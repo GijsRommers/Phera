@@ -203,8 +203,8 @@ function is_runtime_stub(string $file): bool {
         || ($parts[0] === 'sapi' && $parts[1] === 'cli')
         || ($parts[0] === 'ext' && in_array($parts[1], [
             'ctype', 'date', 'dom', 'filter', 'hash', 'iconv', 'json', 'libxml',
-            'mbstring', 'openssl', 'pcre', 'pdo', 'pdo_mysql', 'pdo_pgsql', 'pdo_sqlite',
-            'random', 'reflection', 'session', 'spl', 'sqlite3', 'standard', 'tokenizer',
+            'mbstring', 'openssl', 'pcntl', 'pcre', 'pdo', 'pdo_mysql', 'pdo_pgsql', 'pdo_sqlite',
+            'posix', 'random', 'reflection', 'session', 'spl', 'sqlite3', 'standard', 'tokenizer',
         ], true));
 }
 

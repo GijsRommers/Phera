@@ -7,8 +7,8 @@
 //! strings, so `"\xff"` is a single byte.
 
 use phera_ast::{
-    DollarCurlyForm, Expression, ExpressionKind, Identifier, Literal, MemberName, StringPart,
-    Variable,
+    Argument, Arguments, DollarCurlyForm, Expression, ExpressionKind, Identifier, Literal,
+    MemberName, Name, NameKind, StringPart, Variable,
 };
 use phera_lexer::TokenKind;
 use phera_source::Span;
@@ -27,7 +27,7 @@ impl Parser<'_> {
         let bytes = if quote == b'\'' {
             decode_single_quoted(body)
         } else {
-            decode_double_quoted(body, false, token.span)?
+            decode_double_quoted(body, Some(b'"'), token.span)?
         };
 
         Ok(Expression {
@@ -40,18 +40,53 @@ impl Parser<'_> {
     /// `DoubleQuote`. With no interpolation at all this is a plain string
     /// literal.
     pub(crate) fn parse_interpolated_string(&mut self) -> Result<Expression, ParseError> {
-        let start = self.expect(TokenKind::DoubleQuote, "double quote")?.span;
+        self.parse_delimited_string(TokenKind::DoubleQuote, b'"')
+    }
+
+    pub(crate) fn parse_shell_string(&mut self) -> Result<Expression, ParseError> {
+        let value = self.parse_delimited_string(TokenKind::Backquote, b'`')?;
+        let span = value.span;
+        let callee = Expression {
+            span,
+            kind: ExpressionKind::Name(Name {
+                kind: NameKind::FullyQualified,
+                text: "shell_exec".into(),
+                span,
+            }),
+        };
+        Ok(Expression {
+            span,
+            kind: ExpressionKind::Call {
+                callee: Box::new(callee),
+                arguments: Arguments::List(vec![Argument {
+                    span,
+                    value,
+                    name: None,
+                    spread: false,
+                }]),
+                opening: span.start,
+            },
+        })
+    }
+
+    fn parse_delimited_string(
+        &mut self,
+        kind: TokenKind,
+        delimiter: u8,
+    ) -> Result<Expression, ParseError> {
+        let start = self.bump()?.span;
         let mut parts: Vec<StringPart> = Vec::new();
 
         loop {
             match self.kind() {
-                TokenKind::DoubleQuote => {
+                closing if closing == kind => {
                     self.bump()?;
                     break;
                 }
                 TokenKind::StringPart => {
                     let token = self.bump()?;
-                    let bytes = decode_double_quoted(self.bytes_of(&token), false, token.span)?;
+                    let bytes =
+                        decode_double_quoted(self.bytes_of(&token), Some(delimiter), token.span)?;
                     parts.push(StringPart::Literal(bytes, token.span));
                 }
                 TokenKind::Variable => {
@@ -350,7 +385,7 @@ impl Parser<'_> {
                     let bytes = if nowdoc {
                         text
                     } else {
-                        decode_double_quoted(&text, true, span)?
+                        decode_double_quoted(&text, None, span)?
                     };
                     result.push(StringPart::Literal(bytes, span));
                 }
@@ -492,7 +527,11 @@ fn decode_single_quoted(bytes: &[u8]) -> Vec<u8> {
 /// Resolves the escapes of a double-quoted string or heredoc body. In a
 /// heredoc `\"` stays two characters; every other double-quote escape works
 /// the same. Unknown escapes keep their backslash.
-fn decode_double_quoted(bytes: &[u8], heredoc: bool, span: Span) -> Result<Vec<u8>, ParseError> {
+fn decode_double_quoted(
+    bytes: &[u8],
+    delimiter: Option<u8>,
+    span: Span,
+) -> Result<Vec<u8>, ParseError> {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
 
@@ -520,7 +559,7 @@ fn decode_double_quoted(bytes: &[u8], heredoc: bool, span: Span) -> Result<Vec<u
             b'f' => simple(&mut out, 0x0C, &mut i),
             b'\\' => simple(&mut out, b'\\', &mut i),
             b'$' => simple(&mut out, b'$', &mut i),
-            b'"' if !heredoc => simple(&mut out, b'"', &mut i),
+            byte if Some(byte) == delimiter => simple(&mut out, byte, &mut i),
             b'0'..=b'7' => {
                 // Octal escape: up to three digits, value taken modulo 256.
                 let mut value = 0u32;

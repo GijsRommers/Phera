@@ -53,15 +53,19 @@ runner yet.
 Built in, each checked call by call against real PHP: core, standard, ctype,
 date, dom (first stage), filter, hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
-session, SPL, sqlite3, streams, tokenizer.
+session, SPL, sqlite3, streams, tokenizer, Unix process functions, and POSIX queries.
 
 Named arguments to built-ins use PHP’s declared defaults for skipped parameters.
 For example, `json_decode($json, flags: JSON_THROW_ON_ERROR)` uses the default
 depth. Reflection reads the same defaults, and native errors include the
 function or method that raised them in the exception trace.
 
-In progress: bcmath, curl, gmp, intl, mysqli, pgsql, process functions, sodium,
-zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
+Unix scripts can launch programs with `shell_exec()`, backticks, and the process
+functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
+launching for web requests, run `phera serve --no-process public`.
+
+In progress: bcmath, curl, gmp, intl, mysqli, pgsql, sodium, zlib.
+Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
 
 ## ✨ Goals
 

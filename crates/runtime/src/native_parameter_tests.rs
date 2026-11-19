@@ -10,6 +10,13 @@ fn native_parameter_tables_match_php_stubs() {
     let runtime = super::Runtime::new();
     let mut audit = Audit::default();
     audit.registry(&runtime.web_registry);
+    for function in runtime.registry.functions() {
+        if runtime.web_registry.get_function(function.name).is_none()
+            && audit.compare(function.name, function.params)
+        {
+            audit.functions += 1;
+        }
+    }
     audit.messages.sort_unstable();
     audit.missing.sort_unstable();
     eprintln!(

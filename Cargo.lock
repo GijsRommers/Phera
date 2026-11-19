@@ -467,6 +467,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "command-fds"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b60b5124979fccd9addd89d8b97a1d6eebb4950694520c75ddd722535ea443f"
+dependencies = [
+ "nix",
+ "thiserror",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2195,6 +2205,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-process"
+version = "0.1.0"
+dependencies = [
+ "command-fds",
+ "nix",
+ "phera-ext-standard",
+ "phera-ext-streams",
+ "phera-extension-api",
+ "rustix",
+ "rustix-libc-wrappers",
+ "tokio",
+]
+
+[[package]]
 name = "phera-ext-random"
 version = "0.1.0"
 dependencies = [
@@ -2364,6 +2388,7 @@ dependencies = [
  "phera-ext-openssl",
  "phera-ext-pcre",
  "phera-ext-pdo",
+ "phera-ext-process",
  "phera-ext-random",
  "phera-ext-redis",
  "phera-ext-reflection",
@@ -2953,6 +2978,16 @@ dependencies = [
  "libc",
  "linux-raw-sys",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rustix-libc-wrappers"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdd97be0a7cf7b87085442067b6caa72b2f9b0ddd4a4df537d7225cd40498937"
+dependencies = [
+ "libc",
+ "rustix",
 ]
 
 [[package]]

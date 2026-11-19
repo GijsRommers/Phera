@@ -1263,6 +1263,40 @@ password_needs_rehash	ext/standard/basic_functions.stub.php:3311	hash	r--		-	alg
 password_verify	ext/standard/basic_functions.stub.php:3313	password	r--		-	hash	r--		-
 pathinfo	ext/standard/basic_functions.stub.php:2370	path	r--		-	flags	o--	PATHINFO_ALL	i15
 pclose	ext/standard/basic_functions.stub.php:2726	handle	r--		-
+pcntl_alarm	ext/pcntl/pcntl.stub.php:1063	seconds	r--		-
+pcntl_async_signals	ext/pcntl/pcntl.stub.php:1080	enable	o--	null	n
+pcntl_errno	ext/pcntl/pcntl.stub.php:1068
+pcntl_exec	ext/pcntl/pcntl.stub.php:1061	path	r--		-	args	o--	[]	a	env_vars	o--	[]	a
+pcntl_fork	ext/pcntl/pcntl.stub.php:1000
+pcntl_forkx	ext/pcntl/pcntl.stub.php:1091	flags	r--		-
+pcntl_get_last_error	ext/pcntl/pcntl.stub.php:1065
+pcntl_getcpu	ext/pcntl/pcntl.stub.php:1104
+pcntl_getcpuaffinity	ext/pcntl/pcntl.stub.php:1099	process_id	o--	null	n
+pcntl_getpriority	ext/pcntl/pcntl.stub.php:1071	process_id	o--	null	n	mode	o--	PRIO_PROCESS	i0
+pcntl_getqos_class	ext/pcntl/pcntl.stub.php:1107
+pcntl_rfork	ext/pcntl/pcntl.stub.php:1087	flags	r--		-	signal	o--	0	i0
+pcntl_setcpuaffinity	ext/pcntl/pcntl.stub.php:1100	process_id	o--	null	n	cpu_ids	o--	[]	a
+pcntl_setns	ext/pcntl/pcntl.stub.php:1095	process_id	o--	null	n	nstype	o--	CLONE_NEWNET	?
+pcntl_setpriority	ext/pcntl/pcntl.stub.php:1075	priority	r--		-	process_id	o--	null	n	mode	o--	PRIO_PROCESS	i0
+pcntl_setqos_class	ext/pcntl/pcntl.stub.php:1108	qos_class	o--	Pcntl\QosClass::Default	ePcntl\QosClass::Default
+pcntl_signal	ext/pcntl/pcntl.stub.php:1023	signal	r--		-	handler	r--		-	restart_syscalls	o--	true	t
+pcntl_signal_dispatch	ext/pcntl/pcntl.stub.php:1028
+pcntl_signal_get_handler	ext/pcntl/pcntl.stub.php:1026	signal	r--		-
+pcntl_sigprocmask	ext/pcntl/pcntl.stub.php:1032	mode	r--		-	signals	r--		-	old_signals	o-&	null	n
+pcntl_sigtimedwait	ext/pcntl/pcntl.stub.php:1041	signals	r--		-	info	o-&	[]	a	seconds	o--	0	i0	nanoseconds	o--	0	i0
+pcntl_sigwaitinfo	ext/pcntl/pcntl.stub.php:1038	signals	r--		-	info	o-&	[]	a
+pcntl_strerror	ext/pcntl/pcntl.stub.php:1078	error_code	r--		-
+pcntl_unshare	ext/pcntl/pcntl.stub.php:1083	flags	r--		-
+pcntl_wait	ext/pcntl/pcntl.stub.php:1020	status	r-&		-	flags	o--	0	i0	resource_usage	o-&	[]	a
+pcntl_waitid	ext/pcntl/pcntl.stub.php:1013	idtype	o--	P_ALL	i0	id	o--	null	n	info	o-&	[]	a	flags	o--	WEXITED	i4	resource_usage	o-&	[]	a
+pcntl_waitpid	ext/pcntl/pcntl.stub.php:1006	process_id	r--		-	status	r-&		-	flags	o--	0	i0	resource_usage	o-&	[]	a
+pcntl_wexitstatus	ext/pcntl/pcntl.stub.php:1055	status	r--		-
+pcntl_wifcontinued	ext/pcntl/pcntl.stub.php:1050	status	r--		-
+pcntl_wifexited	ext/pcntl/pcntl.stub.php:1045	status	r--		-
+pcntl_wifsignaled	ext/pcntl/pcntl.stub.php:1053	status	r--		-
+pcntl_wifstopped	ext/pcntl/pcntl.stub.php:1047	status	r--		-
+pcntl_wstopsig	ext/pcntl/pcntl.stub.php:1059	status	r--		-
+pcntl_wtermsig	ext/pcntl/pcntl.stub.php:1057	status	r--		-
 pdo::__construct	ext/pdo/pdo_dbh.stub.php:167	dsn	r--		-	username	o--	null	n	password	o--	null	n	options	o--	null	n
 pdo::begintransaction	ext/pdo/pdo_dbh.stub.php:177
 pdo::commit	ext/pdo/pdo_dbh.stub.php:180
@@ -1426,6 +1460,47 @@ phpversion	ext/standard/basic_functions.stub.php:3044	extension	o--	null	n
 pi	ext/standard/basic_functions.stub.php:3169
 popen	ext/standard/basic_functions.stub.php:2732	command	r--		-	mode	r--		-
 pos	ext/standard/basic_functions.stub.php:1593	array	r--		-
+posix_access	ext/posix/posix.stub.php:401	filename	r--		-	flags	o--	0	i0
+posix_ctermid	ext/posix/posix.stub.php:382
+posix_eaccess	ext/posix/posix.stub.php:404	filename	r--		-	flags	o--	0	i0
+posix_errno	ext/posix/posix.stub.php:446
+posix_fpathconf	ext/posix/posix.stub.php:462	file_descriptor	r--		-	name	r--		-
+posix_get_last_error	ext/posix/posix.stub.php:443
+posix_getcwd	ext/posix/posix.stub.php:391
+posix_getegid	ext/posix/posix.stub.php:334
+posix_geteuid	ext/posix/posix.stub.php:324
+posix_getgid	ext/posix/posix.stub.php:330
+posix_getgrgid	ext/posix/posix.stub.php:417	group_id	r--		-
+posix_getgrnam	ext/posix/posix.stub.php:411	name	r--		-
+posix_getgroups	ext/posix/posix.stub.php:345
+posix_getlogin	ext/posix/posix.stub.php:349
+posix_getpgid	ext/posix/posix.stub.php:361	process_id	r--		-
+posix_getpgrp	ext/posix/posix.stub.php:352
+posix_getpid	ext/posix/posix.stub.php:316
+posix_getppid	ext/posix/posix.stub.php:318
+posix_getpwnam	ext/posix/posix.stub.php:423	username	r--		-
+posix_getpwuid	ext/posix/posix.stub.php:429	user_id	r--		-
+posix_getrlimit	ext/posix/posix.stub.php:436	resource	o--	null	n
+posix_getsid	ext/posix/posix.stub.php:365	process_id	r--		-
+posix_getuid	ext/posix/posix.stub.php:320
+posix_initgroups	ext/posix/posix.stub.php:451	username	r--		-	group_id	r--		-
+posix_isatty	ext/posix/posix.stub.php:389	file_descriptor	r--		-
+posix_kill	ext/posix/posix.stub.php:314	process_id	r--		-	signal	r--		-
+posix_mkfifo	ext/posix/posix.stub.php:394	filename	r--		-	permissions	r--		-
+posix_mknod	ext/posix/posix.stub.php:398	filename	r--		-	flags	r--		-	major	o--	0	i0	minor	o--	0	i0
+posix_pathconf	ext/posix/posix.stub.php:457	path	r--		-	name	r--		-
+posix_setegid	ext/posix/posix.stub.php:337	group_id	r--		-
+posix_seteuid	ext/posix/posix.stub.php:327	user_id	r--		-
+posix_setgid	ext/posix/posix.stub.php:332	group_id	r--		-
+posix_setpgid	ext/posix/posix.stub.php:358	process_id	r--		-	process_group_id	r--		-
+posix_setrlimit	ext/posix/posix.stub.php:440	resource	r--		-	soft_limit	r--		-	hard_limit	r--		-
+posix_setsid	ext/posix/posix.stub.php:355
+posix_setuid	ext/posix/posix.stub.php:322	user_id	r--		-
+posix_strerror	ext/posix/posix.stub.php:448	error_code	r--		-
+posix_sysconf	ext/posix/posix.stub.php:454	conf_id	r--		-
+posix_times	ext/posix/posix.stub.php:378
+posix_ttyname	ext/posix/posix.stub.php:386	file_descriptor	r--		-
+posix_uname	ext/posix/posix.stub.php:372
 pow	ext/standard/basic_functions.stub.php:3184	num	r--		-	exponent	r--		-
 preg_filter	ext/pcre/php_pcre.stub.php:121	pattern	r--		-	replacement	r--		-	subject	r--		-	limit	o--	-1	i-1	count	o-&	null	n
 preg_grep	ext/pcre/php_pcre.stub.php:142	pattern	r--		-	array	r--		-	flags	o--	0	i0

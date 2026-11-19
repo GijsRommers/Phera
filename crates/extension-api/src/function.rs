@@ -87,6 +87,7 @@ pub struct Param {
     pub nullable: bool,
     null_coercion: NullCoercion,
     arity: ArgumentCount,
+    pub rejects_nul: bool,
     pub optional: bool,
     /// Fills a skipped position when a later named argument is supplied.
     pub default: Option<ConstantValue>,
@@ -118,6 +119,7 @@ impl Param {
             nullable: false,
             null_coercion: NullCoercion::Declared,
             arity: ArgumentCount::Parameters,
+            rejects_nul: false,
             optional: false,
             default: None,
             default_name: None,
@@ -125,6 +127,12 @@ impl Param {
             sensitive: false,
             variadic: false,
         }
+    }
+
+    /// PHP validates NUL bytes in paths before parsing the next argument.
+    pub const fn without_nul(mut self) -> Self {
+        self.rejects_nul = true;
+        self
     }
 
     pub const fn nullable(mut self) -> Self {
