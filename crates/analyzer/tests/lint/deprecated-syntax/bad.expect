@@ -1,0 +1,1 @@
+2	deprecated-syntax	This cast spelling is deprecated in PHP 8.5. Use (int).

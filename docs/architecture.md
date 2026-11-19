@@ -1082,8 +1082,8 @@ What remains, in order of expected gain: the destination-driven compiler
 
 ## 11. Tools built into the runtime
 
-Two tools that PHP projects today get from separate packages written in PHP
-are planned as part of the `phera` binary, sharing its lexer, parser and AST.
+Tools that PHP projects today get from separate packages written in PHP
+are part of the `phera` binary, sharing its lexer, parser and AST.
 One front end means the tools and the runtime cannot disagree about what a
 file means, and native code makes them fast enough to run on every save.
 
@@ -1444,6 +1444,104 @@ phera new shop --template symfony           asks nothing
 - **While Phera cannot run a framework**, the command says so after creating
   the project and names the PHP command that serves it meanwhile. One
   function, `Template::runs_on_phera`, holds that fact.
+
+### 11.9 `phera lint`: source checks and local edits
+
+`phera lint [paths...]` checks PHP source for suspicious constructs, unused
+code, deprecated features and consistency. With no paths it checks the
+project's own PHP files. Directory discovery skips `vendor/` unless it is
+explicitly requested. Expression types and type-dependent reachability are
+the responsibility of `phera check` (11.1).
+
+```text
+phera lint
+phera lint src tests --fix
+phera lint src --fix-unsafe
+phera lint --only style --skip strict-types
+phera lint --only all
+phera lint --rule unused-import --format github
+phera lint --explain unused-import
+```
+
+`--rule` and `--only` can be repeated to select rules and groups. `--only all`
+and `--all` select every rule. Use `phera lint --help` for the command options
+and `phera lint --list-rules` for the rule names and examples. `--skip`
+excludes a rule from that selection. Output uses the shared text, JSON or
+GitHub annotation renderer. A run returns 1 if findings remain and 2 if it
+cannot run. The parser and deprecation rules target PHP 8.5. The common
+baseline format stores stable rule names and messages.
+`[lint].baseline` loads a baseline and `--generate-baseline FILE` records
+the current findings.
+
+```toml
+[lint]
+exclude = ["generated", "tests/fixtures"]
+baseline = "lint-baseline.json"
+
+[lint.groups]
+style = true
+suspicious = true
+
+[lint.rules]
+unused-import = "error"
+variable-variables = "warn"
+debug-call = "off"
+
+[lint.style]
+strict_types = true
+
+[lint.naming]
+variables = "snake"
+
+[lint.complexity]
+cyclomatic = 10
+cognitive = 15
+nesting = 4
+function_lines = 80
+class_lines = 500
+parameters = 5
+```
+
+Syntax diagnostics are on by default. The suspicious, unused and modernize
+groups have default rules where the patterns are precise enough to pass a
+review against Symfony and Laravel. The false-finding budget for these
+defaults is zero on both trees. A rule with a proven false finding needs a
+narrower predicate or becomes opt-in. Style, naming and complexity are
+opt-in. Style thresholds and choices, such as requiring strict types, are
+project settings. The complexity thresholds govern function and class
+length, nesting, cyclomatic and cognitive complexity, and parameter counts.
+
+`// phera-ignore rule-name reason` suppresses that rule on its own line
+or the following line. `// phera-ignore-file rule-name` covers the file.
+Unused directives are findings. A string containing directive text has
+no effect.
+
+The analyzer owns one registry of rules. Each rule declares a stable,
+kebab-case identifier, a group, a short description, examples of bad and
+good PHP, the syntax nodes it visits and any fix. The registry supplies
+both `--explain` and the generated rule catalog. Discovery, parsing, the
+declaration index, structural traversal, suppression scanning, baseline
+and diagnostic rendering live in the analyzer and can be shared with
+`check`. Files are processed in parallel. Rules share one structural walk
+per file and defer their unused-code decisions until all references in the
+relevant lexical scope have been seen.
+
+Fixes describe byte ranges in the original source. The lexer and parser
+provide the token boundaries, including punctuation. A rule preserves
+comments and whitespace outside its edits. `--fix` applies safe edits and
+`--fix-unsafe` also applies edits whose behavior changes are described in
+their rule documentation. Edits in different findings can overlap. The
+fixer selects compatible edits in source order and makes a bounded
+number of passes on the new source. It parses the final candidate before
+writing it and rejects a candidate that introduces a finding. Each
+fixable rule has a fixture for the resulting bytes and a second run that
+leaves them unchanged.
+
+The catalogs of PHP_CodeSniffer, PHP CS Fixer, PHPMD, Psalm, PHPStan and
+Rector provide starting points for rule semantics. For a future
+`phera fmt`, a lossless token stream needs to retain comments, whitespace
+and PHP/HTML boundaries and associate them with AST nodes. Lint edits only
+need the spans for the particular tokens and trivia a rule examines.
 
 ## 12. What to take from Hack and HHVM, and what not
 

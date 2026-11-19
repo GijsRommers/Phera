@@ -1,0 +1,1 @@
+2	unused-catch-variable	Catch variable $e is never read. Omit the variable from catch.

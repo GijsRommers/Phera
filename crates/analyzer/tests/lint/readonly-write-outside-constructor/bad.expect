@@ -1,0 +1,1 @@
+2	readonly-write-outside-constructor	Readonly property $x is written outside the constructor.

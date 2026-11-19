@@ -107,6 +107,18 @@ fn long_chains_parse_and_drop() {
             "concatenation",
             format!("<?php {}'a';", "'a'.".repeat(DEEP)),
         ),
+        (
+            "assigned sum",
+            format!("<?php $total = {}1;", "1+".repeat(DEEP)),
+        ),
+        (
+            "exit argument",
+            format!("<?php exit({}1);", "1+".repeat(DEEP)),
+        ),
+        (
+            "clone argument",
+            format!("<?php clone({}1);", "1+".repeat(DEEP)),
+        ),
         ("logical or", format!("<?php {}1;", "1||".repeat(DEEP))),
         ("pipe", format!("<?php 1{};", "|>f(...)".repeat(DEEP))),
         ("indexing", format!("<?php $a{};", "[1]".repeat(DEEP))),

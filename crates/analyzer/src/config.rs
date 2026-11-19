@@ -84,53 +84,13 @@ impl Options {
     }
 
     fn read_config(&mut self, source: &str) -> Result<(), String> {
-        let tokens = tokenize(source)?;
-        let mut inside = false;
-        let mut cursor = 0;
-        while cursor < tokens.len() {
-            if tokens[cursor] == "[" {
-                cursor += 1;
-                inside = tokens.get(cursor).is_some_and(|s| s == "check");
-                while cursor < tokens.len() && tokens[cursor] != "]" {
-                    cursor += 1;
-                }
-                cursor += 1;
-                continue;
-            }
-            let key = tokens[cursor].clone();
-            cursor += 1;
-            if tokens.get(cursor).is_none_or(|s| s != "=") {
-                if inside {
-                    return Err(format!("phera.toml: expected '=' after {key}"));
-                }
-                continue;
-            }
-            cursor += 1;
-            let mut values = Vec::new();
-            let array = tokens.get(cursor).is_some_and(|s| s == "[");
-            if array {
-                cursor += 1;
-                while cursor < tokens.len() && tokens[cursor] != "]" {
-                    if tokens[cursor] != "," {
-                        values.push(tokens[cursor].clone());
-                    }
-                    cursor += 1;
-                }
-                if cursor == tokens.len() {
-                    return Err("phera.toml: unclosed array".into());
-                }
-                cursor += 1;
-            } else if let Some(value) = tokens.get(cursor) {
-                values.push(value.clone());
-                cursor += 1;
-            }
-            if !inside {
-                continue;
-            }
-            self.setting(&key, values, array)?;
-        }
-        Ok(())
+        read_tables(
+            source,
+            |table| table == "check",
+            |_, key, values, array| self.setting(key, values, array),
+        )
     }
+
     fn setting(&mut self, key: &str, values: Vec<String>, array: bool) -> Result<(), String> {
         let scalar = || {
             values
@@ -190,6 +150,60 @@ fn default_baseline(paths: &[String]) -> String {
         .map_or_else(|| FILE.into(), |file| file.to_string_lossy().into_owned())
 }
 
+/// Read the requested tables from settings shared by the analyzer commands.
+pub(crate) fn read_tables(
+    source: &str,
+    interested: impl Fn(&str) -> bool,
+    mut setting: impl FnMut(&str, &str, Vec<String>, bool) -> Result<(), String>,
+) -> Result<(), String> {
+    let tokens = tokenize(source)?;
+    let mut table = String::new();
+    let mut cursor = 0;
+    while cursor < tokens.len() {
+        if tokens[cursor] == "[" {
+            cursor += 1;
+            table = tokens.get(cursor).cloned().unwrap_or_default();
+            while cursor < tokens.len() && tokens[cursor] != "]" {
+                cursor += 1;
+            }
+            cursor += 1;
+            continue;
+        }
+        let key = tokens[cursor].clone();
+        cursor += 1;
+        if tokens.get(cursor).is_none_or(|s| s != "=") {
+            if interested(&table) {
+                return Err(format!("phera.toml: expected '=' after {key}"));
+            }
+            continue;
+        }
+        cursor += 1;
+        let mut values = Vec::new();
+        let array = tokens.get(cursor).is_some_and(|s| s == "[");
+        if array {
+            cursor += 1;
+            while cursor < tokens.len() && tokens[cursor] != "]" {
+                if tokens[cursor] != "," {
+                    values.push(tokens[cursor].clone());
+                }
+                cursor += 1;
+            }
+            if cursor == tokens.len() {
+                return Err("phera.toml: unclosed array".into());
+            }
+            cursor += 1;
+        } else if let Some(value) = tokens.get(cursor) {
+            values.push(value.clone());
+            cursor += 1;
+        }
+        if !interested(&table) {
+            continue;
+        }
+        setting(&table, &key, values, array)?;
+    }
+    Ok(())
+}
+
 fn level(value: &str) -> Result<u8, String> {
     match value {
         "0" => Ok(0),
@@ -202,7 +216,7 @@ fn level(value: &str) -> Result<u8, String> {
     }
 }
 
-fn string(value: &str) -> Result<String, String> {
+pub(crate) fn string(value: &str) -> Result<String, String> {
     value
         .strip_prefix('"')
         .map(String::from)

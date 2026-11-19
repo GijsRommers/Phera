@@ -157,7 +157,7 @@ pub struct DeclareDirective {
     pub value: Expression,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UseKind {
     /// `use Foo\Bar;` imports a class, interface, trait, enum or namespace.
     Class,

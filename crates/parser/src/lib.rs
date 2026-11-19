@@ -7,8 +7,10 @@
 //! recursion.
 
 mod declaration;
+mod diagnostics;
 mod error;
 mod expression;
+pub mod magic_methods;
 mod names;
 mod nesting;
 mod parser;

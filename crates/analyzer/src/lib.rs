@@ -17,6 +17,7 @@ pub mod global_effects;
 pub mod index;
 #[cfg(test)]
 mod ladder_equivalence;
+pub mod lint;
 pub mod names;
 mod phpdoc;
 pub mod project;

@@ -12,7 +12,7 @@ use phera_source::{CompileDiagnostic, LineTable};
 use crate::context::Compiler;
 use crate::ir::{CompiledUnit, Constant, Instruction};
 use crate::policies::DeclarationTiming;
-use crate::{CompileError, errors, passes::lower};
+use crate::{CompileError, passes::lower};
 
 /// Included files return 1 by default; evaluated expressions return null.
 #[derive(Clone, Copy)]
@@ -72,23 +72,25 @@ fn compile_program(
                 scanner_diagnostics: Vec::new(),
             };
         }
-        let display = String::from_utf8_lossy(source);
-        let token = source
-            .get(error.span.start..error.span.end)
-            .unwrap_or_default();
-        let token = String::from_utf8_lossy(token);
-        let line = errors::parse_line(&error.message, &display, lines.line(error.span.start));
-        let message = errors::parse_message(&error.message, &display, &token, line);
+        let (line, message) = error.php_diagnostic(source, lines);
         let message = match kind {
             SourceKind::File | SourceKind::CliFile => message,
-            SourceKind::Eval { .. } => crate::eval_diagnostics::message(
-                message,
-                &display,
-                &token,
-                error.span.start,
-                line,
-                lines,
-            ),
+            SourceKind::Eval { .. } => {
+                let display = String::from_utf8_lossy(source);
+                let token = String::from_utf8_lossy(
+                    source
+                        .get(error.span.start..error.span.end)
+                        .unwrap_or_default(),
+                );
+                crate::eval_diagnostics::message(
+                    message,
+                    &display,
+                    &token,
+                    error.span.start,
+                    line,
+                    lines,
+                )
+            }
         };
         CompileError {
             message,

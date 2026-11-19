@@ -1963,6 +1963,8 @@ dependencies = [
  "phera-lexer",
  "phera-parser",
  "phera-source",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
