@@ -117,11 +117,7 @@ impl Vm {
             ));
             return Err(error);
         }
-        let previous = if self.diagnostic_reporter.is_visible() {
-            self.error_handlers.reporting
-        } else {
-            self.error_handlers.reporting & 4437
-        };
+        let previous = self.error_handlers.reporting;
         if let Some(Value::Int(level)) = arguments.first() {
             self.set_error_reporting(*level);
         }

@@ -36,6 +36,7 @@ pub(crate) struct IniOverrides {
     values: Vec<Option<PhpString>>,
     startup: Vec<Option<PhpString>>,
     reporting_number: Option<i64>,
+    reporting_ini_modified: bool,
     precision: Option<i32>,
     serialization_precision: Option<i32>,
 }
@@ -137,7 +138,9 @@ impl Vm {
             return Ok(());
         };
         let modified = self.ini_overrides.get(slot).is_some()
-            || entry.name == "error_reporting" && self.ini_overrides.reporting_number.is_some();
+            || entry.name == "error_reporting"
+                && (self.ini_overrides.reporting_number.is_some()
+                    || self.ini_overrides.reporting_ini_modified);
         if !entry.access.runtime() || !modified {
             return Ok(());
         }
@@ -197,6 +200,10 @@ impl Vm {
             list.insert(ArrayKey::str(entry.name), value);
         }
         Ok(Value::from(list))
+    }
+
+    pub(crate) fn mark_reporting_ini_modified(&mut self) {
+        self.ini_overrides.reporting_ini_modified = true;
     }
 
     /// error_reporting() keeps its number directly until an INI reader needs text.

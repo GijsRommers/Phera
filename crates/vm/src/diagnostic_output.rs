@@ -133,9 +133,7 @@ impl Vm {
         {
             (web.fail_unsent_response)(&mut self.state);
         }
-        if (self.error_handlers.reporting & level != 0 || level & (16 | 32) != 0)
-            && (self.diagnostic_reporter.is_visible() || level & FATAL != 0)
-        {
+        if self.error_handlers.reporting & level != 0 || level & (16 | 32) != 0 {
             if self.ini_enabled(b"log_errors") {
                 self.log_diagnostic(kind, message.as_bytes(), &location);
             }

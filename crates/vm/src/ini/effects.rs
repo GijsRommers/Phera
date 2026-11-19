@@ -30,6 +30,7 @@ impl Vm {
                 self.error_handlers.reporting =
                     value.map_or(30719, |text| i64::from(integer(text) as i32));
                 self.ini_overrides.reporting_number = None;
+                self.ini_overrides.reporting_ini_modified = false;
             }
             "zend.exception_ignore_args" => {
                 self.error_handlers.trace_ignore_args = boolean(bytes);
