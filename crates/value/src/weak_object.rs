@@ -15,12 +15,16 @@
 //! for the destructor (see `crate::destruction`). A plain `Weak` would then
 //! report the object as gone too early.
 //!
-//! So a `WeakObject` keeps the object's id and serial number beside the
-//! `Weak`. When the `Weak` is dead, it asks the request's id pool which
-//! object now carries that id; the hand-over registered the new `Rc` there,
-//! and the registration goes when that `Rc`'s lease on the id goes. The
-//! serial number, never reused within a request, makes sure the object
-//! found is the same PHP object and not a later one with the same id.
+//! So a `WeakObject` keeps the object's id and identity beside the `Weak`.
+//! When the `Weak` is dead, it asks the request's id pool which object now
+//! carries that id; the hand-over registered the new `Rc` there, with the
+//! identity of the object it took over from, and the registration goes
+//! when the new `Rc` is freed.
+//!
+//! An object's identity is the address of the allocation it was created
+//! in. The handle's `Weak` keeps that allocation reserved (an `Rc`'s memory
+//! is only given back when its last `Weak` goes), so no later object can
+//! have the same identity while the handle exists.
 
 use std::rc::{Rc, Weak};
 
@@ -32,21 +36,18 @@ use crate::object::{Object, ObjectIds};
 pub struct WeakObject {
     object: Weak<Object>,
     id: u32,
-    serial: u64,
+    /// The object's [`Object::identity`].
+    origin: usize,
     pool: Weak<ObjectIds>,
 }
 
 impl WeakObject {
     pub fn new(object: &Rc<Object>) -> Self {
-        let (serial, pool) = match &object.lease {
-            Some(lease) => (lease.serial, Rc::downgrade(&lease.pool)),
-            None => (0, Weak::new()),
-        };
         WeakObject {
             object: Rc::downgrade(object),
             id: object.id,
-            serial,
-            pool,
+            origin: object.identity(),
+            pool: object.pool.as_deref().map_or_else(Weak::new, Rc::downgrade),
         }
     }
 
@@ -56,13 +57,12 @@ impl WeakObject {
             return Some(object);
         }
         let pool = self.pool.upgrade()?;
-        let current = pool
-            .incarnations
-            .try_borrow()
-            .ok()?
-            .get(&self.id)?
-            .upgrade()?;
-        (current.serial() == self.serial).then_some(current)
+        let incarnations = pool.incarnations.try_borrow().ok()?;
+        let (origin, current) = incarnations.get(&self.id)?;
+        if *origin != self.origin {
+            return None;
+        }
+        current.upgrade()
     }
 
     pub fn is_alive(&self) -> bool {
@@ -71,19 +71,30 @@ impl WeakObject {
 
     /// Whether this handle is on `object` (in any of its incarnations).
     pub fn refers_to(&self, object: &Rc<Object>) -> bool {
-        if self.serial == 0 {
-            return std::ptr::eq(self.object.as_ptr(), Rc::as_ptr(object));
-        }
-        object.id == self.id && object.serial() == self.serial
+        object.identity() == self.origin
     }
 }
 
 impl Object {
-    /// The object's serial number: unique within its request, and kept by
-    /// the object that waits for its destructor. 0 for an object made
-    /// without an id pool.
-    pub fn serial(&self) -> u64 {
-        self.lease.as_ref().map_or(0, |lease| lease.serial)
+    /// Which PHP object this is: the address of the allocation it was
+    /// created in, unique among the objects alive (and among those a
+    /// `WeakObject` still refers to). An object that took over another's
+    /// contents for its destructor has the identity of the one it took
+    /// over from.
+    pub fn identity(&self) -> usize {
+        if self.incarnated
+            && let Some(pool) = &self.pool
+            && let Ok(incarnations) = pool.incarnations.try_borrow()
+            && let Some((origin, _)) = incarnations.get(&self.id)
+        {
+            return *origin;
+        }
+        self.address()
+    }
+
+    /// Where this object is in memory.
+    pub(crate) fn address(&self) -> usize {
+        std::ptr::from_ref(self) as usize
     }
 }
 

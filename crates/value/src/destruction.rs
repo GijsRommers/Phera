@@ -25,7 +25,7 @@
 //!    [`Destruction`] set to `Due`. Every other object stays `Never` and
 //!    pays one comparison when it is freed, and nothing while it lives.
 //! 2. When a `Due` object is dropped, its `Drop` moves the object's contents
-//!    (class, properties, native state, and the lease on its id) into a new
+//!    (class, properties, native state, and its hold on its id) into a new
 //!    `Rc<Object>` marked `Done`, and pushes that onto the request's
 //!    [`DoomedObjects`] queue. The id is still taken, so `spl_object_id`
 //!    and `var_dump` see the same object.
@@ -97,8 +97,8 @@ impl Object {
     pub fn expect_destructor(&self) {
         if self.destruction.get() != Destruction::Due {
             self.destruction.set(Destruction::Due);
-            if let Some(lease) = &self.lease {
-                lease.pool.doomed.due.set(lease.pool.doomed.due.get() + 1);
+            if let Some(pool) = &self.pool {
+                pool.doomed.due.set(pool.doomed.due.get() + 1);
             }
         }
     }
@@ -107,9 +107,9 @@ impl Object {
     /// must not run): one fewer for the pool's count.
     fn no_longer_due(&self) {
         if self.destruction.get() == Destruction::Due
-            && let Some(lease) = &self.lease
+            && let Some(pool) = &self.pool
         {
-            let due = &lease.pool.doomed.due;
+            let due = &pool.doomed.due;
             due.set(due.get().saturating_sub(1));
         }
     }
@@ -117,7 +117,7 @@ impl Object {
     /// The id pool of the object's request, which also says whether a
     /// destructor is due there; `None` for an object made without one.
     pub fn pool(&self) -> Option<Rc<ObjectIds>> {
-        self.lease.as_ref().map(|lease| lease.pool.clone())
+        self.pool.as_deref().cloned()
     }
 
     /// Records that the destructor has run (or must no longer run).
@@ -130,27 +130,25 @@ impl Object {
     /// that waits in the queue for its destructor.
     fn hand_over(&mut self) {
         self.no_longer_due();
-        let Some(mut lease) = self.lease.take() else {
+        let Some(hold) = self.pool.take_if(|pool| !pool.doomed.closed.get()) else {
             return;
         };
-        let pool = lease.pool.clone();
-        if pool.doomed.closed.get() {
-            self.lease = Some(lease);
-            return;
-        }
-        lease.incarnated = true;
-        let doomed = Object {
+        // The hold moves with the contents: the id goes back when the new
+        // object is freed.
+        let pool = hold.0.clone();
+        let origin = self.address();
+        let doomed = Rc::new(Object {
             id: self.id,
             class: self.class.clone(),
             properties: RefCell::new(self.properties.take()),
             native: RefCell::new(self.native.take()),
             destruction: Cell::new(Destruction::Done),
             attachments: Cell::new(self.attachments.take()),
-            lease: Some(lease),
-        };
-        let doomed = Rc::new(doomed);
+            pool: Some(hold),
+            incarnated: true,
+        });
         if let Ok(mut incarnations) = pool.incarnations.try_borrow_mut() {
-            incarnations.insert(self.id, Rc::downgrade(&doomed));
+            incarnations.insert(self.id, (origin, Rc::downgrade(&doomed)));
         }
         pool.doomed.push(doomed);
     }
@@ -158,10 +156,14 @@ impl Object {
 
 impl Drop for Object {
     /// An object without a destructor is simply freed (its property table
-    /// frees nested values without recursion, see `array::drop`).
+    /// frees nested values without recursion, see `array::drop`), and its
+    /// id goes back to the pool after that (see `PoolHold`).
     fn drop(&mut self) {
         if self.destruction.get() == Destruction::Due {
             self.hand_over();
+        }
+        if let Some(pool) = &self.pool {
+            pool.begin_release(self.id, self.incarnated);
         }
     }
 }

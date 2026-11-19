@@ -224,6 +224,7 @@ impl ClassTable {
     /// Records a live object under its id, for the end of the request: its
     /// destructor phase and the cleanup of cycles. No weak handle's liveness
     /// takes part in allocation or id selection.
+    #[inline]
     pub(crate) fn track(&mut self, object: &Rc<Object>) {
         let index = object.id.saturating_sub(1) as usize;
         if let Some(slot) = self.objects.get_mut(index) {

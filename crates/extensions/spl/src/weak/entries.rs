@@ -12,7 +12,7 @@
 //! (after the key's destructor; never, if the destructor keeps `$this`).
 //! Rust frees the key in `Drop`, which cannot reach the map, so the map
 //! does not own its values: each key object does (see
-//! `phera_value::Object::attach`), under this map's serial number. When
+//! `phera_value::Object::attach`), under this map's identity. When
 //! the map itself goes first, its `Drop` takes its values back from the
 //! keys that are still alive.
 
@@ -26,8 +26,8 @@ use phera_extension_api::{Object, Value};
 #[derive(Default)]
 pub(super) struct Entries {
     keys: IndexMap<u32, WeakObject>,
-    /// The serial number of the WeakMap: the tag of its values on the keys.
-    owner: u64,
+    /// The identity of the WeakMap (`Object::identity`): the tag of its values on the keys.
+    owner: usize,
 }
 
 impl Entries {
@@ -56,9 +56,9 @@ impl Entries {
             .flatten()
     }
 
-    /// Stores `value` for `key` in the map whose serial number is `owner`;
+    /// Stores `value` for `key` in the map whose identity is `owner`;
     /// returns the value it replaces, for the caller to drop.
-    pub(super) fn set(&mut self, owner: u64, key: &Rc<Object>, value: Value) -> Option<Value> {
+    pub(super) fn set(&mut self, owner: usize, key: &Rc<Object>, value: Value) -> Option<Value> {
         self.owner = owner;
         if self
             .keys
@@ -113,8 +113,8 @@ impl Entries {
         self.keys.len()
     }
 
-    /// The same entries for the WeakMap whose serial number is `owner`.
-    pub(super) fn copy_for(&self, owner: u64) -> Entries {
+    /// The same entries for the WeakMap whose identity is `owner`.
+    pub(super) fn copy_for(&self, owner: usize) -> Entries {
         let mut copy = Entries {
             keys: IndexMap::new(),
             owner,

@@ -13,8 +13,8 @@
 //! the key object is freed (after the key's destructor, and not at all if
 //! the destructor stored `$this`). Rust frees an object in `Drop`, which
 //! cannot call into the map. So the map keeps only weak handles on its keys
-//! and stores each value on the key object, tagged with the map's serial
-//! number: freeing the key frees its values in the same moment.
+//! and stores each value on the key object, tagged with the map's identity
+//! (see `Object::identity`): freeing the key frees its values in the same moment.
 //!
 //! It also gives PHP's rule for cycles through a map: a value that refers
 //! back to its own key keeps nothing alive by itself, and the cycle
@@ -25,12 +25,12 @@ use std::cell::Cell;
 use crate::object::Object;
 use crate::value::Value;
 
-/// The attached values of one object, by owner (a map's serial number).
-pub(crate) type Attachments = Cell<Option<Box<Vec<(u64, Value)>>>>;
+/// The attached values of one object, by owner (a map's identity, see `Object::identity`).
+pub(crate) type Attachments = Cell<Option<Box<Vec<(usize, Value)>>>>;
 
 impl Object {
     /// The value attached for `owner`, if any.
-    pub fn attachment(&self, owner: u64) -> Option<Value> {
+    pub fn attachment(&self, owner: usize) -> Option<Value> {
         self.with_attachments(|attached| {
             attached
                 .iter()
@@ -43,7 +43,7 @@ impl Object {
     /// none.
     pub fn update_attachment<R>(
         &self,
-        owner: u64,
+        owner: usize,
         change: impl FnOnce(&mut Value) -> R,
     ) -> Option<R> {
         self.with_attachments(|attached| {
@@ -56,7 +56,7 @@ impl Object {
 
     /// Attaches `value` for `owner`; returns the value it replaces, for the
     /// caller to drop.
-    pub fn attach(&self, owner: u64, value: Value) -> Option<Value> {
+    pub fn attach(&self, owner: usize, value: Value) -> Option<Value> {
         self.with_attachments(|attached| {
             match attached
                 .iter_mut()
@@ -73,7 +73,7 @@ impl Object {
 
     /// Removes the value attached for `owner`; returns it, for the caller
     /// to drop.
-    pub fn detach(&self, owner: u64) -> Option<Value> {
+    pub fn detach(&self, owner: usize) -> Option<Value> {
         self.with_attachments(|attached| {
             let index = attached
                 .iter()
@@ -104,7 +104,7 @@ impl Object {
     /// Runs `use_them` on the attachments. They are taken out of the cell
     /// for the call and put back after, so no borrow is held; nothing in
     /// `use_them` reaches this object's attachments again.
-    fn with_attachments<R>(&self, use_them: impl FnOnce(&mut Vec<(u64, Value)>) -> R) -> R {
+    fn with_attachments<R>(&self, use_them: impl FnOnce(&mut Vec<(usize, Value)>) -> R) -> R {
         let mut attached = self.attachments.take().unwrap_or_default();
         let result = use_them(&mut attached);
         if !attached.is_empty() {

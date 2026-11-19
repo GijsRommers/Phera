@@ -24,11 +24,11 @@ use phera_extension_api::{
 
 use crate::{This, make, read_state, receiver, store, update_state};
 
-/// The WeakReference of each object, by the object's id and serial number
-/// (which stay the same while it waits for its destructor, unlike its
-/// address): `WeakReference::create()` twice gives the same reference.
+/// The WeakReference of each object, by the object's id and identity
+/// (which stay the same while it waits for its destructor; see
+/// `WeakObject`): `WeakReference::create()` twice gives the same reference.
 #[derive(Default)]
-struct References(HashMap<(u32, u64), Weak<Object>>);
+struct References(HashMap<(u32, usize), Weak<Object>>);
 
 fn construct(_: &mut dyn Context, _: This<'_>, _: &[Value]) -> NativeResult {
     Err(NativeError::error(
@@ -39,7 +39,7 @@ fn construct(_: &mut dyn Context, _: This<'_>, _: &[Value]) -> NativeResult {
 fn create(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> NativeResult {
     let target = args::object(arguments, 0)
         .ok_or_else(|| NativeError::error("Missing WeakReference target"))?;
-    let key = (target.id, target.serial());
+    let key = (target.id, target.identity());
     if let Some(existing) = context
         .state()
         .get_or_default::<References>()
@@ -119,7 +119,7 @@ fn exists(_: &mut dyn Context, map: &Object, offset: Value) -> Result<bool, Nati
 
 fn set(_: &mut dyn Context, map: &Object, offset: Value, value: Value) -> Result<(), NativeError> {
     let key = key(offset, true)?;
-    let owner = map.serial();
+    let owner = map.identity();
     let replaced = update_state(map, |state: &mut Map| {
         state.set(owner, &key, value.deref().clone())
     })?;
@@ -169,7 +169,7 @@ fn count(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult
 }
 
 fn clone_map(original: &Rc<Object>, copy: &Object) -> Result<(), NativeError> {
-    let owner = copy.serial();
+    let owner = copy.identity();
     store(
         copy,
         read_state(original, |state: &Map| state.copy_for(owner))?,
