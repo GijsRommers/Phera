@@ -101,12 +101,14 @@ pub async fn unserialize(context: &mut dyn Context, arguments: &[Value]) -> Nati
             };
             report_offset(context, offset, input.len());
             if !decoder.delayed.is_empty() {
-                decoder.complete(context).await?;
+                decoder.materialize(context)?;
+                decoder.run_hooks(context).await?;
             }
             return Ok(Value::Bool(false));
         }
     }
-    decoder.complete(context).await?;
+    decoder.materialize(context)?;
+    decoder.run_hooks(context).await?;
     let value = decoder.graph.get(root);
     let result = value.try_deref()?.clone();
     Ok(result)
@@ -233,10 +235,10 @@ impl Decoder<'_> {
         Ok(self.reader.close()?)
     }
 
-    async fn complete(&mut self, context: &mut dyn Context) -> Result<(), NativeError> {
+    fn materialize(&mut self, context: &mut dyn Context) -> Result<(), NativeError> {
         self.graph.materialize(context)?;
         self.graph.retain_array_cycles(context);
-        self.run_hooks(context).await
+        Ok(())
     }
 
     async fn run_hooks(&mut self, context: &mut dyn Context) -> Result<(), NativeError> {
@@ -289,9 +291,7 @@ fn array_key(token: Token<'_>, container: &Container) -> BuildResult<ArrayKey> {
         (Token::Int(key), Container::Properties(_)) => Ok(ArrayKey::str(key.to_string())),
         (Token::Int(key), _) => Ok(ArrayKey::Int(key)),
         (Token::String(key), Container::Properties(_)) => Ok(ArrayKey::str(php_string(key))),
-        (Token::String(key), _) => {
-            ArrayKey::from_value(&Value::String(php_string(key))).map_err(|_| Failure::Parse)
-        }
+        (Token::String(key), _) => Ok(ArrayKey::from_string(php_string(key))),
         _ => Err(Failure::Parse),
     }
 }

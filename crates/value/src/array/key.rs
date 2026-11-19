@@ -21,6 +21,14 @@ impl ArrayKey {
         ArrayKey::String(s.into())
     }
 
+    /// Normalize an owned string as PHP does for `$array[$key]`.
+    pub fn from_string(string: PhpString) -> Self {
+        match numeric_string_key(string.as_bytes()) {
+            Some(key) => Self::Int(key),
+            None => Self::String(string),
+        }
+    }
+
     /// Normalises a PHP value into an array key, reporting deprecations and
     /// warnings to `diag` exactly as PHP 8.5 does.
     ///
@@ -42,7 +50,10 @@ impl ArrayKey {
                 );
                 Ok(ArrayKey::str(""))
             }
-            Value::String(s) => Ok(string_to_key(s)),
+            Value::String(s) => Ok(match numeric_string_key(s.as_bytes()) {
+                Some(key) => Self::Int(key),
+                None => Self::String(s.clone()),
+            }),
             Value::Array(_) => Err(OpError::type_error(
                 "Cannot access offset of type array on array".to_string(),
             )),
@@ -72,35 +83,30 @@ impl ArrayKey {
 /// leading zeros (`"05"`, `"-0"`), `+`, whitespace, and anything that does
 /// not fit in `i64` (`"9223372036854775808"` stays a string).
 ///
-/// A key that stays a string shares the caller's string (one reference
-/// count) instead of copying its bytes: `$row['name']` in a loop would
-/// otherwise allocate a new string on every access.
-fn string_to_key(string: &PhpString) -> ArrayKey {
-    let bytes = string.as_bytes();
-    let not_a_key = || ArrayKey::String(string.clone());
+fn numeric_string_key(bytes: &[u8]) -> Option<i64> {
     let (digits, neg) = match bytes.split_first() {
         Some((b'-', rest)) => (rest, true),
         _ => (bytes, false),
     };
     // "0" is the only key that may start with 0: not "00", "05" or "-0".
     if digits.is_empty() || (digits[0] == b'0' && bytes.len() > 1) || digits.len() > 19 {
-        return not_a_key();
+        return None;
     }
     let mut acc: u64 = 0;
     for &b in digits {
         if !b.is_ascii_digit() {
-            return not_a_key();
+            return None;
         }
         acc = acc * 10 + u64::from(b - b'0');
     }
     if neg {
         if acc > i64::MIN.unsigned_abs() {
-            return not_a_key();
+            return None;
         }
-        ArrayKey::Int((acc as i64).wrapping_neg())
+        Some((acc as i64).wrapping_neg())
     } else if acc > i64::MAX as u64 {
-        not_a_key()
+        None
     } else {
-        ArrayKey::Int(acc as i64)
+        Some(acc as i64)
     }
 }

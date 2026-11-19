@@ -22,7 +22,7 @@ pub async fn decode_value(
     let root = decoder.graph.new_place();
     match decoder.build(context, root).await {
         Ok(()) => {
-            materialize(context, &mut decoder)?;
+            decoder.materialize(context)?;
             let hooks = decoder.run_hooks(context).await;
             publish(context, decoder.graph.get(root).try_deref()?.clone())?;
             Ok(hook_status(hooks))
@@ -59,19 +59,13 @@ pub async fn decode_entries<'a>(
         offset += length + decoder.reader.offset();
         entries.push((ArrayKey::String(key), place));
     }
-    materialize(context, &mut decoder)?;
+    decoder.materialize(context)?;
     let mut array = PhpArray::new();
     for (key, place) in entries {
         array.insert(key, decoder.graph.get(place));
     }
     publish(context, Value::from(array))?;
     Ok(hook_status(decoder.run_hooks(context).await))
-}
-
-fn materialize(context: &mut dyn Context, decoder: &mut Decoder<'_>) -> Result<(), NativeError> {
-    decoder.graph.materialize(context)?;
-    decoder.graph.retain_array_cycles(context);
-    Ok(())
 }
 
 fn hook_status(result: Result<(), NativeError>) -> Decoded {
