@@ -93,6 +93,9 @@ phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-mbstring = { path = "crates/extensions/mbstring" }
 iconv-native = "0.1"
 encoding_rs = "0.8.35"
+cssparser = "0.38"
+precomputed-hash = "0.1"
+selectors = "0.41"
 base64 = "0.22"
 phera-ext-json = { path = "crates/extensions/json" }
 phera-ext-openssl = { path = "crates/extensions/openssl" }
@@ -157,6 +160,7 @@ rustix = { version = "1", features = ["fs", "param", "process", "system", "termi
 rustix-libc-wrappers = { version = "0.1.1", features = ["process"] }
 sysinfo = { version = "0.39.3", default-features = false, features = ["system"] }
 tempfile = "3"
+memchr = "2"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }

@@ -128,7 +128,7 @@ fn node_name(arena: &Arena, id: NodeId, mode: &str) -> String {
     let node = &arena[id];
     if !matches!(
         node.kind,
-        Kind::Element | Kind::Attribute | Kind::ProcessingInstruction
+        Kind::Element | Kind::Attribute | Kind::Namespace | Kind::ProcessingInstruction
     ) {
         return String::new();
     }
@@ -149,7 +149,7 @@ fn by_id(arena: &Arena, value: &Value) -> Vec<NodeId> {
         .flat_map(|value| value.split_ascii_whitespace())
         .collect();
     arena
-        .descendants(Arena::DOCUMENT)
+        .content_descendants(Arena::DOCUMENT)
         .filter(|&id| {
             arena[id].kind == Kind::Element
                 && arena[id]

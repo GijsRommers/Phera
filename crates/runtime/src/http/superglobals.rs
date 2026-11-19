@@ -13,8 +13,10 @@
 //! headers give one cookie string, and two `Content-Type` headers describe a
 //! form only when the form type comes first.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
 use std::time::{SystemTime, UNIX_EPOCH};
+use tempfile::TempPath;
 
 use phera_value::{ArrayKey, PhpArray, Value};
 use phera_vm::Vm;
@@ -30,7 +32,7 @@ pub(crate) fn define_superglobals(
     document_root: &Path,
     environment: PhpArray,
     form: Option<Form>,
-) -> Vec<PathBuf> {
+) -> Vec<TempPath> {
     let mut get = PhpArray::new();
     parse_pairs(
         &mut get,
