@@ -346,7 +346,12 @@ impl Context for Vm {
         if function == "var_dump"
             && let Some(class) = self.hooked_property_class(&object).or_else(|| {
                 self.classes.for_object(&object).filter(|class| {
-                    class.has_only_php_ancestors()
+                    // A native dump projection (for example DateTime's) exposes its
+                    // own entries. Exception uses the ordinary declared property table.
+                    class
+                        .hooks
+                        .as_ref()
+                        .is_none_or(|hooks| hooks.properties.is_none())
                         && class.defaults.iter().any(|property| property.ty.is_some())
                 })
             })
