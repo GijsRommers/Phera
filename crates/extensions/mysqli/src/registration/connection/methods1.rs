@@ -5,12 +5,8 @@ use crate::connection::{commands, query};
 use phera_extension_api::{ConstantValue, MethodEntry, Param, ParamType};
 
 pub const ENTRIES: &[MethodEntry] = &[
-    MethodEntry::public(
-        "use_result",
-        &[],
-        dispatch::pending_method::<{ query::USE }>,
-    )
-    .tentative_return("mysqli_result|false"),
+    MethodEntry::public_async("use_result", &[], dispatch::pending_async::<{ query::USE }>)
+        .tentative_return("mysqli_result|false"),
     MethodEntry::public(
         "more_results",
         &[],

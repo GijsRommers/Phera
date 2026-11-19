@@ -36,7 +36,7 @@ pub struct Connection {
     pub version: String,
     pub host_info: String,
     pub backslashes: bool,
-    pub pending: Option<Outcome>,
+    pub pending: Option<query::Pending>,
     pub more: VecDeque<Result<Outcome, DbError>>,
 }
 

@@ -145,8 +145,7 @@ jobs:
     name: PDO end to end
     # The name is a required check in the branch protection, so it stays as it
     # is although the job now runs the SQLite and Redis comparisons too.
-    # Runs the comparison scripts of PDO, SQLite3 and Redis through the release
-    # binary; every one of them must match real PHP.
+    # Runs the database and Redis comparisons through the release binary.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -222,7 +221,7 @@ jobs:
         run: cargo test -p phera-ext-streams --test scripts --test concurrency --no-fail-fast
         env:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera
-      - name: Run PDO, SQLite3 and Redis tests through the release binary
+      - name: Compare PDO, mysqli, pgsql, SQLite3 and Redis against PHP
         run: cargo test -p phera-db-drivers -p phera-ext-pdo -p phera-ext-mysqli -p phera-ext-pgsql -p phera-ext-sqlite3 -p phera-ext-redis --no-fail-fast
         env:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera

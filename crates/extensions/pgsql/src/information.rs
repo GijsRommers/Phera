@@ -40,7 +40,14 @@ const NAMES: &[&str] = &[
 ];
 
 pub fn sync<const OP: usize>(c: &mut dyn Context, a: &[Value]) -> NativeResult {
-    let name = NAMES.get(OP).copied().unwrap_or_default();
+    sync_named::<OP>(c, a, NAMES.get(OP).copied().unwrap_or_default())
+}
+
+pub(crate) fn sync_named<const OP: usize>(
+    c: &mut dyn Context,
+    a: &[Value],
+    name: &str,
+) -> NativeResult {
     let state = connection::argument(c, args::value(a, 0), name)?;
     let state = state.borrow();
     let lease = state.lease()?;
@@ -79,8 +86,15 @@ pub fn asynchronous<const OP: usize>(
     c: &mut dyn Context,
     a: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
+    asynchronous_named::<OP>(c, a, NAMES.get(OP).copied().unwrap_or_default())
+}
+
+pub(crate) fn asynchronous_named<'a, const OP: usize>(
+    c: &'a mut dyn Context,
+    a: Vec<Value>,
+    name: &'static str,
+) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
-        let name = NAMES.get(OP).copied().unwrap_or_default();
         let explicit = args::object(&a, 0).is_some();
         let arg = if explicit {
             args::value(&a, 0)

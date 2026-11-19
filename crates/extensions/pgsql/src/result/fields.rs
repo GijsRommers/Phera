@@ -27,6 +27,16 @@ pub fn index(result: &ResultSet, field: i64, call: &str, arg: usize) -> Result<u
 }
 
 pub fn sync<const OP: usize>(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let names = [
+        "pg_field_name",
+        "pg_field_size",
+        "pg_field_type",
+        "pg_field_type_oid",
+    ];
+    sync_named::<OP>(arguments, names.get(OP).copied().unwrap_or_default())
+}
+
+pub(crate) fn sync_named<const OP: usize>(arguments: &[Value], name: &str) -> NativeResult {
     let state = of(arguments)?;
     let state = state.borrow();
     let state = state.as_ref().ok_or_else(closed)?;
@@ -39,13 +49,6 @@ pub fn sync<const OP: usize>(_: &mut dyn Context, arguments: &[Value]) -> Native
             .position(|col| col.name.as_bytes() == name);
         return Ok(Value::Int(found.map_or(-1, |i| i as i64)));
     }
-    let names = [
-        "pg_field_name",
-        "pg_field_size",
-        "pg_field_type",
-        "pg_field_type_oid",
-    ];
-    let name = names.get(OP).copied().unwrap_or_default();
     let field = index(state, args::int(arguments, 1).unwrap_or_default(), name, 2)?;
     let Some(column) = state.rows.columns.get(field) else {
         return Ok(Value::Bool(false));

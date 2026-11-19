@@ -803,7 +803,7 @@ impl Context for Vm {
             return Err(internal_error!("InternalIterator allocation"));
         };
         *object.native.borrow_mut() = Some(Box::new(crate::internal_iterator::InternalIterator {
-            cursor,
+            cursor: Some(cursor),
             initialized: false,
         }));
         Ok(value)

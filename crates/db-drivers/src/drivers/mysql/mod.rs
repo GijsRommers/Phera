@@ -117,7 +117,8 @@ impl Mysql {
                 if let Some(owner) = &options.mysql_stream {
                     return self
                         .stream(stream::Query::Binary(statement.clone(), params), owner)
-                        .await;
+                        .await
+                        .map(|outcome| outcome.rows);
                 }
                 let mut result = self
                     .connection()?
@@ -173,8 +174,9 @@ impl Mysql {
         }
         if let Some(owner) = owner {
             return self
-                .stream(stream::Query::Text(sql.to_owned()), owner)
-                .await;
+                .stream(stream::Query::Text(sql.as_bytes().to_vec()), owner)
+                .await
+                .map(|outcome| outcome.rows);
         }
         let mut result = self.connection()?.query_iter(sql).await.map_err(error)?;
         let columns = result.columns_ref().to_vec();

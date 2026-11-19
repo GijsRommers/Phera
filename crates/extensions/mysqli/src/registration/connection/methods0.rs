@@ -138,10 +138,10 @@ pub const ENTRIES: &[MethodEntry] = &[
         dispatch::query_call::<{ query::NEXT }, true>,
     )
     .tentative_return("bool"),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "store_result",
         &[Param::new("mode", ParamType::Int).with_default(ConstantValue::Int(0))],
-        dispatch::pending_method::<{ query::STORE }>,
+        dispatch::pending_async::<{ query::STORE }>,
     )
     .tentative_return("mysqli_result|false"),
 ];

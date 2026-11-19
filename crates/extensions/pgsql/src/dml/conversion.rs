@@ -84,12 +84,22 @@ fn convert_value(
     }
     let text = to_php_string(value, context.diagnostics())?.to_string_lossy();
     let converted = match column.type_name.as_str() {
-        "int2" | "int4" | "int8" | "oid" => text.parse::<i64>().ok().map(Value::Int),
-        "float4" | "float8" | "numeric" | "money" => text
-            .parse::<f64>()
-            .ok()
-            .filter(|number| number.is_finite())
-            .map(Value::Float),
+        "int2" | "int4" | "int8" | "oid" => match value {
+            Value::Int(number) => Some(Value::Int(*number)),
+            Value::Float(number) => Some(Value::Int(*number as i64)),
+            Value::String(_) if text.is_empty() => Some(Value::from("NULL")),
+            Value::String(_) if text.parse::<i64>().is_ok() => Some(Value::from(text)),
+            _ => None,
+        },
+        "float4" | "float8" | "numeric" | "money" => match value {
+            Value::Int(number) => Some(Value::Int(*number)),
+            Value::Float(number) => Some(Value::Float(*number)),
+            Value::String(_) if text.is_empty() => Some(Value::from("NULL")),
+            Value::String(_) if text.parse::<f64>().is_ok_and(f64::is_finite) => {
+                Some(Value::from(text))
+            }
+            _ => None,
+        },
         "bool" => match value {
             Value::Bool(true) => Some(Value::from("'t'")),
             Value::Bool(false) => Some(Value::from("'f'")),

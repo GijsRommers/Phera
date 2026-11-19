@@ -1,5 +1,6 @@
 //! Internal PostgreSQL handles such as `PgSql\Connection` cannot be constructed directly.
 
+mod aliases;
 mod commands0;
 mod connection0;
 mod query0;
@@ -21,17 +22,19 @@ pub fn register(registry: &mut Registry) {
             ..ClassEntry::class(class)
         });
     }
-    for entries in [
+    let groups = [
         connection0::ENTRIES,
         query0::ENTRIES,
         result0::ENTRIES,
         result1::ENTRIES,
         commands0::ENTRIES,
-    ] {
+    ];
+    for entries in groups {
         for &entry in entries {
             registry.function(entry);
         }
     }
+    aliases::register(registry, groups.into_iter().flatten());
 }
 
 const METHODS: [MethodEntry; 1] =

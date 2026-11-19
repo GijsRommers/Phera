@@ -97,10 +97,17 @@ pub fn of(arguments: &[Value]) -> Result<Handle, NativeError> {
 }
 
 pub fn execute<const OP: usize>(c: &mut dyn Context, a: &[Value]) -> NativeResult {
+    execute_named::<OP>(c, a, NAMES.get(OP).copied().unwrap_or_default())
+}
+
+pub(crate) fn execute_named<const OP: usize>(
+    c: &mut dyn Context,
+    a: &[Value],
+    call: &str,
+) -> NativeResult {
     let handle = of(a)?;
     let mut result = handle.borrow_mut();
     let state = result.as_mut().ok_or_else(closed)?;
-    let call = NAMES.get(OP).copied().unwrap_or_default();
     let value = match OP {
         FREE => {
             *result = None;

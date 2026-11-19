@@ -7,7 +7,10 @@
 
 use std::rc::Rc;
 
-use crate::{Context, NativeError, NativeResult, Object, PhpArray, Value};
+use crate::{
+    Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value,
+    traversal::IteratorStep,
+};
 
 /// PHP's three-way comparison. Uncomparable pairs fail every ordering test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +75,15 @@ pub trait NativeIterator {
     fn valid(&mut self, context: &mut dyn Context) -> Result<bool, NativeError>;
     fn current(&mut self, context: &mut dyn Context) -> NativeResult;
     fn key(&mut self, context: &mut dyn Context) -> NativeResult;
+
+    /// An opted-in step can wait for I/O before its synchronous cursor operation.
+    fn needs_input(&self, _operation: IteratorStep) -> bool {
+        false
+    }
+
+    fn read_input(&mut self) -> LocalFuture<'_, Result<(), NativeError>> {
+        Box::pin(async { Ok(()) })
+    }
 
     /// Read a foreach entry synchronously, advancing first after the first successful read.
     /// Returning None leaves the cursor untouched so the VM can run the ordinary steps.

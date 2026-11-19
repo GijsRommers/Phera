@@ -55,9 +55,11 @@ date, dom (first stage), filter, hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, SPL, sqlite3, streams, tokenizer.
 
-The mysqli and pgsql extensions provide async connections, queries, prepared
-statements, and result fetching over the same clients and connection pool as
-PDO. Compatibility testing is in progress. MySQL LOCAL INFILE is disabled.
+The `mysqli` and `pgsql` extensions share PDO's async connections, TLS and
+connection pool. For mysqli single statements, `MYSQLI_USE_RESULT` fetches one
+row at a time, including in `foreach`. PostgreSQL supports the `pg_exec` alias
+and other PHP 8.5 aliases for supported operations. Compatibility testing is
+in progress. MySQL LOCAL INFILE is disabled.
 
 In progress: bcmath, curl, gmp, intl, process functions, sodium,
 zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.

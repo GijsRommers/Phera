@@ -7,12 +7,15 @@ use mysql_async::{Column, Conn, Params, QueryResult, Row, Statement};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use super::{Mysql, error};
+use super::{
+    Mysql, error,
+    native::{Outcome, Reply},
+};
 use crate::drivers::RawRows;
 use crate::errors::DbError;
 
 pub(super) enum Query {
-    Text(String),
+    Text(Vec<u8>),
     Binary(Statement, Params),
 }
 
@@ -42,8 +45,7 @@ struct Batch {
 
 struct Header {
     columns: Vec<Column>,
-    affected: u64,
-    insert_id: u64,
+    reply: Reply,
 }
 
 impl Mysql {
@@ -51,7 +53,7 @@ impl Mysql {
         &mut self,
         query: Query,
         owner: &Arc<()>,
-    ) -> Result<RawRows, DbError> {
+    ) -> Result<Outcome, DbError> {
         let connection = self.connection.take().ok_or_else(Mysql::closed)?;
         let (requests, pending) = mpsc::channel(1);
         let (initial, header) = oneshot::channel();
@@ -77,11 +79,14 @@ impl Mysql {
         if header.columns.is_empty() {
             self.finish_stream().await;
         }
-        self.last_insert_id = header.insert_id;
-        Ok(RawRows::Mysql {
-            columns: header.columns,
-            rows: Vec::new(),
-            affected: header.affected,
+        self.last_insert_id = header.reply.insert_id;
+        Ok(Outcome {
+            rows: RawRows::Mysql {
+                columns: header.columns,
+                rows: Vec::new(),
+                affected: header.reply.affected,
+            },
+            reply: header.reply,
         })
     }
 
@@ -194,8 +199,12 @@ async fn read<P: Protocol>(
     let columns = result.columns_ref().to_vec();
     let header = Header {
         columns: columns.clone(),
-        affected: result.affected_rows(),
-        insert_id: result.last_insert_id().unwrap_or_default(),
+        reply: Reply {
+            affected: result.affected_rows(),
+            insert_id: result.last_insert_id().unwrap_or_default(),
+            info: result.info().into_owned(),
+            warnings: result.warnings(),
+        },
     };
     if columns.is_empty() {
         let _ = initial.send(result.drop_result().await.map(|()| header).map_err(error));

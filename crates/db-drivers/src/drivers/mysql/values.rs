@@ -17,14 +17,29 @@ pub fn parameter(value: &BoundValue) -> MysqlValue {
 }
 
 pub fn convert(columns: Vec<mysql_async::Column>, rows: Vec<Row>, affected: u64) -> Rows {
-    convert_with_numeric_types(columns, rows, affected, true)
+    convert_rows(columns, rows, affected, NumericTypes::Pdo)
 }
 
-pub fn convert_with_numeric_types(
+pub fn convert_mysqlnd(
     columns: Vec<mysql_async::Column>,
     rows: Vec<Row>,
     affected: u64,
     native: bool,
+) -> Rows {
+    convert_rows(columns, rows, affected, NumericTypes::Mysqlnd { native })
+}
+
+#[derive(Clone, Copy)]
+enum NumericTypes {
+    Pdo,
+    Mysqlnd { native: bool },
+}
+
+fn convert_rows(
+    columns: Vec<mysql_async::Column>,
+    rows: Vec<Row>,
+    affected: u64,
+    numeric: NumericTypes,
 ) -> Rows {
     let values: Vec<Vec<Value>> = rows
         .into_iter()
@@ -35,7 +50,9 @@ pub fn convert_with_numeric_types(
                 .into_iter()
                 .map(|value| value.unwrap_or(MysqlValue::NULL))
                 .zip(&columns)
-                .map(|(value, column)| cell(value, column.column_type(), column.decimals(), native))
+                .map(|(value, column)| {
+                    cell(value, column.column_type(), column.decimals(), numeric)
+                })
                 .collect()
         })
         .collect();
@@ -57,14 +74,26 @@ pub fn convert_with_numeric_types(
     }
 }
 
-fn cell(value: MysqlValue, kind: ColumnType, decimals: u8, native: bool) -> Value {
+fn cell(value: MysqlValue, kind: ColumnType, decimals: u8, numeric: NumericTypes) -> Value {
+    let native = !matches!(numeric, NumericTypes::Mysqlnd { native: false });
+    let mysqlnd = matches!(numeric, NumericTypes::Mysqlnd { .. });
     match value {
+        MysqlValue::Int(value) if mysqlnd && kind == ColumnType::MYSQL_TYPE_YEAR => {
+            Value::from(format!("{value:04}"))
+        }
+        MysqlValue::UInt(value) if mysqlnd && kind == ColumnType::MYSQL_TYPE_YEAR => {
+            Value::from(format!("{value:04}"))
+        }
         MysqlValue::NULL => Value::Null,
         MysqlValue::Int(value) => Value::Int(value),
         MysqlValue::UInt(value) => {
             i64::try_from(value).map_or_else(|_| Value::from(value.to_string()), Value::Int)
         }
-        MysqlValue::Float(value) => Value::Float(f64::from(value)),
+        MysqlValue::Float(value) => Value::Float(if mysqlnd {
+            mysqlnd_float(value, decimals)
+        } else {
+            f64::from(value)
+        }),
         MysqlValue::Double(value) => Value::Float(value),
         MysqlValue::Bytes(bytes) => {
             if kind == ColumnType::MYSQL_TYPE_BIT {
@@ -77,7 +106,7 @@ fn cell(value: MysqlValue, kind: ColumnType, decimals: u8, native: bool) -> Valu
                 return i64::try_from(number)
                     .map_or_else(|_| Value::from(number.to_string()), Value::Int);
             }
-            if !native {
+            if !native || (mysqlnd && kind == ColumnType::MYSQL_TYPE_YEAR) {
                 return Value::from(bytes);
             }
             let text = String::from_utf8_lossy(&bytes);
@@ -125,4 +154,16 @@ fn fraction(text: &mut String, micros: u32, decimals: u8) {
         text.push('.');
         text.push_str(&digits[..usize::from(decimals)]);
     }
+}
+
+// mysqlnd widens a binary FLOAT through decimal text, with six significant digits
+// for columns without a fixed decimal scale.
+fn mysqlnd_float(value: f32, decimals: u8) -> f64 {
+    let value = f64::from(value);
+    let text = if decimals < 31 {
+        format!("{value:.precision$}", precision = usize::from(decimals))
+    } else {
+        format!("{value:.5e}")
+    };
+    text.parse().unwrap_or(value)
 }

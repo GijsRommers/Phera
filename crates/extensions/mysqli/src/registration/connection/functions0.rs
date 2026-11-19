@@ -146,17 +146,17 @@ pub const ENTRIES: &[FunctionEntry] = &[
         &[Param::new("mysql", ParamType::Class("mysqli"))],
         dispatch::query_proc::<{ query::NEXT }>,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::asynchronous(
         "mysqli_store_result",
         &[
             Param::new("mysql", ParamType::Class("mysqli")),
             Param::new("mode", ParamType::Int).with_default(ConstantValue::Int(0)),
         ],
-        dispatch::pending_function::<{ query::STORE }>,
+        dispatch::pending_async_proc::<{ query::STORE }>,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::asynchronous(
         "mysqli_use_result",
         &[Param::new("mysql", ParamType::Class("mysqli"))],
-        dispatch::pending_function::<{ query::USE }>,
+        dispatch::pending_async_proc::<{ query::USE }>,
     ),
 ];

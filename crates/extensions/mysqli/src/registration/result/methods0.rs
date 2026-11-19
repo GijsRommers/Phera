@@ -5,7 +5,7 @@ use crate::result;
 use phera_extension_api::{ConstantValue, MethodEntry, Param, ParamType};
 
 pub const ENTRIES: &[MethodEntry] = &[
-    MethodEntry::public(
+    MethodEntry::public_async(
         "__construct",
         &[
             Param::new("mysql", ParamType::Class("mysqli")),
@@ -24,42 +24,42 @@ pub const ENTRIES: &[MethodEntry] = &[
         dispatch::fetch_object,
     )
     .tentative_return("object|false|null"),
-    MethodEntry::public("close", &[], dispatch::result_method::<{ result::FREE }>)
+    MethodEntry::public_async("close", &[], dispatch::result_async::<{ result::FREE }>)
         .tentative_return("void"),
-    MethodEntry::public("free", &[], dispatch::result_method::<{ result::FREE }>)
+    MethodEntry::public_async("free", &[], dispatch::result_async::<{ result::FREE }>)
         .tentative_return("void"),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "free_result",
         &[],
-        dispatch::result_method::<{ result::FREE }>,
+        dispatch::result_async::<{ result::FREE }>,
     )
     .tentative_return("void"),
-    MethodEntry::public("fetch_row", &[], dispatch::result_method::<{ result::ROW }>)
+    MethodEntry::public_async("fetch_row", &[], dispatch::result_async::<{ result::ROW }>)
         .tentative_return("array|false|null"),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "fetch_assoc",
         &[],
-        dispatch::result_method::<{ result::ASSOC }>,
+        dispatch::result_async::<{ result::ASSOC }>,
     )
     .tentative_return("array|false|null"),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "fetch_array",
         &[Param::new("mode", ParamType::Int)
             .with_constant_default("MYSQLI_BOTH", ConstantValue::Int(3))],
-        dispatch::result_method::<{ result::ARRAY }>,
+        dispatch::result_async::<{ result::ARRAY }>,
     )
     .tentative_return("array|false|null"),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "fetch_all",
         &[Param::new("mode", ParamType::Int)
             .with_constant_default("MYSQLI_NUM", ConstantValue::Int(2))],
-        dispatch::result_method::<{ result::ALL }>,
+        dispatch::result_async::<{ result::ALL }>,
     )
     .tentative_return("array"),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "fetch_column",
         &[Param::new("column", ParamType::Int).with_default(ConstantValue::Int(0))],
-        dispatch::result_method::<{ result::COLUMN }>,
+        dispatch::result_async::<{ result::COLUMN }>,
     )
     .returning("string|int|float|false|null"),
     MethodEntry::public(

@@ -15,46 +15,46 @@ pub const ENTRIES: &[FunctionEntry] = &[
         ],
         dispatch::fetch_object_proc,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::asynchronous(
         "mysqli_free_result",
         &[Param::new("result", ParamType::Class("mysqli_result"))],
-        dispatch::result_proc::<{ result::FREE }>,
+        dispatch::result_async_proc::<{ result::FREE }>,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::asynchronous(
         "mysqli_fetch_row",
         &[Param::new("result", ParamType::Class("mysqli_result"))],
-        dispatch::result_proc::<{ result::ROW }>,
+        dispatch::result_async_proc::<{ result::ROW }>,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::asynchronous(
         "mysqli_fetch_assoc",
         &[Param::new("result", ParamType::Class("mysqli_result"))],
-        dispatch::result_proc::<{ result::ASSOC }>,
+        dispatch::result_async_proc::<{ result::ASSOC }>,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::asynchronous(
         "mysqli_fetch_array",
         &[
             Param::new("result", ParamType::Class("mysqli_result")),
             Param::new("mode", ParamType::Int)
                 .with_constant_default("MYSQLI_BOTH", ConstantValue::Int(3)),
         ],
-        dispatch::result_proc::<{ result::ARRAY }>,
+        dispatch::result_async_proc::<{ result::ARRAY }>,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::asynchronous(
         "mysqli_fetch_all",
         &[
             Param::new("result", ParamType::Class("mysqli_result")),
             Param::new("mode", ParamType::Int)
                 .with_constant_default("MYSQLI_NUM", ConstantValue::Int(2)),
         ],
-        dispatch::result_proc::<{ result::ALL }>,
+        dispatch::result_async_proc::<{ result::ALL }>,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::asynchronous(
         "mysqli_fetch_column",
         &[
             Param::new("result", ParamType::Class("mysqli_result")),
             Param::new("column", ParamType::Int).with_default(ConstantValue::Int(0)),
         ],
-        dispatch::result_proc::<{ result::COLUMN }>,
+        dispatch::result_async_proc::<{ result::COLUMN }>,
     ),
     FunctionEntry::sync(
         "mysqli_data_seek",

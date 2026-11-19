@@ -4,6 +4,8 @@ use phera_db_drivers::drivers::{RawRows, mysql::Outcome};
 use phera_db_drivers::errors::DbError;
 use phera_extension_api::{Context, NativeError, NativeResult, Value, args};
 
+use crate::result::stream::Stream;
+
 use super::{Connection, Handle, run};
 use crate::{errors, result};
 
@@ -14,6 +16,11 @@ pub const NEXT: usize = 3;
 pub const STORE: usize = 4;
 pub const USE: usize = 5;
 pub const MORE: usize = 6;
+
+pub struct Pending {
+    pub rows: RawRows,
+    pub stream: Option<Stream>,
+}
 
 pub async fn execute<const OP: usize>(
     context: &mut dyn Context,
@@ -28,7 +35,10 @@ pub async fn execute<const OP: usize>(
         return match state.more.pop_front() {
             Some(Ok(outcome)) => {
                 state.observe(&outcome);
-                state.pending = outcome.rows.has_columns().then_some(outcome);
+                state.pending = outcome.rows.has_columns().then_some(Pending {
+                    rows: outcome.rows,
+                    stream: None,
+                });
                 Ok(Value::Bool(true))
             }
             Some(Err(error)) => failure(context, &mut state, error, call),
@@ -67,6 +77,43 @@ pub async fn execute<const OP: usize>(
             call,
         );
     }
+    if OP == REAL_QUERY || (OP == QUERY && mode == 1) {
+        let native = state.borrow().native_numbers;
+        let stream = Stream::new(lease.clone(), native);
+        let owner = stream.owner.clone();
+        let output = run(&lease, move |driver| {
+            Box::pin(async move {
+                let outcome = driver.start_native_stream(sql, &owner).await?;
+                let backslashes =
+                    (!outcome.rows.has_columns()).then(|| driver.backslashes_enabled());
+                Ok((outcome, backslashes))
+            })
+        })
+        .await;
+        let (outcome, backslashes) = match output {
+            Ok(outcome) => outcome,
+            Err(error) => return failure(context, &mut state.borrow_mut(), error, call),
+        };
+        {
+            let mut state = state.borrow_mut();
+            state.observe(&outcome);
+            if let Some(backslashes) = backslashes {
+                state.backslashes = backslashes;
+            }
+        }
+        if outcome.rows.has_columns() {
+            let pending = Pending {
+                rows: outcome.rows,
+                stream: Some(stream),
+            };
+            if OP == REAL_QUERY {
+                state.borrow_mut().pending = Some(pending);
+            } else {
+                return result::create_pending(context, pending, native, true).await;
+            }
+        }
+        return Ok(Value::Bool(true));
+    }
     let output = run(&lease, move |driver| {
         Box::pin(async move {
             let outcomes = driver.query_native(&sql, OP == MULTI_QUERY).await?;
@@ -92,23 +139,33 @@ pub async fn execute<const OP: usize>(
     } else {
         state.more = outcomes.collect();
         if outcome.rows.has_columns() {
-            state.pending = Some(outcome);
+            state.pending = Some(Pending {
+                rows: outcome.rows,
+                stream: None,
+            });
         }
     }
     Ok(Value::Bool(true))
 }
 
-pub fn result_operation<const OP: usize>(context: &mut dyn Context, state: Handle) -> NativeResult {
-    let mut state = state.borrow_mut();
+pub fn more_results(state: Handle) -> NativeResult {
+    let state = state.borrow();
     state.lease()?;
-    if OP == MORE {
-        return Ok(Value::Bool(!state.more.is_empty()));
-    }
-    match state.pending.take() {
-        Some(outcome) if outcome.rows.has_columns() => {
-            result::create(context, outcome.rows, state.native_numbers, OP == USE)
-        }
-        _ => Ok(Value::Bool(false)),
+    Ok(Value::Bool(!state.more.is_empty()))
+}
+
+pub async fn result_operation<const OP: usize>(
+    context: &mut dyn Context,
+    state: Handle,
+) -> NativeResult {
+    let (pending, native) = {
+        let mut state = state.borrow_mut();
+        state.lease()?;
+        (state.pending.take(), state.native_numbers)
+    };
+    match pending {
+        Some(pending) => result::create_pending(context, pending, native, OP == USE).await,
+        None => Ok(Value::Bool(false)),
     }
 }
 
@@ -129,9 +186,12 @@ impl Connection {
 pub fn failure(
     context: &mut dyn Context,
     state: &mut Connection,
-    error: DbError,
+    mut error: DbError,
     call: &str,
 ) -> NativeResult {
+    if error.code == Some(2014) {
+        error.detail = "Commands out of sync; you can't run this command now".into();
+    }
     state.error = Some(error.clone());
     state.reply.affected = 0;
     errors::report(context, &error, call, false)

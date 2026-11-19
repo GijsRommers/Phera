@@ -78,15 +78,33 @@ pub fn local_function<const OP: usize>(c: &mut dyn Context, a: &[Value]) -> Nati
 }
 
 pub fn pending_method<const OP: usize>(
-    c: &mut dyn Context,
+    _c: &mut dyn Context,
     o: Option<&Rc<Object>>,
     _: &[Value],
 ) -> NativeResult {
-    query::result_operation::<OP>(c, connection::handle(o)?)
+    query::more_results(connection::handle(o)?)
 }
 
 pub fn pending_function<const OP: usize>(c: &mut dyn Context, a: &[Value]) -> NativeResult {
     pending_method::<OP>(c, args::object(a, 0), a.get(1..).unwrap_or_default())
+}
+
+pub fn pending_async<'a, const OP: usize>(
+    c: &'a mut dyn Context,
+    o: Option<Rc<Object>>,
+    a: Vec<Value>,
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(async move {
+        let (o, _) = target(o.as_ref(), &a);
+        query::result_operation::<OP>(c, connection::handle(o)?).await
+    })
+}
+
+pub fn pending_async_proc<const OP: usize>(
+    c: &mut dyn Context,
+    a: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    pending_async::<OP>(c, None, a)
 }
 
 pub fn query_call<const OP: usize, const METHOD: bool>(
@@ -233,6 +251,31 @@ fn result_dispatch<const OP: usize>(
     method: bool,
 ) -> NativeResult {
     let object = o.ok_or_else(|| NativeError::error("mysqli_result object is missing"))?;
+    let call = result_name::<OP>(method);
+    result::execute::<OP>(c, object, a, &call)
+}
+
+pub fn result_async<'a, const OP: usize>(
+    c: &'a mut dyn Context,
+    o: Option<Rc<Object>>,
+    a: Vec<Value>,
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(async move {
+        let call = result_name::<OP>(o.is_some());
+        let (o, a) = target(o.as_ref(), &a);
+        let object = o.ok_or_else(|| NativeError::error("mysqli_result object is missing"))?;
+        result::stream::execute::<OP>(c, object, a, &call).await
+    })
+}
+
+pub fn result_async_proc<const OP: usize>(
+    c: &mut dyn Context,
+    a: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    result_async::<OP>(c, None, a)
+}
+
+fn result_name<const OP: usize>(method: bool) -> String {
     let names = [
         "free_result",
         "fetch_row",
@@ -251,11 +294,10 @@ fn result_dispatch<const OP: usize>(
         "fetch_lengths",
     ];
     let name = names.get(OP).copied().unwrap_or_default();
-    let call = format!(
+    format!(
         "{}{name}",
         if method { "mysqli_result::" } else { "mysqli_" }
-    );
-    result::execute::<OP>(c, object, a, &call)
+    )
 }
 
 pub fn fetch_object<'a>(

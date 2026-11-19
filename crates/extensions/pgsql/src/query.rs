@@ -124,17 +124,25 @@ pub fn execute<const OP: usize, const SEND: bool>(
     c: &mut dyn Context,
     a: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
+    let call = match (OP, SEND) {
+        (SIMPLE, false) => "pg_query",
+        (PARAMS, false) => "pg_query_params",
+        (PREPARE, false) => "pg_prepare",
+        (EXECUTE, false) => "pg_execute",
+        (SIMPLE, true) => "pg_send_query",
+        (PARAMS, true) => "pg_send_query_params",
+        (PREPARE, true) => "pg_send_prepare",
+        _ => "pg_send_execute",
+    };
+    execute_named::<OP, SEND>(c, a, call)
+}
+
+pub(crate) fn execute_named<'a, const OP: usize, const SEND: bool>(
+    c: &'a mut dyn Context,
+    a: Vec<Value>,
+    call: &'static str,
+) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
-        let call = match (OP, SEND) {
-            (SIMPLE, false) => "pg_query",
-            (PARAMS, false) => "pg_query_params",
-            (PREPARE, false) => "pg_prepare",
-            (EXECUTE, false) => "pg_execute",
-            (SIMPLE, true) => "pg_send_query",
-            (PARAMS, true) => "pg_send_query_params",
-            (PREPARE, true) => "pg_send_prepare",
-            _ => "pg_send_execute",
-        };
         let explicit = args::object(&a, 0).is_some();
         let conn = if explicit {
             args::value(&a, 0)

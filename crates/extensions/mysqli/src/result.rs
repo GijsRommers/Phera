@@ -2,8 +2,12 @@
 
 mod fields;
 mod iteration;
+mod object;
 mod properties;
+pub(crate) mod stream;
+
 pub use iteration::{get_iterator, iterator};
+pub use object::fetch_object;
 pub use properties::ACCESS;
 
 use std::cell::RefCell;
@@ -13,7 +17,7 @@ use crate::connection::properties::uint;
 use phera_db_drivers::drivers::{RawRows, Rows, mysql::values};
 use phera_extension_api::value::to_php_string;
 use phera_extension_api::{
-    ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, Value, args,
+    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
 
 pub const FREE: usize = 0;
@@ -40,6 +44,8 @@ pub struct ResultSet {
     last: Option<usize>,
     field: usize,
     unbuffered: bool,
+    stream: Option<stream::Stream>,
+    stream_count: Option<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -69,7 +75,7 @@ pub fn decode(raw: RawRows, native: bool) -> Rows {
             rows,
             columns,
             affected,
-        } => values::convert_with_numeric_types(columns, rows, affected, native),
+        } => values::convert_mysqlnd(columns, rows, affected, native),
         _ => Rows::default(),
     }
 }
@@ -81,18 +87,20 @@ pub fn create(context: &mut dyn Context, raw: RawRows, native: bool, stream: boo
 pub fn create_rows(context: &mut dyn Context, rows: Rows, unbuffered: bool) -> NativeResult {
     let value = context.create_object("mysqli_result", PhpArray::new())?;
     if let Value::Object(object) = &value {
-        attach(object, rows, unbuffered);
+        attach(object, rows, unbuffered, None);
     }
     Ok(value)
 }
 
-fn attach(object: &Object, rows: Rows, unbuffered: bool) {
+fn attach(object: &Object, rows: Rows, unbuffered: bool, stream: Option<stream::Stream>) {
     let set = ResultSet {
         rows,
         position: 0,
         last: None,
         field: 0,
         unbuffered,
+        stream_count: stream.as_ref().map(|_| 0),
+        stream,
     };
     *object.native.borrow_mut() = Some(Box::new(Rc::new(RefCell::new(Some(set)))));
 }
@@ -113,24 +121,56 @@ fn closed() -> NativeError {
 
 pub fn construct(
     _: &mut dyn Context,
-    this: Option<&Rc<Object>>,
-    arguments: &[Value],
+    this: Option<Rc<Object>>,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let object = this.ok_or_else(closed)?;
+        let connection = crate::connection::handle(args::object(&arguments, 0))?;
+        let (pending, native) = {
+            let mut connection = connection.borrow_mut();
+            connection.lease()?;
+            let pending = connection.pending.take().ok_or_else(|| {
+                NativeError::error("mysqli_result object is not fully initialized")
+            })?;
+            (pending, connection.native_numbers)
+        };
+        let unbuffered = args::int(&arguments, 1) == Some(1);
+        attach_pending(&object, pending, native, unbuffered).await?;
+        Ok(Value::Null)
+    })
+}
+
+pub async fn create_pending(
+    context: &mut dyn Context,
+    pending: crate::connection::query::Pending,
+    native: bool,
+    unbuffered: bool,
 ) -> NativeResult {
-    let object = this.ok_or_else(closed)?;
-    let connection = crate::connection::handle(args::object(arguments, 0))?;
-    let mut connection = connection.borrow_mut();
-    connection.lease()?;
-    let raw = connection
-        .pending
-        .take()
-        .ok_or_else(|| NativeError::error("mysqli_result object is not fully initialized"))?;
-    let unbuffered = args::int(arguments, 1) == Some(1);
-    attach(
-        object,
-        decode(raw.rows, connection.native_numbers),
-        unbuffered,
-    );
-    Ok(Value::Null)
+    let value = context.create_object("mysqli_result", PhpArray::new())?;
+    if let Value::Object(object) = &value {
+        attach_pending(object, pending, native, unbuffered).await?;
+    }
+    Ok(value)
+}
+
+async fn attach_pending(
+    object: &Object,
+    mut pending: crate::connection::query::Pending,
+    native: bool,
+    unbuffered: bool,
+) -> Result<(), NativeError> {
+    let mut rows = decode(pending.rows, native);
+    if !unbuffered && let Some(stream) = pending.stream.take() {
+        rows.values = stream
+            .read(true)
+            .await
+            .map_err(|e| NativeError::error(e.detail))?
+            .0
+            .values;
+    }
+    attach(object, rows, unbuffered, pending.stream);
+    Ok(())
 }
 
 impl ResultSet {
@@ -180,6 +220,13 @@ impl ResultSet {
     }
 
     fn num_rows(&self) -> Value {
+        if let Some(count) = self.stream_count {
+            return uint(if self.stream.is_some() {
+                0
+            } else {
+                count as u64
+            });
+        }
         uint(
             if self.unbuffered && self.position <= self.rows.values.len() {
                 0
@@ -269,49 +316,4 @@ pub fn execute<const OP: usize>(
             Ok(results.array(mode)?.map_or(Value::Null, Value::from))
         }
     }
-}
-
-pub async fn fetch_object(
-    context: &mut dyn Context,
-    object: &Object,
-    arguments: &[Value],
-    call: &str,
-) -> NativeResult {
-    let name =
-        args::string(arguments, 0).map_or_else(|| "stdClass".into(), |s| s.to_string_lossy());
-    let params = args::array(arguments, 1);
-    if context.lookup_class(&name).await?.is_none() {
-        let argument = if call.starts_with("mysqli_result::") {
-            1
-        } else {
-            2
-        };
-        return Err(NativeError::type_error(format!(
-            "{call}(): Argument #{argument} ($class) must be a valid class name, {name} given"
-        )));
-    }
-    let handle = handle(object)?;
-    let row = {
-        let mut state = handle.borrow_mut();
-        state.as_mut().ok_or_else(closed)?.array(Fetch::Assoc)?
-    };
-    let Some(row) = row else {
-        return Ok(Value::Null);
-    };
-    let result = context.create_object(&name, row)?;
-    if let Value::Object(object) = &result {
-        let constructor = context.has_method(object, "__construct");
-        if constructor {
-            let arguments =
-                params.map_or_else(Vec::new, |p| p.iter().map(|(_, v)| v.clone()).collect());
-            context
-                .call_method(object.clone(), "__construct", arguments)
-                .await?;
-        } else if params.is_some_and(|values| !values.is_empty()) {
-            return Err(NativeError::value_error(format!(
-                "{call}(): Argument ($constructor_args) must be empty when class has no constructor"
-            )));
-        }
-    }
-    Ok(result)
 }

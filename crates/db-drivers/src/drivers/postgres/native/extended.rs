@@ -9,6 +9,12 @@ use crate::drivers::postgres::protocol::TextParameter;
 use crate::errors::DbError;
 use crate::parameters::BoundValue;
 
+#[derive(Clone)]
+pub(super) struct NativeStatement {
+    statement: Statement,
+    columns: Vec<NativeColumn>,
+}
+
 impl Postgres {
     pub async fn native_prepare(
         &mut self,
@@ -22,7 +28,7 @@ impl Postgres {
                 detail: format!("ERROR:  prepared statement \"{name}\" already exists"),
             });
         }
-        let statement = self.prepare_query(sql).await?;
+        let statement = self.prepare_native_statement(sql).await?;
         self.native_mut()?
             .statements
             .insert(name.to_string(), statement);
@@ -52,13 +58,44 @@ impl Postgres {
         sql: &str,
         params: &[BoundValue],
     ) -> Result<NativeSequence, DbError> {
-        let statement = self.prepare_query(sql).await?;
+        let statement = self.prepare_native_statement(sql).await?;
         self.native_bound(&statement, params).await
+    }
+
+    async fn prepare_native_statement(&mut self, sql: &str) -> Result<NativeStatement, DbError> {
+        let observations = self.native()?.observations.clone();
+        observations.capture();
+        let prepared = self.prepare_query(sql).await;
+        let description = observations
+            .finish()
+            .into_iter()
+            .find_map(|header| match header {
+                Header::Columns(columns) => Some(columns),
+                Header::Command(_) => None,
+            });
+        let statement = prepared?;
+        let columns = description.unwrap_or_else(|| {
+            statement
+                .columns()
+                .iter()
+                .map(|column| {
+                    let kind = column.type_();
+                    NativeColumn {
+                        name: column.name().into(),
+                        table: column.table_oid().unwrap_or(0),
+                        oid: kind.oid(),
+                        size: -1,
+                        kind: kind.name().into(),
+                    }
+                })
+                .collect()
+        });
+        Ok(NativeStatement { statement, columns })
     }
 
     async fn native_bound(
         &mut self,
-        statement: &Statement,
+        prepared: &NativeStatement,
         params: &[BoundValue],
     ) -> Result<NativeSequence, DbError> {
         let params: Vec<TextParameter> = params.iter().map(TextParameter::from).collect();
@@ -66,24 +103,11 @@ impl Postgres {
             .iter()
             .map(|value| value as &(dyn ToSql + Sync))
             .collect();
-        let columns = statement
-            .columns()
-            .iter()
-            .map(|column| {
-                let kind = column.type_();
-                NativeColumn {
-                    name: column.name().into(),
-                    table: column.table_oid().unwrap_or(0),
-                    oid: kind.oid(),
-                    size: -1,
-                    kind: kind.name().into(),
-                }
-            })
-            .collect::<Vec<_>>();
+        let statement = &prepared.statement;
         let observations = self.native()?.observations.clone();
         observations.capture();
         let mut result = NativeResult {
-            columns,
+            columns: prepared.columns.clone(),
             ..NativeResult::default()
         };
         let response = if result.columns.is_empty() {
@@ -100,7 +124,18 @@ impl Postgres {
         if let Some(Header::Command(command)) = observations.finish().pop_back() {
             result.command = command;
         }
-        let (rows, affected) = response.map_err(|cause| error(cause, ""))?;
+        let (rows, affected) = response.map_err(|cause| {
+            let context = cause
+                .as_db_error()
+                .and_then(|e| e.where_())
+                .map(str::to_owned);
+            let mut error = error(cause, "");
+            if let Some(context) = context {
+                error.detail.push_str("\nCONTEXT:  ");
+                error.detail.push_str(&context);
+            }
+            error
+        })?;
         result.affected = affected;
         if !rows.is_empty() {
             // The existing driver receives binary values. Ask PostgreSQL to
@@ -116,6 +151,7 @@ impl Postgres {
                         let expression = format!("${}", index + 1);
                         match *col.type_() {
                             Type::BOOL => format!("pg_catalog.boolout({expression})::text"),
+                            Type::BPCHAR => format!("pg_catalog.bpcharout({expression})::text"),
                             Type::INET => format!("pg_catalog.inet_out({expression})::text"),
                             _ => format!("{expression}::text"),
                         }

@@ -1,5 +1,7 @@
 //! MySQL program status and result sets used by `$db->query($sql)`.
 
+use std::sync::Arc;
+
 use mysql_async::consts::StatusFlags;
 use mysql_async::prelude::Queryable;
 use mysql_async::{ChangeUserOpts, Params, Row, Statement};
@@ -112,19 +114,36 @@ impl Mysql {
         })
     }
 
+    /// The text protocol reader waits for an explicit fetch request after its header.
+    pub async fn start_native_stream(
+        &mut self,
+        sql: Vec<u8>,
+        owner: &Arc<()>,
+    ) -> Result<Outcome, DbError> {
+        self.check_pending().await?;
+        self.validate_native_text(&sql).await?;
+        self.stream(super::stream::Query::Text(sql), owner).await
+    }
+
+    async fn validate_native_text(&mut self, sql: &[u8]) -> Result<(), DbError> {
+        if sql.contains(&b';') {
+            // mysql_async negotiates multi-statements and cannot switch them off.
+            // Ask the server to parse SQL with separators before sending it as text.
+            let connection = self.connection()?;
+            let statement = connection.prep(sql).await.map_err(error)?;
+            connection.close(statement).await.map_err(error)?;
+        }
+        Ok(())
+    }
+
     pub async fn query_native(
         &mut self,
         sql: &[u8],
         multiple: bool,
     ) -> Result<Vec<Result<Outcome, DbError>>, DbError> {
         self.check_pending().await?;
-        if !multiple && sql.contains(&b';') {
-            // mysql_async has no COM_SET_OPTION API to switch off its
-            // negotiated multi-statements capability. Ask the server to parse
-            // SQL containing the statement separator before sending it as text.
-            let connection = self.connection()?;
-            let statement = connection.prep(sql).await.map_err(error)?;
-            connection.close(statement).await.map_err(error)?;
+        if !multiple {
+            self.validate_native_text(sql).await?;
         }
         let mut result = self.connection()?.query_iter(sql).await.map_err(error)?;
         let mut outcomes = Vec::new();

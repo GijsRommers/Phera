@@ -1,6 +1,9 @@
 //! `foreach ($result as $row)` traverses an associative cursor.
 
-use phera_extension_api::{Context, NativeError, NativeIterator, NativeResult, Object, Value};
+use phera_extension_api::{
+    Context, LocalFuture, NativeError, NativeIterator, NativeResult, Object, Value,
+    traversal::IteratorStep,
+};
 use std::rc::Rc;
 
 use super::{Fetch, Handle, closed, handle};
@@ -11,6 +14,7 @@ pub fn iterator(
 ) -> Result<Box<dyn NativeIterator>, NativeError> {
     Ok(Box::new(Cursor {
         handle: handle(&object)?,
+        object,
         current: None,
         index: 0,
     }))
@@ -18,6 +22,7 @@ pub fn iterator(
 
 struct Cursor {
     handle: Handle,
+    object: Rc<Object>,
     current: Option<Value>,
     index: i64,
 }
@@ -36,6 +41,19 @@ impl Cursor {
 }
 
 impl NativeIterator for Cursor {
+    fn needs_input(&self, operation: IteratorStep) -> bool {
+        matches!(operation, IteratorStep::Rewind | IteratorStep::Advance)
+            && self
+                .handle
+                .borrow()
+                .as_ref()
+                .is_some_and(|result| result.stream.is_some())
+    }
+
+    fn read_input(&mut self) -> LocalFuture<'_, Result<(), NativeError>> {
+        Box::pin(super::stream::load(&self.object, false))
+    }
+
     fn rewind(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
         if let Some(result) = self
             .handle

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use tokio_postgres::types::Type;
-use tokio_postgres::{Notification, SimpleQueryMessage, Statement};
+use tokio_postgres::{Notification, SimpleQueryMessage};
 
 use super::{
     Postgres, error,
@@ -17,6 +17,7 @@ use super::{
 use crate::drivers::connection_error;
 use crate::errors::DbError;
 
+#[derive(Clone)]
 pub struct NativeColumn {
     pub name: String,
     pub oid: u32,
@@ -69,7 +70,7 @@ pub type NativeSequence = Vec<NativeResult>;
 
 pub(super) struct State {
     observations: Arc<Observations>,
-    statements: HashMap<String, Statement>,
+    statements: HashMap<String, extended::NativeStatement>,
     copy: Option<std::pin::Pin<Box<tokio_postgres::CopyInSink<bytes::Bytes>>>>,
 }
 
