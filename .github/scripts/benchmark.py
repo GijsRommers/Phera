@@ -26,8 +26,6 @@ def main():
     parser.add_argument('--head', required=True, type=pathlib.Path)
     parser.add_argument('--base-benchmarks', type=pathlib.Path)
     parser.add_argument('--runs', type=int, default=5)
-    parser.add_argument('--base-benchmarks', type=pathlib.Path,
-                        help='Only compare scripts already present on the base branch')
     parser.add_argument('--base-sha', default='local base')
     parser.add_argument('--head-sha', default='local head')
     args = parser.parse_args()
@@ -50,11 +48,6 @@ def main():
     with tempfile.TemporaryDirectory(prefix='phera-bench-') as directory:
         wrapper = pathlib.Path(directory) / 'timed.php'
         for script in sorted(pathlib.Path('benchmarks').glob('bench-*.php')):
-            if args.base_benchmarks is not None and not (
-                args.base_benchmarks / script.name
-            ).is_file():
-                report.append(f'| {script.name} | new script | — | — |')
-                continue
             # The wrapper leaves strict_types declarations and scripts untouched.
             path = str(script.resolve()).replace('\\', '\\\\').replace("'", "\\'")
             wrapper.write_text(
