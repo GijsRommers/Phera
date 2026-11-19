@@ -115,12 +115,12 @@ fn argument(input: &mut Input<'_>, depth: usize) -> Option<Node> {
         }
         "number" | "date" | "time" => {
             let style = if input.next_if_eq(&',').is_some() {
-                take_until(input, &['}'])
+                take_raw(input, &['}'])
             } else {
                 String::new()
             };
             match kind.as_str() {
-                "number" => Argument::Number(style),
+                "number" => Argument::Number(style.trim().to_owned()),
                 "date" => Argument::Date(style),
                 _ => Argument::Time(style),
             }
@@ -181,9 +181,13 @@ fn skip_space(input: &mut Input<'_>) {
 }
 
 fn take_until(input: &mut Input<'_>, stop: &[char]) -> String {
+    take_raw(input, stop).trim().to_owned()
+}
+
+fn take_raw(input: &mut Input<'_>, stop: &[char]) -> String {
     let mut buffer = String::new();
     while let Some(character) = input.next_if(|ch| !stop.contains(ch)) {
         buffer.push(character);
     }
-    buffer.trim().to_owned()
+    buffer
 }

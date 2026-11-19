@@ -68,7 +68,7 @@ pub fn parse(
             NativeError::error("IntlDateFormatter offset is already being modified")
         })? = Value::Int((start + length) as i64);
     }
-    let Some((civil, zone)) = parsed else {
+    let Some(Parsed { civil, zone, .. }) = parsed else {
         return fail(context, state, site, 9, "Date parsing failed");
     };
     let timestamp = historical::resolve(&zone, civil);
@@ -96,13 +96,21 @@ pub fn parse(
     Ok(Value::from(value))
 }
 
-pub(super) fn fields(state: &Formatter, text: &str) -> (Option<(Civil, ZoneKind)>, usize) {
+pub(super) struct Parsed {
+    pub civil: Civil,
+    pub zone: ZoneKind,
+    pub micros: i64,
+}
+
+pub(super) fn fields(state: &Formatter, text: &str) -> (Option<Parsed>, usize) {
     let mut scanner = Scanner {
         rest: text,
         state,
         meridiem: None,
+        before_era: false,
         zone: state.zone.clone(),
         civil: Civil::from_timestamp(0),
+        micros: 0,
     };
     let mut pattern = state.pattern.chars().peekable();
     let mut quoted = false;
@@ -138,6 +146,9 @@ pub(super) fn fields(state: &Formatter, text: &str) -> (Option<(Civil, ZoneKind)
     if let Some(pm) = scanner.meridiem {
         scanner.civil.hour = scanner.civil.hour.rem_euclid(12) + i64::from(pm) * 12;
     }
+    if scanner.before_era {
+        scanner.civil.year = 1 - scanner.civil.year;
+    }
     let civil = scanner.civil;
     if !state.lenient
         && (!(1..=12).contains(&civil.month)
@@ -148,15 +159,24 @@ pub(super) fn fields(state: &Formatter, text: &str) -> (Option<(Civil, ZoneKind)
     {
         return (None, text.len() - scanner.rest.len());
     }
-    (Some((civil, scanner.zone)), text.len() - scanner.rest.len())
+    (
+        Some(Parsed {
+            civil,
+            zone: scanner.zone,
+            micros: scanner.micros,
+        }),
+        text.len() - scanner.rest.len(),
+    )
 }
 
 struct Scanner<'a> {
     rest: &'a str,
     state: &'a Formatter,
     meridiem: Option<bool>,
+    before_era: bool,
     zone: ZoneKind,
     civil: Civil,
+    micros: i64,
 }
 
 impl Scanner<'_> {
@@ -177,6 +197,14 @@ impl Scanner<'_> {
 
     fn field(&mut self, symbol: char, width: usize) -> bool {
         let number = match symbol {
+            'G' => {
+                let era = self.name(symbol, width, 2, |before| Civil {
+                    year: if before == 0 { 2000 } else { -1000 },
+                    ..Civil::from_timestamp(0)
+                });
+                self.before_era = era == Some(1);
+                return era.is_some();
+            }
             'M' | 'L' if width >= 3 => self
                 .name(symbol, width, 12, |month| Civil {
                     year: 2000,
@@ -206,7 +234,7 @@ impl Scanner<'_> {
             'X' | 'x' | 'Z' | 'O' | 'z' | 'v' | 'V' => return self.timezone(),
             'y' | 'u' | 'Y' => self.numeric(if width == 2 { 2 } else { width.clamp(4, 10) }),
             'D' => self.numeric(3),
-            'S' => self.numeric(width.min(9)),
+            'S' => return self.fraction(width),
             _ => self.numeric(2),
         };
         let Some(number) = number else {
@@ -234,9 +262,24 @@ impl Scanner<'_> {
             'k' => self.civil.hour = if number == 24 { 0 } else { number },
             'm' => self.civil.minute = number,
             's' => self.civil.second = number,
-            'S' | 'e' => {}
+            'e' => {}
             _ => return false,
         }
+        true
+    }
+
+    fn fraction(&mut self, width: usize) -> bool {
+        let remaining = self.rest;
+        let Some(fraction) = self.numeric(width.min(9)) else {
+            return false;
+        };
+        let bytes = remaining.len() - self.rest.len();
+        let digits = remaining[..bytes].chars().count() as u32;
+        self.micros = if digits > 6 {
+            fraction / 10_i64.pow(digits - 6)
+        } else {
+            fraction * 10_i64.pow(6 - digits)
+        };
         true
     }
 

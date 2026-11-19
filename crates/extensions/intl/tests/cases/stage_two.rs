@@ -62,6 +62,30 @@ fn collation_and_transforms() {
         }
     }
     matrix.case("Transliterator::create", &[Value::from("Any-Latin/BGN")]);
+    let invalid = Value::from(vec![255]);
+    let locale = [Value::from("en_US")];
+    for (left, right) in [
+        (invalid.clone(), Value::from("x")),
+        (Value::from("x"), invalid.clone()),
+    ] {
+        matrix.instance("Collator", &locale, "compare", &[left, right], None);
+    }
+    let mixed = map(&[
+        ("word", Value::from("z")),
+        ("number", Value::Int(5)),
+        ("null", Value::Null),
+        ("letter", Value::from("é")),
+    ]);
+    matrix.instance("Collator", &locale, "sortWithSortKeys", &[], Some(mixed));
+    for method in ["sort", "asort", "sortWithSortKeys"] {
+        let values = [
+            (ArrayKey::Int(0), Value::from("valid")),
+            (ArrayKey::Int(1), invalid.clone()),
+        ]
+        .into_iter()
+        .collect::<PhpArray>();
+        matrix.instance("Collator", &locale, method, &[], Some(Value::from(values)));
+    }
     matrix.compare("intl-collation-and-transforms");
 }
 
@@ -98,6 +122,10 @@ fn message_format_arguments() {
             "{stamp, date, short} {stamp, time, short}",
             map(&[("stamp", Value::Int(1724727600))]),
         ),
+        (
+            "{stamp, time, yyyy-MM-dd G HH:mm:ss.SSS}",
+            map(&[("stamp", Value::Float(1336310569.123))]),
+        ),
     ];
     for locale in ["en_US", "fr_FR", "nl_BE", "ar_EG"] {
         for (pattern, arguments) in &inputs {
@@ -127,6 +155,11 @@ fn message_format_arguments() {
         ("en_US", "{0,number}", "123abc"),
         ("fr_FR", "{0,number}", "1\u{202f}234,5"),
         ("nl_BE", "{0,number,percent}", "23%"),
+        (
+            "en_US",
+            "On {0,time,yyyy-MM-dd G HH:mm:ss.SSS zzz} then",
+            "On 2012-05-06 AD 15:22:49.123 GMT+02:00 then",
+        ),
     ] {
         matrix.case(
             "msgfmt_parse_message",

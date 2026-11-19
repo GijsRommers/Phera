@@ -87,7 +87,7 @@ impl Format<'_> {
                 date::format_message(
                     self.context,
                     self.locale,
-                    amount as i64,
+                    amount,
                     style,
                     matches!(kind, Argument::Time(_)),
                 )

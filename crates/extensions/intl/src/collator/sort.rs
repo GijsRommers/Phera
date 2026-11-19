@@ -24,6 +24,7 @@ enum KeyMode {
     Regular,
     Strings,
     Numbers,
+    SortKeys,
 }
 
 pub fn array(
@@ -43,7 +44,7 @@ pub fn array(
         return Ok(Value::Bool(false));
     };
     let mode = match args::int(arguments, 1).unwrap_or(0) {
-        _ if matches!(operation, Operation::SortKeys) => KeyMode::Strings,
+        _ if matches!(operation, Operation::SortKeys) => KeyMode::SortKeys,
         0 => KeyMode::Regular,
         1 => KeyMode::Strings,
         2 => KeyMode::Numbers,
@@ -51,7 +52,24 @@ pub fn array(
     };
     let mut values = Vec::with_capacity(array.len());
     for (key, value) in array.iter() {
+        if let Value::String(text) = &*value.deref()
+            && std::str::from_utf8(text.as_bytes()).is_err()
+        {
+            let detail = if matches!(operation, Operation::SortKeys) {
+                "Sort with sort keys failed"
+            } else {
+                "Error converting hash from UTF-8 to UTF-16"
+            };
+            return failure(context, state, site, 10, detail);
+        }
         let entry = match mode {
+            KeyMode::SortKeys => {
+                let bytes = match value {
+                    Value::String(text) => text.as_bytes(),
+                    _ => b"",
+                };
+                SortValue::String(self::key(&state.formatter, bytes))
+            }
             KeyMode::Strings => {
                 let text = to_php_string(value, context.diagnostics())?;
                 if std::str::from_utf8(text.as_bytes()).is_err() {
@@ -80,7 +98,11 @@ pub fn array(
             }
             _ => regular(context, &state.formatter, left, right),
         };
-        Ok(order.then_with(|| left_index.cmp(&right_index)))
+        Ok(if matches!(mode, KeyMode::SortKeys) {
+            order
+        } else {
+            order.then_with(|| left_index.cmp(&right_index))
+        })
     })?;
     let preserve_keys = matches!(operation, Operation::Asort);
     let result: PhpArray = sorted

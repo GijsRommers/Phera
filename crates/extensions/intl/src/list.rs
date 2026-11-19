@@ -19,7 +19,7 @@ use crate::{error, locale, locale_id, number};
 
 const CLASS: &str = "IntlListFormatter";
 const HOOKS: ClassHooks = ClassHooks {
-    clone: Some(NativeClone::copy::<List>()),
+    clone: Some(NativeClone::Forbidden),
     ..ClassHooks::EMPTY
 };
 
@@ -36,6 +36,12 @@ fn construct(
 ) -> NativeResult {
     const SITE: &str = "IntlListFormatter::__construct";
     error::clear(context);
+    if args::bytes(values, 0).len() > locale::MAX_LEN {
+        return Err(NativeError::value_error(format!(
+            "{SITE}(): Argument #1 ($locale) must be less than or equal to {} characters",
+            locale::MAX_LEN
+        )));
+    }
     let input = locale::effective(context, args::bytes(values, 0));
     let locale = locale_id::cldr(&input);
     if locale.id.language.is_unknown() || !number::known_language(locale.id.language.as_str()) {
@@ -114,7 +120,7 @@ fn format(
         for (_, value) in array.iter() {
             let string = context.stringify(value).await?;
             let Ok(text) = std::str::from_utf8(string.as_bytes()) else {
-                let detail = "Error converting string to UTF-16";
+                let detail = "Failed to convert string to UTF-16";
                 if let Some(object) = &object
                     && let Ok(mut payload) = object.native_payload_mut()
                     && let Some(state) = payload

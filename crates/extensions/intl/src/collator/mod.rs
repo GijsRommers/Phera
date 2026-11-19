@@ -114,8 +114,12 @@ fn dispatch(
         .and_then(|data| data.downcast_mut::<Collator>())
         .ok_or_else(missing)?;
     match operation {
-        Operation::ErrorCode => return Ok(Value::Int(i64::from(state.last_error.0))),
+        Operation::ErrorCode => {
+            error::clear(context);
+            return Ok(Value::Int(i64::from(state.last_error.0)));
+        }
         Operation::ErrorMessage => {
+            error::clear(context);
             let name = error::name(state.last_error.0);
             return Ok(Value::from(state.last_error.1.as_ref().map_or_else(
                 || name.to_owned(),
@@ -129,16 +133,22 @@ fn dispatch(
     }
     match operation {
         Operation::Compare => {
-            let (Ok(left), Ok(right)) = (
-                std::str::from_utf8(args::bytes(arguments, 0)),
-                std::str::from_utf8(args::bytes(arguments, 1)),
-            ) else {
+            let Ok(left) = std::str::from_utf8(args::bytes(arguments, 0)) else {
                 return failure(
                     context,
                     state,
                     site,
                     10,
-                    "Error converting string to UTF-16",
+                    "Error converting first argument to UTF-16",
+                );
+            };
+            let Ok(right) = std::str::from_utf8(args::bytes(arguments, 1)) else {
+                return failure(
+                    context,
+                    state,
+                    site,
+                    10,
+                    "Error converting second argument to UTF-16",
                 );
             };
             Ok(Value::Int(state.formatter.compare(left, right) as i64))
@@ -150,7 +160,7 @@ fn dispatch(
                     state,
                     site,
                     10,
-                    "Error converting string to UTF-16",
+                    "Error converting first argument to UTF-16",
                 );
             };
             Ok(Value::from(sort::key(&state.formatter, input.as_bytes())))
@@ -189,7 +199,7 @@ fn dispatch(
             if matches!(kind, 0 | 1) {
                 Ok(Value::from(collation_locale(&state.locale, kind)))
             } else {
-                failure(context, state, site, 1, "Error getting locale failed")
+                failure(context, state, site, 1, "Error getting locale by type")
             }
         }
         Operation::ErrorCode | Operation::ErrorMessage => Ok(Value::Null),

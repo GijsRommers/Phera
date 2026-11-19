@@ -24,6 +24,7 @@ pub enum Renderer {
     Pattern {
         pattern: Rc<DateTimePattern>,
         arabic: bool,
+        literal_fraction: bool,
         names: Rc<FixedCalendarDateTimeNames<Gregorian, CompositeFieldSet>>,
     },
     Traditional(Rc<DateTimeFormatter<YMDT>>),
@@ -42,6 +43,7 @@ impl Renderer {
             .keywords
             .remove(icu_locale::extensions::unicode::key!("ca"));
         let arabic = locale.id.language.as_str() == "ar";
+        let literal_fraction = pattern.contains(".S");
         let pattern = pattern.parse::<DateTimePattern>().ok()?;
         let mut names =
             FixedCalendarDateTimeNames::<Gregorian, CompositeFieldSet>::try_new(locale.into())
@@ -50,6 +52,7 @@ impl Renderer {
         Some(Self::Pattern {
             pattern: Rc::new(pattern),
             arabic,
+            literal_fraction,
             names: Rc::new(names),
         })
     }
@@ -75,6 +78,7 @@ impl Renderer {
                 pattern,
                 names,
                 arabic,
+                literal_fraction,
             } => {
                 let name = zone.name();
                 let timezone = TimeZone::from_iana_id(&name)
@@ -87,8 +91,12 @@ impl Renderer {
                 };
                 let formatter = names.with_pattern_unchecked(pattern);
                 let formatted = formatter.format(&value);
-                if *arabic {
-                    let mut sink = ArabicZoneNames::default();
+                if *arabic || *literal_fraction {
+                    let mut sink = PhpDateParts {
+                        strip_arabic_mark: *arabic,
+                        literal_fraction: *literal_fraction,
+                        ..Default::default()
+                    };
                     formatted.try_write_to_parts(&mut sink).ok()?.ok()?;
                     Some(sink.output)
                 } else {
@@ -124,16 +132,19 @@ fn is_non_gregorian(locale: &Locale) -> bool {
             .is_some_and(|region| region.as_str() == "SA")
 }
 
-/// ICU4C uses an unmarked sign in Arabic localized GMT offsets.
+/// Preserve punctuation PHP renders literally within its date format fields.
 #[derive(Default)]
-struct ArabicZoneNames {
+struct PhpDateParts {
     output: String,
+    strip_arabic_mark: bool,
+    literal_fraction: bool,
     in_zone_name: bool,
+    in_seconds: bool,
 }
 
-impl fmt::Write for ArabicZoneNames {
+impl fmt::Write for PhpDateParts {
     fn write_str(&mut self, text: &str) -> fmt::Result {
-        if self.in_zone_name {
+        if self.strip_arabic_mark && self.in_zone_name {
             self.output
                 .extend(text.chars().filter(|&scalar| scalar != '\u{061c}'));
         } else {
@@ -143,7 +154,7 @@ impl fmt::Write for ArabicZoneNames {
     }
 }
 
-impl PartsWrite for ArabicZoneNames {
+impl PartsWrite for PhpDateParts {
     type SubPartsWrite = Self;
 
     fn with_part(
@@ -151,10 +162,15 @@ impl PartsWrite for ArabicZoneNames {
         part: Part,
         mut write: impl FnMut(&mut Self) -> fmt::Result,
     ) -> fmt::Result {
-        let previous = self.in_zone_name;
+        if self.literal_fraction && self.in_seconds && part == icu_decimal::parts::DECIMAL {
+            self.output.push('.');
+            return Ok(());
+        }
+        let previous = (self.in_zone_name, self.in_seconds);
         self.in_zone_name |= part == icu_datetime::parts::TIME_ZONE_NAME;
+        self.in_seconds |= part == icu_datetime::parts::SECOND;
         let result = write(self);
-        self.in_zone_name = previous;
+        (self.in_zone_name, self.in_seconds) = previous;
         result
     }
 }

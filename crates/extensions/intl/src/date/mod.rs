@@ -41,12 +41,15 @@ pub fn render_pattern(
 pub fn format_message(
     context: &mut dyn Context,
     locale: &Locale,
-    timestamp: i64,
+    timestamp: f64,
     style: &str,
     time: bool,
 ) -> Option<String> {
     let pattern = message_pattern(locale, style, time);
-    Renderer::new(locale, &pattern, 1)?.format(timestamp, 0, &current_zone(context))
+    let milliseconds = (timestamp * 1000.0).floor();
+    let seconds = milliseconds.div_euclid(1000.0) as i64;
+    let micros = milliseconds.rem_euclid(1000.0) as i64 * 1000;
+    Renderer::new(locale, &pattern, 1)?.format(seconds, micros, &current_zone(context))
 }
 
 pub fn parse_message(
@@ -70,12 +73,16 @@ pub fn parse_message(
         error: (0, None),
     };
     let (parsed, _) = parse::fields(&state, input);
-    let (civil, zone) = parsed?;
-    Some(historical::resolve(&zone, civil) as f64)
+    let parse::Parsed {
+        civil,
+        zone,
+        micros,
+    } = parsed?;
+    Some(historical::resolve(&zone, civil) as f64 + micros as f64 / 1_000_000.0)
 }
 
 fn message_pattern(locale: &Locale, style: &str, time: bool) -> String {
-    let style_kind = match style {
+    let style_kind = match style.trim() {
         "full" => Some(Style::Full),
         "long" => Some(Style::Long),
         "" | "medium" => Some(Style::Medium),
