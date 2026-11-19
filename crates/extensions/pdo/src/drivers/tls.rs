@@ -5,6 +5,9 @@ use std::sync::OnceLock;
 use rustls::RootCertStore;
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 
+#[cfg(test)]
+pub mod certificates;
+
 pub async fn platform_roots() -> &'static [CertificateDer<'static>] {
     static CERTIFICATES: OnceLock<Vec<CertificateDer<'static>>> = OnceLock::new();
     if let Some(certificates) = CERTIFICATES.get() {

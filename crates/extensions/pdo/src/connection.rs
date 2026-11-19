@@ -1,21 +1,24 @@
 //! A PDO owns its connection: `$pdo = new PDO($dsn, $user, $password)` awaits the handshake.
 
+mod construct;
+
+pub use construct::construct;
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
+    Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
 use tokio::sync::Mutex;
 
-use crate::attributes::{self, AttributeCall, Attributes};
+use crate::attributes::{AttributeCall, Attributes};
 use crate::constants::{
-    ATTR_ERRMODE, ATTR_PERSISTENT, PARAM_BOOL, PARAM_INT, PARAM_LOB, PARAM_NULL, PARAM_STR,
-    STR_CHAR, STR_NATL,
+    PARAM_BOOL, PARAM_INT, PARAM_LOB, PARAM_NULL, PARAM_STR, STR_CHAR, STR_NATL,
 };
 use crate::dsn::{DriverName, Dsn};
 use crate::errors::{DbError, ErrorMode, ErrorState, unsupported};
-use crate::pool::{self, Lease, Policy};
+use crate::pool::Lease;
 
 pub struct Session {
     pub driver: Mutex<Lease>,
@@ -63,6 +66,8 @@ impl Session {
         call: AttributeCall,
     ) -> NativeResult {
         let actual = self.attributes.borrow().errors;
+        let state = DbError::general("");
+        *self.error.borrow_mut() = ErrorState::Failed(state.clone());
         if matches!(call, AttributeCall::Construct) && !matches!(actual, ErrorMode::Exception) {
             return Err(crate::errors::exception(
                 format!("PDO::__construct(): {}", error.message()),
@@ -70,7 +75,14 @@ impl Session {
                 0,
             ));
         }
-        self.fail(context, error, "PDO::setAttribute")
+        if matches!(actual, ErrorMode::Exception) {
+            return error.report(context, actual, "PDO::setAttribute");
+        }
+        context.warning(format!("PDO::setAttribute(): {}", error.message()));
+        if matches!(actual, ErrorMode::Warning) {
+            context.warning(format!("PDO::setAttribute(): {}", state.message()));
+        }
+        Ok(Value::Bool(false))
     }
 
     fn attribute_error_mode(&self) -> ErrorMode {
@@ -90,108 +102,6 @@ pub fn session(this: Option<&Rc<Object>>) -> Result<Rc<Session>, NativeError> {
         .and_then(|native| native.downcast_ref::<Rc<Session>>())
         .cloned()
         .ok_or_else(|| NativeError::error("PDO object is uninitialized"))
-}
-
-pub fn construct<'a>(
-    context: &'a mut dyn Context,
-    this: Option<Rc<Object>>,
-    arguments: Vec<Value>,
-) -> LocalFuture<'a, NativeResult> {
-    Box::pin(async move {
-        let object = this.ok_or_else(|| NativeError::error("PDO object is missing"))?;
-        if object.native.borrow().is_some() {
-            return Err(NativeError::error("PDO object is already initialized"));
-        }
-        let dsn_text = args::string(&arguments, 0)
-            .map(|s| s.to_string_lossy())
-            .unwrap_or_default();
-        let mut dsn = Dsn::parse(&dsn_text)?;
-        let username = args::string(&arguments, 1)
-            .map(|s| s.to_string_lossy())
-            .unwrap_or_else(|| dsn.get("user", "").to_owned());
-        let password = args::string(&arguments, 2)
-            .map(|s| s.to_string_lossy())
-            .unwrap_or_else(|| dsn.get("password", "").to_owned());
-        let policy = Policy::from_options(args::array(&arguments, 3).map(Rc::as_ref));
-        let mut attributes = Attributes::new(dsn.driver);
-        if let Some(options) = args::array(&arguments, 3) {
-            if let Some(value) = options.get(&ArrayKey::Int(ATTR_PERSISTENT)) {
-                use phera_extension_api::value::{is_numeric, to_int};
-                attributes.persistent = match &*value.deref() {
-                    Value::String(text)
-                        if !text.as_bytes().is_empty() && !is_numeric(text.as_bytes()) =>
-                    {
-                        true
-                    }
-                    value => to_int(value, context.diagnostics())? != 0,
-                };
-            }
-            if let Some(value) = options.get(&ArrayKey::Int(ATTR_ERRMODE)) {
-                attributes.errors =
-                    match phera_extension_api::value::to_int(value, context.diagnostics())? {
-                        0 => ErrorMode::Silent,
-                        1 => ErrorMode::Warning,
-                        _ => ErrorMode::Exception,
-                    };
-            }
-            if dsn.driver == DriverName::Sqlite {
-                for (key, value) in options.iter() {
-                    if let ArrayKey::Int(attribute) = key {
-                        attributes::sqlite_pre_open(context, &mut attributes, attribute, value)?;
-                    }
-                }
-            } else {
-                dsn.options =
-                    crate::connect_options::ConnectOptions::from_php(context, dsn.driver, options)?;
-                attributes.autocommit = dsn.options.mysql.autocommit;
-            }
-        }
-        if dsn.driver == DriverName::Sqlite {
-            // The driver opens the file with the options' flags and timeout.
-            dsn.fields
-                .insert("flags".into(), attributes.sqlite_flags.to_string());
-            dsn.fields
-                .insert("timeout".into(), attributes.timeout.to_string());
-        }
-        let driver = match pool::acquire(&dsn, &username, &password, policy).await {
-            Ok(driver) => driver,
-            Err(error) => {
-                let code = error.code.unwrap_or(0);
-                return Err(crate::errors::exception(
-                    format!("SQLSTATE[{}] [{code}] {}", error.state, error.detail),
-                    Some(&error),
-                    code,
-                ));
-            }
-        };
-        let version = driver.version().to_owned();
-        let connection = Rc::new(Session {
-            driver: Mutex::new(driver),
-            name: dsn.driver,
-            version,
-            attributes: RefCell::new(attributes),
-            error: RefCell::new(ErrorState::Unused),
-            last_error: RefCell::new(None),
-            transaction: Cell::new(false),
-            statement_sequence: Cell::new(0),
-        });
-        if let Some(options) = args::array(&arguments, 3) {
-            for (key, value) in options.iter() {
-                if let ArrayKey::Int(attribute) = key {
-                    attributes::apply(
-                        context,
-                        &connection,
-                        attribute,
-                        value,
-                        AttributeCall::Construct,
-                    )
-                    .await?;
-                }
-            }
-        }
-        *object.native.borrow_mut() = Some(Box::new(connection));
-        Ok(Value::Null)
-    })
 }
 
 pub fn available(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {

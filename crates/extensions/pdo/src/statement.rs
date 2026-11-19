@@ -23,6 +23,7 @@ pub struct Statement {
     // releasing the session, whose final drop may immediately start pool reset.
     pub prepared: Prepared,
     pub stream_owner: Option<Arc<()>>,
+    pub postgres_lazy: bool,
     pub connection: Rc<Session>,
     pub sql: Sql,
     pub bindings: HashMap<String, Binding>,
@@ -116,13 +117,13 @@ async fn create(
             arguments,
             attributes.fetch,
             0,
-            0,
+            attributes.fetch_flags,
         )?
     } else {
         crate::fetch_options::Configuration {
             mode: attributes.fetch,
             column: 0,
-            flags: 0,
+            flags: attributes.fetch_flags,
         }
     };
     // SQLite numbers its own `?`, `?2`, `:name` and `@name` placeholders.
@@ -168,6 +169,8 @@ async fn create(
     };
     connection.success();
     *object.native.borrow_mut() = Some(Box::new(Rc::new(RefCell::new(Statement {
+        postgres_lazy: connection.name == crate::dsn::DriverName::Postgres
+            && !attributes.pgsql_prefetch,
         connection,
         sql,
         prepared,

@@ -60,6 +60,7 @@ pub struct Rows {
 pub struct Execution {
     pub national_strings: bool,
     pub mysql_stream: Option<Arc<()>>,
+    pub postgres_stream: Option<Arc<()>>,
 }
 
 /// How a PDO statement is executed.
@@ -197,7 +198,7 @@ impl Driver {
             ));
         }
         match self {
-            Self::Postgres(driver) => driver.execute(sql, prepared, values).await,
+            Self::Postgres(driver) => driver.execute(sql, prepared, values, options).await,
             Self::Mysql(driver) => driver.execute(sql, prepared, values, options).await,
             Self::Sqlite(_) => Err(connection_error(
                 "a SQLite statement is executed through its own handle",
@@ -208,7 +209,10 @@ impl Driver {
     /// `$pdo->exec($sql)`: SQL text without placeholders, for its row count.
     pub async fn exec(&mut self, sql: &str) -> Result<RawRows, DbError> {
         match self {
-            Self::Postgres(driver) => driver.run_unprepared(sql).await,
+            Self::Postgres(driver) => {
+                driver.discard_lazy();
+                driver.run_unprepared(sql).await
+            }
             Self::Mysql(driver) => driver.exec(sql).await,
             Self::Sqlite(driver) => driver.run_unprepared(sql).await,
         }
@@ -217,7 +221,10 @@ impl Driver {
     /// SQL text sent as it is: `BEGIN`, `COMMIT` and `ROLLBACK`.
     pub async fn run_unprepared(&mut self, sql: &str) -> Result<RawRows, DbError> {
         match self {
-            Self::Postgres(driver) => driver.run_unprepared(sql).await,
+            Self::Postgres(driver) => {
+                driver.discard_lazy();
+                driver.run_unprepared(sql).await
+            }
             Self::Mysql(driver) => driver.run_unprepared(sql).await,
             Self::Sqlite(driver) => driver.run_unprepared(sql).await,
         }
@@ -226,7 +233,10 @@ impl Driver {
     /// `$pdo->lastInsertId($name)`.
     pub async fn last_id(&mut self, name: Option<&str>) -> Result<String, DbError> {
         match self {
-            Self::Postgres(driver) => driver.last_id(name).await,
+            Self::Postgres(driver) => {
+                driver.discard_lazy();
+                driver.last_id(name).await
+            }
             Self::Mysql(driver) => Ok(driver.last_id()),
             Self::Sqlite(driver) => driver
                 .database
@@ -240,7 +250,10 @@ impl Driver {
     /// `$pdo->quote($string)`, which depends on the session's escaping mode.
     pub async fn quote(&mut self, bytes: &[u8]) -> Result<String, DbError> {
         match self {
-            Self::Postgres(driver) => driver.quote(bytes).await,
+            Self::Postgres(driver) => {
+                driver.discard_lazy();
+                driver.quote(bytes).await
+            }
             Self::Mysql(driver) => driver.quote(bytes).await,
             Self::Sqlite(_) => Ok(String::from_utf8_lossy(&sqlite::quote(bytes)).into_owned()),
         }
@@ -253,7 +266,10 @@ impl Driver {
         column: &Column,
     ) -> Result<(i16, Option<String>), DbError> {
         match self {
-            Self::Postgres(driver) => driver.metadata(column).await,
+            Self::Postgres(driver) => {
+                driver.discard_lazy();
+                driver.metadata(column).await
+            }
             Self::Mysql(_) | Self::Sqlite(_) => Err(connection_error("Mismatched metadata driver")),
         }
     }

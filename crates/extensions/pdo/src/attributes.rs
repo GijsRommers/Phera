@@ -1,5 +1,9 @@
 //! `$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_SILENT)` changes later failures.
 
+mod read;
+
+pub use read::get;
+
 use std::rc::Rc;
 
 use phera_extension_api::value::{NumVal, parse_numeric, to_int};
@@ -8,7 +12,7 @@ use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Objec
 use crate::connection::{Session, session};
 use crate::constants::*;
 use crate::dsn::DriverName;
-use crate::errors::{DbError, ErrorMode, unsupported};
+use crate::errors::{DbError, ErrorMode};
 use crate::fetch::FetchMode;
 use crate::statement_class::StatementClass;
 
@@ -19,14 +23,34 @@ pub enum ColumnCase {
     Lower,
 }
 
+#[derive(Clone, Copy)]
+pub enum NullHandling {
+    Natural,
+    EmptyString,
+    ToString,
+    Other(u8),
+}
+
+impl NullHandling {
+    pub fn number(self) -> i64 {
+        match self {
+            Self::Natural => 0,
+            Self::EmptyString => 1,
+            Self::ToString => 2,
+            Self::Other(number) => i64::from(number),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Attributes {
     pub errors: ErrorMode,
     pub fetch: FetchMode,
+    pub fetch_flags: i64,
     pub emulate: bool,
     pub stringify: bool,
     pub case: ColumnCase,
-    pub oracle_nulls: i64,
+    pub oracle_nulls: NullHandling,
     pub persistent: bool,
     pub statement_class: StatementClass,
     pub timeout: i64,
@@ -38,6 +62,7 @@ pub struct Attributes {
     pub mysql_buffered: bool,
     pub national_strings: bool,
     pub pgsql_disable_prepares: bool,
+    pub pgsql_prefetch: bool,
 }
 
 impl Attributes {
@@ -45,10 +70,11 @@ impl Attributes {
         Self {
             errors: ErrorMode::Exception,
             fetch: FetchMode::Both,
+            fetch_flags: 0,
             emulate: driver == DriverName::Mysql,
             stringify: false,
             case: ColumnCase::Natural,
-            oracle_nulls: 0,
+            oracle_nulls: NullHandling::Natural,
             persistent: false,
             statement_class: StatementClass::default(),
             timeout: 60,
@@ -60,6 +86,7 @@ impl Attributes {
             mysql_buffered: true,
             national_strings: false,
             pgsql_disable_prepares: false,
+            pgsql_prefetch: true,
         }
     }
 }
@@ -206,14 +233,21 @@ fn change(
                 }
             }
         }
-        (_, ATTR_ORACLE_NULLS) => attrs.oracle_nulls = integer(value)?,
+        (_, ATTR_ORACLE_NULLS) => {
+            attrs.oracle_nulls = match integer(value)? as u8 {
+                0 => NullHandling::Natural,
+                1 => NullHandling::EmptyString,
+                2 => NullHandling::ToString,
+                other => NullHandling::Other(other),
+            };
+        }
         (_, ATTR_STRINGIFY_FETCHES) => attrs.stringify = boolean(value)?,
         (_, ATTR_DEFAULT_FETCH_MODE) => {
             let number = match &*value.deref() {
                 Value::Array(items) => {
                     if matches!(
                         items.get(&phera_extension_api::ArrayKey::Int(0)),
-                        Some(Value::Int(FETCH_CLASS | 9))
+                        Some(Value::Int(FETCH_CLASS | FETCH_INTO))
                     ) {
                         return Err(invalid(
                             call,
@@ -230,7 +264,9 @@ fn change(
                     "Fetch mode must be a bitmask of PDO::FETCH_* constants",
                 ));
             }
-            attrs.fetch = FetchMode::parse(number, attrs.fetch)?;
+            let number = i64::from(number as u16);
+            attrs.fetch_flags = number & FETCH_GROUPING;
+            attrs.fetch = FetchMode::default_attribute(number & !FETCH_GROUPING);
         }
         (DriverName::Sqlite, ATTR_TIMEOUT) => attrs.timeout = integer(value)?,
         (DriverName::Sqlite, SQLITE_ATTR_EXTENDED_RESULT_CODES) => {
@@ -255,10 +291,7 @@ fn change(
         (DriverName::Postgres, PGSQL_DISABLE_PREPARES) => {
             attrs.pgsql_disable_prepares = boolean(value)?
         }
-        (DriverName::Postgres, ATTR_PREFETCH) if boolean(value)? => {}
-        (DriverName::Postgres, ATTR_PREFETCH) => {
-            return Err(unsupported("Lazy PostgreSQL fetches"));
-        }
+        (DriverName::Postgres, ATTR_PREFETCH) => attrs.pgsql_prefetch = boolean(value)?,
         _ => return Ok(Value::Bool(false)),
     }
     Ok(Value::Bool(true))
@@ -285,85 +318,6 @@ pub fn set<'a>(
             AttributeCall::Set,
         )
         .await
-    })
-}
-
-pub fn get<'a>(
-    context: &'a mut dyn Context,
-    this: Option<Rc<Object>>,
-    arguments: Vec<Value>,
-) -> LocalFuture<'a, NativeResult> {
-    Box::pin(async move {
-        let connection = session(this.as_ref())?;
-        connection.success();
-        let attribute = args::int(&arguments, 0).unwrap_or_default();
-        if connection.name != DriverName::Sqlite
-            && matches!(attribute, ATTR_CONNECTION_STATUS | ATTR_SERVER_INFO)
-        {
-            let result = connection
-                .driver
-                .lock()
-                .await
-                .server_attribute(attribute)
-                .await;
-            return match result {
-                Ok(text) => Ok(Value::from(text)),
-                Err(error) => connection.fail(context, error, "PDO::getAttribute"),
-            };
-        }
-        let attrs = connection.attributes.borrow();
-        let value = match (connection.name, attribute) {
-            (_, ATTR_ERRMODE) => Value::Int(match attrs.errors {
-                ErrorMode::Silent => ERRMODE_SILENT,
-                ErrorMode::Warning => ERRMODE_WARNING,
-                ErrorMode::Exception => ERRMODE_EXCEPTION,
-            }),
-            (_, ATTR_SERVER_VERSION) | (DriverName::Sqlite, ATTR_CLIENT_VERSION) => {
-                Value::from(connection.version.clone())
-            }
-            (DriverName::Mysql, ATTR_CLIENT_VERSION) => Value::from("mysql_async 0.37.1"),
-            (DriverName::Postgres, ATTR_CLIENT_VERSION) => Value::from("tokio-postgres 0.7.18"),
-            (_, ATTR_CASE) => Value::Int(match attrs.case {
-                ColumnCase::Natural => CASE_NATURAL,
-                ColumnCase::Upper => CASE_UPPER,
-                ColumnCase::Lower => CASE_LOWER,
-            }),
-            (_, ATTR_PERSISTENT) => Value::Bool(attrs.persistent),
-            (_, ATTR_DRIVER_NAME) => Value::from(connection.name.name()),
-            (_, ATTR_STRINGIFY_FETCHES) => Value::Bool(attrs.stringify),
-            (_, ATTR_ORACLE_NULLS) => Value::Int(attrs.oracle_nulls),
-            (_, ATTR_STATEMENT_CLASS) => attrs.statement_class.as_attribute()?,
-            (_, ATTR_DEFAULT_FETCH_MODE) => Value::Int(attrs.fetch.number()),
-            (DriverName::Sqlite, SQLITE_ATTR_TRANSACTION_MODE) => {
-                Value::Int(attrs.transaction_mode)
-            }
-            (DriverName::Mysql | DriverName::Postgres, ATTR_EMULATE_PREPARES) => {
-                Value::Bool(attrs.emulate)
-            }
-            (DriverName::Mysql, ATTR_AUTOCOMMIT) => Value::Bool(attrs.autocommit),
-            (DriverName::Mysql, ATTR_DEFAULT_STR_PARAM) => Value::Int(if attrs.national_strings {
-                STR_NATL
-            } else {
-                STR_CHAR
-            }),
-            (DriverName::Mysql, ATTR_FETCH_TABLE_NAMES) => Value::Bool(attrs.mysql_table_names),
-            (DriverName::Mysql, MYSQL_BUFFERED) => Value::Bool(attrs.mysql_buffered),
-            (DriverName::Mysql, MYSQL_LOCAL_INFILE) => Value::Bool(false),
-            (DriverName::Mysql, MYSQL_LOCAL_INFILE_DIRECTORY) => Value::Null,
-            (DriverName::Postgres, PGSQL_DISABLE_PREPARES) => {
-                Value::Bool(attrs.pgsql_disable_prepares)
-            }
-            _ => {
-                drop(attrs);
-                let error = DbError {
-                    state: "IM001".into(),
-                    code: None,
-                    detail: "driver does not support that attribute".into(),
-                };
-                return connection.fail_get_attribute(context, error);
-            }
-        };
-        Ok(value)
     })
 }
 

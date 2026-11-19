@@ -16,6 +16,8 @@ pub const FETCH_BOTH: i64 = 4;
 pub const FETCH_OBJ: i64 = 5;
 pub const FETCH_COLUMN: i64 = 7;
 pub const FETCH_CLASS: i64 = 8;
+pub const FETCH_INTO: i64 = 9;
+pub const FETCH_NAMED: i64 = 11;
 pub const FETCH_KEY_PAIR: i64 = 12;
 pub const FETCH_GROUP: i64 = 32;
 pub const FETCH_UNIQUE: i64 = 64;
@@ -172,7 +174,7 @@ pub const CONSTANTS: &[(&str, ConstantValue)] = &[
     ("FETCH_BOUND", ConstantValue::Int(6)),
     ("FETCH_COLUMN", ConstantValue::Int(FETCH_COLUMN)),
     ("FETCH_CLASS", ConstantValue::Int(FETCH_CLASS)),
-    ("FETCH_INTO", ConstantValue::Int(9)),
+    ("FETCH_INTO", ConstantValue::Int(FETCH_INTO)),
     ("FETCH_FUNC", ConstantValue::Int(10)),
     ("FETCH_GROUP", ConstantValue::Int(FETCH_GROUP)),
     ("FETCH_UNIQUE", ConstantValue::Int(FETCH_UNIQUE)),
@@ -180,7 +182,7 @@ pub const CONSTANTS: &[(&str, ConstantValue)] = &[
     ("FETCH_CLASSTYPE", ConstantValue::Int(FETCH_CLASSTYPE)),
     ("FETCH_SERIALIZE", ConstantValue::Int(FETCH_SERIALIZE)),
     ("FETCH_PROPS_LATE", ConstantValue::Int(FETCH_PROPS_LATE)),
-    ("FETCH_NAMED", ConstantValue::Int(11)),
+    ("FETCH_NAMED", ConstantValue::Int(FETCH_NAMED)),
     ("ATTR_AUTOCOMMIT", ConstantValue::Int(0)),
     ("ATTR_PREFETCH", ConstantValue::Int(1)),
     ("ATTR_TIMEOUT", ConstantValue::Int(ATTR_TIMEOUT)),

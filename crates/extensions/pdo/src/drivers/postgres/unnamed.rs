@@ -2,6 +2,7 @@
 
 use std::future::poll_fn;
 use std::pin::pin;
+use std::sync::Arc;
 
 use futures_core::Stream;
 use tokio_postgres::types::{ToSql, Type};
@@ -17,6 +18,7 @@ impl Postgres {
         &mut self,
         sql: &Sql,
         values: &[BoundValue],
+        owner: Option<&Arc<()>>,
     ) -> Result<RawRows, DbError> {
         let query = sql.render(|index| format!("${}", index + 1));
         let parameters: Vec<_> = values.iter().map(TextParameter::from).collect();
@@ -28,6 +30,9 @@ impl Postgres {
             .query_typed_raw(&query, parameters)
             .await
             .map_err(|failure| error(failure, &query))?;
+        if let Some(owner) = owner {
+            return self.start_lazy(stream, Vec::new(), query, owner).await;
+        }
         let mut stream = pin!(stream);
         let mut columns = Vec::new();
         let mut binary = Vec::new();

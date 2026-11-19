@@ -8,6 +8,7 @@
 
 mod connect;
 mod information;
+mod lazy;
 mod metadata;
 mod parameters;
 mod protocol;
@@ -29,8 +30,7 @@ pub use protocol::error;
 use tokio_postgres::types::ToSql;
 use tokio_postgres::{Client, SimpleQueryMessage, Statement};
 
-use super::{Column, Prepared, RawRows, connection_error};
-use crate::dsn::Dsn;
+use super::{Column, Execution, Prepared, RawRows, connection_error};
 use crate::errors::DbError;
 use crate::parameters::{BoundValue, literal, quote};
 use crate::placeholders::Sql;
@@ -56,6 +56,7 @@ pub struct Postgres {
     /// Set once the connection may hold type information that `DISCARD ALL`
     /// cannot clear; see `prepare_query`.
     retire: bool,
+    lazy: Option<lazy::Active>,
 }
 
 impl Drop for Postgres {
@@ -66,37 +67,13 @@ impl Drop for Postgres {
 }
 
 impl Postgres {
-    pub async fn connect(dsn: &Dsn, user: &str, password: &str) -> Result<Self, DbError> {
-        let transaction = Arc::new(AtomicU8::new(IDLE));
-        let (client, connection) = connect::open(dsn, user, password, transaction.clone()).await?;
-        let task = tokio::spawn(async move {
-            let _ = connection.await;
-        });
-        let mut driver = Self {
-            client,
-            task,
-            version: String::new(),
-            transaction,
-            retire: false,
-        };
-        let messages = driver
-            .client
-            .simple_query("SHOW server_version")
-            .await
-            .map_err(|e| error(e, "SHOW server_version"))?;
-        for message in messages {
-            if let SimpleQueryMessage::Row(row) = message {
-                driver.version = row.get(0).unwrap_or_default().into();
-            }
-        }
-        Ok(driver)
-    }
-
     pub async fn transaction_state(&self) -> bool {
         // An error may be delivered before the connection task consumes its
         // ReadyForQuery. An empty query is valid even in a failed transaction
         // and acts as a protocol barrier when the PHP script asks for state.
-        let _ = self.client.simple_query("").await;
+        if self.lazy.is_none() {
+            let _ = self.client.simple_query("").await;
+        }
         !self.client.is_closed() && self.transaction.load(Ordering::Acquire) != IDLE
     }
 
@@ -109,7 +86,8 @@ impl Postgres {
         let _ = (&mut self.task).await;
     }
 
-    pub async fn reset(&self) -> Result<(), DbError> {
+    pub async fn reset(&mut self) -> Result<(), DbError> {
+        self.discard_lazy();
         // Separate protocol messages: DISCARD ALL cannot execute in a transaction.
         self.client
             .batch_execute("ROLLBACK")
@@ -134,6 +112,7 @@ impl Postgres {
     }
 
     pub async fn prepare(&mut self, sql: &Sql) -> Result<Statement, DbError> {
+        self.discard_lazy();
         let query = sql.render(|i| format!("${}", i + 1));
         self.prepare_query(&query).await
     }
@@ -171,11 +150,17 @@ impl Postgres {
         sql: &Sql,
         prepared: &Prepared,
         values: &[BoundValue],
+        options: &Execution,
     ) -> Result<RawRows, DbError> {
+        self.discard_lazy();
         let statement = match prepared {
             Prepared::Postgres { statement, .. } => statement.clone(),
             Prepared::PostgresDeferred { .. } => self.prepare(sql).await?,
-            Prepared::PostgresUnnamed => return self.execute_unnamed(sql, values).await,
+            Prepared::PostgresUnnamed => {
+                return self
+                    .execute_unnamed(sql, values, options.postgres_stream.as_ref())
+                    .await;
+            }
             Prepared::Emulated => {
                 let mut literals = Vec::new();
                 for value in values {
@@ -214,6 +199,21 @@ impl Postgres {
             .map(|p| p as &(dyn ToSql + Sync))
             .collect();
         let query = sql.render(|i| format!("${}", i + 1));
+        if let Some(owner) = &options.postgres_stream
+            && !statement.columns().is_empty()
+        {
+            let stream = self
+                .client
+                .query_raw(&statement, references.iter().copied())
+                .await
+                .map_err(|failure| error(failure, &query))?;
+            let columns = statement
+                .columns()
+                .iter()
+                .map(crate::metadata::postgres)
+                .collect();
+            return self.start_lazy(stream, columns, query, owner).await;
+        }
         let columns = statement
             .columns()
             .iter()

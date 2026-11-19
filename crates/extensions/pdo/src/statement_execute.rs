@@ -75,15 +75,23 @@ pub fn execute_named<'a>(
             let attrs = connection.attributes.borrow();
             let mysql_stream = (connection.name == DriverName::Mysql && !attrs.mysql_buffered)
                 .then(|| stream_owner.clone().unwrap_or_default());
+            let postgres_stream = state
+                .borrow()
+                .postgres_lazy
+                .then(|| stream_owner.clone().unwrap_or_default());
             Execution {
                 national_strings: attrs.national_strings,
                 mysql_stream,
+                postgres_stream,
             }
         };
-        let new_owner = execution.mysql_stream.clone();
+        let new_owner = execution
+            .mysql_stream
+            .clone()
+            .or_else(|| execution.postgres_stream.clone());
         let mut driver = connection.driver.lock().await;
         if let Some(owner) = stream_owner
-            && let Err(error) = driver.close_mysql_stream(owner).await
+            && let Err(error) = driver.close_stream(owner).await
         {
             return fail(&state, context, error, method);
         }

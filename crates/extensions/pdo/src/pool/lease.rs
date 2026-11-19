@@ -93,7 +93,7 @@ impl Lease {
         .into_php()
     }
 
-    pub async fn read_mysql_stream(
+    pub async fn read_stream(
         &mut self,
         owner: Arc<()>,
         all: bool,
@@ -103,6 +103,7 @@ impl Lease {
                 Box::pin(async move {
                     match driver {
                         Driver::Mysql(mysql) => mysql.read_stream(&owner, all).await,
+                        Driver::Postgres(postgres) => postgres.read_lazy(&owner, all).await,
                         _ => Ok(None),
                     }
                 })
@@ -113,11 +114,13 @@ impl Lease {
             .transpose()
     }
 
-    pub async fn close_mysql_stream(&mut self, owner: Arc<()>) -> Result<(), DbError> {
+    pub async fn close_stream(&mut self, owner: Arc<()>) -> Result<(), DbError> {
         self.run(move |driver| {
             Box::pin(async move {
-                if let Driver::Mysql(mysql) = driver {
-                    mysql.close_stream(&owner).await;
+                match driver {
+                    Driver::Mysql(mysql) => mysql.close_stream(&owner).await,
+                    Driver::Postgres(postgres) => postgres.close_lazy(&owner),
+                    Driver::Sqlite(_) => {}
                 }
                 Ok(())
             })
@@ -203,7 +206,10 @@ impl Lease {
             Box::pin(async move {
                 match (driver, attribute) {
                     (Driver::Mysql(mysql), ATTR_SERVER_INFO) => mysql.server_info().await,
-                    (Driver::Postgres(postgres), ATTR_SERVER_INFO) => postgres.server_info().await,
+                    (Driver::Postgres(postgres), ATTR_SERVER_INFO) => {
+                        postgres.discard_lazy();
+                        postgres.server_info().await
+                    }
                     (Driver::Mysql(mysql), _) => Ok(mysql.connection_status()),
                     (Driver::Postgres(postgres), _) => Ok(postgres.connection_status().into()),
                     (Driver::Sqlite(_), _) => Err(connection_error("Missing server connection")),

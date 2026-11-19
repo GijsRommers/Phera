@@ -7,9 +7,10 @@ use phera_extension_api::{
     ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
 
-use crate::attributes::{Attributes, ColumnCase};
+use crate::attributes::{Attributes, ColumnCase, NullHandling};
 use crate::constants::{
-    FETCH_ASSOC, FETCH_BOTH, FETCH_COLUMN, FETCH_DEFAULT, FETCH_KEY_PAIR, FETCH_NUM, FETCH_OBJ,
+    FETCH_ASSOC, FETCH_BOTH, FETCH_COLUMN, FETCH_DEFAULT, FETCH_KEY_PAIR, FETCH_NAMED, FETCH_NUM,
+    FETCH_OBJ,
 };
 use crate::drivers::Column;
 use crate::errors::unsupported;
@@ -23,6 +24,8 @@ pub enum FetchMode {
     Object,
     Column,
     KeyPair,
+    Named,
+    Other(i64),
 }
 
 impl FetchMode {
@@ -35,6 +38,7 @@ impl FetchMode {
             FETCH_OBJ => Ok(Self::Object),
             FETCH_COLUMN => Ok(Self::Column),
             FETCH_KEY_PAIR => Ok(Self::KeyPair),
+            FETCH_NAMED => Ok(Self::Named),
             _ => Err(unsupported("This PDO fetch mode")),
         }
     }
@@ -46,7 +50,13 @@ impl FetchMode {
             Self::Object => FETCH_OBJ,
             Self::Column => FETCH_COLUMN,
             Self::KeyPair => FETCH_KEY_PAIR,
+            Self::Named => FETCH_NAMED,
+            Self::Other(number) => number,
         }
+    }
+
+    pub fn default_attribute(number: i64) -> Self {
+        Self::parse(number, Self::Other(number)).unwrap_or(Self::Other(number))
     }
 }
 
@@ -58,6 +68,9 @@ pub fn convert(
     column: usize,
     attributes: &Attributes,
 ) -> NativeResult {
+    if matches!(mode, FetchMode::Other(_)) {
+        return Err(unsupported("This PDO fetch mode"));
+    }
     if matches!(mode, FetchMode::Column) {
         return row
             .get(column)
@@ -71,6 +84,7 @@ pub fn convert(
         ));
     }
     let mut values = PhpArray::new();
+    let mut duplicates = std::collections::HashSet::new();
     for (index, (value, column)) in row.iter().zip(columns).enumerate() {
         let value = stringify(context, value.clone(), attributes)?;
         if !matches!(mode, FetchMode::Num) {
@@ -80,7 +94,24 @@ pub fn convert(
             } else {
                 ArrayKey::from_value(&Value::from(name))?
             };
-            values.insert(key, value.clone());
+            match (mode, values.get(&key)) {
+                (FetchMode::Named, Some(previous)) => {
+                    let mut group = if duplicates.insert(key.clone()) {
+                        let mut group = PhpArray::new();
+                        group.push(previous.clone())?;
+                        group
+                    } else if let Value::Array(group) = previous {
+                        (**group).clone()
+                    } else {
+                        PhpArray::new()
+                    };
+                    group.push(value.clone())?;
+                    values.insert(key, Value::from(group));
+                }
+                _ => {
+                    values.insert(key, value.clone());
+                }
+            }
         }
         if matches!(mode, FetchMode::Num | FetchMode::Both) {
             values.insert(ArrayKey::Int(index as i64), value);
@@ -112,12 +143,12 @@ pub(crate) fn stringify(
     value: Value,
     attributes: &Attributes,
 ) -> NativeResult {
-    if attributes.oracle_nulls == 1
+    if matches!(attributes.oracle_nulls, NullHandling::EmptyString)
         && matches!(&value, Value::String(text) if text.as_bytes().is_empty())
     {
         return Ok(Value::Null);
     }
-    if value.is_null() && attributes.oracle_nulls == 2 {
+    if value.is_null() && matches!(attributes.oracle_nulls, NullHandling::ToString) {
         return Ok(Value::from(""));
     }
     if !attributes.stringify || value.is_null() {

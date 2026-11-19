@@ -7,10 +7,11 @@ use std::sync::atomic::AtomicU8;
 use std::time::Duration;
 
 use tokio::net::{TcpStream, UnixStream};
-use tokio_postgres::{Client, Config, Connection, NoTls, tls::NoTlsStream};
+use tokio_postgres::{Client, Config, Connection, NoTls, SimpleQueryMessage, tls::NoTlsStream};
 
 use super::stream::ObservedStream;
 use super::tls::{Mode, negotiate};
+use super::{IDLE, Postgres, error};
 use crate::drivers::connection_error;
 use crate::dsn::Dsn;
 use crate::errors::DbError;
@@ -119,17 +120,56 @@ pub(super) fn tls_failure(host: &str, port: u16, error: io::Error) -> DbError {
         .get_ref()
         .and_then(|source| source.downcast_ref::<Error>());
     let reason = match problem {
-        Some(Error::InvalidCertificate(
-            CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. },
-        )) => {
-            return failed(
-                host,
-                port,
-                format!("server certificate does not match host name \"{host}\""),
-            );
+        Some(Error::InvalidCertificate(CertificateError::NotValidForNameContext {
+            presented,
+            ..
+        })) => certificate_name_error(presented, host),
+        Some(Error::InvalidCertificate(CertificateError::NotValidForName)) => {
+            certificate_name_error(&[], host)
         }
         Some(Error::InvalidCertificate(_)) => "SSL error: certificate verify failed".to_owned(),
         _ => format!("SSL error: {error}"),
     };
     failed(host, port, reason)
+}
+
+fn certificate_name_error(presented: &[String], host: &str) -> String {
+    let Some((first, rest)) = presented.split_first() else {
+        return "could not get server's host name from server certificate".into();
+    };
+    let extra = match rest.len() {
+        0 => String::new(),
+        1 => " (and 1 other name)".into(),
+        count => format!(" (and {count} other names)"),
+    };
+    format!("server certificate for \"{first}\"{extra} does not match host name \"{host}\"")
+}
+
+impl Postgres {
+    pub async fn connect(dsn: &Dsn, user: &str, password: &str) -> Result<Self, DbError> {
+        let transaction = Arc::new(AtomicU8::new(IDLE));
+        let (client, connection) = open(dsn, user, password, transaction.clone()).await?;
+        let task = tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        let mut driver = Self {
+            client,
+            task,
+            version: String::new(),
+            transaction,
+            retire: false,
+            lazy: None,
+        };
+        let messages = driver
+            .client
+            .simple_query("SHOW server_version")
+            .await
+            .map_err(|e| error(e, "SHOW server_version"))?;
+        for message in messages {
+            if let SimpleQueryMessage::Row(row) = message {
+                driver.version = row.get(0).unwrap_or_default().into();
+            }
+        }
+        Ok(driver)
+    }
 }

@@ -21,7 +21,7 @@ pub async fn fill(
     };
     let result = {
         let mut lease = connection.driver.lock().await;
-        let result = lease.read_mysql_stream(owner, all).await;
+        let result = lease.read_stream(owner, all).await;
         if let Some(active) = lease.observed_transaction_state() {
             connection.transaction.set(active);
         }
@@ -35,6 +35,9 @@ pub async fn fill(
             statement.rows.values = rows.values;
             if done {
                 statement.stream_owner = None;
+                if statement.postgres_lazy {
+                    statement.rows.affected = 0;
+                }
             }
         }
         Ok(None) => {
@@ -57,12 +60,7 @@ pub async fn close(context: &mut dyn Context, state: &RefCell<Statement>) -> Nat
         };
         (statement.connection.clone(), owner)
     };
-    let result = connection
-        .driver
-        .lock()
-        .await
-        .close_mysql_stream(owner)
-        .await;
+    let result = connection.driver.lock().await.close_stream(owner).await;
     match result {
         Ok(()) => Ok(Value::Null),
         Err(error) => fail(state, context, error, "PDOStatement::closeCursor"),
