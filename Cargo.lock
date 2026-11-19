@@ -2201,10 +2201,12 @@ dependencies = [
 name = "phera-ext-redis"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "phera-extension-api",
  "phera-io-pool",
  "redis",
  "rustls",
+ "tempfile",
  "tokio",
  "tokio-rustls",
 ]

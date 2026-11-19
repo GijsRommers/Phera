@@ -3,13 +3,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::future::select_ok;
 use redis::aio::MultiplexedConnection;
 use redis::{
-    AsyncConnectionConfig, Client, ConnectionAddr, IntoConnectionInfo, RedisConnectionInfo,
-    RedisError, RedisResult, Value,
+    AsyncConnectionConfig, Client, ConnectionAddr, ErrorKind, IntoConnectionInfo,
+    RedisConnectionInfo, RedisError, RedisResult, Value,
 };
 use rustls::pki_types::ServerName;
-use tokio::net::TcpStream;
+use tokio::net::{TcpStream, lookup_host};
 use tokio::task::AbortHandle;
 use tokio_rustls::TlsConnector;
 
@@ -73,10 +74,24 @@ async fn open_tls(
     settings: &RedisConnectionInfo,
     config: AsyncConnectionConfig,
 ) -> RedisResult<Socket> {
+    let mut addresses = lookup_host((host, port)).await?.peekable();
+    if addresses.peek().is_none() {
+        return Err((ErrorKind::InvalidClientConfig, "No address found for host").into());
+    }
     let tls = phera_io_pool::tls::webpki_client().map_err(super::error)?;
     let name = ServerName::try_from(host.to_owned()).map_err(super::error)?;
-    let stream = TcpStream::connect((host, port)).await?;
-    let stream = TlsConnector::from(tls).connect(name, stream).await?;
+    let connector = TlsConnector::from(tls);
+    // As with redis-rs, try every address and keep the first completed TLS handshake.
+    let (stream, _) = select_ok(addresses.map(|address| {
+        let connector = connector.clone();
+        let name = name.clone();
+        Box::pin(async move {
+            connector
+                .connect(name, TcpStream::connect(address).await?)
+                .await
+        })
+    }))
+    .await?;
     let (connection, driver) =
         MultiplexedConnection::new_with_config(settings, stream, config).await?;
     Ok(Socket {
