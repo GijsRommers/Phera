@@ -181,19 +181,30 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Event::DocType(_)) => return Err(extra_content()),
                 Ok(Event::GeneralRef(reference)) if !self.open.is_empty() => {
-                    let name = &reference;
-                    let (value, entity) = self.entities.resolve(name)?;
-                    if entity && !self.options.substitute_entities {
-                        self.add(Kind::EntityReference, name, &value, line)?;
-                    } else {
-                        self.text(&value, Kind::Text)?;
-                    }
+                    self.reference(&reference, line)?;
                 }
                 Ok(Event::GeneralRef(_)) => return Err(self.unexpected_text()),
                 Ok(Event::Eof) => return self.finish(),
+                Err(error @ Error::IllFormed(IllFormedError::MismatchedEndTag { .. })) => {
+                    let error = self.reader_error(error);
+                    self.report(error);
+                    self.close();
+                }
                 Err(error) => return Err(self.reader_error(error)),
             }
         }
+    }
+
+    fn reference(&mut self, name: &str, line: usize) -> Result<(), ParseError> {
+        match self.entities.resolve(name) {
+            Ok((value, true)) if !self.options.substitute_entities => {
+                self.add(Kind::EntityReference, name, &value, line)?;
+            }
+            Ok((value, _)) => self.text(&value, Kind::Text)?,
+            Err(error) if error.code == 26 => self.report(error),
+            Err(error) => return Err(error),
+        }
+        Ok(())
     }
 
     fn finish(&self) -> Result<(), ParseError> {

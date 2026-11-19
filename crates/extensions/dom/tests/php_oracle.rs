@@ -14,6 +14,11 @@ fn termwind_document_calls() {
     compare("termwind");
 }
 
+#[test]
+fn malformed_xml_recovery() {
+    compare("recovery");
+}
+
 fn compare(name: &str) {
     let Some(oracle) = Comparison::from_environment("dom") else {
         return;
