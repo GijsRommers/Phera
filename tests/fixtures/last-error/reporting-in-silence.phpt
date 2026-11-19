@@ -53,6 +53,13 @@ var_dump($generator->current());
 report();
 $generator->next();
 report();
+
+function oversizedMask() {
+    error_reporting(1 << 40);
+    report();
+}
+@oversizedMask();
+report();
 --EXPECTF--
 int(4437)
 string(5) "30207"
@@ -77,3 +84,7 @@ int(30207)
 string(5) "30207"
 int(30207)
 string(5) "30207"
+int(0)
+string(13) "1099511627776"
+int(30207)
+string(13) "1099511627776"

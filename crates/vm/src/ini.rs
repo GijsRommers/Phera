@@ -208,7 +208,7 @@ impl Vm {
 
     /// error_reporting() keeps its number directly until an INI reader needs text.
     pub(crate) fn set_error_reporting(&mut self, level: i64) {
-        self.error_handlers.reporting = level;
+        self.error_handlers.reporting = i64::from(level as i32);
         self.ini_overrides.reporting_number = Some(level);
     }
 }
