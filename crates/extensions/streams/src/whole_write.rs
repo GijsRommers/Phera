@@ -10,6 +10,7 @@ use rustix::fs::{FlockOperation, flock};
 use crate::errors::warn_false;
 use crate::handles::read_notice;
 use crate::io_policy::{CHUNK, IoPolicy};
+use crate::request::files;
 use crate::resource::stream_argument;
 use crate::stream::{Stream, Wrapper};
 use crate::transfer::{finish_write, read, write_bytes};
@@ -54,10 +55,14 @@ pub fn file_put_contents(
         } else {
             b"wb"
         };
+        if flags & crate::whole_file::NO_DEFAULT_CONTEXT == 0 {
+            files(context).use_default_context(args::value(&arguments, 3));
+        }
         let Some(mut stream) = open(context, function, name, mode, flags & USE_PATH != 0).await?
         else {
             return Ok(Value::Bool(false));
         };
+        files(context).claim_id();
         if lock {
             let (locked, restored) = IoPolicy::Blocking
                 .run(move || {

@@ -55,10 +55,14 @@ Built in, each checked call by call against real PHP: core, standard, ctype,
 connection reuse, and the easy and multi interfaces), date, dom (first stage),
 filter, hash, json, mbstring, openssl, pcre, PDO (SQLite, MySQL, PostgreSQL,
 with TLS), random, redis, reflection, serialize, session, SPL, sqlite3, streams,
-tokenizer.
+tokenizer, Unix process functions, and POSIX queries.
 
-In progress: bcmath, gmp, intl, mysqli, pgsql, process functions, sodium,
-zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
+Unix scripts can launch programs with `shell_exec()`, backticks, and the process
+functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
+launching for web requests, run `phera serve --no-process public`.
+
+In progress: bcmath, gmp, intl, mysqli, pgsql, sodium, zlib.
+Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
 
 ## ✨ Goals
 

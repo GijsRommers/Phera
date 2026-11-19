@@ -43,7 +43,7 @@ pub fn certificates(host: &str) -> TestCertificates {
 
 impl TestCertificates {
     pub fn server(&self, require_client: bool) -> Arc<ServerConfig> {
-        let provider = Arc::new(rustls_rustcrypto::provider());
+        let provider = phera_io_pool::tls::provider().clone();
         let builder = ServerConfig::builder_with_provider(provider.clone())
             .with_safe_default_protocol_versions()
             .unwrap();
