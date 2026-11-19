@@ -25,6 +25,7 @@ use crate::calls::registers::Registers;
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
 use crate::fast::{ScalarStep, array_index_step, scalar_step};
+use crate::fast_values::value_step;
 
 /// How many loop rounds or calls a script may run before it lets other tasks
 /// on the same thread have a turn.
@@ -242,8 +243,11 @@ impl Machine<'_> {
                 ScalarStep::Fallback => match *instruction {
                     Instruction::FetchIndex {
                         dst, base, index, ..
-                    } => array_index_step::<GUARDED>(dst, base, index, slots),
-                    _ => ScalarStep::Fallback,
+                    } => match array_index_step::<GUARDED>(dst, base, index, slots) {
+                        ScalarStep::Fallback => value_step::<GUARDED>(instruction, slots, &mut ip),
+                        complete => complete,
+                    },
+                    _ => value_step::<GUARDED>(instruction, slots, &mut ip),
                 },
                 complete => complete,
             };

@@ -83,6 +83,7 @@ mod execution_time;
 mod extract;
 mod failed_construction;
 mod fast;
+mod fast_values;
 mod fibers;
 mod finally;
 mod function_facts;

@@ -102,7 +102,7 @@ fn overwrite_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -
 
 /// Stores any result, dropping what the register held before.
 #[inline(always)]
-fn store<const GUARDED: bool>(
+pub(crate) fn store<const GUARDED: bool>(
     slots: &mut [Option<Value>],
     register: Reg,
     value: Value,
