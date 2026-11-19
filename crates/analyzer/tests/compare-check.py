@@ -23,6 +23,13 @@ def identity(root, path, diagnostic, aliases):
     return path.relative_to(root).as_posix(), diagnostic["line"], aliases.get(identifier, identifier)
 
 
+
+def phpstan_path(path):
+    # PHPStan groups a trait finding under "Trait.php (in context of class C)".
+    # Its line number still belongs to Trait.php, even when several classes use it.
+    source, separator, context = path.partition(" (in context of ")
+    return source if separator and context.endswith(")") else path
+
 def phpstan(root, report):
     if "error_details" in report:
         if sum(map(len, report["error_details"].values())) != report["errors"]:
@@ -33,7 +40,7 @@ def phpstan(root, report):
             raise ValueError(f"PHPStan failed: {report['errors']}")
         groups = {path: group["messages"] for path, group in report["files"].items()}
     return {
-        identity(root, path, message, STAN_IDENTIFIERS)
+        identity(root, phpstan_path(path), message, STAN_IDENTIFIERS)
         for path, messages in groups.items()
         for message in messages
     }
