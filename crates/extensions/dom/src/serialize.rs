@@ -244,13 +244,15 @@ impl Serializer<'_> {
     }
 
     fn attributes(&self, id: NodeId, output: &mut String) {
-        let node = &self.arena[id];
-        let (namespaces, attributes): (Vec<_>, Vec<_>) = node
+        let attributes = self.arena[id]
             .attributes()
             .iter()
-            .map(|&id| &self.arena[id])
-            .partition(|attr| attr.name.namespace.as_deref() == Some(XMLNS));
-        for attribute in namespaces.into_iter().chain(attributes) {
+            .map(|&id| &self.arena[id]);
+        let declared = |attribute: &&Node| attribute.name.namespace.as_deref() == Some(XMLNS);
+        for attribute in attributes.clone().filter(declared) {
+            self.attribute(attribute, output);
+        }
+        for attribute in attributes.filter(|attribute| !declared(attribute)) {
             self.attribute(attribute, output);
         }
     }

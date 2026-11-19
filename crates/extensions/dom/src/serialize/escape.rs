@@ -20,7 +20,18 @@ pub(super) fn escape(output: &mut String, input: &str, mode: Escaping) {
         | Escaping::Html { attribute, .. }
         | Escaping::Canonical { attribute } => attribute,
     };
-    for character in input.chars() {
+    let prefix = input
+        .bytes()
+        .position(|b| {
+            matches!(
+                b,
+                b'&' | b'<' | b'>' | b'\r' | b'\n' | b'\t' | b'"' | 128..=255
+            )
+        })
+        .unwrap_or(input.len());
+    let (plain, escaped) = input.split_at(prefix);
+    output.push_str(plain);
+    for character in escaped.chars() {
         match character {
             '&' => output.push_str("&amp;"),
             '<' => output.push_str("&lt;"),

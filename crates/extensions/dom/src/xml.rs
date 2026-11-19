@@ -57,10 +57,7 @@ pub fn parse(input: &[u8], options: Options) -> Parsed {
         decoded
     };
     let mut parser = Parser::new(&input, options);
-    let result = match input
-        .char_indices()
-        .find(|&(_, character)| !xml_char(character))
-    {
+    let result = match invalid_character(&input) {
         Some((offset, character)) => {
             parser.position.advance(&input, offset);
             Err(ParseError::fatal(
@@ -81,6 +78,16 @@ pub fn parse(input: &[u8], options: Options) -> Parsed {
         document,
         diagnostics: parser.diagnostics,
     }
+}
+
+fn invalid_character(input: &str) -> Option<(usize, char)> {
+    let offset = input
+        .bytes()
+        .position(|byte| matches!(byte, 0..=8 | 11..=12 | 14..=31 | 128..=255))?;
+    input[offset..]
+        .char_indices()
+        .find(|&(_, character)| !xml_char(character))
+        .map(|(index, character)| (offset + index, character))
 }
 
 type ScopeChanges = Vec<(String, Option<String>)>;
@@ -347,14 +354,15 @@ impl Default for Position {
 
 impl Position {
     fn advance(&mut self, input: &str, offset: usize) {
+        if self.offset == offset {
+            return;
+        }
         if let Some(chunk) = input.get(self.offset..offset) {
-            for character in chunk.chars() {
-                if character == '\n' {
-                    self.line += 1;
-                    self.column = 1;
-                } else {
-                    self.column += 1;
-                }
+            if let Some((complete, tail)) = chunk.rsplit_once('\n') {
+                self.line += 1 + complete.bytes().filter(|&byte| byte == b'\n').count();
+                self.column = 1 + tail.chars().count();
+            } else {
+                self.column += chunk.chars().count();
             }
             self.offset = offset;
         }

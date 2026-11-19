@@ -84,6 +84,9 @@ impl Entities {
     }
 
     pub(super) fn attribute(&mut self, mut input: &str) -> Result<String, ParseError> {
+        if !input.contains(['&', '\r', '\n', '\t']) {
+            return Ok(input.to_owned());
+        }
         let mut value = String::new();
         while let Some((text, rest)) = input.split_once('&') {
             value.extend(text.chars().map(attribute_space));
