@@ -170,12 +170,8 @@ impl Vm {
         method: &Method,
         consuming_class: &str,
         unit: &phera_bytecode::CompiledUnit,
-    ) -> Result<(), NativeError> {
-        let pending = self.check_contract(inherited, method, Some(consuming_class), unit)?;
-        if let Some(pending) = pending {
-            return Err(crate::autoload::ClassMiss::method_signatures(vec![pending]));
-        }
-        Ok(())
+    ) -> Result<Option<MethodVariance>, NativeError> {
+        self.check_contract(inherited, method, Some(consuming_class), unit)
     }
 
     fn check_contract(

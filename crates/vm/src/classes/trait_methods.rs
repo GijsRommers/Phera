@@ -9,9 +9,15 @@ use phera_bytecode::{ClassDeclaration, ClassKind, CompiledUnit, Visibility};
 use phera_extension_api::NativeError;
 
 use super::{Class, Method, MethodBody, inheritance_checks};
-use crate::Vm;
+use crate::{Vm, autoload::MethodVariance};
 
 type MethodTable = HashMap<String, Rc<Method>>;
+
+#[derive(Default)]
+pub(super) struct TraitMethodVariance {
+    pub(super) overrides: Vec<(Rc<Method>, MethodVariance)>,
+    pub(super) requirements: Vec<MethodVariance>,
+}
 
 impl Vm {
     pub(super) fn resolve_traits(
@@ -43,7 +49,7 @@ impl Vm {
         unit: &CompiledUnit,
         traits: &[Rc<Class>],
         methods: &mut MethodTable,
-    ) -> Result<(), NativeError> {
+    ) -> Result<TraitMethodVariance, NativeError> {
         let class = &declaration.name;
         let rules = self.trait_method_rules(declaration, traits)?;
         let mut imports = Imports {
@@ -90,11 +96,14 @@ impl Vm {
             requirements,
             ..
         } = imports;
+        let mut pending = TraitMethodVariance::default();
         for (name, import) in imported {
             let linked = self.import_method(&import, class);
             if let Some(inherited) = methods.get(&name) {
                 inheritance_checks::check_override(display(class), inherited, &linked)?;
-                self.check_method_contract(inherited, &linked, unit)?;
+                if let Some(miss) = self.check_method_contract(inherited, &linked, unit)? {
+                    pending.overrides.push((inherited.clone(), miss));
+                }
             }
             methods.insert(name, linked);
         }
@@ -114,13 +123,17 @@ impl Vm {
                         display(class),
                     )));
                 }
-                self.check_trait_contract(&requirement, implementation, class, unit)?;
+                if let Some(miss) =
+                    self.check_trait_contract(&requirement, implementation, class, unit)?
+                {
+                    pending.requirements.push(miss);
+                }
             } else {
                 let linked = self.import_method(&requirement, class);
                 methods.insert(key, linked);
             }
         }
-        Ok(())
+        Ok(pending)
     }
 
     fn check_trait_finality(
