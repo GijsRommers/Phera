@@ -103,8 +103,12 @@ pub(in crate::bindings) fn register(registry: &mut Registry) {
                     .tentative_return("void"),
                     M::public("setIdAttributeNode", &[ATTR, IS_ID], mark_node)
                         .tentative_return("void"),
-                    M::public("setAttributeNode", &[ATTR], set_attribute_node),
-                    M::public("setAttributeNodeNS", &[ATTR], set_attribute_node),
+                    M::public("setAttributeNode", &[ATTR], |c, t, a| {
+                        set_attribute_node(c, t, a, false)
+                    }),
+                    M::public("setAttributeNodeNS", &[ATTR], |c, t, a| {
+                        set_attribute_node(c, t, a, true)
+                    }),
                     M::public("removeAttributeNode", &[ATTR], mutation::remove_child),
                     M::public(
                         "toggleAttribute",

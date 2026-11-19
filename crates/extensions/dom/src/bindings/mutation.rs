@@ -112,6 +112,7 @@ pub(super) fn insert_nodes(
         }
         for &id in &children {
             arena.insert(parent, id, before).map_err(link_error)?;
+            super::namespace::reconcile(arena, parent, id);
         }
         Ok(children.first().copied())
     } else if arena[child].kind == Kind::Attribute && arena[parent].kind == Kind::Element {
@@ -125,6 +126,7 @@ pub(super) fn insert_nodes(
         Ok(Some(child))
     } else {
         arena.insert(parent, child, before).map_err(link_error)?;
+        super::namespace::reconcile(arena, parent, child);
         Ok(Some(child))
     }
 }
@@ -159,11 +161,27 @@ pub(super) fn import(context: &mut dyn Context, this: This<'_>, args: &[Value]) 
         context.warning("DOMDocument::importNode(): Cannot import: Node Type Not Supported".into());
         return Ok(Value::Bool(false));
     }
-    let id = target.shared.borrow_mut().document.arena.import(
-        &source.document.arena,
-        node.id,
-        args::bool(args, 1).unwrap_or_default(),
-    );
+    let id = {
+        use super::attributes::namespaces::{AttributeBinding, bind};
+        let mut destination = target.shared.borrow_mut();
+        let arena = &mut destination.document.arena;
+        let id = arena.import(
+            &source.document.arena,
+            node.id,
+            args::bool(args, 1).unwrap_or_default(),
+        );
+        if arena[id].kind == Kind::Attribute {
+            let root = arena
+                .children(Arena::DOCUMENT)
+                .find(|&id| arena[id].kind == Kind::Element);
+            if let Some(root) = root {
+                let mut name = arena[id].name.clone();
+                bind(arena, root, &mut name, AttributeBinding::Node);
+                arena[id].name = name;
+            }
+        }
+        id
+    };
     drop(source);
     target.at(id).wrap(context)
 }

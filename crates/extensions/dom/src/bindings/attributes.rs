@@ -6,7 +6,7 @@
 //! assert($document->getElementById('target') === $root);
 //! ```
 
-mod namespaces;
+pub(super) mod namespaces;
 mod registration;
 
 pub(super) use registration::register;
@@ -40,7 +40,7 @@ pub(super) fn set(
     value: String,
 ) -> Result<NodeId, NativeError> {
     let mut name = name;
-    namespaces::bind(arena, id, &mut name);
+    namespaces::bind(arena, id, &mut name, namespaces::AttributeBinding::Direct);
     let existing = if name.namespace.is_none() {
         find(arena, id, None, &name.qualified())
     } else {
@@ -184,6 +184,7 @@ fn set_attribute_node(
     context: &mut dyn Context,
     this: This<'_>,
     arguments: &[Value],
+    by_namespace: bool,
 ) -> NativeResult {
     let element = this_node(this)?;
     let attr = mutation::argument_node(arguments, 0)?;
@@ -200,13 +201,27 @@ fn set_attribute_node(
         {
             Err(dom_error(10, "Inuse Attribute Error"))
         } else {
-            let name = &arena[attr.id].name;
-            let old = find(
+            let mut name = arena[attr.id].name.clone();
+            let old = if by_namespace {
+                find(
+                    arena,
+                    element.id,
+                    Some(name.namespace.as_deref()),
+                    &name.local,
+                )
+            } else {
+                arena[element.id].attributes().iter().copied().find(|&id| {
+                    arena[id].name.local == name.local
+                        && arena[id].name.namespace.as_deref() != Some(XMLNS)
+                })
+            };
+            namespaces::bind(
                 arena,
                 element.id,
-                Some(name.namespace.as_deref()),
-                &name.local,
+                &mut name,
+                namespaces::AttributeBinding::Node,
             );
+            arena[attr.id].name = name;
             arena
                 .set_attribute(element.id, attr.id, old)
                 .map_err(mutation::link_error)?;

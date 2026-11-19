@@ -72,16 +72,32 @@ pub(super) fn create_attribute_ns(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    let name = checked_name(
+    let document = this_node(this)?;
+    let mut state = document.shared.borrow_mut();
+    let arena = &mut state.document.arena;
+    let root = arena
+        .children(Arena::DOCUMENT)
+        .find(|&id| arena[id].kind == Kind::Element);
+    let Some(root) = root else {
+        context.warning("DOMDocument::createAttributeNS(): Document Missing Root Element".into());
+        return Ok(Value::Bool(false));
+    };
+    let mut name = match checked_name(
         argument(args, 1).unwrap_or_default(),
         namespace(args, 0),
         true,
-    );
-    create(
-        context,
-        this,
-        name.map(|name| Node::new(Kind::Attribute, name, "")),
-    )
+    ) {
+        Ok(name) => name,
+        Err(error) => {
+            drop(state);
+            return super::mutation::fail(context, &document, error);
+        }
+    };
+    use super::attributes::namespaces::{AttributeBinding, bind};
+    bind(arena, root, &mut name, AttributeBinding::Node);
+    let id = insert_new(arena, Node::new(Kind::Attribute, name, ""));
+    drop(state);
+    document.at(id).wrap(context)
 }
 
 pub(super) fn create_text(

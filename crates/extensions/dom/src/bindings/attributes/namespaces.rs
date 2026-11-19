@@ -5,11 +5,22 @@
 //! echo $document->saveXML($node);
 //! ```
 
-use super::super::node::namespace_scope;
-use crate::tree::{Arena, Kind, Name, Node, NodeId};
-use crate::xml::names::{self, XML, XMLNS};
+use super::super::{namespace, node::namespace_scope};
+use crate::tree::{Arena, Name, NodeId};
+use crate::xml::names::{XML, XMLNS};
 
-pub(super) fn bind(arena: &mut Arena, element: NodeId, name: &mut Name) {
+#[derive(Clone, Copy)]
+pub(in crate::bindings) enum AttributeBinding {
+    Direct,
+    Node,
+}
+
+pub(in crate::bindings) fn bind(
+    arena: &mut Arena,
+    element: NodeId,
+    name: &mut Name,
+    binding: AttributeBinding,
+) {
     let Some(uri) = name.namespace.as_deref() else {
         return;
     };
@@ -31,11 +42,10 @@ pub(super) fn bind(arena: &mut Arena, element: NodeId, name: &mut Name) {
         return;
     }
     let requested = name.prefix.as_deref().unwrap_or("");
-    let default_bound = scope.get("").is_some_and(|bound| bound == uri);
-    if requested.is_empty() && default_bound {
-        return;
-    }
-    let base = if default_bound || (requested.is_empty() && scope.contains_key("")) {
+    let default_conflict = matches!(binding, AttributeBinding::Direct)
+        && scope.get("").is_some_and(|bound| bound == uri);
+    let require_prefix = requested.is_empty() && matches!(binding, AttributeBinding::Node);
+    let base = if default_conflict || require_prefix || scope.contains_key(requested) {
         "default"
     } else {
         requested
@@ -47,16 +57,6 @@ pub(super) fn bind(arena: &mut Arena, element: NodeId, name: &mut Name) {
         }
         prefix = format!("{base}{index}");
     }
-    let qualified = if prefix.is_empty() {
-        "xmlns".into()
-    } else {
-        format!("xmlns:{prefix}")
-    };
-    let declaration = arena.allocate(Node::new(
-        Kind::Attribute,
-        names::qualified(&qualified, Some(XMLNS.into())),
-        uri,
-    ));
-    let _ = arena.set_attribute(element, declaration, None);
+    namespace::declare(arena, element, &prefix, uri);
     name.prefix = (!prefix.is_empty()).then_some(prefix);
 }

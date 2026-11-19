@@ -5,15 +5,33 @@
 //! echo $node->namespaceURI;
 //! ```
 
+mod reconciliation;
+
+pub(super) use reconciliation::reconcile;
+
 use phera_extension_api::{
     ClassEntry, ClassHooks, Context, NativeError, NativePropertyAccess, NativePropertyMutation,
     NativePropertyRead, NativeResult, Object, PhpArray, Registry, Value,
 };
 
-use crate::tree::{Arena, Kind, NodeId};
-use crate::xml::names::XMLNS;
+use crate::tree::{Arena, Kind, Node, NodeId};
+use crate::xml::names::{self, XMLNS};
 
 use super::{Location, native};
+
+pub(super) fn declare(arena: &mut Arena, element: NodeId, prefix: &str, uri: &str) {
+    let qualified = if prefix.is_empty() {
+        "xmlns".into()
+    } else {
+        format!("xmlns:{prefix}")
+    };
+    let declaration = arena.allocate(Node::new(
+        Kind::Attribute,
+        names::qualified(&qualified, Some(XMLNS.into())),
+        uri,
+    ));
+    let _ = arena.set_attribute(element, declaration, None);
+}
 
 #[derive(Clone)]
 struct Declaration {
