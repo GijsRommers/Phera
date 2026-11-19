@@ -4,7 +4,7 @@ use std::{collections::HashSet, rc::Rc};
 
 use phera_extension_api::{
     ArrayKey, ConstantValue, Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray,
-    QuerySeparator, Value, args, value::to_php_string,
+    Value, args, value::to_php_string,
 };
 
 use crate::strings::url::{Encoding, encode_into};
@@ -62,9 +62,8 @@ fn build(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let numeric_prefix = args::bytes(arguments, 1);
     let separator = args::string(arguments, 2).cloned().unwrap_or_else(|| {
         context
-            .state()
-            .get::<QuerySeparator>()
-            .map_or_else(|| "&".into(), |separator| separator.0.clone())
+            .ini_get(b"arg_separator.output")
+            .unwrap_or_else(|| "&".into())
     });
     let separator = separator.as_bytes();
     let encoding = if args::int(arguments, 3).unwrap_or(1) as i32 == 2 {

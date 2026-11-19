@@ -10,7 +10,7 @@ use phera_bytecode::{
     Symbol, SymbolId, Type, TypeId, TypeMask,
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ir;
 
@@ -20,7 +20,14 @@ pub(crate) struct Tables {
     unit: CompiledUnit,
     /// The file's top-level functions, which calls reach with `CallDirect`.
     callees: crate::passes::direct_calls::DirectCallees,
+    /// Where each name, constant and symbol already sits in its table. A
+    /// generated file has tens of thousands of each; searching the tables
+    /// would make lowering quadratic.
+    name_ids: HashMap<String, u32>,
     constant_ids: HashMap<ConstantValue, u32>,
+    symbol_ids: HashMap<Symbol, u32>,
+    /// The registers of the function being lowered that append in place.
+    pub(crate) appending: HashSet<Reg>,
 }
 
 /// A literal as a hashable key: floats by their bits, so `-0.0` and `0.0`
@@ -38,16 +45,13 @@ enum ConstantValue {
 impl Tables {
     /// Intern names in first-use order to keep table indices deterministic.
     pub(crate) fn name(&mut self, name: &str) -> NameId {
-        let index = self
-            .unit
-            .names
-            .iter()
-            .position(|entry| entry == name)
-            .unwrap_or_else(|| {
-                self.unit.names.push(name.to_owned());
-                self.unit.names.len() - 1
-            });
-        NameId(index as u32)
+        if let Some(&index) = self.name_ids.get(name) {
+            return NameId(index);
+        }
+        let index = self.unit.names.len() as u32;
+        self.unit.names.push(name.to_owned());
+        self.name_ids.insert(name.to_owned(), index);
+        NameId(index)
     }
 
     /// Recognize literal values without evaluating arbitrary PHP expressions.
@@ -99,16 +103,13 @@ impl Tables {
             }),
             written: name.to_owned(),
         };
-        let index = self
-            .unit
-            .symbols
-            .iter()
-            .position(|entry| entry == &symbol)
-            .unwrap_or_else(|| {
-                self.unit.symbols.push(symbol);
-                self.unit.symbols.len() - 1
-            });
-        SymbolId(index as u32)
+        if let Some(&index) = self.symbol_ids.get(&symbol) {
+            return SymbolId(index);
+        }
+        let index = self.unit.symbols.len() as u32;
+        self.symbol_ids.insert(symbol.clone(), index);
+        self.unit.symbols.push(symbol);
+        SymbolId(index)
     }
 
     /// Translate a written type to its mask and class-name table entries.
@@ -188,6 +189,7 @@ impl Tables {
             ..Function::default()
         };
         let scratch = Reg(source.registers as u16);
+        self.appending = crate::passes::lowering::appending_registers(&source.instructions);
         let mut offsets = Vec::new();
         for (index, instruction) in source.instructions.into_iter().enumerate() {
             offsets.push(function.instructions.len() as u32);

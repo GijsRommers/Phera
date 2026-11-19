@@ -11,8 +11,13 @@ mod error;
 #[cfg(test)]
 mod extension_introspection_tests;
 mod http;
+#[cfg(test)]
+mod ini_tests;
+#[cfg(test)]
+mod process_oracle_tests;
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use phera_bytecode::CompiledUnit;
@@ -20,7 +25,7 @@ use phera_dotenv::Environment;
 use phera_ext_http::{RequestHeaders, ResponseHead, Sapi, UploadedFiles};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
 use phera_extension_api::{LocalFuture, Registry};
-use phera_value::Value;
+use phera_value::{PhpArray, Value};
 use phera_vm::{CodeLoader, NativeTables, Vm};
 
 use cache::CodeCache;
@@ -41,6 +46,7 @@ pub struct Runtime {
 pub struct WebWorker {
     runtime: Runtime,
     native: NativeTables,
+    environment: Rc<PhpArray>,
 }
 
 impl WebWorker {
@@ -51,7 +57,7 @@ impl WebWorker {
         request: HttpRequest,
     ) -> HttpResponse {
         self.runtime
-            .handle_web_request(&self.native, script, document_root, request)
+            .handle_web_request(self, script, document_root, request)
             .await
     }
 }
@@ -92,8 +98,12 @@ impl Runtime {
         registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_json::Json);
         registry.load(&phera_ext_mbstring::Mbstring);
+        registry.php_module("iconv");
         registry.load(&phera_ext_pcre::Pcre);
         registry.load(&phera_ext_pdo::Pdo);
+        registry.php_module("pdo_mysql");
+        registry.php_module("pdo_pgsql");
+        registry.php_module("pdo_sqlite");
         registry.load(&phera_ext_sqlite3::Sqlite3);
         registry.load(&phera_ext_redis::Redis);
         registry.load(&phera_ext_http::Http);
@@ -101,6 +111,7 @@ impl Runtime {
         registry.load(&phera_ext_random::Random);
         registry.load(&phera_ext_reflection::Reflection);
         registry.load(&phera_ext_serialize::Serialize);
+        Vm::register_fiber_classes(&mut registry);
         registry.load(&phera_ext_spl::Spl);
         registry.load(&phera_ext_session::Session);
         let mut web_registry = registry.clone();
@@ -162,6 +173,7 @@ impl Runtime {
         WebWorker {
             runtime: self.clone(),
             native: NativeTables::new(self.web_registry.clone()),
+            environment: self.inherited_environment(),
         }
     }
 
@@ -179,7 +191,7 @@ impl Runtime {
 
     async fn handle_web_request(
         &self,
-        native: &NativeTables,
+        worker: &WebWorker,
         script: &Path,
         document_root: &Path,
         request: HttpRequest,
@@ -206,7 +218,7 @@ impl Runtime {
             None => None,
         };
 
-        let mut vm = self.new_vm(native, Sapi::Web);
+        let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
         let uploads = http::define_superglobals(
             &mut vm,
             &request,
@@ -275,13 +287,22 @@ impl Runtime {
     }
 
     fn new_cli_vm(&self) -> Vm {
-        self.new_vm(&NativeTables::new(self.registry.clone()), Sapi::Cli)
+        self.new_vm(
+            &NativeTables::new(self.registry.clone()),
+            Sapi::Cli,
+            self.inherited_environment(),
+        )
     }
 
-    fn new_vm(&self, native: &NativeTables, sapi: Sapi) -> Vm {
+    fn inherited_environment(&self) -> Rc<PhpArray> {
+        Rc::new(php_array(self.environment.iter()))
+    }
+
+    fn new_vm(&self, native: &NativeTables, sapi: Sapi, environment: Rc<PhpArray>) -> Vm {
         let mut vm = Vm::with_native_tables(native);
         *vm.state_mut().get_or_default::<Sapi>() = sapi;
-        vm.set_global("_ENV", Value::from(php_array(self.environment.iter())));
+        // A script's writes copy the inherited array before changing it.
+        vm.set_global("_ENV", Value::Array(environment));
         *vm.state_mut().get_or_default::<RequestEnvironment>() =
             RequestEnvironment::new(self.environment.clone());
         vm.set_loader(Arc::new(self.clone()));

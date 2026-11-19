@@ -8,6 +8,17 @@ use crate::policies::{DeclarationTiming, NameKind};
 use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
+    /// PHP reports a method call, and errors about it, on the line of the
+    /// method's name. In a chain written over several lines that is not the
+    /// line the expression starts on.
+    pub(super) fn member_line(&self, name: &ast::MemberName) -> usize {
+        let start = match name {
+            ast::MemberName::Identifier(name) => name.span.start,
+            ast::MemberName::Expression(name) => name.span.start,
+        };
+        self.lines.line(start)
+    }
+
     /// Resolve class identifiers at compile time; computed targets remain explicitly unsupported.
     pub(crate) fn compile_object_expression(
         &mut self,
@@ -95,6 +106,7 @@ impl Compiler<'_> {
                 nullsafe: false,
             } => {
                 let receiver = self.compile_expression(target)?;
+                let line = self.member_line(name);
                 match name {
                     ast::MemberName::Identifier(name) => self.emit(
                         Instruction::MethodCall {
@@ -132,6 +144,7 @@ impl Compiler<'_> {
                 name,
                 arguments,
             } => {
+                let line = self.member_line(name);
                 if let Some(result) = self.compile_parent_hook(class, name, arguments, line)? {
                     return Ok(result);
                 }

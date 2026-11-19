@@ -6,8 +6,8 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
-    Value, args,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Object, Param,
+    ParamType, Value, args,
 };
 
 type Cell = Rc<RefCell<Value>>;
@@ -70,23 +70,35 @@ fn array_walk_recursive(
 
 // Snapshot keys per level so callbacks that keep appending cannot prolong the
 // walk forever. PHP's live iteration of appended/replaced keys is not implemented.
+struct LazySource {
+    original: Rc<Object>,
+    instance: Rc<Object>,
+}
+
 struct Frame {
     target: Cell,
+    lazy_source: Option<LazySource>,
     keys: std::vec::IntoIter<ArrayKey>,
 }
 
 impl Frame {
-    fn new(target: Cell) -> Result<Self, NativeError> {
+    fn new(target: Cell, lazy_source: Option<LazySource>) -> Result<Self, NativeError> {
         let keys = {
             let value = target.try_borrow().map_err(|_| borrowed())?;
             match &*value {
                 Value::Array(array) => array.keys().collect::<Vec<_>>(),
-                Value::Object(object) => object.to_array().keys().collect(),
+                Value::Object(object) => lazy_source
+                    .as_ref()
+                    .map_or(object, |source| &source.instance)
+                    .to_array()
+                    .keys()
+                    .collect(),
                 _ => return Err(changed_type()),
             }
         };
         Ok(Self {
             target,
+            lazy_source,
             keys: keys.into_iter(),
         })
     }
@@ -112,7 +124,11 @@ impl Frame {
 
     /// Install the cell before calling PHP. Never hold a table or cell borrow
     /// across an await; deleting/replacing the containing array is then safe.
-    fn element(&self, key: &ArrayKey) -> Result<Option<Cell>, NativeError> {
+    fn element(
+        &self,
+        context: &mut dyn Context,
+        key: &ArrayKey,
+    ) -> Result<Option<Cell>, NativeError> {
         let mut value = self.target.try_borrow_mut().map_err(|_| borrowed())?;
         match &mut *value {
             Value::Array(array) => {
@@ -122,10 +138,18 @@ impl Frame {
                 Ok(Some(reference(element)))
             }
             Value::Object(object) => {
+                let lazy_source = self
+                    .lazy_source
+                    .as_ref()
+                    .filter(|source| Rc::ptr_eq(&source.original, object));
+                let object = lazy_source.map_or(&*object, |source| &source.instance);
                 let Some(mut element) = object.get(key) else {
                     return Ok(None);
                 };
                 let reference = reference(&mut element);
+                if lazy_source.is_some() {
+                    context.track_iterated_property(object, key, &reference)?;
+                }
                 object.set(key.clone(), element);
                 Ok(Some(reference))
             }
@@ -172,7 +196,18 @@ async fn walk(context: &mut dyn Context, arguments: Vec<Value>, depth: Depth) ->
     super::callback::check_callback(name, callback)?;
     // PHP protects arrays on descent, so a root containing itself is visited twice.
     let mut active = HashSet::new();
-    let mut frames = vec![Frame::new(target)?];
+    let original = match &*target.try_borrow().map_err(|_| borrowed())? {
+        Value::Object(object) if object.lazy().is_some() => Some(object.clone()),
+        _ => None,
+    };
+    let lazy_source = match original {
+        Some(original) => Some(LazySource {
+            instance: context.lazy_object_for_iteration(original.clone()).await?,
+            original,
+        }),
+        None => None,
+    };
+    let mut frames = vec![Frame::new(target, lazy_source)?];
     while let Some(frame) = frames.last_mut() {
         let Some(key) = frame.keys.next() else {
             frame.ensure_container()?;
@@ -183,7 +218,7 @@ async fn walk(context: &mut dyn Context, arguments: Vec<Value>, depth: Depth) ->
             }
             continue;
         };
-        let Some(element) = frame.element(&key)? else {
+        let Some(element) = frame.element(context, &key)? else {
             continue;
         };
         let is_array = matches!(
@@ -194,7 +229,7 @@ async fn walk(context: &mut dyn Context, arguments: Vec<Value>, depth: Depth) ->
             if !active.insert(Rc::as_ptr(&element)) {
                 return Err(NativeError::error("Recursion detected"));
             }
-            frames.push(Frame::new(element)?);
+            frames.push(Frame::new(element, None)?);
         } else {
             let mut parameters = vec![Value::Reference(element), frame.key_value(&key)?];
             if let Some(extra) = arguments.get(2) {

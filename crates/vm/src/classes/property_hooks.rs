@@ -68,7 +68,12 @@ impl Vm {
     ) -> bool {
         self.current()
             .and_then(|frame| frame.this())
-            .is_some_and(|receiver| std::ptr::eq(&**receiver, object))
+            .is_some_and(|receiver| {
+                std::ptr::eq(&**receiver, object)
+                    || receiver
+                        .lazy_instance()
+                        .is_some_and(|instance| std::ptr::eq(&*instance, object))
+            })
             && self.has_property_hook_scope(property, hooks)
     }
 

@@ -85,9 +85,13 @@ pub fn child_blocks(statement: &Statement) -> Vec<&[Statement]> {
         | StatementKind::For { body, .. }
         | StatementKind::Foreach { body, .. } => vec![body],
         StatementKind::If {
-            then, otherwise, ..
+            then,
+            elseifs,
+            otherwise,
+            ..
         } => {
             let mut blocks = vec![then.as_slice()];
+            blocks.extend(elseifs.iter().map(|elseif| elseif.body.as_slice()));
             blocks.extend(otherwise.as_deref());
             blocks
         }

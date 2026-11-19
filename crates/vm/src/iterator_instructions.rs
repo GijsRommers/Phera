@@ -17,7 +17,7 @@ impl Vm {
         let place = self.path(path)?;
         let value = self.read_place(&place, crate::access_mode::Missing::Warn)?;
         if let phera_value::Value::Object(ref object) = value {
-            if object.class.is_traversable() {
+            if object.class.is_traversable() || object.lazy().is_some() {
                 self.set(subject, value);
                 return Ok(false);
             }
@@ -50,6 +50,9 @@ impl Vm {
             _ => None,
         };
         if let Some(object) = receiver {
+            if object.lazy().is_some() {
+                return self.lazy_iterator(iterator, Some(subject), object).await;
+            }
             if object.class.is_traversable() {
                 self.set(subject, Value::Null);
                 return self

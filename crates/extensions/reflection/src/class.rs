@@ -2,6 +2,7 @@
 
 use std::rc::{Rc, Weak};
 
+use phera_extension_api::reflection::lazy::{SKIP_DESTRUCTOR, SKIP_INITIALIZATION_ON_SERIALIZE};
 use phera_extension_api::reflection::{ClassInfo, ReflectedClassKind};
 use phera_extension_api::{
     ArrayKey, ClassEntry, ConstantValue, Context, LocalFuture, MethodEntry, NativeResult, Object,
@@ -30,8 +31,11 @@ pub(crate) fn register(registry: &mut Registry) {
                 ("IS_EXPLICIT_ABSTRACT", Int(64)),
                 ("IS_FINAL", Int(32)),
                 ("IS_READONLY", Int(65536)),
-                ("SKIP_INITIALIZATION_ON_SERIALIZE", Int(8)),
-                ("SKIP_DESTRUCTOR", Int(16)),
+                (
+                    "SKIP_INITIALIZATION_ON_SERIALIZE",
+                    Int(SKIP_INITIALIZATION_ON_SERIALIZE),
+                ),
+                ("SKIP_DESTRUCTOR", Int(SKIP_DESTRUCTOR)),
             ]
         },
         methods: &METHODS,
@@ -238,9 +242,11 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
     ]
 };
 
-const METHODS: [MethodEntry; IDENTITY_METHODS.len() + crate::class_members::METHODS.len()] = {
-    let mut methods =
-        [IDENTITY_METHODS[0]; IDENTITY_METHODS.len() + crate::class_members::METHODS.len()];
+const METHOD_COUNT: usize =
+    IDENTITY_METHODS.len() + crate::class_members::METHODS.len() + crate::lazy::CLASS_METHODS.len();
+
+const METHODS: [MethodEntry; METHOD_COUNT] = {
+    let mut methods = [IDENTITY_METHODS[0]; METHOD_COUNT];
     let mut index = 0;
     while index < IDENTITY_METHODS.len() {
         methods[index] = IDENTITY_METHODS[index];
@@ -251,6 +257,12 @@ const METHODS: [MethodEntry; IDENTITY_METHODS.len() + crate::class_members::METH
         methods[index] = crate::class_members::METHODS[member];
         index += 1;
         member += 1;
+    }
+    let mut lazy = 0;
+    while lazy < crate::lazy::CLASS_METHODS.len() {
+        methods[index] = crate::lazy::CLASS_METHODS[lazy];
+        index += 1;
+        lazy += 1;
     }
     methods
 };

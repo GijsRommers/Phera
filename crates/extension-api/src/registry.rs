@@ -6,9 +6,6 @@ use phera_value::Value;
 
 use crate::{ClassEntry, FunctionEntry};
 
-/// Handles a family of PHP INI settings, with a value only for a write.
-pub type IniHandler = fn(&mut dyn crate::Context, &[u8], Option<&Value>) -> crate::NativeResult;
-
 /// The value of a constant an extension defines. Kept apart from [`Value`] so
 /// a registry holds no `Rc` and can be shared between worker threads.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -68,11 +65,11 @@ pub struct Registry {
     /// Only calls already holding a first-argument object need to check this table.
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
     extra_named_handlers: HashMap<&'static str, crate::SyncFn>,
-    ini_handlers: HashMap<&'static [u8], IniHandler>,
     callback_frames: HashSet<&'static str>,
     function_modules: HashMap<&'static str, &'static str>,
     function_return_types: HashMap<&'static str, &'static str>,
     function_order: Vec<&'static str>,
+    ini: crate::ini::Catalog,
     extensions: Vec<&'static str>,
     /// Modules whose version is not PHP's, by lowercase name.
     module_versions: HashMap<String, &'static str>,
@@ -93,16 +90,6 @@ struct NativeConstant {
 }
 
 impl Registry {
-    /// Dispatches a family such as `session.*` without a dependency on its extension.
-    pub fn ini_family(&mut self, prefix: &'static [u8], handler: IniHandler) {
-        self.ini_handlers.insert(prefix, handler);
-    }
-
-    pub fn ini_handler(&self, setting: &[u8]) -> Option<IniHandler> {
-        let prefix = setting.split(|byte| *byte == b'.').next()?;
-        self.ini_handlers.get(prefix).copied()
-    }
-
     pub fn new() -> Self {
         Self::default()
     }
@@ -131,7 +118,35 @@ impl Registry {
 
     /// Engine-provided PHP modules can register without an extension crate.
     pub fn php_module(&mut self, name: &'static str) {
+        if self
+            .extensions
+            .iter()
+            .any(|module| module.eq_ignore_ascii_case(name))
+        {
+            return;
+        }
+        self.ini.register(name);
         self.extensions.push(name);
+    }
+
+    /// Names and defaults for INI settings of modules loaded by this runtime.
+    pub fn ini_entries(
+        &self,
+    ) -> impl Iterator<Item = (usize, &'static crate::ini::IniDefinition)> + '_ {
+        self.ini.entries()
+    }
+
+    pub fn ini_entry(&self, name: &[u8]) -> Option<(usize, &'static crate::ini::IniDefinition)> {
+        self.ini.get(name)
+    }
+
+    /// Register the effect of a setting already described by the PHP catalog.
+    pub fn ini_update(&mut self, name: &'static str, update: crate::ini::IniUpdate) {
+        self.ini.update(name, update);
+    }
+
+    pub fn ini_hook(&self, name: &str) -> Option<crate::ini::IniUpdate> {
+        self.ini.hook(name)
     }
 
     pub fn extensions(&self) -> impl Iterator<Item = &'static str> + '_ {

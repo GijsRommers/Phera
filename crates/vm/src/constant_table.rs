@@ -27,6 +27,7 @@ pub(crate) struct GlobalConstant {
 }
 
 /// Request constants and the resolved values of bytecode symbols.
+#[derive(Default)]
 pub(crate) struct ConstantTable {
     native: Rc<NativeConstants>,
     values: HashMap<String, GlobalConstant>,
@@ -72,6 +73,10 @@ pub(crate) fn native_constants(registry: &phera_extension_api::Registry) -> Nati
 }
 
 impl ConstantTable {
+    pub(crate) fn native_definitions(&self) -> Rc<NativeConstants> {
+        self.native.clone()
+    }
+
     pub(crate) fn new(native: Rc<NativeConstants>) -> Self {
         Self {
             native,

@@ -120,7 +120,18 @@ impl Style for VarDump<'_> {
             Container::Object(object) => {
                 let class = object.class.name();
                 let display = class.split('\0').next().unwrap_or(class);
-                format!("object({display})#{} ({len}) {{\n", object.id)
+                let prefix = match object.lazy().as_deref() {
+                    Some(phera_extension_api::value::LazyObject::Pending {
+                        strategy: phera_extension_api::value::LazyStrategy::Ghost,
+                        ..
+                    }) => "lazy ghost ",
+                    Some(
+                        phera_extension_api::value::LazyObject::Pending { .. }
+                        | phera_extension_api::value::LazyObject::Proxy(_),
+                    ) => "lazy proxy ",
+                    _ => "",
+                };
+                format!("{prefix}object({display})#{} ({len}) {{\n", object.id)
             }
         };
         out.extend_from_slice(head.as_bytes());
