@@ -1830,6 +1830,7 @@ name = "phera-ext-serialize"
 version = "0.1.0"
 dependencies = [
  "itoa",
+ "memchr",
  "phera-extension-api",
 ]
 
