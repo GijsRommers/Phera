@@ -281,6 +281,26 @@ advisory lock. Like PHP's files handler, garbage collection can unlink a stale
 name while a request locks its descriptor. A request opening that name after
 collection may create a new inode.
 
+### Child processes
+
+PHP can start programs through `proc_open()`, `popen()`, `exec()`,
+`shell_exec()`, backticks, `system()` and `passthru()`. The array form of
+`proc_open()` passes an argument vector directly to the program. String
+commands run through `/bin/sh -c`. Children inherit the request's working
+directory and effective environment unless a call supplies replacements.
+Process pipes, socket pairs and terminal streams share the stream API.
+Tokio waits for a child or work on its pipes without blocking the worker.
+
+`phera serve --no-process` makes program-starting functions throw `Error`.
+Program execution is enabled by default. The PHP execution time limit also
+caps a wait on a child or its streams. The HTTP request timeout covers the
+whole handler and cancels any pending wait. PHP's Unix process resource
+destructor closes its pipes and checks child status without waiting or
+sending a signal. Phera gives each web child its own process group and
+terminates abandoned children at request cleanup. A program that explicitly
+leaves its group can keep running. Explicit closure waits asynchronously
+and returns the child's exit status.
+
 ## 6. Scope
 
 In: the PHP that Symfony and Laravel and their dependencies run in production.
@@ -291,9 +311,9 @@ classes, interfaces, traits, enums, readonly, attributes, anonymous classes, lat
 static binding, magic methods, exceptions with `finally`, generators, `match`,
 nullsafe, destructuring, alternative control syntax, heredoc and nowdoc,
 `declare(strict_types=1)` with parameter and return type checks, `include` and
-autoloading, `eval`, property hooks, asymmetric visibility, the pipe operator.
+autoloading, `eval`, property hooks, asymmetric visibility, the pipe operator, and deprecated backticks.
 
-**Language, left out:** backticks, `(real)`, short and
+**Language, left out:** `(real)`, short and
 ASP tags, `goto`, `declare(ticks)` and `__halt_compiler` data access.
 `assert()` is checked, as under `php -n`: a failed assertion throws
 `AssertionError` with the condition as written. A setting that compiles
@@ -301,7 +321,7 @@ assertions out, as PHP's production configuration does, comes with the
 configuration file.
 Fiber switching and request-local state are described in section 9.5.
 
-**Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl, posix, the C
+**Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl, the C
 extension ABI, `dl()`, startup configuration from an INI file, and functions
 removed or deprecated before PHP 8.
 
@@ -386,8 +406,7 @@ silence:
   `function_exists()` and `class_exists()` answer false for these, so code
   that checks first takes its fallback. The list comes from the
   `#[\Deprecated]` attributes in PHP 8.5's own stub files, not from memory.
-- **Syntax** (the backtick operator): a compile error, "... is not
-  supported by Phera", with file and line.
+- **Removed syntax** such as `(real)` produces a compile error with file and line.
 - **Legacy package layouts** (PSR-0 autoloading, `target-dir`,
   `include-path`, PEAR-style trees): `phera install` stops and names the
   package and the field. Nothing is installed half.

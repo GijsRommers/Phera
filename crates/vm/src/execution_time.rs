@@ -70,6 +70,23 @@ impl Vm {
         if self.execution_time.charged.get().as_secs() < seconds as u64 {
             return Ok(());
         }
+        Err(self.execution_time_error(seconds))
+    }
+
+    pub(crate) fn process_wait_budget(&self) -> Option<Duration> {
+        let seconds = self.execution_time.seconds.get();
+        if seconds == 0 {
+            return None;
+        }
+        self.execution_time.charge();
+        Some(Duration::from_secs(seconds as u64).saturating_sub(self.execution_time.charged.get()))
+    }
+
+    pub(crate) fn process_wait_expired(&mut self) -> NativeError {
+        self.execution_time_error(self.execution_time.seconds.get())
+    }
+
+    fn execution_time_error(&mut self, seconds: i64) -> NativeError {
         self.execution_time.restart(seconds);
         let mut location = self.location();
         // The fairness boundary publishes the target of a taken branch.
@@ -84,11 +101,11 @@ impl Vm {
         self.execution_time.timed_out.set(true);
         self.set_hidden_fatal_status();
         self.mark_timed_out_objects();
-        Err(self.fatal_error(
+        self.fatal_error(
             1,
             format!("Maximum execution time of {seconds} second{suffix} exceeded"),
             location,
-        ))
+        )
     }
 
     /// Timeouts decide their HTTP response before entering shutdown.

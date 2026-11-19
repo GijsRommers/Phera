@@ -173,6 +173,14 @@ impl Context for Vm {
         Some(self.code.known_unit(main)?.file.as_str().into())
     }
 
+    fn process_wait_budget(&self) -> Option<std::time::Duration> {
+        Vm::process_wait_budget(self)
+    }
+
+    fn process_wait_expired(&mut self) -> NativeError {
+        Vm::process_wait_expired(self)
+    }
+
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
     }

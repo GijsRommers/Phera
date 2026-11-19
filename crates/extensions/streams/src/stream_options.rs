@@ -151,18 +151,24 @@ fn metadata(stream: &Stream) -> PhpArray {
     let (wrapper, kind) = match stream.wrapper {
         Wrapper::File => ("plainfile", "STDIO"),
         Wrapper::Standard => ("PHP", "STDIO"),
+        Wrapper::Process => ("plainfile", "STDIO"),
+        Wrapper::ProcessSocket => ("", "generic_socket"),
         Wrapper::Memory => ("PHP", "MEMORY"),
         Wrapper::Temp => ("PHP", "TEMP"),
         Wrapper::Data => ("RFC2397", "RFC2397"),
         Wrapper::Input => ("PHP", "Input"),
         Wrapper::Output => ("PHP", "Output"),
     };
-    insert("wrapper_type", Value::from(wrapper));
+    if stream.child_pipe.is_none() {
+        insert("wrapper_type", Value::from(wrapper));
+    }
     insert("stream_type", Value::from(kind));
     insert("mode", Value::from(stream.mode.clone()));
     insert("unread_bytes", Value::Int(stream.unread() as i64));
     insert("seekable", Value::Bool(stream.seekable));
-    insert("uri", Value::from(stream.uri.clone()));
+    if stream.child_pipe.is_none() {
+        insert("uri", Value::from(stream.uri.clone()));
+    }
     result
 }
 
@@ -171,6 +177,10 @@ fn set_blocking(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
         let resource = stream_arg(&arguments, "stream_set_blocking")?;
         let enable = args::bool(&arguments, 1).unwrap_or(false);
         let value = operate(resource, IoPolicy::Inline, move |stream| {
+            if stream.child_pipe.is_some() {
+                stream.blocked = enable;
+                return Ok(());
+            }
             let Some(file) = stream.descriptor() else {
                 return Ok(());
             };

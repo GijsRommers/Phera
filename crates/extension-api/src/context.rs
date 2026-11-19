@@ -76,6 +76,16 @@ pub trait Context {
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
 
+    /// Time available to wait on a child process or its pipes.
+    fn process_wait_budget(&self) -> Option<std::time::Duration> {
+        None
+    }
+
+    /// End PHP execution after a child I/O wait uses the remaining budget.
+    fn process_wait_expired(&mut self) -> NativeError {
+        NativeError::error("Process wait exceeded the execution time limit")
+    }
+
     /// Current PHP scope for diagnostics emitted by object handlers.
     fn diagnostic_function(&self) -> Option<&str> {
         None

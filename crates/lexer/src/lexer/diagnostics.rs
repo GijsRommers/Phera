@@ -50,6 +50,13 @@ impl ScannerDiagnostics {
 
         let text = &source[token.span.start..token.span.end];
         match token.kind {
+            Backquote if self.scan == ScanMode::Parsed && mode == Mode::Php => {
+                self.push(
+                    token.span.start,
+                    CompileDiagnosticKind::Deprecated,
+                    "The backtick (`) operator is deprecated, use shell_exec() instead".into(),
+                );
+            }
             String => {
                 let quote = usize::from(matches!(text.first(), Some(b'b' | b'B')));
                 if text[quote] == b'"' {

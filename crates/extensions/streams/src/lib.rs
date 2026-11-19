@@ -6,6 +6,7 @@
 //! fclose($file);
 //! ```
 
+mod child_pipe;
 mod context_options;
 mod copy;
 mod csv;
@@ -33,19 +34,27 @@ mod request;
 mod resource;
 mod scan;
 mod scan_format;
+mod select;
 mod source_tools;
 mod stream;
 mod stream_copy;
 mod stream_options;
 mod temporary;
+mod terminal;
 mod transfer;
 mod whole_file;
 mod whole_write;
 mod wrapper;
 
+pub use child_pipe::{
+    ChildStreamKind, child_stream, close_child_stream, duplicate_descriptor, open_descriptor,
+    set_attachment,
+};
 pub use input::RequestInput;
 pub use path_text::parent as dirname_parent;
+pub use request::new_resource;
 pub use request::{request_input, set_request, track_standard};
+pub use terminal::{stream_kind, with_descriptor};
 pub use whole_write::append_log;
 pub use wrapper::standard_constants;
 
@@ -84,6 +93,7 @@ impl Extension for Streams {
         source_tools::register(registry);
         stream_copy::register(registry);
         stream_options::register(registry);
+        select::register(registry);
         temporary::register(registry);
         transfer::register(registry);
         whole_file::register(registry);

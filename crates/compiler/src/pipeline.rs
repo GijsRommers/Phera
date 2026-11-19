@@ -73,7 +73,7 @@ fn compile_program(
     native_functions: Option<&crate::NativeFunctions<'_>>,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let ast = parsed.map_err(|error| {
-        if error.is_compile_error() || error.is_backtick_operator() {
+        if error.is_compile_error() {
             return CompileError {
                 message: error.message,
                 file: file.into(),

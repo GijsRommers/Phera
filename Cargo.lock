@@ -467,6 +467,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "command-fds"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b60b5124979fccd9addd89d8b97a1d6eebb4950694520c75ddd722535ea443f"
+dependencies = [
+ "nix",
+ "thiserror",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2195,6 +2205,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-process"
+version = "0.1.0"
+dependencies = [
+ "command-fds",
+ "nix",
+ "phera-ext-standard",
+ "phera-ext-streams",
+ "phera-extension-api",
+ "rustix",
+ "tokio",
+]
+
+[[package]]
 name = "phera-ext-random"
 version = "0.1.0"
 dependencies = [
@@ -2364,6 +2387,7 @@ dependencies = [
  "phera-ext-openssl",
  "phera-ext-pcre",
  "phera-ext-pdo",
+ "phera-ext-process",
  "phera-ext-random",
  "phera-ext-redis",
  "phera-ext-reflection",
