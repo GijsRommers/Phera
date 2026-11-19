@@ -67,20 +67,8 @@ impl DiagnosticReporter {
         self.suppression == 0
     }
 
-    /// Return output for the embedding VM, or retain it while capturing diagnostics.
-    pub(crate) fn report(
-        &mut self,
-        kind: &str,
-        message: &[u8],
-        file: &str,
-        line: usize,
-    ) -> Option<Vec<u8>> {
-        if !self.is_visible() && kind != "Fatal error" {
-            return None;
-        }
-        let mut bytes = format!("\n{kind}: ").into_bytes();
-        bytes.extend_from_slice(message);
-        bytes.extend_from_slice(format!(" in {file} on line {line}\n").as_bytes());
+    /// Captured diagnostics do not reach the script's output.
+    pub(super) fn display(&mut self, bytes: Vec<u8>) -> Option<Vec<u8>> {
         if let Some(capture) = &mut self.diagnostic_capture {
             capture.push(bytes);
             None

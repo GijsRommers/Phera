@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 phera-source.workspace = true
+chrono.workspace = true
 phera-value.workspace = true
 phera-extension-api.workspace = true
 tokio.workspace = true

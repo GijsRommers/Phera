@@ -17,8 +17,8 @@
 //!
 //! Some recorded options have partial effects. The assertion guard is checked
 //! after argument evaluation; bail and callback are only remembered.
-//! `display_errors=stderr` uses the normal diagnostic sink. The mbstring
-//! settings apply only to encodings and operations implemented by Phera.
+//! The mbstring settings apply only to encodings and operations implemented
+//! by Phera.
 //! The fiber stack size validates PHP's lower bound without allocating a
 //! native stack. PCRE settings use a separately compiled cache entry.
 
@@ -34,6 +34,7 @@ mod effects;
 #[derive(Default)]
 pub(crate) struct IniOverrides {
     values: Vec<Option<PhpString>>,
+    startup: Vec<Option<PhpString>>,
     reporting_number: Option<i64>,
     precision: Option<i32>,
     serialization_precision: Option<i32>,
@@ -81,7 +82,34 @@ impl Vm {
         self.ini_overrides
             .get(slot)
             .cloned()
-            .or_else(|| entry.default.as_deref().map(PhpString::from))
+            .or_else(|| self.ini_global(slot, entry))
+    }
+
+    fn ini_global(&self, slot: usize, entry: &IniDefinition) -> Option<PhpString> {
+        if let Some(Some(value)) = self.ini_overrides.startup.get(slot) {
+            return Some(value.clone());
+        }
+        self.web_diagnostic_default(entry.name)
+            .or(entry.default.as_deref())
+            .map(PhpString::from)
+    }
+
+    /// Apply process startup values as the baseline for this request's INI.
+    pub fn configure_ini(&mut self, settings: &[(String, String)]) {
+        for (name, value) in settings {
+            let Some((slot, entry)) = self.registry.ini_entry(name.as_bytes()) else {
+                continue;
+            };
+            if self
+                .ini_apply("startup", entry, Some(value.as_bytes()))
+                .unwrap_or(false)
+            {
+                if self.ini_overrides.startup.len() <= slot {
+                    self.ini_overrides.startup.resize(slot + 1, None);
+                }
+                self.ini_overrides.startup[slot] = Some(value.as_str().into());
+            }
+        }
     }
 
     pub(crate) fn ini_set(
@@ -113,8 +141,12 @@ impl Vm {
         if !entry.access.runtime() || !modified {
             return Ok(());
         }
-        if self.ini_apply("ini_restore", entry, entry.default.as_deref())?
-            && let Some(value) = self.ini_overrides.values.get_mut(slot)
+        let original = self.ini_global(slot, entry);
+        if self.ini_apply(
+            "ini_restore",
+            entry,
+            original.as_ref().map(PhpString::as_bytes),
+        )? && let Some(value) = self.ini_overrides.values.get_mut(slot)
         {
             *value = None;
         }
@@ -151,10 +183,9 @@ impl Vm {
                 .ini_local(slot, entry)
                 .map_or(Value::Null, Value::String);
             let value = if details {
-                let global = entry
-                    .default
-                    .as_deref()
-                    .map_or_else(|| local.clone(), Value::from);
+                let global = self
+                    .ini_global(slot, entry)
+                    .map_or_else(|| local.clone(), Value::String);
                 let mut fields = PhpArray::new();
                 fields.insert(ArrayKey::str("global_value"), global);
                 fields.insert(ArrayKey::str("local_value"), local);

@@ -33,6 +33,15 @@ impl ResponseHead {
         }
     }
 
+    /// PHP chooses 500 for a fatal diagnostic when display is off and the
+    /// script has not chosen another response status.
+    pub fn fail_if_ok(state: &mut RequestState) {
+        let head = state.get_or_default::<Self>();
+        if head.status == 200 {
+            head.status = 500;
+        }
+    }
+
     /// Applies one `header()` line.
     ///
     /// Two forms are special in PHP. `HTTP/1.1 404 Not Found` sets the status

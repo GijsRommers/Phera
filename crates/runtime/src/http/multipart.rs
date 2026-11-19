@@ -59,12 +59,15 @@ pub(crate) fn boundary(content_type: &[u8]) -> Boundary {
     }
     match parameters_of(parameters)
         .into_iter()
-        .find(|(name, _)| name == "boundary")
+        .find(|(name, _, _)| name == "boundary")
     {
-        Some((_, value)) if value.len() > MAX_BOUNDARY_BYTES => {
+        Some((_, _, false)) => Boundary::Invalid(
+            "PHP Request Startup: Invalid boundary in multipart/form-data POST data",
+        ),
+        Some((_, value, true)) if value.len() > MAX_BOUNDARY_BYTES => {
             Boundary::Invalid("Boundary too large in multipart/form-data POST data")
         }
-        Some((_, value)) => Boundary::Valid(value),
+        Some((_, value, _)) => Boundary::Valid(value),
         None => Boundary::Invalid(
             "PHP Request Startup: Missing boundary in multipart/form-data POST data",
         ),
@@ -104,8 +107,8 @@ pub(crate) fn parts<'a>(body: &'a [u8], boundary: &[u8], cancelled: &AtomicBool)
         let parameter = |wanted: &str| {
             disposition
                 .iter()
-                .find(|(name, _)| name == wanted)
-                .map(|(_, value)| value.clone())
+                .find(|(name, _, _)| name == wanted)
+                .map(|(_, value, _)| value.clone())
         };
         let claimed_type = header(headers, b"content-type");
         parts.push(Part {
@@ -177,7 +180,7 @@ fn header<'a>(headers: &'a [u8], name: &[u8]) -> &'a [u8] {
 /// `form-data; name="a"; filename="b \"c\".txt"`. Keys come back in lower
 /// case. A value may stand in double or single quotes; inside them a
 /// backslash keeps the quote or backslash after it.
-fn parameters_of(value: &[u8]) -> Vec<(String, Vec<u8>)> {
+fn parameters_of(value: &[u8]) -> Vec<(String, Vec<u8>, bool)> {
     let mut parameters = Vec::new();
     let mut rest = value;
     while let Some(semicolon) = rest.iter().position(|&byte| byte == b';') {
@@ -191,15 +194,15 @@ fn parameters_of(value: &[u8]) -> Vec<(String, Vec<u8>)> {
         // As in PHP, a space before the `=` makes the key another key:
         // `name = "a"` names nothing.
         let key = String::from_utf8_lossy(rest[..equals].trim_ascii_start()).to_ascii_lowercase();
-        let (parsed, after) = parameter_value(&rest[equals + 1..]);
-        parameters.push((key, parsed));
+        let (parsed, after, closed) = parameter_value(&rest[equals + 1..]);
+        parameters.push((key, parsed, closed));
         rest = after;
     }
     parameters
 }
 
 /// One parameter value, quoted or bare, and the input after it.
-fn parameter_value(input: &[u8]) -> (Vec<u8>, &[u8]) {
+fn parameter_value(input: &[u8]) -> (Vec<u8>, &[u8], bool) {
     let input = input.trim_ascii_start();
     let quoted = input
         .split_first()
@@ -209,7 +212,7 @@ fn parameter_value(input: &[u8]) -> (Vec<u8>, &[u8]) {
             .iter()
             .position(|&byte| byte == b';')
             .unwrap_or(input.len());
-        return (input[..end].trim_ascii_end().to_vec(), &input[end..]);
+        return (input[..end].trim_ascii_end().to_vec(), &input[end..], true);
     };
     let mut value = Vec::new();
     let mut index = 0;
@@ -219,14 +222,14 @@ fn parameter_value(input: &[u8]) -> (Vec<u8>, &[u8]) {
                 value.push(next);
                 index += 2;
             }
-            _ if byte == quote => return (value, &quoted[index + 1..]),
+            _ if byte == quote => return (value, &quoted[index + 1..], true),
             _ => {
                 value.push(byte);
                 index += 1;
             }
         }
     }
-    (value, &[])
+    (value, &[], false)
 }
 
 /// Bound the work between cancellation checks. Adjacent windows share
@@ -326,9 +329,9 @@ mod tests {
         assert_eq!(
             spaced,
             [
-                ("name ".to_string(), b"a".to_vec()),
-                ("filename".to_string(), b"it".to_vec()),
-                ("x".to_string(), b"bare".to_vec()),
+                ("name ".to_string(), b"a".to_vec(), true),
+                ("filename".to_string(), b"it".to_vec(), true),
+                ("x".to_string(), b"bare".to_vec(), true),
             ]
         );
         assert_eq!(

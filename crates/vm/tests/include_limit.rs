@@ -2,7 +2,7 @@
 
 use phera_bytecode::CompiledUnit;
 use phera_extension_api::{LocalFuture, Registry};
-use phera_vm::{CodeLoader, Vm};
+use phera_vm::{CodeLoadError, CodeLoader, Vm};
 use std::{path::PathBuf, sync::Arc};
 
 /// Reuse one compiled unit to model an endlessly self-including file.
@@ -12,14 +12,16 @@ struct RecursiveLoader {
 }
 
 impl CodeLoader for RecursiveLoader {
-    fn load(&self, _path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, String>> {
+    fn load(&self, _path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
         Box::pin(async {
             if self
                 .loads
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                 >= 32
             {
-                return Err("bounded regression loader stopped".into());
+                return Err(CodeLoadError::Read(
+                    "bounded regression loader stopped".into(),
+                ));
             }
             Ok(self.unit.clone())
         })
@@ -44,8 +46,12 @@ async fn recursive_includes_obey_frame_limit() {
 struct PermissionLoader;
 
 impl CodeLoader for PermissionLoader {
-    fn load(&self, _path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, String>> {
-        Box::pin(async { Err("Permission denied (os error 13)".into()) })
+    fn load(&self, _path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
+        Box::pin(async {
+            Err(CodeLoadError::Read(
+                "Permission denied (os error 13)".into(),
+            ))
+        })
     }
 }
 
@@ -73,9 +79,9 @@ struct RecordingLoader {
 }
 
 impl CodeLoader for RecordingLoader {
-    fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, String>> {
+    fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
         self.paths.lock().unwrap().push(path);
-        Box::pin(async { Err("No such file or directory".into()) })
+        Box::pin(async { Err(CodeLoadError::Read("No such file or directory".into())) })
     }
 }
 

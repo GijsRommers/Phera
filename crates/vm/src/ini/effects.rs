@@ -31,12 +31,6 @@ impl Vm {
                     value.map_or(30719, |text| i64::from(integer(text) as i32));
                 self.ini_overrides.reporting_number = None;
             }
-            "display_errors" => {
-                self.error_handlers.display_errors = boolean(bytes)
-                    || bytes.eq_ignore_ascii_case(b"stdout")
-                    || bytes.eq_ignore_ascii_case(b"stderr");
-            }
-            "log_errors" => self.error_handlers.log_errors = boolean(bytes),
             "zend.exception_ignore_args" => {
                 self.error_handlers.trace_ignore_args = boolean(bytes);
             }

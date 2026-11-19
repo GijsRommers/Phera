@@ -5,7 +5,7 @@
 use std::collections::{HashMap, hash_map::Entry};
 
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeResult, PhpArray, Registry, Value,
+    ArrayKey, Context, FunctionEntry, NativeResult, PhpArray, Registry, RequestState, Value,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -25,7 +25,19 @@ impl Sapi {
 }
 
 #[derive(Default)]
-pub struct RequestHeaders(pub Vec<(String, Vec<u8>)>);
+pub struct RequestHeaders {
+    pub fields: Vec<(String, Vec<u8>)>,
+    pub method: String,
+    pub target: String,
+    pub protocol: String,
+}
+
+impl RequestHeaders {
+    pub fn request_line(state: &RequestState) -> Option<(&str, &str, &str)> {
+        let headers = state.get::<Self>()?;
+        Some((&headers.method, &headers.target, &headers.protocol))
+    }
+}
 
 pub fn register_web(registry: &mut Registry) {
     for function in ["getallheaders", "apache_request_headers"] {
@@ -46,7 +58,7 @@ fn request_headers(context: &mut dyn Context, _: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
     if let Some(headers) = context.state().get::<RequestHeaders>() {
         let mut values = HashMap::<String, Vec<u8>>::new();
-        for (name, value) in &headers.0 {
+        for (name, value) in &headers.fields {
             let lower = name.to_ascii_lowercase();
             let combined = match values.entry(lower) {
                 Entry::Occupied(entry) => {

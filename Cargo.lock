@@ -2056,6 +2056,7 @@ dependencies = [
 name = "phera-vm"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "phera-bytecode",
  "phera-compiler",
  "phera-ext-core",

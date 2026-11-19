@@ -55,6 +55,7 @@ mod control_flow;
 mod debug_info;
 mod declaration_diagnostics;
 mod default_autoload;
+mod diagnostic_output;
 mod diagnostic_reporter;
 mod diagnostics;
 mod dimension_instructions;
@@ -164,7 +165,16 @@ mod unsupported_items;
 
 /// Resolves PHP includes through the embedding runtime code cache.
 pub trait CodeLoader: Send + Sync {
-    fn load(&self, path: std::path::PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, String>>;
+    fn load(
+        &self,
+        path: std::path::PathBuf,
+    ) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>>;
+}
+
+/// A compile diagnostic ends inclusion. A read error can try another path.
+pub enum CodeLoadError {
+    Compile(phera_compiler::CompileError),
+    Read(String),
 }
 
 /// Receives each PHP output write while Vm also retains its output buffer.

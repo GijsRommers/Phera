@@ -6,7 +6,7 @@ use phera_bytecode::{IncludeKind, Reg};
 use phera_extension_api::{NativeError, WorkingDirectory};
 use phera_value::Value;
 
-use crate::Vm;
+use crate::{CodeLoadError, Vm, diagnostics::SourceLocation};
 
 impl Vm {
     /// Execute included top-level code with references to the caller scope.
@@ -119,18 +119,16 @@ impl Vm {
             } else {
                 candidate
             };
-            result = loader.load(candidate).await;
-            if let Err(error) = &result
-                && (error.contains("Fatal error:") || error.contains("Parse error:"))
-            {
-                self.out(error.as_bytes());
-                self.status = 255;
-                return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                    (),
-                ))));
-            }
-            if result.is_ok() {
-                break;
+            match loader.load(candidate).await {
+                Ok(unit) => return Ok(Ok(unit)),
+                Err(CodeLoadError::Read(message)) => result = Err(message),
+                Err(CodeLoadError::Compile(error)) => {
+                    self.report_compile_error(&error);
+                    self.status = 255;
+                    return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                        (),
+                    ))));
+                }
             }
         }
         Ok(result.map_err(|error| {
@@ -153,12 +151,19 @@ impl Vm {
                 if let Some(previous) = self.function_table.get(&key) {
                     let previous_line = self.code.function(previous).definition_line;
                     let previous_file = &self.code.unit(previous).file;
-                    let text = format!(
-                        "\nFatal error: Cannot redeclare function {}() (previously declared \
-                         in {}:{previous_line}) in {} on line {}\n",
-                        function.name, previous_file, unit.file, function.definition_line,
+                    let message = format!(
+                        "Cannot redeclare function {}() (previously declared in {}:{previous_line})",
+                        function.name, previous_file,
                     );
-                    self.out(text.as_bytes());
+                    self.report_diagnostic(
+                        64,
+                        "Fatal error",
+                        message.into(),
+                        SourceLocation {
+                            file: unit.file.clone(),
+                            line: function.definition_line as usize,
+                        },
+                    );
                     self.status = 255;
                     return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
                         (),

@@ -3,6 +3,7 @@
 
 mod scenarios {
     mod compression;
+    mod diagnostics;
     mod environment;
     mod limits;
     mod new_project;

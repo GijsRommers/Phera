@@ -26,7 +26,7 @@ use phera_ext_http::{RequestHeaders, ResponseHead, Sapi, UploadedFiles};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
 use phera_extension_api::{LocalFuture, Registry};
 use phera_value::{PhpArray, Value};
-use phera_vm::{CodeLoader, NativeTables, Vm};
+use phera_vm::{CodeLoadError, CodeLoader, NativeTables, Vm};
 
 use cache::CodeCache;
 
@@ -40,6 +40,8 @@ pub struct Runtime {
     web_registry: Arc<Registry>,
     cache: CodeCache,
     environment: Arc<Environment>,
+    ini: Option<Arc<[(String, String)]>>,
+    web_development: bool,
 }
 
 /// A web worker links the process's native definitions once on its own thread.
@@ -122,7 +124,16 @@ impl Runtime {
             registry: Arc::new(registry),
             cache: CodeCache::default(),
             environment: Arc::new(environment),
+            ini: None,
+            web_development: false,
         }
+    }
+
+    /// Sets startup INI values for scripts and the server's development mode.
+    pub fn with_ini(mut self, settings: Vec<(String, String)>, web_development: bool) -> Self {
+        self.ini = (!settings.is_empty()).then(|| settings.into());
+        self.web_development = web_development;
+        self
     }
 
     /// Compiles a file, or returns it from the cache.
@@ -147,8 +158,26 @@ impl Runtime {
         arguments: &[String],
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
-        let unit = self.compile_file(path.as_ref()).await?;
+        let compiled = self.compile_file(path.as_ref()).await;
         let mut vm = self.new_cli_vm();
+        if let Some(ini) = &self.ini {
+            vm.configure_ini(ini);
+        }
+        if let Some(sink) = sink {
+            vm.set_sink(sink);
+        }
+        let unit = match compiled {
+            Ok(unit) => unit,
+            Err(RuntimeError::Compile(error)) => {
+                vm.report_compile_error(&error);
+                return Ok(RunResult {
+                    executed_instructions: 0,
+                    output: vm.output,
+                    status: 255,
+                });
+            }
+            Err(error) => return Err(error),
+        };
         vm.set_args(arguments);
         let server =
             environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
@@ -156,9 +185,6 @@ impl Runtime {
         for (name, stream) in phera_ext_streams::standard_constants() {
             phera_ext_streams::track_standard(vm.state_mut(), &stream);
             vm.set_constant(name, stream);
-        }
-        if let Some(sink) = sink {
-            vm.set_sink(sink);
         }
         let status = vm.run(unit).await;
         Ok(RunResult {
@@ -196,12 +222,11 @@ impl Runtime {
         document_root: &Path,
         request: HttpRequest,
     ) -> HttpResponse {
-        let unit = match self.compile_file(script).await {
-            Ok(unit) => unit,
-            Err(RuntimeError::Read { .. }) => {
-                return HttpResponse::plain(404, "File not found.\n");
-            }
-            Err(error) => return HttpResponse::plain(500, error.to_string()),
+        let compiled = match self.compile_file(script).await {
+            Ok(unit) => Ok(unit),
+            Err(RuntimeError::Compile(error)) => Err(error),
+            Err(RuntimeError::Read { .. }) => return HttpResponse::plain(404, "File not found.\n"),
+            Err(_) => return HttpResponse::plain(500, ""),
         };
 
         // A form with files is read before the script starts, as in PHP,
@@ -227,8 +252,21 @@ impl Runtime {
             php_array(self.environment.iter()),
             form,
         );
-        *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders(request.headers);
+        *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders {
+            fields: request.headers,
+            method: request.method,
+            target: request.target,
+            protocol: request.protocol,
+        };
         vm.prepare_web_headers_with(ResponseHead::prepare);
+        vm.configure_web_diagnostics(
+            self.web_development,
+            RequestHeaders::request_line,
+            ResponseHead::fail_if_ok,
+        );
+        if let Some(ini) = &self.ini {
+            vm.configure_ini(ini);
+        }
         *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);
         phera_ext_streams::set_request(
             vm.state_mut(),
@@ -238,20 +276,21 @@ impl Runtime {
         if let Some(warning) = form_warning {
             vm.request_startup_warning(warning);
         }
-        let exit_status = vm.run(unit).await;
+        match compiled {
+            Ok(unit) => {
+                vm.run(unit).await;
+            }
+            Err(error) => {
+                vm.report_compile_error(&error);
+                ResponseHead::prepare(vm.state_mut());
+            }
+        }
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
-
-        let mut response = HttpResponse {
+        HttpResponse {
             status: head.status,
             headers: head.headers,
             body: std::mem::take(&mut vm.output),
-        };
-        // An uncaught error is a server error, unless the script had already
-        // chosen a status of its own.
-        if exit_status == 255 && response.status == 200 {
-            response.status = 500;
         }
-        response
     }
 
     /// [`Runtime::run_file`] for callers that are not async: starts a
@@ -307,11 +346,12 @@ fn single_threaded_executor() -> Result<tokio::runtime::Runtime, RuntimeError> {
 
 /// `include` and `require` load code through the same cache.
 impl CodeLoader for Runtime {
-    fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, String>> {
+    fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
         Box::pin(async move {
-            self.compile_file(path)
-                .await
-                .map_err(|error| error.to_string())
+            self.compile_file(path).await.map_err(|error| match error {
+                RuntimeError::Compile(error) => CodeLoadError::Compile(error),
+                error => CodeLoadError::Read(error.to_string()),
+            })
         })
     }
 }

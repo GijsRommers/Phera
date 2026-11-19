@@ -256,6 +256,21 @@ an existing nginx `fastcgi_pass`. A proxy reaches Phera over HTTP like any
 other upstream. This can be revisited if someone needs to keep an nginx
 configuration unchanged.
 
+#### PHP diagnostics
+
+`phera serve` starts with `display_errors` off and `log_errors` on. Fatal
+errors and uncaught exceptions produce an empty 500 if the script has not
+sent output or chosen another status. The server's standard error includes
+the request line. Use `phera serve --dev` to turn display on in a local
+development server. Command-line scripts display errors by default.
+
+Both commands accept `-d NAME=VALUE` before the script or document root.
+`error_reporting` selects which diagnostics are displayed and logged.
+`html_errors` controls display formatting, `display_startup_errors` controls
+display during request startup, and `error_log` can direct logging to a
+file. On the command line, `display_errors=stderr` sends plain diagnostics
+to standard error. In the web server it displays them in the response.
+
 ### 5.3 PHP file sessions
 
 `session_start()` keeps its settings, handler, original payload and live

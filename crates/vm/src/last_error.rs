@@ -2,7 +2,7 @@
 
 use phera_value::{ArrayKey, PhpArray, PhpString, Value};
 
-use crate::{Vm, diagnostics::SourceLocation};
+use crate::{Vm, diagnostic_output::DiagnosticPhase, diagnostics::SourceLocation};
 
 pub(crate) struct LastError {
     pub(crate) level: i64,
@@ -30,7 +30,8 @@ impl LastError {
 impl Vm {
     /// Reports a warning produced while PHP reads the request before running its script.
     pub fn request_startup_warning(&mut self, message: &str) {
-        self.report_diagnostic(
+        self.emit_diagnostic(
+            DiagnosticPhase::RequestStartup,
             2,
             "Warning",
             message.into(),
@@ -49,27 +50,7 @@ impl Vm {
         message: PhpString,
         location: SourceLocation,
     ) {
-        if self.error_handlers.reporting & level != 0 {
-            if self.error_handlers.log_errors && self.diagnostic_reporter.is_visible() {
-                use std::io::Write;
-
-                let mut log = std::io::stderr().lock();
-                let _ = write!(log, "PHP {kind}:  ");
-                let _ = log.write_all(message.as_bytes());
-                let _ = writeln!(log, " in {} on line {}", location.file, location.line);
-            }
-            if self.error_handlers.display_errors
-                && let Some(bytes) = self.diagnostic_reporter.report(
-                    kind,
-                    message.as_bytes(),
-                    &location.file,
-                    location.line,
-                )
-            {
-                self.out(&bytes);
-            }
-        }
-        self.record_last_error(level, message, location);
+        self.emit_diagnostic(DiagnosticPhase::Running, level, kind, message, location);
     }
 
     pub(crate) fn record_last_error(

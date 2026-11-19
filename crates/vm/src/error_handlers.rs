@@ -46,8 +46,6 @@ pub(crate) struct ErrorHandlers {
     pub(crate) pending: Vec<DiagnosticEvent>,
     pub(crate) reporting: i64,
     pub(crate) last_error: Option<crate::last_error::LastError>,
-    pub(crate) display_errors: bool,
-    pub(crate) log_errors: bool,
     pub(crate) trace_ignore_args: bool,
     /// PHP formats saved trace strings using the current request limit, not creation-time text.
     pub(crate) trace_string_limit: usize,
@@ -66,8 +64,6 @@ impl Default for ErrorHandlers {
             pending: Vec::new(),
             reporting: 30719,
             last_error: None,
-            display_errors: true,
-            log_errors: false,
             trace_ignore_args: false,
             trace_string_limit: 15,
         }

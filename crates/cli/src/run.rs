@@ -25,7 +25,12 @@ impl OutputSink for Stdout {
     }
 }
 
-pub(crate) fn script(script: &str, arguments: &[String], files: FileSelection) -> ExitCode {
+pub(crate) fn script(
+    script: &str,
+    arguments: &[String],
+    files: FileSelection,
+    ini: Vec<(String, String)>,
+) -> ExitCode {
     if !Path::new(script).is_file() {
         // PHP's own wording, on standard output as PHP prints it.
         println!("Could not open input file: {script}");
@@ -39,11 +44,10 @@ pub(crate) fn script(script: &str, arguments: &[String], files: FileSelection) -
             return ExitCode::FAILURE;
         }
     };
-    match Runtime::with_environment(loaded.environment).run_file_blocking(
-        script,
-        arguments,
-        Some(Box::new(Stdout)),
-    ) {
+    match Runtime::with_environment(loaded.environment)
+        .with_ini(ini, false)
+        .run_file_blocking(script, arguments, Some(Box::new(Stdout)))
+    {
         Ok(result) => {
             if std::env::var_os("PHERA_INSTRUCTION_COUNT").is_some() {
                 eprintln!("Executed instructions: {}", result.executed_instructions);
