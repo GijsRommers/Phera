@@ -29,9 +29,18 @@ foreach ([{entries}] as $name) {{
 }}
 "#
     );
-    let Some(expected) = oracle::run_php("runtime-extension-introspection", &source) else {
+    let Some(mut expected) = oracle::run_php("runtime-extension-introspection", &source) else {
         return;
     };
+    if level == phera_extension_api::LanguageLevel::Php86 {
+        // The PHP 8.6 compatibility build uses a PhpRedis branch whose module
+        // metadata reports RC1. Phera continues to report the 6.3.0 release.
+        for line in &mut expected {
+            if line == "redis:1:6.3.0RC1" {
+                *line = "redis:1:6.3.0".into();
+            }
+        }
+    }
     let unit =
         phera_compiler::compile_bytes_at(source.as_bytes(), "extension-probe.php", level).unwrap();
     let mut vm = runtime.new_vm(phera_ext_http::Sapi::Cli);
