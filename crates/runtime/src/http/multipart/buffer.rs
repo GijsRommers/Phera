@@ -1,20 +1,24 @@
 //! PHP reads multipart bodies from the SAPI in windows. After a failed parse,
 //! `file_get_contents('php://input')` can still read bytes beyond that window.
 
-pub(super) const FILL_UNIT: usize = 5120;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-pub(super) struct Buffer<'a> {
+use memchr::memmem::Finder;
+
+const FILL_UNIT: usize = 5120;
+
+pub(super) struct Buffer<'a, 'cancel> {
     body: &'a [u8],
-    capacity: usize,
+    cancelled: &'cancel AtomicBool,
     position: usize,
     buffered_end: usize,
 }
 
-impl<'a> Buffer<'a> {
-    pub(super) fn new(body: &'a [u8], boundary_length: usize) -> Self {
+impl<'a, 'cancel> Buffer<'a, 'cancel> {
+    pub(super) fn new(body: &'a [u8], cancelled: &'cancel AtomicBool) -> Self {
         Self {
             body,
-            capacity: FILL_UNIT.max(boundary_length + 6),
+            cancelled,
             position: 0,
             buffered_end: 0,
         }
@@ -25,10 +29,13 @@ impl<'a> Buffer<'a> {
     }
 
     fn fill(&mut self) {
-        self.buffered_end = (self.position + self.capacity).min(self.body.len());
+        self.buffered_end = (self.position + FILL_UNIT).min(self.body.len());
     }
 
     pub(super) fn line(&mut self) -> Option<&'a [u8]> {
+        if self.cancelled.load(Ordering::Relaxed) {
+            return None;
+        }
         self.next_line().or_else(|| {
             self.fill();
             self.next_line()
@@ -37,12 +44,12 @@ impl<'a> Buffer<'a> {
 
     fn next_line(&mut self) -> Option<&'a [u8]> {
         let available = &self.body[self.position..self.buffered_end];
-        if let Some(newline) = available.iter().position(|&byte| byte == b'\n') {
+        if let Some(newline) = memchr::memchr(b'\n', available) {
             self.position += newline + 1;
             let line = &available[..newline];
             return Some(line.strip_suffix(b"\r").unwrap_or(line));
         }
-        if available.len() == self.capacity {
+        if available.len() == FILL_UNIT {
             self.position += available.len();
             return Some(available);
         }
@@ -55,12 +62,13 @@ impl<'a> Buffer<'a> {
         let start = self.position;
         let mut end = start;
         let mut complete = false;
-        loop {
+        let finder = Finder::new(delimiter);
+        while !self.cancelled.load(Ordering::Relaxed) {
             if self.buffered_end - self.position < FILL_UNIT {
                 self.fill();
             }
             let available = &self.body[self.position..self.buffered_end];
-            let boundary = boundary_at(available, delimiter);
+            let boundary = boundary_at(available, delimiter, &finder);
             complete |= boundary.is_some_and(|index| available[index..].starts_with(delimiter));
             let length = boundary.unwrap_or(available.len()).min(FILL_UNIT - 1);
             if length == 0 {
@@ -81,13 +89,40 @@ impl<'a> Buffer<'a> {
     }
 }
 
-fn boundary_at(available: &[u8], delimiter: &[u8]) -> Option<usize> {
-    available.iter().enumerate().find_map(|(index, &byte)| {
-        if byte != b'\n' {
-            return None;
-        }
-        let remainder = &available[index..];
-        let length = remainder.len().min(delimiter.len());
-        (remainder[..length] == delimiter[..length]).then_some(index)
-    })
+fn boundary_at(available: &[u8], delimiter: &[u8], finder: &Finder<'_>) -> Option<usize> {
+    if let Some(index) = finder.find(available) {
+        return Some(index);
+    }
+    // A partial match can only start in the last delimiter-length bytes.
+    let tail = available
+        .len()
+        .saturating_sub(delimiter.len().saturating_sub(1));
+    memchr::memchr_iter(b'\n', &available[tail..])
+        .map(|index| tail + index)
+        .find(|&index| delimiter.starts_with(&available[index..]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn large_content_with_near_matches_uses_the_longest_boundary() {
+        let mut boundary = [b'a'; 70];
+        boundary[69] = b'b';
+        let delimiter = [b"\n--", &boundary[..]].concat();
+        let mut near_match = delimiter.clone();
+        near_match[72] = b'c';
+        let mut body = near_match.repeat((1024_usize * 1024).div_ceil(near_match.len()));
+        let length = body.len();
+        body.extend_from_slice(&delimiter);
+        let cancelled = AtomicBool::new(false);
+        let mut buffer = Buffer::new(&body, &cancelled);
+        let start = Instant::now();
+        let (content, complete) = buffer.content(&delimiter, None);
+        assert!(complete);
+        assert_eq!(content.len(), length);
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
 }

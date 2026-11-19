@@ -18,6 +18,9 @@ pub struct ServerConfig {
     /// The longest pause between two pieces of a request body. A client
     /// that stops in the middle of an upload is answered 408.
     pub body_idle_timeout: Duration,
+    /// Base time for the complete request head and body. Body bytes received
+    /// extend the original deadline in proportion to the bytes accepted.
+    pub request_read_timeout: Duration,
     /// The longest time a handler may take to answer a complete request,
     /// waiting included. After that the handler is stopped and the client
     /// is answered 504. `None` means no limit.
@@ -41,6 +44,7 @@ impl Default for ServerConfig {
             // after 60 seconds, so Phera waits longer than that.
             idle_timeout: Duration::from_secs(75),
             body_idle_timeout: Duration::from_secs(30),
+            request_read_timeout: Duration::from_secs(60),
             request_timeout: Some(Duration::from_secs(60)),
             max_connections_per_worker: 10_000,
             shutdown_timeout: Duration::from_secs(30),
@@ -55,6 +59,7 @@ pub(crate) struct ConnectionLimits {
     pub(crate) max_body_bytes: usize,
     pub(crate) idle_timeout: Duration,
     pub(crate) body_idle_timeout: Duration,
+    pub(crate) request_read_timeout: Duration,
     pub(crate) request_timeout: Option<Duration>,
 }
 
@@ -64,6 +69,7 @@ impl From<&ServerConfig> for ConnectionLimits {
             max_body_bytes: config.max_body_bytes,
             idle_timeout: config.idle_timeout,
             body_idle_timeout: config.body_idle_timeout,
+            request_read_timeout: config.request_read_timeout,
             request_timeout: config.request_timeout,
         }
     }

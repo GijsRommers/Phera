@@ -43,6 +43,7 @@ pub struct Runtime {
     web_cache: CodeCache,
     environment: Arc<Environment>,
     startup_ini: Arc<[(String, String)]>,
+    web_development: bool,
     no_process: bool,
 }
 
@@ -145,6 +146,7 @@ impl Runtime {
             registry,
             environment: Arc::new(environment),
             startup_ini: Arc::new([]),
+            web_development: false,
             no_process: false,
         }
     }
@@ -152,6 +154,12 @@ impl Runtime {
     /// Settings supplied by the host before each request begins.
     pub fn with_startup_ini(mut self, settings: Vec<(String, String)>) -> Self {
         self.startup_ini = settings.into();
+        self
+    }
+
+    /// Start web requests with display enabled for local development.
+    pub fn with_web_development(mut self, enabled: bool) -> Self {
+        self.web_development = enabled;
         self
     }
 
@@ -176,8 +184,23 @@ impl Runtime {
         arguments: &[String],
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
-        let unit = self.cache.compile(path.as_ref().to_path_buf()).await?;
+        let compiled = self.cache.compile(path.as_ref().to_path_buf()).await;
         let mut vm = self.new_cli_vm();
+        if let Some(sink) = sink {
+            vm.set_sink(sink);
+        }
+        let unit = match compiled {
+            Ok(unit) => unit,
+            Err(RuntimeError::Compile(error)) => {
+                vm.report_entry_compile_failure(error);
+                return Ok(RunResult {
+                    executed_instructions: 0,
+                    output: vm.output,
+                    status: 255,
+                });
+            }
+            Err(error) => return Err(error),
+        };
         vm.set_args(arguments);
         let server =
             environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
@@ -185,9 +208,6 @@ impl Runtime {
         for (name, stream) in phera_ext_streams::standard_constants() {
             phera_ext_streams::track_standard(vm.state_mut(), &stream);
             vm.set_constant(name, stream);
-        }
-        if let Some(sink) = sink {
-            vm.set_sink(sink);
         }
         let status = vm.run(unit).await;
         Ok(RunResult {
@@ -225,33 +245,25 @@ impl Runtime {
         document_root: &Path,
         request: HttpRequest,
     ) -> HttpResponse {
-        let unit = match self.web_cache.compile(script.to_path_buf()).await {
-            Ok(unit) => unit,
-            Err(RuntimeError::Read { .. }) => {
-                return HttpResponse::plain(404, "File not found.\n");
-            }
-            Err(RuntimeError::Compile(error)) => {
-                let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
-                vm.report_entry_compile_failure(error);
-                let mut response = HttpResponse::plain(500, "");
-                response.body = vm.output;
-                return response;
-            }
-            Err(error) => return HttpResponse::plain(500, error.to_string()),
+        let compiled = match self.web_cache.compile(script.to_path_buf()).await {
+            Ok(unit) => Ok(unit),
+            Err(RuntimeError::Compile(error)) => Err(error),
+            Err(RuntimeError::Read { .. }) => return HttpResponse::plain(404, "File not found.\n"),
+            Err(_) => return HttpResponse::plain(500, ""),
         };
 
         // A form with files is read before the script starts, as in PHP,
         // and its files are written on a thread that may block. PHP gives
         // such a request no raw body to read afterwards.
         let mut request = request;
-        let form = match http::form_boundary(&request) {
-            Some(boundary) => {
+        let boundary = http::form_boundary(&request);
+        let (form, form_warning) = match boundary {
+            http::Boundary::Valid(boundary) => {
                 let body = std::mem::take(&mut request.body);
-                tokio::task::spawn_blocking(move || http::receive_form(&body, &boundary))
-                    .await
-                    .ok()
+                (http::receive_form(body, boundary).await, None)
             }
-            None => None,
+            http::Boundary::Invalid(warning) => (None, Some(warning)),
+            http::Boundary::OtherMediaType => (None, None),
         };
 
         let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
@@ -267,8 +279,14 @@ impl Runtime {
             && request
                 .header("Content-Type")
                 .is_some_and(|content_type| !http::is_multipart(content_type));
-        *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders(request.headers);
+        *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders {
+            fields: request.headers,
+            method: request.method,
+            target: request.target,
+            protocol: request.protocol,
+        };
         vm.prepare_web_headers_with(ResponseHead::prepare, ResponseHead::set_error_status);
+        vm.configure_web_diagnostics(self.web_development, RequestHeaders::request_line);
         *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);
         phera_ext_streams::set_request(
             vm.state_mut(),
@@ -278,25 +296,24 @@ impl Runtime {
         if buffered_post && let Some(input) = phera_ext_streams::request_input(vm.state_mut()) {
             input.mark_post_read();
         }
-        let exit_status = vm.run(unit).await;
-        let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
-
-        // What the script did not move is deleted, as PHP does.
-        if let Some(uploads) = vm.state_mut().take::<UploadedFiles>() {
-            uploads.cleanup().await;
+        if let Some(warning) = form_warning {
+            vm.request_startup_warning(warning);
         }
-
-        let mut response = HttpResponse {
+        match compiled {
+            Ok(unit) => {
+                vm.run(unit).await;
+            }
+            Err(error) => {
+                vm.report_entry_compile_failure(error);
+                ResponseHead::prepare(vm.state_mut());
+            }
+        }
+        let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
+        HttpResponse {
             status: head.status,
             headers: head.headers,
             body: std::mem::take(&mut vm.output),
-        };
-        // An uncaught error is a server error, unless the script had already
-        // chosen a status of its own.
-        if exit_status == 255 && response.status == 200 && !vm.timed_out() {
-            response.status = 500;
         }
-        response
     }
 
     /// [`Runtime::run_file`] for callers that are not async: starts a

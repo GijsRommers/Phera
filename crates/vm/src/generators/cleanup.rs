@@ -201,7 +201,7 @@ impl Vm {
             self.native_callback_sites.pop();
         }
         self.closing_generator = previous;
-        self.diagnostic_reporter.restore_silence(caller_silence);
+        self.restore_silence(caller_silence);
         if self.call_stack.depth() > stop {
             self.finish_return_value(Value::Null, stop)?;
         }

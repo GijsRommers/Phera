@@ -57,7 +57,7 @@ fn content_type(context: &mut dyn Context) -> Result<Vec<u8>, NativeError> {
         .state()
         .get::<RequestHeaders>()
         .into_iter()
-        .flat_map(|headers| &headers.0)
+        .flat_map(|headers| &headers.fields)
         .filter_map(|(name, value)| name.eq_ignore_ascii_case("Content-Type").then_some(value));
     let Some(first) = values.next() else {
         return Err(NativeError::throw(
@@ -146,13 +146,9 @@ async fn parse_multipart(
     };
     let range = input.read_multipart();
     let reserved = range.clone();
-    let bytes = input.bytes().clone();
-    let mut form =
-        tokio::task::spawn_blocking(move || uploads::receive(&bytes[range], &boundary, limits))
-            .await
-            .map_err(|error| {
-                NativeError::error(format!("Unable to parse request body: {error}"))
-            })?;
+    let mut form = uploads::receive(input.bytes().clone(), range, boundary, limits)
+        .await
+        .map_err(|error| NativeError::error(format!("Unable to parse request body: {error}")))?;
     let issue = form.issue.take();
     input.finish_multipart(reserved, form.consumed);
     let (post, files, temporary) = form.into_variables();

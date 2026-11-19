@@ -2,7 +2,7 @@
 
 use phera_extension_api::{ArrayKey, Context, NativeError, PhpArray, PhpString, Value};
 
-use super::{Decoder, Failure, Graph, Options, Reader, has_wire_tags};
+use super::{Decoder, Failure, Graph, Reader, has_wire_tags, options};
 
 pub enum Decoded {
     Complete,
@@ -86,7 +86,7 @@ async fn decoder<'a>(
         graph: Graph::default(),
         frames: Vec::new(),
         delayed: Vec::new(),
-        options: Options::read(context, None).await?,
+        options: options::read(context, None).await?,
         last_class: None,
         tracks_references: has_wire_tags(bytes, &[b"R:", b"r:", b"C:"]),
     })

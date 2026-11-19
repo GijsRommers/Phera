@@ -48,6 +48,17 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 `phera <command> --help` lists the options. There is no formatter and no test
 runner yet.
 
+### Serving a site
+
+Run `phera serve public` to serve a document root. PHP diagnostics, including
+fatal backtraces, go to the server log by default. Use `phera serve --dev public`
+to display diagnostics in responses during local development.
+
+`--request-read-timeout SECONDS` sets the initial time budget for receiving
+headers and the body. It defaults to 60 seconds and gains one second for every
+16 KiB of body data received. If the budget runs out, the server returns HTTP 408
+and closes the connection.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,

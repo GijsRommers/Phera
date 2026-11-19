@@ -21,7 +21,11 @@
 
 mod buffer;
 
-use buffer::{Buffer, FILL_UNIT};
+use std::sync::atomic::AtomicBool;
+
+use buffer::Buffer;
+
+const MAX_BOUNDARY_BYTES: usize = 70;
 
 /// Names and headers of the part currently being read.
 pub(super) struct PartHeaders {
@@ -43,24 +47,41 @@ enum MimeHeader {
     ContentType,
 }
 
-/// The boundary of a multipart POST that PHP would parse on startup.
-pub(super) fn boundary(content_type: &[u8]) -> Option<Vec<u8>> {
-    super::is_multipart(content_type)
-        .then(|| explicit_boundary(content_type).ok())
-        .flatten()
-        .filter(|boundary| !boundary.is_empty())
-        .map(<[u8]>::to_vec)
+/// How the Content-Type header applies to PHP's multipart startup reader.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Boundary {
+    OtherMediaType,
+    Valid(Vec<u8>),
+    Invalid(&'static str),
 }
 
-pub(super) struct Multipart<'a> {
-    buffer: Buffer<'a>,
+pub(super) fn boundary(content_type: &[u8]) -> Boundary {
+    if !super::is_multipart(content_type) {
+        return Boundary::OtherMediaType;
+    }
+    match explicit_boundary(content_type) {
+        Ok(boundary) => Boundary::Valid(boundary.to_vec()),
+        Err(BoundaryError::Missing) => Boundary::Invalid(
+            "PHP Request Startup: Missing boundary in multipart/form-data POST data",
+        ),
+        Err(BoundaryError::Invalid) => Boundary::Invalid(
+            "PHP Request Startup: Invalid boundary in multipart/form-data POST data",
+        ),
+        Err(BoundaryError::TooLarge) => {
+            Boundary::Invalid("Boundary too large in multipart/form-data POST data")
+        }
+    }
+}
+
+pub(super) struct Multipart<'a, 'cancel> {
+    buffer: Buffer<'a, 'cancel>,
     delimiter: Vec<u8>,
 }
 
-impl<'a> Multipart<'a> {
-    pub(super) fn new(body: &'a [u8], boundary: &[u8]) -> Self {
+impl<'a, 'cancel> Multipart<'a, 'cancel> {
+    pub(super) fn new(body: &'a [u8], boundary: &[u8], cancelled: &'cancel AtomicBool) -> Self {
         Self {
-            buffer: Buffer::new(body, boundary.len()),
+            buffer: Buffer::new(body, cancelled),
             delimiter: [b"\n--", boundary].concat(),
         }
     }
@@ -179,8 +200,8 @@ fn parameters_of(value: &[u8]) -> Vec<(String, Vec<u8>)> {
 /// PHP searches for "boundary" anywhere in the header, then reads the value
 /// through the next quote, semicolon or comma, depending on its opening byte.
 pub(super) fn explicit_boundary(content_type: &[u8]) -> Result<&[u8], BoundaryError> {
-    let start = find(content_type, b"boundary")
-        .or_else(|| find(&content_type.to_ascii_lowercase(), b"boundary"))
+    let start = memchr::memmem::find(content_type, b"boundary")
+        .or_else(|| memchr::memmem::find(&content_type.to_ascii_lowercase(), b"boundary"))
         .ok_or(BoundaryError::Missing)?;
     let value = content_type[start..]
         .iter()
@@ -199,7 +220,7 @@ pub(super) fn explicit_boundary(content_type: &[u8]) -> Result<&[u8], BoundaryEr
             .next()
             .unwrap_or_default()
     };
-    if boundary.len() > FILL_UNIT - 4 {
+    if boundary.len() > MAX_BOUNDARY_BYTES {
         return Err(BoundaryError::TooLarge);
     }
     Ok(boundary)
@@ -246,15 +267,6 @@ fn parameter_value(input: &[u8]) -> (Vec<u8>, &[u8]) {
     (value, &[])
 }
 
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || haystack.len() < needle.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,7 +281,8 @@ mod tests {
     }
 
     fn parts<'a>(body: &'a [u8], boundary: &[u8]) -> Vec<Part<'a>> {
-        let mut form = Multipart::new(body, boundary);
+        let cancelled = AtomicBool::new(false);
+        let mut form = Multipart::new(body, boundary, &cancelled);
         let mut parts = Vec::new();
         while let Some(headers) = form.next_headers() {
             let Disposition::Form { name, filename } = headers.disposition else {
@@ -292,20 +305,26 @@ mod tests {
         let boundary_of = |header: &str| boundary(header.as_bytes());
         assert_eq!(
             boundary_of("multipart/form-data; boundary=XyZ"),
-            Some(b"XyZ".to_vec())
+            Boundary::Valid(b"XyZ".to_vec())
         );
         assert_eq!(
             boundary_of("MULTIPART/FORM-DATA; charset=utf-8; BOUNDARY=\"X y\""),
-            Some(b"X y".to_vec())
+            Boundary::Valid(b"X y".to_vec())
+        );
+        assert!(matches!(
+            boundary_of("multipart/form-data"),
+            Boundary::Invalid(_)
+        ));
+        assert_eq!(
+            boundary_of("multipart/form-data; boundary="),
+            Boundary::Valid(Vec::new())
         );
         for other in [
-            "multipart/form-data",
-            "multipart/form-data; boundary=",
             "multipart/mixed; boundary=XyZ",
             "application/x-www-form-urlencoded",
             "",
         ] {
-            assert_eq!(boundary_of(other), None, "{other}");
+            assert_eq!(boundary_of(other), Boundary::OtherMediaType, "{other}");
         }
     }
 

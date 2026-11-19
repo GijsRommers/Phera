@@ -25,6 +25,7 @@ pub(crate) struct Output {
     prepare_headers: Option<fn(&mut RequestState)>,
     set_error_status: Option<fn(&mut RequestState)>,
     web: bool,
+    pub(crate) web_diagnostics: Option<crate::diagnostic_output::WebDiagnostics>,
     pub(crate) origin: Option<SourceLocation>,
     queued_origin: Option<SourceLocation>,
     pub(crate) chunk_caller: Option<&'static str>,
@@ -40,6 +41,7 @@ impl Output {
             prepare_headers: None,
             set_error_status: None,
             web: false,
+            web_diagnostics: None,
             origin: None,
             queued_origin: None,
             chunk_caller: None,
@@ -80,8 +82,13 @@ impl Vm {
     }
 
     pub(crate) fn set_hidden_fatal_status(&mut self) {
-        if !self.error_handlers.display_errors
-            && self.output_writer.origin.is_none()
+        if self.output_writer.web && !self.display_errors_enabled() {
+            self.set_unsent_error_status();
+        }
+    }
+
+    pub(super) fn set_unsent_error_status(&mut self) {
+        if self.output_writer.origin.is_none()
             && let Some(set_status) = self.output_writer.set_error_status
         {
             set_status(&mut self.state);

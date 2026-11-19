@@ -140,6 +140,7 @@ rustix = { version = "1", features = ["fs", "param", "process", "system", "termi
 rustix-libc-wrappers = { version = "0.1.1", features = ["process"] }
 sysinfo = { version = "0.39.3", default-features = false, features = ["system"] }
 tempfile = "3"
+memchr = "2"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }
