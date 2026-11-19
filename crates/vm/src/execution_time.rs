@@ -7,7 +7,7 @@ use std::future::{Future, poll_fn};
 use std::rc::Rc;
 use std::time::Duration;
 
-use phera_extension_api::{NativeError, Unwind};
+use phera_extension_api::NativeError;
 use rustix::time::{ClockId, clock_gettime};
 
 use crate::Vm;
@@ -18,7 +18,7 @@ pub(crate) struct ExecutionTime {
     charged: Cell<Duration>,
     started: Cell<Option<Duration>>,
     polling: Cell<bool>,
-    timeout_http_failure: Cell<Option<bool>>,
+    timed_out: Cell<bool>,
 }
 
 impl ExecutionTime {
@@ -48,7 +48,9 @@ impl ExecutionTime {
             self.started
                 .set((self.seconds.get() > 0).then(thread_cpu_time));
             let result = future.as_mut().poll(context);
-            self.charge();
+            if result.is_pending() {
+                self.charge();
+            }
             self.started.set(None);
             self.polling.set(false);
             result
@@ -79,21 +81,19 @@ impl Vm {
             location.line = line as usize;
         }
         let suffix = if seconds == 1 { "" } else { "s" };
-        self.execution_time.timeout_http_failure.set(Some(
-            !self.error_handlers.display_errors && self.output_writer.origin.is_none(),
-        ));
+        self.execution_time.timed_out.set(true);
+        self.set_hidden_fatal_status();
         self.mark_timed_out_objects();
-        self.report_fatal(
+        Err(self.fatal_error(
             1,
             format!("Maximum execution time of {seconds} second{suffix} exceeded"),
             location,
-        );
-        Err(NativeError::Unwind(Unwind(Box::new(()))))
+        ))
     }
 
-    /// A hidden fatal timeout can set HTTP 500 only before the response is committed.
-    pub fn timeout_http_failure(&self) -> Option<bool> {
-        self.execution_time.timeout_http_failure.get()
+    /// Timeouts decide their HTTP response before entering shutdown.
+    pub fn timed_out(&self) -> bool {
+        self.execution_time.timed_out.get()
     }
 }
 

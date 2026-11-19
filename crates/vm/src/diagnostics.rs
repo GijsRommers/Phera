@@ -92,8 +92,13 @@ impl Vm {
                 self.status = 255;
             }
             NativeError::Unwind(state) => {
-                if let Ok(thrown) = state.0.downcast::<crate::exceptions::Thrown>() {
-                    self.report_throwable(&thrown.object);
+                match state.0.downcast::<crate::last_error::FatalDiagnostic>() {
+                    Ok(diagnostic) => self.report_prepared_fatal(*diagnostic),
+                    Err(state) => {
+                        if let Ok(thrown) = state.downcast::<crate::exceptions::Thrown>() {
+                            self.report_throwable(&thrown.object);
+                        }
+                    }
                 }
             }
         }

@@ -19,12 +19,12 @@ pub(crate) struct TraceOptions {
 
 impl Vm {
     /// Capture before a user error handler runs, or before fatal unwinding releases frames.
-    pub(crate) fn capture_fatal_trace(
+    pub(crate) fn fatal_trace(
         &mut self,
         native: Option<&crate::error_traces::NativeTrace>,
         location: &crate::diagnostics::SourceLocation,
-    ) {
-        self.error_handlers.fatal_trace = if self.error_handlers.fatal_error_backtraces {
+    ) -> Option<Value> {
+        if self.error_handlers.fatal_error_backtraces {
             let arguments = !self.error_handlers.trace_ignore_args;
             let mut trace = PhpArray::new();
             if let Some(native) = native {
@@ -39,7 +39,7 @@ impl Vm {
             Some(Value::from(self.capture_trace(trace, false, arguments, 0)))
         } else {
             None
-        };
+        }
     }
 
     pub(crate) fn exception_location(&self) -> (Value, usize) {

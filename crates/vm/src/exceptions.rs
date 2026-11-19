@@ -192,7 +192,7 @@ impl Vm {
                 else {
                     return internal_error!("declaration diagnostic payload");
                 };
-                self.report_fatal(
+                return self.fatal_error(
                     64,
                     failure.message,
                     crate::diagnostics::SourceLocation {
@@ -200,7 +200,6 @@ impl Vm {
                         line: failure.line,
                     },
                 );
-                return NativeError::Unwind(phera_extension_api::Unwind(Box::new(())));
             }
             Err(error) => {
                 if matches!(&error, NativeError::Unwind(payload) if payload.0.is::<Thrown>()) {

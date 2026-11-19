@@ -1,5 +1,6 @@
 //! `error_clear_last(); var_dump(error_get_last());` prints NULL until the next diagnostic.
 
+use phera_extension_api::{NativeError, Unwind};
 use phera_value::{ArrayKey, PhpArray, PhpString, Value};
 
 use crate::{Vm, diagnostics::SourceLocation};
@@ -8,6 +9,14 @@ pub(crate) struct LastError {
     pub(crate) level: i64,
     pub(crate) message: PhpString,
     pub(crate) location: SourceLocation,
+}
+
+/// A bailout may cross a native callback before the default handler can write its output.
+pub(crate) struct FatalDiagnostic {
+    level: i64,
+    message: PhpString,
+    location: SourceLocation,
+    trace: Option<Value>,
 }
 
 impl LastError {
@@ -37,8 +46,69 @@ impl Vm {
         message: impl Into<PhpString>,
         location: SourceLocation,
     ) {
-        self.capture_fatal_trace(None, &location);
-        self.report_current_diagnostic(level, "Fatal error", message.into(), location);
+        let diagnostic = self.prepare_fatal(level, message.into(), location, None);
+        self.report_prepared_fatal(diagnostic);
+    }
+
+    pub(crate) fn fatal_error(
+        &mut self,
+        level: i64,
+        message: impl Into<PhpString>,
+        location: SourceLocation,
+    ) -> NativeError {
+        NativeError::Unwind(Unwind(Box::new(self.prepare_fatal(
+            level,
+            message.into(),
+            location,
+            None,
+        ))))
+    }
+
+    pub(crate) fn fatal_native_error(
+        &mut self,
+        level: i64,
+        message: impl Into<PhpString>,
+        name: &str,
+        arguments: &[Value],
+    ) -> NativeError {
+        let location = self.location();
+        let native = self
+            .error_handlers
+            .fatal_error_backtraces
+            .then(|| crate::error_traces::NativeTrace::new(name, arguments));
+        NativeError::Unwind(Unwind(Box::new(self.prepare_fatal(
+            level,
+            message.into(),
+            location,
+            native.as_ref(),
+        ))))
+    }
+
+    fn prepare_fatal(
+        &mut self,
+        level: i64,
+        message: PhpString,
+        location: SourceLocation,
+        native: Option<&crate::error_traces::NativeTrace>,
+    ) -> FatalDiagnostic {
+        let trace = self.fatal_trace(native, &location);
+        FatalDiagnostic {
+            level,
+            message,
+            location,
+            trace,
+        }
+    }
+
+    pub(crate) fn report_prepared_fatal(&mut self, diagnostic: FatalDiagnostic) {
+        self.error_handlers.fatal_trace = diagnostic.trace;
+        self.report_current_diagnostic(
+            diagnostic.level,
+            "Fatal error",
+            diagnostic.message,
+            diagnostic.location,
+        );
+        self.fiber_bailout = true;
         self.status = 255;
     }
 

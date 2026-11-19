@@ -62,7 +62,10 @@ fn a_hidden_timeout_sets_an_http_error_status() {
     let served = Served::start_in(
         "hidden-php-execution-time",
         1,
-        &[("spin.php", "<?php while (true) {}")],
+        &[(
+            "spin.php",
+            "<?php register_shutdown_function(fn () => print http_response_code()); while (true) {}",
+        )],
         ".",
         &[
             "--request-timeout",
@@ -73,7 +76,7 @@ fn a_hidden_timeout_sets_an_http_error_status() {
             "max_execution_time=1",
         ],
     );
-    assert_eq!(served.get("/spin.php"), (500, String::new()));
+    assert_eq!(served.get("/spin.php"), (500, "500".to_owned()));
 }
 
 #[test]

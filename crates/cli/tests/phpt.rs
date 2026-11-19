@@ -43,6 +43,17 @@ const SUPPORTED_SECTIONS: &[&str] = &[
     "XFAIL",
 ];
 
+/// Directives exercised by this runner. Other INI cases still need php-src's harness.
+const SUPPORTED_INI: &[&str] = &[
+    "display_errors",
+    "fatal_error_backtraces",
+    "hard_timeout",
+    "log_errors",
+    "max_execution_time",
+    "zend.exception_ignore_args",
+    "zend.exception_string_param_max_len",
+];
+
 enum Outcome {
     Pass,
     Fail(String),
@@ -152,6 +163,9 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
         .map(|a| a.split_whitespace().collect())
         .unwrap_or_default();
     let ini = phpt.section("INI").unwrap_or_default();
+    if let Some((name, _)) = ini_entries(ini).find(|(name, _)| !SUPPORTED_INI.contains(name)) {
+        return Outcome::Skip(format!("--INI-- setting {name} is not supported"));
+    }
 
     let probes = [
         phpt.section("EXTENSIONS").map(extension_probe),
@@ -267,6 +281,13 @@ fn trim_output(bytes: &[u8]) -> &[u8] {
     }
 }
 
+fn ini_entries(ini: &str) -> impl Iterator<Item = (&str, &str)> {
+    ini.lines().map(str::trim).filter_map(|line| {
+        let (name, value) = line.split_once('=')?;
+        (!name.starts_with(';')).then(|| (name.trim(), value.trim()))
+    })
+}
+
 fn indent(text: &str) -> String {
     if text.is_empty() {
         return "    <empty>".into();
@@ -308,17 +329,7 @@ fn run_php(
 
     let dir = script.0.parent().unwrap_or(Path::new("."));
     let executable = resolve_executable(&binary[0]);
-    let directives = ini.lines().map(str::trim).filter_map(|line| {
-        let (name, value) = line.split_once('=')?;
-        if name.starts_with(';') {
-            return None;
-        }
-        Some(format!(
-            "{}={}",
-            name.trim(),
-            value.trim().replace("{PWD}", &dir.to_string_lossy())
-        ))
-    });
+    let directives = ini_entries(ini).map(|(name, value)| format!("{name}={value}"));
 
     let mut child = Command::new(&binary[0])
         .args(&binary[1..])

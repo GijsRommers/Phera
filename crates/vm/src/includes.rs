@@ -151,17 +151,14 @@ impl Vm {
                         "Cannot redeclare function {}() (previously declared in {previous_file}:{previous_line})",
                         function.name,
                     );
-                    self.report_fatal(
+                    return Err(self.fatal_error(
                         64,
                         message,
                         SourceLocation {
                             file: unit.file.clone(),
                             line: function.definition_line as usize,
                         },
-                    );
-                    return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                        (),
-                    ))));
+                    ));
                 }
                 let main = self.code.load(unit);
                 let index = self.code.declared(main, id.index());

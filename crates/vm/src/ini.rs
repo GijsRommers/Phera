@@ -34,6 +34,7 @@ mod effects;
 pub(crate) struct IniOverrides {
     startup: Vec<Option<PhpString>>,
     values: Vec<Option<PhpString>>,
+    web_execution_time: bool,
     reporting_number: Option<i64>,
     precision: Option<i32>,
     serialization_precision: Option<i32>,
@@ -53,6 +54,12 @@ impl IniOverrides {
 }
 
 impl Vm {
+    /// The web SAPI changes the default without allocating an INI override table.
+    pub fn use_web_execution_time(&mut self) {
+        self.ini_overrides.web_execution_time = true;
+        self.execution_time.restart(30);
+    }
+
     /// Install a SAPI setting before running PHP. Runtime writes can restore it.
     pub fn set_startup_ini(&mut self, name: &str, value: &str) {
         let Some((slot, entry)) = self.registry.ini_entry(name.as_bytes()) else {
@@ -111,7 +118,13 @@ impl Vm {
             .startup
             .get(slot)
             .and_then(Clone::clone)
-            .or_else(|| entry.default.as_deref().map(PhpString::from))
+            .or_else(|| {
+                if self.ini_overrides.web_execution_time && entry.name == "max_execution_time" {
+                    Some("30".into())
+                } else {
+                    entry.default.as_deref().map(PhpString::from)
+                }
+            })
     }
 
     pub(crate) fn ini_set(

@@ -217,9 +217,11 @@ impl Vm {
                     Ok(value) => State::Returned(value.clone()),
                     Err(NativeError::Unwind(payload))
                         if payload.0.is::<()>()
+                            || payload.0.is::<crate::last_error::FatalDiagnostic>()
                             || payload.0.is::<crate::error_traces::DeclarationFailure>() =>
                     {
                         self.fiber_bailout = self.status == 255
+                            || payload.0.is::<crate::last_error::FatalDiagnostic>()
                             || payload.0.is::<crate::error_traces::DeclarationFailure>();
                         State::Exited
                     }

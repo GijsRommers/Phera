@@ -45,7 +45,8 @@ impl Vm {
             )),
         };
         if level == 256 {
-            self.capture_fatal_trace(event.native.as_ref(), &event.location);
+            self.error_handlers.fatal_trace =
+                self.fatal_trace(event.native.as_ref(), &event.location);
         } else {
             self.error_handlers.fatal_trace = None;
         }
@@ -55,6 +56,7 @@ impl Vm {
         } else {
             self.report_event(event);
             if level == 256 {
+                self.fiber_bailout = true;
                 self.status = 255;
                 return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
                     (),

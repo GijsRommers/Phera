@@ -243,7 +243,7 @@ impl Runtime {
             form,
         );
         *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders(request.headers);
-        vm.prepare_web_headers_with(ResponseHead::prepare);
+        vm.prepare_web_headers_with(ResponseHead::prepare, ResponseHead::set_error_status);
         *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);
         phera_ext_streams::set_request(
             vm.state_mut(),
@@ -275,8 +275,7 @@ impl Runtime {
         };
         // An uncaught error is a server error, unless the script had already
         // chosen a status of its own.
-        if exit_status == 255 && response.status == 200 && vm.timeout_http_failure().unwrap_or(true)
-        {
+        if exit_status == 255 && response.status == 200 && !vm.timed_out() {
             response.status = 500;
         }
         response
@@ -325,7 +324,7 @@ impl Runtime {
         let mut vm = Vm::with_native_tables(native);
         *vm.state_mut().get_or_default::<Sapi>() = sapi;
         if matches!(sapi, Sapi::Web) {
-            vm.set_startup_ini("max_execution_time", "30");
+            vm.use_web_execution_time();
         }
         for (name, value) in self.startup_ini.iter() {
             vm.set_startup_ini(name, value);

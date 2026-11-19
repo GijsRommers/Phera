@@ -213,6 +213,7 @@ impl Vm {
                 let level = event.level;
                 self.report_event(event);
                 if level == 256 {
+                    self.fiber_bailout = true;
                     self.status = 255;
                     return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
                         (),
