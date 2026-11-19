@@ -1,0 +1,53 @@
+//! `session_id('example')` sets the ID for this request alone.
+
+use std::collections::HashMap;
+
+use phera_extension_api::{Context, PhpString};
+
+#[derive(Default)]
+pub struct SessionState {
+    pub settings: HashMap<&'static str, PhpString>,
+    pub id: PhpString,
+    pub started: Option<(String, usize)>,
+}
+
+pub fn state(context: &mut dyn Context) -> &mut SessionState {
+    context.state().get_or_default::<SessionState>()
+}
+
+pub fn active(context: &mut dyn Context) -> bool {
+    context
+        .state()
+        .get::<SessionState>()
+        .is_some_and(|session| session.started.is_some())
+}
+
+pub fn after_start(context: &mut dyn Context, message: &str) -> String {
+    let Some((file, line)) = &state(context).started else {
+        return message.into();
+    };
+    format!("{message} (started from {file} on line {line})")
+}
+
+pub fn after_output(context: &dyn Context, message: &str) -> String {
+    match context.output_origin() {
+        Some((file, line)) => format!("{message} (sent from {file} on line {line})"),
+        None => message.into(),
+    }
+}
+
+pub fn can_change(context: &mut dyn Context, function: &str, setting: &str, headers: bool) -> bool {
+    let description = format!("{function}(): Session {setting} cannot be changed");
+    let message = if active(context) {
+        after_start(context, &format!("{description} when a session is active"))
+    } else if headers && context.output_origin().is_some() {
+        after_output(
+            context,
+            &format!("{description} after headers have already been sent"),
+        )
+    } else {
+        return true;
+    };
+    context.warning(message);
+    false
+}

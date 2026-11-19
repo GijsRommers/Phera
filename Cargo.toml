@@ -74,6 +74,7 @@ rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled
 phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-random = { path = "crates/extensions/random" }
 phera-ext-serialize = { path = "crates/extensions/serialize" }
+phera-ext-session = { path = "crates/extensions/session" }
 phera-ext-standard = { path = "crates/extensions/standard" }
 phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }

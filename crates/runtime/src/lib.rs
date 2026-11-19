@@ -83,6 +83,7 @@ impl Runtime {
         registry.load(&phera_ext_random::Random);
         registry.load(&phera_ext_reflection::Reflection);
         registry.load(&phera_ext_serialize::Serialize);
+        registry.load(&phera_ext_session::Session);
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);
         registry.constant("PHP_SAPI", Sapi::Cli.name());
