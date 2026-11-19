@@ -2,9 +2,11 @@
 
 use std::rc::Rc;
 
+use crate::lazy_continuation::{ReflectInitialize, ReflectedOperation};
+use crate::lazy_objects::resolved_lazy_instance;
 use phera_extension_api::reflection::{MemberInfo, PropertyRead, PropertySlot, PropertyWrite};
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{Object, Value};
+use phera_value::{LazyObject, Object, Value};
 
 use crate::{
     Vm,
@@ -49,6 +51,7 @@ impl Vm {
                     }
                     Self::effective_property(property, slot, &object)
                 };
+                let object = resolved_lazy_instance(object.clone());
                 if let Some(linked) = &property.hooks {
                     let hooks = &linked.hooks;
                     if matches!(mode, PropertyRead::Value)
@@ -80,6 +83,13 @@ impl Vm {
                             },
                         ));
                     }
+                }
+                if is_lazy_slot(&object, property) {
+                    return Err(ReflectInitialize {
+                        object,
+                        operation: ReflectedOperation::Read(member.clone(), mode),
+                    }
+                    .suspend());
                 }
                 return self.reflected_backing_value(
                     property,
@@ -135,6 +145,7 @@ impl Vm {
             }
             _ => (property, instance_slot(slot)),
         };
+        let object = object.as_ref().cloned().map(resolved_lazy_instance);
         if let (Some(object), Some(linked)) = (&object, &property.hooks) {
             let hooks = &linked.hooks;
             if matches!(mode, PropertyWrite::Value)
@@ -163,6 +174,16 @@ impl Vm {
                     },
                 ));
             }
+        }
+        if !matches!(mode, PropertyWrite::RawWithoutInitialization)
+            && let Some(object) = &object
+            && is_lazy_slot(object, property)
+        {
+            return Err(ReflectInitialize {
+                object: object.clone(),
+                operation: ReflectedOperation::Write(member.clone(), value, mode),
+            }
+            .suspend());
         }
         let value = value_without_reference(value);
         let value = match &property.ty {
@@ -204,7 +225,7 @@ impl Vm {
         Ok(Value::Null)
     }
 
-    fn effective_property<'a>(
+    pub(super) fn effective_property<'a>(
         property: &'a PropertyDefault,
         slot: PropertySlot,
         object: &'a Object,
@@ -300,4 +321,9 @@ fn value_without_reference(value: Value) -> Value {
         Value::Reference(_) => value.deref().clone(),
         value => value,
     }
+}
+
+fn is_lazy_slot(object: &Object, property: &PropertyDefault) -> bool {
+    matches!(object.lazy().as_deref(), Some(LazyObject::Pending { properties, .. })
+        if properties.contains(&property.key))
 }

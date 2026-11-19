@@ -60,6 +60,7 @@ pub(crate) struct ClassTable {
     local: ClassDefinitions,
     pub(crate) has_dimensions: bool,
     pub(crate) has_property_views: bool,
+    pub(crate) has_lazy_objects: bool,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
 }
@@ -69,6 +70,7 @@ impl ClassTable {
         Self {
             has_dimensions: false,
             has_property_views: native.has_property_views,
+            has_lazy_objects: false,
             native,
             local: ClassDefinitions::default(),
             objects: Vec::new(),

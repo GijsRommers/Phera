@@ -35,6 +35,7 @@ impl Vm {
             detached: None,
             resolved: InlineStack::new(),
             next: 0,
+            retry: None,
         })
     }
 
@@ -46,6 +47,10 @@ impl Vm {
         let place = &path.place;
         let operation = std::mem::replace(&mut path.operation, PropertyMutation::Unset);
         match plan {
+            OverloadedMutation::Lazy(object) => {
+                path.operation = operation;
+                return Ok(MutationStep::Lazy(object));
+            }
             OverloadedMutation::Hook(hook) => {
                 path.operation = operation;
                 return Ok(MutationStep::Hook(hook));

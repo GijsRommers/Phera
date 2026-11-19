@@ -149,6 +149,21 @@ impl ClassHandle for Class {
     fn as_any(&self) -> &dyn Any {
         self
     }
+    fn order_lazy_properties(&self, properties: phera_value::PhpArray) -> phera_value::PhpArray {
+        let mut ordered = phera_value::PhpArray::with_capacity(properties.len());
+        for property in &self.defaults {
+            if let Some(value) = properties.get(&property.key) {
+                ordered.insert(property.key.clone(), value.clone());
+            }
+        }
+        for (key, value) in properties.iter() {
+            if !ordered.contains_key(&key) {
+                ordered.insert(key, value.clone());
+            }
+        }
+        ordered
+    }
+
     fn is_enum(&self) -> bool {
         self.kind == ClassKind::Enum
     }

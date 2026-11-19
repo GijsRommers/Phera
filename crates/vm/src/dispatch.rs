@@ -230,6 +230,12 @@ impl Vm {
                 }
                 Instruction::IterStart { iter, src, .. } => {
                     let subject = self.get(src);
+                    if let Value::Object(object) = &subject
+                        && object.lazy().is_some()
+                    {
+                        self.lazy_iterator(iter, None, object.clone()).await?;
+                        return Ok(DispatchResult::Continue);
+                    }
                     if matches!(&subject, Value::Object(object) if crate::generators::generator_object(object))
                     {
                         self.discard_generator_temporary(src);
@@ -253,6 +259,13 @@ impl Vm {
                         .await?;
                     } else {
                         let value = self.get(subject);
+                        if let Value::Object(object) = &value
+                            && object.lazy().is_some()
+                        {
+                            self.lazy_iterator(iter, Some(subject), object.clone())
+                                .await?;
+                            return Ok(DispatchResult::Continue);
+                        }
                         self.set(subject, Value::Null);
                         self.start_traversable(iter, value, true).await?;
                     }

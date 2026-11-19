@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
 
@@ -423,6 +423,23 @@ pub trait Context {
     }
 
     /// Whether the requesting operation will need to run a PHP property hook.
+    /// An object walk observes PHP state, and aliases the resulting property slots.
+    fn lazy_object_for_iteration(
+        &mut self,
+        object: Rc<Object>,
+    ) -> LocalFuture<'_, Result<Rc<Object>, crate::NativeError>> {
+        Box::pin(std::future::ready(Ok(object)))
+    }
+
+    fn track_iterated_property(
+        &mut self,
+        _object: &Rc<Object>,
+        _key: &crate::ArrayKey,
+        _reference: &Rc<RefCell<Value>>,
+    ) -> Result<(), crate::NativeError> {
+        Ok(())
+    }
+
     fn property_view_runs_code(&self, _object: &Object, _purpose: crate::PropertyPurpose) -> bool {
         false
     }

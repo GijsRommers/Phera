@@ -42,6 +42,7 @@ struct IndirectPath {
 
 pub(crate) enum PathReadStep {
     Complete(ReadPlace),
+    Lazy(Rc<Object>),
     Getter {
         function: FunctionIndex,
         object: Rc<Object>,
@@ -54,6 +55,7 @@ pub(crate) struct PathRead {
     mode: FetchMode,
     register: Option<Reg>,
     next: usize,
+    retry: Option<PathKey>,
     value: Value,
     indirect: Option<Box<IndirectPath>>,
     resolved: Option<Box<InlineStack<PathKey>>>,
@@ -86,6 +88,7 @@ impl Vm {
             mode,
             register,
             next: 0,
+            retry: None,
             value,
             indirect: None,
             resolved: update.then(|| Box::new(InlineStack::new())),
@@ -133,7 +136,9 @@ impl Vm {
                     target: path.target.take(),
                 }));
             }
-            let key = if let Step::Index(index) = step {
+            let key = if let Some(key) = path.retry.take() {
+                key
+            } else if let Step::Index(index) = step {
                 if update {
                     PathKey::Index(Some(self.write_index_key(&value, index)?))
                 } else if matches!(value, Value::Array(_) | Value::String(_)) {
@@ -146,6 +151,32 @@ impl Vm {
             } else {
                 self.magic_path_key(step).await?
             };
+            if let (PathKey::Property(name), Value::Object(object)) = (&key, &value) {
+                use crate::lazy_property_access::LazyAccess;
+                let access = match (mode, steps.peek()) {
+                    (FetchMode::Quiet, _) | (FetchMode::Isset | FetchMode::Empty, Some(_)) => {
+                        LazyAccess::Coalesce
+                    }
+                    (FetchMode::Isset | FetchMode::Empty, None) => LazyAccess::Isset,
+                    _ => LazyAccess::Read,
+                };
+                let effective = self.lazy_property_receiver(object, name, access);
+                if self.property_requires_initialization(&effective, name, access) {
+                    path.value = value;
+                    path.retry = Some(key);
+                    path.next -= 1;
+                    return Ok(PathReadStep::Lazy(effective));
+                }
+                if !Rc::ptr_eq(object, &effective) {
+                    value = Value::Object(effective);
+                    if update {
+                        path.indirect = Some(Box::new(IndirectPath {
+                            root: value.clone(),
+                            keys: InlineStack::new(),
+                        }));
+                    }
+                }
+            }
             let last = steps.peek().is_none();
             if update {
                 let stored = match (&key, &value) {

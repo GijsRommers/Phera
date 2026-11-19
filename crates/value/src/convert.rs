@@ -425,7 +425,7 @@ pub fn to_array(v: &Value, diag: &mut dyn Diagnostics) -> PhpArray {
     match &*v.deref() {
         Value::Null => PhpArray::new(),
         Value::Array(a) => (**a).clone(),
-        Value::Object(o) => o.to_array(),
+        Value::Object(o) => o.lazy_properties(),
         val => {
             let scalar = match val {
                 Value::Bool(b) => Value::Bool(*b),
