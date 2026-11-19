@@ -250,7 +250,7 @@ impl Runtime {
             &request,
             script,
             document_root,
-            php_array(self.environment.iter()),
+            worker.environment.as_ref().clone(),
             form,
         );
         let buffered_post = request.method == "POST"

@@ -266,7 +266,10 @@ impl Vm {
                 if let Some(miss) = self.check_method_contract(inherited, &linked, unit)?
                     && let Some(parent) = &parent
                 {
-                    pending.push(((0, self.method_listing_order(parent, inherited)), miss));
+                    pending.push((
+                        (0, Some(self.method_listing_order(parent, inherited))),
+                        miss,
+                    ));
                 }
             }
             methods.insert(key, linked);
@@ -274,7 +277,29 @@ impl Vm {
         let mut enum_info = self.install_enum_methods(declaration, &mut methods)?;
         let traits = self.resolve_traits(declaration)?;
         if !traits.is_empty() {
-            self.compose_trait_methods(declaration, unit, &traits, &mut methods)?;
+            let trait_variance =
+                self.compose_trait_methods(declaration, unit, &traits, &mut methods)?;
+            // PHP checks concrete trait imports in the same parent-method order
+            // as methods written on the class, then checks the trait requirements.
+            if let Some(parent) = &parent {
+                pending.extend(
+                    trait_variance
+                        .overrides
+                        .into_iter()
+                        .map(|(inherited, miss)| {
+                            (
+                                (0, Some(self.method_listing_order(parent, &inherited))),
+                                miss,
+                            )
+                        }),
+                );
+            }
+            pending.extend(
+                trait_variance
+                    .requirements
+                    .into_iter()
+                    .map(|miss| ((1, None), miss)),
+            );
         }
         if enum_info.is_some() {
             super::enums::check_magic_methods(name, &methods)?;
@@ -338,7 +363,10 @@ impl Vm {
                     }
                     if let Some(miss) = self.check_method_contract(method, implementation, unit)? {
                         pending.push((
-                            (index + 1, self.method_listing_order(interface, method)),
+                            (
+                                index + 2,
+                                Some(self.method_listing_order(interface, method)),
+                            ),
                             miss,
                         ));
                     }
