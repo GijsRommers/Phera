@@ -1,4 +1,5 @@
 <?php
+// Rule: variable.undefined; property_hooks_good.
 interface HookContract {
     public string $label { get; }
 }

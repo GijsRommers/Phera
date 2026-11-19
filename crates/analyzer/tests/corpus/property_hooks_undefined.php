@@ -1,4 +1,5 @@
 <?php
+// Rule: variable.undefined; property_hooks_undefined.
 class BrokenHookRecord {
     public string $name {
         get { echo $missing; return $this->name; }
