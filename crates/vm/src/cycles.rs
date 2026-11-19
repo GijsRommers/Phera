@@ -26,8 +26,10 @@
 //! after 10,000 of them it asks for a run at the next instruction boundary
 //! (through the same flag as due destructors). A run costs time in
 //! proportion to the live objects and what they hold; when it frees fewer
-//! than 100 values the threshold grows by 10,000, as PHP's does, so that a
-//! program with a large live heap and no cycles is not walked over and over.
+//! than 100 values the threshold grows by 10,000, as PHP's does, and the next
+//! run never comes before twice as many allocations as there are live objects, so
+//! that a program with a large live heap and no cycles pays a constant
+//! amount per allocation for the walks.
 
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{ArrayKey, Destruction, Garbage, PhpArray, Value, find_garbage};
@@ -171,7 +173,13 @@ impl Vm {
                 THRESHOLD_STEP
             };
         }
-        self.classes.request_collection_after(self.cycles.threshold);
+        // A run walks every live object, so the next one waits for at least
+        // twice as many allocations as there are live objects: a large heap
+        // that holds no cycles costs a constant amount per allocation, not a
+        // walk every 10,000.
+        let live = self.object_ids.live();
+        self.classes
+            .request_collection_after(self.cycles.threshold.max(live.saturating_mul(2)));
         Ok(())
     }
 

@@ -391,23 +391,28 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             }
             ScalarStep::Complete
         }
-        Instruction::Clear { reg: register } => match slots.get_mut(register.index()) {
-            Some(slot) if GUARDED && owns_heap_values(slot) => clear(slot),
-            Some(slot) => {
-                *slot = None;
-                ScalarStep::Complete
-            }
-            None => ScalarStep::Fallback,
-        },
-        // Unsetting a variable bound to a PHP reference has more to undo.
-        Instruction::UnsetLocal { local } => match slots.get_mut(local.index()) {
+        // Guarded, unsetting a variable bound to a PHP reference goes to the
+        // general handler, which also forgets a global bound to it, so that
+        // the object it holds can be destroyed then. Unguarded no object
+        // has a destructor, and this is main's plain clear.
+        Instruction::UnsetLocal { local } if GUARDED => match slots.get_mut(local.index()) {
             Some(Some(Value::Reference(_))) | None => ScalarStep::Fallback,
-            Some(slot) if GUARDED && owns_heap_values(slot) => clear(slot),
+            Some(slot) if owns_heap_values(slot) => clear(slot),
             Some(slot) => {
                 *slot = None;
                 ScalarStep::Complete
             }
         },
+        Instruction::Clear { reg: register } | Instruction::UnsetLocal { local: register } => {
+            match slots.get_mut(register.index()) {
+                Some(slot) if GUARDED && owns_heap_values(slot) => clear(slot),
+                Some(slot) => {
+                    *slot = None;
+                    ScalarStep::Complete
+                }
+                None => ScalarStep::Fallback,
+            }
+        }
         _ => ScalarStep::Fallback,
     }
 }

@@ -48,7 +48,7 @@ impl Vm {
     /// Whether an object waits for its destructor. One flag test.
     #[inline]
     pub(crate) fn destructors_due(&self) -> bool {
-        self.classes.ids().has_doomed()
+        self.object_ids.has_doomed()
     }
 
     /// Calls the destructor of every released object, oldest release first,
