@@ -22,7 +22,7 @@ use crate::{
 
 pub(super) struct Activation {
     pub(super) frame: Frame,
-    pub(super) silence: usize,
+    pub(super) silence: Vec<i64>,
     storage: Storage,
 }
 
@@ -38,7 +38,7 @@ pub(super) struct Storage {
 impl Activation {
     /// The scalar interpreter has no access to the VM side tables.
     pub(super) fn local_registers(&mut self) -> Option<&mut [Option<Value>]> {
-        if self.silence != 0
+        if !self.silence.is_empty()
             || self.frame.has_extras()
             || !self.storage.calls.is_empty()
             || !self.storage.finally.is_empty()
@@ -154,14 +154,13 @@ impl Vm {
         self.registers.detach(start, &mut storage.registers)?;
         Ok(Activation {
             frame,
-            silence: 0,
+            silence: Vec::new(),
             storage,
         })
     }
 
     pub(super) fn restore_generator_frame(&mut self, activation: Activation) -> Storage {
-        self.diagnostic_reporter
-            .restore_silence(self.diagnostic_reporter.silence() + activation.silence);
+        self.diagnostic_reporter.resume_silence(activation.silence);
         let old_start = activation.frame.start();
         let start = self.registers.len();
         let base = start + activation.frame.kind().prefix();

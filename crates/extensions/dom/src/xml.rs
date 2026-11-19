@@ -5,12 +5,16 @@
 //! echo $document->documentElement->firstChild->nodeName;
 //! ```
 
+mod declarations;
+mod diagnostics;
 mod doctype;
 mod dtd;
 mod elements;
 mod encoding;
 mod entities;
 pub(crate) mod names;
+mod replacement;
+pub(crate) use encoding::supported_encoding;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -22,6 +26,7 @@ use quick_xml::{Error, Reader};
 use crate::document::{Document, ParseError, Settings};
 use crate::tree::{Arena, Kind, Name, Node, NodeId};
 
+use self::diagnostics::Position;
 use self::encoding::{decode, xml_char};
 use self::entities::Entities;
 
@@ -41,7 +46,15 @@ pub struct Parsed {
 }
 
 pub fn parse(input: &[u8], options: Options) -> Parsed {
-    let decoded = match decode(input) {
+    parse_with_encoding(input, options, None)
+}
+
+pub fn parse_with_encoding(
+    input: &[u8],
+    options: Options,
+    override_encoding: Option<&str>,
+) -> Parsed {
+    let decoded = match decode(input, override_encoding) {
         Ok(decoded) => decoded,
         Err(error) => {
             return Parsed {
@@ -56,18 +69,15 @@ pub fn parse(input: &[u8], options: Options) -> Parsed {
         decoded
     };
     let mut parser = Parser::new(&input, options);
-    let result = match input
-        .char_indices()
-        .find(|&(_, character)| !xml_char(character))
-    {
+    let result = match invalid_character(&input) {
         Some((offset, character)) => {
-            parser.position.advance(&input, offset);
+            parser.position.advance(offset);
             Err(ParseError::fatal(
                 9,
                 format!("PCDATA invalid Char value {}", character as u32),
             ))
         }
-        None => parser.run(&input),
+        None => parser.run(),
     };
     if let Err(error) = result {
         parser.report(error);
@@ -82,17 +92,37 @@ pub fn parse(input: &[u8], options: Options) -> Parsed {
     }
 }
 
+fn invalid_character(input: &str) -> Option<(usize, char)> {
+    let offset = input
+        .bytes()
+        .position(|byte| matches!(byte, 0..=8 | 11..=12 | 14..=31 | 128..=255))?;
+    input[offset..]
+        .char_indices()
+        .find(|&(_, character)| !xml_char(character))
+        .map(|(index, character)| (offset + index, character))
+}
+
 type ScopeChanges = Vec<(String, Option<String>)>;
+
+// The macOS oracle's libxml 2.9.13 retains its older recovery behavior.
+const LEGACY_RECOVERY: bool = cfg!(target_os = "macos");
+
+struct OpenElement {
+    id: NodeId,
+    namespaces: ScopeChanges,
+    preserve_space: bool,
+    saw_text: bool,
+}
 
 struct Parser<'a> {
     reader: Reader<&'a [u8]>,
     document: Document,
-    open: Vec<(NodeId, ScopeChanges)>,
+    open: Vec<OpenElement>,
     scope: HashMap<String, String>,
     entities: Entities,
     attribute_rules: dtd::AttributeRules,
     diagnostics: Vec<ParseError>,
-    position: Position,
+    position: Position<'a>,
     root: bool,
     doctype: bool,
     options: Options,
@@ -110,17 +140,17 @@ impl<'a> Parser<'a> {
             entities: Entities::default(),
             attribute_rules: dtd::AttributeRules::default(),
             diagnostics: Vec::new(),
-            position: Position::default(),
+            position: Position::new(input),
             root: false,
             doctype: false,
             options,
         }
     }
 
-    fn run(&mut self, input: &str) -> Result<(), ParseError> {
+    fn run(&mut self) -> Result<(), ParseError> {
         loop {
             let start = self.reader.buffer_position() as usize;
-            self.position.advance(input, start);
+            self.position.advance(start);
             let event = self.reader.read_event();
             let end = self.reader.buffer_position() as usize;
             let line = self.position.line;
@@ -135,7 +165,7 @@ impl<'a> Parser<'a> {
                     Ok(Event::Start(_)) => 1,
                     _ => 0,
                 };
-                self.position.advance(input, end.saturating_sub(delimiter));
+                self.position.advance(end.saturating_sub(delimiter));
             }
             match event {
                 Ok(Event::Start(tag)) => self.element(tag, line, true)?,
@@ -180,36 +210,17 @@ impl<'a> Parser<'a> {
                 }
                 Ok(Event::DocType(_)) => return Err(extra_content()),
                 Ok(Event::GeneralRef(reference)) if !self.open.is_empty() => {
-                    let name = &reference;
-                    let (value, entity) = self.entities.resolve(name)?;
-                    if entity && !self.options.substitute_entities {
-                        self.add(Kind::EntityReference, name, &value, line)?;
-                    } else {
-                        self.text(&value, Kind::Text)?;
-                    }
+                    self.reference(&reference, line)?;
                 }
                 Ok(Event::GeneralRef(_)) => return Err(self.unexpected_text()),
                 Ok(Event::Eof) => return self.finish(),
+                Err(error @ Error::IllFormed(IllFormedError::MismatchedEndTag { .. })) => {
+                    let error = self.reader_error(error);
+                    self.report(error);
+                    self.close();
+                }
                 Err(error) => return Err(self.reader_error(error)),
             }
-        }
-    }
-
-    fn finish(&self) -> Result<(), ParseError> {
-        match self.open.last() {
-            Some(&(id, _)) => {
-                let node = &self.document.arena[id];
-                Err(ParseError::fatal(
-                    77,
-                    format!(
-                        "Premature end of data in tag {} line {}",
-                        node.name.qualified(),
-                        node.line
-                    ),
-                ))
-            }
-            None if !self.root => Err(ParseError::fatal(4, "Document is empty")),
-            None => Ok(()),
         }
     }
 
@@ -243,7 +254,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parent(&self) -> NodeId {
-        self.open.last().map_or(Arena::DOCUMENT, |frame| frame.0)
+        self.open.last().map_or(Arena::DOCUMENT, |frame| frame.id)
     }
 
     fn add(
@@ -276,13 +287,17 @@ impl<'a> Parser<'a> {
             };
         }
         let parent = self.parent();
+        let strip = kind == Kind::Text
+            && self.options.strip_blanks
+            && blank(text)
+            && self.ignorable_space(parent);
         let arena = &mut self.document.arena;
         if kind == Kind::Text
             && let Some(last) = arena[parent].last_child()
             && arena[last].kind == Kind::Text
         {
             arena[last].value.push_str(text);
-        } else if kind != Kind::Text || !self.options.strip_blanks || !blank(text) {
+        } else if !strip {
             let name = if kind == Kind::Cdata {
                 "#cdata-section"
             } else {
@@ -290,61 +305,30 @@ impl<'a> Parser<'a> {
             };
             self.add(kind, name, text, self.position.line)?;
         }
+        if !LEGACY_RECOVERY
+            && !strip
+            && kind == Kind::Text
+            && let Some(frame) = self.open.last_mut()
+        {
+            frame.saw_text = true;
+        }
         Ok(())
     }
 
-    fn report(&mut self, mut error: ParseError) {
-        error.line = self.position.line;
-        error.column = self.position.column;
-        error.message.push('\n');
-        self.diagnostics.push(error);
-    }
-
-    fn reader_error(&self, error: Error) -> ParseError {
-        match error {
-            Error::IllFormed(IllFormedError::MismatchedEndTag { expected, found }) => {
-                let line = self.document.arena[self.parent()].line;
-                ParseError::fatal(
-                    76,
-                    format!("Opening and ending tag mismatch: {expected} line {line} and {found}"),
-                )
-            }
-            Error::IllFormed(IllFormedError::UnclosedReference) => {
-                ParseError::fatal(23, "EntityRef: expecting ';'")
-            }
-            other => ParseError::fatal(73, other.to_string()),
+    fn ignorable_space(&self, parent: NodeId) -> bool {
+        if self
+            .open
+            .last()
+            .is_some_and(|frame| frame.preserve_space || (!LEGACY_RECOVERY && frame.saw_text))
+        {
+            return false;
         }
-    }
-}
-
-struct Position {
-    offset: usize,
-    line: usize,
-    column: usize,
-}
-
-impl Default for Position {
-    fn default() -> Self {
-        Self {
-            offset: 0,
-            line: 1,
-            column: 1,
-        }
-    }
-}
-
-impl Position {
-    fn advance(&mut self, input: &str, offset: usize) {
-        if let Some(chunk) = input.get(self.offset..offset) {
-            for character in chunk.chars() {
-                if character == '\n' {
-                    self.line += 1;
-                    self.column = 1;
-                } else {
-                    self.column += 1;
-                }
-            }
-            self.offset = offset;
+        let arena = &self.document.arena;
+        let remaining = self.reader.get_ref();
+        match arena[parent].first_child() {
+            Some(first) if arena[first].kind == Kind::Text => false,
+            None if remaining.starts_with(b"</") => false,
+            _ => remaining.starts_with(b"<"),
         }
     }
 }

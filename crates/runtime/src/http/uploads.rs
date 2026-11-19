@@ -19,7 +19,11 @@
 //! ([`Form::into_variables`]), because PHP values never change threads.
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::ops::Range;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use phera_value::{PhpArray, Value};
 use tempfile::TempPath;
@@ -96,9 +100,31 @@ impl FormIssue {
     }
 }
 
-/// Reads a `multipart/form-data` body and writes every acceptable file to
-/// a temporary file. Blocks on the disk: call it from a blocking thread.
-pub(super) fn receive(body: &[u8], boundary: &[u8], limits: FormLimits) -> Form {
+/// Signals the reader before an abandoned request drops its join handle.
+struct CancelForm(Arc<AtomicBool>);
+
+impl Drop for CancelForm {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+pub(super) async fn receive(
+    body: impl AsRef<[u8]> + Send + 'static,
+    range: Range<usize>,
+    boundary: Vec<u8>,
+    limits: FormLimits,
+) -> Result<Form, tokio::task::JoinError> {
+    let cancellation = CancelForm(Arc::default());
+    let reader = cancellation.0.clone();
+    tokio::task::spawn_blocking(move || {
+        read_form(&body.as_ref()[range], &boundary, limits, &reader)
+    })
+    .await
+}
+
+/// Reads the form in bounded windows and writes files on a blocking thread.
+fn read_form(body: &[u8], boundary: &[u8], limits: FormLimits, cancelled: &AtomicBool) -> Form {
     let mut items = Vec::new();
     let mut issue = None;
     let mut form_limit = 0;
@@ -107,7 +133,7 @@ pub(super) fn receive(body: &[u8], boundary: &[u8], limits: FormLimits) -> Form 
     let mut parts = 0;
     let mut fields = 0;
     let mut unnamed = 0;
-    let mut multipart = Multipart::new(body, boundary);
+    let mut multipart = Multipart::new(body, boundary, cancelled);
     while let Some(headers) = multipart.next_headers() {
         let Disposition::Form { name, filename } = headers.disposition else {
             continue;
@@ -123,15 +149,22 @@ pub(super) fn receive(body: &[u8], boundary: &[u8], limits: FormLimits) -> Form 
                 break;
             };
             let (content, _) = multipart.content(None);
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
             fields += 1;
             if name.eq_ignore_ascii_case(b"MAX_FILE_SIZE") {
                 form_limit = phera_extension_api::ini::integer(content);
             }
             if fields <= limits.max_input_vars {
-                items.push(Item::Field {
-                    name,
-                    value: content.to_vec(),
-                });
+                let mut value = Vec::with_capacity(content.len());
+                for chunk in content.chunks(64 * 1024) {
+                    if cancelled.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    value.extend_from_slice(chunk);
+                }
+                items.push(Item::Field { name, value });
             } else if fields == limits.max_input_vars.saturating_add(1) {
                 issue = Some(FormIssue::TooManyFields(limits.max_input_vars));
             }
@@ -172,6 +205,7 @@ pub(super) fn receive(body: &[u8], boundary: &[u8], limits: FormLimits) -> Form 
             content,
             complete,
             size,
+            cancelled,
         );
         if upload.error == UploadError::NoTemporaryDirectory {
             issue = Some(FormIssue::TemporaryFile);
@@ -224,6 +258,7 @@ fn store(
     content: &[u8],
     complete: bool,
     limits: FileSize,
+    cancelled: &AtomicBool,
 ) -> Upload {
     let length = content.len() as i64;
     let error = if filename.is_empty() {
@@ -237,7 +272,7 @@ fn store(
     } else {
         UploadError::Ok
     };
-    let written = (error == UploadError::Ok).then(|| write_temporary(content));
+    let written = (error == UploadError::Ok).then(|| write_temporary(content, cancelled));
     let (temporary, error) = match written {
         Some(Ok(path)) => (Some(path), UploadError::Ok),
         Some(Err(error)) => (None, error),
@@ -257,14 +292,22 @@ fn store(
 
 /// Writes `content` to a new file `php??????` in the temporary directory,
 /// readable by this user only.
-fn write_temporary(content: &[u8]) -> Result<TempPath, UploadError> {
+fn write_temporary(content: &[u8], cancelled: &AtomicBool) -> Result<TempPath, UploadError> {
+    if cancelled.load(Ordering::Relaxed) {
+        return Err(UploadError::CannotWrite);
+    }
     let mut file = tempfile::Builder::new()
         .prefix("php")
         .rand_bytes(6)
         .tempfile()
         .map_err(|_| UploadError::NoTemporaryDirectory)?;
-    file.write_all(content)
-        .map_err(|_| UploadError::CannotWrite)?;
+    for chunk in content.chunks(64 * 1024) {
+        if cancelled.load(Ordering::Relaxed) {
+            return Err(UploadError::CannotWrite);
+        }
+        file.write_all(chunk)
+            .map_err(|_| UploadError::CannotWrite)?;
+    }
     file.flush().map_err(|_| UploadError::CannotWrite)?;
     Ok(file.into_temp_path())
 }
@@ -281,7 +324,7 @@ fn base_name(filename: &[u8]) -> &[u8] {
 
 impl Form {
     /// Builds `$_POST` and `$_FILES`, and lists the temporary files.
-    pub(crate) fn into_variables(self) -> (PhpArray, PhpArray, Vec<PathBuf>) {
+    pub(crate) fn into_variables(self) -> (PhpArray, PhpArray, Vec<TempPath>) {
         let mut post = PhpArray::new();
         let mut files = PhpArray::new();
         let mut temporary = Vec::new();
@@ -305,12 +348,7 @@ impl Form {
                     for (key, value) in entries {
                         store_named(&mut files, &entry_name(&upload.field, key), value);
                     }
-                    if let Some(mut file) = upload.temporary {
-                        // The request now owns cleanup. Until here, dropping
-                        // a cancelled parse also removes its temporary files.
-                        file.disable_cleanup(true);
-                        temporary.push(file.to_path_buf());
-                    }
+                    temporary.extend(upload.temporary);
                 }
             }
         }

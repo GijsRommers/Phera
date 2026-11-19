@@ -85,11 +85,7 @@ impl Vm {
         let caller_silence = self.diagnostic_reporter.silence();
         let storage = self.restore_generator_frame(activation);
         let outcome = self.run_generator_instructions(object, input, stop).await;
-        let generator_silence = self
-            .diagnostic_reporter
-            .silence()
-            .saturating_sub(caller_silence);
-        self.diagnostic_reporter.restore_silence(caller_silence);
+        let generator_silence = self.diagnostic_reporter.suspend_silence(caller_silence);
         state(object, |generator| match outcome {
             Ok(Pause::Value(destination, key, value)) => {
                 generator.publish(key, value);
