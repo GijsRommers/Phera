@@ -110,7 +110,10 @@ fn compile_program(
         compiler.anonymous_classes.set(anonymous_seed);
     }
     compiler.function.dynamic_scope = true;
-    if let Err(mut error) = compiler.block(&ast.statements, DeclarationTiming::Hoisted) {
+    if let Err(mut error) = compiler
+        .block(&ast.statements, DeclarationTiming::Hoisted)
+        .and_then(|()| compiler.finish_gotos())
+    {
         error
             .scanner_diagnostics
             .extend(compiler.declaration_warnings.into_iter().map(|warning| {
@@ -139,7 +142,7 @@ pub(super) fn finish(
     let keep_source =
         !reflection_initializers.is_empty() || compiler.reflection.has_doc_comments.get();
     let unit = CompiledUnit {
-        main: compiler.finish(),
+        main: compiler.finish()?,
         reflection_source: keep_source.then(|| source.into()),
         reflection_initializers,
         constant_metadata: compiler.constant_metadata,

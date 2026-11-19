@@ -17,6 +17,8 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         let start = self.position();
         self.loops.push(Loop {
+            start: self.position(),
+            cleanup: None,
             breaks: vec![],
             continues: vec![],
         });
@@ -64,6 +66,8 @@ impl Compiler<'_> {
             )
         });
         self.loops.push(Loop {
+            start: self.position(),
+            cleanup: None,
             breaks: vec![],
             continues: vec![],
         });
@@ -112,14 +116,26 @@ impl Compiler<'_> {
         }) {
             return Err(self.error("jump out of a finally block is disallowed", line));
         }
-        self.emit_finally_exits(
-            Some(at),
+        let leaves_target = is_break
+            || matches!(
+                self.loops[at].cleanup,
+                Some(super::exits::LoopCleanup::Switch(_))
+            );
+        let retained = super::exits::ExitDepth {
+            loops: if leaves_target { at } else { at + 1 },
+            finally_blocks: self
+                .finalies
+                .partition_point(|scope| scope.loop_depth <= at),
+        };
+        self.emit_control_exits(
+            retained,
             if is_break {
                 phera_bytecode::FinallyEntry::Break
             } else {
                 phera_bytecode::FinallyEntry::Continue
             },
             line,
+            |_, _| {},
         );
         let jump = self.emit(Instruction::Jump(Target(0)), line);
         if let Some(loop_state) = self.loops.get_mut(at) {
@@ -220,7 +236,15 @@ impl Compiler<'_> {
         if !self.finalies.is_empty() {
             self.emit(Instruction::CheckReturn { source }, line);
         }
-        self.emit_finally_exits(None, phera_bytecode::FinallyEntry::Return, line);
+        self.emit_control_exits(
+            super::exits::ExitDepth {
+                loops: self.loops.len(),
+                finally_blocks: 0,
+            },
+            phera_bytecode::FinallyEntry::Return,
+            line,
+            |_, _| {},
+        );
         self.emit(
             if !self.finalies.is_empty() {
                 Instruction::ReturnChecked { source }

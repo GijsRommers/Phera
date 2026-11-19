@@ -73,7 +73,9 @@ impl Compiler<'_> {
             if directive.name.name == "strict_types" {
                 self.function.strict_types =
                     matches!(constant(&directive.value), Some(Constant::Int(1)))
-            } else {
+            } else if directive.name.name != "ticks"
+                || !matches!(constant(&directive.value), Some(Constant::Int(0)))
+            {
                 return Err(self.error(
                     format!("declare({}) not supported yet", directive.name.name),
                     line,

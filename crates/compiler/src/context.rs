@@ -19,6 +19,8 @@ use crate::policies::{DeclarationTiming, NameKind};
 
 /// Unresolved exits for one nested loop or switch context.
 pub(super) struct Loop {
+    pub(super) start: usize,
+    pub(super) cleanup: Option<crate::statements::exits::LoopCleanup>,
     pub(super) breaks: Vec<usize>,
     pub(super) continues: Vec<usize>,
 }
@@ -51,6 +53,7 @@ pub(super) struct Compiler<'ast> {
     pub(super) loops: Vec<Loop>,
     /// Lexical cleanup scopes decide which finally blocks a structured exit crosses.
     pub(super) finalies: Vec<crate::statements::exceptions::FinallyScope>,
+    pub(super) labels: Option<Box<crate::statements::gotos::Labels>>,
     pub(super) namespace: String,
     /// __CLASS__ is lexical and does not change when a closure is rebound.
     pub(super) class_scope: Option<String>,
@@ -90,6 +93,7 @@ impl<'ast> Compiler<'ast> {
             locals: HashMap::new(),
             loops: vec![],
             finalies: vec![],
+            labels: None,
             namespace: namespace.into(),
             class_scope: None,
             trait_scope: None,
@@ -135,7 +139,8 @@ impl<'ast> Compiler<'ast> {
     }
 
     /// Renumber locals before temporaries without changing instruction order.
-    pub(super) fn finish(&mut self) -> Function {
+    pub(super) fn finish(&mut self) -> Result<Function, CompileError> {
+        self.finish_gotos()?;
         let mut mapping = vec![Reg(0); self.peak];
         let mut named = vec![false; self.peak];
         for (i, name) in self.function.locals.iter().enumerate() {
@@ -175,7 +180,7 @@ impl<'ast> Compiler<'ast> {
             }
         }
         self.function.registers = self.peak;
-        std::mem::take(&mut self.function)
+        Ok(std::mem::take(&mut self.function))
     }
 
     /// Append an IR instruction and its source line together; return its patch position.

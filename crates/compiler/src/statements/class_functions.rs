@@ -38,7 +38,7 @@ impl Compiler<'_> {
         builder.imports = self.imports.clone();
         let result = builder.compile_expression(expression)?;
         builder.emit(Instruction::Return(result), line);
-        Ok(self.append_function_body(&mut builder))
+        self.append_function_body(&mut builder)
     }
 
     /// Reuse parameter/default lowering while keeping method names out of the function table.
