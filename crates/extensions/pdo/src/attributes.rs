@@ -251,7 +251,8 @@ fn change(
                     ) {
                         return Err(invalid(
                             call,
-                            "PDO::FETCH_INTO and PDO::FETCH_CLASS cannot be set as the default fetch mode",
+                            "PDO::FETCH_INTO and PDO::FETCH_CLASS cannot be set as \
+                             the default fetch mode",
                         ));
                     }
                     i64::from(!items.is_empty())

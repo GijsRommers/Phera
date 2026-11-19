@@ -24,7 +24,20 @@ pub(super) async fn open(
     password: &str,
     status: Arc<AtomicU8>,
 ) -> Result<Connected, DbError> {
-    let mode = Mode::parse(dsn.get("sslmode", "prefer"))?;
+    let system_roots = dsn.get("sslrootcert", "") == "system";
+    let default_mode = if system_roots {
+        "verify-full"
+    } else {
+        "prefer"
+    };
+    let mode_text = dsn.get("sslmode", default_mode);
+    let mode = Mode::parse(mode_text)?;
+    if system_roots && mode != Mode::VerifyFull {
+        return Err(connection_error(format!(
+            "weak sslmode \"{mode_text}\" may not be used with sslrootcert=system \
+             (use \"verify-full\")"
+        )));
+    }
     let host = dsn.get("host", "localhost");
     let port = dsn.port()?;
     let mut config = Config::new();

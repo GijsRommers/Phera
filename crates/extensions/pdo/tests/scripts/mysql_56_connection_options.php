@@ -9,9 +9,11 @@ $pdo = new PDO($dsn, 'phera', 'phera', [
     Pdo\Mysql::ATTR_IGNORE_SPACE => true,
     Pdo\Mysql::ATTR_MULTI_STATEMENTS => false,
 ]);
-var_dump($pdo->getAttribute(PDO::ATTR_AUTOCOMMIT), $pdo->query('SELECT @phera_pdo_init')->fetchColumn());
+var_dump($pdo->getAttribute(PDO::ATTR_AUTOCOMMIT));
+var_dump($pdo->query('SELECT @phera_pdo_init')->fetchColumn());
 $pdo->setAttribute(PDO::ATTR_AUTOCOMMIT, true);
-var_dump($pdo->getAttribute(PDO::ATTR_AUTOCOMMIT), $pdo->query('SELECT @@autocommit')->fetchColumn());
+var_dump($pdo->getAttribute(PDO::ATTR_AUTOCOMMIT));
+var_dump($pdo->query('SELECT @@autocommit')->fetchColumn());
 $pdo->exec('CREATE TEMPORARY TABLE pdo_option_probe (id int, value int)');
 $pdo->exec('INSERT INTO pdo_option_probe VALUES (1, 4)');
 var_dump($pdo->query('SELECT COUNT (id) FROM pdo_option_probe')->fetchColumn());

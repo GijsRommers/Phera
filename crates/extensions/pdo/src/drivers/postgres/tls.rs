@@ -119,15 +119,21 @@ async fn client_config(dsn: &Dsn, mode: Mode) -> Result<ClientConfig, String> {
     let Some(cert) = client_file(dsn, "sslcert", "postgresql.crt").await else {
         return Ok(builder.with_no_client_auth());
     };
+    let chain = match tokio::fs::read(&cert).await {
+        Ok(chain) => chain,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(builder.with_no_client_auth());
+        }
+        Err(error) => {
+            return Err(format!(
+                "could not open certificate file \"{}\": {error}",
+                cert.display()
+            ));
+        }
+    };
     let key = client_file(dsn, "sslkey", "postgresql.key")
         .await
         .ok_or_else(|| "certificate present, but private key file is missing".to_owned())?;
-    let chain = tokio::fs::read(&cert).await.map_err(|error| {
-        format!(
-            "could not read certificate file \"{}\": {error}",
-            cert.display()
-        )
-    })?;
     let chain = tls::certificates(&chain).map_err(|error| error.to_string())?;
     let key = private_key(&key).await?;
     builder

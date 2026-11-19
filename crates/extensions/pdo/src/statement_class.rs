@@ -77,7 +77,8 @@ impl StatementClass {
                     const PUBLIC: i64 = 1;
                     if constructor.modifiers & PUBLIC != 0 {
                         return Err(NativeError::type_error(format!(
-                            "{argument} User-supplied statement class cannot have a public constructor"
+                            "{argument} User-supplied statement class cannot have \
+                             a public constructor"
                         )));
                     }
                     result.constructor = Some(Rc::from(constructor.class.as_str()));
@@ -87,7 +88,8 @@ impl StatementClass {
         if let Some(args) = config.get(&ArrayKey::Int(1)) {
             let Value::Array(args) = &*args.deref() else {
                 return Err(NativeError::type_error(format!(
-                    "{argument} PDO::ATTR_STATEMENT_CLASS constructor_args must be of type ?array, {} given",
+                    "{argument} PDO::ATTR_STATEMENT_CLASS constructor_args must be of type \
+                     ?array, {} given",
                     args.type_name()
                 )));
             };
