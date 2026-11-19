@@ -50,7 +50,12 @@ fn multiplier(byte: u8) -> Option<i64> {
 pub fn parse_quantity(input: &[u8]) -> (i64, Option<String>) {
     let leading = input.iter().take_while(|byte| whitespace(byte)).count();
     let text = &input[leading..];
-    let text = text.trim_ascii_end();
+    let trailing = text
+        .iter()
+        .rev()
+        .take_while(|byte| whitespace(byte))
+        .count();
+    let text = &text[..text.len() - trailing];
     if text.is_empty() {
         return (0, None);
     }
@@ -70,15 +75,17 @@ pub fn parse_quantity(input: &[u8]) -> (i64, Option<String>) {
             b'x' => 16,
             b'o' => 8,
             b'b' => 2,
-            byte => {
-                let byte = if second.is_ascii() { *second } else { byte };
-                return (
-                    0,
-                    Some(format!(
-                        "Invalid prefix \"0{}\", interpreting as \"0\" for backwards compatibility",
-                        char::from(byte)
-                    )),
-                );
+            _ => {
+                let warning = if *second == 0 {
+                    "Invalid prefix \"0".to_owned()
+                } else {
+                    let byte = [*second];
+                    let byte = String::from_utf8_lossy(&byte);
+                    format!(
+                        "Invalid prefix \"0{byte}\", interpreting as \"0\" for backwards compatibility"
+                    )
+                };
+                return (0, Some(warning));
             }
         };
         if tail.is_empty()

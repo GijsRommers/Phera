@@ -25,10 +25,18 @@ error_reporting(1);
 echo ini_get('default_charset'), '|', get_include_path(), '|', error_reporting();
 "#;
     assert_eq!(run(&runtime, change).await, "ASCII|/tmp|1");
-    let pristine = "<?php echo ini_get('default_charset'), '|', error_reporting();";
-    let php = oracle::run_php("ini-worker-defaults", pristine).expect("PHP oracle");
+    let php = oracle::find_php().expect("PHP oracle");
+    let pristine = std::process::Command::new(php)
+        .args([
+            "-n",
+            "-r",
+            "echo ini_get('default_charset'), '|', error_reporting();",
+        ])
+        .output()
+        .unwrap();
+    assert!(pristine.status.success());
     let start = run(&runtime, source).await;
-    assert_eq!(start.replace("|.|", "|"), php.join("\n"));
+    assert_eq!(start.replace("|.|", "|").as_bytes(), pristine.stdout);
     assert_eq!(run(&runtime, source).await, start);
 }
 
@@ -93,7 +101,6 @@ async fn quantity_conversions_match_php() {
     assert_eq!(expected.len(), case);
     let actual: Vec<_> = actual.lines().collect();
     assert_eq!(actual.len(), case);
-    for (expected, actual) in expected.iter().zip(actual) {
-        assert_eq!(expected, actual);
-    }
+    let actual = actual.into_iter().map(str::to_owned).collect::<Vec<_>>();
+    oracle::compare("INI quantity conversions", &[], &expected, &actual);
 }

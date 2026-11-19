@@ -43,6 +43,9 @@ impl Vm {
                 let Ok(limit) = usize::try_from(integer(bytes)) else {
                     return false;
                 };
+                if limit > 1_000_000 {
+                    return false;
+                }
                 self.error_handlers.trace_string_limit = limit;
             }
             "precision" | "serialize_precision" if integer(bytes) < -1 => return false,
