@@ -63,10 +63,10 @@ pub fn ini(context: &mut dyn Context, name: &[u8], value: Option<&Value>) -> Nat
         }
         return Ok(Value::Bool(false));
     };
-    if let Some(value) = value {
-        if !update(context, name, value, "ini_set")? {
-            return Ok(Value::Bool(false));
-        }
+    if let Some(value) = value
+        && !update(context, name, value, "ini_set")?
+    {
+        return Ok(Value::Bool(false));
     }
     Ok(Value::String(previous))
 }
