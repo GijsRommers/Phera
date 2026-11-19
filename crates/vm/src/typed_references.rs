@@ -363,7 +363,7 @@ fn reference_property_name(property: &PropertyDefault) -> String {
     let declaration = property
         .ty
         .as_ref()
-        .map_or("mixed", |ty| ty.display.as_str());
+        .map_or("mixed".into(), crate::types::php_type_display);
     format!(
         "{}::${} of type {}",
         property.declaring, property.name, declaration

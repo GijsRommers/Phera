@@ -55,4 +55,7 @@ pub use instruction::{
     BinaryOp, CallResult, CaptureKind, CastKind, ClassBinding, ClosureBinding, FetchMode,
     FinallyEntry, IncDec, IncludeKind, Instruction, RuntimeError, UnaryOp,
 };
-pub use unit::{CompiledUnit, Constant, ConstantKey, DeclarationWarning, Symbol, Type, TypeMask};
+pub use unit::{
+    CompiledUnit, Constant, ConstantKey, DeclarationWarning, Symbol, Type, TypeMask,
+    union_in_php_order,
+};

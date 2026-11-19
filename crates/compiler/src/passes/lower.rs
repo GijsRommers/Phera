@@ -126,7 +126,7 @@ impl Tables {
             mask,
             classes,
             intersection: display.contains('&'),
-            display: display.into(),
+            display: phera_bytecode::union_in_php_order(display),
         });
         TypeId(index as u32)
     }
