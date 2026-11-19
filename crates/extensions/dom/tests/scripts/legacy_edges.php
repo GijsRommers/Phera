@@ -33,3 +33,11 @@ foreach ([true, false] as $retainParent) {
     unset($parent);
     echo json_encode($child->parentNode?->nodeName), "\n";
 }
+
+$document->loadXML('<r><item>old</item></r>');
+$list = $document->getElementsByTagName('item');
+echo json_encode($list->item(0)->textContent), "\n";
+$document->loadXML('<r><item>new</item><item>later</item></r>');
+echo json_encode([$list->length, $list->item(0)->textContent]), "\n";
+$clone = clone $document;
+echo json_encode($clone->documentElement->ownerDocument === $clone), "\n";

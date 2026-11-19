@@ -8,6 +8,7 @@
 
 mod html_file;
 pub(super) mod io;
+mod node_class;
 
 use phera_extension_api::{
     ClassEntry, ConstantValue as C, Context, MethodEntry as M, NativeError, NativeResult,
@@ -109,6 +110,17 @@ pub(super) fn register(registry: &mut Registry) {
                         mutation::adopt,
                     )
                     .returning("DOMNode|false"),
+                    M::public_async(
+                        "registerNodeClass",
+                        const {
+                            &[
+                                P::new("baseClass", T::String),
+                                P::new("extendedClass", T::String).nullable(),
+                            ]
+                        },
+                        node_class::register,
+                    )
+                    .tentative_return("bool"),
                     M::public(
                         "getElementById",
                         const { &[P::new("elementId", T::String)] },

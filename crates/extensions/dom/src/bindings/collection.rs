@@ -20,7 +20,7 @@ use phera_extension_api::{
 use crate::tree::{Arena, Kind, NodeId};
 use crate::xml::names::XMLNS;
 
-use super::{Location, This, location, native, receiver};
+use super::{Location, NodeHandle, This, location, native, receiver};
 
 #[derive(Clone)]
 enum Selection {
@@ -37,11 +37,18 @@ enum Selection {
 #[derive(Clone)]
 struct Collection {
     root: Location,
+    document_handle: Option<NodeHandle>,
     selection: Selection,
     _pins: Vec<Rc<()>>,
 }
 
 impl Collection {
+    fn root(&self) -> Location {
+        self.document_handle
+            .as_ref()
+            .map_or_else(|| self.root.clone(), NodeHandle::current)
+    }
+
     fn ids(&self, arena: &Arena) -> Vec<NodeId> {
         let id = self.root.id;
         match &self.selection {
@@ -87,16 +94,17 @@ impl Collection {
     }
 
     fn wrap_node(&self, context: &mut dyn Context, id: Option<NodeId>) -> NativeResult {
+        let root = self.root();
         match id {
             Some(id) if matches!(self.selection, Selection::Snapshot(_)) => {
-                super::namespace::wrap(context, self.root.at(id))
+                super::namespace::wrap(context, root.at(id))
             }
-            id => self.root.wrap_optional(context, id),
+            id => root.wrap_optional(context, id),
         }
     }
 
     fn snapshot(&self) -> Vec<NodeId> {
-        self.ids(&self.root.shared.borrow().document.arena)
+        self.ids(&self.root().shared.borrow().document.arena)
     }
 }
 
@@ -138,6 +146,17 @@ fn wrap(
 ) -> NativeResult {
     let value = context.create_object(class, PhpArray::new())?;
     if let Value::Object(object) = &value {
+        let document_handle =
+            if root.id == Arena::DOCUMENT && !matches!(selection, Selection::Snapshot(_)) {
+                root.shared
+                    .borrow()
+                    .wrappers
+                    .get(&root.id)
+                    .and_then(std::rc::Weak::upgrade)
+                    .and_then(|object| native(&object))
+            } else {
+                None
+            };
         let pins = {
             let mut state = root.shared.borrow_mut();
             let mut pins = vec![state.pin(root.id)];
@@ -154,6 +173,7 @@ fn wrap(
         };
         *object.native.borrow_mut() = Some(Box::new(Collection {
             root,
+            document_handle,
             selection,
             _pins: pins,
         }));
@@ -234,7 +254,8 @@ fn named(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nati
 fn named_item(context: &mut dyn Context, object: &Object, name: &str) -> NativeResult {
     let collection = collection(object)?;
     let id = {
-        let state = collection.root.shared.borrow();
+        let root = collection.root();
+        let state = root.shared.borrow();
         let arena = &state.document.arena;
         collection
             .ids(arena)
@@ -251,7 +272,8 @@ fn named_ns(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> N
         .map(|value| String::from_utf8_lossy(value.as_bytes()));
     let name = String::from_utf8_lossy(args::bytes(arguments, 1));
     let id = {
-        let state = collection.root.shared.borrow();
+        let root = collection.root();
+        let state = root.shared.borrow();
         let arena = &state.document.arena;
         collection.ids(arena).into_iter().find(|&id| {
             arena[id].name.namespace.as_deref() == namespace.as_deref()

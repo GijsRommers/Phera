@@ -66,6 +66,7 @@ pub struct Doctype {
     pub system_id: String,
     pub internal_subset: Option<String>,
     pub notations: String,
+    pub attribute_defaults: std::collections::HashMap<String, Vec<(String, String)>>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

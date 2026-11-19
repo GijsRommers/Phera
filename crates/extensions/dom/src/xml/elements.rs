@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use quick_xml::events::BytesStart;
 use quick_xml::events::attributes::AttrError;
 
-use super::{Parser, ScopeChanges, extra_content, names};
+use super::{OpenElement, Parser, ScopeChanges, extra_content, names};
 use crate::document::ParseError;
 use crate::tree::{Kind, Name, Node};
 
@@ -99,6 +99,7 @@ impl Parser<'_> {
             .map_err(|_| extra_content())?;
 
         let mut expanded = HashSet::new();
+        let mut preserve_space = self.open.last().is_some_and(|frame| frame.preserve_space);
         for (key, value) in first_attribute.into_iter().chain(attributes) {
             let name = if namespace_declaration(&key).is_some() {
                 names::qualified(&key, Some(names::XMLNS.into()))
@@ -125,6 +126,13 @@ impl Parser<'_> {
                     .get(local_tag)
                     .iter()
                     .any(|rule| rule.is_id && rule.name == key);
+            if name.namespace.as_deref() == Some(names::XML) && name.local == "space" {
+                match value.text.as_str() {
+                    "preserve" => preserve_space = true,
+                    "default" => preserve_space = false,
+                    _ => {}
+                }
+            }
             let parts = value.parts();
             for part in &parts {
                 if part.kind == Kind::EntityReference {
@@ -142,7 +150,11 @@ impl Parser<'_> {
                 .map_err(|_| extra_content())?;
         }
         if push {
-            self.open.push((id, scope_changes));
+            self.open.push(OpenElement {
+                id,
+                namespaces: scope_changes,
+                preserve_space,
+            });
         } else {
             self.restore(scope_changes);
         }
@@ -150,8 +162,8 @@ impl Parser<'_> {
     }
 
     pub(super) fn close(&mut self) {
-        if let Some((_, changes)) = self.open.pop() {
-            self.restore(changes);
+        if let Some(frame) = self.open.pop() {
+            self.restore(frame.namespaces);
         }
     }
 

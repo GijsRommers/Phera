@@ -33,6 +33,41 @@ pub(super) fn find(
     })
 }
 
+fn default_value<'a>(
+    arena: &'a Arena,
+    id: NodeId,
+    namespace: Option<Option<&str>>,
+    name: &str,
+) -> Option<&'a str> {
+    let doctype = arena
+        .children(Arena::DOCUMENT)
+        .find_map(|id| arena[id].doctype.as_deref())?;
+    let attributes = doctype
+        .attribute_defaults
+        .get(&arena[id].name.qualified())?;
+    attributes.iter().find_map(|(qualified, value)| {
+        let matches = match namespace {
+            None => qualified == name,
+            Some(namespace) => match qualified.split_once(':') {
+                Some((prefix, local)) => {
+                    local == name
+                        && namespace.is_some_and(|uri| {
+                            if prefix == "xml" {
+                                uri == XML
+                            } else {
+                                super::node::namespace_scope(arena, id)
+                                    .find(|(bound, _)| bound == prefix)
+                                    .is_some_and(|(_, bound)| bound == uri)
+                            }
+                        })
+                }
+                None => namespace.is_none() && qualified == name,
+            },
+        };
+        matches.then_some(value.as_str())
+    })
+}
+
 pub(super) fn set(
     arena: &mut Arena,
     id: NodeId,
@@ -85,7 +120,19 @@ fn read(
     let attribute = {
         let state = node.shared.borrow();
         let namespace = namespace.as_ref().map(|uri| uri.as_deref());
-        find(&state.document.arena, node.id, namespace, &name)
+        let arena = &state.document.arena;
+        let attribute = find(arena, node.id, namespace, &name);
+        if attribute.is_none()
+            && let Some(value) = default_value(arena, node.id, namespace, &name)
+        {
+            match operation {
+                Read::Value => return Ok(Value::from(value)),
+                Read::Has => return Ok(Value::Bool(true)),
+                Read::Node => return Err(NativeError::error("Unsupported node type: 16")),
+                _ => {}
+            }
+        }
+        attribute
     };
     match (operation, attribute) {
         (Read::Value, Some(attribute)) => {
@@ -171,6 +218,9 @@ fn toggle(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nat
     let html = state.document.settings.html;
     let arena = &mut state.document.arena;
     let previous = find(arena, node.id, None, &name.local);
+    if previous.is_none() && default_value(arena, node.id, None, &name.local).is_some() {
+        return Ok(Value::Bool(true));
+    }
     let enabled = args::bool(arguments, 1).unwrap_or(previous.is_none());
     match (enabled, previous) {
         (false, Some(id)) => arena.detach(id),

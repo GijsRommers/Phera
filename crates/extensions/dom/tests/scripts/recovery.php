@@ -19,3 +19,17 @@ foreach ([
         echo json_encode([$xml, $flags, $loaded, $document->saveXML(), $errors]), "\n";
     }
 }
+
+foreach ([
+    '<r> </r>',
+    '<r> <x/> </r>',
+    '<r>x<a/> <b/> </r>',
+    '<r><a/>x<b/> <c/> </r>',
+    '<r><![CDATA[x]]> <a/> </r>',
+    '<r> &amp;<x/> </r>',
+    '<r xml:space="preserve"><p xml:space="default"> <a/> </p> </r>',
+] as $xml) {
+    $document = new DOMDocument();
+    $document->loadXML($xml, LIBXML_NOBLANKS);
+    echo json_encode($document->saveXML()), "\n";
+}

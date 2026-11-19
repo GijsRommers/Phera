@@ -229,7 +229,13 @@ pub(super) fn duplicate(node: &Location, deep: bool) -> Location {
                 let _ = temporary.arena.insert(Arena::DOCUMENT, copy, None);
             }
         }
-        return Location::new(temporary, true, Arena::DOCUMENT);
+        let clone = Location::new(temporary, true, Arena::DOCUMENT);
+        clone
+            .shared
+            .borrow_mut()
+            .node_classes
+            .clone_from(&state.node_classes);
+        return clone;
     }
     let copy = temporary.arena.import(source, node.id, deep);
     if !state.owned {

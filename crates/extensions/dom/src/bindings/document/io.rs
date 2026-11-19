@@ -105,8 +105,17 @@ fn install(
         validate_on_parse: previous.validate_on_parse,
         ..document.settings
     };
-    original.shared.borrow_mut().wrappers.remove(&original.id);
-    Location::new(document, true, Arena::DOCUMENT).bind(object);
+    let location = Location::new(document, true, Arena::DOCUMENT);
+    {
+        let mut state = original.shared.borrow_mut();
+        state.wrappers.remove(&original.id);
+        location
+            .shared
+            .borrow_mut()
+            .node_classes
+            .clone_from(&state.node_classes);
+    }
+    location.bind(object);
     Ok(Value::Bool(true))
 }
 

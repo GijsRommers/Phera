@@ -4,7 +4,7 @@
 //! echo $document->doctype->internalSubset;
 //! ```
 
-use super::{Parser, declarations};
+use super::{Parser, declarations, dtd};
 use crate::document::ParseError;
 use crate::tree::{Doctype, DtdEntry, Kind, Node, NodeId};
 
@@ -35,6 +35,14 @@ impl Parser<'_> {
             if !declarations.is_empty() {
                 doctype.internal_subset = Some(declarations);
             }
+        }
+        for (element, attribute, value) in self.attribute_rules.defaults() {
+            let value = self.entities.attribute(value, true)?.text;
+            doctype
+                .attribute_defaults
+                .entry(element.into())
+                .or_default()
+                .push((attribute.into(), value));
         }
         self.document.arena[id].doctype = Some(Box::new(doctype));
         self.doctype = true;
@@ -76,7 +84,12 @@ impl Parser<'_> {
                 return;
             }
         } else if let Some(data) = data.strip_prefix("<!ATTLIST") {
-            self.attribute_rules.declare(data);
+            self.attribute_rules.declare(data, serialized);
+            return;
+        } else if let Some(data) = data.strip_prefix("<!ELEMENT")
+            && dtd::write_element(data, serialized)
+        {
+            return;
         } else if let Some(data) = data.strip_prefix("<!NOTATION")
             && let Some((markup, node)) = declarations::notation(data)
         {

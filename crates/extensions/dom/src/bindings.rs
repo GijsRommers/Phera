@@ -18,6 +18,7 @@ mod node;
 mod properties;
 mod xpath;
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
@@ -81,6 +82,7 @@ struct DomState {
     document: Document,
     owned: bool,
     wrappers: HashMap<NodeId, Weak<Object>>,
+    node_classes: HashMap<String, String>,
     detached: detached::Detached,
 }
 
@@ -90,6 +92,15 @@ struct Location {
     id: NodeId,
 }
 
+#[derive(Clone)]
+struct NodeHandle(Rc<RefCell<Location>>);
+
+impl NodeHandle {
+    fn current(&self) -> Location {
+        self.0.borrow().clone()
+    }
+}
+
 impl Location {
     fn new(document: Document, owned: bool, id: NodeId) -> Self {
         Self {
@@ -97,6 +108,7 @@ impl Location {
                 document,
                 owned,
                 wrappers: HashMap::new(),
+                node_classes: HashMap::new(),
                 detached: detached::Detached::default(),
             })),
             id,
@@ -115,11 +127,24 @@ impl Location {
     }
 
     fn bind(self, object: &Rc<Object>) {
+        let handle = native::<NodeHandle>(object);
+        if let Some(handle) = &handle {
+            let previous = handle.current();
+            if (!previous.same_document(&self) || previous.id != self.id)
+                && let Ok(mut state) = previous.shared.try_borrow_mut()
+            {
+                state.wrappers.remove(&previous.id);
+            }
+        }
         self.shared
             .borrow_mut()
             .wrappers
             .insert(self.id, Rc::downgrade(object));
-        *object.native.borrow_mut() = Some(Box::new(self));
+        if let Some(handle) = handle {
+            *handle.0.borrow_mut() = self;
+        } else {
+            *object.native.borrow_mut() = Some(Box::new(NodeHandle(Rc::new(RefCell::new(self)))));
+        }
     }
 
     fn wrap(self, context: &mut dyn Context) -> NativeResult {
@@ -128,7 +153,7 @@ impl Location {
             if let Some(object) = state.wrappers.get(&self.id).and_then(Weak::upgrade) {
                 return Ok(Value::Object(object));
             }
-            match state.document.arena[self.id].kind {
+            let class = match state.document.arena[self.id].kind {
                 Kind::Element => "DOMElement",
                 Kind::Attribute => "DOMAttr",
                 Kind::Namespace => "DOMNameSpaceNode",
@@ -142,9 +167,14 @@ impl Location {
                 Kind::EntityReference => "DOMEntityReference",
                 Kind::Entity => "DOMEntity",
                 Kind::Notation => "DOMNotation",
-            }
+            };
+            state
+                .node_classes
+                .get(class)
+                .cloned()
+                .map_or(Cow::Borrowed(class), Cow::Owned)
         };
-        let value = context.create_object(class, PhpArray::new())?;
+        let value = context.create_object(&class, PhpArray::new())?;
         if let Value::Object(object) = &value {
             self.bind(object);
         }
@@ -169,7 +199,8 @@ fn native<T: Clone + 'static>(object: &Object) -> Option<T> {
 }
 
 fn location(object: &Object) -> Result<Location, NativeError> {
-    let location: Location = native(object).ok_or_else(|| dom_error(11, "Invalid State Error"))?;
+    let handle: NodeHandle = native(object).ok_or_else(|| dom_error(11, "Invalid State Error"))?;
+    let location = handle.current();
     if let Ok(mut state) = location.shared.try_borrow_mut() {
         state.release_detached();
     }

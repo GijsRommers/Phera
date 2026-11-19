@@ -93,10 +93,16 @@ fn invalid_character(input: &str) -> Option<(usize, char)> {
 
 type ScopeChanges = Vec<(String, Option<String>)>;
 
+struct OpenElement {
+    id: NodeId,
+    namespaces: ScopeChanges,
+    preserve_space: bool,
+}
+
 struct Parser<'a> {
     reader: Reader<&'a [u8]>,
     document: Document,
-    open: Vec<(NodeId, ScopeChanges)>,
+    open: Vec<OpenElement>,
     scope: HashMap<String, String>,
     entities: Entities,
     attribute_rules: dtd::AttributeRules,
@@ -218,8 +224,8 @@ impl<'a> Parser<'a> {
 
     fn finish(&self) -> Result<(), ParseError> {
         match self.open.last() {
-            Some(&(id, _)) => {
-                let node = &self.document.arena[id];
+            Some(frame) => {
+                let node = &self.document.arena[frame.id];
                 Err(ParseError::fatal(
                     77,
                     format!(
@@ -264,7 +270,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parent(&self) -> NodeId {
-        self.open.last().map_or(Arena::DOCUMENT, |frame| frame.0)
+        self.open.last().map_or(Arena::DOCUMENT, |frame| frame.id)
     }
 
     fn add(
@@ -297,13 +303,17 @@ impl<'a> Parser<'a> {
             };
         }
         let parent = self.parent();
+        let strip = kind == Kind::Text
+            && self.options.strip_blanks
+            && blank(text)
+            && self.ignorable_space(parent);
         let arena = &mut self.document.arena;
         if kind == Kind::Text
             && let Some(last) = arena[parent].last_child()
             && arena[last].kind == Kind::Text
         {
             arena[last].value.push_str(text);
-        } else if kind != Kind::Text || !self.options.strip_blanks || !blank(text) {
+        } else if !strip {
             let name = if kind == Kind::Cdata {
                 "#cdata-section"
             } else {
@@ -312,6 +322,19 @@ impl<'a> Parser<'a> {
             self.add(kind, name, text, self.position.line)?;
         }
         Ok(())
+    }
+
+    fn ignorable_space(&self, parent: NodeId) -> bool {
+        if self.open.last().is_some_and(|frame| frame.preserve_space) {
+            return false;
+        }
+        let arena = &self.document.arena;
+        let remaining = self.reader.get_ref();
+        match arena[parent].first_child() {
+            Some(first) if arena[first].kind == Kind::Text => false,
+            None if remaining.starts_with(b"</") => false,
+            _ => remaining.starts_with(b"<"),
+        }
     }
 
     fn report(&mut self, mut error: ParseError) {
