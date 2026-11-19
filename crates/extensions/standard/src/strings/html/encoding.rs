@@ -32,6 +32,15 @@ impl Encoding {
             .position(|&byte| byte == 0)
             .unwrap_or(name.len());
         let name = &name[..end];
+        let default;
+        let name = if name.is_empty() {
+            default = context.ini_get(b"default_charset");
+            default
+                .as_ref()
+                .map_or(b"".as_slice(), |value| value.as_bytes())
+        } else {
+            name
+        };
         match name.to_ascii_lowercase().as_slice() {
             b"" | b"utf-8" => Self::Utf8,
             b"iso-8859-1" | b"iso8859-1" => Self::Latin1,

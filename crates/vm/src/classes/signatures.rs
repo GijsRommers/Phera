@@ -206,7 +206,10 @@ impl Vm {
             if (base.tentative && source.is_none())
                 || !self.type_subset(source, &method.declaring, target, inherited_scope, unit)
             {
-                if base.tentative && compatible {
+                // PHP loads a class that the two return types name before it
+                // compares them, for a tentative return type as well.
+                let missing = self.unresolved_contract_type(source, target, unit);
+                if base.tentative && compatible && missing.is_none() {
                     if let MethodBody::User(reference) = method.body
                         && !self
                             .code
@@ -236,8 +239,7 @@ impl Vm {
                     }
                 } else {
                     compatible = false;
-                    unresolved =
-                        unresolved.or_else(|| self.unresolved_contract_type(source, target, unit));
+                    unresolved = unresolved.or(missing);
                 }
             }
         }

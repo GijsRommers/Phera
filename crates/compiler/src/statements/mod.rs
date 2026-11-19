@@ -24,8 +24,9 @@ impl Compiler<'_> {
             StatementKind::If {
                 condition,
                 then,
+                elseifs,
                 otherwise,
-            } => self.compile_if(condition, then, otherwise, line)?,
+            } => self.compile_if(condition, then, elseifs, otherwise, line)?,
             StatementKind::While { condition, body } => {
                 self.compile_while(condition, body, line)?
             }

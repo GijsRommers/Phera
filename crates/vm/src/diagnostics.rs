@@ -85,11 +85,10 @@ impl Vm {
             NativeError::Throw { class, message, .. } => {
                 let location = self.location();
                 let text = self.error_trace(class, &message, &location.file, location.line);
-                self.out(text.as_bytes());
                 let suffix = format!(" in {} on line {}\n", location.file, location.line);
                 let heading = text.strip_prefix("\nFatal error: ").unwrap_or(&text);
                 let message = heading.strip_suffix(&suffix).unwrap_or(heading);
-                self.record_last_error(1, message.to_owned(), location);
+                self.report_diagnostic(1, "Fatal error", message.into(), location);
                 self.status = 255;
             }
             NativeError::Unwind(state) => {
@@ -101,16 +100,10 @@ impl Vm {
                     .0
                     .downcast::<crate::error_traces::DeclarationFailure>()
                 {
-                    self.out(
-                        format!(
-                            "\nFatal error: {} in {} on line {}\n",
-                            failure.message, failure.file, failure.line
-                        )
-                        .as_bytes(),
-                    );
-                    self.record_last_error(
+                    self.report_diagnostic(
                         64,
-                        failure.message,
+                        "Fatal error",
+                        failure.message.into(),
                         SourceLocation {
                             file: failure.file,
                             line: failure.line,
@@ -134,7 +127,8 @@ pub(crate) struct OperatorDiagnostics<'vm> {
 impl<'vm> OperatorDiagnostics<'vm> {
     /// Detach the reusable buffer while retaining the VM needed to publish it on every exit.
     pub(crate) fn new(vm: &'vm mut Vm) -> Self {
-        let buffer = vm.diagnostic_reporter.take_operator();
+        let mut buffer = vm.diagnostic_reporter.take_operator();
+        buffer.float_precision = Some(vm.float_precision());
         Self { vm, buffer }
     }
 }

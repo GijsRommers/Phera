@@ -19,7 +19,7 @@ three times on a clean release build of this worktree (`cargo build --release
 | Name | Severity | One line |
 | --- | --- | --- |
 | `strict-identity-reference-cycle-crash` | 1 | `===` on an array containing a reference to itself recurses in Rust and aborts the process (stack overflow). |
-| `long-chain-assign-clone-stack-overflow` | 1 | Assigning a ~600k-term operator chain makes the parser clone the AST recursively and abort (PHP 8.5 runs the same file in 0.1 s). |
+| `long-chain-assign-clone-stack-overflow` | 1 | Assigning a ~600k-term operator chain makes the parser clone the AST recursively and abort (PHP 8.5 runs the same file in 0.1 s).  **Fixed** by `engine/long-expressions` (#39). |
 | `selfref-array-cursor-panic` | 1 | `end()`/`reset()`/`array_pop()`/`array_shift()` on an array containing a reference to itself panic (`RefCell already mutably borrowed`, exit 101). |
 | `class-chain-linking-quadratic` | 3 | A deep `class Cn extends Cn-1` chain costs O(n²) time and memory when linking (20 000 classes: 16 s and 4.4 GB in Phera vs 0.2 s in PHP). |
 | `no-memory-limit-unbounded-ram` | 3 | The engine has no memory limit: a 3-line loop grows past 2.4 GB in 4 s where PHP dies at 128 MB in 0.06 s. |
@@ -70,6 +70,13 @@ explicit stack of `(a, b)` value pairs — or keep a visited set of
 `Rc::as_ptr` pairs and treat a revisited pair as identical, matching PHP.
 
 ## `long-chain-assign-clone-stack-overflow` — severity 1 (crash)
+
+**Status: fixed** (pull request #39, `engine/long-expressions`). The
+assignment moves its right side instead of cloning it, `Expression` clones
+and drops chains in a loop, and the compiler, analyzer and tokenizer walk
+long chains without recursion. The reproducer prints `600001`, as PHP does;
+`crates/cli/tests/long_sources.rs` covers this and 70 other long and deep
+shapes against PHP.
 
 **Reproducer:** `tests/security/long-chain-assign-crash.php` (generated:
 `$x = 1+1+...+1;` with 600 000 terms, 1.2 MB).

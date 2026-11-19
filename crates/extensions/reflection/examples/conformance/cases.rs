@@ -40,6 +40,18 @@ impl Surface {
             | "markLazyObjectAsInitialized" => {
                 "[[], [null], [new Subject()], [new HookedSubject()], [new stdClass()]]"
             }
+            "newLazyGhost" => {
+                "[[], [null], [static function (object $object): void {}], [static function () {}, 7], [static function () {}, ReflectionClass::SKIP_DESTRUCTOR]]"
+            }
+            "newLazyProxy" => {
+                "[[], [null], [static fn (object $object) => new ($object::class)()], [static fn () => new stdClass(), 7]]"
+            }
+            "resetAsLazyGhost" => {
+                "[[], [null, static function () {}], [new Subject(), static function () {}], [new stdClass(), static function () {}], [new Subject(), static function () {}, 7]]"
+            }
+            "resetAsLazyProxy" => {
+                "[[], [null, static fn () => new Subject()], [new Subject(), static fn () => new Subject()], [new stdClass(), static fn () => new stdClass()], [new Subject(), static fn () => new Subject(), 7]]"
+            }
             "newInstance" => "[[], [3], ['bad']]",
             "newInstanceArgs" => {
                 "[[], [[]], [['id' => 3]], [[3]], [['nonexistent' => 4]], ['bad']]"

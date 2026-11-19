@@ -3,14 +3,12 @@
 
 use phera_bytecode::{BinaryOp, Reg};
 use phera_extension_api::{LocalFuture, NativeError};
-use phera_value::{
-    Diagnostics, ObjectComparator, OpError, StringComparison, StringComparisonStep, Value,
-};
+use phera_value::{Diagnostics, ObjectComparator, OpError, StringComparisonStep, Value};
 
 use crate::Vm;
 
 pub(crate) struct PendingComparison {
-    pub(crate) cast: Box<StringComparison>,
+    pub(crate) work: StringComparisonStep,
     pub(crate) operator: BinaryOp,
     pub(crate) destination: Reg,
 }
@@ -52,25 +50,77 @@ pub(crate) fn comparison_value(operator: BinaryOp, order: i8) -> Value {
 
 impl Vm {
     #[cold]
-    pub(crate) fn finish_string_comparison(
+    pub(crate) fn finish_comparison_in_callback(
         &mut self,
-        mut cast: Box<StringComparison>,
+        mut work: StringComparisonStep,
     ) -> LocalFuture<'_, Result<i8, NativeError>> {
         Box::pin(async move {
             loop {
-                if !self.error_handlers.pending.is_empty() {
-                    self.drain_error_handlers().await?;
-                }
-                let object = Value::Object(cast.object().clone());
-                let string = self.object_to_string(&object).await?;
-                let next = self.step_comparison(|diagnostics, objects| {
-                    cast.resume(string, objects, diagnostics)
-                })?;
-                match next {
+                work = match work {
                     StringComparisonStep::Complete(order) => return Ok(order),
-                    StringComparisonStep::Cast(next) => cast = next,
-                }
+                    StringComparisonStep::Cast(cast) => {
+                        if !self.error_handlers.pending.is_empty() {
+                            self.drain_error_handlers().await?;
+                        }
+                        let string = self
+                            .object_to_string(&Value::Object(cast.object().clone()))
+                            .await?;
+                        self.step_comparison(|diagnostics, objects| {
+                            cast.resume(string, objects, diagnostics)
+                        })?
+                    }
+                    StringComparisonStep::Initialize(comparison) => {
+                        let object = comparison
+                            .pending()
+                            .ok_or_else(|| internal_error!("lazy comparison receiver"))?;
+                        self.initialize_lazy_via_callback(object).await?;
+                        self.step_comparison(|diagnostics, objects| {
+                            comparison.resume(objects, diagnostics)
+                        })?
+                    }
+                };
             }
         })
+    }
+
+    pub(crate) async fn continue_comparison(
+        &mut self,
+        mut pending: PendingComparison,
+    ) -> Result<(), NativeError> {
+        loop {
+            pending.work = match pending.work {
+                StringComparisonStep::Complete(order) => {
+                    self.set(
+                        pending.destination,
+                        comparison_value(pending.operator, order),
+                    );
+                    return Ok(());
+                }
+                StringComparisonStep::Cast(cast) => {
+                    if !self.error_handlers.pending.is_empty() {
+                        self.drain_error_handlers().await?;
+                    }
+                    let string = self
+                        .object_to_string(&Value::Object(cast.object().clone()))
+                        .await?;
+                    self.step_comparison(|diagnostics, objects| {
+                        cast.resume(string, objects, diagnostics)
+                    })?
+                }
+                StringComparisonStep::Initialize(comparison) => {
+                    let object = comparison
+                        .pending()
+                        .ok_or_else(|| internal_error!("lazy comparison receiver"))?;
+                    let continuation = crate::lazy_continuation::LazyContinuation::Comparison(
+                        pending.destination,
+                        pending.operator,
+                        comparison,
+                    );
+                    self.suspend_lazy_initialization(object, continuation)
+                        .await?;
+                    return Ok(());
+                }
+            };
+        }
     }
 }

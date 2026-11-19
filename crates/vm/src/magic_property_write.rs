@@ -26,6 +26,7 @@ impl Vm {
         name: ArrayKey,
         value: Value,
     ) -> Result<Option<SelectedSetter>, NativeError> {
+        let object = crate::lazy_objects::resolved_lazy_instance(object);
         let class = self
             .classes
             .for_object(&object)

@@ -56,12 +56,3 @@ impl RequestState {
         slot.downcast().ok().map(|state| *state)
     }
 }
-
-/// Runtime configuration for `http_build_query(['a' => 1, 'b' => 2])`.
-pub struct QuerySeparator(pub phera_value::PhpString);
-
-impl Default for QuerySeparator {
-    fn default() -> Self {
-        Self("&".into())
-    }
-}

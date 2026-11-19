@@ -57,20 +57,11 @@ impl Analyzer<'_> {
             StatementKind::If {
                 condition,
                 then,
+                elseifs,
                 otherwise,
             } => {
-                let scope = Scope::default();
-                let truth = self.condition_truth(condition, &scope);
-                for (branch, value) in [(Some(&then[..]), true), (otherwise.as_deref(), false)] {
-                    if let Some(branch) = branch
-                        && truth.is_none_or(|truth| truth == value)
-                    {
-                        let mut scope = scope.clone();
-                        self.refine(condition, &mut scope, value);
-                        scope.known.extend(known.iter().cloned());
-                        pending.push((branch, names.clone(), scope.known));
-                    }
-                }
+                self.deferred_if(condition, then, elseifs, otherwise.as_deref(), pending);
+                return;
             }
             _ => {
                 for body in crate::collect::child_blocks(statement) {
@@ -95,12 +86,64 @@ impl Analyzer<'_> {
         }
     }
 
+    /// An `if` ladder, rung by rung: each `elseif` is reached with what the
+    /// conditions before it being false tells, as if it were an `if` nested
+    /// in the `else` before it.
+    fn deferred_if<'a>(
+        &mut self,
+        condition: &'a Expression,
+        then: &'a [Statement],
+        elseifs: &'a [ElseIf],
+        otherwise: Option<&'a [Statement]>,
+        pending: &mut Vec<DeclarationBlock<'a>>,
+    ) {
+        let outer_known = self.context.known.clone();
+        let names = self.context.names.clone();
+        let last = elseifs.len();
+        let branches = std::iter::once((condition, then)).chain(
+            elseifs
+                .iter()
+                .map(|elseif| (&elseif.condition, &elseif.body[..])),
+        );
+        for (index, (condition, body)) in branches.enumerate() {
+            let truth = self.condition_truth(condition, &Scope::default());
+            if truth != Some(false) {
+                let mut scope = Scope::default();
+                self.refine(condition, &mut scope, true);
+                scope.known.extend(self.context.known.iter().cloned());
+                pending.push((body, names.clone(), scope.known));
+            }
+            self.deferred_expression_list(vec![condition], pending);
+            if truth == Some(true) {
+                break;
+            }
+            let mut rest = Scope::default();
+            self.refine(condition, &mut rest, false);
+            rest.known.extend(self.context.known.iter().cloned());
+            if index == last {
+                if let Some(body) = otherwise {
+                    pending.push((body, names.clone(), rest.known));
+                }
+            } else {
+                self.context.known = rest.known;
+            }
+        }
+        self.context.known = outer_known;
+    }
+
     fn deferred_expressions<'a>(
         &mut self,
         statement: &'a Statement,
         pending: &mut Vec<DeclarationBlock<'a>>,
     ) {
-        let mut expressions = crate::walk::statement_expressions(statement);
+        self.deferred_expression_list(crate::walk::statement_expressions(statement), pending);
+    }
+
+    fn deferred_expression_list<'a>(
+        &mut self,
+        mut expressions: Vec<&'a Expression>,
+        pending: &mut Vec<DeclarationBlock<'a>>,
+    ) {
         while let Some(expression) = expressions.pop() {
             match &expression.kind {
                 ExpressionKind::Closure(closure) => pending.push((

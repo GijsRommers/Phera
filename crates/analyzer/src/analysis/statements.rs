@@ -42,11 +42,16 @@ impl Analyzer<'_> {
                     && is_throw(next)
                     && let StatementKind::If {
                         condition,
+                        elseifs,
                         otherwise: None,
                         ..
                     } = &statement.kind
                 {
-                    self.last_condition = Some(condition.span);
+                    self.last_condition = Some(
+                        elseifs
+                            .last()
+                            .map_or(condition.span, |branch| branch.condition.span),
+                    );
                 }
             }
             flow = self.statement(statement, scope);
@@ -114,15 +119,10 @@ impl Analyzer<'_> {
             StatementKind::If {
                 condition,
                 then,
+                elseifs,
                 otherwise,
             } => {
-                return self.if_statement(
-                    condition,
-                    then,
-                    otherwise.as_deref(),
-                    scope,
-                    statement.span,
-                );
+                return self.if_statement(condition, then, elseifs, otherwise.as_deref(), scope);
             }
             StatementKind::Switch { subject, cases } => {
                 return self.switch(subject, cases, scope);
@@ -210,51 +210,9 @@ impl Analyzer<'_> {
         Flow::Terminal
     }
 
-    fn if_statement(
-        &mut self,
-        condition: &Expression,
-        then: &[Statement],
-        otherwise: Option<&[Statement]>,
-        scope: &mut Scope,
-        span: Span,
-    ) -> Flow {
-        let previous = self.last_condition;
-        let elsewhere = self.level >= 4 && self.is_elseif(span);
-        if elsewhere
-            && otherwise.is_none_or(|body| matches!(body, [statement] if is_throw(statement)))
-        {
-            self.last_condition = Some(condition.span);
-        }
-        let branches = self.condition(condition, scope.clone(), false);
-        let (kind, label) = if elsewhere {
-            ("elseif", "Elseif condition")
-        } else {
-            ("if", "If condition")
-        };
-        self.constant_condition(kind, label, condition, &branches);
-        self.last_condition = previous;
-        let (a, left) = self.statement_branch(then, branches.yes, scope);
-        let (b, right) = self.statement_branch(otherwise.unwrap_or_default(), branches.no, scope);
-        if let Some(after) = condition::Condition::merge(left, right) {
-            *scope = after;
-            return Flow::Next;
-        }
-        if a == Flow::Terminal && b == Flow::Terminal {
-            Flow::Terminal
-        } else if a == Flow::Break || b == Flow::Break {
-            Flow::Break
-        } else {
-            Flow::Continue
-        }
-    }
-
-    fn is_elseif(&self, span: Span) -> bool {
-        self.file
-            .source
-            .get(span.start..span.start.saturating_add(6))
-            .is_some_and(|keyword| keyword.eq_ignore_ascii_case("elseif"))
-    }
-    fn statement_branch(
+    /// Runs one branch of a conditional on the scope its outcome leaves, or,
+    /// when that outcome cannot happen, only if a label inside can be jumped to.
+    pub(super) fn statement_branch(
         &mut self,
         body: &[Statement],
         branch: Option<Scope>,
@@ -274,7 +232,7 @@ impl Analyzer<'_> {
     }
 }
 
-fn is_throw(statement: &Statement) -> bool {
+pub(super) fn is_throw(statement: &Statement) -> bool {
     matches!(
         statement.kind,
         StatementKind::Expression(Expression {
@@ -285,7 +243,7 @@ fn is_throw(statement: &Statement) -> bool {
 }
 
 /// A label can re-enter a block after an otherwise terminal statement.
-fn contains_label(statement: &Statement) -> bool {
+pub(super) fn contains_label(statement: &Statement) -> bool {
     let mut pending = vec![statement];
     while let Some(statement) = pending.pop() {
         if matches!(statement.kind, StatementKind::Label(_)) {
