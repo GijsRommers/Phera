@@ -149,6 +149,28 @@ impl Drop for Served {
 }
 
 #[test]
+fn web_scripts_and_includes_keep_the_shebang_as_inline_text() {
+    use phera_extension_api::testing::{oracle, serve::Server};
+
+    let php = oracle::find_php().expect("PHP 8.5 required");
+    let ours = Served::start(
+        "shebang",
+        &[
+            (
+                "index.php",
+                "#!/usr/bin/env php\n<?php echo __LINE__, '\\n'; include __DIR__.'/include.php';",
+            ),
+            ("include.php", "#!include\n<?php echo __LINE__;"),
+        ],
+    );
+    let theirs = Server::start_php(&php, &ours.root, 1);
+    assert_eq!(
+        ours.get("/"),
+        send_request(&theirs.address, "GET", "/", "", "")
+    );
+}
+
+#[test]
 fn php_scripts_static_files_and_the_front_controller() {
     let served = Served::start(
         "site",

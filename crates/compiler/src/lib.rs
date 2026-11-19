@@ -38,6 +38,14 @@ pub fn compile_bytes(
     compile_source(source, file, pipeline::SourceKind::File)
 }
 
+/// Compile a script under PHP's CLI scanner rules, including its first-line shebang.
+pub fn compile_cli_bytes(
+    source: &[u8],
+    file: &str,
+) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    compile_source(source, file, pipeline::SourceKind::CliFile)
+}
+
 /// Compile the code passed to `eval()` without requiring an opening tag.
 pub fn compile_eval(
     source: &[u8],

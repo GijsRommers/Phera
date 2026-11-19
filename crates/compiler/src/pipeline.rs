@@ -18,6 +18,7 @@ use crate::{CompileError, errors, passes::lower};
 #[derive(Clone, Copy)]
 pub(super) enum SourceKind {
     File,
+    CliFile,
     Eval { anonymous_seed: u64 },
 }
 
@@ -28,7 +29,8 @@ pub(super) fn compile_on_stack(
     kind: SourceKind,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let lines = LineTable::from_bytes(source);
-    let (parsed, mut scanner_diagnostics) = phera_parser::parse_file_on_current_stack(source);
+    let (parsed, mut scanner_diagnostics) =
+        phera_parser::parse_file_on_current_stack(source, matches!(kind, SourceKind::CliFile));
     let compile_diagnostics = RefCell::new(Vec::new());
     let result = compile_program(parsed, source, file, &lines, kind, &compile_diagnostics);
     scanner_diagnostics.extend(compile_diagnostics.into_inner());
@@ -78,7 +80,7 @@ fn compile_program(
         let line = errors::parse_line(&error.message, &display, lines.line(error.span.start));
         let message = errors::parse_message(&error.message, &display, &token, line);
         let message = match kind {
-            SourceKind::File => message,
+            SourceKind::File | SourceKind::CliFile => message,
             SourceKind::Eval { .. } => crate::eval_diagnostics::message(
                 message,
                 &display,
@@ -126,7 +128,7 @@ fn compile_program(
         return Err(error);
     }
     let default = match kind {
-        SourceKind::File => Constant::Int(1),
+        SourceKind::File | SourceKind::CliFile => Constant::Int(1),
         SourceKind::Eval { .. } => Constant::Null,
     };
     let register = compiler.literal(default, 1)?;

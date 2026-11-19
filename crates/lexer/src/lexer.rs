@@ -158,6 +158,18 @@ impl<'src> Lexer<'src> {
         }
     }
 
+    /// Start scanning after the CLI shebang while keeping offsets in the original file.
+    pub fn after_shebang(mut self) -> Self {
+        if self.source.starts_with(b"#!") {
+            self.position = self
+                .source
+                .iter()
+                .position(|&byte| byte == b'\n')
+                .map_or(self.source.len(), |newline| newline + 1);
+        }
+        self
+    }
+
     /// Creates a lexer for PHP code without an opening tag, such as the code
     /// passed to `eval()`.
     pub fn new_php(source: &'src str) -> Self {
