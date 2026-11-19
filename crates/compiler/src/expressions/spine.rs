@@ -30,17 +30,14 @@ fn holds_only_scalars(operand: &ast::Expression) -> bool {
             {
                 pending.push(operand)
             }
-            ast::ExpressionKind::Cast { kind, operand }
-                if matches!(
-                    kind,
+            ast::ExpressionKind::Cast {
+                kind:
                     ast::CastKind::Int
-                        | ast::CastKind::Float
-                        | ast::CastKind::Bool
-                        | ast::CastKind::String
-                ) =>
-            {
-                pending.push(operand)
-            }
+                    | ast::CastKind::Float
+                    | ast::CastKind::Bool
+                    | ast::CastKind::String,
+                operand,
+            } => pending.push(operand),
             _ => return false,
         }
     }
