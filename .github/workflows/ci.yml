@@ -62,7 +62,7 @@ jobs:
           - name: all other crates
             key: rest
             packages: --workspace --exclude phera-ext-mbstring --exclude phera-cli
-    # A draft gets the three short checks only. Work in progress is pushed
+    # A draft gets the short checks only. Work in progress is pushed
     # often, and its long jobs kept finished pull requests waiting for a
     # free runner.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
@@ -244,4 +244,4 @@ jobs:
         with:
           toolchain: '1.99.1'
       - run: cargo install cargo-audit --version 0.23.0 --locked
-      - run: cargo audit --deny warnings --no-yanked
+      - run: python3 .github/scripts/check-advisories.py
