@@ -51,6 +51,7 @@ pub enum ExpressionKind {
     StaticProperty {
         class: Box<Expression>,
         name: Variable,
+        name_start: usize,
     },
     /// `Foo::BAR`, including `Foo::class`.
     ClassConstant {
@@ -63,6 +64,7 @@ pub enum ExpressionKind {
     Call {
         callee: Box<Expression>,
         arguments: Arguments,
+        opening: usize,
     },
     /// `$a->b(1)` or `$a?->b(1)`
     MethodCall {

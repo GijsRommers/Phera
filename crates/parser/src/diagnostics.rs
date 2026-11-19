@@ -1,7 +1,30 @@
-//! Public PHP wording for frontend diagnostics.
+//! PHP diagnostic wording shared by the runtime and lint.
+//! For example, `echo ;` reports an unexpected semicolon.
+
+use crate::ParseError;
+use phera_source::LineTable;
+
+pub(crate) fn php_diagnostic(
+    error: &ParseError,
+    source: &[u8],
+    lines: &LineTable,
+) -> (usize, String) {
+    let original = lines.line(error.span.start);
+    if error.is_compile_error() || error.is_backtick_operator() {
+        return (original, error.message.clone());
+    }
+    let token = source
+        .get(error.span.start..error.span.end)
+        .unwrap_or_default();
+    let source = String::from_utf8_lossy(source);
+    let token = String::from_utf8_lossy(token);
+    let line = parse_line(&error.message, &source, original);
+    let message = parse_message(&error.message, &source, &token, line);
+    (line, message)
+}
 
 /// Preserve frontend errors while normalizing the CLI wording PHP exposes.
-pub(super) fn parse_message(message: &str, source: &str, token: &str, line: usize) -> String {
+fn parse_message(message: &str, source: &str, token: &str, line: usize) -> String {
     if message == "unterminated comment" {
         return format!("Unterminated comment starting line {line}");
     }
@@ -73,7 +96,7 @@ pub(super) fn parse_message(message: &str, source: &str, token: &str, line: usiz
 }
 
 /// PHP points at the offending body line, rather than the whole heredoc token.
-pub(super) fn parse_line(message: &str, source: &str, original: usize) -> usize {
+fn parse_line(message: &str, source: &str, original: usize) -> usize {
     if !message.starts_with("invalid ") || !message.contains("indentation") {
         return original;
     }

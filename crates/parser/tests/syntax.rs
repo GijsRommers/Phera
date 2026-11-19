@@ -368,13 +368,15 @@ fn sexp_expr(expression: &Expression) -> String {
             sexp_expr(target),
             sexp_member(name)
         ),
-        ExpressionKind::StaticProperty { class, name } => {
+        ExpressionKind::StaticProperty { class, name, .. } => {
             format!("(staticprop {} {})", sexp_expr(class), sexp_variable(name))
         }
         ExpressionKind::ClassConstant { class, name } => {
             format!("(classconst {} {})", sexp_expr(class), sexp_member(name))
         }
-        ExpressionKind::Call { callee, arguments } => {
+        ExpressionKind::Call {
+            callee, arguments, ..
+        } => {
             format!("(call {} {})", sexp_expr(callee), sexp_arguments(arguments))
         }
         ExpressionKind::MethodCall {

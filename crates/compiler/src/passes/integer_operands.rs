@@ -174,6 +174,9 @@ pub(crate) fn dead_after(function: &Function, index: usize, register: phera_byte
                 }
                 Instruction::CallDirect {
                     args, count, dst, ..
+                }
+                | Instruction::CallNativeDirect {
+                    args, count, dst, ..
                 } => {
                     if (args.0..args.0 + count).contains(&register.0) {
                         return false;

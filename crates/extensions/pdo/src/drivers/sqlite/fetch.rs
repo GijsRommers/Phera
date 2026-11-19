@@ -12,7 +12,7 @@ async fn fill(context: &mut dyn Context, this: Option<&Rc<Object>>, all: bool) -
         _ => None,
     };
     let Some(handle) = handle else {
-        return Ok(Value::Null);
+        return crate::stream_fetch::fill(context, &state, all).await;
     };
     loop {
         if !all && state.borrow().cursor < state.borrow().rows.values.len() {
@@ -118,6 +118,7 @@ pub fn close<'a>(
                 crate::errors::exception(error.message, None, i64::from(error.code))
             })?;
         }
+        crate::stream_fetch::close(context, &state).await?;
         crate::statement::close(context, this.as_ref(), &args)
     })
 }

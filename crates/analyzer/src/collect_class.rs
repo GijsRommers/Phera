@@ -119,9 +119,12 @@ fn add_member(
                                 .or_else(|| doc.variables.get(&None))
                                 .map(|annotation| annotation.ty.clone())
                         }),
-                        null_default: p.default.as_ref().is_some_and(|value| {
-                            matches!(value.kind, ExpressionKind::Literal(Literal::Null))
-                        }),
+                        null_default: p
+                            .default
+                            .as_ref()
+                            .map_or(ty.is_none() && !p.has_hook_list, |value| {
+                                matches!(value.kind, ExpressionKind::Literal(Literal::Null))
+                            }),
                         modifiers: *modifiers,
                         location: location(p.span.start),
                     },
@@ -167,6 +170,7 @@ fn add_method(
     );
     signature.apply_phpdoc(doc, names);
     signature.modifiers = method.modifiers;
+    signature.returns_reference = method.by_reference;
     signature.global_effects = method
         .body
         .as_ref()

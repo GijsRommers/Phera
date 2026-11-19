@@ -220,6 +220,18 @@ impl ReflectionContext for Vm {
         class.map_or_else(Members::default, |class| self.cached_members(&class, kind))
     }
 
+    fn reflect_after_initialization(
+        &mut self,
+        object: Rc<Object>,
+        read: phera_extension_api::reflection::LazyReflectionRead,
+    ) -> NativeResult {
+        self.reflection_after_initialization(object, read)
+    }
+
+    fn reflect_instance_has_property(&mut self, object: Rc<Object>, name: String) -> NativeResult {
+        self.reflection_instance_has_property(object, name)
+    }
+
     fn reflect_class_constant(&mut self, class: &str, name: &str) -> NativeResult {
         let constant = self
             .classes

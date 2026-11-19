@@ -25,24 +25,64 @@ use phera_extension_api::{
 #[derive(Default)]
 pub struct UploadedFiles {
     waiting: Vec<PathBuf>,
+    first_active: usize,
 }
 
 impl UploadedFiles {
     pub fn new(waiting: Vec<PathBuf>) -> UploadedFiles {
-        UploadedFiles { waiting }
+        UploadedFiles {
+            waiting,
+            first_active: 0,
+        }
+    }
+
+    /// PHP replaces the active upload table when a new multipart parse starts.
+    /// Keep the earlier files on the cleanup list.
+    pub fn replace_active(&mut self, files: Vec<PathBuf>) {
+        self.first_active = self.waiting.len();
+        self.waiting.extend(files);
     }
 
     fn holds(&self, path: &Path) -> bool {
-        self.waiting.iter().any(|waiting| waiting == path)
+        self.waiting[self.first_active..]
+            .iter()
+            .any(|waiting| waiting == path)
     }
 
     fn forget(&mut self, path: &Path) {
-        self.waiting.retain(|waiting| waiting != path);
+        if let Some(index) = self.waiting[self.first_active..]
+            .iter()
+            .position(|file| file == path)
+        {
+            self.waiting.remove(self.first_active + index);
+        }
     }
 
     /// The files nobody moved. The runtime deletes them after the request.
-    pub fn into_unclaimed(self) -> Vec<PathBuf> {
-        self.waiting
+    pub async fn cleanup(mut self) {
+        let files = std::mem::take(&mut self.waiting);
+        if !files.is_empty() {
+            let _ = tokio::task::spawn_blocking(move || remove_files(files)).await;
+        }
+    }
+}
+
+impl Drop for UploadedFiles {
+    fn drop(&mut self) {
+        let files = std::mem::take(&mut self.waiting);
+        if !files.is_empty() {
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn_blocking(move || remove_files(files));
+            } else {
+                remove_files(files);
+            }
+        }
+    }
+}
+
+fn remove_files(files: Vec<PathBuf>) {
+    for file in files {
+        let _ = std::fs::remove_file(file);
     }
 }
 

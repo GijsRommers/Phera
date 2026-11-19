@@ -36,13 +36,7 @@ impl Vm {
                 return self.declared_classes(function);
             }
             Operation::GetCalledClass => {
-                return self
-                    .current()
-                    .and_then(|frame| frame.called())
-                    .map(|class| class.name_value.clone())
-                    .ok_or_else(|| {
-                        NativeError::error("get_called_class() must be called from within a class")
-                    });
+                return self.called_class_name();
             }
             Operation::GetClass | Operation::GetParentClass if arguments.is_empty() => {
                 if matches!(function, Operation::GetClass)
@@ -102,7 +96,12 @@ impl Vm {
             }
             Operation::ClassAlias => {
                 return self
-                    .class_alias(&string(&value), &string(&arguments[1]), option(2, true))
+                    .class_alias(
+                        &string(&value),
+                        &string(&arguments[1]),
+                        option(2, true),
+                        &arguments,
+                    )
                     .await;
             }
             _ => {}
@@ -264,6 +263,17 @@ impl Vm {
             }
         }
         Ok(Value::from(listed))
+    }
+}
+
+impl Vm {
+    pub(crate) fn called_class_name(&self) -> NativeResult {
+        self.current()
+            .and_then(|frame| frame.called())
+            .map(|class| class.name_value.clone())
+            .ok_or_else(|| {
+                NativeError::error("get_called_class() must be called from within a class")
+            })
     }
 }
 

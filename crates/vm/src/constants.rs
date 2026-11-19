@@ -59,6 +59,12 @@ impl Vm {
         constant.value
     }
 
+    pub(crate) fn warn_duplicate_constant(&mut self, name: &str) {
+        self.warn(format!(
+            "Constant {name} already defined, this will be an error in PHP 9"
+        ));
+    }
+
     /// Implements PHP DeclareConstant semantics outside the dispatch loop.
     pub(crate) fn declare_constant(
         &mut self,
@@ -67,7 +73,7 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let name = self.name(name)?;
         if self.constants.contains_key(&name) {
-            self.warn(format!("Constant {name} already defined"));
+            self.warn_duplicate_constant(&name);
         } else {
             let origin = self.current().map(|frame| frame.frame.function);
             let deprecated = self.current().and_then(|frame| {

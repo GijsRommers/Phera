@@ -12,12 +12,13 @@ use phera_source::{CompileDiagnostic, LineTable};
 use crate::context::Compiler;
 use crate::ir::{CompiledUnit, Constant, Instruction};
 use crate::policies::DeclarationTiming;
-use crate::{CompileError, errors, passes::lower};
+use crate::{CompileError, passes::lower};
 
 /// Included files return 1 by default; evaluated expressions return null.
 #[derive(Clone, Copy)]
 pub(super) enum SourceKind {
     File,
+    CliFile,
     Eval { anonymous_seed: u64 },
 }
 
@@ -26,11 +27,21 @@ pub(super) fn compile_on_stack(
     source: &[u8],
     file: &str,
     kind: SourceKind,
+    native_functions: Option<&crate::NativeFunctions<'_>>,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let lines = LineTable::from_bytes(source);
-    let (parsed, mut scanner_diagnostics) = phera_parser::parse_file_on_current_stack(source);
+    let (parsed, mut scanner_diagnostics) =
+        phera_parser::parse_file_on_current_stack(source, matches!(kind, SourceKind::CliFile));
     let compile_diagnostics = RefCell::new(Vec::new());
-    let result = compile_program(parsed, source, file, &lines, kind, &compile_diagnostics);
+    let result = compile_program(
+        parsed,
+        source,
+        file,
+        &lines,
+        kind,
+        &compile_diagnostics,
+        native_functions,
+    );
     scanner_diagnostics.extend(compile_diagnostics.into_inner());
     match result {
         Ok(mut unit) => {
@@ -59,6 +70,7 @@ fn compile_program(
     lines: &LineTable,
     kind: SourceKind,
     compile_diagnostics: &RefCell<Vec<CompileDiagnostic>>,
+    native_functions: Option<&crate::NativeFunctions<'_>>,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let ast = parsed.map_err(|error| {
         if error.is_compile_error() || error.is_backtick_operator() {
@@ -70,23 +82,25 @@ fn compile_program(
                 scanner_diagnostics: Vec::new(),
             };
         }
-        let display = String::from_utf8_lossy(source);
-        let token = source
-            .get(error.span.start..error.span.end)
-            .unwrap_or_default();
-        let token = String::from_utf8_lossy(token);
-        let line = errors::parse_line(&error.message, &display, lines.line(error.span.start));
-        let message = errors::parse_message(&error.message, &display, &token, line);
+        let (line, message) = error.php_diagnostic(source, lines);
         let message = match kind {
-            SourceKind::File => message,
-            SourceKind::Eval { .. } => crate::eval_diagnostics::message(
-                message,
-                &display,
-                &token,
-                error.span.start,
-                line,
-                lines,
-            ),
+            SourceKind::File | SourceKind::CliFile => message,
+            SourceKind::Eval { .. } => {
+                let display = String::from_utf8_lossy(source);
+                let token = String::from_utf8_lossy(
+                    source
+                        .get(error.span.start..error.span.end)
+                        .unwrap_or_default(),
+                );
+                crate::eval_diagnostics::message(
+                    message,
+                    &display,
+                    &token,
+                    error.span.start,
+                    line,
+                    lines,
+                )
+            }
         };
         CompileError {
             message,
@@ -106,6 +120,7 @@ fn compile_program(
         compile_diagnostics,
         &reflection,
     );
+    compiler.native_functions = native_functions;
     if let SourceKind::Eval { anonymous_seed } = kind {
         compiler.anonymous_classes.set(anonymous_seed);
     }
@@ -126,7 +141,7 @@ fn compile_program(
         return Err(error);
     }
     let default = match kind {
-        SourceKind::File => Constant::Int(1),
+        SourceKind::File | SourceKind::CliFile => Constant::Int(1),
         SourceKind::Eval { .. } => Constant::Null,
     };
     let register = compiler.literal(default, 1)?;
@@ -158,7 +173,7 @@ pub(super) fn finish(
         file: compiler.file.into(),
     };
     validate_global_writes(&unit)?;
-    Ok(lower::lower(unit))
+    Ok(lower::lower(unit, compiler.native_functions))
 }
 
 /// PHP 8.1 makes the global table read-only except through an indexed symbol name.

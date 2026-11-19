@@ -33,8 +33,17 @@ pub(crate) struct Parser<'src> {
 }
 
 impl<'src> Parser<'src> {
-    pub(crate) fn new(source: &'src [u8], collect_diagnostics: bool) -> (Self, ScanReport) {
+    pub(crate) fn new(
+        source: &'src [u8],
+        collect_diagnostics: bool,
+        skip_shebang: bool,
+    ) -> (Self, ScanReport) {
         let lexer = Lexer::new_bytes(source).with_doc_comments();
+        let lexer = if skip_shebang {
+            lexer.after_shebang()
+        } else {
+            lexer
+        };
         let mut lexer = if collect_diagnostics {
             lexer.with_diagnostics(ScanMode::Parsed)
         } else {

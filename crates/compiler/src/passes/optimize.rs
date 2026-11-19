@@ -124,6 +124,26 @@ fn update_scalar_facts(scalar: &mut [bool], instruction: Instruction) {
         Instruction::LoadInt { dst, .. }
         | Instruction::LoadBool { dst, .. }
         | Instruction::LoadNull { dst } => set_scalar(scalar, dst, true),
+        Instruction::BuiltinUnary { op, dst, .. } => {
+            scalar.fill(false);
+            set_scalar(
+                scalar,
+                dst,
+                !matches!(
+                    op,
+                    phera_bytecode::BuiltinUnary::GetType | phera_bytecode::BuiltinUnary::GetClass
+                ),
+            );
+        }
+        Instruction::BuiltinFrame {
+            op: phera_bytecode::BuiltinFrame::ArgumentCount,
+            dst,
+        }
+        | Instruction::ArrayKeyExists { dst, .. }
+        | Instruction::InLiteralArray { dst, .. } => {
+            scalar.fill(false);
+            set_scalar(scalar, dst, true);
+        }
         Instruction::Move { dst, src } | Instruction::Assign { local: dst, src } => {
             set_scalar(scalar, dst, is_scalar(scalar, src))
         }

@@ -29,6 +29,7 @@ enum Step<'a> {
     Collection(&'a Collection),
     Shape(&'a Shape),
     Generic(&'a Generic),
+    Callable(&'a crate::index::Signature),
     Union(usize),
     Intersection(usize),
     ClassString,
@@ -67,6 +68,7 @@ impl ValueType {
                 | Self::Shape(_)
                 | Self::ClassString(_)
                 | Self::Generic(_)
+                | Self::Callable(_)
                 | Self::Union(_)
                 | Self::Intersection(_)
                 | Self::Template(_)
@@ -140,6 +142,18 @@ impl ValueType {
                             );
                             continue;
                         }
+                        Self::Callable(signature) => {
+                            pending.push(Step::Callable(signature));
+                            pending.push(Step::Visit(&signature.returns, depth));
+                            pending.extend(
+                                signature
+                                    .parameters
+                                    .iter()
+                                    .rev()
+                                    .map(|parameter| Step::Visit(&parameter.ty, depth)),
+                            );
+                            continue;
+                        }
                         Self::Union(types) | Self::Intersection(types) => {
                             pending.push(if matches!(ty, Self::Union(_)) {
                                 Step::Union(types.len())
@@ -200,6 +214,17 @@ impl ValueType {
                             .unwrap_or_else(|| generic.base.clone()),
                         arguments,
                     }))
+                }
+                Step::Callable(original) => {
+                    let returns = results.pop().unwrap_or(Self::Mixed);
+                    let parameters =
+                        results.split_off(results.len().saturating_sub(original.parameters.len()));
+                    let mut signature = original.clone();
+                    signature.returns = returns;
+                    for (parameter, ty) in signature.parameters.iter_mut().zip(parameters) {
+                        parameter.ty = ty;
+                    }
+                    Self::Callable(Arc::new(signature))
                 }
                 Step::ClassString => {
                     Self::ClassString(Arc::new(results.pop().unwrap_or(Self::Object)))

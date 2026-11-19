@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use phera_dotenv::{Environment, FileSelection};
-use phera_runtime::{OutputSink, Runtime};
+use phera_runtime::{OutputSink, Runtime, RuntimeError};
 
 /// Writes a script's output to the terminal as it is produced, so a long
 /// running script shows progress.
@@ -25,7 +25,12 @@ impl OutputSink for Stdout {
     }
 }
 
-pub(crate) fn script(script: &str, arguments: &[String], files: FileSelection) -> ExitCode {
+pub(crate) fn script(
+    script: &str,
+    arguments: &[String],
+    files: FileSelection,
+    ini: Vec<(String, String)>,
+) -> ExitCode {
     if !Path::new(script).is_file() {
         // PHP's own wording, on standard output as PHP prints it.
         println!("Could not open input file: {script}");
@@ -39,17 +44,18 @@ pub(crate) fn script(script: &str, arguments: &[String], files: FileSelection) -
             return ExitCode::FAILURE;
         }
     };
-    match Runtime::with_environment(loaded.environment).run_file_blocking(
-        script,
-        arguments,
-        Some(Box::new(Stdout)),
-    ) {
+    let runtime = Runtime::with_environment(loaded.environment).with_startup_ini(ini);
+    match runtime.run_file_blocking(script, arguments, Some(Box::new(Stdout))) {
         Ok(result) => {
             if std::env::var_os("PHERA_INSTRUCTION_COUNT").is_some() {
                 eprintln!("Executed instructions: {}", result.executed_instructions);
             }
             // Exit statuses are one byte; PHP truncates the same way.
             ExitCode::from(result.status as u8)
+        }
+        Err(RuntimeError::Compile(error)) => {
+            Stdout.write(&runtime.cli_compile_output(error));
+            ExitCode::from(255)
         }
         Err(error) => {
             print!("{error}");

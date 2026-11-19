@@ -86,6 +86,17 @@ pub(crate) fn coerce(
     checking: TypeChecking,
     vm: &mut Vm,
 ) -> NativeResult {
+    coerce_in_scope(value, declaration_type, checking, vm, None)
+}
+
+/// Callable declarations use the declaring function's scope, even during argument binding.
+pub(crate) fn coerce_in_scope(
+    value: Value,
+    declaration_type: &Type,
+    checking: TypeChecking,
+    vm: &mut Vm,
+    scope: Option<&crate::classes::MethodContext>,
+) -> NativeResult {
     // Mirrors deref().clone() without a redundant retain/release for already
     // owned values. Reference cells still produce a detached value snapshot.
     let value = match value {
@@ -107,7 +118,11 @@ pub(crate) fn coerce(
     {
         return Ok(value);
     }
-    if mask.intersects(TypeMask::CALLABLE) && vm.resolve_callable(&value).is_ok() {
+    if mask.intersects(TypeMask::CALLABLE)
+        && vm
+            .resolve_callable_for(&value, crate::callables::CallableUse::Type(scope))
+            .is_ok()
+    {
         return Ok(value);
     }
     let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(vm);

@@ -12,6 +12,7 @@ impl Vm {
         name: &str,
         alias: &str,
         autoload: bool,
+        arguments: &[Value],
     ) -> NativeResult {
         let class = if autoload {
             self.lookup_class(name).await?
@@ -48,13 +49,11 @@ impl Vm {
                     | "void"
             )
         {
-            let location = self.location();
-            return Err(phera_extension_api::NativeError::Unwind(
-                phera_extension_api::Unwind(Box::new(crate::error_traces::DeclarationFailure {
-                    message: format!("Cannot use \"{key}\" as a class alias as it is reserved"),
-                    file: location.file,
-                    line: location.line,
-                })),
+            return Err(self.fatal_native_error(
+                64,
+                format!("Cannot use \"{key}\" as a class alias as it is reserved"),
+                "class_alias",
+                arguments,
             ));
         }
         if key == "_" {
@@ -66,8 +65,18 @@ impl Vm {
         if self.classes.alias(key, class.clone()) {
             return Ok(Value::Bool(true));
         }
+        let message = self.class_redeclaration_message(&class, alias);
+        self.warn(message);
+        Ok(Value::Bool(false))
+    }
+
+    pub(crate) fn class_redeclaration_message(
+        &self,
+        class: &crate::classes::Class,
+        name: &str,
+    ) -> String {
         let kind = class.kind.description().to_ascii_lowercase();
-        let mut message = format!("Cannot redeclare {kind} {alias}");
+        let mut message = format!("Cannot redeclare {kind} {name}");
         if let Some((function, index)) = class.declaration {
             let unit = self.code.unit(function);
             if let Some(declaration) = unit.classes.get(index.index()) {
@@ -75,8 +84,7 @@ impl Vm {
                 message.push_str(&format!(" (previously declared in {file}:{line})"));
             }
         }
-        self.warn(message);
-        Ok(Value::Bool(false))
+        message
     }
 
     /// Membership uses canonical names on a miss so aliases work for ancestors as well.

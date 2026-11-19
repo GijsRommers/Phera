@@ -116,6 +116,7 @@ fn decode(ty: &Type, bytes: &[u8]) -> Result<Value, DecodeError> {
             }
             Value::from(text)
         }
+        Type::CHAR => Value::from(bytes.strip_prefix(&[0]).unwrap_or(bytes).to_vec()),
         Type::TEXT | Type::VARCHAR | Type::BPCHAR | Type::NAME | Type::JSON | Type::XML => {
             Value::from(bytes.to_vec())
         }

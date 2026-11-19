@@ -18,6 +18,7 @@ fn registry() -> Registry {
 #[derive(Clone, Copy)]
 enum Comparison {
     Exact,
+    ExactSince(u32),
     /// iconv's `//TRANSLIT` is not reproducible across processes, so only
     /// the kind of result and the diagnostics must agree, and a string must
     /// be ASCII:
@@ -81,6 +82,16 @@ impl Matrix {
     /// - `iconv()` of a long string to `//IGNORE` on glibc; see
     ///   [`Comparison::IgnoreOnGlibc`].
     pub fn case(&mut self, function: &str, arguments: Vec<Value>) {
+        self.case_with_minimum(function, arguments, None);
+    }
+
+    /// Runs both calls in order, since later observations can read their state.
+    pub fn case_with_minimum(
+        &mut self,
+        function: &str,
+        arguments: Vec<Value>,
+        minimum: Option<u32>,
+    ) {
         let literals: Vec<String> = arguments.iter().map(oracle::php_literal).collect();
         let mut expression = format!("{function}({})", literals.join(","));
         if function == "mb_list_encodings" && arguments.is_empty() {
@@ -94,7 +105,9 @@ impl Matrix {
             && matches!(arguments.get(1), Some(Value::String(target))
                 if target.as_bytes().to_ascii_uppercase().ends_with(b"//IGNORE"))
             && matches!(arguments.get(2), Some(Value::String(text)) if text.len() >= LONG_FOR_GLIBC);
-        let comparison = if transliterating {
+        let comparison = if let Some(minimum) = minimum {
+            Comparison::ExactSince(minimum)
+        } else if transliterating {
             Comparison::Transliteration
         } else if ignoring_long_on_glibc {
             Comparison::IgnoreOnGlibc
@@ -180,18 +193,41 @@ impl Matrix {
 
     pub fn compare(self, name: &str) {
         let php = oracle::run_php(name, &self.script).expect("PHP 8.5 is required");
-        let shape = |lines: &[String]| -> Vec<String> {
-            lines
-                .iter()
-                .zip(&self.comparisons)
-                .map(|(line, comparison)| match comparison {
-                    Comparison::Exact => line.clone(),
-                    Comparison::Transliteration => transliteration_shape(line),
-                    Comparison::IgnoreOnGlibc => kind_and_diagnostics(line),
-                })
-                .collect()
-        };
-        oracle::compare(name, &self.labels, &shape(&php), &shape(&self.rust));
+        assert_eq!(
+            php.len(),
+            self.rust.len(),
+            "{name}: different number of lines"
+        );
+        let mut labels = Vec::new();
+        let mut expected = Vec::new();
+        let mut actual = Vec::new();
+        for (index, (((php, rust), label), comparison)) in php
+            .into_iter()
+            .zip(self.rust)
+            .zip(self.labels)
+            .zip(self.comparisons)
+            .enumerate()
+        {
+            let (php, rust) = match comparison {
+                Comparison::Exact => (php, rust),
+                Comparison::ExactSince(minimum) => {
+                    if !oracle::supports_php_since(&format!("{name} #{index} {label}"), minimum) {
+                        continue;
+                    }
+                    (php, rust)
+                }
+                Comparison::Transliteration => {
+                    (transliteration_shape(&php), transliteration_shape(&rust))
+                }
+                Comparison::IgnoreOnGlibc => {
+                    (kind_and_diagnostics(&php), kind_and_diagnostics(&rust))
+                }
+            };
+            labels.push(label);
+            expected.push(php);
+            actual.push(rust);
+        }
+        oracle::compare(name, &labels, &expected, &actual);
     }
 }
 

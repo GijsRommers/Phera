@@ -8,7 +8,7 @@
 use std::rc::Rc;
 
 use phera_bytecode::Reg;
-use phera_extension_api::{MethodEntry, NativeMethod, ParamType};
+use phera_extension_api::{MethodEntry, NativeMethod};
 
 use super::{
     call_state::{CallTarget, Callee},
@@ -30,9 +30,10 @@ impl Machine<'_> {
         if entry.direct.is_none()
             || entry.preparation.is_some()
             || !matches!(entry.handler, NativeMethod::Sync(_))
-            || entry.params.iter().any(|param| {
-                param.ty != ParamType::Mixed || param.by_ref || param.variadic || param.optional
-            })
+            || entry
+                .params
+                .iter()
+                .any(|param| param.by_ref || param.variadic || param.optional)
         {
             return Step::Slow;
         }
@@ -80,7 +81,9 @@ impl Machine<'_> {
             return Step::Slow;
         }
         let operands = self.registers.window(call.base(), call.sent as usize);
-        if operands.iter().any(Option::is_none) {
+        if operands.len() != call.sent as usize
+            || !super::native_signature::accepts(entry.params, operands)
+        {
             return Step::Slow;
         }
         let Some(value) = direct(receiver, operands) else {
@@ -90,7 +93,10 @@ impl Machine<'_> {
         self.registers.truncate(call.start());
         self.registers
             .put(position.frame.base() + destination.index(), value);
-        self.spend_work();
+        if self.spend_work() {
+            self.publish(position.ip);
+            return Step::Yield;
+        }
         Step::Done(position.ip)
     }
 }

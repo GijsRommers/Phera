@@ -39,7 +39,10 @@ impl Analyzer<'_> {
                 "parameter.phpDocType",
                 &format!("@param for ${name}"),
             ) {
-                let mut ty = annotated.ty.clone();
+                let mut ty = crate::signature_types::declaration_refinement(
+                    &parameter.ty,
+                    annotated.ty.clone(),
+                );
                 if parameter.variadic {
                     ty = ValueType::Collection(std::sync::Arc::new(crate::types::Collection {
                         kind: crate::types::CollectionKind::Array,
@@ -49,7 +52,23 @@ impl Analyzer<'_> {
                     }));
                 }
                 if let Some(class) = self.context.class.as_deref() {
-                    ty = self.relative_type(ty, class);
+                    if self.level >= 5 {
+                        let receiver = ValueType::Class(class.into());
+                        ty = ty.substitute(
+                            &Default::default(),
+                            Some(crate::types::RelativeTypes {
+                                receiver: &receiver,
+                                owner: class,
+                                parent: self
+                                    .index
+                                    .class(class)
+                                    .and_then(|class| class.parents.first())
+                                    .map(String::as_str),
+                            }),
+                        );
+                    } else {
+                        ty = self.relative_type(ty, class);
+                    }
                 }
                 scope.define(name, ty);
             }
@@ -62,7 +81,9 @@ impl Analyzer<'_> {
                 "return.phpDocType",
                 "@return",
             )
-            .then_some(annotated.ty)
+            .then(|| {
+                crate::signature_types::declaration_refinement(&signature.returns, annotated.ty)
+            })
         })
     }
 

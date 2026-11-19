@@ -569,6 +569,42 @@ pub enum Instruction {
         dst: Reg,
         source: Reg,
     },
+    BuiltinUnary {
+        op: crate::BuiltinUnary,
+        dst: Reg,
+        src: Reg,
+    },
+    /// Calls a statically known builtin with positional by-value arguments.
+    CallNativeDirect {
+        function: SymbolId,
+        args: Reg,
+        count: u16,
+        dst: Reg,
+        result: CallResult,
+    },
+    BuiltinFrame {
+        op: crate::BuiltinFrame,
+        dst: Reg,
+    },
+    ArrayKeyExists {
+        dst: Reg,
+        key: Reg,
+        array: Reg,
+    },
+    InLiteralArray {
+        dst: Reg,
+        needle: Reg,
+        haystack: ConstId,
+        strict: bool,
+    },
+    InitUserCallback {
+        callback: Reg,
+        arguments: crate::CallbackArguments,
+    },
+    SendUserCallback {
+        src: Reg,
+        arguments: crate::CallbackArguments,
+    },
 }
 
 // The interpreter copies one instruction per step. Keep them register-sized;

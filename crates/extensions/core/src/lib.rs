@@ -7,6 +7,7 @@ mod backtrace;
 mod constants;
 mod count;
 mod dump;
+mod included_files;
 mod interfaces;
 mod iterator_functions;
 mod throwable;
@@ -23,6 +24,7 @@ impl Extension for Core {
 
     fn register(&self, registry: &mut Registry) {
         interfaces::register(registry);
+        included_files::register(registry);
         constants::register(registry);
         backtrace::register(registry);
         count::register(registry);

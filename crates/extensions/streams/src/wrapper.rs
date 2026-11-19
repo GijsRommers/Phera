@@ -4,7 +4,6 @@ use std::fs;
 use std::io::{self, Cursor};
 use std::os::fd::AsFd;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use phera_extension_api::{Context, NativeError, Value};
 use rustix::io::fcntl_dupfd_cloexec;
@@ -237,18 +236,13 @@ async fn open_php(
     target: &[u8],
     mode: &[u8],
     uri: &[u8],
-    input: Arc<[u8]>,
+    input: crate::input::RequestInput,
 ) -> Result<Option<io::Result<Stream>>, NativeError> {
     let target = target.to_ascii_lowercase();
     let stream = match target.as_slice() {
         b"memory" => buffer(Wrapper::Memory, mode, uri),
         b"output" => Stream::new(Backing::Output, Wrapper::Output, b"wb", uri),
-        b"input" => Stream::new(
-            Backing::Input(Cursor::new(input)),
-            Wrapper::Input,
-            b"rb",
-            uri,
-        ),
+        b"input" => Stream::new(Backing::Input(input.open()), Wrapper::Input, b"rb", uri),
         name if name.starts_with(b"temp") => {
             let mut stream = buffer(Wrapper::Temp, mode, uri);
             let limit = name

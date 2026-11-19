@@ -131,15 +131,16 @@ impl Vm {
             .unwrap_or(function_name)
             .to_owned();
         let declared = &unit.types[declaration.index()];
-        let context = match scope {
-            types::DeclarationScope::Relative => self.prepared_context(entry, call).method(),
-            _ => None,
-        };
+        let context = (scope == types::DeclarationScope::Relative
+            || declared.mask.intersects(phera_bytecode::TypeMask::CALLABLE))
+        .then(|| self.prepared_context(entry, call).method())
+        .flatten();
         let scoped = context
             .as_ref()
+            .filter(|_| scope == types::DeclarationScope::Relative)
             .map(|context| crate::closure_types::parameter_type(declared, context));
         let ty = scoped.as_ref().unwrap_or(declared);
-        self.check_argument(value, ty, &function_name, offset, &name)
+        self.check_argument(value, ty, &function_name, offset, (&name, context.as_ref()))
     }
 
     /// Arity errors keep the caller's source location and the complete supplied arity.

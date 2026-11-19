@@ -20,6 +20,14 @@ impl Default for Condition {
 }
 
 impl Condition {
+    pub fn truth(&self) -> Option<bool> {
+        match (self.yes.is_some(), self.no.is_some()) {
+            (true, false) => Some(true),
+            (false, true) => Some(false),
+            _ => None,
+        }
+    }
+
     fn boolean(&mut self) {
         if self.yes.is_some() || self.no.is_some() {
             self.ty = ValueType::Bool;
@@ -46,10 +54,10 @@ enum Gate {
 
 enum Step<'a> {
     Evaluate(&'a Expression, Scope),
-    Negate,
-    Right(Gate, &'a Expression),
-    Combine(Gate, Option<Scope>),
-    Ternary(Option<&'a Expression>, &'a Expression),
+    Negate(&'a Expression, &'a Expression),
+    Right(Gate, &'a Expression, &'a Expression, &'a Expression),
+    Combine(Gate, Option<Scope>, &'a Expression, &'a Expression, bool),
+    Ternary(&'a Expression, Option<&'a Expression>, &'a Expression),
     Alternative(&'a Expression, Option<Scope>),
     Join(Condition),
 }
@@ -71,7 +79,7 @@ impl Analyzer<'_> {
                         } else {
                             Gate::Or
                         };
-                        pending.push(Step::Right(gate, right));
+                        pending.push(Step::Right(gate, expression, left, right));
                         pending.push(Step::Evaluate(left, scope));
                     }
                     ExpressionKind::Binary {
@@ -90,7 +98,7 @@ impl Analyzer<'_> {
                         operator: UnaryOperator::Not,
                         operand,
                     } => {
-                        pending.push(Step::Negate);
+                        pending.push(Step::Negate(expression, operand));
                         pending.push(Step::Evaluate(operand, scope));
                     }
                     ExpressionKind::Ternary {
@@ -98,16 +106,23 @@ impl Analyzer<'_> {
                         then,
                         otherwise,
                     } => {
-                        pending.push(Step::Ternary(then.as_deref(), otherwise));
+                        pending.push(Step::Ternary(condition, then.as_deref(), otherwise));
                         pending.push(Step::Evaluate(condition, scope));
                     }
                     _ => outcome = self.condition_leaf(expression, scope, quiet),
                 },
-                Step::Negate => {
+                Step::Negate(expression, operand) => {
+                    self.constant_negation(expression, operand, outcome.truth());
                     std::mem::swap(&mut outcome.yes, &mut outcome.no);
                     outcome.boolean();
                 }
-                Step::Right(gate, right) => {
+                Step::Right(gate, operator, left, right) => {
+                    let reported = self.constant_logical_operand(
+                        operator,
+                        left,
+                        outcome.truth(),
+                        dead_code::Side::Left,
+                    );
                     let continuing = match gate {
                         Gate::And => outcome.yes.take(),
                         Gate::Or => outcome.no.take(),
@@ -117,21 +132,39 @@ impl Analyzer<'_> {
                             Gate::And => outcome.no.take(),
                             Gate::Or => outcome.yes.take(),
                         };
-                        pending.push(Step::Combine(gate, shortcut));
+                        pending.push(Step::Combine(gate, shortcut, operator, right, reported));
                         pending.push(Step::Evaluate(right, scope));
                     } else {
                         outcome.boolean();
+                        if !reported {
+                            self.constant_logical_result(operator, outcome.truth());
+                        }
                     }
                 }
-                Step::Combine(Gate::And, skipped) => {
-                    outcome.no = Condition::merge(skipped, outcome.no.take());
+                Step::Combine(gate, skipped, operator, right, reported) => {
+                    let right_reported = self.constant_logical_operand(
+                        operator,
+                        right,
+                        outcome.truth(),
+                        dead_code::Side::Right,
+                    );
+                    let shortcut = match gate {
+                        Gate::And => &mut outcome.no,
+                        Gate::Or => &mut outcome.yes,
+                    };
+                    *shortcut = Condition::merge(skipped, shortcut.take());
                     outcome.boolean();
+                    if !reported && !right_reported {
+                        self.constant_logical_result(operator, outcome.truth());
+                    }
                 }
-                Step::Combine(Gate::Or, skipped) => {
-                    outcome.yes = Condition::merge(skipped, outcome.yes.take());
-                    outcome.boolean();
-                }
-                Step::Ternary(then, otherwise) => {
+                Step::Ternary(condition, then, otherwise) => {
+                    self.constant_condition(
+                        "ternary",
+                        "Ternary operator condition",
+                        condition,
+                        &outcome,
+                    );
                     let no = outcome.no.take();
                     pending.push(Step::Alternative(otherwise, no));
                     if let Some(then) = then {
@@ -164,6 +197,7 @@ impl Analyzer<'_> {
         left: &Expression,
         mut scope: Scope,
     ) -> (Condition, Option<Scope>) {
+        self.constant_null_check(left, &scope, dead_code::NullCheck::Coalesce);
         let nullish = self.nullish(left, &scope);
         let truth = self.condition_truth(left, &scope);
         let ty = self.expression(left, &mut scope, true);
@@ -209,6 +243,11 @@ impl Analyzer<'_> {
         if let Some(truth) = truth
             .or_else(|| assignment_truth(expression, &scope))
             .or_else(|| (ty == ValueType::Null).then_some(false))
+            .or_else(|| {
+                (self.level >= 4)
+                    .then(|| super::dead_code::truth(&ty))
+                    .flatten()
+            })
         {
             self.refine(expression, &mut scope, truth);
             return if truth {

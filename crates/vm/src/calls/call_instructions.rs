@@ -46,13 +46,7 @@ impl Vm {
                 "Cannot redeclare function {name}() (previously declared in {}:{previous_line})",
                 self.code.unit(previous).file
             );
-            return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                crate::error_traces::DeclarationFailure {
-                    message,
-                    file: location.file,
-                    line: location.line,
-                },
-            ))));
+            return Err(self.fatal_error(1, message, location));
         }
         self.function_table.insert(name, index);
         Ok(())

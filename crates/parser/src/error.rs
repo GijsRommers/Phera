@@ -38,6 +38,15 @@ impl ParseError {
         }
     }
 
+    /// Return the PHP-facing line and wording for the parser error.
+    pub fn php_diagnostic(
+        &self,
+        source: &[u8],
+        lines: &phera_source::LineTable,
+    ) -> (usize, String) {
+        crate::diagnostics::php_diagnostic(self, source, lines)
+    }
+
     pub fn is_compile_error(&self) -> bool {
         self.kind == ErrorKind::Compile
     }

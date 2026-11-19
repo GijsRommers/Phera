@@ -7,9 +7,8 @@
 //! their consumers. Date, mbstring, and PCRE use the same request registry.
 //! Read the generated list below for the directives without runtime consumers.
 //!
-//! The server sets request timeout and request body limits. PHP memory and
-//! execution time limits are recorded without changing those engine limits.
-//! No PHP configuration file is loaded.
+//! The server sets its own request timeout and request body limits. PHP's
+//! execution limit counts CPU time. No PHP configuration file is loaded.
 //!
 //! The session extension registers validators for its catalog entries through
 //! `Registry::ini_update`. Session functions and INI calls share the same
@@ -33,7 +32,9 @@ mod effects;
 
 #[derive(Default)]
 pub(crate) struct IniOverrides {
+    startup: Vec<Option<PhpString>>,
     values: Vec<Option<PhpString>>,
+    web_execution_time: bool,
     reporting_number: Option<i64>,
     precision: Option<i32>,
     serialization_precision: Option<i32>,
@@ -53,6 +54,34 @@ impl IniOverrides {
 }
 
 impl Vm {
+    /// The web SAPI changes the default without allocating an INI override table.
+    pub fn use_web_execution_time(&mut self) {
+        self.ini_overrides.web_execution_time = true;
+        self.execution_time.restart(30);
+    }
+
+    /// Install a SAPI setting before running PHP. Runtime writes can restore it.
+    pub fn set_startup_ini(&mut self, name: &str, value: &str) {
+        let Some((slot, entry)) = self.registry.ini_entry(name.as_bytes()) else {
+            return;
+        };
+        let value = match value.to_ascii_lowercase().as_str() {
+            "on" | "yes" | "true" => "1",
+            "off" | "no" | "false" | "none" | "null" => "",
+            _ => value,
+        };
+        if !matches!(
+            self.ini_apply("startup", entry, Some(value.as_bytes())),
+            Ok(true)
+        ) {
+            return;
+        }
+        if self.ini_overrides.startup.len() <= slot {
+            self.ini_overrides.startup.resize(slot + 1, None);
+        }
+        self.ini_overrides.startup[slot] = Some(value.into());
+    }
+
     pub(crate) fn float_precision(&self) -> i32 {
         self.ini_overrides.precision.unwrap_or(14)
     }
@@ -81,7 +110,21 @@ impl Vm {
         self.ini_overrides
             .get(slot)
             .cloned()
-            .or_else(|| entry.default.as_deref().map(PhpString::from))
+            .or_else(|| self.ini_default(slot, entry))
+    }
+
+    fn ini_default(&self, slot: usize, entry: &IniDefinition) -> Option<PhpString> {
+        self.ini_overrides
+            .startup
+            .get(slot)
+            .and_then(Clone::clone)
+            .or_else(|| {
+                if self.ini_overrides.web_execution_time && entry.name == "max_execution_time" {
+                    Some("30".into())
+                } else {
+                    entry.default.as_deref().map(PhpString::from)
+                }
+            })
     }
 
     pub(crate) fn ini_set(
@@ -113,8 +156,12 @@ impl Vm {
         if !entry.access.runtime() || !modified {
             return Ok(());
         }
-        if self.ini_apply("ini_restore", entry, entry.default.as_deref())?
-            && let Some(value) = self.ini_overrides.values.get_mut(slot)
+        let default = self.ini_default(slot, entry);
+        if self.ini_apply(
+            "ini_restore",
+            entry,
+            default.as_ref().map(PhpString::as_bytes),
+        )? && let Some(value) = self.ini_overrides.values.get_mut(slot)
         {
             *value = None;
         }
@@ -151,10 +198,9 @@ impl Vm {
                 .ini_local(slot, entry)
                 .map_or(Value::Null, Value::String);
             let value = if details {
-                let global = entry
-                    .default
-                    .as_deref()
-                    .map_or_else(|| local.clone(), Value::from);
+                let global = self
+                    .ini_default(slot, entry)
+                    .map_or_else(|| local.clone(), Value::String);
                 let mut fields = PhpArray::new();
                 fields.insert(ArrayKey::str("global_value"), global);
                 fields.insert(ArrayKey::str("local_value"), local);

@@ -1,0 +1,1 @@
+2	unreachable-catch	Catch type 'Exception' is already handled by 'Throwable'.

@@ -14,6 +14,7 @@ impl Compiler<'_> {
         callee: &ast::Expression,
         arguments: &ast::Arguments,
         line: usize,
+        opening_line: usize,
     ) -> Result<Reg, CompileError> {
         use ast::ExpressionKind;
         if let ExpressionKind::Name(name) = &callee.kind
@@ -30,17 +31,29 @@ impl Compiler<'_> {
         {
             self.function.dynamic_scope = true;
         }
-        let mut quoted_condition = None;
-        if let ExpressionKind::Name(name) = &callee.kind
+        let quoted_condition = if let ExpressionKind::Name(name) = &callee.kind
             && callee.span == name.span
         {
-            quoted_condition = self.assertion_text(name, arguments);
-            let (name, fallback) = self.resolve(name, NameKind::Function);
-            self.emit(Instruction::StartCall { name, fallback }, line);
+            let (resolved, fallback) = self.resolve(name, NameKind::Function);
+            if fallback.is_none()
+                && let Some(result) = self.compile_builtin_call(&resolved, arguments, line)?
+            {
+                return Ok(result);
+            }
+            let quoted = self.assertion_text(name, arguments);
+            self.emit(
+                Instruction::StartCall {
+                    name: resolved,
+                    fallback,
+                },
+                line,
+            );
+            quoted
         } else {
             let callee = self.compile_expression(callee)?;
             self.emit(Instruction::StartDynamicCall { callee }, line);
-        }
+            return self.compile_arguments(arguments, opening_line);
+        };
         let Some((description, name)) = quoted_condition else {
             return self.compile_arguments(arguments, line);
         };
@@ -130,7 +143,7 @@ impl Compiler<'_> {
         Ok(temporary_objects)
     }
 
-    fn finish_call(
+    pub(super) fn finish_call(
         &mut self,
         temporary_objects: Vec<Reg>,
         line: usize,

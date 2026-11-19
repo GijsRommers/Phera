@@ -41,6 +41,11 @@ impl Analyzer<'_> {
             return facts;
         };
         let collect = self.level >= 5
+            || self.level >= 4
+                && label
+                    .strip_suffix("()")
+                    .and_then(super::refine_types::predicate_type)
+                    .is_some()
             || self.level >= 2
                 && (super::builtin_facts::takes_facts(label)
                     || signature
@@ -64,6 +69,10 @@ impl Analyzer<'_> {
         let supplied = self.bind_arguments(arguments, signature, label, span, kind);
         if !arguments.iter().any(|a| a.spread) {
             self.check_arity(arguments.len(), &supplied, signature, label, span);
+        }
+        if self.level >= 5 {
+            let target = super::argument_contracts::select_target(signature, label, kind);
+            self.check_argument_contracts(arguments, &facts.types, signature, &target, scope);
         }
         facts
     }

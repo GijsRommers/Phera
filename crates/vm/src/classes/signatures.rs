@@ -1,7 +1,7 @@
 //! Override contracts compare accepted parameter sets and produced return sets at class linking.
 
 use super::{Method, MethodBody};
-use crate::Vm;
+use crate::{Vm, autoload::MethodVariance};
 use phera_extension_api::NativeError;
 
 /// Parameter spelling is retained for PHP's declaration-compatibility diagnostics.
@@ -39,11 +39,11 @@ impl Contract {
                     .iter()
                     .map(|parameter| ParameterContract {
                         name: parameter.name.into(),
-                        declaration: Some(parameter.ty.name().into()),
+                        declaration: Some(native_parameter_type(parameter)),
                         by_reference: parameter.by_ref,
                         variadic: parameter.variadic,
                         optional: parameter.optional,
-                        default_display: None,
+                        default_display: native_default(parameter),
                     })
                     .collect(),
                 returns: Some(returns.into()),
@@ -126,6 +126,33 @@ impl Contract {
     }
 }
 
+/// Native argument metadata also supplies the spelling used in compatibility errors.
+fn native_parameter_type(parameter: &phera_extension_api::Param) -> String {
+    let ty = parameter.ty.name();
+    if !parameter.nullable || ty == "mixed" {
+        ty.into()
+    } else if ty.contains('|') {
+        format!("{ty}|null")
+    } else {
+        format!("?{ty}")
+    }
+}
+
+fn native_default(parameter: &phera_extension_api::Param) -> Option<String> {
+    use phera_extension_api::ConstantValue;
+    if let Some(name) = parameter.default_name {
+        return Some(name.into());
+    }
+    Some(match parameter.default? {
+        ConstantValue::Null => "null".into(),
+        ConstantValue::Bool(value) => value.to_string(),
+        ConstantValue::Int(value) => value.to_string(),
+        ConstantValue::Float(value) => phera_value::float_repr(value),
+        ConstantValue::String(value) => format!("{value:?}"),
+        ConstantValue::EmptyArray => "[]".into(),
+    })
+}
+
 impl Vm {
     /// Contravariant parameters may widen inputs; covariant returns may narrow outputs.
     pub(crate) fn check_method_contract(
@@ -133,7 +160,7 @@ impl Vm {
         inherited: &Method,
         method: &Method,
         unit: &phera_bytecode::CompiledUnit,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Option<MethodVariance>, NativeError> {
         self.check_contract(inherited, method, None, unit)
     }
 
@@ -143,7 +170,7 @@ impl Vm {
         method: &Method,
         consuming_class: &str,
         unit: &phera_bytecode::CompiledUnit,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Option<MethodVariance>, NativeError> {
         self.check_contract(inherited, method, Some(consuming_class), unit)
     }
 
@@ -153,20 +180,20 @@ impl Vm {
         method: &Method,
         trait_scope: Option<&str>,
         unit: &phera_bytecode::CompiledUnit,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Option<MethodVariance>, NativeError> {
         if (inherited.visibility == phera_bytecode::Visibility::Private && !inherited.is_abstract)
             || (method.name.eq_ignore_ascii_case("__construct") && !inherited.is_abstract)
         {
-            return Ok(());
+            return Ok(None);
         }
         let (Some(base), Some(child)) = (
             Contract::from_method(inherited, &self.code),
             Contract::from_method(method, &self.code),
         ) else {
-            return Ok(());
+            return Ok(None);
         };
         let inherited_scope = trait_scope.unwrap_or(&inherited.declaring);
-        let mut unresolved = None;
+        let mut unresolved = Vec::new();
         let mut compatible = !base.returns_reference || child.returns_reference;
         compatible &= child
             .parameters
@@ -196,8 +223,7 @@ impl Vm {
             let target = implementation.declaration.as_deref();
             if !self.type_subset(source, inherited_scope, target, &method.declaring, unit) {
                 compatible = false;
-                unresolved =
-                    unresolved.or_else(|| self.unresolved_contract_type(source, target, unit));
+                unresolved.extend(self.unresolved_contract_types(source, target, unit));
             }
         }
         if base.returns.is_some() {
@@ -208,8 +234,9 @@ impl Vm {
             {
                 // PHP loads a class that the two return types name before it
                 // compares them, for a tentative return type as well.
-                let missing = self.unresolved_contract_type(source, target, unit);
-                if base.tentative && compatible && missing.is_none() {
+                let previous_missing = unresolved.len();
+                unresolved.extend(self.unresolved_contract_types(source, target, unit));
+                if base.tentative && compatible && unresolved.len() == previous_missing {
                     if let MethodBody::User(reference) = method.body
                         && !self
                             .code
@@ -239,15 +266,14 @@ impl Vm {
                     }
                 } else {
                     compatible = false;
-                    unresolved = unresolved.or(missing);
                 }
             }
         }
         if compatible {
-            return Ok(());
+            return Ok(None);
         }
         let MethodBody::User(reference) = &method.body else {
-            return Ok(());
+            return Ok(None);
         };
         let child = child.display(method, |ty| {
             self.contract_type_name(ty, &method.declaring, trait_scope, unit)
@@ -257,15 +283,14 @@ impl Vm {
         });
         let file = self.code.unit(*reference).file.clone();
         let line = self.code.function(*reference).definition_line as usize;
-        if let Some(name) = unresolved {
-            let failure = crate::error_traces::DeclarationFailure {
-                message: format!(
-                    "Could not check compatibility between {child} and {base}, because class {name} is not available"
-                ),
+        if !unresolved.is_empty() {
+            return Ok(Some(MethodVariance {
+                names: unresolved.into_iter().map(str::to_owned).collect(),
+                child,
+                base,
                 file,
                 line,
-            };
-            return Err(crate::autoload::ClassMiss::signature(name, failure));
+            }));
         }
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
             crate::error_traces::DeclarationFailure {
@@ -298,16 +323,6 @@ impl Vm {
             }
         }
         display
-    }
-
-    /// Linking a method signature can require class identities even though passing arguments does not.
-    fn unresolved_contract_type<'a>(
-        &self,
-        source: Option<&'a str>,
-        target: Option<&'a str>,
-        unit: &phera_bytecode::CompiledUnit,
-    ) -> Option<&'a str> {
-        self.unresolved_contract_types(source, target, unit).next()
     }
 
     pub(super) fn unresolved_contract_types<'a, 'vm>(

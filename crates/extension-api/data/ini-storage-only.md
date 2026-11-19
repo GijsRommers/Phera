@@ -33,8 +33,6 @@ engine behavior. A directive is visible only when its owning module is loaded.
 - `error_prepend_string`
 - `expose_php`
 - `extension_dir`
-- `fatal_error_backtraces`
-- `file_uploads`
 - `filter.default`
 - `filter.default_flags`
 - `from`
@@ -57,13 +55,9 @@ engine behavior. A directive is visible only when its owning module is loaded.
 - `mail.force_extra_parameters`
 - `mail.log`
 - `mail.mixed_lf_and_crlf`
-- `max_execution_time`
-- `max_file_uploads`
 - `max_input_nesting_level`
 - `max_input_time`
-- `max_input_vars`
 - `max_memory_limit`
-- `max_multipart_body_parts`
 - `mbstring.encoding_translation`
 - `mbstring.http_input`
 - `mbstring.http_output_conv_mimetypes`
@@ -76,7 +70,6 @@ engine behavior. A directive is visible only when its owning module is loaded.
 - `output_buffering`
 - `output_handler`
 - `pdo_mysql.default_socket`
-- `post_max_size`
 - `realpath_cache_size`
 - `realpath_cache_ttl`
 - `redis.arrays.algorithm`
@@ -142,7 +135,6 @@ engine behavior. A directive is visible only when its owning module is loaded.
 - `syslog.facility`
 - `syslog.filter`
 - `syslog.ident`
-- `upload_max_filesize`
 - `upload_tmp_dir`
 - `url_rewriter.hosts`
 - `url_rewriter.tags`

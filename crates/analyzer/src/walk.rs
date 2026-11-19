@@ -77,7 +77,9 @@ fn aggregate_children(expression: &Expression) -> Vec<&Expression> {
 fn call_children(expression: &Expression) -> Vec<&Expression> {
     let mut result: Vec<&Expression> = Vec::new();
     match &expression.kind {
-        ExpressionKind::Call { callee, arguments } => {
+        ExpressionKind::Call {
+            callee, arguments, ..
+        } => {
             result.push(callee);
             arguments_children(arguments, &mut result);
         }
@@ -159,7 +161,7 @@ fn simple_children(expression: &Expression) -> Vec<&Expression> {
             result.push(target);
             member(name, &mut result);
         }
-        ExpressionKind::StaticProperty { class, name } => {
+        ExpressionKind::StaticProperty { class, name, .. } => {
             result.push(class);
             if let Variable::Dynamic(e) = name {
                 result.push(e);
