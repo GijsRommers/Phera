@@ -99,6 +99,8 @@ mod intrinsics;
 mod iteration;
 mod iterator_instructions;
 mod iterators;
+mod lazy_continuation;
+mod lazy_objects;
 mod locals;
 mod magic_method;
 mod magic_mutations;

@@ -283,7 +283,12 @@ impl Vm {
                     .await;
                 match result {
                     Ok(value) => Ok(Some(value)),
-                    Err(error) => self.finish_reflected_hook(error, method, destination).await,
+                    Err(error) => match crate::lazy_continuation::ReflectInitialize::take(error) {
+                        Ok(request) => {
+                            Box::pin(self.finish_reflected_lazy(request, destination)).await
+                        }
+                        Err(error) => self.finish_reflected_hook(error, method, destination).await,
+                    },
                 }
             }
             _ => Err(internal_error!("native target")),

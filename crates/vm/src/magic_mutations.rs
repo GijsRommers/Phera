@@ -24,6 +24,7 @@ pub(crate) enum PropertyMutation {
 }
 
 enum OverloadedMutation {
+    Lazy(Rc<Object>),
     Ordinary(Reg, Box<InlineStack<PathKey>>),
     Unresolved,
     Handled,
@@ -50,6 +51,7 @@ pub(crate) enum MutationHook {
 }
 
 pub(crate) enum MutationStep {
+    Lazy(Rc<Object>),
     Complete(Option<Value>),
     Hook(MutationHook),
 }
@@ -62,6 +64,7 @@ pub(crate) struct MutationPath {
     detached: Option<Value>,
     resolved: InlineStack<PathKey>,
     next: usize,
+    retry: Option<PathKey>,
 }
 
 impl Vm {
@@ -84,7 +87,7 @@ impl Vm {
         let mut steps = path.place.steps()?.skip(path.next).peekable();
         while let Some(step) = steps.next() {
             path.next += 1;
-            let current = cursor.deref().clone();
+            let mut current = cursor.deref().clone();
             if matches!(step, Step::Index(_) | Step::Append)
                 && let Value::Object(object) = &current
                 && crate::dimensions::has_dimension(object)
@@ -101,18 +104,43 @@ impl Vm {
                     },
                 ));
             }
-            let key = match (step, &operation) {
-                (Step::Index(index), PropertyMutation::Unset) => {
-                    let Some(key) = self.unset_index_key(&current, index)? else {
-                        return Ok(OverloadedMutation::Handled);
-                    };
-                    PathKey::Index(Some(key))
+            let key = if let Some(key) = path.retry.take() {
+                key
+            } else {
+                match (step, &operation) {
+                    (Step::Index(index), PropertyMutation::Unset) => {
+                        let Some(key) = self.unset_index_key(&current, index)? else {
+                            return Ok(OverloadedMutation::Handled);
+                        };
+                        PathKey::Index(Some(key))
+                    }
+                    (Step::Index(index), _) => {
+                        PathKey::Index(Some(self.write_index_key(&current, index)?))
+                    }
+                    _ => self.magic_path_key(step).await?,
                 }
-                (Step::Index(index), _) => {
-                    PathKey::Index(Some(self.write_index_key(&current, index)?))
-                }
-                _ => self.magic_path_key(step).await?,
             };
+            if let (PathKey::Property(name), Value::Object(object)) = (&key, &current) {
+                let effective = crate::lazy_objects::resolved_lazy_instance(object.clone());
+                let access = match (steps.peek().is_none(), &operation) {
+                    (true, PropertyMutation::Write(_, Binding::ByValue)) => {
+                        crate::lazy_objects::LazyAccess::Write
+                    }
+                    (true, PropertyMutation::Unset) => crate::lazy_objects::LazyAccess::Unset,
+                    _ => crate::lazy_objects::LazyAccess::Reference,
+                };
+                if self.property_requires_initialization(&effective, name, access) {
+                    path.cursor = cursor;
+                    path.retry = Some(key);
+                    path.next -= 1;
+                    return Ok(OverloadedMutation::Lazy(effective));
+                }
+                if !Rc::ptr_eq(object, &effective) {
+                    current = Value::Object(effective);
+                    path.detached = Some(current.clone());
+                    path.resolved = InlineStack::new();
+                }
+            }
             if let (PathKey::Property(name), Value::Object(object)) = (&key, &current) {
                 let class = self
                     .classes

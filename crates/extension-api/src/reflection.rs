@@ -9,6 +9,8 @@ use phera_value::{Object, PhpArray, Value};
 
 use crate::{LocalFuture, NativeResult};
 
+pub mod lazy;
+
 #[derive(Clone, Debug, Default)]
 pub struct SourceInfo {
     pub file: String,
@@ -212,6 +214,25 @@ pub trait ReflectionContext {
         class: &ClassInfo,
         args: Option<PhpArray>,
     ) -> LocalFuture<'_, NativeResult>;
+
+    fn reflect_make_lazy(
+        &mut self,
+        class: &ClassInfo,
+        request: lazy::MakeLazy,
+    ) -> LocalFuture<'_, NativeResult>;
+
+    fn reflect_lazy_object(
+        &mut self,
+        object: Rc<Object>,
+        query: lazy::LazyClassQuery,
+    ) -> NativeResult;
+
+    fn reflect_lazy_property(
+        &mut self,
+        member: &MemberInfo,
+        object: Rc<Object>,
+        operation: lazy::LazyPropertyOperation,
+    ) -> NativeResult;
 
     /// Attribute construction applies the declaration's scalar typing and location.
     fn reflect_construct_attribute(

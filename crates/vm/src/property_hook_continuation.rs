@@ -73,6 +73,10 @@ impl WriteCompletion {
 }
 
 pub(crate) enum HookContinuation {
+    Lazy(
+        crate::lazy_objects::Initialization,
+        crate::lazy_continuation::LazyContinuation,
+    ),
     Read {
         path: PathRead,
         completion: ReadCompletion,
@@ -108,6 +112,7 @@ pub(crate) enum HookContinuation {
 impl HookContinuation {
     pub(crate) fn native_trace(&self) -> Option<&crate::error_traces::NativeTrace> {
         match self {
+            Self::Lazy(_, continuation) => continuation.native_trace(),
             Self::ObjectVars(view, _) => Some(&view.native),
             Self::NativeView(view, _) => Some(&view.native),
             Self::ReflectedCall(_, native) => Some(native),
@@ -148,6 +153,22 @@ impl Vm {
         returned: ReturnedHook,
     ) -> Result<(), NativeError> {
         match *returned.continuation {
+            HookContinuation::Lazy(initialization, continuation) => {
+                use crate::lazy_continuation::LazyContinuation;
+                let value = initialization.finish(returned.value)?;
+                match continuation {
+                    LazyContinuation::Read(path, completion) => {
+                        self.continue_property_path(path, completion).await
+                    }
+                    LazyContinuation::Mutation(path, completion) => {
+                        self.continue_property_mutation(path, completion).await
+                    }
+                    LazyContinuation::Reflection(destination, _) => {
+                        self.set(destination, value);
+                        Ok(())
+                    }
+                }
+            }
             HookContinuation::Read {
                 mut path,
                 completion,
@@ -214,6 +235,17 @@ impl Vm {
         completion: ReadCompletion,
     ) -> Result<(), NativeError> {
         match self.advance_path_read(&mut path).await? {
+            PathReadStep::Lazy(object) => {
+                let continuation =
+                    crate::lazy_continuation::LazyContinuation::Read(path, completion);
+                if let Some(returned) = self
+                    .suspend_lazy_initialization(object, continuation)
+                    .await?
+                {
+                    Box::pin(self.resume_property_hook(returned)).await?;
+                }
+                Ok(())
+            }
             PathReadStep::Complete(result) => match completion {
                 ReadCompletion::Fetch(destination) => {
                     self.set(destination, result.value);
@@ -302,6 +334,17 @@ impl Vm {
         completion: WriteCompletion,
     ) -> Result<(), NativeError> {
         match self.advance_magic_mutation(&mut path).await? {
+            MutationStep::Lazy(object) => {
+                let continuation =
+                    crate::lazy_continuation::LazyContinuation::Mutation(path, completion);
+                if let Some(returned) = self
+                    .suspend_lazy_initialization(object, continuation)
+                    .await?
+                {
+                    Box::pin(self.resume_property_hook(returned)).await?;
+                }
+                Ok(())
+            }
             MutationStep::Complete(converted) => {
                 completion.finish(self, converted);
                 Ok(())

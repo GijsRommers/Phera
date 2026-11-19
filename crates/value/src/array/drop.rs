@@ -24,7 +24,7 @@ impl PhpArray {
 
     /// Drops the values one by one. An array, object or reference that this
     /// was the last owner of has its own values added to the list.
-    fn drop_values(mut work: Vec<Value>) {
+    pub(crate) fn drop_values(mut work: Vec<Value>) {
         while let Some(value) = work.pop() {
             match value {
                 Value::Array(owner) => {
@@ -33,8 +33,9 @@ impl PhpArray {
                     }
                 }
                 Value::Object(owner) => {
-                    if let Ok(object) = Rc::try_unwrap(owner) {
+                    if let Ok(mut object) = Rc::try_unwrap(owner) {
                         object.properties.into_inner().take_values(&mut work);
+                        object.lazy.take_values(&mut work);
                     }
                 }
                 Value::Reference(owner) => {

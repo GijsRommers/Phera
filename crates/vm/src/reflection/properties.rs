@@ -204,7 +204,7 @@ impl Vm {
         Ok(Value::Null)
     }
 
-    fn effective_property<'a>(
+    pub(super) fn effective_property<'a>(
         property: &'a PropertyDefault,
         slot: PropertySlot,
         object: &'a Object,
