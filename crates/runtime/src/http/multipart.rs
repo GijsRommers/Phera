@@ -45,8 +45,7 @@ enum MimeHeader {
 
 /// The boundary of a multipart POST that PHP would parse on startup.
 pub(super) fn boundary(content_type: &[u8]) -> Option<Vec<u8>> {
-    super::media_type(content_type)
-        .eq_ignore_ascii_case(b"multipart/form-data")
+    super::is_multipart(content_type)
         .then(|| explicit_boundary(content_type).ok())
         .flatten()
         .filter(|boundary| !boundary.is_empty())

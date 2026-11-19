@@ -84,6 +84,8 @@ fn request_bodies_and_limits_match_the_php_server() {
         ("PUT", Some(URLENCODED), "a=1&a=2", "?raw=1"),
         ("PUT", Some(URLENCODED), large.as_str(), "?raw=1"),
         ("POST", Some(URLENCODED), "a=1&b=2", ""),
+        ("POST", Some("application/json"), "{}", "?raw=1"),
+        ("POST", None, "a=1", ""),
         ("PUT", Some(MULTIPART), FORM, ""),
         ("PUT", Some(MULTIPART), FORM, "?raw=1"),
         ("PUT", Some(MULTIPART), FORM, "?twice=1"),
@@ -152,6 +154,14 @@ fn request_bodies_and_limits_match_the_php_server() {
             content_type.map_or(String::new(), |value| format!("Content-Type: {value}\r\n"));
         compare(&ours, &theirs, method, &headers, body, query);
     }
+    // PHP's built-in server returns 501 for QUERY. Its PUT parser is the
+    // reference for the same content sent to Phera with QUERY.
+    let headers = format!("Content-Type: {URLENCODED}\r\n");
+    let body = "a[b][]=1";
+    assert_eq!(
+        ours.request("QUERY", "/show.php", &headers, body),
+        send_request(&theirs.address, "PUT", "/show.php", &headers, body),
+    );
 }
 
 fn compare(ours: &Served, theirs: &Server, method: &str, headers: &str, body: &str, query: &str) {

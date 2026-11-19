@@ -24,6 +24,10 @@ fn media_type(content_type: &[u8]) -> &[u8] {
         .unwrap_or_default()
 }
 
+pub(crate) fn is_multipart(content_type: &[u8]) -> bool {
+    media_type(content_type).eq_ignore_ascii_case(b"multipart/form-data")
+}
+
 pub(crate) fn receive_form(body: &[u8], boundary: &[u8]) -> Form {
     uploads::receive(body, boundary, form_limits::FormLimits::default())
 }

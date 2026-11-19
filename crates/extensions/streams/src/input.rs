@@ -39,9 +39,13 @@ impl RequestInput {
         }
     }
 
-    /// The automatic urlencoded POST reader has already buffered the input.
+    /// The automatic POST reader has already buffered the input.
     pub fn mark_post_read(&self) {
         self.read_urlencoded();
+    }
+
+    pub fn post_read(&self) -> bool {
+        lock(&self.state).post_read
     }
 
     /// The standard POST reader replaces the raw stream with what it reads.

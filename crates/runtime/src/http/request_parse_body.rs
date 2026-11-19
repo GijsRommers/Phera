@@ -10,7 +10,7 @@ use phera_extension_api::{
 
 use super::form_limits::FormLimits;
 use super::multipart::{BoundaryError, explicit_boundary};
-use super::{media_type, query, uploads};
+use super::{is_multipart, media_type, query, uploads};
 
 const EXCEPTION: &str = "RequestParseBodyException";
 const FUNCTION: &str = "request_parse_body";
@@ -32,10 +32,14 @@ fn parse(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
             let post = parse_urlencoded(context, &input, limits);
             return pair(post, PhpArray::new());
         }
-        if media_type(&content_type).eq_ignore_ascii_case(b"multipart/form-data") {
+        if is_multipart(&content_type) {
             return parse_multipart(context, &input, &content_type, limits).await;
         }
 
+        // For POST, PHP's default reader also runs for an unknown media type.
+        if input.post_read() {
+            read_standard(context, &input, limits);
+        }
         Err(NativeError::throw_bytes(
             EXCEPTION,
             [
@@ -85,13 +89,7 @@ fn parse_urlencoded(
     limits: FormLimits,
 ) -> PhpArray {
     let mut post = PhpArray::new();
-    let range = match size_issue(input, limits) {
-        Some(message) => {
-            context.warning(format!("{FUNCTION}(): {message}"));
-            input.buffered_urlencoded()
-        }
-        None => input.read_urlencoded(),
-    };
+    let range = read_standard(context, input, limits);
 
     let limit = limits.max_input_vars as u64;
     if query::parse_post(&mut post, &input.bytes()[range], limit) {
@@ -101,6 +99,20 @@ fn parse_urlencoded(
         ));
     }
     post
+}
+
+fn read_standard(
+    context: &mut dyn Context,
+    input: &RequestInput,
+    limits: FormLimits,
+) -> std::ops::Range<usize> {
+    match size_issue(input, limits) {
+        Some(message) => {
+            context.warning(format!("{FUNCTION}(): {message}"));
+            input.buffered_urlencoded()
+        }
+        None => input.read_urlencoded(),
+    }
 }
 
 async fn parse_multipart(
