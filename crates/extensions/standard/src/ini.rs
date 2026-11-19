@@ -72,8 +72,7 @@ fn change(context: &mut dyn Context, arguments: &[Value], name: &str) -> NativeR
         Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_)
     ) {
         return Err(NativeError::type_error(format!(
-            "{name}(): Argument #2 ($value) must be of type string|int|float|bool|null, {} given",
-            value.type_name()
+            "{name}(): Argument #2 ($value) must be of type string|int|float|bool|null",
         )));
     }
     let value = value::to_php_string(&value, context.diagnostics())?;

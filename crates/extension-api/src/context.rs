@@ -68,6 +68,11 @@ pub trait Context {
         None
     }
 
+    /// The request's entry script, used for script ownership metadata.
+    fn entry_script_path(&self) -> Option<std::path::PathBuf> {
+        self.script_path()
+    }
+
     /// The request's include path, used by the VM and by the file wrappers.
     fn include_path(&self) -> phera_value::PhpString {
         ".".into()

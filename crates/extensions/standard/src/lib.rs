@@ -9,9 +9,12 @@ pub mod environment;
 mod ini;
 mod math;
 mod natural;
+mod network;
 mod offsets;
 mod packing;
 mod process;
+mod process_info;
+mod sleep;
 mod strings;
 mod time;
 mod version_compare;
@@ -40,6 +43,9 @@ impl Extension for Standard {
         }
         environment::register(registry);
         process::register(registry);
+        process_info::register(registry);
+        sleep::register(registry);
+        network::register(registry);
         ini::register(registry);
     }
 }

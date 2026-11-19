@@ -110,7 +110,7 @@ fn sleep(_context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
 }
 
 /// `usleep($microseconds)`: the same in millionths of a second. Returns null.
-fn usleep(_context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+fn usleep(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let amount = args::int(&arguments, 0).unwrap_or(0);
         let microseconds = wait_amount("usleep", "microseconds", amount)?;

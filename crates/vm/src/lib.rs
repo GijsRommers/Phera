@@ -343,7 +343,7 @@ impl Vm {
                     .insert(function.name.to_ascii_lowercase(), index);
             }
         }
-        self.include_state.record(unit.file.clone());
+        self.include_state.record_entry(unit.file.clone());
         let registers = unit.main.registers as usize;
         self.registers.grow_to(registers);
         self.call_stack.push(Frame::new(main, 0, None));

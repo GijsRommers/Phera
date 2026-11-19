@@ -13,6 +13,8 @@ mod extension_introspection_tests;
 mod http;
 #[cfg(test)]
 mod ini_tests;
+#[cfg(test)]
+mod process_oracle_tests;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

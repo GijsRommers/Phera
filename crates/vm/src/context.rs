@@ -71,6 +71,12 @@ impl Context for Vm {
         Vm::include_path(self)
     }
 
+    fn entry_script_path(&self) -> Option<std::path::PathBuf> {
+        self.include_state
+            .entry_script()
+            .map(std::path::PathBuf::from)
+    }
+
     fn script_path(&self) -> Option<std::path::PathBuf> {
         Some(self.location().file.into())
     }

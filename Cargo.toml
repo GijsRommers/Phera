@@ -95,8 +95,9 @@ pwhash = "1"
 getrandom = "0.3"
 bytes = "1"
 percent-encoding = "2"
-nix = { version = "0.31", default-features = false, features = ["user"] }
-rustix = { version = "1", features = ["fs", "process", "termios", "time"] }
+nix = { version = "0.31", default-features = false, features = ["user", "resource", "feature", "net"] }
+rustix = { version = "1", features = ["fs", "process", "system", "termios", "time"] }
+sysinfo = { version = "0.39.3", default-features = false, features = ["system"] }
 tempfile = "3"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }
