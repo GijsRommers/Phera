@@ -24,7 +24,7 @@ const MAX_DEPTH: u32 = 1000;
 
 pub(crate) struct Parser<'src> {
     pub(crate) source: &'src [u8],
-    _level: phera_source::LanguageLevel,
+    pub(crate) level: phera_source::LanguageLevel,
     tokens: Vec<Token>,
     doc_comments: Vec<(usize, Span)>,
     pos: usize,
@@ -78,7 +78,7 @@ impl<'src> Parser<'src> {
 
         let parser = Self {
             source,
-            _level: level,
+            level,
             tokens,
             doc_comments: lexer.take_doc_comments(),
             pos: 0,

@@ -831,6 +831,7 @@ impl Parser<'_> {
             None
         };
         let has_hook_list = self.at(TokenKind::LeftBrace);
+        let trailing_comment = self.doc_comment();
         let hooks = if has_hook_list {
             self.bump()?;
             let hooks = self.parse_property_hooks()?;
@@ -840,13 +841,23 @@ impl Parser<'_> {
             Vec::new()
         };
 
-        let parameter_doc_comment = self
-            .doc_comment()
-            .or(variable_comment)
-            .or(type_comment)
-            .or(doc_comment);
+        let include_parameter_comments = self
+            .level
+            .has(phera_source::Change::ReflectionParameterDocComments);
+        let parameter_doc_comment = if include_parameter_comments {
+            trailing_comment
+                .or(variable_comment)
+                .or(type_comment)
+                .or(doc_comment)
+        } else {
+            None
+        };
         Ok(Parameter {
-            doc_comment,
+            doc_comment: if include_parameter_comments && has_hook_list {
+                trailing_comment.or(doc_comment)
+            } else {
+                doc_comment
+            },
             parameter_doc_comment,
             attributes,
             modifiers,

@@ -109,6 +109,7 @@ impl<'ast> Compiler<'ast> {
         builder.validate_nodiscard(declaration, line)?;
         if declaration.parameters.iter().any(|parameter| {
             parameter.default.is_some()
+                || parameter.parameter_doc_comment.is_some()
                 || !parameter.attributes.is_empty()
                 || parameter.is_promoted()
         }) {

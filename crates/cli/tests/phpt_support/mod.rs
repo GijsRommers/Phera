@@ -2,6 +2,8 @@
 //!
 //! For example, `spl_object_hash($object)` emits a deprecation at PHP 8.6.
 
+pub(super) mod upstream;
+
 use phera_extension_api::LanguageLevel;
 
 use super::Outcome;

@@ -465,7 +465,9 @@ prints. A fixture whose output differs between the versions exists twice,
 under `tests/fixtures/php85/` and `tests/fixtures/php86/`; all others run at
 both levels and must print the same. CI runs the suite once per level, each
 against that PHP. The php-src sweep of 7.1 is taken from the matching
-branch.
+branch. The selected upstream tests retain their source and expectations
+from 8.5. Small revision files supply the corresponding 8.6 source edits
+and expectations when their upstream test changed.
 
 ## 7. Testing
 

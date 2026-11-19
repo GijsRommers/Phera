@@ -15,6 +15,8 @@ pub enum LanguageLevel {
 /// A change to an operation that exists at both language levels.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Change {
+    /// ReflectionParameter::getDocComment()
+    ReflectionParameterDocComments,
     /// The listed DateTime, DateTimeImmutable, DateTimeZone, DateInterval, and
     /// DatePeriod methods now have tentative static return types.
     DateTentativeStaticReturnTypes,
@@ -141,7 +143,8 @@ impl LanguageLevel {
 
     pub const fn has(self, change: Change) -> bool {
         match change {
-            Change::DateTentativeStaticReturnTypes
+            Change::ReflectionParameterDocComments
+            | Change::DateTentativeStaticReturnTypes
             | Change::DirectoryIteratorReturnTypes
             | Change::SplFileObjectCsvMethodsDeprecated
             | Change::SplClassesDeprecated

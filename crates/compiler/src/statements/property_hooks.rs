@@ -180,10 +180,9 @@ impl Compiler<'_> {
                 Some(declaration.class),
                 AttributePlacement::Declaration(AttributeTarget::Method),
             )?;
-            if parameters
-                .iter()
-                .any(|parameter| !parameter.attributes.is_empty())
-            {
+            if parameters.iter().any(|parameter| {
+                parameter.parameter_doc_comment.is_some() || !parameter.attributes.is_empty()
+            }) {
                 body.function.metadata.parameters = parameters
                     .iter()
                     .map(|parameter| body.reflected_parameter(parameter))

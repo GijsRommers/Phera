@@ -85,7 +85,7 @@ fn main() -> ExitCode {
     for path in &tests {
         let name = display_path(path);
 
-        match expected_outcome(run_test(&binary, path), &name, level) {
+        match expected_outcome(run_test(&binary, path, level), &name, level) {
             Outcome::Pass => {
                 passed += 1;
                 println!("PASS  {name}");
@@ -133,7 +133,7 @@ fn binary(level: LanguageLevel) -> Vec<String> {
     }
 }
 
-fn run_test(binary: &[String], path: &Path) -> Outcome {
+fn run_test(binary: &[String], path: &Path, level: LanguageLevel) -> Outcome {
     let phpt = match Phpt::parse_file(path) {
         Ok(phpt) => phpt,
         Err(error) => return Outcome::Fail(format!("cannot read test: {error}")),
@@ -167,8 +167,16 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
         }
     }
 
-    let outcome = match run_php(binary, path, "php", file, &args) {
-        Ok(run) => check_output(&phpt, &run),
+    let revision = match phpt_support::upstream::revision(path, level) {
+        Ok(revision) => revision,
+        Err(error) => return Outcome::Fail(error),
+    };
+    let file = match phpt_support::upstream::source(file, revision.as_ref()) {
+        Ok(file) => file,
+        Err(error) => return Outcome::Fail(error),
+    };
+    let outcome = match run_php(binary, path, "php", &file, &args) {
+        Ok(run) => check_output(revision.as_ref().unwrap_or(&phpt), &run),
         Err(error) => Outcome::Fail(error),
     };
 
