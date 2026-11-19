@@ -9,6 +9,7 @@ pub mod environment;
 mod math;
 mod natural;
 mod offsets;
+mod packing;
 mod strings;
 mod time;
 mod version_compare;
@@ -29,6 +30,7 @@ impl Extension for Standard {
         url::register(registry);
         math::register(registry);
         arrays::register(registry);
+        packing::register(registry);
         constants::register(registry);
         for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
             registry.function(*entry);

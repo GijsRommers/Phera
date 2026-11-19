@@ -24,6 +24,12 @@ fn read(
     _: &str,
     mode: NativePropertyRead,
 ) -> Result<Option<Value>, NativeError> {
+    if matches!(mode, NativePropertyRead::Update) {
+        return Err(NativeError::error(incomplete_object_message(
+            object,
+            "modify a property on",
+        )));
+    }
     let function = if matches!(mode, NativePropertyRead::Exists) {
         "property_exists"
     } else {

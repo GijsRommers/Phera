@@ -64,6 +64,7 @@ pub struct Registry {
     functions: HashMap<String, FunctionEntry>,
     /// Only calls already holding a first-argument object need to check this table.
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
+    extra_named_handlers: HashMap<&'static str, crate::SyncFn>,
     callback_frames: HashSet<&'static str>,
     function_order: Vec<&'static str>,
     extensions: Vec<&'static str>,
@@ -220,6 +221,20 @@ impl Registry {
     /// The first argument is already bound and checked when the VM selects this handler.
     pub fn object_handler(&self, name: &str) -> Option<crate::AsyncFn> {
         self.object_handlers.get(name).copied()
+    }
+
+    /// Provide an alternate body when a native variadic call supplies extra names.
+    pub fn function_with_extra_named_handler(
+        &mut self,
+        entry: FunctionEntry,
+        handler: crate::SyncFn,
+    ) {
+        self.function(entry);
+        self.extra_named_handlers.insert(entry.name, handler);
+    }
+
+    pub fn extra_named_handler(&self, name: &str) -> Option<crate::SyncFn> {
+        self.extra_named_handlers.get(name).copied()
     }
 
     /// Register an async function whose PHP callbacks run through an internal stack frame.

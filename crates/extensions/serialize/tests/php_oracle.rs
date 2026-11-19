@@ -190,6 +190,16 @@ fn serialize_php_matrix() {
     }
     let mut bits = 0xc3dc2db218da258du64;
     cases.push("serialize", "-0.0", vec![Value::Float(-0.0)]);
+    for whole in [-274877906943.0, -7.0, -1.0, 0.0, 42.0, 274877906943.0] {
+        for sixteenths in 0..16 {
+            let value = whole + f64::from(sixteenths) / 16.0;
+            cases.push(
+                "serialize",
+                &format!("{value:?}"),
+                vec![Value::Float(value)],
+            );
+        }
+    }
     for _ in 0..8192 {
         bits ^= bits << 13;
         bits ^= bits >> 7;

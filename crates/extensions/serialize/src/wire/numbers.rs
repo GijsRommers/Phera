@@ -71,3 +71,29 @@ pub(super) fn float_end(input: &[u8], start: usize) -> Option<usize> {
     }
     Some(end)
 }
+
+/// Single correctly rounded division suffices for decimal coefficients and
+/// divisors that are both representable exactly as binary64.
+pub(super) fn decimal(bytes: &[u8]) -> Option<f64> {
+    let (sign, bytes) = match bytes {
+        [b'-', rest @ ..] => (-1.0, rest),
+        [b'+', rest @ ..] => (1.0, rest),
+        _ => (1.0, bytes),
+    };
+    if bytes.len() > 15 {
+        return None;
+    }
+    let mut coefficient = 0u64;
+    let mut divider = 0u64;
+    for &digit in bytes {
+        match digit {
+            b'0'..=b'9' => {
+                coefficient = coefficient * 10 + u64::from(digit - b'0');
+                divider *= 10;
+            }
+            b'.' => divider = 1,
+            _ => return None,
+        }
+    }
+    Some(coefficient as f64 / divider.max(1) as f64 * sign)
+}
