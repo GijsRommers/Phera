@@ -67,6 +67,7 @@ impl Compiler<'_> {
             if self.is_compiled_operand(node) {
                 break;
             }
+            self.note_hook_backing(node);
             postfix.push(node);
             node = target;
         }

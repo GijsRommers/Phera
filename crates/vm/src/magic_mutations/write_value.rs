@@ -12,7 +12,7 @@ pub(crate) struct WriteValue {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct AssignmentLocal {
+pub(crate) struct AssignmentLocal {
     source: Reg,
     destination: Reg,
 }
@@ -41,7 +41,7 @@ impl WriteValue {
         &self.value
     }
 
-    pub(super) fn into_value(mut self, vm: &mut Vm) -> Value {
+    pub(crate) fn into_value(mut self, vm: &mut Vm) -> Value {
         self.read(vm);
         self.value
     }
@@ -55,7 +55,7 @@ impl WriteValue {
 
 impl AssignmentLocal {
     /// __set receives a copy, while the result reads the local after the call.
-    pub(super) fn refresh_result(self, vm: &mut Vm) {
+    pub(crate) fn refresh_result(self, vm: &mut Vm) {
         let value = vm.read_defined_local(self.source).unwrap_or_default();
         vm.set(self.destination, value);
     }

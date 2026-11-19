@@ -112,6 +112,32 @@ impl Vm {
         Ok(())
     }
 
+    pub(crate) async fn mutate_property_dimension(
+        &mut self,
+        path: DimensionPath,
+        mutation: crate::magic_mutations::PropertyMutation,
+    ) -> NativeResult {
+        use crate::access_mode::Binding;
+        use crate::magic_mutations::PropertyMutation;
+        let write = match mutation {
+            PropertyMutation::Write(value, Binding::ByValue) => {
+                Write::Assign(value.into_value(self))
+            }
+            PropertyMutation::Write(value, Binding::ByReference) => {
+                Write::Bind(value.into_value(self))
+            }
+            PropertyMutation::Unset => Write::Unset,
+        };
+        self.write_dimension_path(path, write).await
+    }
+
+    pub(crate) async fn reference_property_dimension(
+        &mut self,
+        path: DimensionPath,
+    ) -> NativeResult {
+        self.write_dimension_path(path, Write::Reference).await
+    }
+
     async fn send_dimension(&mut self, path: DimensionPath) -> Result<(), NativeError> {
         let view = crate::calls::call_view::CallView::top(&self.code, &self.call_stack)?;
         let index = view.argument_index()?;

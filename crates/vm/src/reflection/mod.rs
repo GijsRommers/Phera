@@ -5,8 +5,9 @@ use std::rc::Rc;
 use phera_bytecode::Visibility;
 use phera_extension_api::reflection::{
     AttributeInfo, AttributeSite, AttributeTarget, ClassInfo, ClassSelector, ExtensionInfo,
-    FunctionTarget, GeneratorQuery, Initializer, MemberInfo, MemberKind, Members, PropertyRead,
-    ReflectedClassKind, ReflectionContext, SourceInfo,
+    FunctionTarget, GeneratorQuery, Initializer, MemberInfo, MemberKind, Members, PropertyHandle,
+    PropertyHookKind, PropertyRead, PropertyWrite, ReflectedClassKind, ReflectionContext,
+    SourceInfo,
 };
 use phera_extension_api::{LocalFuture, NativeError, NativeResult};
 use phera_value::{Object, PhpArray, Value};
@@ -21,9 +22,11 @@ mod cache;
 mod callables;
 mod constants;
 mod functions;
+pub(crate) mod hook_calls;
 mod initializers;
 mod members;
 mod properties;
+mod property_hooks;
 
 enum Construction {
     Reflection,
@@ -87,6 +90,9 @@ impl ReflectionContext for Vm {
     ) -> LocalFuture<'_, NativeResult> {
         Box::pin(async move {
             let callee = self.reflection_function_callee(&target, receiver, false)?;
+            if matches!(target, FunctionTarget::PropertyHook { .. }) {
+                return Err(hook_calls::ReflectedHookCall::Method { callee, args }.suspend());
+            }
             self.invoke_array_callback(callee, &args).await
         })
     }
@@ -278,6 +284,26 @@ impl ReflectionContext for Vm {
         })
     }
 
+    fn reflect_property_hook(
+        &self,
+        member: &MemberInfo,
+        kind: PropertyHookKind,
+    ) -> Option<FunctionTarget> {
+        self.reflection_property_hook(member, kind)
+    }
+
+    fn reflect_hook_prototype(
+        &self,
+        property: PropertyHandle,
+        kind: PropertyHookKind,
+    ) -> Option<FunctionTarget> {
+        self.reflection_hook_prototype(property, kind)
+    }
+
+    fn reflect_property_settable_type(&self, member: &MemberInfo) -> Option<String> {
+        self.reflection_property_settable_type(member)
+    }
+
     fn reflect_property_read(
         &mut self,
         member: &MemberInfo,
@@ -292,8 +318,9 @@ impl ReflectionContext for Vm {
         member: &MemberInfo,
         object: Option<Rc<Object>>,
         value: Value,
+        mode: PropertyWrite,
     ) -> NativeResult {
-        self.reflection_property_write(member, object, value)
+        self.reflection_property_write(member, object, value, mode)
     }
 }
 
@@ -382,7 +409,13 @@ impl Vm {
                 | flags(class.is_readonly, 65536),
             is_abstract: class.is_abstract
                 || kind == ReflectedClassKind::Interface
-                    && class.methods.values().any(|method| method.is_abstract),
+                    && (class.methods.values().any(|method| method.is_abstract)
+                        || class.defaults.iter().any(|property| {
+                            property
+                                .hooks
+                                .as_ref()
+                                .is_some_and(|hooks| hooks.methods().any(|hook| hook.is_abstract))
+                        })),
             instantiable: concrete && constructor_public && class.origin != ClassOrigin::Closure,
             cloneable,
             iterable: concrete && class.is_a("Traversable"),

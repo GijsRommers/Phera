@@ -40,13 +40,14 @@ pub struct Parameter {
     pub default: Option<Expression>,
     /// Hooks on a promoted property.
     pub hooks: Vec<PropertyHook>,
+    pub has_hook_list: bool,
     pub span: Span,
 }
 
 impl Parameter {
     /// A readonly constructor parameter promotes even without explicit visibility.
     pub fn is_promoted(&self) -> bool {
-        self.modifiers.promotes_property()
+        self.modifiers.promotes_property() || self.has_hook_list
     }
 }
 
@@ -145,6 +146,7 @@ pub struct PropertyDeclaration {
     pub name: String,
     pub default: Option<Expression>,
     pub hooks: Vec<PropertyHook>,
+    pub has_hook_list: bool,
     pub span: Span,
 }
 
@@ -185,13 +187,17 @@ pub enum TraitAdaptation {
 /// `get => expr;`, `set(string $value) { ... }`
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropertyHook {
+    pub doc_comment: Option<Span>,
     pub attributes: Vec<Attribute>,
     pub is_final: bool,
     pub by_reference: bool,
     /// `get` or `set`.
     pub name: Identifier,
+    pub invalid_modifier: Option<Identifier>,
+    pub has_parameter_list: bool,
     pub parameters: Vec<Parameter>,
     pub body: HookBody,
+    pub is_generator: bool,
     pub span: Span,
 }
 

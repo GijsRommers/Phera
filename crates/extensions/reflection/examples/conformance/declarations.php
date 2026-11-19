@@ -23,6 +23,17 @@ class Subject extends MiddleClass {
 }
 #[Attribute(Attribute::TARGET_ALL | Attribute::IS_REPEATABLE)]
 class AuditMarker { public function __construct(public int $number = 3) {} }
+interface HookedContract { public int $hooked { get; } }
+class HookedSubject extends Subject implements HookedContract {
+    #[AuditMarker(6)]
+    final public int $hooked = 4 {
+        #[AuditMarker(7)]
+        get => $this->hooked + 1;
+        #[AuditMarker(8)]
+        final set(#[SensitiveParameter] int|string $value) => (int) $value * 2;
+    }
+    public int $virtual { get => 5; }
+}
 class Inaccessible { private function __construct() {} }
 readonly class Immutable { public function __construct(public int $id = 7) {} }
 final class FinalClass { public static $value = 2; }

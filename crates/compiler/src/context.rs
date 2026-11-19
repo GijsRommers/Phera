@@ -67,6 +67,8 @@ pub(super) struct Compiler<'ast> {
     /// __CLASS__ is lexical and does not change when a closure is rebound.
     pub(super) class_scope: Option<String>,
     pub(super) trait_scope: Option<String>,
+    pub(super) hooked_property: Option<String>,
+    pub(super) uses_hook_backing: bool,
     pub(super) imports: Option<Imports>,
     pub(super) reflection: &'ast ReflectionInputs,
 }
@@ -109,6 +111,8 @@ impl<'ast> Compiler<'ast> {
             namespace: namespace.into(),
             class_scope: None,
             trait_scope: None,
+            hooked_property: None,
+            uses_hook_backing: false,
             imports: None,
             reflection,
         }

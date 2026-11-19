@@ -74,6 +74,7 @@ pub(crate) struct PropertyDefault {
     pub(crate) is_readonly: bool,
     pub(crate) static_initialized: Rc<std::cell::Cell<bool>>,
     pub(crate) value_initialized: Rc<std::cell::Cell<bool>>,
+    pub(crate) hooks: Option<Rc<super::property_hooks::LinkedPropertyHooks>>,
 }
 
 /// A method remembers its declaring scope independently of the receiver's class.

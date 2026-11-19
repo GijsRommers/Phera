@@ -63,7 +63,20 @@ impl Compiler<'_> {
                 });
                 node = left;
             }
-            let mut lhs = if let Some(bytes) = fold_leading_strings(node, &mut spine) {
+            let folded = fold_leading_strings(node, &mut spine);
+            // Backing storage is a lexical property of a hook, including references
+            // in code that can never run.
+            let mut known_truth = self
+                .hooked_property
+                .is_none()
+                .then(|| match &folded {
+                    Some(bytes) => Some(!bytes.is_empty() && bytes != b"0"),
+                    None => literal_truth(node),
+                })
+                .flatten();
+            // A run of `false && ...` steps keeps one literal result.
+            let mut decided = false;
+            let mut lhs = if let Some(bytes) = folded {
                 self.literal(Constant::Bytes(bytes), self.lines.line(node.span.start))?
             } else if spine
                 .last()
@@ -79,6 +92,18 @@ impl Compiler<'_> {
                 line,
             } in spine.into_iter().rev()
             {
+                if matches!(
+                    (operator, known_truth),
+                    (ast::BinaryOperator::And, Some(false)) | (ast::BinaryOperator::Or, Some(true))
+                ) {
+                    if !std::mem::replace(&mut decided, true) {
+                        lhs = self
+                            .literal(Constant::Bool(operator == ast::BinaryOperator::Or), line)?;
+                    }
+                    continue;
+                }
+                known_truth = None;
+                decided = false;
                 let mark = self.mark_temporaries();
                 match operator {
                     ast::BinaryOperator::And
@@ -190,5 +215,19 @@ impl Compiler<'_> {
             line,
         );
         Ok(dst)
+    }
+}
+
+fn literal_truth(expression: &ast::Expression) -> Option<bool> {
+    match &expression.kind {
+        ast::ExpressionKind::Literal(literal) => Some(match literal {
+            ast::Literal::Null => false,
+            ast::Literal::Bool(value) => *value,
+            ast::Literal::Int(value) => *value != 0,
+            ast::Literal::Float(value) => *value != 0.0,
+            ast::Literal::String(value) => !value.is_empty() && value != b"0",
+        }),
+        ast::ExpressionKind::Array(values) if values.is_empty() => Some(false),
+        _ => None,
     }
 }

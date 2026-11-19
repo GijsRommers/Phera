@@ -32,10 +32,7 @@ impl Vm {
         mode: FetchMode,
     ) -> Result<Option<BatchExit>, NativeError> {
         let place = self.path(path)?;
-        if mode == FetchMode::Read
-            && let Some(value) = self.read_property_site(&place)?
-        {
-            self.set(destination, value);
+        if mode == FetchMode::Read && self.fetch_property_site(&place, destination)? {
             return Ok(None);
         }
         if self.classes.has_dimensions && self.prepare_dimension(&place)? {
@@ -46,6 +43,13 @@ impl Vm {
             })));
         }
         if place.has_properties()? && mode != FetchMode::Destructure {
+            if mode != FetchMode::Read
+                && (!matches!(place.base()?, phera_bytecode::PathBase::This { .. })
+                    || self.current().is_some_and(|frame| frame.this().is_some()))
+                && self.start_cached_getter(&place, destination)?
+            {
+                return Ok(None);
+            }
             return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
                 dst: destination,
                 path,
@@ -214,7 +218,7 @@ impl Vm {
     ) -> Result<Option<BatchExit>, NativeError> {
         let value = self.read_local(source);
         let place = self.path(path)?;
-        if self.assign_property_site(&place, &value)? {
+        if self.assign_property_site(&place, &value, None)? {
             return Ok(None);
         }
         if place.steps()?.next().is_none()

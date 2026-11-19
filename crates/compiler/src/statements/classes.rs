@@ -2,6 +2,7 @@
 
 use super::builtin_attributes::AttributePlacement;
 use super::class_default_types::DefaultKind;
+use super::property_hooks::HookedDeclaration;
 use phera_ast as ast;
 use phera_bytecode::{ClassKind, Visibility};
 use phera_source::attributes::AttributeTarget;
@@ -156,9 +157,7 @@ impl Compiler<'_> {
                     AttributePlacement::Declaration(AttributeTarget::Property),
                 )?;
                 for property in items {
-                    if !property.hooks.is_empty() {
-                        return Err(self.error("Property hooks not supported yet", line));
-                    }
+                    let property_line = self.lines.line(property.span.start);
                     let readonly = modifiers.is_readonly || declaration.modifiers.is_readonly;
                     let declared_type = ty.as_ref().map(|ty| self.declaration_type(ty));
                     let (set_visibility, is_final) = self.property_write_visibility(
@@ -190,7 +189,22 @@ impl Compiler<'_> {
                         .as_ref()
                         .map(|value| self.compile_initializer(value, &name, trait_scope, line))
                         .transpose()?;
+                    let hooks = self.compile_property_metadata(HookedDeclaration {
+                        class: &name,
+                        trait_scope,
+                        kind: declaration.kind,
+                        property: &property.name,
+                        modifiers,
+                        readonly,
+                        ty: ty.as_ref(),
+                        default: property.default.as_ref(),
+                        hooks: &property.hooks,
+                        has_hook_list: property.has_hook_list,
+                        has_parent: !declaration.extends.is_empty(),
+                        line: property_line,
+                    })?;
                     properties.push(ClassProperty {
+                        hooks,
                         name: property.name.clone(),
                         set_visibility,
                         is_final,
@@ -263,7 +277,23 @@ impl Compiler<'_> {
                         ty.as_deref(),
                         readonly,
                     )?;
+                    let hooks = self.compile_property_metadata(HookedDeclaration {
+                        class: &name,
+                        trait_scope,
+                        kind: declaration.kind,
+                        property: &parameter.name,
+                        modifiers: &parameter.modifiers,
+                        readonly: parameter.modifiers.is_readonly
+                            || declaration.modifiers.is_readonly,
+                        ty: parameter.ty.as_ref(),
+                        default: None,
+                        hooks: &parameter.hooks,
+                        has_hook_list: parameter.has_hook_list,
+                        has_parent: !declaration.extends.is_empty(),
+                        line: self.lines.line(parameter.span.start),
+                    })?;
                     properties.push(ClassProperty {
+                        hooks,
                         name: parameter.name.clone(),
                         set_visibility,
                         is_final,

@@ -186,11 +186,12 @@ impl Compiler<'_> {
                 (_, false) => Some("A function with return type must return a value"),
             };
             if let Some(message) = message {
-                let message = if self
-                    .function
-                    .name
-                    .rsplit_once("::")
-                    .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__toString"))
+                let message = if self.hooked_property.is_some()
+                    || self
+                        .function
+                        .name
+                        .rsplit_once("::")
+                        .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__toString"))
                 {
                     message.replace("function", "method")
                 } else {
