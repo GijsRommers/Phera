@@ -23,13 +23,15 @@ fn regenerate(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'
         if !active(context) {
             let message = after_start(
                 context,
-                "session_regenerate_id(): Session ID cannot be regenerated when there is no active session",
+                "session_regenerate_id(): Session ID cannot be regenerated when there \
+                 is no active session",
             );
             context.warning(message);
             return Ok(Value::Bool(false));
         }
         if context.output_origin().is_some() {
-            let message = "session_regenerate_id(): Session ID cannot be regenerated after headers have already been sent";
+            let message = "session_regenerate_id(): Session ID cannot be regenerated after \
+                           headers have already been sent";
             context.warning(after_output(context, message));
             return Ok(Value::Bool(false));
         }
@@ -46,10 +48,10 @@ fn regenerate(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'
                 Err(error) => Err(error),
             }
         };
-        let close = storage::close(context, FUNCTION).await;
-        if !matches!((&action, &close), (Ok(true), Ok(()))) {
+        let action = lifecycle::close_after(context, FUNCTION, action).await;
+        if !matches!(action, Ok(true)) {
             state(context).active = false;
-            lifecycle::combine(context, action, close)?;
+            action?;
             let message = if delete {
                 "Session object destruction failed"
             } else {
@@ -63,8 +65,9 @@ fn regenerate(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'
         session.before = None;
         session.id = None;
         if let Err(error) = replace_id(context, FUNCTION).await {
-            let close = lifecycle::finish(context, lifecycle::Close::Discard, FUNCTION).await;
-            return lifecycle::combine(context, Err(error), close.map(|_| ()));
+            storage::release(context);
+            state(context).active = false;
+            return Err(error);
         }
         let sent = !settings::boolean(context, "use_cookies") || headers::cookie(context, FUNCTION);
         Ok(Value::Bool(sent))

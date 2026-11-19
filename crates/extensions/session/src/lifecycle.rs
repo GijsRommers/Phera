@@ -5,7 +5,7 @@ use phera_extension_api::{Context, FunctionEntry, LocalFuture, NativeError, Nati
 use crate::{
     settings,
     start::{self, require_id},
-    state::{active, state},
+    state::{active, state, warning},
     storage, user_handler, variables,
 };
 
@@ -62,9 +62,9 @@ pub async fn finish(
         Close::Write => flush(context, function).await,
         Close::Discard => Ok(()),
     };
-    let close = storage::close(context, function).await;
+    let result = close_after(context, function, result).await;
     state(context).active = false;
-    combine(context, result, close)?;
+    result?;
     Ok(true)
 }
 
@@ -101,7 +101,7 @@ async fn flush(context: &mut dyn Context, function: &str) -> Result<(), NativeEr
                  session.save_path is correct ({path})"
             ),
         };
-        context.warning(format!("{function}(): {message}"));
+        warning(context, function, &message);
     }
     Ok(())
 }
@@ -120,25 +120,30 @@ pub async fn destroy(context: &mut dyn Context, function: &str) -> Result<bool, 
     if matches!(result, Ok(false)) {
         context.warning(format!("{function}(): Session object destruction failed"));
     }
-    let close = storage::close(context, function).await;
+    let result = close_after(context, function, result).await;
     let session = state(context);
     session.active = false;
     session.id = None;
     session.started = None;
     session.variables = None;
     session.before = None;
-    combine(context, result, close)
+    result
 }
 
-pub fn combine<T>(
+pub async fn close_after<T>(
     context: &mut dyn Context,
+    function: &str,
     result: Result<T, NativeError>,
-    close: Result<(), NativeError>,
 ) -> Result<T, NativeError> {
-    match (result, close) {
-        (Err(previous), Err(error)) => Err(context.chain_exception(error, previous)),
-        (Err(error), _) | (_, Err(error)) => Err(error),
-        (Ok(value), Ok(())) => Ok(value),
+    match result {
+        Ok(value) => {
+            storage::close(context, function).await?;
+            Ok(value)
+        }
+        Err(error) => {
+            storage::release(context);
+            Err(error)
+        }
     }
 }
 

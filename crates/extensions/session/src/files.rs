@@ -1,10 +1,11 @@
 //! `SessionHandler::read($id)` and `session_start()` use the same file backend.
 
+use phera_ext_streams::file_io::blocking;
 use phera_extension_api::{Context, NativeError, PhpString};
 
 use crate::{
     file_handler::{Directory, FileError, LockedFile},
-    state::state,
+    state::{state, warning},
 };
 
 pub struct Files {
@@ -18,6 +19,13 @@ pub fn open(context: &mut dyn Context, path: &PhpString) -> Result<(), String> {
         directory,
         locked: None,
     });
+    Ok(())
+}
+
+pub async fn close(context: &mut dyn Context) -> Result<(), NativeError> {
+    if let Some((_, file)) = state(context).files.take().and_then(|files| files.locked) {
+        blocking(move || drop(file)).await?;
+    }
     Ok(())
 }
 
@@ -127,6 +135,7 @@ fn warn(context: &mut dyn Context, function: &str, error: FileError) {
                 save_path or path length exceeds {limit} characters"
             )
         }
+        FileError::Owner => "Session data file is not created by your uid".into(),
         FileError::Open(path, error) => {
             let errno = error.raw_os_error().unwrap_or_default();
             let text = error.to_string();
@@ -135,15 +144,5 @@ fn warn(context: &mut dyn Context, function: &str, error: FileError) {
         }
         FileError::Io(error) => format!("Session file I/O failed: {error}"),
     };
-    let message = if matches!(phera_ext_http::sapi(context), phera_ext_http::Sapi::Web) {
-        message
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-            .replace('\'', "&#039;")
-    } else {
-        message
-    };
-    context.warning(format!("{function}(): {message}"));
+    warning(context, function, &message);
 }

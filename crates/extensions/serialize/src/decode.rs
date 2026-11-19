@@ -230,6 +230,10 @@ impl Decoder<'_> {
     async fn complete(&mut self, context: &mut dyn Context) -> Result<(), NativeError> {
         self.graph.materialize(context)?;
         self.graph.retain_array_cycles(context);
+        self.run_hooks(context).await
+    }
+
+    async fn run_hooks(&mut self, context: &mut dyn Context) -> Result<(), NativeError> {
         for hook in std::mem::take(&mut self.delayed) {
             match hook {
                 Delayed::Wakeup(object) => {

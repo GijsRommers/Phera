@@ -1,50 +1,13 @@
 //! `ini_set('session.use_strict_mode', '1')` changes only the current request.
 
 use phera_extension_api::value::{NoDiagnostics, is_numeric, to_php_string};
-use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpString, Value, args,
-};
+use phera_extension_api::{Context, NativeError, NativeResult, PhpString, Value};
 
 use crate::{
     id::c_string,
-    state::{active, can_change, state},
+    quantity,
+    state::{can_change, state, warning},
 };
-
-pub const FUNCTIONS: &[FunctionEntry] = &[
-    FunctionEntry::sync("session_name", NAME, |context, arguments| {
-        string_setting(context, arguments, "session_name", "name", "name", true)
-    }),
-    FunctionEntry::sync("session_save_path", PATH, |context, arguments| {
-        string_setting(
-            context,
-            arguments,
-            "session_save_path",
-            "save_path",
-            "save path",
-            true,
-        )
-    }),
-    FunctionEntry::sync("session_cache_limiter", VALUE, |context, arguments| {
-        string_setting(
-            context,
-            arguments,
-            "session_cache_limiter",
-            "cache_limiter",
-            "cache limiter",
-            false,
-        )
-    }),
-    FunctionEntry::sync("session_cache_expire", EXPIRE, cache_expire),
-    FunctionEntry::sync("session_module_name", MODULE, module_name),
-];
-
-const NAME: &[Param] = &[Param::new("name", ParamType::String).nullable().optional()];
-const PATH: &[Param] = &[Param::new("path", ParamType::String).nullable().optional()];
-const VALUE: &[Param] = &[Param::new("value", ParamType::String).nullable().optional()];
-const EXPIRE: &[Param] = &[Param::new("value", ParamType::Int).nullable().optional()];
-const MODULE: &[Param] = &[Param::new("module", ParamType::String)
-    .nullable()
-    .optional()];
 
 const DEFAULTS: &[(&str, &str)] = &[
     ("name", "PHPSESSID"),
@@ -80,6 +43,20 @@ pub fn ini(context: &mut dyn Context, name: &[u8], value: Option<&Value>) -> Nat
     else {
         return Ok(Value::Bool(false));
     };
+    let value = value
+        .map(|value| {
+            let value = value.try_deref()?;
+            if matches!(
+                &*value,
+                Value::Array(_) | Value::Object(_) | Value::Resource(_)
+            ) {
+                return Err(NativeError::type_error(
+                    "ini_set(): Argument #2 ($value) must be of type string|int|float|bool|null",
+                ));
+            }
+            Ok(to_php_string(&value, &mut NoDiagnostics)?)
+        })
+        .transpose()?;
     let Some(previous) = get(context, name) else {
         if value.is_some() && name.starts_with("trans_sid_") {
             return Err(unsupported(name));
@@ -87,7 +64,6 @@ pub fn ini(context: &mut dyn Context, name: &[u8], value: Option<&Value>) -> Nat
         return Ok(Value::Bool(false));
     };
     if let Some(value) = value {
-        let value = to_php_string(value, &mut NoDiagnostics)?;
         if !update(context, name, value, "ini_set")? {
             return Ok(Value::Bool(false));
         }
@@ -115,7 +91,12 @@ pub fn text(context: &mut dyn Context, setting: &str) -> PhpString {
 }
 
 pub fn integer(context: &mut dyn Context, setting: &str) -> i64 {
-    number(&text(context, setting))
+    if let Some(number) = state(context).numbers.get(setting) {
+        return *number;
+    }
+    default(setting)
+        .and_then(|(_, initial)| initial.parse().ok())
+        .unwrap_or_default()
 }
 
 pub fn boolean(context: &mut dyn Context, setting: &str) -> bool {
@@ -162,16 +143,22 @@ pub fn update(
     if name == "auto_start" || !can_change(context, function, "ini settings", true) {
         return Ok(false);
     }
+    if matches!(
+        name,
+        "cookie_lifetime" | "gc_probability" | "gc_divisor" | "gc_maxlifetime" | "cache_expire"
+    ) {
+        return Ok(update_quantity(context, name, value, function));
+    }
     let bytes = c_string(value.as_bytes());
     let printable = String::from_utf8_lossy(bytes);
-    let warning = match name {
+    let problem = match name {
         "sid_length" | "sid_bits_per_character" if bytes != initial.as_bytes() => {
             return Err(unsupported(name));
         }
         "use_trans_sid" if ini_bool(&value) => return Err(unsupported(name)),
         "use_only_cookies" if !ini_bool(&value) => {
             context.deprecated(format!(
-                "{function}(session.configuration): Disabling \
+                "{function}(): Disabling \
                 session.use_only_cookies INI setting is deprecated"
             ));
             None
@@ -186,8 +173,8 @@ pub fn update(
                     .any(|byte| b"=,;.[ \t\r\n\x0b\x0c".contains(byte)) =>
         {
             Some(format!(
-                "session.name \"{printable}\" must not be numeric, empty, contain null bytes or any of \
-             the following characters \"=,;.[ \\t\\r\\n\\013\\014\""
+                "session.name \"{printable}\" must not be numeric, empty, contain null \
+                 bytes or any of the following characters \"=,;.[ \\t\\r\\n\\013\\014\""
             ))
         }
         "save_handler" if bytes.eq_ignore_ascii_case(b"user") => {
@@ -205,29 +192,51 @@ pub fn update(
                 "Serialization handler \"{printable}\" cannot be found"
             ))
         }
-        "cookie_lifetime" if number(&value) < 0 => Some("CookieLifetime cannot be negative".into()),
-        "gc_probability" if number(&value) < 0 => {
-            context.warning(format!(
-                "{function}(session.gc_probability): \
-                session.gc_probability must be greater than or equal to 0"
-            ));
-            return Ok(false);
-        }
-        "gc_divisor" if number(&value) <= 0 => {
-            context.warning(format!(
-                "{function}(session.gc_divisor): \
-                session.gc_divisor must be greater than 0"
-            ));
-            return Ok(false);
-        }
         _ => None,
     };
-    if let Some(message) = warning {
-        context.warning(format!("{function}(): {message}"));
+    if let Some(message) = problem {
+        warning(context, function, &message);
         return Ok(false);
     }
     state(context).settings.insert(name, value);
     Ok(true)
+}
+
+fn update_quantity(
+    context: &mut dyn Context,
+    name: &'static str,
+    value: PhpString,
+    function: &str,
+) -> bool {
+    if name == "cookie_lifetime" {
+        let decimal = number(&value);
+        if decimal < 0 {
+            warning(context, function, "CookieLifetime cannot be negative");
+            return false;
+        }
+        if decimal > i64::MAX - i64::from(i32::MAX) - 1 {
+            state(context).settings.insert(name, value);
+            return true;
+        }
+    }
+    let (number, diagnostic) = quantity::parse(value.as_bytes());
+    if let Some(diagnostic) = diagnostic {
+        context.warning(format!("Invalid \"session.{name}\" setting. {diagnostic}"));
+    }
+    let problem = match name {
+        "gc_probability" if number < 0 => Some("must be greater than or equal to 0"),
+        "gc_divisor" if number <= 0 => Some("must be greater than 0"),
+        "cookie_lifetime" if number < 0 => return false,
+        _ => None,
+    };
+    if let Some(problem) = problem {
+        warning(context, function, &format!("session.{name} {problem}"));
+        return false;
+    }
+    let session = state(context);
+    session.settings.insert(name, value);
+    session.numbers.insert(name, number);
+    true
 }
 
 fn unsupported(setting: &str) -> NativeError {
@@ -235,78 +244,4 @@ fn unsupported(setting: &str) -> NativeError {
         "Phera\\NotSupportedException",
         format!("session.{setting} is not supported by Phera: deprecated since PHP 8.4"),
     )
-}
-
-fn string_setting(
-    context: &mut dyn Context,
-    arguments: &[Value],
-    function: &str,
-    setting: &str,
-    label: &str,
-    path: bool,
-) -> NativeResult {
-    let previous = text(context, setting);
-    if let Some(next) = args::string(arguments, 0) {
-        if path && next.as_bytes().contains(&0) {
-            let parameter = if setting == "name" { "name" } else { "path" };
-            return Err(NativeError::value_error(format!(
-                "{function}(): Argument #1 (${parameter}) must not contain any null bytes"
-            )));
-        }
-        if !can_change(context, function, label, true) {
-            return Ok(Value::Bool(false));
-        }
-        update(context, setting, next.clone(), function)?;
-    }
-    Ok(Value::String(previous))
-}
-
-fn cache_expire(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let previous = Value::Int(integer(context, "cache_expire"));
-    if let Some(next) = args::int(arguments, 0) {
-        if !can_change(context, "session_cache_expire", "cache expiration", true) {
-            return Ok(if active(context) {
-                previous
-            } else {
-                Value::Bool(false)
-            });
-        }
-        update(
-            context,
-            "cache_expire",
-            next.to_string().into(),
-            "session_cache_expire",
-        )?;
-    }
-    Ok(previous)
-}
-
-fn module_name(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let current = text(context, "save_handler");
-    let previous = Value::from(if current.as_bytes() == b"user" {
-        "user"
-    } else {
-        "files"
-    });
-    if let Some(next) = args::string(arguments, 0) {
-        let function = "session_module_name";
-        if !can_change(context, function, "save handler module", true) {
-            return Ok(Value::Bool(false));
-        }
-        if next.as_bytes().eq_ignore_ascii_case(b"user") {
-            return Err(NativeError::value_error(
-                "session_module_name(): Argument #1 ($module) cannot be \"user\"",
-            ));
-        }
-        let name = c_string(next.as_bytes());
-        if !name.eq_ignore_ascii_case(b"files") {
-            let name = String::from_utf8_lossy(name);
-            context.warning(format!(
-                "{function}(): Session handler module \"{name}\" cannot be found"
-            ));
-            return Ok(Value::Bool(false));
-        }
-        update(context, "save_handler", next.clone(), function)?;
-    }
-    Ok(previous)
 }

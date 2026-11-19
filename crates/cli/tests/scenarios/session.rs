@@ -1,6 +1,7 @@
 //! Cookie-bearing requests run against `php -S` and one Phera worker.
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 
 use phera_extension_api::testing::{oracle, serve::Server};
@@ -62,7 +63,7 @@ if ($action === 'destroy') {
 } else {
     if ($action === 'hold' || $action === 'timeout') {
         file_put_contents(__DIR__ . "/stores/$store/locked", '1');
-        usleep($action === 'timeout' ? 3000000 : 160000);
+        usleep($action === 'timeout' ? 3000000 : 300000);
     }
     $_SESSION['count'] = ++$count;
 }
@@ -114,7 +115,7 @@ impl Client {
             match name.as_str() {
                 "set-cookie" => answer.cookies.push(self.accept(value)),
                 "expires" if value != "Thu, 19 Nov 1981 08:52:00 GMT" => {
-                    check_date(value);
+                    check_date(value, 180 * 60);
                     answer.cache.push((name, "<future>".into()));
                 }
                 "expires" | "pragma" | "last-modified" | "cache-control" => {
@@ -142,7 +143,7 @@ impl Client {
             .split(';')
             .map(|attribute| {
                 if let Some(date) = attribute.strip_prefix(" expires=") {
-                    check_date(date);
+                    check_date(date, 90);
                     " expires=<future>"
                 } else {
                     attribute
@@ -154,9 +155,16 @@ impl Client {
     }
 }
 
-fn check_date(date: &str) {
+fn check_date(date: &str, seconds: u64) {
     let date = httpdate::parse_http_date(date).expect("valid HTTP date");
-    assert!(date > std::time::SystemTime::now(), "{date:?}");
+    let age = date
+        .duration_since(std::time::SystemTime::now())
+        .expect("date is in the future")
+        .as_secs();
+    assert!(
+        (seconds - 3..=seconds).contains(&age),
+        "{date:?} has age {age}"
+    );
 }
 
 fn target(store: &str, action: &str, limiter: &str) -> String {
@@ -212,15 +220,18 @@ fn two_requests_share_one_file_lock_even_across_sapis() {
         client.request(&ours.address, &count).body,
         "[true,2,1,32,1]"
     );
+    let marker = ours.root.join("stores/shared/locked");
     for other in [&ours.address, &theirs.address] {
         let mut left = client.clone();
         let mut right = client.clone();
         let hold = target("shared", "hold", "");
         let mut results = std::thread::scope(|scope| {
             let first = scope.spawn(|| left.request(&ours.address, &hold));
+            wait_for_lock(&marker);
             let second = scope.spawn(|| right.request(other, &count));
             [first.join().unwrap().body, second.join().unwrap().body]
         });
+        fs::remove_file(&marker).expect("remove lock marker");
         results.sort_unstable();
         let expected = if other == &ours.address {
             [2, 3]
@@ -254,20 +265,14 @@ fn one_worker_isolates_sessions_and_recovers_the_lock_after_timeout() {
     assert_eq!(first.request(&ours.address, &count).body, "[true,2,2,32,0]");
     let id = first.cookie.as_ref().unwrap().clone();
     let file = ours.root.join("stores/one").join(format!("sess_{id}"));
+    assert_eq!(
+        fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
     let timeout = target("one", "timeout", "");
     std::thread::scope(|scope| {
         let pending = scope.spawn(|| first.request(&ours.address, &timeout));
-        let marker = ours.root.join("stores/one/locked");
-        for _ in 0..200 {
-            if marker.is_file() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        assert!(
-            marker.is_file(),
-            "timeout request acquired its session file"
-        );
+        wait_for_lock(&ours.root.join("stores/one/locked"));
         let probe = target("one", "isolate", "");
         assert_eq!(
             second.request(&ours.address, &probe).body,
@@ -304,6 +309,11 @@ fn malformed_cookie_ids_do_not_name_files() {
     let mut nul = Client {
         cookie: Some("valid%00tail".into()),
     };
+    let php_nul = nul
+        .clone()
+        .request(&theirs.address, &target("php", "invalid", ""));
+    assert_eq!(php_nul.body, "[true,[],true]");
+    assert!(ours.root.join("stores/php/sess_valid").is_file());
     let answer = nul.request(&ours.address, &target("phera", "invalid", ""));
     assert!(answer.body.starts_with("[false,"));
     assert_eq!(
@@ -312,4 +322,14 @@ fn malformed_cookie_ids_do_not_name_files() {
             .count(),
         0
     );
+}
+
+fn wait_for_lock(marker: &std::path::Path) {
+    for _ in 0..200 {
+        if marker.is_file() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("request did not reach its session critical section");
 }

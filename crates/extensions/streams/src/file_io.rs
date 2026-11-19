@@ -5,7 +5,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::io;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use phera_extension_api::{Context, NativeError};
@@ -41,4 +41,22 @@ pub fn open_private_file(path: &Path, mode: u32, create: bool) -> io::Result<Fil
         ));
     }
     Ok(file)
+}
+
+/// PHP accepts session files owned by the process user or by root.
+pub fn file_is_owned(file: &File) -> io::Result<bool> {
+    let uid = rustix::process::getuid().as_raw();
+    let effective = rustix::process::geteuid().as_raw();
+    let owner = file.metadata()?.uid();
+    Ok(uid == 0 || owner == 0 || owner == uid || owner == effective)
+}
+
+/// Checks that a file opened before a lock wait still names the same inode.
+pub fn same_file(file: &File, path: &Path) -> bool {
+    if let Ok(opened) = file.metadata()
+        && let Ok(current) = std::fs::symlink_metadata(path)
+    {
+        return opened.dev() == current.dev() && opened.ino() == current.ino();
+    }
+    false
 }

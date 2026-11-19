@@ -1,9 +1,9 @@
 //! `session_encode()` uses either `key|value`, one array, or length-prefixed keys.
 
-use phera_ext_serialize::{SequenceEncoder, decode_entries, decode_value};
+use phera_ext_serialize::{Decoded, SequenceEncoder, decode_entries, decode_value};
 use phera_extension_api::{ArrayKey, Context, NativeError, PhpArray, Value};
 
-use crate::{id::c_string, settings};
+use crate::{id::c_string, settings, state::warning};
 
 #[derive(Clone, Copy)]
 pub enum Format {
@@ -43,7 +43,7 @@ impl Format {
             let key = match key {
                 ArrayKey::String(key) => key,
                 ArrayKey::Int(key) => {
-                    context.warning(format!("{function}(): Skipping numeric key {key}"));
+                    warning(context, function, &format!("Skipping numeric key {key}"));
                     continue;
                 }
             };
@@ -52,9 +52,13 @@ impl Format {
             match self {
                 Self::Text if key.contains(&b'|') => {
                     let key = String::from_utf8_lossy(c_string(key));
-                    context.warning(format!(
-                        "{function}(): Failed to write session data. Data contains invalid key \"{key}\""
-                    ));
+                    warning(
+                        context,
+                        function,
+                        &format!(
+                            "Failed to write session data. Data contains invalid key \"{key}\""
+                        ),
+                    );
                     return Ok(None);
                 }
                 Self::Text => {
@@ -79,29 +83,41 @@ impl Format {
         context: &mut dyn Context,
         bytes: &[u8],
         function: &str,
-    ) -> Result<Option<Value>, NativeError> {
-        let entries = match self {
-            Self::Array if bytes.is_empty() => Some(Value::from(PhpArray::new())),
-            Self::Array => decode_value(context, bytes, function)
-                .await?
-                .map(|value| match value {
-                    Value::Null => Value::from(PhpArray::new()),
-                    other => other,
-                }),
-            Self::Text => decode_entries(context, bytes, function, |rest| {
-                let end = rest.iter().position(|byte| *byte == b'|')?;
-                Some((rest[..end].to_vec().into(), end + 1))
-            })
-            .await?
-            .map(Value::from),
-            Self::Binary => decode_entries(context, bytes, function, |rest| {
-                let length = usize::from(*rest.first()? & 0x7f);
-                let key = rest.get(1..=length)?;
-                Some((key.to_vec().into(), length + 1))
-            })
-            .await?
-            .map(Value::from),
-        };
-        Ok(entries)
+        publish: fn(&mut dyn Context, Value) -> Result<(), NativeError>,
+    ) -> Result<Decoded, NativeError> {
+        match self {
+            Self::Array if bytes.is_empty() => {
+                publish(context, Value::from(PhpArray::new()))?;
+                Ok(Decoded::Complete)
+            }
+            Self::Array => decode_value(context, bytes, function, publish).await,
+            Self::Text => {
+                decode_entries(
+                    context,
+                    bytes,
+                    function,
+                    |rest| {
+                        let end = rest.iter().position(|byte| *byte == b'|')?;
+                        Some((rest[..end].to_vec().into(), end + 1))
+                    },
+                    publish,
+                )
+                .await
+            }
+            Self::Binary => {
+                decode_entries(
+                    context,
+                    bytes,
+                    function,
+                    |rest| {
+                        let length = usize::from(*rest.first()? & 0x7f);
+                        let key = rest.get(1..=length)?;
+                        Some((key.to_vec().into(), length + 1))
+                    },
+                    publish,
+                )
+                .await
+            }
+        }
     }
 }

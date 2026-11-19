@@ -71,6 +71,11 @@ impl Context for Vm {
         Some(self.location().file.into())
     }
 
+    fn entry_script_path(&self) -> Option<std::path::PathBuf> {
+        let main = self.code.known_unit(crate::code_table::FunctionIndex(0))?;
+        Some(main.file.as_str().into())
+    }
+
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
         self
     }

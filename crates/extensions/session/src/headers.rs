@@ -27,7 +27,8 @@ pub fn cookie(context: &mut dyn Context, function: &str) -> bool {
     let partitioned = settings::boolean(context, "cookie_partitioned");
     if partitioned && !secure {
         context.warning(format!(
-            "{function}(): Partitioned session cookie cannot be used without also configuring it as secure"
+            "{function}(): Partitioned session cookie cannot be used without also \
+             configuring it as secure"
         ));
         return false;
     }
@@ -81,7 +82,8 @@ pub async fn cache(context: &mut dyn Context, function: &str) -> Result<bool, Na
     }
     if context.output_origin().is_some() {
         let message = format!(
-            "{function}(): Session cache limiter cannot be sent after headers have already been sent"
+            "{function}(): Session cache limiter cannot be sent after headers have \
+             already been sent"
         );
         context.warning(after_output(context, &message));
         return Ok(false);
@@ -116,7 +118,7 @@ pub async fn cache(context: &mut dyn Context, function: &str) -> Result<bool, Na
         context,
         format!("Cache-Control: {policy}, max-age={seconds}").as_bytes(),
     );
-    if let Some(path) = context.script_path() {
+    if let Some(path) = context.entry_script_path() {
         let modified = blocking(move || {
             let time = std::fs::metadata(path).ok()?.modified().ok()?;
             time.duration_since(UNIX_EPOCH)

@@ -9,11 +9,11 @@
 use std::collections::HashMap;
 use std::fs::{self, File, FileTimes, TryLockError};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, SystemTime};
 
-use phera_ext_streams::file_io::{blocking, open_private_file, resolve};
+use phera_ext_streams::file_io::{blocking, file_is_owned, open_private_file, resolve, same_file};
 use phera_extension_api::{Context, NativeError, PhpString};
 
 use crate::id;
@@ -41,6 +41,7 @@ pub struct LockedFile {
 pub enum FileError {
     Id,
     Path,
+    Owner,
     Open(PathBuf, io::Error),
     Io(io::Error),
 }
@@ -146,6 +147,7 @@ impl Directory {
                 let attempt = open_private_file(&path, 0, false)
                     .and_then(|file| file.try_lock().map(|()| file).map_err(io::Error::from));
                 if let Ok(file) = attempt
+                    && same_file(&file, &path)
                     && let Ok(mtime) = file.metadata().and_then(|info| info.modified())
                     && let Ok(age) = now.duration_since(mtime)
                     && (lifetime < 0 || age.as_secs() > lifetime as u64)
@@ -167,8 +169,12 @@ async fn try_open_locked(
     blocking(move || {
         let file = open_private_file(&path, mode, true)
             .map_err(|error| FileError::Open(path.clone(), error))?;
+        if !file_is_owned(&file).map_err(FileError::Io)? {
+            return Err(FileError::Owner);
+        }
         match file.try_lock() {
-            Ok(()) => Ok(Some(file)),
+            Ok(()) if same_file(&file, &path) => Ok(Some(file)),
+            Ok(()) => Ok(None),
             Err(TryLockError::WouldBlock) => Ok(None),
             Err(TryLockError::Error(error)) => Err(FileError::Io(error)),
         }
@@ -195,7 +201,7 @@ fn parse(bytes: &[u8], radix: u32) -> Option<u64> {
         })
 }
 
-fn gate(path: &PathBuf) -> Arc<Gate> {
+fn gate(path: &Path) -> Arc<Gate> {
     let gates = GATES.get_or_init(|| Mutex::new(HashMap::new()));
     let mut gates = gates
         .lock()
@@ -207,7 +213,7 @@ fn gate(path: &PathBuf) -> Arc<Gate> {
         gates.retain(|_, gate| gate.strong_count() != 0);
     }
     let gate = Arc::new(Gate::new(()));
-    gates.insert(path.clone(), Arc::downgrade(&gate));
+    gates.insert(path.to_path_buf(), Arc::downgrade(&gate));
     gate
 }
 
@@ -243,7 +249,9 @@ impl LockedFile {
                 if unchanged {
                     let now = SystemTime::now();
                     let times = FileTimes::new().set_accessed(now).set_modified(now);
-                    return file.file.set_times(times);
+                    if file.file.set_times(times).is_ok() {
+                        return Ok(());
+                    }
                 }
                 file.file.seek(SeekFrom::Start(0))?;
                 file.file.write_all(&data)?;

@@ -124,8 +124,15 @@ pub async fn close(context: &mut dyn Context, function: &str) -> Result<(), Nati
     } else {
         Ok(())
     };
-    state(context).files = None;
-    result
+    let released = files::close(context).await;
+    result.and(released)
+}
+
+/// Zend skips PHP callbacks while an exception is pending, but releases native resources.
+pub fn release(context: &mut dyn Context) {
+    let session = state(context);
+    session.files = None;
+    session.user_open = false;
 }
 
 pub async fn destroy(

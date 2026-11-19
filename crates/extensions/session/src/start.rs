@@ -6,6 +6,8 @@ use phera_extension_api::{
     PhpString, Value, args,
 };
 
+use phera_ext_serialize::Decoded;
+
 use crate::{
     headers,
     id::c_string,
@@ -44,7 +46,14 @@ fn start(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
             Ok(true) if active(context) => headers::cache(context, function).await?,
             Ok(_) => false,
             Err(error) => {
-                state(context).id = None;
+                if !active(context) {
+                    state(context).id = None;
+                } else if read_and_close {
+                    storage::release(context);
+                    state(context).active = false;
+                } else {
+                    context.register_request_finalizer(lifecycle::finalize);
+                }
                 return Err(error);
             }
         };
@@ -95,8 +104,8 @@ fn options(context: &mut dyn Context, arguments: &[Value]) -> Result<bool, Nativ
                     Some(NumVal::Int(number)) if parsed.exact => number > 0,
                     _ => {
                         return Err(NativeError::type_error(format!(
-                            "session_start(): Option \"{name}\" value must be of type compatible with \
-                         int, \"{}\" given",
+                            "session_start(): Option \"{name}\" value must be of type \
+                             compatible with int, \"{}\" given",
                             String::from_utf8_lossy(c_string(text.as_bytes()))
                         )));
                     }
@@ -110,19 +119,43 @@ fn options(context: &mut dyn Context, arguments: &[Value]) -> Result<bool, Nativ
 }
 
 fn incoming_cookie(context: &mut dyn Context) -> Result<bool, NativeError> {
-    if state(context).id.is_some() || !settings::boolean(context, "use_cookies") {
+    if state(context).id.is_some() {
         return Ok(false);
     }
     let name = ArrayKey::String(settings::text(context, "name"));
-    if let Some(cookie) = context.request_global("_COOKIE")
-        && let Value::Array(cookies) = &*cookie.try_deref()?
-        && let Some(value) = cookies.get(&name)
-        && let Value::String(id) = &*value.try_deref()?
+    if settings::boolean(context, "use_cookies")
+        && let Some(id) = global_id(context, "_COOKIE", &name)?
     {
-        state(context).id = Some(id.clone());
+        state(context).id = Some(id);
         return Ok(true);
     }
+    if !settings::boolean(context, "use_only_cookies") {
+        for global in ["_GET", "_POST"] {
+            if global_id(context, global, &name)?.is_some() {
+                return Err(NativeError::throw(
+                    "Phera\\NotSupportedException",
+                    "Session IDs in GET or POST are not supported by Phera: \
+                     deprecated since PHP 8.4",
+                ));
+            }
+        }
+    }
     Ok(false)
+}
+
+fn global_id(
+    context: &dyn Context,
+    global: &str,
+    name: &ArrayKey,
+) -> Result<Option<PhpString>, NativeError> {
+    if let Some(value) = context.request_global(global)
+        && let Value::Array(array) = &*value.try_deref()?
+        && let Some(value) = array.get(name)
+        && let Value::String(id) = &*value.try_deref()?
+    {
+        return Ok(Some(id.clone()));
+    }
+    Ok(None)
 }
 
 pub async fn initialize(
@@ -134,12 +167,25 @@ pub async fn initialize(
     let location = context.source_location();
     state(context).active = true;
     let result = load(context, function, from_cookie, reset).await;
-    if !matches!(result, Ok(true)) {
-        let close = lifecycle::finish(context, lifecycle::Close::Discard, function).await;
-        return lifecycle::combine(context, result, close.map(|_| ()));
+    match result {
+        Ok(Decoded::Complete) => {
+            state(context).started = location;
+            Ok(true)
+        }
+        Ok(Decoded::HookFailed(error)) => {
+            state(context).started = location;
+            Err(error)
+        }
+        Ok(Decoded::Invalid) => {
+            lifecycle::finish(context, lifecycle::Close::Discard, function).await?;
+            Ok(false)
+        }
+        Err(error) => {
+            storage::release(context);
+            state(context).active = false;
+            Err(error)
+        }
     }
-    state(context).started = location;
-    result
 }
 
 async fn load(
@@ -147,18 +193,19 @@ async fn load(
     function: &str,
     from_cookie: bool,
     reset: bool,
-) -> Result<bool, NativeError> {
+) -> Result<Decoded, NativeError> {
     let path = settings::text(context, "save_path");
     let name = settings::text(context, "name");
     let reuse_files = reset && user_handler::handler(context).is_none();
     if !reuse_files && !storage::open(context, &path, name, function).await? {
+        lifecycle::finish(context, lifecycle::Close::Discard, function).await?;
         let module = settings::text(context, "save_handler");
         context.warning(format!(
             "{function}(): Failed to initialize storage module: {} (path: {})",
             module.to_string_lossy(),
             path.to_string_lossy()
         ));
-        return Ok(false);
+        return Ok(Decoded::Invalid);
     }
     let proposed = state(context).id.clone();
     let proposed = proposed.filter(|id| {
@@ -180,7 +227,7 @@ async fn load(
         && settings::boolean(context, "use_cookies")
         && !headers::cookie(context, function)
     {
-        return Ok(false);
+        return Ok(Decoded::Invalid);
     }
     variables::clear(context);
     let Some(data) = storage::read(context, &id, function).await? else {
@@ -192,14 +239,13 @@ async fn load(
         );
         lifecycle::finish(context, lifecycle::Close::Discard, function).await?;
         context.warning(message);
-        return Ok(false);
+        return Ok(Decoded::Invalid);
     };
     if collect_now(context) {
         storage::collect(context, function).await?;
     }
     state(context).before = settings::boolean(context, "lazy_write").then(|| data.clone());
-    variables::decode(context, &data, function).await?;
-    Ok(true)
+    variables::decode(context, &data, function).await
 }
 
 fn collect_now(context: &mut dyn Context) -> bool {

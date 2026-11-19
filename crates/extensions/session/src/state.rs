@@ -9,6 +9,7 @@ use crate::files::Files;
 #[derive(Default)]
 pub struct SessionState {
     pub settings: HashMap<&'static str, PhpString>,
+    pub numbers: HashMap<&'static str, i64>,
     pub id: Option<PhpString>,
     pub active: bool,
     pub variables: Option<Value>,
@@ -59,4 +60,24 @@ pub fn can_change(context: &mut dyn Context, function: &str, setting: &str, head
     };
     context.warning(message);
     false
+}
+
+/// PHP's docref diagnostics distinguish a named call from module shutdown.
+pub fn warning(context: &mut dyn Context, function: &str, message: &str) {
+    let origin = if function == "PHP Request Shutdown" {
+        function.to_owned()
+    } else {
+        format!("{function}()")
+    };
+    let message = if matches!(phera_ext_http::sapi(context), phera_ext_http::Sapi::Web) {
+        message
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&#039;")
+    } else {
+        message.to_owned()
+    };
+    context.warning(format!("{origin}: {message}"));
 }

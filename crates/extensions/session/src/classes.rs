@@ -64,12 +64,14 @@ const METHODS: &[MethodEntry] = &[
         }))
     })
     .tentative_return("bool"),
-    MethodEntry::public("close", &[], |context, _, _| {
-        if !opened(context, "close")? {
-            return Ok(Value::Bool(false));
-        }
-        state(context).files = None;
-        Ok(Value::Bool(true))
+    MethodEntry::public_async("close", &[], |context, _, _| {
+        Box::pin(async move {
+            if !opened(context, "close")? {
+                return Ok(Value::Bool(false));
+            }
+            files::close(context).await?;
+            Ok(Value::Bool(true))
+        })
     })
     .tentative_return("bool"),
     MethodEntry::public_async("read", ID, |context, _, arguments| {

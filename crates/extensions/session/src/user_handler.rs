@@ -46,7 +46,8 @@ fn set(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nati
             }
             other => {
                 return Err(NativeError::type_error(format!(
-                    "{function}(): Argument #1 ($open) must be of type SessionHandlerInterface, {} given",
+                    "{function}(): Argument #1 ($open) must be of type \
+                     SessionHandlerInterface, {} given",
                     given(other)
                 )));
             }

@@ -7,6 +7,8 @@ use phera_extension_api::{
     Value, args,
 };
 
+use phera_ext_serialize::Decoded;
+
 use crate::{
     codec::Format,
     lifecycle,
@@ -71,20 +73,35 @@ pub async fn decode(
     context: &mut dyn Context,
     data: &[u8],
     function: &str,
-) -> Result<bool, NativeError> {
+) -> Result<Decoded, NativeError> {
     let format = Format::current(context);
-    let Some(decoded) = format.decode(context, data, function).await? else {
+    let publish = match format {
+        Format::Array => replace_array,
+        Format::Text | Format::Binary => merge_entries,
+    };
+    let result = format.decode(context, data, function, publish).await?;
+    if matches!(result, Decoded::Invalid) {
         let result = lifecycle::destroy(context, function).await;
         clear(context);
         context.warning(format!(
             "{function}(): Failed to decode session object. Session has been destroyed"
         ));
         result?;
-        return Ok(false);
-    };
-    if matches!(format, Format::Array) {
-        publish(context, decoded);
-    } else if let Value::Array(entries) = decoded
+    }
+    Ok(result)
+}
+
+fn replace_array(context: &mut dyn Context, value: Value) -> Result<(), NativeError> {
+    if matches!(value, Value::Null) {
+        clear(context);
+    } else {
+        publish(context, value);
+    }
+    Ok(())
+}
+
+fn merge_entries(context: &mut dyn Context, decoded: Value) -> Result<(), NativeError> {
+    if let Value::Array(entries) = decoded
         && let Some(Value::Reference(reference)) = &state(context).variables
     {
         let mut value = reference
@@ -97,7 +114,7 @@ pub async fn decode(
             }
         }
     }
-    Ok(true)
+    Ok(())
 }
 
 fn encode_function(context: &mut dyn Context, _: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -120,8 +137,10 @@ fn decode_function(
             ));
             return Ok(Value::Bool(false));
         }
-        Ok(Value::Bool(
-            decode(context, args::bytes(&arguments, 0), function).await?,
-        ))
+        match decode(context, args::bytes(&arguments, 0), function).await? {
+            Decoded::Complete => Ok(Value::Bool(true)),
+            Decoded::Invalid => Ok(Value::Bool(false)),
+            Decoded::HookFailed(error) => Err(error),
+        }
     })
 }
