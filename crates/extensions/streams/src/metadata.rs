@@ -4,8 +4,8 @@ use std::fs::{self, Metadata};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Registry, Value,
-    args,
+    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
+    Registry, Value, args,
 };
 use rustix::fs::{Access, access, statvfs};
 
@@ -53,7 +53,7 @@ pub fn register(registry: &mut Registry) {
 }
 
 #[derive(Clone, Copy)]
-enum Query {
+pub(crate) enum Query {
     Access(Access),
     IsFile,
     IsDirectory,
@@ -77,7 +77,16 @@ impl Query {
     }
 
     fn run(self, context: &mut dyn Context, args: &[Value], function: &str) -> NativeResult {
-        let name = args::bytes(args, 0);
+        self.path(context, args::bytes(args, 0), function, false)
+    }
+
+    pub(crate) fn path(
+        self,
+        context: &mut dyn Context,
+        name: &[u8],
+        function: &str,
+        throws: bool,
+    ) -> NativeResult {
         if name.is_empty() {
             return Ok(Value::Bool(false));
         }
@@ -114,13 +123,15 @@ impl Query {
             return Ok(Value::Bool(false));
         }
         let operation = if self.follow() { "stat" } else { "Lstat" };
-        warn_false(
-            context,
-            format!(
-                "{function}(): {operation} failed for {}",
-                String::from_utf8_lossy(name)
-            ),
-        )
+        let message = format!(
+            "{function}(): {operation} failed for {}",
+            String::from_utf8_lossy(name)
+        );
+        if throws {
+            Err(NativeError::throw("RuntimeException", message))
+        } else {
+            warn_false(context, message)
+        }
     }
 
     fn value(self, meta: &Metadata) -> NativeResult {
@@ -261,12 +272,16 @@ fn fstat(_: &mut dyn Context, args: &[Value]) -> NativeResult {
 fn realpath(context: &mut dyn Context, args: &[Value]) -> NativeResult {
     let name = args::bytes(args, 0);
     check_path("realpath", "#1 ($path)", name)?;
-    let result = directory(context)
+    Ok(real_path(context, name))
+}
+
+pub(crate) fn real_path(context: &mut dyn Context, name: &[u8]) -> Value {
+    directory(context)
         .resolve(path(name))
-        .and_then(|path| canonical(&path));
-    Ok(result.map_or(Value::Bool(false), |path| {
-        Value::from(bytes(&path).to_vec())
-    }))
+        .and_then(|path| canonical(&path))
+        .map_or(Value::Bool(false), |path| {
+            Value::from(bytes(&path).to_vec())
+        })
 }
 
 fn disk_free_space(context: &mut dyn Context, args: &[Value]) -> NativeResult {

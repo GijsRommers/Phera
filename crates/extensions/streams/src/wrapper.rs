@@ -9,7 +9,9 @@ use std::sync::Arc;
 use phera_extension_api::{Context, NativeError, Value};
 use rustix::io::fcntl_dupfd_cloexec;
 
-use crate::errors::{nonempty_path, open_failed, reason, wrapper_warning};
+use crate::errors::{
+    nonempty_path, open_failure_message, reason, wrapper_message, wrapper_warning,
+};
 use crate::io_policy::IoPolicy;
 use crate::mode::Mode;
 use crate::request::{directory, files, path, resource, search};
@@ -59,12 +61,12 @@ impl<'a> Target<'a> {
 }
 
 struct OpenFailure {
-    detail: String,
+    detail: Vec<u8>,
     resolved: Option<PathBuf>,
 }
 
 impl OpenFailure {
-    fn new(detail: impl Into<String>) -> Self {
+    fn new(detail: impl Into<Vec<u8>>) -> Self {
         Self {
             detail: detail.into(),
             resolved: None,
@@ -78,6 +80,43 @@ pub async fn open(
     name: &[u8],
     mode: &[u8],
     include_path: bool,
+) -> Result<Option<Stream>, NativeError> {
+    open_with_errors(
+        context,
+        function,
+        name,
+        mode,
+        include_path,
+        OpenErrors::Warn,
+    )
+    .await
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum OpenErrors {
+    Warn,
+    Throw,
+}
+
+impl OpenErrors {
+    fn report(self, context: &mut dyn Context, message: String) -> Result<(), NativeError> {
+        match self {
+            Self::Warn => {
+                context.warning(message);
+                Ok(())
+            }
+            Self::Throw => Err(NativeError::throw("RuntimeException", message)),
+        }
+    }
+}
+
+pub(crate) async fn open_with_errors(
+    context: &mut dyn Context,
+    function: &str,
+    name: &[u8],
+    mode: &[u8],
+    include_path: bool,
+    errors: OpenErrors,
 ) -> Result<Option<Stream>, NativeError> {
     nonempty_path(name)?;
     // The PHP mode parser takes a C string and keeps at most 15 bytes in metadata.
@@ -111,15 +150,15 @@ pub async fn open(
             None,
         ),
         Target::Unavailable(scheme) => {
-            if include_path {
-                wrapper_warning(context, function, scheme);
+            if matches!(errors, OpenErrors::Throw) || include_path {
+                errors.report(context, wrapper_message(function, scheme))?;
             }
             wrapper_warning(context, function, scheme);
             (open_file(context, name, name, mode, false).await?, None)
         }
     };
     if let Some(warning) = warning {
-        context.warning(warning);
+        errors.report(context, warning)?;
     }
     match result {
         Ok(stream) => Ok(Some(stream)),
@@ -128,7 +167,13 @@ pub async fn open(
                 .resolved
                 .as_deref()
                 .map_or(name, crate::request::bytes);
-            open_failed(context, function, uri, &failure.detail);
+            let message = open_failure_message(function, uri, &failure.detail);
+            match errors {
+                OpenErrors::Warn => context.warning_bytes(&message),
+                OpenErrors::Throw => {
+                    return Err(NativeError::throw_bytes("RuntimeException", message));
+                }
+            }
             Ok(None)
         }
     }
@@ -142,10 +187,9 @@ async fn open_file(
     include_path: bool,
 ) -> Result<Result<Stream, OpenFailure>, NativeError> {
     let Some(parsed) = Mode::parse(mode) else {
-        return Ok(Err(OpenFailure::new(format!(
-            "`{}' is not a valid mode for fopen",
-            String::from_utf8_lossy(mode)
-        ))));
+        return Ok(Err(OpenFailure::new(
+            [b"`".as_slice(), mode, b"' is not a valid mode for fopen"].concat(),
+        )));
     };
     let include = include_path.then(|| (context.include_path(), context.script_path()));
     let mask = files(context).mask;
@@ -180,7 +224,10 @@ async fn open_file(
                     } else {
                         reason(&error)
                     };
-                    OpenFailure { detail, resolved }
+                    OpenFailure {
+                        detail: detail.into_bytes(),
+                        resolved,
+                    }
                 })
         })
         .await

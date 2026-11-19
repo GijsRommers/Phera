@@ -32,8 +32,9 @@ mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
 pub use object_handlers::{
-    ClassHooks, IteratorFactory, NativeClone, NativeCompare, NativeComparison, NativeCount,
-    NativeDimensions, NativeIterator, PropertyProjection, PropertyPurpose,
+    ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeClone,
+    NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,
+    PropertyProjection, PropertyPurpose,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
 pub use registry::{ConstantValue, Registry};

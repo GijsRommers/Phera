@@ -164,11 +164,10 @@ impl Registers {
         }
     }
 
-    /// Move a value from one slot to another, leaving the first empty.
-    #[inline]
+    /// Move an argument into an empty slot of a newly reserved frame.
+    #[inline(always)]
     pub(crate) fn move_slot(&mut self, from: usize, to: usize) {
-        let value = self.slots[from].take();
-        self.slots[to] = value;
+        self.slots.swap(from, to);
     }
 
     /// Take the value out of a slot, leaving it empty.

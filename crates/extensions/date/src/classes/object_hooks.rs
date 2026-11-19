@@ -53,7 +53,10 @@ pub(super) const PERIOD: ClassHooks = ClassHooks {
     ..ClassHooks::EMPTY
 };
 
-fn clone_state<T: Clone + 'static>(original: &Object, copy: &Object) -> Result<(), NativeError> {
+fn clone_state<T: Clone + 'static>(
+    original: &std::rc::Rc<Object>,
+    copy: &Object,
+) -> Result<(), NativeError> {
     let state = original
         .native
         .try_borrow()

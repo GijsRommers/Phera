@@ -62,10 +62,10 @@ impl Vm {
                     None
                 },
                 traversal: None,
+                traversal_mode: frame::TraversalMode::Value,
                 property_hooks: None,
                 source: if object_iteration { None } else { place },
                 position: None,
-                traversal_reference: false,
                 started: false,
             },
         );
@@ -95,10 +95,10 @@ impl Vm {
             frame::IteratorState {
                 snapshot: None,
                 traversal: None,
+                traversal_mode: frame::TraversalMode::Value,
                 property_hooks: None,
                 source: Some(place),
                 position: None,
-                traversal_reference: false,
                 started: false,
             },
         );
@@ -269,7 +269,8 @@ pub(crate) fn snapshot_step(
         return false;
     }
     let Some(array) = &state.snapshot else {
-        return false;
+        return state.traversal_mode == frame::TraversalMode::Value
+            && native_step(state, None, destination, slots);
     };
     let position = if state.started {
         state
@@ -292,6 +293,40 @@ pub(crate) fn snapshot_step(
         None => *ip = end.index(),
     }
     true
+}
+
+/// Consume a combined entry from a by-value cursor on the ordinary path.
+pub(crate) fn native_step(
+    state: &mut frame::IteratorState,
+    key: Option<Reg>,
+    destination: Reg,
+    slots: &mut [Option<Value>],
+) -> bool {
+    let Some((value, index)) = state
+        .traversal
+        .as_mut()
+        .and_then(|cursor| cursor.next_entry(key.is_some()))
+    else {
+        return false;
+    };
+    state.started = true;
+    if let Some((key, index)) = key.zip(index)
+        && let Some(slot) = slots.get_mut(key.index())
+    {
+        *slot = Some(owned_value(index));
+    }
+    if let Some(slot) = slots.get_mut(destination.index()) {
+        *slot = Some(owned_value(value));
+    }
+    true
+}
+
+fn owned_value(value: Value) -> Value {
+    if value.is_reference() {
+        value.deref().clone()
+    } else {
+        value
+    }
 }
 
 impl Vm {
