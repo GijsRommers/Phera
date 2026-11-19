@@ -97,13 +97,13 @@ pub struct MemberInfo {
 }
 
 /// A property slot in a linked class, valid only for the current PHP request.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PropertyHandle {
     pub class: u32,
     pub slot: PropertySlot,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PropertySlot {
     Instance(usize),
     Static(usize),
@@ -224,6 +224,21 @@ pub trait ReflectionContext {
     /// Evaluates one compiled declaration expression in its lexical scope.
     fn reflect_evaluate(&mut self, initializer: Initializer) -> LocalFuture<'_, NativeResult>;
 
+    /// Finds a declared getter or setter without exposing it in the method table.
+    fn reflect_property_hook(
+        &self,
+        member: &MemberInfo,
+        kind: PropertyHookKind,
+    ) -> Option<FunctionTarget>;
+
+    fn reflect_hook_prototype(
+        &self,
+        property: PropertyHandle,
+        kind: PropertyHookKind,
+    ) -> Option<FunctionTarget>;
+
+    fn reflect_property_settable_type(&self, member: &MemberInfo) -> Option<String>;
+
     /// Reads a live object property, with no caller visibility check.
     fn reflect_property_read(
         &mut self,
@@ -238,11 +253,19 @@ pub trait ReflectionContext {
         member: &MemberInfo,
         object: Option<Rc<Object>>,
         value: Value,
+        mode: PropertyWrite,
     ) -> NativeResult;
 }
 
 #[derive(Clone, Copy, Debug)]
+pub enum PropertyWrite {
+    Value,
+    Raw,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub enum PropertyRead {
+    Raw,
     Value,
     Initialized,
     Default,
@@ -258,6 +281,21 @@ pub struct ExtensionInfo {
     pub constants: PhpArray,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PropertyHookKind {
+    Get,
+    Set,
+}
+
+impl PropertyHookKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Get => "get",
+            Self::Set => "set",
+        }
+    }
+}
+
 // A reflective call keeps its target even when the object passed to invoke is a subclass.
 #[derive(Clone)]
 pub enum FunctionTarget {
@@ -265,6 +303,10 @@ pub enum FunctionTarget {
     Method {
         class: String,
         name: String,
+    },
+    PropertyHook {
+        property: PropertyHandle,
+        kind: PropertyHookKind,
     },
     Closure(Weak<Object>),
     /// The implicit __invoke method exists only on a concrete Closure object.

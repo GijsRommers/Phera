@@ -80,6 +80,8 @@ pub enum ClassKind {
     /// A class that cannot be extended.
     FinalClass,
     Interface,
+    /// An internal, unbacked enum with its cases in declaration order.
+    UnitEnum(&'static [&'static str]),
 }
 
 /// Internal signatures can require a return type or give a tentative compatibility warning.

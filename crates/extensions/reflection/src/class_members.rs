@@ -335,7 +335,12 @@ fn set_static_value(
             class.info.name
         ))
     })?;
-    engine(context)?.reflect_property_write(&member, None, args.get(1).cloned().unwrap_or_default())
+    engine(context)?.reflect_property_write(
+        &member,
+        None,
+        args.get(1).cloned().unwrap_or_default(),
+        phera_extension_api::reflection::PropertyWrite::Value,
+    )
 }
 
 fn static_member(

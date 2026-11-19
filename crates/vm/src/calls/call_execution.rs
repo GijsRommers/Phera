@@ -6,15 +6,18 @@
 //! a frame of the call's kind; `$this` and a closure are in the window
 //! already. User code never recurses through the Rust stack.
 
+use std::rc::Rc;
+
 use phera_bytecode::{FunctionId, Reg};
 use phera_extension_api::NativeError;
+use phera_value::{Object, Value};
 
 use crate::Vm;
 use crate::calls::call_view::CallView;
 use crate::calls::callback_binding::ArgumentOrigin;
 use crate::calls::execution_loop::BatchExit;
 use crate::calls::frame::Frame;
-use crate::calls::prepared_call::{CallDetails, CallFlags, PreparedCall, PreparedCallee};
+use crate::calls::prepared_call::{CallDetails, CallFlags, CallKind, PreparedCall, PreparedCallee};
 use crate::calls::window_context::WindowContext;
 use crate::code_table::FunctionIndex;
 
@@ -25,6 +28,44 @@ pub(crate) enum CallEntry {
 }
 
 impl Vm {
+    /// A resolved method with an exact positional argument list can create the
+    /// running window directly. Other arguments need the ordinary binder.
+    pub(crate) fn enter_exact_method(
+        &mut self,
+        function: FunctionIndex,
+        receiver: &Rc<Object>,
+        argument: Option<&Value>,
+        destination: Option<Reg>,
+    ) -> Result<bool, NativeError> {
+        let facts = self.code.facts(function);
+        let count = usize::from(argument.is_some());
+        if facts.parameters as usize != count
+            || facts.shape != crate::function_facts::FunctionShape::Plain
+            || argument.is_some_and(|value| {
+                !facts.takes_value(0)
+                    || (facts.is_typed(0)
+                        && !facts.parameter_masks[0].intersects(crate::types::own_type(value)))
+            })
+        {
+            return Ok(false);
+        }
+        self.check_frame_limit()?;
+        let base = self.registers.len() + 1;
+        self.registers.grow_to(base + facts.registers as usize);
+        self.registers
+            .put(base - 1, Value::Object(receiver.clone()));
+        if let Some(argument) = argument {
+            self.registers.put(base, argument.clone());
+        }
+        self.call_stack.push(Frame::of_kind(
+            function,
+            CallKind::Method,
+            base,
+            destination,
+        ));
+        Ok(true)
+    }
+
     /// Enter ordinary PHP frames directly. Native calls and string conversions
     /// that must run PHP code are left for the asynchronous interpreter.
     pub(crate) fn enter_prepared_call(

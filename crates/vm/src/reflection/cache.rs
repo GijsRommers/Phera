@@ -4,7 +4,7 @@ use std::{collections::HashMap, rc::Rc};
 
 use phera_extension_api::NativeError;
 use phera_extension_api::reflection::{
-    ClassInfo, FunctionInfo, FunctionTarget, MemberKind, Members,
+    ClassInfo, FunctionInfo, FunctionTarget, MemberKind, Members, PropertyHandle, PropertyHookKind,
 };
 
 use crate::{
@@ -30,6 +30,7 @@ struct ReflectedClass {
 enum FunctionKey {
     Named(String),
     Method(String, String),
+    PropertyHook(PropertyHandle, PropertyHookKind),
 }
 
 impl ReflectedClass {
@@ -82,6 +83,9 @@ impl Vm {
             FunctionTarget::Named(name) => FunctionKey::Named(name.to_ascii_lowercase()),
             FunctionTarget::Method { class, name } => {
                 FunctionKey::Method(class.to_ascii_lowercase(), name.to_ascii_lowercase())
+            }
+            FunctionTarget::PropertyHook { property, kind } => {
+                FunctionKey::PropertyHook(*property, *kind)
             }
             FunctionTarget::Closure(_) | FunctionTarget::ClosureInvoke(_) => {
                 return self.reflection_function(target).map(Rc::new);

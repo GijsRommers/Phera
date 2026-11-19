@@ -631,7 +631,8 @@ impl Parser<'_> {
                 None
             };
 
-            let hooks = if self.at(TokenKind::LeftBrace) {
+            let has_hook_list = self.at(TokenKind::LeftBrace);
+            let hooks = if has_hook_list {
                 self.bump()?;
                 let hooks = self.parse_property_hooks()?;
                 self.expect(TokenKind::RightBrace, "'}'")?;
@@ -640,15 +641,15 @@ impl Parser<'_> {
                 Vec::new()
             };
 
-            let has_hooks = !hooks.is_empty();
             items.push(PropertyDeclaration {
                 name,
                 default,
                 hooks,
+                has_hook_list,
                 span: self.span_since(start),
             });
 
-            if !has_hooks && self.eat(TokenKind::Comma)? {
+            if !has_hook_list && self.eat(TokenKind::Comma)? {
                 continue;
             }
             break;
@@ -673,59 +674,68 @@ impl Parser<'_> {
                 Vec::new()
             };
 
-            // Modifiers on hooks: only `final` is meaningful; PHP rejects the
-            // others at compile time, so they are dropped here.
+            let doc_comment = self.declaration_doc_comment(&attributes);
             let mut is_final = false;
-            loop {
-                if self.eat(TokenKind::Final)? {
+            let mut invalid_modifier = None;
+            while matches!(
+                self.kind(),
+                TokenKind::Final
+                    | TokenKind::Public
+                    | TokenKind::Protected
+                    | TokenKind::Private
+                    | TokenKind::PublicSet
+                    | TokenKind::ProtectedSet
+                    | TokenKind::PrivateSet
+                    | TokenKind::Static
+                    | TokenKind::Abstract
+                    | TokenKind::Readonly
+            ) {
+                let token = self.bump()?;
+                if token.kind == TokenKind::Final && !is_final {
                     is_final = true;
-                } else if matches!(
-                    self.kind(),
-                    TokenKind::Public
-                        | TokenKind::Protected
-                        | TokenKind::Private
-                        | TokenKind::PublicSet
-                        | TokenKind::ProtectedSet
-                        | TokenKind::PrivateSet
-                        | TokenKind::Static
-                        | TokenKind::Abstract
-                        | TokenKind::Readonly
-                ) {
-                    self.bump()?;
-                } else {
-                    break;
+                } else if invalid_modifier.is_none() {
+                    invalid_modifier = Some(Identifier {
+                        name: self.text_of(&token).to_ascii_lowercase(),
+                        span: token.span,
+                    });
                 }
             }
 
             let by_reference = self.eat(TokenKind::Ampersand)?;
             let name = self.parse_strict_identifier()?;
-            let parameters = if self.at(TokenKind::LeftParen) {
+            let has_parameter_list = self.at(TokenKind::LeftParen);
+            let parameters = if has_parameter_list {
                 self.parse_parameter_list()?
             } else {
                 Vec::new()
             };
 
-            let body = if self.eat(TokenKind::Semicolon)? {
-                HookBody::None
-            } else if self.at(TokenKind::LeftBrace) {
-                self.bump()?;
-                let statements = self.parse_inner_statements()?;
-                self.close_brace()?;
-                HookBody::Block(statements)
-            } else {
-                self.expect(TokenKind::FatArrow, "'=>'")?;
-                let expression = self.parse_expr(0)?;
-                self.expect(TokenKind::Semicolon, "';'")?;
-                HookBody::Expression(expression)
-            };
+            let (body, is_generator) = self.generator_body(|parser| {
+                if parser.eat(TokenKind::Semicolon)? {
+                    Ok(HookBody::None)
+                } else if parser.eat(TokenKind::LeftBrace)? {
+                    let statements = parser.parse_inner_statements()?;
+                    parser.close_brace()?;
+                    Ok(HookBody::Block(statements))
+                } else {
+                    parser.expect(TokenKind::FatArrow, "'=>'")?;
+                    let expression = parser.parse_expr(0)?;
+                    parser.expect(TokenKind::Semicolon, "';'")?;
+                    Ok(HookBody::Expression(expression))
+                }
+            })?;
 
             hooks.push(PropertyHook {
+                doc_comment,
                 attributes,
                 is_final,
                 by_reference,
                 name,
+                invalid_modifier,
+                has_parameter_list,
                 parameters,
                 body,
+                is_generator,
                 span: self.span_since(start),
             });
         }
@@ -818,7 +828,8 @@ impl Parser<'_> {
         } else {
             None
         };
-        let hooks = if self.at(TokenKind::LeftBrace) {
+        let has_hook_list = self.at(TokenKind::LeftBrace);
+        let hooks = if has_hook_list {
             self.bump()?;
             let hooks = self.parse_property_hooks()?;
             self.expect(TokenKind::RightBrace, "'}'")?;
@@ -837,6 +848,7 @@ impl Parser<'_> {
             name,
             default,
             hooks,
+            has_hook_list,
             span: self.span_since(start),
         })
     }
