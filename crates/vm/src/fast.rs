@@ -117,16 +117,26 @@ fn integer_binary(
 /// general handler for that instruction does it with full PHP semantics.
 #[inline(always)]
 pub(crate) fn scalar_step(
-    instruction: Instruction,
+    instruction: &Instruction,
     slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> ScalarStep {
-    match instruction {
+    match *instruction {
         Instruction::Nop => ScalarStep::Complete,
         Instruction::LoadInt { dst, value } => store_integer(slots, dst, i64::from(value)),
         Instruction::LoadNull { dst } => store(slots, dst, Value::Null),
         Instruction::LoadBool { dst, value } => store(slots, dst, Value::Bool(value)),
         Instruction::BuiltinUnary { op, dst, src } => builtin_step(op, dst, src, slots),
+        Instruction::Unary {
+            op: phera_bytecode::UnaryOp::Negate,
+            dst,
+            src,
+        } => {
+            let Some(negative) = integer_at(slots, src).and_then(i64::checked_neg) else {
+                return ScalarStep::Fallback;
+            };
+            store_integer(slots, dst, negative)
+        }
         Instruction::Cast {
             to: phera_bytecode::CastKind::Bool,
             dst,

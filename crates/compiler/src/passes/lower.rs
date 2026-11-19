@@ -37,6 +37,17 @@ enum ConstantValue {
 }
 
 impl Tables<'_> {
+    pub(crate) fn literal_array(&mut self, values: Vec<Constant>) -> ConstId {
+        let index = ConstId(self.unit.constants.len() as u32);
+        self.unit.constants.push(Constant::Array(
+            values
+                .into_iter()
+                .map(|value| (phera_bytecode::ConstantKey::Next, value))
+                .collect(),
+        ));
+        index
+    }
+
     /// Intern names in first-use order to keep table indices deterministic.
     pub(crate) fn name(&mut self, name: &str) -> NameId {
         let index = self
@@ -238,7 +249,15 @@ impl Tables<'_> {
                 .instructions
                 .iter()
                 .any(|instruction| match instruction {
-                    Instruction::InitDynamicCall { .. } => true,
+                    Instruction::InitDynamicCall { .. } | Instruction::InitUserCallback { .. } => {
+                        true
+                    }
+                    Instruction::BuiltinFrame {
+                        op:
+                            phera_bytecode::BuiltinFrame::ArgumentCount
+                            | phera_bytecode::BuiltinFrame::ArgumentsFrom(_),
+                        ..
+                    } => true,
                     Instruction::InitCall { function } => self
                         .unit
                         .symbols

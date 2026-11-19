@@ -47,20 +47,23 @@ impl CodeCache {
             &source,
             &canonical.to_string_lossy(),
             &|name| {
-                let entry = self.registry.get_function(name)?;
+                let Some(entry) = self.registry.get_function(name) else {
+                    return phera_vm::is_intrinsic_function(name)
+                        .then_some(phera_compiler::NativeFunction::General);
+                };
                 Some(match entry.handler {
-                    phera_extension_api::NativeFn::Sync(_) => {
-                        phera_compiler::NativeFunction::Direct {
-                            positional_by_value: entry
-                                .params
-                                .iter()
-                                .take_while(|parameter| !parameter.by_ref)
-                                .count(),
-                        }
-                    }
-                    phera_extension_api::NativeFn::Async(_) => {
+                    phera_extension_api::NativeFn::Async(_)
+                        if self.registry.sync_selector(entry.name).is_none() =>
+                    {
                         phera_compiler::NativeFunction::General
                     }
+                    _ => phera_compiler::NativeFunction::Direct {
+                        positional_by_value: entry
+                            .params
+                            .iter()
+                            .take_while(|parameter| !parameter.by_ref)
+                            .count(),
+                    },
                 })
             },
         )?);

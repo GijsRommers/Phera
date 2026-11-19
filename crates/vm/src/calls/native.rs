@@ -3,6 +3,7 @@
 use crate::Vm;
 use crate::calls::call_state::CallTarget;
 use crate::calls::call_view::CallView;
+use crate::calls::callback_binding::{ArgumentBinding, ArgumentOrigin};
 use crate::calls::prepared_call::PreparedCallee;
 use crate::classes::MethodBody;
 use phera_extension_api::{NativeError, NativeFn, NativeResult};
@@ -14,12 +15,17 @@ impl Vm {
         &mut self,
         entry: phera_extension_api::FunctionEntry,
         arguments: Vec<Value>,
-        origin: crate::calls::callback_binding::ArgumentOrigin,
+        origin: ArgumentOrigin,
+        binding: ArgumentBinding,
     ) -> NativeResult {
-        if self.error_handlers.error.is_some() && !self.error_handlers.active {
+        if binding.has_native_frame()
+            && self.error_handlers.error.is_some()
+            && !self.error_handlers.active
+        {
             self.native_entry_traced(entry, arguments, origin).await
         } else {
-            self.native_entry_body(entry, arguments, origin).await
+            self.native_entry_body(entry, arguments, origin, binding)
+                .await
         }
     }
 
@@ -37,7 +43,9 @@ impl Vm {
                     .replace(crate::error_traces::NativeTrace::new(
                         entry.name, &arguments,
                     ));
-            let result = self.native_entry_body(entry, arguments, origin).await;
+            let result = self
+                .native_entry_body(entry, arguments, origin, ArgumentBinding::Caller)
+                .await;
             self.error_handlers.native_site = previous;
             result
         })
@@ -49,6 +57,7 @@ impl Vm {
         entry: phera_extension_api::FunctionEntry,
         mut arguments: Vec<Value>,
         origin: crate::calls::callback_binding::ArgumentOrigin,
+        binding: ArgumentBinding,
     ) -> NativeResult {
         // Asked here, not inside the call: without a registered loader a
         // native call must not even build the future that would look.
@@ -57,14 +66,15 @@ impl Vm {
                 .await?;
         }
         let previous = std::mem::replace(&mut self.argument_origin, origin);
-        let prepared = self.prepare_call_with_trace(entry.name, entry.params, &mut arguments);
+        let prepared =
+            self.prepare_call_recording(entry.name, entry.params, &mut arguments, binding);
         self.argument_origin = previous;
         if let Err(error) = prepared
             && let Err(error) = self
-                .retry_native_strings(entry, &mut arguments, origin, error)
+                .retry_native_strings(entry, &mut arguments, origin, binding, error)
                 .await
         {
-            if !omits_native_trace(entry.name) {
+            if binding.has_native_frame() {
                 self.failed_native = Some(crate::error_traces::NativeTrace::new(
                     entry.name, &arguments,
                 ));
@@ -80,7 +90,7 @@ impl Vm {
         match entry.handler {
             NativeFn::Sync(handler) => {
                 let result = handler(self, &arguments);
-                if result.is_err() && !omits_native_trace(entry.name) {
+                if result.is_err() && binding.has_native_frame() {
                     self.failed_native = Some(crate::error_traces::NativeTrace::new(
                         entry.name, &arguments,
                     ));
@@ -104,6 +114,7 @@ impl Vm {
         entry: phera_extension_api::FunctionEntry,
         arguments: &'a mut [Value],
         origin: crate::calls::callback_binding::ArgumentOrigin,
+        binding: ArgumentBinding,
         original_error: NativeError,
     ) -> phera_extension_api::LocalFuture<'a, Result<(), NativeError>> {
         Box::pin(async move {
@@ -113,7 +124,7 @@ impl Vm {
             self.coerce_native_strings(entry.name, entry.params, arguments, origin)
                 .await?;
             self.with_argument_origin(origin, |vm| {
-                vm.prepare_call_with_trace(entry.name, entry.params, arguments)
+                vm.prepare_call_recording(entry.name, entry.params, arguments, binding)
             })
         })
     }
@@ -191,7 +202,7 @@ impl Vm {
             entry.handler = NativeFn::Sync(handler);
             let origin = callee.argument_binding.origin(self.argument_origin);
             return self
-                .native_entry_origin(entry, arguments, origin)
+                .native_entry_origin(entry, arguments, origin, callee.argument_binding)
                 .await
                 .map(Some);
         }
@@ -201,7 +212,13 @@ impl Vm {
         for index in 0..call.sent as usize {
             let value = self.registers.window_mut(slots.slot(index), 1)[0].take();
             let value = value.unwrap_or_else(|| match callee.target {
-                CallTarget::Intrinsic(intrinsic) => intrinsic.named_default(index),
+                CallTarget::Intrinsic(intrinsic) => {
+                    if matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc) && index == 0
+                    {
+                        missing.get_or_insert(("call_user_func", 1, "callback"));
+                    }
+                    intrinsic.named_default(index)
+                }
                 CallTarget::Native(entry) => {
                     if let Some(parameter) = entry.params.get(index)
                         && !parameter.optional
@@ -235,7 +252,9 @@ impl Vm {
                     &mut self.native_view_depth,
                     destination.map(|_| self.call_stack.depth()),
                 );
-                let result = self.native_entry_origin(*entry, arguments, origin).await;
+                let result = self
+                    .native_entry_origin(*entry, arguments, origin, callee.argument_binding)
+                    .await;
                 self.native_view_depth = previous_view;
                 self.native_called_class = previous;
                 if self.output_writer.buffers.pending.is_some() && result.is_ok() {
@@ -266,6 +285,13 @@ impl Vm {
                 Ok(None)
             }
             CallTarget::Intrinsic(intrinsic) => {
+                if matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc)
+                    && !named.is_empty()
+                {
+                    return Box::pin(self.invoke_named_user_callback(arguments, named))
+                        .await
+                        .map(Some);
+                }
                 // Boxed: an intrinsic such as `eval` runs code, and its future
                 // must not make the future of every ordinary native call larger.
                 Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin))
@@ -447,9 +473,4 @@ fn named_default(parameters: &[phera_extension_api::Param], index: usize) -> Val
         .and_then(|parameter| parameter.default)
         .map(|default| default.to_value())
         .unwrap_or_default()
-}
-
-/// Zend emits these operators without a native frame in PHP stack traces.
-pub(super) fn omits_native_trace(name: &str) -> bool {
-    matches!(name, "strlen" | "count" | "sizeof" | "array_key_exists")
 }

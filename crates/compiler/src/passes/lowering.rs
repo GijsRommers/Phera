@@ -306,6 +306,37 @@ impl Tables<'_> {
                 operator: op,
                 source: src,
             } => Instruction::BuiltinUnary { op, dst, src },
+            Old::BuiltinFrame {
+                destination: dst,
+                operator: op,
+            } => Instruction::BuiltinFrame { op, dst },
+            Old::ArrayKeyExists {
+                destination: dst,
+                key,
+                array,
+            } => Instruction::ArrayKeyExists { dst, key, array },
+            Old::InLiteralArray {
+                destination: dst,
+                needle,
+                haystack,
+                strict,
+            } => Instruction::InLiteralArray {
+                dst,
+                needle,
+                haystack: self.literal_array(haystack),
+                strict,
+            },
+            Old::InitUserCallback {
+                callback,
+                arguments,
+            } => Instruction::InitUserCallback {
+                callback,
+                arguments,
+            },
+            Old::SendUserCallback {
+                source: src,
+                arguments,
+            } => Instruction::SendUserCallback { src, arguments },
             Old::Echo(src) => Instruction::Echo { src },
             Old::Jump(target) => Instruction::Jump {
                 target: Target(target.0 as u32),

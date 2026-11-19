@@ -114,19 +114,26 @@ fn explode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     } else {
         limit.max(1) as usize
     };
-    let mut parts = Vec::new();
-    let mut rest = string;
-    while parts.len() + 1 < most_parts
-        && let Some(position) = find(rest, separator)
-    {
-        parts.push(&rest[..position]);
-        rest = &rest[position + separator.len()..];
-    }
-    parts.push(rest);
+    let mut remaining = most_parts;
+    let mut rest = Some(string);
+    let parts = std::iter::from_fn(|| {
+        let part = rest.take()?;
+        if remaining > 1
+            && let Some(position) = find(part, separator)
+        {
+            remaining -= 1;
+            rest = Some(&part[position + separator.len()..]);
+            return Some(&part[..position]);
+        }
+        Some(part)
+    });
     if limit < 0 {
-        parts.truncate(parts.len().saturating_sub(limit.unsigned_abs() as usize));
+        // The discarded suffix must not allocate PHP strings.
+        let mut retained: Vec<_> = parts.collect();
+        retained.truncate(retained.len().saturating_sub(limit.unsigned_abs() as usize));
+        return Ok(Value::from(list(retained.into_iter().map(Value::from))));
     }
-    Ok(Value::from(list(parts.into_iter().map(Value::from))))
+    Ok(Value::from(list(parts.map(Value::from))))
 }
 
 /// `str_repeat(string $string, int $times): string`

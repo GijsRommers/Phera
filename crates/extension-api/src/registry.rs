@@ -67,6 +67,7 @@ pub struct Registry {
     functions: HashMap<String, FunctionEntry>,
     /// Only calls already holding a first-argument object need to check this table.
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
+    sync_selectors: HashMap<&'static str, crate::SyncSelector>,
     extra_named_handlers: HashMap<&'static str, crate::SyncFn>,
     ini_handlers: HashMap<&'static [u8], IniHandler>,
     callback_frames: HashSet<&'static str>,
@@ -277,6 +278,15 @@ impl Registry {
     /// The first argument is already bound and checked when the VM selects this handler.
     pub fn object_handler(&self, name: &str) -> Option<crate::AsyncFn> {
         self.object_handlers.get(name).copied()
+    }
+
+    /// An async function can select a synchronous handler for an exact shape.
+    pub fn register_sync_selector(&mut self, name: &'static str, selector: crate::SyncSelector) {
+        self.sync_selectors.insert(name, selector);
+    }
+
+    pub fn sync_selector(&self, name: &str) -> Option<crate::SyncSelector> {
+        self.sync_selectors.get(name).copied()
     }
 
     /// Provide an alternate body when a native variadic call supplies extra names.

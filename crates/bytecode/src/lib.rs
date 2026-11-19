@@ -43,7 +43,7 @@ mod instruction;
 pub mod reflection;
 mod unit;
 
-pub use builtin::BuiltinUnary;
+pub use builtin::{BuiltinFrame, BuiltinUnary, CallbackArguments};
 pub use class::{
     ClassConstant, ClassDeclaration, ClassKind, EnumBacking, EnumCase, Initializer,
     MethodDeclaration, PropertyDeclaration, PropertyHook, PropertyHooks, TRAIT_CLASS_NAME,

@@ -99,6 +99,11 @@ mod internal_iterator;
 mod interpreter;
 mod intrinsic_calls;
 mod intrinsics;
+
+/// Whether the engine supplies a function independently of extension registration.
+pub fn is_intrinsic_function(name: &str) -> bool {
+    intrinsics::Intrinsic::resolve(name).is_some()
+}
 mod iteration;
 mod iterator_instructions;
 mod iterators;

@@ -35,6 +35,12 @@ impl Vm {
         }
 
         match instruction {
+            Instruction::InitUserCallback {
+                callback,
+                arguments,
+            } => {
+                Box::pin(self.autoload_user_callback(callback, arguments)).await?;
+            }
             Instruction::GeneratorReturn { src } => {
                 return self
                     .dispatched_return(

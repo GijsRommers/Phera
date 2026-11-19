@@ -30,7 +30,7 @@ pub use class::{
 pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
-pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};
+pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn, SyncSelector};
 pub use object_handlers::{
     ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeClone,
     NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,

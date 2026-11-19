@@ -1677,6 +1677,7 @@ dependencies = [
  "phera-lexer",
  "phera-parser",
  "phera-source",
+ "phera-value",
 ]
 
 [[package]]

@@ -83,13 +83,7 @@ impl Vm {
             })?;
         match function {
             ArgumentFunction::Count => Ok(Value::Int(frame.argument_count() as i64)),
-            ArgumentFunction::All => {
-                let mut result = PhpArray::new();
-                for index in 0..frame.argument_count() {
-                    result.push(frame.argument(&self.registers, index))?;
-                }
-                Ok(Value::Array(Rc::new(result)))
-            }
+            ArgumentFunction::All => self.argument_array(frame, 0),
             ArgumentFunction::One => (position < frame.argument_count() as i64)
                 .then(|| frame.argument(&self.registers, position as usize))
                 .ok_or_else(|| {
@@ -99,6 +93,19 @@ impl Vm {
                     )
                 }),
         }
+    }
+
+    /// `array_slice(func_get_args(), $start)` starts reading at the first wanted slot.
+    pub(crate) fn argument_array(
+        &self,
+        frame: crate::calls::frame_view::FrameView<'_>,
+        start: usize,
+    ) -> NativeResult {
+        let mut result = PhpArray::new();
+        for index in start..frame.argument_count() {
+            result.push(frame.argument(&self.registers, index))?;
+        }
+        Ok(Value::Array(Rc::new(result)))
     }
 }
 

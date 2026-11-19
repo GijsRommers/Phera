@@ -13,10 +13,27 @@ impl Vm {
         parameters: &[Param],
         arguments: &mut [Value],
     ) -> Result<(), NativeError> {
+        self.prepare_call_recording(
+            name,
+            parameters,
+            arguments,
+            crate::calls::callback_binding::ArgumentBinding::Caller,
+        )
+    }
+
+    pub(crate) fn prepare_call_recording(
+        &mut self,
+        name: &str,
+        parameters: &[Param],
+        arguments: &mut [Value],
+        binding: crate::calls::callback_binding::ArgumentBinding,
+    ) -> Result<(), NativeError> {
         let callbacks = parameters
             .iter()
             .any(|parameter| parameter.ty == phera_extension_api::ParamType::Callable);
-        let traced = self.error_handlers.error.is_some() && !self.error_handlers.active;
+        let traced = binding.has_native_frame()
+            && self.error_handlers.error.is_some()
+            && !self.error_handlers.active;
         if !callbacks && !traced {
             return prepare_call(name, parameters, arguments, self);
         }

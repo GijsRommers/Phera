@@ -42,12 +42,11 @@ impl Vm {
         if context.invocation == Invocation::Constructor
             || matches!(method.declaring.as_str(), "Exception" | "Error")
             || entry.preparation.is_some()
-            || (self.error_handlers.error.is_some() && !self.error_handlers.active)
             || !call.is_plain()
             || details.named.is_some()
             || count > 4
             || slots.len() != count
-            || !super::sync_native::accepts(entry.params, slots)
+            || !super::native_signature::accepts(entry.params, slots)
         {
             return fallback;
         }
@@ -67,8 +66,14 @@ impl Vm {
         if method.is_static {
             self.native_called_class = Some(context.called);
         }
+        let pending = self.error_handlers.pending.len();
         let result = handler(self, context.receiver.as_ref(), &arguments[..count]);
         self.native_called_class = previous;
+        if pending != self.error_handlers.pending.len() {
+            let operator = if method.is_static { "::" } else { "->" };
+            let name = format!("{}{operator}{}", method.declaring, method.name);
+            self.attach_native_diagnostics(pending, &name, &arguments[..count]);
+        }
         match result {
             Ok(value) => {
                 self.set(destination, value);

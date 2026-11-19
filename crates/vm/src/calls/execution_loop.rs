@@ -193,14 +193,14 @@ impl Machine<'_> {
         let mut executed = 0;
         let mut work = self.work;
         let result = loop {
-            let Some(&instruction) = instructions.get(ip) else {
+            let Some(instruction) = instructions.get(ip) else {
                 break Err(LoopExit::Invalid);
             };
             let previous = ip;
             ip += 1;
             executed += 1;
             let step = match scalar_step(instruction, slots, &mut ip) {
-                ScalarStep::Fallback => match instruction {
+                ScalarStep::Fallback => match *instruction {
                     Instruction::FetchIndex {
                         dst, base, index, ..
                     } => array_index_step(dst, base, index, slots),
@@ -209,7 +209,7 @@ impl Machine<'_> {
                 complete => complete,
             };
             if step == ScalarStep::Fallback {
-                break Ok(instruction);
+                break Ok(*instruction);
             }
             // Only backward jumps count as work; comparing positions also
             // covers fused compare-and-branch instructions.

@@ -235,6 +235,7 @@ fn find_direct_calls(
                 open.push(open_call(&open, callee, index));
             }
             Instruction::InitDynamicCall { .. }
+            | Instruction::InitUserCallback { .. }
             | Instruction::InitMethodCall { .. }
             | Instruction::InitStaticCall { .. }
             | Instruction::DynamicMethodCall { .. }

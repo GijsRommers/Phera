@@ -11,4 +11,30 @@ pub enum BuiltinUnary {
     TypeCheck(TypeMask),
     IsResource,
     GetType,
+    GetClass,
+    Defined,
+}
+
+/// Builtins that read the PHP frame itself, as in `func_num_args()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuiltinFrame {
+    ArgumentCount,
+    ArgumentsFrom(u32),
+    CalledClass,
+}
+
+/// `call_user_func($callback, $value)` and `call_user_func_array($callback, $values)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallbackArguments {
+    Positional,
+    Array,
+}
+
+impl CallbackArguments {
+    pub const fn function(self) -> &'static str {
+        match self {
+            Self::Positional => "call_user_func",
+            Self::Array => "call_user_func_array",
+        }
+    }
 }

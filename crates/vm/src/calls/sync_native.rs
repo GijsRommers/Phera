@@ -7,14 +7,68 @@
 
 use phera_bytecode::{Reg, SymbolId, TypeMask};
 use phera_extension_api::{
-    FunctionEntry, NativeError, NativeFn, Param, ParamType, PropertyViewRequest, SyncFn,
+    FunctionEntry, NativeError, NativeFn, PropertyViewRequest, SyncFn, SyncSelector,
 };
 use phera_value::Value;
 
 use super::call_state::CallTarget;
+use super::callback_binding::ArgumentBinding;
 use super::execution_loop::BatchExit;
+use super::native_signature::{accepts, exact_types, native_type};
 use super::pending::LinkedFunction;
 use crate::{Vm, error_traces::NativeTrace};
+
+/// The registry signature reduced to the checks needed by a positional call.
+#[derive(Clone, Copy)]
+pub(crate) struct NativeLink {
+    handler: Handler,
+    name: &'static str,
+    min: usize,
+    max: usize,
+    masks: [TypeMask; 4],
+    object_handler: bool,
+}
+
+#[derive(Clone, Copy)]
+enum Handler {
+    Sync(SyncFn),
+    Select(SyncSelector),
+}
+
+impl NativeLink {
+    fn new(entry: FunctionEntry, registry: &phera_extension_api::Registry) -> Option<Self> {
+        let handler = match entry.handler {
+            NativeFn::Sync(handler) => Handler::Sync(handler),
+            NativeFn::Async(_) => Handler::Select(registry.sync_selector(entry.name)?),
+        };
+        let mut masks = [TypeMask::default(); 4];
+        for (mask, parameter) in masks.iter_mut().zip(entry.params) {
+            *mask = exact_types(parameter);
+        }
+        Some(Self {
+            handler,
+            name: entry.name,
+            min: entry.min_args(),
+            max: entry.params.len().min(masks.len()),
+            masks,
+            object_handler: registry.object_handler(entry.name).is_some(),
+        })
+    }
+
+    fn accepts(&self, values: &[Option<Value>]) -> bool {
+        values.iter().zip(self.masks).all(|(slot, mask)| {
+            slot.as_ref()
+                .is_some_and(|value| mask.intersects(native_type(value)))
+        }) && (!self.object_handler || !matches!(values.first(), Some(Some(Value::Object(_)))))
+    }
+
+    fn select_handler(&self, values: &[Option<Value>]) -> Option<SyncFn> {
+        match self.handler {
+            Handler::Sync(handler) => Some(handler),
+            Handler::Select(selector) => selector(values),
+        }
+    }
+}
 
 impl Vm {
     /// The compiler put positional arguments in a contiguous part of the caller frame.
@@ -32,30 +86,41 @@ impl Vm {
             .ok_or_else(|| internal_error!("native call frame"))?;
         let base = frame.base() + args.index();
         let count = usize::from(count);
-        let entry = {
-            let symbols = self.code.cache(frame.function).symbols.borrow();
-            match symbols.get(symbol.index()).and_then(Option::as_ref) {
-                Some(LinkedFunction::Other(callee)) => match callee.target {
-                    CallTarget::Native(entry) => Some(entry),
-                    _ => None,
-                },
-                _ => None,
-            }
-        };
-        if let Some(entry) = entry
-            && let NativeFn::Sync(handler) = entry.handler
-            && count <= 4
-            && self.accepts_sync_call(entry, base, count)
+        let link = self
+            .code
+            .cache(frame.function)
+            .direct_natives
+            .get()
+            .and_then(|links| links.get(symbol.index()))
+            .and_then(std::cell::Cell::get);
+        let values = self.registers.window(base, count);
+        if let Some(link) = link
+            && count >= link.min
+            && count <= link.max
+            && values.len() == count
+            && link.accepts(values)
+            && let Some(handler) = link.select_handler(values)
         {
+            if count == 1 {
+                let argument = self.registers.take(base);
+                return self.invoke_sync_function(
+                    link.name,
+                    handler,
+                    std::slice::from_ref(&argument),
+                    destination,
+                    ArgumentBinding::Caller,
+                );
+            }
             let mut arguments = [const { Value::Null }; 4];
             for (offset, argument) in arguments[..count].iter_mut().enumerate() {
                 *argument = self.registers.take(base + offset);
             }
             return self.invoke_sync_function(
-                entry.name,
+                link.name,
                 handler,
                 &arguments[..count],
                 destination,
+                ArgumentBinding::Caller,
             );
         }
         self.call_native_direct_fallback(symbol, base, count, destination)
@@ -73,6 +138,21 @@ impl Vm {
         let LinkedFunction::Other(callee) = self.linked_function(symbol)? else {
             return Err(internal_error!("direct native target"));
         };
+        if let CallTarget::Native(entry) = callee.target
+            && let Some(frame) = self.call_stack.current()
+        {
+            let cache = self.code.cache(frame.function);
+            let links = cache.direct_natives.get_or_init(|| {
+                (0..cache.symbols.borrow().len())
+                    .map(|_| std::cell::Cell::new(None))
+                    .collect()
+            });
+            if let Some(slot) = links.get(symbol.index())
+                && slot.get().is_none()
+            {
+                slot.set(NativeLink::new(entry, &self.registry));
+            }
+        }
         self.prepare_call(callee)?;
         for offset in 0..count {
             let argument = self.registers.take(base + offset);
@@ -104,6 +184,7 @@ impl Vm {
         let NativeFn::Sync(handler) = entry.handler else {
             return Ok(Some(BatchExit::NativeCall(destination)));
         };
+        let binding = callee.argument_binding;
         let count = call.sent as usize;
         if !call.is_plain()
             || details.named.is_some()
@@ -124,15 +205,15 @@ impl Vm {
         self.call_stack.pop_call()?;
         self.registers.truncate(call.start());
 
-        let result = self.invoke_sync_function(entry.name, handler, &arguments, destination);
+        let result =
+            self.invoke_sync_function(entry.name, handler, &arguments, destination, binding);
         self.call_stack.recycle_native_arguments(arguments);
         result
     }
 
     fn accepts_sync_call(&self, entry: FunctionEntry, base: usize, count: usize) -> bool {
         let slots = self.registers.window(base, count);
-        (self.error_handlers.error.is_none() || self.error_handlers.active)
-            && slots.len() == count
+        slots.len() == count
             && accepts(entry.params, slots)
             && (!matches!(slots.first(), Some(Some(Value::Object(_))))
                 || self.registry.object_handler(entry.name).is_none())
@@ -144,21 +225,50 @@ impl Vm {
         handler: SyncFn,
         arguments: &[Value],
         destination: Reg,
+        binding: ArgumentBinding,
     ) -> Result<Option<BatchExit>, NativeError> {
         let previous_class = self.native_called_class.take();
         let previous_view = self.native_view_depth.replace(self.call_stack.depth());
+        let pending = self.error_handlers.pending.len();
         let result = handler(self, arguments);
         self.native_view_depth = previous_view;
         self.native_called_class = previous_class;
+        if binding.has_native_frame() && pending != self.error_handlers.pending.len() {
+            self.attach_native_diagnostics(pending, name, arguments);
+        }
         match result {
             Ok(value) => {
                 if self.output_writer.buffers.pending.is_some() {
                     self.output_writer.chunk_caller = Some(name);
                 }
-                self.set(destination, value);
+                if let Some(frame) = self.call_stack.current()
+                    && let [slot] = self
+                        .registers
+                        .window_mut(frame.base() + destination.index(), 1)
+                {
+                    *slot = Some(value);
+                }
                 Ok(None)
             }
-            Err(error) => self.finish_sync_function_error(name, arguments, destination, error),
+            Err(error) => {
+                self.finish_sync_function_error(name, arguments, destination, error, binding)
+            }
+        }
+    }
+
+    /// A synchronous handler cannot run PHP before its queued warnings are published.
+    #[cold]
+    pub(super) fn attach_native_diagnostics(
+        &mut self,
+        start: usize,
+        name: &str,
+        arguments: &[Value],
+    ) {
+        if let Some(events) = self.error_handlers.pending.get_mut(start..) {
+            let trace = NativeTrace::new(name, arguments);
+            for event in events {
+                event.native = Some(trace.clone());
+            }
         }
     }
 
@@ -169,8 +279,9 @@ impl Vm {
         arguments: &[Value],
         destination: Reg,
         error: NativeError,
+        binding: ArgumentBinding,
     ) -> Result<Option<BatchExit>, NativeError> {
-        if !super::native::omits_native_trace(name) {
+        if binding.has_native_frame() {
             self.failed_native = Some(NativeTrace::new(name, arguments));
         }
         if matches!(&error, NativeError::Unwind(unwind) if unwind.0.is::<PropertyViewRequest>()) {
@@ -178,52 +289,5 @@ impl Vm {
         } else {
             Err(error)
         }
-    }
-}
-
-/// These argument types are accepted as supplied. A zero mask reserves class,
-/// callable and by-reference checks for the normal binder.
-pub(super) fn accepts(parameters: &[Param], slots: &[Option<Value>]) -> bool {
-    slots.len() <= parameters.len()
-        && parameters[slots.len()..]
-            .iter()
-            .all(|parameter| parameter.optional)
-        && parameters.iter().zip(slots).all(|(parameter, slot)| {
-            slot.as_ref().is_some_and(|value| {
-                !value.is_reference()
-                    && !parameter.by_ref
-                    && !parameter.variadic
-                    && (parameter.ty == ParamType::Mixed
-                        || exact_types(parameter).intersects(crate::types::own_type(value)))
-            })
-        })
-}
-
-fn exact_types(parameter: &Param) -> TypeMask {
-    use ParamType as P;
-    use TypeMask as T;
-    let mask = match parameter.ty {
-        P::Bool => T::BOOL,
-        P::Int | P::RoundingModeOrInt => T::INT,
-        P::Float => T::FLOAT,
-        P::String | P::ClosureOrString => T::STRING,
-        P::Array | P::Iterable => T::ARRAY,
-        P::Object => T::OBJECT,
-        P::ArrayOrObject | P::ObjectOrArray => T::ARRAY.union(T::OBJECT),
-        P::Number => T::INT.union(T::FLOAT),
-        P::IntOrString => T::INT.union(T::STRING),
-        P::ArrayOrInt => T::ARRAY.union(T::INT),
-        P::ArrayOrString => T::ARRAY.union(T::STRING),
-        P::ObjectOrString => T::OBJECT.union(T::STRING),
-        P::StringOrNumber => T::STRING.union(T::INT).union(T::FLOAT),
-        P::ArrayOrNumber => T::ARRAY.union(T::INT).union(T::FLOAT),
-        P::ArrayOrFloat => T::ARRAY.union(T::FLOAT),
-        P::ArrayOrBool => T::ARRAY.union(T::BOOL),
-        P::Mixed | P::Class(_) | P::Callable | P::RecursiveOrAggregate => T::default(),
-    };
-    if parameter.nullable {
-        mask.union(T::NULL)
-    } else {
-        mask
     }
 }

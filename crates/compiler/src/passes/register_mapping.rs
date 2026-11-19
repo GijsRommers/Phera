@@ -130,6 +130,10 @@ impl Instruction {
             Instruction::DynamicGlobal { name } => *name = map(*name),
             Instruction::Clear { register } => *register = map(*register),
             Instruction::StartCall { .. } => {}
+            Instruction::InitUserCallback { callback, .. }
+            | Instruction::SendUserCallback {
+                source: callback, ..
+            } => *callback = map(*callback),
             Instruction::StartDynamicCall { callee } => *callee = map(*callee),
             Instruction::FinishCall {
                 destination: dst, ..
@@ -164,6 +168,9 @@ impl Instruction {
             | Instruction::Constant {
                 destination: dst, ..
             }
+            | Instruction::BuiltinFrame {
+                destination: dst, ..
+            }
             | Instruction::Array(dst)
             | Instruction::Echo(dst)
             | Instruction::ReturnReference(dst)
@@ -191,9 +198,23 @@ impl Instruction {
                 destination: dst,
                 source: src,
                 ..
+            }
+            | Instruction::InLiteralArray {
+                destination: dst,
+                needle: src,
+                ..
             } => {
                 *dst = map(*dst);
                 *src = map(*src)
+            }
+            Instruction::ArrayKeyExists {
+                destination,
+                key,
+                array,
+            } => {
+                *destination = map(*destination);
+                *key = map(*key);
+                *array = map(*array);
             }
             Instruction::Reference {
                 destination: dst,

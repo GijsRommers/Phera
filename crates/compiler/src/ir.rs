@@ -271,6 +271,29 @@ pub enum Instruction {
         operator: phera_bytecode::BuiltinUnary,
         source: Reg,
     },
+    BuiltinFrame {
+        destination: Reg,
+        operator: phera_bytecode::BuiltinFrame,
+    },
+    ArrayKeyExists {
+        destination: Reg,
+        key: Reg,
+        array: Reg,
+    },
+    InLiteralArray {
+        destination: Reg,
+        needle: Reg,
+        haystack: Vec<phera_bytecode::Constant>,
+        strict: bool,
+    },
+    InitUserCallback {
+        callback: Reg,
+        arguments: phera_bytecode::CallbackArguments,
+    },
+    SendUserCallback {
+        source: Reg,
+        arguments: phera_bytecode::CallbackArguments,
+    },
     /// Write a PHP string conversion to output; emits Echo.
     Echo(Reg),
     /// Transfer control to an IR target; emits Jump with a relocated target.

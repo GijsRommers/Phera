@@ -60,6 +60,7 @@ pub(crate) fn register(registry: &mut Registry) {
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
+    replace::register_sync_selectors(registry);
 }
 
 /// PHP's error for a string that would pass [`MAX_STRING_BYTES`].

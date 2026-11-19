@@ -136,7 +136,7 @@ impl Compiler<'_> {
         Ok(temporary_objects)
     }
 
-    fn finish_call(
+    pub(super) fn finish_call(
         &mut self,
         temporary_objects: Vec<Reg>,
         line: usize,
