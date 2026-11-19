@@ -247,7 +247,8 @@ fn change(
                 1 => NullHandling::EmptyString,
                 2 => NullHandling::ToString,
                 _ => {
-                    return Err(NativeError::value_error(
+                    return Err(invalid(
+                        call,
                         "PDO::ATTR_ORACLE_NULLS must be one of the PDO::NULL_* constants",
                     ));
                 }
