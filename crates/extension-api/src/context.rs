@@ -368,6 +368,11 @@ pub trait Context {
         )))
     }
 
+    /// Access to the runtime's cold reflection queries.
+    fn reflection(&mut self) -> Option<&mut dyn crate::reflection::ReflectionContext> {
+        None
+    }
+
     /// Publishes scanner diagnostics with PHP's severity and location.
     fn compile_diagnostic(
         &mut self,

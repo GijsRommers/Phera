@@ -21,6 +21,7 @@ pub(super) const FUNCTIONS: &[FunctionEntry] = &[
     IN_ARRAY,
     ARRAY_SEARCH,
     ARRAY_KEY_EXISTS,
+    ARRAY_CHANGE_KEY_CASE,
     KEY_EXISTS,
 ];
 
@@ -290,4 +291,43 @@ fn array_key_exists(context: &mut dyn Context, arguments: &[Value]) -> NativeRes
         ArrayKey::from_value_diag(key, context.diagnostics())?
     };
     Ok(Value::Bool(required_array(arguments, 1).contains_key(&key)))
+}
+
+/// `array_change_key_case(array $array, int $case = CASE_LOWER): array`,
+/// the array with its string keys in lower or upper case. Only the letters
+/// a to z change (PHP 8.2 and later); integer keys stay as they are.
+///
+/// ```php
+/// array_change_key_case(["Id" => 1, "NAME" => "x"]);             // ["id" => 1, "name" => "x"]
+/// array_change_key_case(["Id" => 1, "ID" => 2], CASE_UPPER);     // ["ID" => 2]
+/// ```
+///
+/// Two keys that become the same leave one entry, at the place of the
+/// first and with the value of the last.
+const ARRAY_CHANGE_KEY_CASE: FunctionEntry = FunctionEntry::sync(
+    "array_change_key_case",
+    &[
+        Param::new("array", ParamType::Array),
+        Param::new("case", ParamType::Int).optional(),
+    ],
+    array_change_key_case,
+);
+
+fn array_change_key_case(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    // CASE_LOWER is 0; PHP takes every other number as CASE_UPPER.
+    let upper = args::int(arguments, 1).is_some_and(|case| case != 0);
+    let mut result = PhpArray::new();
+    for (key, value) in required_array(arguments, 0).iter() {
+        let key = match key {
+            ArrayKey::String(name) if upper => {
+                ArrayKey::String(PhpString::from(name.as_bytes().to_ascii_uppercase()))
+            }
+            ArrayKey::String(name) => {
+                ArrayKey::String(PhpString::from(name.as_bytes().to_ascii_lowercase()))
+            }
+            ArrayKey::Int(_) => key.clone(),
+        };
+        result.insert(key, value.clone());
+    }
+    Ok(Value::from(result))
 }

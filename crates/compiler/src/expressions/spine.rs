@@ -177,6 +177,7 @@ impl Compiler<'_> {
         let dst = lhs;
         self.emit(
             Instruction::Call {
+                result: phera_bytecode::CallResult::Used,
                 destination: dst,
                 name,
                 fallback: None,

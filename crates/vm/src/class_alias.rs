@@ -74,9 +74,12 @@ impl Vm {
             Entry::Occupied(_) => {
                 let kind = class.kind.description().to_ascii_lowercase();
                 let mut message = format!("Cannot redeclare {kind} {alias}");
-                if let Some((function, line)) = class.declaration {
-                    let file = &self.code.unit(function).file;
-                    message.push_str(&format!(" (previously declared in {file}:{line})"));
+                if let Some((function, index)) = class.declaration {
+                    let unit = self.code.unit(function);
+                    if let Some(declaration) = unit.classes.get(index.index()) {
+                        let (file, line) = (&unit.file, declaration.line);
+                        message.push_str(&format!(" (previously declared in {file}:{line})"));
+                    }
                 }
                 self.warn(message);
                 Ok(Value::Bool(false))

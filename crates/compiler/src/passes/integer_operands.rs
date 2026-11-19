@@ -167,7 +167,7 @@ pub(crate) fn dead_after(function: &Function, index: usize, register: phera_byte
                     break;
                 }
                 Instruction::InitCall { .. } | Instruction::Nop => {}
-                Instruction::Call { dst } => {
+                Instruction::Call { dst, .. } => {
                     if dst == register {
                         break;
                     }

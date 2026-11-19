@@ -30,6 +30,7 @@ impl Compiler<'_> {
             "{initializer}",
             &self.namespace,
             self.compile_diagnostics,
+            self.reflection,
         );
         builder.anonymous_classes = self.anonymous_classes.clone();
         builder.class_scope = Some(class.to_owned());
@@ -46,6 +47,7 @@ impl Compiler<'_> {
         class: &str,
         trait_scope: Option<&str>,
         method: &ast::Method,
+        doc_comment: Option<phera_source::Span>,
         line: usize,
     ) -> Result<ClassMethod, CompileError> {
         if method.modifiers.is_final
@@ -82,37 +84,34 @@ impl Compiler<'_> {
                 }
             }
         }
-        let declaration = ast::FunctionDeclaration {
-            attributes: method.attributes.clone(),
-            name: ast::Identifier {
-                name: format!("{class}::{}", method.name.name),
+        use super::functions::{FunctionBody, FunctionSource};
+        let name = format!("{class}::{}", method.name.name);
+        let implicit_return = (method.return_type.is_none()
+            && method.name.name.eq_ignore_ascii_case("__toString"))
+        .then(|| ast::Type {
+            kind: ast::TypeKind::Named(ast::Name {
+                kind: ast::NameKind::Unqualified,
+                text: "string".into(),
                 span: method.name.span,
-            },
-            by_reference: method.by_reference,
-            parameters: method.parameters.clone(),
-            return_type: method.return_type.clone().or_else(|| {
-                method
-                    .name
-                    .name
-                    .eq_ignore_ascii_case("__toString")
-                    .then(|| ast::Type {
-                        kind: ast::TypeKind::Named(ast::Name {
-                            kind: ast::NameKind::Unqualified,
-                            text: "string".into(),
-                            span: method.name.span,
-                        }),
-                        span: method.name.span,
-                    })
             }),
-            body: method.body.clone().unwrap_or_default(),
+            span: method.name.span,
+        });
+        let declaration = FunctionSource {
+            span: method.span,
+            doc_comment,
+            attributes: &method.attributes,
+            name: &name,
+            by_reference: method.by_reference,
+            parameters: &method.parameters,
+            return_type: method.return_type.as_ref().or(implicit_return.as_ref()),
+            body: FunctionBody::Statements(method.body.as_deref().unwrap_or_default()),
         };
         let index = self.functions.len();
-        // The synthetic name is already fully qualified.
         let previous = std::mem::replace(&mut self.trait_scope, trait_scope.map(str::to_owned));
-        let result = self.compile_function(&declaration, DeclarationTiming::Hoisted, line);
+        let result =
+            self.compile_captured_function(&declaration, DeclarationTiming::Hidden, line, &[]);
         self.trait_scope = previous;
         result?;
-        self.unhoist(index);
         Ok(ClassMethod {
             name: method.name.name.clone(),
             function: index,

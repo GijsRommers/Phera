@@ -161,17 +161,19 @@ fn retarget(instruction: Instruction, from: Reg, to: Reg) -> Option<Instruction>
             lhs,
             rhs,
         },
-        I::Call { dst } if dst == from => I::Call { dst: to },
+        I::Call { dst, result } if dst == from => I::Call { dst: to, result },
         I::CallDirect {
             function,
             args,
             count,
             dst,
+            result,
         } if dst == from => I::CallDirect {
             function,
             args,
             count,
             dst: to,
+            result,
         },
         _ => return None,
     };
@@ -271,12 +273,13 @@ fn rewrite_call(function: &mut Function, call: &DirectCall, area: usize) {
             other => other,
         };
     }
-    if let Instruction::Call { dst } = function.instructions[call.call] {
+    if let Instruction::Call { dst, result } = function.instructions[call.call] {
         function.instructions[call.call] = Instruction::CallDirect {
             function: call.callee.function,
             args: Reg(area as u16),
             count: call.sends.len() as u16,
             dst,
+            result,
         };
     }
 }

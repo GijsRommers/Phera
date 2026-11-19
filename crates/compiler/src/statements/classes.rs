@@ -1,8 +1,10 @@
 //! Class declarations compile methods as ordinary functions so calls keep heap-frame execution.
 
+use super::builtin_attributes::AttributePlacement;
 use super::class_default_types::DefaultKind;
 use phera_ast as ast;
 use phera_bytecode::{ClassKind, Visibility};
+use phera_source::attributes::AttributeTarget;
 
 use crate::ir::{ClassDeclaration, ClassProperty, Instruction};
 use crate::policies::{DeclarationTiming, NameKind};
@@ -27,10 +29,15 @@ impl Compiler<'_> {
         let display = name.split('\0').next().unwrap_or(&name);
         let enum_backing = self.validate_enum(declaration, display)?;
         self.validate_class_declaration(declaration, display)?;
-        if declaration.attributes.iter().any(|attribute| {
-            attribute.name.text.trim_start_matches('\\') != "AllowDynamicProperties"
-        }) {
-            return Err(self.error("Attributes not supported yet", line));
+        let mut metadata = self.declaration_metadata(
+            &declaration.attributes,
+            declaration.span,
+            declaration.doc_comment,
+            Some(&name),
+            AttributePlacement::Declaration(AttributeTarget::Class),
+        )?;
+        if !metadata.attributes.is_empty() {
+            self.validate_class_attributes(declaration, display, &mut metadata)?;
         }
         let mut methods = Vec::new();
         // Lowercased, to find a redeclared method without comparing it with
@@ -52,9 +59,13 @@ impl Compiler<'_> {
                 if declaration.kind != ast::ClassKind::Enum {
                     return Err(self.error("Case can only be used in enums", case_line));
                 }
-                if !attributes.is_empty() {
-                    return Err(self.error("Attributes not supported yet", case_line));
-                }
+                let metadata = self.declaration_metadata(
+                    attributes,
+                    member.span,
+                    member.doc_comment,
+                    Some(&name),
+                    AttributePlacement::Declaration(AttributeTarget::ClassConstant),
+                )?;
                 let value = value
                     .as_ref()
                     .map(|value| {
@@ -66,7 +77,7 @@ impl Compiler<'_> {
                         )
                     })
                     .transpose()?;
-                enum_cases.push((case.name.clone(), value));
+                enum_cases.push((case.name.clone(), value, metadata));
                 continue;
             }
             if let ast::ClassMemberKind::TraitUse {
@@ -87,9 +98,17 @@ impl Compiler<'_> {
                 modifiers,
                 ty,
                 items,
-                ..
+                attributes,
             } = &member.kind
             {
+                let metadata = self.declaration_metadata(
+                    attributes,
+                    member.span,
+                    member.doc_comment,
+                    Some(&name),
+                    AttributePlacement::Declaration(AttributeTarget::ClassConstant),
+                )?;
+                self.reject_member_set_visibility(modifiers, "class constant", member.span)?;
                 for constant in items {
                     if constant.name.name.eq_ignore_ascii_case("class") {
                         return Err(self.error("A class constant must not be called 'class'; it is reserved for class name fetching", self.lines.line(member.span.start)));
@@ -105,6 +124,7 @@ impl Compiler<'_> {
                         )?;
                     }
                     constants.push(crate::ir::ClassConstant {
+                        metadata: metadata.clone(),
                         name: constant.name.name.clone(),
                         visibility: member_visibility(modifiers),
                         is_final: modifiers.is_final,
@@ -128,51 +148,25 @@ impl Compiler<'_> {
                 items,
             } = &member.kind
             {
-                if !attributes.is_empty() {
-                    return Err(self.error("Attributes not supported yet", line));
-                }
-                if modifiers.set_visibility.is_some() {
-                    return Err(self.error("Asymmetric visibility not supported yet", line));
-                }
+                let metadata = self.declaration_metadata(
+                    attributes,
+                    member.span,
+                    member.doc_comment,
+                    Some(&name),
+                    AttributePlacement::Declaration(AttributeTarget::Property),
+                )?;
                 for property in items {
                     if !property.hooks.is_empty() {
                         return Err(self.error("Property hooks not supported yet", line));
                     }
-                    if ty.as_ref().is_some_and(|ty| {
-                        self.declaration_type(ty)
-                            .split(['|', '&', '?'])
-                            .any(|name| name == "callable")
-                    }) {
-                        return Err(self.error(
-                            format!(
-                                "Property {display}::${} cannot have type {}",
-                                property.name,
-                                ty.as_ref()
-                                    .map(|ty| self.declaration_type(ty))
-                                    .unwrap_or_default()
-                            ),
-                            self.lines.line(property.span.start),
-                        ));
-                    }
                     let readonly = modifiers.is_readonly || declaration.modifiers.is_readonly;
-                    if readonly && modifiers.is_static {
-                        return Err(self.error(
-                            format!(
-                                "Static property {display}::${} cannot be readonly",
-                                property.name
-                            ),
-                            self.lines.line(property.span.start),
-                        ));
-                    }
-                    if readonly && ty.is_none() {
-                        return Err(self.error(
-                            format!(
-                                "Readonly property {display}::${} must have type",
-                                property.name
-                            ),
-                            self.lines.line(property.span.start),
-                        ));
-                    }
+                    let declared_type = ty.as_ref().map(|ty| self.declaration_type(ty));
+                    let (set_visibility, is_final) = self.property_write_visibility(
+                        modifiers,
+                        (display, &property.name, property.span),
+                        declared_type.as_deref(),
+                        readonly,
+                    )?;
                     if readonly && declaration.name.is_none() && property.default.is_some() {
                         return Err(self.error(
                             format!(
@@ -183,11 +177,10 @@ impl Compiler<'_> {
                         ));
                     }
                     if let (Some(default), Some(ty)) = (&property.default, ty) {
-                        let member = format!("{display}::${}", property.name);
                         self.validate_literal_member_default(
                             default,
                             ty,
-                            &member,
+                            &format!("{display}::${}", property.name),
                             DefaultKind::Property,
                             self.lines.line(property.span.start),
                         )?;
@@ -199,6 +192,10 @@ impl Compiler<'_> {
                         .transpose()?;
                     properties.push(ClassProperty {
                         name: property.name.clone(),
+                        set_visibility,
+                        is_final,
+                        metadata: metadata.clone(),
+                        promoted: false,
                         visibility: match modifiers.visibility {
                             Some(ast::Visibility::Private) => Visibility::Private,
                             Some(ast::Visibility::Protected) => Visibility::Protected,
@@ -206,9 +203,7 @@ impl Compiler<'_> {
                         },
                         is_static: modifiers.is_static,
                         is_readonly: modifiers.is_readonly || declaration.modifiers.is_readonly,
-                        ty: ty
-                            .as_ref()
-                            .map(|declared_type| self.declaration_type(declared_type)),
+                        ty: declared_type,
                         default,
                     });
                 }
@@ -217,6 +212,7 @@ impl Compiler<'_> {
             let ast::ClassMemberKind::Method(method) = &member.kind else {
                 return Err(self.error("Class properties and constants not supported yet", line));
             };
+            self.reject_member_set_visibility(&method.modifiers, "method", method.span)?;
             if !method_names.insert(method.name.name.to_ascii_lowercase()) {
                 return Err(self.error(
                     format!("Cannot redeclare {display}::{}()", method.name.name),
@@ -225,34 +221,59 @@ impl Compiler<'_> {
             }
             self.validate_magic_method(display, method)?;
             for parameter in &method.parameters {
+                let parameter_line = || self.lines.line(parameter.span.start);
+                if parameter.modifiers.is_static {
+                    return Err(self.error(
+                        "Cannot use the static modifier on a parameter",
+                        parameter_line(),
+                    ));
+                }
                 if parameter.is_promoted() {
                     if !method.name.name.eq_ignore_ascii_case("__construct") {
                         return Err(self.error(
                             "Cannot declare promoted property outside a constructor",
-                            self.lines.line(parameter.span.start),
+                            parameter_line(),
                         ));
                     }
-                    if (declaration.modifiers.is_readonly || parameter.modifiers.is_readonly)
-                        && parameter.ty.is_none()
-                    {
+                    if method.body.is_none() {
                         return Err(self.error(
-                            format!(
-                                "Readonly property {display}::${} must have type",
-                                parameter.name
-                            ),
-                            self.lines.line(parameter.span.start),
+                            "Cannot declare promoted property in an abstract constructor",
+                            parameter_line(),
                         ));
                     }
+                    if parameter.variadic {
+                        return Err(self.error(
+                            "Cannot declare variadic promoted property",
+                            parameter_line(),
+                        ));
+                    }
+                    let metadata = self.declaration_metadata(
+                        &parameter.attributes,
+                        parameter.span,
+                        parameter.doc_comment,
+                        Some(&name),
+                        AttributePlacement::Promoted(AttributeTarget::Property),
+                    )?;
+                    let readonly =
+                        parameter.modifiers.is_readonly || declaration.modifiers.is_readonly;
+                    let ty = parameter.ty.as_ref().map(|ty| self.declaration_type(ty));
+                    let (set_visibility, is_final) = self.property_write_visibility(
+                        &parameter.modifiers,
+                        (display, &parameter.name, parameter.span),
+                        ty.as_deref(),
+                        readonly,
+                    )?;
                     properties.push(ClassProperty {
                         name: parameter.name.clone(),
+                        set_visibility,
+                        is_final,
+                        metadata,
+                        promoted: true,
                         visibility: member_visibility(&parameter.modifiers),
                         is_static: false,
                         is_readonly: parameter.modifiers.is_readonly
                             || declaration.modifiers.is_readonly,
-                        ty: parameter
-                            .ty
-                            .as_ref()
-                            .map(|declared_type| self.declaration_type(declared_type)),
+                        ty,
                         default: None,
                     });
                 }
@@ -261,6 +282,7 @@ impl Compiler<'_> {
                 &name,
                 trait_scope,
                 method,
+                member.doc_comment,
                 self.lines.line(method.name.span.start),
             )?);
         }
@@ -268,7 +290,13 @@ impl Compiler<'_> {
             && declaration.kind != ast::ClassKind::Enum
             && traits.is_empty();
         let index = self.classes.len();
+        let allows_dynamic_properties = metadata.attributes.iter().any(|attribute| {
+            attribute
+                .name
+                .eq_ignore_ascii_case("AllowDynamicProperties")
+        });
         self.classes.push(ClassDeclaration {
+            metadata,
             line: line as u32,
             name: name.clone(),
             parent: declaration
@@ -298,10 +326,7 @@ impl Compiler<'_> {
             is_abstract: declaration.modifiers.is_abstract,
             is_final: declaration.modifiers.is_final || declaration.kind == ast::ClassKind::Enum,
             is_readonly: declaration.modifiers.is_readonly,
-            allows_dynamic_properties: declaration
-                .attributes
-                .iter()
-                .any(|attribute| attribute.name.text == "AllowDynamicProperties"),
+            allows_dynamic_properties,
             constants,
             properties,
             methods,

@@ -3,6 +3,8 @@
 use phera_lexer::{BACKTICK_OPERATOR_ERROR, LexError, LexErrorKind};
 use phera_source::Span;
 
+pub(crate) const MULTIPLE_ACCESS_MODIFIERS: &str = "Multiple access type modifiers are not allowed";
+
 /// The first syntax or declaration error detected by the parser.
 ///
 /// A lexer error is reported as a `ParseError` with the lexer's span.

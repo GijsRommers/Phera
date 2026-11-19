@@ -1,6 +1,7 @@
 //! Property and array mutations share iterative path reconstruction and PHP reference binding.
 
 use crate::access_mode::{Binding, Creation, Missing, Mutation};
+use crate::property_set_visibility::PropertyChange;
 use crate::{
     AccessPath, Vm,
     path_update::{PathKey, update},
@@ -35,7 +36,11 @@ impl Vm {
         if let PathBase::StaticProperty { class, name, .. } = place.base()?
             && place.steps()?.next().is_none()
         {
-            self.validate_static_mutation(class, name, &mut value)?;
+            let change = match binding {
+                Binding::ByValue => PropertyChange::Direct,
+                Binding::ByReference => PropertyChange::Bind,
+            };
+            self.validate_static_mutation(class, name, &mut value, change)?;
             if binding == Binding::ByReference {
                 self.bind_static_property_reference(class, name, value)?;
                 return Ok(());
@@ -67,6 +72,12 @@ impl Vm {
         mut value: Value,
         binding: Binding,
     ) -> Result<(), NativeError> {
+        if let PathBase::StaticProperty { class, name, .. } = place.base()?
+            && keys.iter().next().is_some()
+            && !self.get(register).is_object()
+        {
+            self.validate_static_mutation(class, name, &mut value, PropertyChange::Indirect)?;
+        }
         let mut root = self
             .current_slot_mut(register)
             .and_then(Option::take)
@@ -132,6 +143,9 @@ impl Vm {
         register: phera_bytecode::Reg,
         keys: crate::inline_stack::InlineStack<PathKey>,
     ) -> NativeResult {
+        if let PathBase::StaticProperty { class, name, .. } = place.base()? {
+            self.validate_static_mutation(class, name, &mut Value::Null, PropertyChange::Indirect)?;
+        }
         let mut raw = self.raw_local(register);
         let mut steps = keys.iter().cloned().peekable();
         while let Some(key) = steps.next() {
@@ -159,7 +173,28 @@ impl Vm {
                             .unwrap_or_default();
                         return Ok(Value::Reference(Rc::new(RefCell::new(value))));
                     }
-                    crate::property_storage::read(&object, &key).unwrap_or_default()
+                    let value = crate::property_storage::read(&object, &key).unwrap_or_default();
+                    if (steps.peek().is_none() || !value.deref().is_object())
+                        && let Some(class) = object
+                            .class
+                            .as_any()
+                            .downcast_ref::<crate::classes::Class>()
+                        && let Some(property) = class.defaults.iter().find(|item| {
+                            item.key == key && (item.is_readonly || item.set_visibility.is_some())
+                        })
+                    {
+                        let access = self.check_set_visibility(property, PropertyChange::Indirect);
+                        // A detached reference can still mutate the object without replacing the slot.
+                        if value.deref().is_object() && (property.is_readonly || access.is_err()) {
+                            return Ok(Value::Reference(Rc::new(RefCell::new(
+                                value.deref().clone(),
+                            ))));
+                        }
+                        if !property.is_readonly {
+                            access?;
+                        }
+                    }
+                    value
                 }
                 _ => Value::Null,
             };
@@ -200,6 +235,9 @@ impl Vm {
                 "Attempt to unset static property {}::${name}",
                 class.name
             )));
+        }
+        if let PathBase::StaticProperty { class, name, .. } = place.base()? {
+            self.validate_static_mutation(class, name, &mut Value::Null, PropertyChange::Indirect)?;
         }
         let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
             return Ok(());

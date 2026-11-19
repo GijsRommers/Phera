@@ -17,6 +17,7 @@ use crate::nesting::Nesting;
 pub(crate) struct Parser<'src> {
     pub(crate) source: &'src [u8],
     tokens: Vec<Token>,
+    doc_comments: Vec<(usize, Span)>,
     pos: usize,
     /// The lexer error that stopped lexing early, if any. A synthetic `Eof`
     /// token sits at the end of `tokens` in that case.
@@ -31,7 +32,7 @@ pub(crate) struct Parser<'src> {
 
 impl<'src> Parser<'src> {
     pub(crate) fn new(source: &'src [u8], collect_diagnostics: bool) -> (Self, ScanReport) {
-        let lexer = Lexer::new_bytes(source);
+        let lexer = Lexer::new_bytes(source).with_doc_comments();
         let mut lexer = if collect_diagnostics {
             lexer.with_diagnostics(ScanMode::Parsed)
         } else {
@@ -63,6 +64,7 @@ impl<'src> Parser<'src> {
         let parser = Self {
             source,
             tokens,
+            doc_comments: lexer.take_doc_comments(),
             pos: 0,
             lex_error,
             prev_end: 0,
@@ -165,6 +167,22 @@ impl<'src> Parser<'src> {
     /// The kind of the token three positions ahead.
     pub(crate) fn kind4(&self) -> TokenKind {
         self.tokens[(self.pos + 3).min(self.tokens.len() - 1)].kind
+    }
+
+    /// Doc comment immediately before this token, if the scanner saw one.
+    pub(crate) fn doc_comment(&self) -> Option<Span> {
+        if self.doc_comments.is_empty() {
+            return None;
+        }
+        self.doc_comment_before(self.peek_span().start)
+    }
+
+    pub(crate) fn doc_comment_before(&self, offset: usize) -> Option<Span> {
+        let index = self
+            .doc_comments
+            .binary_search_by_key(&offset, |(start, _)| *start)
+            .ok()?;
+        self.doc_comments.get(index).map(|(_, comment)| *comment)
     }
 
     pub(crate) fn peek_span(&self) -> Span {

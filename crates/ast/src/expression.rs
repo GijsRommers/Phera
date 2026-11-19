@@ -325,6 +325,8 @@ pub enum MagicConstant {
 /// `function (...) use (...) { ... }`
 #[derive(Debug, Clone, PartialEq)]
 pub struct Closure {
+    pub declaration_span: Span,
+    pub doc_comment: Option<Span>,
     pub attributes: Vec<Attribute>,
     pub is_static: bool,
     pub by_reference: bool,
@@ -345,6 +347,8 @@ pub struct ClosureUse {
 /// `fn (...) => expr`
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrowFunction {
+    pub declaration_span: Span,
+    pub doc_comment: Option<Span>,
     pub attributes: Vec<Attribute>,
     pub is_static: bool,
     pub by_reference: bool,

@@ -14,7 +14,31 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         self.clear_temporaries_after(line, |compiler| {
-            compiler.compile_expression(expression).map(drop)
+            // `(void) f();` evaluates the operand and discards it outright.
+            if let ast::ExpressionKind::Cast {
+                kind: ast::CastKind::Void,
+                operand,
+            } = &expression.kind
+            {
+                return compiler.compile_expression(operand).map(drop);
+            }
+            let result = compiler.compile_expression(expression)?;
+            if let Some(
+                Instruction::FinishCall {
+                    destination,
+                    result: use_of_result,
+                }
+                | Instruction::Call {
+                    destination,
+                    result: use_of_result,
+                    ..
+                },
+            ) = compiler.function.instructions.last_mut()
+                && *destination == result
+            {
+                *use_of_result = phera_bytecode::CallResult::Discarded;
+            }
+            Ok(())
         })
     }
 
