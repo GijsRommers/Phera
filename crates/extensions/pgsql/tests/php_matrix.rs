@@ -124,7 +124,16 @@ function fixed_cases($db) {
         run('delete-sql', fn() => pg_delete($db, $table, ['id'=>'1'], PGSQL_DML_STRING));
         run('delete', fn() => (bool)pg_delete($db, $table, ['id'=>'1']));
         run('copy-from', fn() => pg_copy_from($db, $table, ["2|a|1.000|t\n", "3|NULL|2.800|f\n"], '|', 'NULL'));
+        run('copy-iterator', fn() => pg_copy_from($db, $table,
+            new ArrayIterator(["4|iterable|3.650|t\n"]), '|', 'NULL'));
+        run('copy-generator', function () use ($db, $table) {
+            $rows = (function () { yield "5|generator|4.125|f"; })();
+            return pg_copy_from($db, $table, $rows, '|', 'NULL');
+        });
         run('copy-to', fn() => pg_copy_to($db, $table, '|', 'NULL'));
+        run('copy-invalid-rows', fn() => pg_copy_from($db, $table, new stdClass()));
+        run('copy-invalid-from-separator', fn() => pg_copy_from($db, $table, [], 'ab'));
+        run('copy-invalid-to-separator', fn() => pg_copy_to($db, $table, ''));
     } finally {
         pg_query($db, 'ROLLBACK');
     }
@@ -134,6 +143,7 @@ function fixed_cases($db) {
         $all = pg_last_notice($db, PGSQL_NOTICE_ALL);
         return [$notice, $all, pg_last_notice($db, PGSQL_NOTICE_CLEAR)];
     });
+    run('notice-invalid-mode', fn() => pg_last_notice($db, 99));
     run('query-null-param', fn() => pg_fetch_row(pg_query_params($db, 'SELECT $1::text, $2::bool', [null, true])));
     run('query-invalid-param', fn() => [pg_query_params($db, 'SELECT $1::int4', ['bad']), pg_last_error($db)]);
     run('async-query-error', function () use ($db) {
@@ -174,5 +184,77 @@ fn pgsql_php_matrix() {
         ));
     }
     script.push_str("fixed_cases($db);\npg_close($db);\n");
-    comparison.check_matrix(&script, TYPES.len() * 72 + 40);
+    comparison.check_matrix(&script, TYPES.len() * 72 + 46);
 }
+
+#[test]
+fn large_objects_match_php() {
+    let Some(comparison) = Comparison::from_environment("pgsql-lob") else {
+        return;
+    };
+    let script = format!("<?php\n{}\n{LARGE_OBJECTS}", oracle::PHP_PREAMBLE);
+    comparison.check_matrix(&script, 26);
+}
+
+const LARGE_OBJECTS: &str = r#"
+$db = pg_connect('host=127.0.0.1 port=54329 dbname=pgsql_ext user=phera password=phera');
+pg_query($db, 'BEGIN');
+try {
+    $oid = null;
+    run('create', function () use ($db, &$oid) {
+        $oid = pg_lo_create($db);
+        return is_int($oid) && $oid > 0;
+    });
+    $lob = null;
+    run('open', function () use ($db, &$lob, $oid) {
+        $lob = pg_lo_open($db, (string)$oid, 'r+');
+        return get_class($lob);
+    });
+    run('write-binary', fn() => pg_lo_write($lob, "a\0\xfftest"));
+    run('tell', fn() => pg_lo_tell($lob));
+    run('seek-start', fn() => pg_lo_seek($lob, 0, PGSQL_SEEK_SET));
+    run('read-zero', fn() => pg_lo_read($lob, 0));
+    run('read-bytes', fn() => pg_lo_read($lob, 3));
+    run('seek-relative', fn() => [pg_lo_seek($lob, 1), pg_lo_tell($lob)]);
+    run('write-prefix', fn() => pg_lo_write($lob, 'abcd', 2));
+    run('truncate', fn() => pg_lo_truncate($lob, 9));
+    run('seek-tail', fn() => pg_lo_seek($lob, -2, PGSQL_SEEK_END));
+    run('read-tail', fn() => [pg_lo_read($lob), pg_lo_read($lob)]);
+    run('read-all', function () use ($lob) {
+        pg_lo_seek($lob, 0, PGSQL_SEEK_SET);
+        ob_start();
+        $length = pg_lo_read_all($lob);
+        return [$length, ob_get_clean()];
+    });
+    run('invalid-mode', fn() => pg_lo_open($db, $oid, 'a'));
+    run('negative-read-length', fn() => pg_lo_read($lob, -1));
+    run('negative-write-length', fn() => pg_lo_write($lob, 'a', -1));
+    run('excess-write-length', fn() => pg_lo_write($lob, 'a', 2));
+    run('invalid-whence', fn() => pg_lo_seek($lob, 0, 99));
+    run('close', fn() => pg_lo_close($lob));
+    run('unlink', fn() => pg_lo_unlink($db, $oid));
+    $aliasOid = null;
+    $aliasLob = null;
+    run('alias-create', function () use ($db, &$aliasOid) {
+        $aliasOid = pg_locreate($db);
+        return is_int($aliasOid) && $aliasOid > 0;
+    });
+    run('alias-open', function () use ($db, $aliasOid, &$aliasLob) {
+        $aliasLob = pg_loopen($db, $aliasOid, 'w+');
+        return get_class($aliasLob);
+    });
+    run('alias-write', fn() => pg_lowrite($aliasLob, str_repeat('x', 8193)));
+    run('alias-read', function () use ($aliasLob) {
+        pg_lo_seek($aliasLob, 0, PGSQL_SEEK_SET);
+        return pg_loread($aliasLob, 1);
+    });
+    run('alias-read-all', function () use ($aliasLob) {
+        ob_start();
+        $length = pg_loreadall($aliasLob);
+        return [$length, strlen(ob_get_clean())];
+    });
+    run('alias-cleanup', fn() => [pg_loclose($aliasLob), pg_lounlink($db, $aliasOid)]);
+} finally {
+    pg_query($db, 'ROLLBACK');
+}
+"#;

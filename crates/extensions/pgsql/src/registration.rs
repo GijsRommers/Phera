@@ -3,9 +3,11 @@
 mod aliases;
 mod commands0;
 mod connection0;
+mod large_objects;
 mod query0;
 mod result0;
 mod result1;
+mod return_types;
 
 use phera_extension_api::{
     ClassEntry, ClassHooks, ClassKind, Context, MethodEntry, NativeClone, NativeError,
@@ -35,6 +37,8 @@ pub fn register(registry: &mut Registry) {
         }
     }
     aliases::register(registry, groups.into_iter().flatten());
+    return_types::register(registry);
+    large_objects::register(registry);
 }
 
 const METHODS: [MethodEntry; 1] =

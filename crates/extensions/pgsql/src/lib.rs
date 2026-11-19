@@ -6,6 +6,7 @@ mod copy;
 mod dml;
 mod escape;
 mod information;
+mod lob;
 mod query;
 mod registration;
 mod result;

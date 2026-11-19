@@ -7,7 +7,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
     FunctionEntry::asynchronous(
         "pg_escape_string",
         &[
-            Param::new("connection", ParamType::Mixed),
+            Param::new("connection", ParamType::Untyped),
             Param::new("string", ParamType::String).with_default(ConstantValue::Null),
         ],
         escape::escape::<0>,
@@ -15,7 +15,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
     FunctionEntry::asynchronous(
         "pg_escape_literal",
         &[
-            Param::new("connection", ParamType::Mixed),
+            Param::new("connection", ParamType::Untyped),
             Param::new("string", ParamType::String).with_default(ConstantValue::Null),
         ],
         escape::escape::<1>,
@@ -23,7 +23,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
     FunctionEntry::asynchronous(
         "pg_escape_identifier",
         &[
-            Param::new("connection", ParamType::Mixed),
+            Param::new("connection", ParamType::Untyped),
             Param::new("string", ParamType::String).with_default(ConstantValue::Null),
         ],
         escape::escape::<2>,
@@ -31,7 +31,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
     FunctionEntry::asynchronous(
         "pg_escape_bytea",
         &[
-            Param::new("connection", ParamType::Mixed),
+            Param::new("connection", ParamType::Untyped),
             Param::new("string", ParamType::String).with_default(ConstantValue::Null),
         ],
         escape::escape::<3>,
@@ -46,7 +46,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         &[
             Param::new("connection", ParamType::Class("PgSql\\Connection")),
             Param::new("table_name", ParamType::String),
-            Param::new("rows", ParamType::ArrayOrObject),
+            Param::new("rows", ParamType::Iterable),
             Param::new("separator", ParamType::String).with_default(ConstantValue::String("\t")),
             Param::new("null_as", ParamType::String).with_default(ConstantValue::String("\\\\N")),
         ],
@@ -131,7 +131,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
     FunctionEntry::asynchronous(
         "pg_put_line",
         &[
-            Param::new("connection", ParamType::Mixed),
+            Param::new("connection", ParamType::Untyped),
             Param::new("query", ParamType::String).optional(),
         ],
         copy::line::<false>,

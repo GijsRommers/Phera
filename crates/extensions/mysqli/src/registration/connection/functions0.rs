@@ -64,7 +64,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         &[
             Param::new("mysql", ParamType::Class("mysqli")),
             Param::new("option", ParamType::Int),
-            Param::new("value", ParamType::Mixed),
+            Param::new("value", ParamType::Untyped),
         ],
         dispatch::local_function::<{ dispatch::OPTION }>,
     ),
@@ -73,7 +73,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         &[
             Param::new("mysql", ParamType::Class("mysqli")),
             Param::new("option", ParamType::Int),
-            Param::new("value", ParamType::Mixed),
+            Param::new("value", ParamType::Untyped),
         ],
         dispatch::local_function::<{ dispatch::OPTION }>,
     ),

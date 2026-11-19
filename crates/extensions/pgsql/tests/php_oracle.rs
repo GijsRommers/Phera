@@ -5,6 +5,35 @@ use phera_extension_api::testing::{
     scripts::{Comparison, Runtime},
 };
 
+#[test]
+fn function_declarations_match_php() {
+    use std::fmt::Write;
+
+    let Some(comparison) = Comparison::from_environment("pgsql-declarations") else {
+        return;
+    };
+    let mut registry = phera_extension_api::Registry::new();
+    registry.load(&phera_ext_pgsql::Pgsql);
+    let mut script = format!("<?php\n{}\n", oracle::PHP_PREAMBLE);
+    for entry in registry.functions() {
+        let name = entry.name;
+        writeln!(
+            script,
+            "run('{name}', function () {{
+                $r = new ReflectionFunction('{name}');
+                $params = [];
+                foreach ($r->getParameters() as $p) {{
+                    $params[] = [$p->getName(), (string)$p->getType(),
+                        $p->isOptional(), $p->isPassedByReference(), $p->isVariadic()];
+                }}
+                return [(string)$r->getReturnType(), $params];
+            }});"
+        )
+        .expect("write declaration case");
+    }
+    comparison.check_matrix(&script, registry.functions().count());
+}
+
 const SETUP: &str = r#"
 $db = pg_connect('host=127.0.0.1 port=54329 dbname=pgsql_ext user=phera password=phera');
 function rows($db) {

@@ -64,7 +64,7 @@ pub const ENTRIES: &[MethodEntry] = &[
         "options",
         &[
             Param::new("option", ParamType::Int),
-            Param::new("value", ParamType::Mixed),
+            Param::new("value", ParamType::Untyped),
         ],
         dispatch::local_method::<{ dispatch::OPTION }>,
     )
@@ -73,7 +73,7 @@ pub const ENTRIES: &[MethodEntry] = &[
         "set_opt",
         &[
             Param::new("option", ParamType::Int),
-            Param::new("value", ParamType::Mixed),
+            Param::new("value", ParamType::Untyped),
         ],
         dispatch::local_method::<{ dispatch::OPTION }>,
     )

@@ -62,8 +62,11 @@ launching for web requests, run `phera serve --no-process public`.
 The `mysqli` and `pgsql` extensions share PDO's async connections, TLS and
 connection pool. For mysqli single statements, `MYSQLI_USE_RESULT` fetches one
 row at a time, including in `foreach`. PostgreSQL supports the `pg_exec` alias
-and other PHP 8.5 aliases for supported operations. Compatibility testing is
-in progress. MySQL LOCAL INFILE is disabled.
+and other PHP 8.5 aliases for supported operations. `pg_copy_from()` accepts
+arrays and traversable row sources. PostgreSQL large objects can be opened,
+read, written, sought, truncated and unlinked in the current transaction.
+Native function return types are visible through reflection. Compatibility
+testing is in progress. MySQL LOCAL INFILE is disabled.
 
 In progress: bcmath, curl, gmp, intl, sodium, zlib.
 Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.

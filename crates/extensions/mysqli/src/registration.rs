@@ -3,6 +3,7 @@
 mod connection;
 mod dispatch;
 mod result;
+mod return_types;
 mod statement_dispatch;
 mod statements;
 
@@ -72,6 +73,7 @@ pub fn register(registry: &mut Registry) {
         const { &[Param::new("flags", ParamType::Int)] },
         report,
     ));
+    return_types::register(registry);
 }
 
 fn report(context: &mut dyn Context, values: &[Value]) -> NativeResult {

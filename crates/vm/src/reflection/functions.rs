@@ -316,19 +316,21 @@ fn native_parameters(parameters: &[Param]) -> Vec<ParameterInfo> {
 
 fn native_parameter(position: usize, param: Param) -> ParameterInfo {
     let name = param.ty.name();
-    let declared_type = if param.nullable && name != "mixed" {
-        if name.contains('|') {
+    let declared_type = if param.ty == phera_extension_api::ParamType::Untyped {
+        None
+    } else if param.nullable && name != "mixed" {
+        Some(if name.contains('|') {
             format!("{name}|null")
         } else {
             format!("?{name}")
-        }
+        })
     } else {
-        name.into()
+        Some(name.into())
     };
     ParameterInfo {
         name: param.name.into(),
         position,
-        declared_type: Some(declared_type),
+        declared_type,
         by_reference: param.by_ref,
         variadic: param.variadic,
         optional: param.optional,

@@ -5,6 +5,39 @@ use phera_extension_api::testing::{
     scripts::{Comparison, Runtime},
 };
 
+#[test]
+fn function_declarations_match_php() {
+    use std::fmt::Write;
+
+    let Some(comparison) = Comparison::from_environment("mysqli-declarations") else {
+        return;
+    };
+    let mut registry = phera_extension_api::Registry::new();
+    registry.class(phera_extension_api::ClassEntry::interface(
+        "IteratorAggregate",
+    ));
+    registry.class(phera_extension_api::ClassEntry::class("RuntimeException"));
+    registry.load(&phera_ext_mysqli::Mysqli);
+    let mut script = format!("<?php\n{}\n", oracle::PHP_PREAMBLE);
+    for entry in registry.functions() {
+        let name = entry.name;
+        writeln!(
+            script,
+            "run('{name}', function () {{
+                $r = new ReflectionFunction('{name}');
+                $params = [];
+                foreach ($r->getParameters() as $p) {{
+                    $params[] = [$p->getName(), (string)$p->getType(),
+                        $p->isOptional(), $p->isPassedByReference(), $p->isVariadic()];
+                }}
+                return [(string)$r->getReturnType(), $params];
+            }});"
+        )
+        .expect("write declaration case");
+    }
+    comparison.check_matrix(&script, registry.functions().count());
+}
+
 const SETUP: &str = r#"
 $db = mysqli_init();
 mysqli_real_connect($db, '127.0.0.1', 'phera', 'phera', 'mysqli_ext', 33069);

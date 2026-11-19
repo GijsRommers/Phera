@@ -7,7 +7,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
     FunctionEntry::asynchronous(
         "pg_query",
         &[
-            Param::new("connection", ParamType::Mixed),
+            Param::new("connection", ParamType::Untyped),
             Param::new("query", ParamType::String).with_default(ConstantValue::Null),
         ],
         query::execute::<0, false>,
@@ -23,8 +23,8 @@ pub const ENTRIES: &[FunctionEntry] = &[
     FunctionEntry::asynchronous(
         "pg_query_params",
         &[
-            Param::new("connection", ParamType::Mixed),
-            Param::new("query", ParamType::Mixed),
+            Param::new("connection", ParamType::Untyped),
+            Param::new("query", ParamType::Untyped),
             Param::new("params", ParamType::Array).with_default(ConstantValue::Null),
         ],
         query::execute::<1, false>,
@@ -41,7 +41,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
     FunctionEntry::asynchronous(
         "pg_prepare",
         &[
-            Param::new("connection", ParamType::Mixed),
+            Param::new("connection", ParamType::Untyped),
             Param::new("statement_name", ParamType::String),
             Param::new("query", ParamType::String).with_default(ConstantValue::Null),
         ],
@@ -59,8 +59,8 @@ pub const ENTRIES: &[FunctionEntry] = &[
     FunctionEntry::asynchronous(
         "pg_execute",
         &[
-            Param::new("connection", ParamType::Mixed),
-            Param::new("statement_name", ParamType::Mixed),
+            Param::new("connection", ParamType::Untyped),
+            Param::new("statement_name", ParamType::Untyped),
             Param::new("params", ParamType::Array).with_default(ConstantValue::Null),
         ],
         query::execute::<3, false>,

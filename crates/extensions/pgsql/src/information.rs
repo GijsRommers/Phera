@@ -201,9 +201,10 @@ pub(crate) fn asynchronous_named<'a, const OP: usize>(
                         Ok(Value::from(list))
                     }
                     3 => Ok(Value::Bool(true)),
-                    _ => Err(phera_extension_api::NativeError::value_error(
-                        "pg_last_notice(): Argument #2 ($mode) must be a valid mode",
-                    )),
+                    _ => Err(phera_extension_api::NativeError::value_error(concat!(
+                        "pg_last_notice(): Argument #2 ($mode) must be one of ",
+                        "PGSQL_NOTICE_LAST, PGSQL_NOTICE_ALL, or PGSQL_NOTICE_CLEAR",
+                    ))),
                 }
             }
             NOTIFY => {

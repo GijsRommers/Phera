@@ -1,5 +1,7 @@
 //! `pg_copy_from($db, 'table', $rows)` sends COPY data through the shared PostgreSQL client.
 
+use phera_extension_api::traversal::{self, IteratorStep};
+use phera_extension_api::value::{to_bool, to_php_string};
 use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, PhpArray, Value, args};
 
 use crate::{connection, escape};
@@ -15,7 +17,7 @@ pub fn copy<const FROM: bool>(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture
             args::string(&a, sep_arg).map_or_else(|| "\t".into(), |s| s.to_string_lossy());
         if separator.len() != 1 {
             return Err(NativeError::value_error(format!(
-                "{call}(): Argument #{} ($separator) must be a single character",
+                "{call}(): Argument #{} ($separator) must be one character",
                 sep_arg + 1
             )));
         }
@@ -28,23 +30,11 @@ pub fn copy<const FROM: bool>(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture
             escape::literal(&separator),
             escape::literal(&null)
         );
-        let mut rows = Vec::new();
-        if FROM {
-            let Some(values) = args::array(&a, 2) else {
-                return Err(NativeError::error(
-                    "pg_copy_from(): Traversable rows are not supported",
-                ));
-            };
-            for (_, row) in values.iter() {
-                let mut row = phera_extension_api::value::to_php_string(row, c.diagnostics())?
-                    .as_bytes()
-                    .to_vec();
-                if row.last() != Some(&b'\n') {
-                    row.push(b'\n');
-                }
-                rows.push(row);
-            }
-        }
+        let rows = if FROM {
+            copy_rows(c, args::value(&a, 2)).await?
+        } else {
+            Vec::new()
+        };
         let result = connection::run(&lease, move |pg| {
             Box::pin(async move {
                 if FROM {
@@ -74,6 +64,37 @@ pub fn copy<const FROM: bool>(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture
             }
         }
     })
+}
+
+async fn copy_rows(c: &mut dyn Context, values: &Value) -> Result<Vec<Vec<u8>>, NativeError> {
+    let mut rows = Vec::new();
+    match &*values.deref() {
+        Value::Array(values) => {
+            for (_, value) in values.iter() {
+                rows.push(copy_row(c, value)?);
+            }
+        }
+        Value::Object(object) => {
+            let mut cursor = c.traverse(object.clone()).await?;
+            traversal::step(cursor.as_mut(), c, IteratorStep::Rewind).await?;
+            while to_bool(&traversal::step(cursor.as_mut(), c, IteratorStep::Valid).await?) {
+                let value = traversal::step(cursor.as_mut(), c, IteratorStep::Current).await?;
+                rows.push(copy_row(c, &value)?);
+                traversal::step(cursor.as_mut(), c, IteratorStep::Advance).await?;
+            }
+        }
+        _ => return Err(NativeError::error("Invalid COPY row source")),
+    }
+    Ok(rows)
+}
+
+fn copy_row(c: &mut dyn Context, value: &Value) -> Result<Vec<u8>, NativeError> {
+    let value = to_php_string(value, c.diagnostics())?;
+    let mut row = value.as_bytes().to_vec();
+    if row.last() != Some(&b'\n') {
+        row.push(b'\n');
+    }
+    Ok(row)
 }
 
 pub fn line<const END: bool>(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture<'_, NativeResult> {

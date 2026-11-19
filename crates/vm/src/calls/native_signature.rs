@@ -48,7 +48,7 @@ pub(super) fn exact_types(parameter: &Param) -> TypeMask {
         P::ArrayOrNumber => T::ARRAY.union(T::INT).union(T::FLOAT),
         P::ArrayOrFloat => T::ARRAY.union(T::FLOAT),
         P::ArrayOrBool => T::ARRAY.union(T::BOOL),
-        P::Mixed => T::MIXED.union(RESOURCE),
+        P::Untyped | P::Mixed => T::MIXED.union(RESOURCE),
         P::Class(_) | P::Callable | P::ReflectedObject | P::RecursiveOrAggregate => T::default(),
     };
     if parameter.nullable {
