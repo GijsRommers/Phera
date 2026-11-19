@@ -12,6 +12,7 @@ impl Vm {
         name: &str,
         alias: &str,
         autoload: bool,
+        arguments: &[Value],
     ) -> NativeResult {
         let class = if autoload {
             self.lookup_class(name).await?
@@ -48,13 +49,11 @@ impl Vm {
                     | "void"
             )
         {
-            let location = self.location();
-            return Err(phera_extension_api::NativeError::Unwind(
-                phera_extension_api::Unwind(Box::new(crate::error_traces::DeclarationFailure {
-                    message: format!("Cannot use \"{key}\" as a class alias as it is reserved"),
-                    file: location.file,
-                    line: location.line,
-                })),
+            return Err(self.fatal_native_error(
+                64,
+                format!("Cannot use \"{key}\" as a class alias as it is reserved"),
+                "class_alias",
+                arguments,
             ));
         }
         if key == "_" {

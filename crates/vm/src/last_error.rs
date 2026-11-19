@@ -84,6 +84,16 @@ impl Vm {
         ))))
     }
 
+    /// Zend has already reported the pending exception and omits a second trace.
+    pub(crate) fn fatal_during_exception(&self, message: impl Into<PhpString>) -> NativeError {
+        NativeError::Unwind(Unwind(Box::new(FatalDiagnostic {
+            level: 1,
+            message: message.into(),
+            location: self.location(),
+            trace: None,
+        })))
+    }
+
     fn prepare_fatal(
         &mut self,
         level: i64,
