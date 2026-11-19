@@ -5,11 +5,13 @@
 use phera_extension_api::PhpArray;
 use phera_io_pool::Operation;
 
-use crate::drivers::{Column, Driver, Prepared, Rows, connection_error};
+use crate::constants::ATTR_SERVER_INFO;
+use crate::drivers::{Column, Driver, Execution, Prepared, Rows, connection_error};
 use crate::errors::DbError;
 use crate::metadata::Metadata;
 use crate::parameters::BoundValue;
 use crate::placeholders::Sql;
+use std::sync::Arc;
 
 pub struct Lease {
     connection: phera_io_pool::Lease<Driver>,
@@ -81,13 +83,49 @@ impl Lease {
         sql: &Sql,
         prepared: &Prepared,
         values: &[BoundValue],
+        options: Execution,
     ) -> Result<Rows, DbError> {
         let (sql, prepared, values) = (sql.clone(), prepared.clone(), values.to_vec());
         self.run(move |driver| {
-            Box::pin(async move { driver.execute(&sql, &prepared, &values).await })
+            Box::pin(async move { driver.execute(&sql, &prepared, &values, &options).await })
         })
         .await?
         .into_php()
+    }
+
+    pub async fn read_stream(
+        &mut self,
+        owner: Arc<()>,
+        all: bool,
+    ) -> Result<Option<(Rows, bool)>, DbError> {
+        let result = self
+            .run(move |driver| {
+                Box::pin(async move {
+                    match driver {
+                        Driver::Mysql(mysql) => mysql.read_stream(&owner, all).await,
+                        Driver::Postgres(postgres) => postgres.read_lazy(&owner, all).await,
+                        _ => Ok(None),
+                    }
+                })
+            })
+            .await?;
+        result
+            .map(|(rows, done)| rows.into_php().map(|rows| (rows, done)))
+            .transpose()
+    }
+
+    pub async fn close_stream(&mut self, owner: Arc<()>) -> Result<(), DbError> {
+        self.run(move |driver| {
+            Box::pin(async move {
+                match driver {
+                    Driver::Mysql(mysql) => mysql.close_stream(&owner).await,
+                    Driver::Postgres(postgres) => postgres.close_lazy(&owner),
+                    Driver::Sqlite(_) => {}
+                }
+                Ok(())
+            })
+        })
+        .await
     }
 
     pub async fn exec(&mut self, sql: &str) -> Result<Rows, DbError> {
@@ -144,6 +182,37 @@ impl Lease {
                 match driver {
                     Driver::Sqlite(sqlite) => sqlite.set_timeout(milliseconds).await,
                     _ => Err(connection_error("ATTR_TIMEOUT is set on SQLite only")),
+                }
+            })
+        })
+        .await
+    }
+
+    pub async fn mysql_autocommit(&mut self, enabled: bool) -> Result<(), DbError> {
+        self.run(move |driver| {
+            Box::pin(async move {
+                if let Driver::Mysql(mysql) = driver {
+                    mysql.set_autocommit(enabled).await
+                } else {
+                    Err(connection_error("ATTR_AUTOCOMMIT is set on MySQL only"))
+                }
+            })
+        })
+        .await
+    }
+
+    pub async fn server_attribute(&mut self, attribute: i64) -> Result<String, DbError> {
+        self.run(move |driver| {
+            Box::pin(async move {
+                match (driver, attribute) {
+                    (Driver::Mysql(mysql), ATTR_SERVER_INFO) => mysql.server_info().await,
+                    (Driver::Postgres(postgres), ATTR_SERVER_INFO) => {
+                        postgres.buffer_lazy().await;
+                        postgres.server_info().await
+                    }
+                    (Driver::Mysql(mysql), _) => Ok(mysql.connection_status()),
+                    (Driver::Postgres(postgres), _) => Ok(postgres.connection_status().into()),
+                    (Driver::Sqlite(_), _) => Err(connection_error("Missing server connection")),
                 }
             })
         })

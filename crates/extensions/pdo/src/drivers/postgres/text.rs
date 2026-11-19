@@ -40,7 +40,7 @@ impl ToSql for Binary {
     }
 }
 
-fn server_text(kind: &Type) -> bool {
+pub(super) fn server_text(kind: &Type) -> bool {
     matches!(
         *kind,
         Type::TIME

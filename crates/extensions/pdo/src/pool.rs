@@ -28,6 +28,7 @@ use phera_extension_api::value::to_bool;
 use phera_extension_api::{ArrayKey, PhpArray};
 use phera_io_pool::{AcquireError, IoRuntime, Options, Pool};
 
+use crate::connect_options::ConnectOptions;
 use crate::drivers::{Driver, connection_error};
 use crate::dsn::{DriverName, Dsn};
 use crate::errors::DbError;
@@ -53,6 +54,7 @@ static POOL: Pool<Key, Driver> = Pool::new(
 struct Key {
     driver: DriverName,
     fields: BTreeMap<String, String>,
+    options: ConnectOptions,
     username: String,
     password: String,
 }
@@ -81,6 +83,7 @@ impl Key {
         Self {
             driver: dsn.driver,
             fields,
+            options: dsn.options.clone(),
             username: username.to_owned(),
             password: password.to_owned(),
         }

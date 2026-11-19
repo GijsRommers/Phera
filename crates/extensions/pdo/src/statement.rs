@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
@@ -21,6 +22,8 @@ pub struct Statement {
     // Rust drops fields in declaration order. Queue statement cleanup before
     // releasing the session, whose final drop may immediately start pool reset.
     pub prepared: Prepared,
+    pub stream_owner: Option<Arc<()>>,
+    pub postgres_lazy: bool,
     pub connection: Rc<Session>,
     pub sql: Sql,
     pub bindings: HashMap<String, Binding>,
@@ -51,7 +54,13 @@ pub fn prepare<'a>(
     this: Option<Rc<Object>>,
     arguments: Vec<Value>,
 ) -> LocalFuture<'a, NativeResult> {
-    Box::pin(async move { create(context, this.as_ref(), &arguments, false).await })
+    Box::pin(async move {
+        let result = create(context, this.as_ref(), &arguments, false).await?;
+        if let Value::Object(object) = &result {
+            initialize(context, object).await?;
+        }
+        Ok(result)
+    })
 }
 
 pub fn query<'a>(
@@ -71,8 +80,15 @@ pub fn query<'a>(
             *statement.connection.error.borrow_mut() = statement.error.clone();
             return executed;
         }
+        initialize(context, object).await?;
         Ok(result)
     })
+}
+
+async fn initialize(context: &mut dyn Context, object: &Rc<Object>) -> Result<(), NativeError> {
+    let connection = state(Some(object))?.borrow().connection.clone();
+    let class = connection.attributes.borrow().statement_class.clone();
+    class.initialize(context, object.clone()).await
 }
 
 async fn create(
@@ -101,13 +117,13 @@ async fn create(
             arguments,
             attributes.fetch,
             0,
-            0,
+            attributes.fetch_flags,
         )?
     } else {
         crate::fetch_options::Configuration {
             mode: attributes.fetch,
             column: 0,
-            flags: 0,
+            flags: attributes.fetch_flags,
         }
     };
     // SQLite numbers its own `?`, `?2`, `:name` and `@name` placeholders.
@@ -121,6 +137,8 @@ async fn create(
     };
     let prepared = if attributes.emulate {
         Prepared::Emulated
+    } else if attributes.pgsql_disable_prepares {
+        Prepared::PostgresUnnamed
     } else if connection.name == crate::dsn::DriverName::Postgres {
         let number = connection.statement_sequence.get() + 1;
         connection.statement_sequence.set(number);
@@ -134,7 +152,7 @@ async fn create(
     };
     let mut properties = PhpArray::new();
     properties.insert(ArrayKey::str("queryString"), Value::from(source));
-    let result = context.create_object("PDOStatement", properties)?;
+    let result = context.create_object(&attributes.statement_class.name, properties)?;
     let Value::Object(object) = &result else {
         return Err(NativeError::error(
             "PDOStatement allocation did not create an object",
@@ -151,9 +169,12 @@ async fn create(
     };
     connection.success();
     *object.native.borrow_mut() = Some(Box::new(Rc::new(RefCell::new(Statement {
+        postgres_lazy: connection.name == crate::dsn::DriverName::Postgres
+            && !attributes.pgsql_prefetch,
         connection,
         sql,
         prepared,
+        stream_owner: None,
         bindings: HashMap::new(),
         rows: Rows::default(),
         cursor: 0,
