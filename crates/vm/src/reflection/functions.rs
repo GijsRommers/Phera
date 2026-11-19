@@ -209,7 +209,8 @@ impl Vm {
                 );
             }
             MethodBody::Closure(operation) => {
-                reflected.parameters = native_parameters("", operation.parameters());
+                reflected.parameters =
+                    native_parameters(&method.signature(&self.code).name, operation.parameters());
                 reflected.extension = Some("Core".into());
             }
         }

@@ -8,6 +8,17 @@ use phera_extension_api::testing::oracle;
 
 use super::super::Runtime;
 
+const DISCOVER: &str = r#"<?php
+foreach (get_defined_functions()['internal'] as $name) echo $name, "\n";
+foreach (array_merge(get_declared_classes(), get_declared_interfaces(), get_declared_traits()) as $name) {
+    foreach ((new ReflectionClass($name))->getMethods() as $method) {
+        if ($method->getDeclaringClass()->getName() === $name) {
+            echo $name, '::', $method->getName(), "\n";
+        }
+    }
+}
+"#;
+
 const INSPECT: &str = r#"
 function inspectDefaults(array $symbols): void {
     foreach ($symbols as $symbol) {
@@ -43,6 +54,10 @@ function inspectDefaults(array $symbols): void {
 async fn reflected_native_parameters_agree_with_php() {
     let runtime = Runtime::new();
     let mut symbols = symbols(&runtime.web_registry);
+    let discovered = run_reflection_script(&runtime, DISCOVER).await;
+    symbols.extend(discovered.lines().map(str::to_owned));
+    symbols.sort_unstable();
+    symbols.dedup();
     let mut source = String::from("<?php\n");
     source.push_str(INSPECT);
     invoke(&mut source, &symbols);
@@ -59,7 +74,13 @@ async fn reflected_native_parameters_agree_with_php() {
     let mut source = String::from("<?php\n");
     source.push_str(INSPECT);
     invoke(&mut source, &symbols);
-    let unit = phera_compiler::compile(&source, "native-parameters.php").unwrap();
+    let output = run_reflection_script(&runtime, &source).await;
+    let output: Vec<_> = output.lines().map(str::to_owned).collect();
+    oracle::compare("reflected native parameters", &symbols, &php, &output);
+}
+
+async fn run_reflection_script(runtime: &Runtime, source: &str) -> String {
+    let unit = phera_compiler::compile(source, "native-parameters.php").unwrap();
     let mut vm = runtime.new_cli_vm();
     assert_eq!(
         vm.run(Arc::new(unit)).await,
@@ -67,13 +88,11 @@ async fn reflected_native_parameters_agree_with_php() {
         "{}",
         String::from_utf8_lossy(&vm.output)
     );
-    let output = String::from_utf8(vm.output).unwrap();
-    let output: Vec<_> = output.lines().map(str::to_owned).collect();
-    oracle::compare("reflected native parameters", &symbols, &php, &output);
+    String::from_utf8(vm.output).unwrap()
 }
 
 fn symbols(registry: &Registry) -> Vec<String> {
-    let mut symbols: Vec<_> = registry
+    registry
         .functions()
         .map(|function| function.name.to_owned())
         .chain(registry.classes().flat_map(|class| {
@@ -82,9 +101,7 @@ fn symbols(registry: &Registry) -> Vec<String> {
                 .iter()
                 .map(|method| format!("{}::{}", class.name, method.name))
         }))
-        .collect();
-    symbols.sort_unstable();
-    symbols
+        .collect()
 }
 
 fn invoke(source: &mut String, symbols: &[String]) {
