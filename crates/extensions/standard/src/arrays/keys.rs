@@ -3,8 +3,8 @@
 
 use phera_extension_api::value::{loose_equals, strict_equals};
 use phera_extension_api::{
-    ArrayKey, Change, Context, FunctionEntry, LocalFuture, NativeError, NativeFn, NativeResult,
-    Param, ParamType, PhpArray, PhpString, Registry, Value, args,
+    ArrayKey, Change, Context, FunctionEntry, LanguageLevel, LocalFuture, NativeError, NativeFn,
+    NativeResult, Param, ParamType, PhpArray, PhpString, Value, args,
 };
 
 use super::list;
