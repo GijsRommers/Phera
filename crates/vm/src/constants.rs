@@ -54,7 +54,7 @@ impl Vm {
         constant: crate::constant_table::GlobalConstant,
     ) -> Value {
         if let Some(message) = constant.deprecated {
-            self.diagnostic("Deprecated", message.into());
+            self.diagnostic("Deprecated", message.to_string());
         }
         constant.value
     }
@@ -69,7 +69,22 @@ impl Vm {
         if self.constants.contains_key(&name) {
             self.warn(format!("Constant {name} already defined"));
         } else {
-            self.constants.insert(name, self.get(source));
+            let origin = self.current().map(|frame| frame.frame.function);
+            let deprecated = self.current().and_then(|frame| {
+                let metadata = frame.unit().constant_metadata.get(&name)?;
+                let attr =
+                    crate::attribute_diagnostics::attribute(&metadata.attributes, "Deprecated")?;
+                Some(crate::attribute_diagnostics::deprecation_message(
+                    attr,
+                    &format!("Constant {name}"),
+                ))
+            });
+            self.constants.insert(
+                name,
+                self.get(source),
+                origin.map(crate::constant_table::ConstantOrigin::Declaration),
+                deprecated,
+            );
         }
         Ok(())
     }

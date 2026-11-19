@@ -90,6 +90,7 @@ pub enum StatementKind {
     /// Group uses are flattened: `use A\{B, C as D};` is two items.
     Use(Vec<UseItem>),
     Const {
+        doc_comment: Option<Span>,
         attributes: Vec<Attribute>,
         items: Vec<ConstantDeclaration>,
     },

@@ -39,7 +39,7 @@ impl Vm {
         self.publish_declaration_warnings(&unit);
         self.declare_included_functions(&unit)?;
         let function = self.code.load(&unit);
-        self.hoist_classes(&unit)?;
+        self.hoist_classes(&unit, function)?;
         let bindings = self.include_bindings(&unit)?;
         let context = self.current().and_then(|frame| frame.method());
         let kind = if let Some(context) = &context {

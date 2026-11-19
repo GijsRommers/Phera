@@ -36,6 +36,7 @@ pub(crate) struct PropertyGuard {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PropertyRead {
     Read,
+    Update,
     Coalesce,
     Isset,
     Empty,
@@ -198,7 +199,7 @@ impl Vm {
         mode: PropertyRead,
     ) -> Result<ReadProperty, phera_extension_api::NativeError> {
         let missing = match mode {
-            PropertyRead::Read => Missing::Warn,
+            PropertyRead::Read | PropertyRead::Update => Missing::Warn,
             PropertyRead::Coalesce => Missing::Silent,
             PropertyRead::Isset | PropertyRead::Empty => Missing::Isset,
         };
@@ -208,7 +209,22 @@ impl Vm {
                 .map(ReadProperty::stored);
         };
         let name = property_name(&key);
-        if let Some(value) = self.native_property_read(object, &name, missing)? {
+        let native = if mode == PropertyRead::Update {
+            crate::properties::native_property_access(object)
+                .map(|access| {
+                    (access.read)(
+                        self,
+                        object,
+                        &name,
+                        phera_extension_api::NativePropertyRead::Update,
+                    )
+                })
+                .transpose()?
+                .flatten()
+        } else {
+            self.native_property_read(object, &name, missing)?
+        };
+        if let Some(value) = native {
             return Ok(ReadProperty::stored(value));
         }
         let Some(class) = self.classes.for_object(object).filter(|class| {
@@ -233,7 +249,7 @@ impl Vm {
                 .read_declared_property(object, &name, missing)
                 .map(ReadProperty::stored);
         }
-        if mode != PropertyRead::Read {
+        if !matches!(mode, PropertyRead::Read | PropertyRead::Update) {
             if let Some(method) = self.property_hook(&class, object, &key, PropertyHook::Isset) {
                 let exists = self
                     .invoke_property_hook(

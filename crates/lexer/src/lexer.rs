@@ -131,6 +131,7 @@ pub struct Lexer<'src> {
     /// apart from `$obj->__halt_compiler`.
     previous: TokenKind,
     tokenizer: bool,
+    doc_comments: Option<Vec<(usize, Span)>>,
     short_open_tags: bool,
     diagnostics: Option<diagnostics::ScannerDiagnostics>,
 }
@@ -151,6 +152,7 @@ impl<'src> Lexer<'src> {
             halt_countdown: None,
             previous: TokenKind::Eof,
             tokenizer: false,
+            doc_comments: None,
             short_open_tags: false,
             diagnostics: None,
         }
@@ -163,6 +165,19 @@ impl<'src> Lexer<'src> {
             modes: vec![Mode::Php],
             ..Self::new(source)
         }
+    }
+
+    /// Collect doc comment spans keyed by the following token's source offset.
+    pub fn with_doc_comments(mut self) -> Self {
+        self.doc_comments = Some(Vec::new());
+        self
+    }
+
+    pub fn take_doc_comments(&mut self) -> Vec<(usize, Span)> {
+        self.doc_comments
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
     /// Collect PHP scanner warnings and deprecations with source offsets.
@@ -339,7 +354,21 @@ impl<'src> Lexer<'src> {
                 return Ok(self.token(kind, start));
             }
         } else {
-            self.position = self.trivia_end(self.position, property)?;
+            let mut start = self.position;
+            while let Some((kind, end, complete)) = self.trivia_at(start, property) {
+                if !complete {
+                    return Err(LexError {
+                        kind: LexErrorKind::UnterminatedComment,
+                        span: Span::new(start, end),
+                    });
+                }
+                if kind == TokenKind::DocComment && self.doc_comments.is_some() {
+                    start = self.capture_doc_comment(Span::new(start, end), property)?;
+                    break;
+                }
+                start = end;
+            }
+            self.position = start;
         }
 
         let start = self.position;
@@ -1032,6 +1061,32 @@ impl<'src> Lexer<'src> {
     }
 
     // --- Whitespace and comments -----------------------------------------------
+
+    /// Finish this run of trivia and attach its final doc comment to the next token.
+    #[cold]
+    fn capture_doc_comment(
+        &mut self,
+        mut comment: Span,
+        property: bool,
+    ) -> Result<usize, LexError> {
+        let mut position = comment.end;
+        while let Some((kind, end, complete)) = self.trivia_at(position, property) {
+            if !complete {
+                return Err(LexError {
+                    kind: LexErrorKind::UnterminatedComment,
+                    span: Span::new(position, end),
+                });
+            }
+            if kind == TokenKind::DocComment {
+                comment = Span::new(position, end);
+            }
+            position = end;
+        }
+        if let Some(comments) = &mut self.doc_comments {
+            comments.push((position, comment));
+        }
+        Ok(position)
+    }
 
     /// Where the whitespace and comments starting at `from` end.
     fn trivia_end(&self, from: usize, looking_for_property: bool) -> Result<usize, LexError> {

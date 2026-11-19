@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 itoa.workspace = true
+memchr = "2"
 phera-extension-api.workspace = true
 
 [lints]
