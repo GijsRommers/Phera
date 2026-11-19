@@ -11,7 +11,10 @@ use phera_extension_api::{
     Registry, Value, args,
 };
 
+mod controls;
 mod encoding;
+
+pub use controls::Controls;
 
 use encoding::Encoding;
 
@@ -38,6 +41,7 @@ pub(crate) fn register(registry: &mut Registry) {
     registry.describe_function("str_getcsv", "array", None);
 }
 
+#[derive(Clone, Copy)]
 pub struct Dialect {
     separator: u8,
     enclosure: u8,
@@ -53,34 +57,14 @@ impl Dialect {
         arguments: &[Value],
         start: usize,
     ) -> Result<Self, NativeError> {
-        let separator = byte(function, arguments, start, "separator", b',')?;
-        let enclosure = byte(function, arguments, start + 1, "enclosure", b'"')?;
-        let escape = match args::string(arguments, start + 2).map(PhpString::as_bytes) {
-            None => {
-                context.deprecated(format!(
-                    concat!(
-                        "{}(): the $escape parameter must be provided ",
-                        "as its default value will change"
-                    ),
-                    function,
-                ));
-                Some(b'\\')
-            }
-            Some([]) => None,
-            Some([byte]) => Some(*byte),
-            _ => {
-                return Err(NativeError::value_error(format!(
-                    "{function}(): Argument #{} ($escape) must be empty or a single character",
-                    start + 3
-                )));
-            }
-        };
-        Ok(Self {
-            separator,
-            enclosure,
-            escape,
-            encoding: Encoding::for_locale(crate::locale::ctype_name(context).as_bytes()),
-        })
+        let controls = Controls::default().with_arguments(
+            context,
+            function,
+            arguments,
+            start,
+            Some(" as its default value will change"),
+        )?;
+        Ok(controls.dialect(context))
     }
 
     pub fn separator(&self) -> u8 {
@@ -193,11 +177,15 @@ impl Dialect {
 }
 
 pub fn values(fields: Vec<Option<Vec<u8>>>) -> NativeResult {
+    fields_array(fields).map(Value::from)
+}
+
+pub fn fields_array(fields: Vec<Option<Vec<u8>>>) -> Result<PhpArray, NativeError> {
     let mut values = PhpArray::new();
     for field in fields {
         values.push(field.map_or(Value::Null, Value::from))?;
     }
-    Ok(Value::from(values))
+    Ok(values)
 }
 
 fn str_getcsv(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -207,23 +195,6 @@ fn str_getcsv(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         .decode(input.to_vec(), || Ok(Vec::new()))
         .map_err(|error| NativeError::error(error.to_string()))?;
     values(fields)
-}
-
-fn byte(
-    function: &str,
-    arguments: &[Value],
-    index: usize,
-    name: &str,
-    default: u8,
-) -> Result<u8, NativeError> {
-    match args::string(arguments, index).map(PhpString::as_bytes) {
-        None => Ok(default),
-        Some([byte]) => Ok(*byte),
-        _ => Err(NativeError::value_error(format!(
-            "{function}(): Argument #{} (${name}) must be a single character",
-            index + 1
-        ))),
-    }
 }
 
 fn space(byte: u8) -> bool {

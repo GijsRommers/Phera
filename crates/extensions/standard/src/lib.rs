@@ -50,6 +50,7 @@ impl Extension for Standard {
     }
 }
 
+pub use arrays::associative_sort;
 /// Exposes PHP comparison traversal for adversarial comparator regression tests.
 #[doc(hidden)]
 pub use arrays::zend_sort::order as php_sort_order;

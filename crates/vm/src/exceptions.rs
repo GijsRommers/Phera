@@ -40,6 +40,14 @@ impl Thrown {
     pub(crate) fn into_error(self) -> NativeError {
         NativeError::Unwind(Unwind(Box::new(self)))
     }
+
+    /// A deferred cleanup can run after the original PHP caller has unwound.
+    pub(crate) fn location(&self) -> crate::diagnostics::SourceLocation {
+        crate::diagnostics::SourceLocation {
+            file: property_text(&self.object, "file"),
+            line: error_line(&self.object),
+        }
+    }
 }
 
 impl Vm {

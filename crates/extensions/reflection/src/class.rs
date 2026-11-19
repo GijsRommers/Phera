@@ -185,8 +185,14 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
             const { &[Param::new("args", ParamType::Mixed).variadic()] },
             |c, o, a, names| {
                 Box::pin(async move {
-                    let arguments = crate::function::forwarded_arguments(a, 0, names)?;
-                    instantiate(c, o, Some(arguments)).await
+                    let arguments = crate::function::forwarded_arguments(a.clone(), 0, names)?;
+                    instantiate(
+                        c,
+                        o,
+                        Some(arguments),
+                        Some(("ReflectionClass->newInstance", a)),
+                    )
+                    .await
                 })
             },
         ),
@@ -197,11 +203,16 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
                 let arguments = args::array(&a, 0)
                     .map(|a| (**a).clone())
                     .unwrap_or_default();
-                instantiate(c, o, Some(arguments))
+                instantiate(
+                    c,
+                    o,
+                    Some(arguments),
+                    Some(("ReflectionClass->newInstanceArgs", a)),
+                )
             },
         ),
         MethodEntry::public_async("newInstanceWithoutConstructor", &[], |c, o, _| {
-            instantiate(c, o, None)
+            instantiate(c, o, None, None)
         }),
         MethodEntry::public_async("getAttributes", crate::attribute::FILTER, |c, o, a| {
             Box::pin(async move {
@@ -444,15 +455,26 @@ fn relationship(
     })
 }
 
-fn instantiate(
-    context: &mut dyn Context,
+fn instantiate<'a>(
+    context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
     arguments: Option<PhpArray>,
-) -> LocalFuture<'_, NativeResult> {
+    trace: Option<(&'static str, Vec<Value>)>,
+) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let class = reflected_class(this.as_ref())?;
-        engine(context)?
-            .reflect_construct(&class.info, arguments)
-            .await
+        if let Some((method, args)) = &trace {
+            context.push_callback_frame(method, this, args);
+        }
+        let result = async {
+            engine(context)?
+                .reflect_construct(&class.info, arguments)
+                .await
+        }
+        .await;
+        if trace.is_some() {
+            context.pop_callback_frame();
+        }
+        result
     })
 }

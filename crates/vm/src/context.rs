@@ -86,6 +86,10 @@ impl Context for Vm {
         self
     }
 
+    fn warning_bytes(&mut self, message: &[u8]) {
+        self.diagnostic_bytes("Warning", message);
+    }
+
     fn native_call_error(
         &mut self,
         name: &str,
@@ -164,6 +168,11 @@ impl Context for Vm {
             && self.hooked_property_class(object).is_some()
     }
 
+    fn has_visible_property(&self, object: &phera_value::Object, name: &str) -> bool {
+        self.property_key(object, name)
+            .is_ok_and(|key| object.has(&key))
+    }
+
     fn property_view(
         &mut self,
         object: std::rc::Rc<phera_value::Object>,
@@ -221,7 +230,7 @@ impl Context for Vm {
         let event = crate::error_handlers::DiagnosticEvent {
             level,
             kind: diagnostic.kind.label().into(),
-            message: diagnostic.message.clone(),
+            message: diagnostic.message.as_str().into(),
             location,
             native: self.error_handlers.native_site.clone(),
             trace_location: Some(caller),
@@ -310,6 +319,65 @@ impl Context for Vm {
             Ok(callee) => Box::pin(self.invoke_resolved_callable(callee, arguments)),
             Err(error) => Box::pin(std::future::ready(Err(error))),
         }
+    }
+
+    fn push_callback_frame(
+        &mut self,
+        name: &str,
+        object: Option<std::rc::Rc<phera_value::Object>>,
+        args: &[Value],
+    ) {
+        use crate::error_traces::{NativeCaller, NativeTrace};
+        let trace = NativeTrace::new(name, args);
+        let native = match object {
+            Some(object) => NativeCaller::Method {
+                trace,
+                object,
+                child_location: None,
+            },
+            None => NativeCaller::Saved(trace),
+        };
+        self.push_native_callback(native);
+    }
+
+    fn pop_callback_frame(&mut self) {
+        self.native_callback_sites.pop();
+    }
+
+    fn call_protected_method(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        match self.protocol_method_in_scope(object, name, phera_bytecode::Visibility::Protected) {
+            Ok(callee) => Box::pin(self.invoke_resolved_callable(callee, arguments)),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
+    fn lookup_class<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<
+        'a,
+        Result<Option<std::rc::Rc<dyn phera_value::ClassHandle>>, phera_extension_api::NativeError>,
+    > {
+        Box::pin(async move {
+            Ok(Vm::lookup_class(self, name)
+                .await?
+                .map(|class| class as std::rc::Rc<dyn phera_value::ClassHandle>))
+        })
+    }
+
+    fn is_user_method(&self, object: &phera_value::Object, name: &str) -> bool {
+        object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+            .filter(|class| class.origin == crate::classes::class::ClassOrigin::User)
+            .and_then(|class| class.methods.get(&name.to_ascii_lowercase()))
+            .is_some_and(|method| matches!(method.body, crate::classes::MethodBody::User(_)))
     }
 
     fn generator_ready(

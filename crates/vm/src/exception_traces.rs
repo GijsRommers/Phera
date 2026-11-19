@@ -96,13 +96,8 @@ impl Vm {
         let stack_depth = self.call_stack.depth();
         let mut child_file = None;
         if callbacks != 0 {
-            child_file = self.append_trace_callbacks(
-                &mut trace,
-                &mut callbacks,
-                stack_depth,
-                limit,
-                arguments,
-            );
+            child_file =
+                self.append_trace_callbacks(&mut trace, &mut callbacks, stack_depth, options);
         }
         for depth in (0..stack_depth).rev() {
             if trace.len() >= limit {
@@ -121,22 +116,23 @@ impl Vm {
                 .warning_site
                 .as_ref()
                 .is_some_and(|site| site.boundary == depth);
-            let callback = callbacks != 0
-                && self
-                    .native_callback_sites
-                    .get(callbacks - 1)
-                    .is_some_and(|site| site.boundary == depth);
+            let callback = callbacks
+                .checked_sub(1)
+                .and_then(|index| self.native_callback_sites.get(index))
+                .filter(|site| site.boundary == depth);
             let suspended_native = callee
                 .extras
                 .property_hook
                 .as_deref()
                 .and_then(crate::property_hook_continuation::HookContinuation::native_trace)
                 .is_some();
-            let internal = warning || callback || suspended_native;
+            let internal = warning || callback.is_some() || suspended_native;
             let include_parent =
                 depth > 1 && caller.is_some_and(|caller| caller.function_id().is_none());
             let mut entry = PhpArray::new();
-            if let Some(caller) = caller.filter(|_| !internal) {
+            if let Some(location) = callback.and_then(|site| site.native.child_location()) {
+                add_source_location(&mut entry, &location.file, location.line);
+            } else if let Some(caller) = caller.filter(|_| !internal) {
                 add_location(&mut entry, caller);
             }
             if function {
@@ -201,6 +197,7 @@ impl Vm {
                     &site.native.name,
                     Some((&site.location.file, site.location.line)),
                     arguments.then(|| site.native.arguments.clone()),
+                    None,
                 );
             } else if suspended_native
                 && let Some(native) = self
@@ -217,12 +214,13 @@ impl Vm {
                     &native.name,
                     location,
                     arguments.then(|| native.arguments.clone()),
+                    None,
                 );
                 child_file = caller.map(|frame| frame.cache().trace_file(frame.unit()));
             }
             if callbacks != 0
                 && let Some(file) =
-                    self.append_trace_callbacks(&mut trace, &mut callbacks, depth, limit, arguments)
+                    self.append_trace_callbacks(&mut trace, &mut callbacks, depth, options)
             {
                 child_file = Some(file);
             }
@@ -236,11 +234,10 @@ impl Vm {
         trace: &mut PhpArray,
         callbacks: &mut usize,
         boundary: usize,
-        limit: usize,
-        arguments: bool,
+        options: TraceOptions,
     ) -> Option<Value> {
         let mut last_file = None;
-        while trace.len() < limit {
+        while trace.len() < options.limit {
             let Some(index) = callbacks.checked_sub(1) else {
                 break;
             };
@@ -263,13 +260,16 @@ impl Vm {
                     .checked_sub(1)
                     .and_then(|parent| self.frame_at(parent))
             };
-            let location = caller.map(|caller| (caller.unit().file.as_str(), caller.line()));
-            append_native(
-                trace,
-                site.native.name(),
-                location,
-                arguments.then(|| site.native.arguments()),
-            );
+            if let Some(name) = site.native.name() {
+                let location = caller.map(|caller| (caller.unit().file.as_str(), caller.line()));
+                append_native(
+                    trace,
+                    name,
+                    location,
+                    options.arguments.then(|| site.native.arguments()),
+                    options.objects.then(|| site.native.object()).flatten(),
+                );
+            }
             if let Some(caller) = caller {
                 last_file = Some(caller.cache().trace_file(caller.unit()));
                 break;
@@ -359,15 +359,18 @@ fn append_native(
     name: &str,
     location: Option<(&str, usize)>,
     arguments: Option<Value>,
+    object: Option<&Rc<phera_value::Object>>,
 ) {
     let mut entry = PhpArray::new();
     if let Some((file, line)) = location {
-        entry.insert(ArrayKey::str("file"), Value::from(file));
-        entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
+        add_source_location(&mut entry, file, line);
     }
     if let Some((class, method)) = name.split_once("->") {
         entry.insert(ArrayKey::str("function"), Value::from(method));
         entry.insert(ArrayKey::str("class"), Value::from(class));
+        if let Some(object) = object {
+            entry.insert(ArrayKey::str("object"), Value::Object(object.clone()));
+        }
         entry.insert(ArrayKey::str("type"), Value::from("->"));
     } else {
         entry.insert(ArrayKey::str("function"), Value::from(name));
@@ -376,4 +379,9 @@ fn append_native(
         entry.insert(ArrayKey::str("args"), arguments);
     }
     let _ = trace.push(Value::from(entry));
+}
+
+fn add_source_location(entry: &mut PhpArray, file: &str, line: usize) {
+    entry.insert(ArrayKey::str("file"), Value::from(file));
+    entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
 }

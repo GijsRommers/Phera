@@ -544,6 +544,20 @@ impl Vm {
                 .ok_or_else(|| exception("Constructor scope does not exist"))?;
             let callee = self.reflection_callee(class, scope, method, Some(object.clone()));
             if let Construction::Attribute(Some(site)) = construction {
+                if let Some(callback) = self.native_callback_sites.last_mut()
+                    && callback.boundary == self.call_stack.depth()
+                    && let crate::error_traces::NativeCaller::Method {
+                        trace,
+                        child_location,
+                        ..
+                    } = &mut callback.native
+                    && trace.name == "ReflectionAttribute->newInstance"
+                {
+                    *child_location = Some(crate::diagnostics::SourceLocation {
+                        file: site.file.clone(),
+                        line: site.line,
+                    });
+                }
                 let previous = self
                     .state
                     .get_or_default::<AttributeCallSite>()

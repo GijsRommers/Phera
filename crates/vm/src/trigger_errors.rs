@@ -12,8 +12,7 @@ impl Vm {
                 "trigger_error() expects at least 1 argument, 0 given",
             )
         })?;
-        let message =
-            phera_value::to_php_string(message, &mut phera_value::NoDiagnostics)?.to_string_lossy();
+        let message = phera_value::to_php_string(message, &mut phera_value::NoDiagnostics)?;
         let level = arguments
             .get(1)
             .map(|value| phera_value::to_int(value, &mut phera_value::NoDiagnostics))

@@ -6,7 +6,7 @@ use phera_extension_api::{
 };
 
 use crate::{
-    errors::{check_path, open_failed},
+    errors::{check_path, open_failure_message},
     handles::FILENAME,
     wrapper::{Target, open},
 };
@@ -42,12 +42,12 @@ fn parse_ini_file(
                 )
                 .into(),
             );
-            return Ok(open_failed(
-                context,
+            context.warning_bytes(&open_failure_message(
                 function,
                 filename,
-                "no suitable wrapper could be found",
+                b"no suitable wrapper could be found",
             ));
+            return Ok(Value::Bool(false));
         }
         let Some(mut stream) = open(context, function, filename, b"rb", true).await? else {
             return Ok(Value::Bool(false));

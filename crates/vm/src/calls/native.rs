@@ -148,7 +148,7 @@ impl Vm {
             {
                 self.failed_native = site.and_then(|site| match site.native {
                     crate::error_traces::NativeCaller::Saved(trace) => Some(trace),
-                    crate::error_traces::NativeCaller::ArrayMap(_) => None,
+                    _ => None,
                 });
             }
             result

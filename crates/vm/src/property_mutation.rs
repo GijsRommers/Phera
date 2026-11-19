@@ -57,7 +57,9 @@ impl Vm {
         crate::types::coerce(value.clone(), declaration_type, strict.into(), self).map_err(|_| {
             NativeError::type_error(format!(
                 "Cannot assign {actual} to property {}::${} of type {}",
-                property.declaring, property.name, declaration_type.display
+                property.declaring,
+                property.name,
+                crate::types::php_type_display(declaration_type)
             ))
         })
     }

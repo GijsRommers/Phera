@@ -1,12 +1,12 @@
 //! `error_clear_last(); var_dump(error_get_last());` prints NULL until the next diagnostic.
 
-use phera_value::{ArrayKey, PhpArray, Value};
+use phera_value::{ArrayKey, PhpArray, PhpString, Value};
 
 use crate::{Vm, diagnostics::SourceLocation};
 
 pub(crate) struct LastError {
     pub(crate) level: i64,
-    pub(crate) message: String,
+    pub(crate) message: PhpString,
     pub(crate) location: SourceLocation,
 }
 
@@ -14,7 +14,10 @@ impl LastError {
     pub(crate) fn to_value(&self) -> Value {
         let mut error = PhpArray::new();
         error.insert(ArrayKey::str("type"), Value::Int(self.level));
-        error.insert(ArrayKey::str("message"), Value::from(self.message.as_str()));
+        error.insert(
+            ArrayKey::str("message"),
+            Value::String(self.message.clone()),
+        );
         error.insert(
             ArrayKey::str("file"),
             Value::from(self.location.file.as_str()),
@@ -30,13 +33,16 @@ impl Vm {
         &mut self,
         level: i64,
         kind: &str,
-        message: String,
+        message: PhpString,
         location: SourceLocation,
     ) {
         if self.error_handlers.reporting & level != 0
-            && let Some(bytes) =
-                self.diagnostic_reporter
-                    .report(kind, &message, &location.file, location.line)
+            && let Some(bytes) = self.diagnostic_reporter.report(
+                kind,
+                message.as_bytes(),
+                &location.file,
+                location.line,
+            )
         {
             self.out(&bytes);
         }
@@ -46,12 +52,12 @@ impl Vm {
     pub(crate) fn record_last_error(
         &mut self,
         level: i64,
-        message: String,
+        message: impl Into<PhpString>,
         location: SourceLocation,
     ) {
         self.error_handlers.last_error = Some(LastError {
             level,
-            message,
+            message: message.into(),
             location,
         });
     }

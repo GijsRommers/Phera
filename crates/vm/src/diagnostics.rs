@@ -1,7 +1,7 @@
 //! Publish PHP diagnostics and fatal traces at the current bytecode location.
 
 use phera_extension_api::NativeError;
-use phera_value::CollectDiagnostics;
+use phera_value::{CollectDiagnostics, PhpString};
 
 use crate::Vm;
 
@@ -57,6 +57,14 @@ impl Vm {
     }
 
     pub(crate) fn diagnostic(&mut self, kind: &str, message: String) {
+        self.publish_diagnostic(kind, message.into());
+    }
+
+    pub(crate) fn diagnostic_bytes(&mut self, kind: &str, message: &[u8]) {
+        self.publish_diagnostic(kind, message.into());
+    }
+
+    fn publish_diagnostic(&mut self, kind: &str, message: PhpString) {
         if self.queue_diagnostic(kind, &message) {
             return;
         }

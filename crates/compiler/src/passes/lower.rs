@@ -10,6 +10,8 @@ use phera_bytecode::{
     Symbol, SymbolId, Type, TypeId, TypeMask,
 };
 
+use std::collections::HashMap;
+
 use crate::ir;
 
 /// Final table builder. No compiler-only paths escape in instructions.
@@ -18,6 +20,19 @@ pub(crate) struct Tables {
     unit: CompiledUnit,
     /// The file's top-level functions, which calls reach with `CallDirect`.
     callees: crate::passes::direct_calls::DirectCallees,
+    constant_ids: HashMap<ConstantValue, u32>,
+}
+
+/// A literal as a hashable key: floats by their bits, so `-0.0` and `0.0`
+/// stay two constants and a NaN is found again.
+#[derive(PartialEq, Eq, Hash)]
+enum ConstantValue {
+    EmptyArray,
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(u64),
+    Bytes(Vec<u8>),
 }
 
 impl Tables {
@@ -37,6 +52,17 @@ impl Tables {
 
     /// Recognize literal values without evaluating arbitrary PHP expressions.
     pub(crate) fn constant(&mut self, constant: &ir::Constant) -> ConstId {
+        let key = match constant {
+            ir::Constant::EmptyArray => ConstantValue::EmptyArray,
+            ir::Constant::Null => ConstantValue::Null,
+            ir::Constant::Bool(value) => ConstantValue::Bool(*value),
+            ir::Constant::Int(value) => ConstantValue::Int(*value),
+            ir::Constant::Float(value) => ConstantValue::Float(value.to_bits()),
+            ir::Constant::Bytes(value) => ConstantValue::Bytes(value.clone()),
+        };
+        if let Some(&index) = self.constant_ids.get(&key) {
+            return ConstId(index);
+        }
         let value = match constant {
             ir::Constant::EmptyArray => Constant::Array(vec![]),
             ir::Constant::Null => Constant::Null,
@@ -45,22 +71,10 @@ impl Tables {
             ir::Constant::Float(value) => Constant::Float(*value),
             ir::Constant::Bytes(value) => Constant::String(value.clone()),
         };
-        let index = self
-            .unit
-            .constants
-            .iter()
-            .position(|entry| match (entry, &value) {
-                // PHP can observe the sign of zero through round() and string conversion.
-                (Constant::Float(left), Constant::Float(right)) => {
-                    left.to_bits() == right.to_bits()
-                }
-                _ => entry == &value,
-            })
-            .unwrap_or_else(|| {
-                self.unit.constants.push(value);
-                self.unit.constants.len() - 1
-            });
-        ConstId(index as u32)
+        let index = self.unit.constants.len() as u32;
+        self.unit.constants.push(value);
+        self.constant_ids.insert(key, index);
+        ConstId(index)
     }
 
     /// Intern a resolved symbol, folding function names but preserving constant spelling.
@@ -132,7 +146,7 @@ impl Tables {
             mask,
             classes,
             intersection: display.contains('&'),
-            display: display.into(),
+            display: phera_bytecode::union_in_php_order(display),
         });
         TypeId(index as u32)
     }

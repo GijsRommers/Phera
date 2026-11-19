@@ -170,7 +170,15 @@ fn coerce_scalar(
             "string" => TypeMask::STRING,
             _ => TypeMask::BOOL,
         };
-        if !mask.intersects(wanted) {
+        // Only the whole `bool` type converts a value to a boolean. `false`
+        // or `true` alone in a union (`int|false`) accepts that one value;
+        // the string "x" is not turned into `true` for it.
+        let offered = if candidate == "bool" {
+            mask.contains(TypeMask::BOOL)
+        } else {
+            mask.intersects(wanted)
+        };
+        if !offered {
             continue;
         }
         let numeric = match value {
@@ -178,10 +186,18 @@ fn coerce_scalar(
             _ => true,
         };
         let result = match candidate {
-            "int" if numeric => Some(Value::Int(to_int(value, diagnostics)?)),
+            "int" if numeric => weak_int(value, diagnostics)?,
             "float" if numeric => Some(Value::Float(to_float(value, diagnostics)?)),
             "string" => Some(Value::String(to_php_string(value, diagnostics)?)),
-            "bool" => Some(Value::Bool(to_bool(value))),
+            "bool" => {
+                if matches!(value, Value::Float(float) if float.is_nan()) {
+                    phera_value::Diagnostics::warning(
+                        diagnostics,
+                        "unexpected NAN value was coerced to bool".to_owned(),
+                    );
+                }
+                Some(Value::Bool(to_bool(value)))
+            }
             _ => None,
         };
         if let Some(value) = result {
@@ -191,22 +207,75 @@ fn coerce_scalar(
     Ok(None)
 }
 
-/// PHP expands its iterable alias when reporting a type mismatch.
-fn php_type_display(declaration: &Type) -> std::borrow::Cow<'_, str> {
-    if declaration.mask.intersects(TypeMask::ITERABLE) {
-        declaration
-            .display
-            .split('|')
-            .flat_map(|name| match name {
-                "iterable" => ["Traversable", "array", ""],
-                "?iterable" => ["Traversable", "array", "null"],
-                name => [name, "", ""],
-            })
-            .filter(|name| !name.is_empty())
-            .collect::<Vec<_>>()
-            .join("|")
-            .into()
-    } else {
-        declaration.display.as_str().into()
+/// The integer a value becomes for an `int` declaration without
+/// `strict_types`, or `None` when it cannot become one.
+///
+/// ```php
+/// function f(int $n) {}
+/// f("7");    // 7
+/// f(2.0);    // 2
+/// f(1.5);    // 1, with "Implicit conversion from float 1.5 to int loses precision"
+/// f(1e30);   // TypeError: no integer is that large
+/// f(NAN);    // TypeError
+/// ```
+///
+/// This is not the `(int)` cast, which accepts every float and wraps
+/// around.
+fn weak_int(
+    value: &Value,
+    diagnostics: &mut phera_value::CollectDiagnostics,
+) -> Result<Option<Value>, NativeError> {
+    use phera_value::{Diagnostics, NumVal};
+
+    /// 2 to the power 63: the first float above every integer.
+    const LIMIT: f64 = 9_223_372_036_854_775_808.0;
+
+    let (float, written_as) = match value {
+        Value::Float(float) => (*float, None),
+        Value::String(string) => match phera_value::parse_numeric(string.as_bytes()).value {
+            Some(NumVal::Float(float)) => (float, Some(string)),
+            _ => return Ok(Some(Value::Int(to_int(value, diagnostics)?))),
+        },
+        _ => return Ok(Some(Value::Int(to_int(value, diagnostics)?))),
+    };
+    if !(-LIMIT..LIMIT).contains(&float) {
+        // Too large, infinite or not a number.
+        return Ok(None);
     }
+    let int = float as i64;
+    if int as f64 != float {
+        diagnostics.deprecated(match written_as {
+            Some(string) => format!(
+                "Implicit conversion from float-string \"{}\" to int loses precision",
+                string.to_string_lossy()
+            ),
+            None => format!(
+                "Implicit conversion from float {} to int loses precision",
+                phera_value::float_repr(float)
+            ),
+        });
+    }
+    Ok(Some(Value::Int(int)))
+}
+
+/// PHP expands its iterable alias when reporting a type mismatch:
+/// `iterable|float` is reported as `Traversable|array|float`.
+pub(crate) fn php_type_display(declaration: &Type) -> std::borrow::Cow<'_, str> {
+    if !declaration.mask.intersects(TypeMask::ITERABLE) {
+        return declaration.display.as_str().into();
+    }
+    let nullable = declaration.display.starts_with('?');
+    let expanded = declaration
+        .display
+        .trim_start_matches('?')
+        .split('|')
+        .flat_map(|name| match name {
+            "iterable" => ["Traversable", "array"],
+            name => [name, ""],
+        })
+        .chain(nullable.then_some("null"))
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>()
+        .join("|");
+    phera_bytecode::union_in_php_order(&expanded).into()
 }

@@ -140,20 +140,53 @@ pub(crate) struct NativeCallbackSite {
 pub(crate) enum NativeCaller {
     Saved(NativeTrace),
     ArrayMap(Vec<Value>),
+    Method {
+        trace: NativeTrace,
+        object: std::rc::Rc<phera_value::Object>,
+        child_location: Option<crate::diagnostics::SourceLocation>,
+    },
+    Internal(Option<crate::diagnostics::SourceLocation>),
 }
 
 impl NativeCaller {
-    pub(crate) fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> Option<&str> {
         match self {
-            Self::Saved(trace) => &trace.name,
-            Self::ArrayMap(_) => "array_map",
+            Self::Saved(trace) | Self::Method { trace, .. } => Some(&trace.name),
+            Self::ArrayMap(_) => Some("array_map"),
+            Self::Internal(_) => None,
         }
     }
 
     pub(crate) fn arguments(&self) -> Value {
         match self {
-            Self::Saved(trace) => trace.arguments.clone(),
+            Self::Saved(trace) | Self::Method { trace, .. } => trace.arguments.clone(),
             Self::ArrayMap(arguments) => NativeTrace::snapshot_arguments(arguments),
+            Self::Internal(_) => Value::Null,
         }
+    }
+
+    pub(crate) fn object(&self) -> Option<&std::rc::Rc<phera_value::Object>> {
+        match self {
+            Self::Method { object, .. } => Some(object),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn child_location(&self) -> Option<&crate::diagnostics::SourceLocation> {
+        match self {
+            Self::Method { child_location, .. } | Self::Internal(child_location) => {
+                child_location.as_ref()
+            }
+            _ => None,
+        }
+    }
+}
+
+impl Vm {
+    pub(crate) fn push_native_callback(&mut self, native: NativeCaller) {
+        self.native_callback_sites.push(NativeCallbackSite {
+            boundary: self.call_stack.depth(),
+            native,
+        });
     }
 }

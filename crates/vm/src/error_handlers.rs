@@ -7,7 +7,7 @@
 
 use crate::{Vm, diagnostics::SourceLocation};
 use phera_extension_api::{CompileDiagnosticKind, Context, NativeError, NativeResult};
-use phera_value::Value;
+use phera_value::{PhpString, Value};
 
 /// Callable plus the error-level mask accepted by set_error_handler.
 #[derive(Clone)]
@@ -20,7 +20,7 @@ pub(crate) struct ErrorHandler {
 pub(crate) struct DiagnosticEvent {
     pub(crate) level: i64,
     pub(crate) kind: String,
-    pub(crate) message: String,
+    pub(crate) message: PhpString,
     pub(crate) location: SourceLocation,
     pub(crate) native: Option<crate::error_traces::NativeTrace>,
     pub(crate) trace_location: Option<SourceLocation>,
@@ -219,7 +219,7 @@ impl Vm {
     }
 
     /// Queuing is required even under @ or error_reporting(0): PHP still calls handlers.
-    pub(crate) fn queue_diagnostic(&mut self, kind: &str, message: &str) -> bool {
+    pub(crate) fn queue_diagnostic(&mut self, kind: &str, message: &PhpString) -> bool {
         let level = match kind {
             "Warning" => 2,
             "Notice" => 8,
@@ -230,7 +230,7 @@ impl Vm {
             self.enqueue_diagnostic(DiagnosticEvent {
                 level,
                 kind: kind.into(),
-                message: message.into(),
+                message: message.clone(),
                 location: self.location(),
                 native: self.error_handlers.native_site.clone(),
                 trace_location: None,

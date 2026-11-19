@@ -71,14 +71,16 @@ impl DiagnosticReporter {
     pub(crate) fn report(
         &mut self,
         kind: &str,
-        message: &str,
+        message: &[u8],
         file: &str,
         line: usize,
     ) -> Option<Vec<u8>> {
         if !self.is_visible() && kind != "Fatal error" {
             return None;
         }
-        let bytes = format!("\n{kind}: {message} in {file} on line {line}\n").into_bytes();
+        let mut bytes = format!("\n{kind}: ").into_bytes();
+        bytes.extend_from_slice(message);
+        bytes.extend_from_slice(format!(" in {file} on line {line}\n").as_bytes());
         if let Some(capture) = &mut self.diagnostic_capture {
             capture.push(bytes);
             None

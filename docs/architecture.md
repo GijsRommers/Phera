@@ -276,6 +276,9 @@ files, `sprintf`, `serialize`), spl, json, pcre (bound to PCRE2), ctype, mbstrin
 date, hash, filter, random, tokenizer, reflection, session, pdo with async
 drivers. **Later:** openssl, curl, dom and xml, intl, fileinfo, iconv.
 
+Locale names are remembered per request, C/POSIX behavior is implemented,
+and localized data is missing.
+
 Functions are added on demand, driven by what failing tests and real framework
 boots call, not by walking PHP's function list.
 

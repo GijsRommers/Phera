@@ -24,6 +24,15 @@ impl Vm {
         object: Rc<Object>,
         name: &str,
     ) -> Result<Callee, NativeError> {
+        self.protocol_method_in_scope(object, name, phera_bytecode::Visibility::Public)
+    }
+
+    pub(crate) fn protocol_method_in_scope(
+        &self,
+        object: Rc<Object>,
+        name: &str,
+        visibility: phera_bytecode::Visibility,
+    ) -> Result<Callee, NativeError> {
         let class = self
             .classes
             .for_object(&object)
@@ -32,7 +41,9 @@ impl Vm {
             .methods
             .get(&name.to_ascii_lowercase())
             .filter(|method| {
-                method.visibility == phera_bytecode::Visibility::Public && !method.is_abstract
+                !method.is_abstract
+                    && (method.visibility == phera_bytecode::Visibility::Public
+                        || method.visibility == visibility)
             })
             .cloned()
             .ok_or_else(|| {

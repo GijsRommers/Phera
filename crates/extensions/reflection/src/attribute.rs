@@ -228,9 +228,15 @@ fn instantiate(
             )));
         }
         let values = arguments(context, &attr.info).await?;
-        engine(context)?
-            .reflect_construct_attribute(&class, values, attr.info.site.clone())
-            .await
+        context.push_callback_frame("ReflectionAttribute->newInstance", this, &[]);
+        let result = async {
+            engine(context)?
+                .reflect_construct_attribute(&class, values, attr.info.site.clone())
+                .await
+        }
+        .await;
+        context.pop_callback_frame();
+        result
     })
 }
 

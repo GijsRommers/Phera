@@ -5,6 +5,8 @@
 //! installed libc locales. The only effects today are on subsequent locale
 //! queries and CSV character scanning under UTF-8 LC_CTYPE. `localeconv()`
 //! and `strcoll()` implement the C/POSIX conventions.
+//! Locale names are remembered per request, C/POSIX behavior is implemented,
+//! and localized data is missing.
 //! Localized collation, decimal and monetary symbols, and time or message
 //! formats would need locale data such as ICU's. PHP float-to-string conversion
 //! is locale independent, including after setting LC_NUMERIC.
