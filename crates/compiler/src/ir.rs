@@ -16,6 +16,8 @@ use phera_bytecode::Reg;
 /// Compiler IR with owned names and paths before table interning.
 #[derive(Debug, Clone)]
 pub enum Instruction {
+    /// Omitted during bytecode lowering; preserves positions while resolving forward gotos.
+    Nop,
     /// Quiet receiver read for isset($this).
     ThisOrNull {
         destination: Reg,
@@ -326,6 +328,8 @@ pub enum Instruction {
         source: Reg,
         place: Option<Place>,
     },
+    /// Release an iterator when a jump bypasses normal traversal.
+    IterEnd(Reg),
     /// Advance traversal and branch on exhaustion; emits IterNext or IterNextKeyed.
     IterNext {
         iterator: Reg,

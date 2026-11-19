@@ -72,8 +72,7 @@ impl<'ast> Compiler<'ast> {
             }
         };
         builder.emit(implicit_return, line);
-        self.append_function(builder, timing, line);
-        Ok(())
+        self.append_function(builder, timing, line)
     }
 
     /// Nested declarations use indices relative to their builder until attached to the unit.
@@ -82,20 +81,24 @@ impl<'ast> Compiler<'ast> {
         mut builder: Compiler<'_>,
         timing: DeclarationTiming,
         line: usize,
-    ) {
-        let id = self.append_function_body(&mut builder);
+    ) -> Result<(), CompileError> {
+        let id = self.append_function_body(&mut builder)?;
         if timing == DeclarationTiming::Hoisted {
             self.hoisted.push(id)
         } else {
             self.emit(Instruction::Declare(id), line);
         }
+        Ok(())
     }
 
-    /// Relocate code and metadata compiled in a separate lexical frame.
-    pub(crate) fn append_function_body(&mut self, builder: &mut Compiler<'_>) -> usize {
+    /// Finalize the lexical frame and relocate its code and metadata.
+    pub(crate) fn append_function_body(
+        &mut self,
+        builder: &mut Compiler<'_>,
+    ) -> Result<usize, CompileError> {
         let id = self.functions.len();
         let class_offset = self.classes.len();
-        let mut function = builder.finish();
+        let mut function = builder.finish()?;
         for instruction in function.instructions.iter_mut().chain(
             builder
                 .functions
@@ -136,7 +139,7 @@ impl<'ast> Compiler<'ast> {
         self.classes.append(&mut builder.classes);
         self.declaration_warnings
             .append(&mut builder.declaration_warnings);
-        id
+        Ok(id)
     }
 
     /// Independent builders keep captured locals ahead of ordinary body temporaries.

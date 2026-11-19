@@ -187,6 +187,11 @@ impl Analyzer<'_> {
         let mut blocks = vec![body];
         while let Some(block) = blocks.pop() {
             for statement in block {
+                // Syntactic fallthrough cannot prove that a goto body is
+                // missing a return. Each explicit return is still checked.
+                if matches!(statement.kind, StatementKind::Goto(_)) {
+                    return;
+                }
                 blocks.extend(crate::collect::child_blocks(statement));
                 for e in crate::walk::statement_expressions(statement) {
                     let mut expressions = vec![e];

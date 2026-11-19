@@ -165,6 +165,10 @@ impl<'src> Parser<'src> {
         &self.tokens[(self.pos + 1).min(self.tokens.len() - 1)]
     }
 
+    pub(crate) fn second_span(&self) -> Span {
+        self.second().span
+    }
+
     /// The kind of the current token.
     pub(crate) fn kind(&self) -> TokenKind {
         self.current().kind

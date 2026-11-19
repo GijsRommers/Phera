@@ -401,6 +401,10 @@ impl Tables {
                     }
                 }
             }
+            Old::Nop => return,
+            Old::IterEnd(iterator) => Instruction::IterEnd {
+                iter: IterId(iterator.0),
+            },
             Old::IterNext {
                 iterator: id,
                 key,

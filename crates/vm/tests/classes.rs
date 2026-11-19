@@ -19,7 +19,6 @@ fn later_milestones_remain_compile_errors() {
     for source in [
         "<?php $callback = function () {};",
         "<?php $callback = fn () => 1;",
-        "<?php goto target; target:",
         "<?php class Example {static function method(){}} Example::method(...);",
         "<?php class Example {function method(){}} (new Example)->method(...);",
         "<?php class Example {public int $value {get => 1;}}",
@@ -57,6 +56,15 @@ fn generator_body_starts_with_a_suspension_boundary() {
         unit.functions.as_slice(),
         [function] if function.is_generator
             && matches!(function.instructions.first(), Some(phera_bytecode::Instruction::GeneratorStart))
+    ));
+}
+
+#[test]
+fn goto_uses_an_existing_jump_instruction() {
+    let unit = phera_compiler::compile("<?php goto target; target:", "goto.php").unwrap();
+    assert!(matches!(
+        unit.main.instructions.first(),
+        Some(phera_bytecode::Instruction::Jump { target }) if target.index() == 1
     ));
 }
 
