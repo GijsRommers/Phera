@@ -1,61 +1,69 @@
-# Design decisions
+# Decisions
 
-## 2026-11-19 — Intl uses ICU4X compiled data
+Every decision that shapes Phera is written down here: what was decided, why,
+and what was turned down. The newest entries are at the top of each part. A
+pull request that takes a decision adds its entry in the same pull request.
 
-Use ICU4X 2.4 with its compiled Unicode 18 and CLDR 49 data. Link the
-components the extension calls and keep their full compiled locale coverage
-by default. A locale subset would save space but would silently change results
-for applications outside the acceptance locales and would require a custom data
-build. Measure the release binary at the Stage 1 gate so that trade-off has a
-number attached to it. Linking ICU4C would add a system dependency and still
-leave results dependent on the host's ICU and CLDR versions.
+"Owner" means Gijs Rommers decided it. "Design" means it was decided during
+design or review work and the owner can overrule it.
 
-Compare types, reference mutations, diagnostics and locale-independent results
-exactly with PHP 8.5. Compare locale data with PHP on the test host across the
-core locales and record individually reviewed exceptions with both CLDR versions
-in the [intl compatibility notes](../crates/extensions/intl/README.md).
-A single machine's formatted output would pin incidental ICU4C locale data for
-every platform.
+## Scope and compatibility
 
-## 2026-11-19 — Intl keeps Unicode scalars and PHP bytes distinct
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | Phera verifies intl types, references, diagnostics and locale-independent results exactly against PHP 8.5. It checks the core locale data on the oracle host and records each accepted difference with both CLDR releases. | ICU4X and PHP's ICU4C can use different locale data even on the same PHP patch release. | Pinning all locale output to one machine. | Design |
+| 2026-11-19 | WordPress is a target next to Symfony and Laravel. `mysqli` and the `pg_*` functions are built as thin layers over the database drivers PDO already uses. | WordPress is the most used PHP application and talks to MySQL only through `mysqli`. One client per database keeps pooling, TLS and type mapping in one place. | A second, separate MySQL client for `mysqli`. | Owner |
+| 2026-11-19 | Phera follows the newest PHP 8.5 patch release. A comparison whose PHP answer changed in a patch release is marked with the version it holds from and is skipped, visibly, on an older PHP. It is never removed. | Patch releases are bug fixes; CI moves to them on its own; nobody runs an old patch on purpose. | Pinning CI to one patch version. | Owner |
+| 2026-11-19 | PHP 8.5 only. The two-version design for PHP 8.6 (architecture.md 6.3) is parked. | Decided by the owner after seeing the design. | Carrying 8.5 and 8.6 side by side now. | Owner |
+| 2026-11-19 | `Fiber` stays as a complete class. It is a compatibility API (Monolog and others ask `Fiber::getCurrent()`), not part of Phera's concurrency, which is tasks on Tokio. | More real code runs unchanged. | Reducing it to `Fiber::getCurrent()` returning null. | Design |
+| 2026-11-17 | A deprecated named item that nothing in use needs is not built and throws `Phera\NotSupportedException` or a compile error. Deprecated behaviour of a supported operation stays as in PHP, message included. | A clear error beats a silently different answer; the list is `crates/source/data/deprecations.tsv`. | Reproducing every legacy corner. | Owner |
 
-Use ICU4X canonical normalization plus the Unicode Character Database's raw
-compatibility and NFKC case-fold mappings. PHP exposes these mappings directly;
-recursive compatibility decomposition loses intermediate scalars. Keep the
-table in compact text and load it on first use. Rejected approximating case
-folding with lowercase or normalizing the raw decomposition before returning it.
+## Safety and dependencies
 
-Use ICU4X's Unicode 18 grapheme state machine for boundaries and retain the
-original PHP bytes for UTF-8 text that PHP's iterator accepts lossily. PHP's
-UTF-16 conversion paths reject invalid UTF-8 and return their own diagnostics.
-For search, compare collation keys at grapheme boundaries, with ICU-equivalent
-compatibility expansions and a prefix table to avoid repeatedly rescanning the
-haystack. ICU4X has no ICU4C StringSearch API; locale-specific contractions
-across clusters still need coverage.
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | Intl links ICU4X 2.4 with full compiled coverage for the linked components. Retain CLDR pattern strings for PHP's mutable number and date styles. | This covers locales beyond the test matrix and preserves PHP's explicit pattern API. Release size is measured in the intl compatibility notes. | ICU4C and a custom core-locale data subset. | Design |
+| 2026-11-19 | Normalizer uses ICU4X and the Unicode Character Database's raw compatibility and NFKC case-fold mappings. Grapheme functions preserve PHP bytes, and searches use collation keys and a prefix table at cluster boundaries. | Raw decomposition must preserve its intermediate scalars. A prefix table avoids re-scanning the haystack for every candidate. | Lowercasing as case folding, recursive decomposition as a raw mapping and unbounded repeated substring comparison. | Design |
+| 2026-11-19 | UTS #46 uses ICU4X mapping and idna's Punycode, with PHP's separate bidi and joiner options. | PHP exposes per-condition error bits and by-reference output for failed names. | An all-or-nothing URL-host error with mandatory WHATWG restrictions. | Design |
+| 2026-11-19 | IntlDateFormatter reads DateTimeInterface and DateTimeZone through Phera's date state. NumberFormatter uses fixed_decimal and caches a bounded number of ICU4X currency formatters. | Reuse the timezone database and avoid constructing a currency formatter for every call. | A second timezone implementation, PHP callbacks for each date and an unbounded currency cache. | Design |
+| 2026-11-19 | TLS uses rustls with the `ring` provider, for databases, Redis and HTTP clients. A CI job scans the lock file for known advisories. | `ring` is audited and widely deployed. The pure Rust provider used before was a pre-release that calls itself not ready for production. `ring` holds C and assembly inside the dependency; Phera's own crates stay free of `unsafe`. | Keeping the pre-release provider; OpenSSL. | Design |
+| 2026-11-19 | Cryptography (`openssl_*`, `sodium_*`, password hashing) is built from audited Rust crates. Phera implements no cipher, hash, padding or secret comparison itself. What no audited crate offers is left out and listed. | Home-made cryptography is where runtimes get broken. | Linking OpenSSL or libsodium. | Design |
+| 2026-11-19 | DOM and XML are Phera's own safe tree with pure Rust parsers (`quick-xml`, `html5ever`), not libxml2. No external entity is ever loaded while parsing a string. `DOMDocument::loadHTML()` therefore differs from PHP for malformed HTML 4. | A C parser fed with documents from the network gives up the memory safety the runtime exists for. | Binding libxml2 for byte-exact output. | Design |
+| 2026-11-19 | curl is built on `hyper` and rustls, not on libcurl. Only `http` and `https` exist; other protocols are refused with libcurl's error. | Same reason as DOM. Refusing `file://`, `gopher://` and the like also closes a class of request-forgery problems. | Binding libcurl. | Design |
+| 2026-11-19 | `LOAD DATA LOCAL INFILE` is refused in PDO and `mysqli`. | It lets a database server read files of the client. | Supporting it behind an option. | Design |
+| 2026-11-17 | No `unsafe` in Phera's own crates; a workspace lint forbids it and CI checks it. Where a design seems to need it, the answer is a safe design that may be slower. A specific use may be proposed to the owner for a gain of about ten times; it is never written without his decision. | The owner's rule. | | Owner |
 
-## 2026-11-19 — Intl state is request-scoped
+## Server and requests
 
-Store the last intl error in the extension API's request store and the INI
-settings in the runtime's INI catalog. That keeps concurrent requests isolated
-and gives PHP INI reads and updates the same setting source. Rejected
-process-global error and locale state or a second copy of the INI values.
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | Intl error state is request-local. Locale settings use the runtime's INI catalog. | Concurrent requests see their own errors and locale changes. | Process-global request state or a second INI value store. | Design |
+| 2026-11-19 | Snapshot and fork is built in four steps: linked code shared per worker; a snapshot at `Phera\snapshot()` with a copy per request; adapters for Symfony and Laravel; copy on first write only if measurements ask for it (architecture.md 5.4). | One Laravel request costs 10 to 17 times PHP's time, and most of that is work repeated per request that opcache does once. Step 1 helps every application; the snapshot removes the framework's boot. | Worker mode as in FrankenPHP or Octane: faster still, but state leaks between requests unless the application is written for it. | Owner asked for it; design |
+| 2026-11-19 | A program started by a web request (`proc_open`, `exec`) is terminated when the request ends. `phera serve --no-process` forbids starting programs. `pcntl_fork` is not built. | One process serves many requests on few threads: an abandoned child would outlive its request unseen, and a multi-threaded async process cannot fork safely. | PHP-FPM's behaviour of letting children live. | Design |
+| 2026-11-19 | The execution time limit counts the CPU time a request spends running PHP code and is checked where the interpreter already hands over to the scheduler. One long call into a built-in function is not interrupted. | A check per instruction would slow every script; waiting for a database must not count, as in PHP on Unix. | A wall-clock limit; a clock read in the interpreter loop. | Design |
+| 2026-11-19 | A multipart boundary longer than 70 bytes is refused, and parsing stops when the request is abandoned. | RFC 2046's limit. A very long boundary made parsing take minutes after the client had gone (security round 3). | | Design |
 
-## 2026-11-19 — Intl style patterns and format objects
+## Tools
 
-Retain the CLDR pattern strings alongside the ICU4X formatters. PHP exposes
-the pattern as mutable object state, and ICU4X's semantic skeletons alone do
-not preserve PHP's date and time style joins or number symbol settings.
-Reject a table of outputs copied from one oracle machine. Keep decimal
-arithmetic in fixed_decimal and cache a bounded number of ICU4X currency
-formatters per NumberFormatter. The currency options exposed by ICU4X are
-narrower than PHP's, so PHP owns the mutable overrides.
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | The repository holds no directories of loose helper scripts. A helper worth keeping is a Rust test or a command of the tooling crate; a one-off stays outside the repository. Decisions go into this file, and the README is updated with every change a user can see. | The owner reads the repository to follow the project. | | Owner |
+| 2026-11-19 | `phera lint` reports by default only what gave no false finding on the Symfony and Laravel code bases; unused variables, unused private properties, switch fall-through and self-comparison are among the defaults. Style, naming and complexity rules are opt-in. | A linter that cries wolf gets switched off. | All rules on by default. | Design |
+| 2026-11-19 | `phera check` uses PHPStan's levels and identifiers, and reads a PHPStan baseline. | Projects can switch without relearning or rewriting their configuration. | Own level scheme. | Design |
+| 2026-11-18 | Phera has no template engine of its own for now; Twig and Blade run as PHP. A native renderer is designed (architecture.md 11.6) and not built. | The frameworks' own engines must work anyway. | | Design |
 
-Read DateTimeInterface and DateTimeZone from Phera's existing date state.
-Use the same bundled timezone data to resolve Unix timestamps and local
-arrays before passing civil fields to ICU4X. Reject a second timezone
-implementation or a call through a PHP callback for every formatted date.
+## Speed and method
 
-Apply ICU4X's UTS #46 mapper and the idna crate's Punycode. PHP reports
-per-condition bits and permits callers to turn bidi and joiner checks on
-independently. Reject an all-or-nothing IDNA error and mandatory WHATWG URL
-restrictions, which would reject domains PHP accepts.
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | Speed is compared with PHP started as `php -n` (no Xdebug), with a second column for opcache and the JIT, and reported in cycles or CPU time next to instructions. | An earlier comparison used a PHP with Xdebug loaded and made Phera look faster than it is. Phera also retires fewer instructions per cycle than PHP, so instruction counts alone understate the gap. | Instruction counts as the only measure. | Design |
+| 2026-11-19 | Built-in calls use the special forms PHP's own compiler has (`strlen`, `count`, type checks, `in_array` with a literal, `sprintf`, constant folding of pure functions). A shortcut tests properties of the call and never the spelling of a script. | They are observable in PHP only through speed, and each has a fixture proving equal behaviour, traces included. | Shortcuts tuned to benchmark scripts. | Design |
+| 2026-11-18 | A change must not make any benchmark script more than 1 percent slower in instructions. The destructors work has a stated exception: no script more than 2 percent, at most three above 1 percent, the sum not slower, every overage named. | The interpreter loop is sensitive to layout; small costs add up unseen. Correct object lifetime has a real price. | No rule; a rule without exception. | Design |
+
+## Process
+
+| Date | Decision | Why | Turned down | By |
+| --- | --- | --- | --- | --- |
+| 2026-11-19 | CI runs the test suite as three jobs side by side, and a draft pull request gets only the three short checks. | One job took 20 to 24 minutes; work in progress filled the runners. | | Design |
+| 2026-11-19 | Finished pull requests are merged into one batch branch, reviewed together and merged with one CI run. A batch merges only when a run of all php-src tests shows no test going from pass to fail. | Every merge makes the other branches out of date; the full php-src run finds regressions the repository's own selection does not. | Merging one by one. | Design |
+| 2026-11-17 | Every pull request is reviewed against real PHP before it merges, whoever wrote it: its own scripts, the php-src tests, the benchmarks. The review is recorded on the pull request. | CI is only the first filter. | | Owner |
