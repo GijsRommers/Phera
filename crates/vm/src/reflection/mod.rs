@@ -24,9 +24,12 @@ mod constants;
 mod functions;
 pub(crate) mod hook_calls;
 mod initializers;
+mod lazy;
 mod members;
 mod properties;
 mod property_hooks;
+
+pub(crate) use cache::ReflectionCache;
 
 enum Construction {
     Reflection,
@@ -241,6 +244,47 @@ impl ReflectionContext for Vm {
             self.reflection_construct(class, args, Construction::Reflection)
                 .await
         })
+    }
+
+    fn reflect_make_lazy(
+        &mut self,
+        class: &ClassInfo,
+        request: phera_extension_api::reflection::lazy::MakeLazy,
+    ) -> LocalFuture<'_, NativeResult> {
+        let class = self.classes.numbered(class.id);
+        Box::pin(async move {
+            self.make_object_lazy(
+                class.ok_or_else(|| exception("Class does not exist"))?,
+                request,
+            )
+            .await
+        })
+    }
+
+    fn reflect_lazy_object(
+        &mut self,
+        object: Rc<Object>,
+        query: phera_extension_api::reflection::lazy::LazyClassQuery,
+    ) -> NativeResult {
+        self.reflection_lazy_object(object, query)
+    }
+
+    fn reflect_lazy_property(
+        &mut self,
+        member: &MemberInfo,
+        object: Rc<Object>,
+        operation: phera_extension_api::reflection::lazy::LazyPropertyOperation,
+    ) -> NativeResult {
+        self.reflection_lazy_property(member, object, operation)
+    }
+
+    fn reflect_write_lazy_property(
+        &mut self,
+        member: Rc<MemberInfo>,
+        object: Rc<Object>,
+        value: Value,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(self.reflection_write_lazy_property(member, object, value))
     }
 
     fn reflect_construct_attribute(

@@ -12,9 +12,12 @@ mod last_error;
 mod locale;
 mod math;
 mod natural;
+mod network;
 mod offsets;
 mod packing;
 mod process;
+mod process_info;
+mod sleep;
 mod strings;
 mod time;
 mod version_compare;
@@ -47,6 +50,9 @@ impl Extension for Standard {
         process::register(registry);
         last_error::register(registry);
         locale::register(registry);
+        process_info::register(registry);
+        sleep::register(registry);
+        network::register(registry);
     }
 }
 

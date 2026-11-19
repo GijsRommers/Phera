@@ -37,7 +37,9 @@ impl Vm {
 
     /// Share the main-scope cell with a function local rather than copying its value.
     pub(crate) fn bind_global(&mut self, local: Reg, name: String) -> Result<(), NativeError> {
-        if let Some(frame) = self.frame_at(0)
+        if let Some(frame) = self
+            .frame_at(0)
+            .filter(|frame| frame.function_id().is_none())
             && let Some(index) = frame
                 .function()
                 .locals

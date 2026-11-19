@@ -103,9 +103,7 @@ impl Vm {
                 BatchExit::Handlers => {}
                 BatchExit::GeneratorTracking => {}
                 BatchExit::Compare(pending) => {
-                    let order = self.finish_string_comparison(pending.cast).await?;
-                    let value = crate::string_comparison::comparison_value(pending.operator, order);
-                    self.set(pending.destination, value);
+                    Box::pin(self.continue_comparison(pending)).await?;
                 }
                 BatchExit::BindCall(destination) => {
                     self.coerce_call_strings(self.argument_origin).await?;

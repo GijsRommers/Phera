@@ -83,17 +83,16 @@ impl Vm {
                     Ok(StringComparisonStep::Complete(order)) => {
                         Ok(comparison_value(operator, order))
                     }
-                    Ok(StringComparisonStep::Cast(cast)) => {
+                    Ok(
+                        step
+                        @ (StringComparisonStep::Cast(_) | StringComparisonStep::Initialize(_)),
+                    ) => {
                         drop(left);
                         drop(right);
                         if self.diagnostic_reporter.has_pending() {
                             self.flush_operator_diagnostics();
                         }
-                        return Ok(self.store_comparison(
-                            StringComparisonStep::Cast(cast),
-                            operator,
-                            destination,
-                        ));
+                        return Ok(self.store_comparison(step, operator, destination));
                     }
                     Err(error) => Err(error),
                 }
@@ -207,8 +206,8 @@ impl Vm {
                 self.set(destination, comparison_value(operator, order));
                 None
             }
-            StringComparisonStep::Cast(cast) => Some(BatchExit::Compare(PendingComparison {
-                cast,
+            work => Some(BatchExit::Compare(PendingComparison {
+                work,
                 operator,
                 destination,
             })),

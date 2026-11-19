@@ -41,12 +41,12 @@ function {closure:closure-listing.php:4} (6 registers)
   0006  line 4    LoadConst { dst: r4, constant: const#0 }
   0007  line 4    Return { src: r4 }
 
-function {closure:closure-listing.php:5} (6 registers)
+function {closure:closure-listing.php:5} (5 registers)
   r0 = $x
   r1 = $a
   0000  line 5    Move { dst: r2, src: r0 }
   0001  line 5    Move { dst: r3, src: r1 }
   0002  line 5    Binary { op: Add, dst: r2, lhs: r2, rhs: r3 }
   0003  line 5    Return { src: r2 }
-  0004  line 5    LoadConst { dst: r4, constant: const#0 }
-  0005  line 5    Return { src: r4 }
+  0004  line 5    LoadConst { dst: r3, constant: const#0 }
+  0005  line 5    Return { src: r3 }

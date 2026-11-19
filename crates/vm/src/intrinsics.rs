@@ -18,8 +18,6 @@ pub(crate) enum Intrinsic {
     SplAutoload(crate::spl_autoload::SplAutoload),
     /// Runtime extension and function listings.
     Runtime(crate::function_introspection::RuntimeFunction),
-    GetIncludePath,
-    SetIncludePath,
     /// PHP `is_callable()` runtime service.
     IsCallable,
     /// PHP `call_user_func()` runtime service.
@@ -48,10 +46,6 @@ pub(crate) enum Intrinsic {
     FuncGetArg,
     /// PHP `error_reporting()` runtime service.
     ErrorReporting,
-    /// PHP `ini_set()` runtime service.
-    IniSet,
-    /// PHP `ini_get()` runtime service.
-    IniGet,
 }
 
 impl Intrinsic {
@@ -92,10 +86,6 @@ impl Intrinsic {
             "func_get_args" => Self::FuncGetArgs,
             "func_get_arg" => Self::FuncGetArg,
             "error_reporting" => Self::ErrorReporting,
-            "ini_set" => Self::IniSet,
-            "ini_get" => Self::IniGet,
-            "get_include_path" => Self::GetIncludePath,
-            "set_include_path" => Self::SetIncludePath,
             name => {
                 if let Some(function) = crate::class_intrinsics::ClassFunction::resolve(name) {
                     Self::Class(function)
@@ -132,9 +122,6 @@ impl Intrinsic {
             Self::FunctionExists => &["function"],
             Self::Defined => &["constant_name"],
             Self::Constant => &["name"],
-            Self::SetIncludePath => &["include_path"],
-            Self::IniGet => &["option"],
-            Self::IniSet => &["option", "value"],
             _ => &[],
         }
     }
@@ -169,10 +156,6 @@ impl Intrinsic {
             "func_get_args",
             "func_get_arg",
             "error_reporting",
-            "ini_set",
-            "ini_get",
-            "get_include_path",
-            "set_include_path",
             "set_error_handler",
             "restore_error_handler",
             "set_exception_handler",

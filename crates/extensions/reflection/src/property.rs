@@ -2,6 +2,7 @@
 
 use std::rc::Rc;
 
+use phera_extension_api::reflection::lazy::LazyPropertyOperation;
 use phera_extension_api::reflection::{
     ClassSelector, MemberInfo, MemberKind, PropertyHookKind, PropertyRead, PropertyWrite,
 };
@@ -122,6 +123,22 @@ pub(crate) fn register(registry: &mut Registry) {
                     },
                 )
                 .returning("void"),
+                MethodEntry::public_async(
+                    "setRawValueWithoutLazyInitialization",
+                    const { &[crate::lazy::OBJECT, Param::new("value", ParamType::Mixed)] },
+                    crate::lazy::write_property,
+                )
+                .returning("void"),
+                MethodEntry::public(
+                    "skipLazyInitialization",
+                    const { &[crate::lazy::OBJECT] },
+                    |c, o, a| crate::lazy::property(c, o, a, LazyPropertyOperation::Skip),
+                )
+                .returning("void"),
+                MethodEntry::public("isLazy", const { &[crate::lazy::OBJECT] }, |c, o, a| {
+                    crate::lazy::property(c, o, a, LazyPropertyOperation::IsLazy)
+                })
+                .returning("bool"),
                 MethodEntry::public(
                     "setValue",
                     const {

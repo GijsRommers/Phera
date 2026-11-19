@@ -8,7 +8,7 @@ use phera_extension_api::{
 };
 
 use crate::{
-    id,
+    id, settings,
     state::{can_change, state},
 };
 
@@ -69,9 +69,10 @@ fn set(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nati
             _ => Some("session_register_shutdown"),
         };
         context.named_shutdown("session_shutdown", callback).await?;
-        let session = state(context);
-        session.settings.insert("save_handler", "user".into());
-        session.user = Some(object);
+        if !settings::update(context, "save_handler", "user".into(), function)? {
+            return Ok(Value::Bool(false));
+        }
+        state(context).user = Some(object);
         Ok(Value::Bool(true))
     })
 }
@@ -84,12 +85,11 @@ fn register_shutdown(context: &mut dyn Context, _: Vec<Value>) -> LocalFuture<'_
 }
 
 pub fn handler(context: &mut dyn Context) -> Option<Rc<Object>> {
-    let session = state(context);
-    session
-        .settings
-        .get("save_handler")
-        .filter(|mode| mode.as_bytes() == b"user")
-        .and(session.user.clone())
+    if settings::text(context, "save_handler").as_bytes() == b"user" {
+        state(context).user.clone()
+    } else {
+        None
+    }
 }
 
 pub async fn call(

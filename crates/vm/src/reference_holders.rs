@@ -93,8 +93,7 @@ pub(crate) fn has_extension_state(
     object: &Object,
 ) -> Result<bool, phera_extension_api::NativeError> {
     let state = object
-        .native
-        .try_borrow()
+        .native_payload()
         .map_err(|_| internal_error!("borrowed native clone state"))?;
     Ok(state
         .as_ref()
@@ -163,7 +162,9 @@ impl ReferenceHolders {
         else {
             return Ok(false);
         };
-        let native = object.native.borrow();
+        let native = object
+            .native_payload()
+            .map_err(|_| internal_error!("property reference state"))?;
         let occupied = native
             .as_ref()
             .is_some_and(|payload| !payload.is::<ObjectReferences>());
@@ -228,7 +229,9 @@ impl ReferenceHolders {
         reference: &Rc<RefCell<Value>>,
         property: Option<&PropertyDefault>,
     ) -> Result<(), NativeError> {
-        let mut native = object.native.borrow_mut();
+        let mut native = object
+            .native_payload_mut()
+            .map_err(|_| internal_error!("property reference state"))?;
         if native.is_none() {
             *native = Some(Box::<ObjectReferences>::default());
         }
@@ -248,11 +251,10 @@ impl ReferenceHolders {
     }
 
     pub(crate) fn untrack_object(object: &Object, key: &ArrayKey) {
-        if let Some(slots) = object
-            .native
-            .borrow_mut()
-            .as_mut()
-            .and_then(|native| native.downcast_mut::<ObjectReferences>())
+        if let Ok(mut payload) = object.native_payload_mut()
+            && let Some(slots) = payload
+                .as_mut()
+                .and_then(|native| native.downcast_mut::<ObjectReferences>())
         {
             slots.slots.remove(key);
         }
