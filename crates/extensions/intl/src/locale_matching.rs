@@ -104,6 +104,9 @@ fn normalize(tag: &str, canonical: bool) -> String {
 
 fn parents(tag: &str) -> impl Iterator<Item = &str> {
     std::iter::successors(Some(tag), |tag| {
+        if let Some((base, _)) = tag.split_once('@') {
+            return Some(base);
+        }
         let (parent, _) = tag.rsplit_once('_')?;
         if let Some((base, singleton)) = parent.rsplit_once('_')
             && singleton.len() == 1
@@ -157,15 +160,36 @@ pub fn accept(context: &mut dyn Context, values: &[Value], site: &str) -> Native
     }
     choices.sort_by_key(|(weight, _)| std::cmp::Reverse(*weight));
     for (_, tag) in &choices {
-        if let Some(result) = parents(tag).find(|tag| available().contains(tag)) {
+        if let Some(result) = parents(tag).find(|tag| is_available(tag)) {
             return Ok(Value::from(result));
         }
     }
-    if choices.is_empty() && !header.trim().is_empty() {
-        Ok(Value::Bool(false))
-    } else {
-        accept_error(context, site, 0)
+    Ok(Value::Bool(false))
+}
+
+pub fn is_available(tag: &str) -> bool {
+    if available().contains(tag) {
+        return true;
     }
+    let Ok(identifier) = tag
+        .replace('_', "-")
+        .parse::<icu_locale::LanguageIdentifier>()
+    else {
+        return false;
+    };
+    let language = identifier.language.as_str();
+    if !available().contains(language)
+        || identifier.region.is_none()
+        || identifier.script.is_some()
+        || !identifier.variants.is_empty()
+    {
+        return false;
+    }
+    let Ok(mut language) = language.parse::<icu_locale::LanguageIdentifier>() else {
+        return false;
+    };
+    icu_locale::LocaleExpander::new_extended().maximize(&mut language);
+    identifier.region == language.region
 }
 
 fn quality(option: &str) -> Option<u16> {

@@ -5,22 +5,26 @@
 //! $f->format(0); // "01:00"
 //! ```
 
-use std::rc::Rc;
+use std::{fmt, rc::Rc};
 
 use icu_calendar::{Date, Gregorian};
 use icu_datetime::pattern::{DateTimePattern, FixedCalendarDateTimeNames};
-use icu_datetime::{DateTimeFormatter, fieldsets::YMDT};
+use icu_datetime::{
+    DateTimeFormatter,
+    fieldsets::{YMDT, enums::CompositeFieldSet},
+};
 use icu_locale::Locale;
 use icu_time::zone::{TimeZone, UtcOffset};
 use icu_time::{DateTime, Time, ZonedDateTime};
 use phera_ext_date::{ZoneKind, calendar::Civil};
-use writeable::{TryWriteable, Writeable};
+use writeable::{Part, PartsWrite, TryWriteable, Writeable};
 
 #[derive(Clone)]
 pub enum Renderer {
     Pattern {
         pattern: Rc<DateTimePattern>,
-        names: Rc<FixedCalendarDateTimeNames<Gregorian>>,
+        arabic: bool,
+        names: Rc<FixedCalendarDateTimeNames<Gregorian, CompositeFieldSet>>,
     },
     Traditional(Rc<DateTimeFormatter<YMDT>>),
 }
@@ -36,12 +40,16 @@ impl Renderer {
             .extensions
             .unicode
             .keywords
-            .remove(&icu_locale::extensions::unicode::key!("ca"));
+            .remove(icu_locale::extensions::unicode::key!("ca"));
+        let arabic = locale.id.language.as_str() == "ar";
         let pattern = pattern.parse::<DateTimePattern>().ok()?;
-        let mut names = FixedCalendarDateTimeNames::<Gregorian>::try_new(locale.into()).ok()?;
+        let mut names =
+            FixedCalendarDateTimeNames::<Gregorian, CompositeFieldSet>::try_new(locale.into())
+                .ok()?;
         names.include_for_pattern(&pattern).ok()?;
         Some(Self::Pattern {
             pattern: Rc::new(pattern),
+            arabic,
             names: Rc::new(names),
         })
     }
@@ -63,7 +71,11 @@ impl Renderer {
         )
         .ok()?;
         match self {
-            Self::Pattern { pattern, names } => {
+            Self::Pattern {
+                pattern,
+                names,
+                arabic,
+            } => {
                 let name = zone.name();
                 let timezone = TimeZone::from_iana_id(&name)
                     .with_offset(UtcOffset::try_from_seconds(offset.seconds).ok())
@@ -74,11 +86,17 @@ impl Renderer {
                     zone: timezone,
                 };
                 let formatter = names.with_pattern_unchecked(pattern);
-                formatter
-                    .format(&value)
-                    .try_write_to_string()
-                    .ok()
-                    .map(|text| text.into_owned())
+                let formatted = formatter.format(&value);
+                if *arabic {
+                    let mut sink = ArabicZoneNames::default();
+                    formatted.try_write_to_parts(&mut sink).ok()?.ok()?;
+                    Some(sink.output)
+                } else {
+                    formatted
+                        .try_write_to_string()
+                        .ok()
+                        .map(|text| text.into_owned())
+                }
             }
             Self::Traditional(formatter) => Some(
                 formatter
@@ -104,4 +122,39 @@ fn is_non_gregorian(locale: &Locale) -> bool {
             .id
             .region
             .is_some_and(|region| region.as_str() == "SA")
+}
+
+/// ICU4C uses an unmarked sign in Arabic localized GMT offsets.
+#[derive(Default)]
+struct ArabicZoneNames {
+    output: String,
+    in_zone_name: bool,
+}
+
+impl fmt::Write for ArabicZoneNames {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        if self.in_zone_name {
+            self.output
+                .extend(text.chars().filter(|&scalar| scalar != '\u{061c}'));
+        } else {
+            self.output.push_str(text);
+        }
+        Ok(())
+    }
+}
+
+impl PartsWrite for ArabicZoneNames {
+    type SubPartsWrite = Self;
+
+    fn with_part(
+        &mut self,
+        part: Part,
+        mut write: impl FnMut(&mut Self) -> fmt::Result,
+    ) -> fmt::Result {
+        let previous = self.in_zone_name;
+        self.in_zone_name |= part == icu_datetime::parts::TIME_ZONE_NAME;
+        let result = write(self);
+        self.in_zone_name = previous;
+        result
+    }
 }

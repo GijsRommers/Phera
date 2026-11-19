@@ -5,7 +5,9 @@
 //! $percent->format(0.25); // "25 %"
 //! ```
 
-use fixed_decimal::{Decimal, FloatPrecision, Sign, SignedRoundingMode, UnsignedRoundingMode};
+use fixed_decimal::{
+    Decimal, FloatPrecision, RoundingIncrement, Sign, SignedRoundingMode, UnsignedRoundingMode,
+};
 use icu_decimal::CompactDecimalFormatter;
 use phera_extension_api::{Context, NativeError, NativeResult, Value, args};
 
@@ -125,18 +127,41 @@ pub fn render(state: &mut Formatter, original: &Decimal, currency: Option<&str>)
         }
     }
     if state.style.is_currency() && !state.custom_pattern {
-        let output = currency_value(state, &value, currency)?;
+        let mut currency_number = value.clone();
+        let (digits, cash_rounding) =
+            number_data::fraction(currency, state.style == Style::CurrencyCash);
+        let rounding = rounding_mode(state.attributes.rounding);
+        let increment = match cash_rounding {
+            2 => RoundingIncrement::MultiplesOf2,
+            5 => RoundingIncrement::MultiplesOf5,
+            25 => RoundingIncrement::MultiplesOf25,
+            _ => RoundingIncrement::MultiplesOf1,
+        };
+        currency_number.round_with_mode_and_increment(-digits, rounding, increment);
+        let output = currency_value(state, &currency_number, currency)?;
+        let data = number_data::for_locale(&state.locale);
         let needs_override = state.attributes.custom_fraction
             || !state.attributes.grouping
             || state.attributes.custom_group_size
             || !state.symbols.is_empty()
-            || !state.text_attributes.is_empty()
-            || state.attributes.rounding != 4;
+            || !state.text_attributes.is_empty();
+        let (prefix, number, suffix) = split_number(&output);
         if !needs_override {
+            if state.attributes.grouping
+                && data.minimum_grouping > 1
+                && !data.symbols[11].is_empty()
+                && !number.contains(data.symbols[11])
+            {
+                let grouped = regroup(number, data.symbols[6], data.symbols[11], state);
+                return Some(format!("{prefix}{grouped}{suffix}"));
+            }
             return Some(output);
         }
-        round(state, &mut value);
-        let (prefix, _, suffix) = split_number(&output);
+        if state.attributes.custom_fraction {
+            round(state, &mut value);
+        } else {
+            value = currency_number;
+        }
         let magnitude = Decimal::new(Sign::None, value.absolute);
         let formatted = decimal(state, &magnitude);
         return Some(affixes(state, original, prefix, &formatted, suffix));
@@ -156,12 +181,13 @@ pub fn render(state: &mut Formatter, original: &Decimal, currency: Option<&str>)
     if scientific && !value.absolute.is_zero() {
         exponent = value.absolute.nonzero_magnitude_start();
         value.multiply_pow10(-exponent);
+        value.absolute.trim_start();
     }
-    if !scientific || state.custom_pattern || state.attributes.custom_fraction {
-        if state.style != Style::Pattern || state.custom_pattern || state.attributes.custom_fraction
-        {
-            round(state, &mut value);
-        }
+    if state.custom_pattern
+        || state.attributes.custom_fraction
+        || (!scientific && state.style != Style::Pattern)
+    {
+        round(state, &mut value);
     }
 
     let negative = value.sign == Sign::Negative;
@@ -187,7 +213,15 @@ fn round(state: &Formatter, value: &mut Decimal) {
     } else {
         (-settings.fraction_max, -settings.fraction_min)
     };
-    let mode = match settings.rounding {
+    let mode = rounding_mode(settings.rounding);
+    value.round_with_mode(lower, mode);
+    value.absolute.trim_end();
+    value.absolute.pad_end(padding.min(0));
+    value.absolute.pad_start(settings.integer_min);
+}
+
+fn rounding_mode(settings: i64) -> SignedRoundingMode {
+    match settings {
         0 => SignedRoundingMode::Ceil,
         1 => SignedRoundingMode::Floor,
         2 => SignedRoundingMode::Unsigned(UnsignedRoundingMode::Trunc),
@@ -195,24 +229,21 @@ fn round(state: &Formatter, value: &mut Decimal) {
         5 => SignedRoundingMode::Unsigned(UnsignedRoundingMode::HalfTrunc),
         6 => SignedRoundingMode::Unsigned(UnsignedRoundingMode::HalfExpand),
         _ => SignedRoundingMode::Unsigned(UnsignedRoundingMode::HalfEven),
-    };
-    value.round_with_mode(lower, mode);
-    value.absolute.trim_end();
-    value.absolute.pad_end(padding.min(0));
-    value.absolute.pad_start(settings.integer_min);
+    }
 }
 
 fn decimal(state: &Formatter, value: &Decimal) -> String {
     let settings = &state.attributes;
-    let ungrouped = !settings.grouping || settings.custom_group_size;
+    let data = number_data::for_locale(&state.locale);
+    let manual_grouping = settings.custom_group_size || data.minimum_grouping > 1;
+    let ungrouped = !settings.grouping || manual_grouping;
     let formatter = if ungrouped {
         &state.ungrouped
     } else {
         &state.decimal
     };
     let mut rendered = formatter.format_to_string(value);
-    let data = number_data::for_locale(&state.locale);
-    if settings.custom_group_size && settings.grouping && settings.group_size > 0 {
+    if manual_grouping && settings.grouping && settings.group_size > 0 {
         rendered = regroup(&rendered, data.symbols[0], data.symbols[1], state);
     }
     if settings.decimal_always && !rendered.contains(data.symbols[0]) {
@@ -248,10 +279,7 @@ fn regroup(text: &str, decimal: &str, separator: &str, state: &Formatter) -> Str
     } else {
         primary
     };
-    let minimum = number_data::for_locale(&state.locale)
-        .minimum_grouping
-        .max(1) as usize;
-    if total < primary + minimum {
+    if primary == 0 || total <= primary {
         return text.to_owned();
     }
     let mut number = String::new();

@@ -20,6 +20,7 @@ mod normalization_data;
 mod normalizer;
 mod number;
 mod number_data;
+mod unsupported;
 
 use phera_extension_api::{ClassEntry, Extension, Registry};
 
@@ -41,6 +42,7 @@ impl Extension for Intl {
         date::register(registry);
         locale::register(registry);
         idn::register(registry);
+        unsupported::register(registry);
         grapheme::register(registry);
     }
 }

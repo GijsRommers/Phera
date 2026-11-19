@@ -118,3 +118,22 @@ pub fn currency(locale: &Locale) -> String {
         .unwrap_or("XXX")
         .to_owned()
 }
+
+pub fn fraction(code: &str, cash: bool) -> (i16, u8) {
+    let table = include_str!("../data/cldr-currency-fractions.tsv");
+    table
+        .lines()
+        .find_map(|row| {
+            let mut fields = row.split('\t');
+            (fields.next()? == code).then_some(())?;
+            let normal = fields.next()?;
+            let cash_digits = fields.next()?;
+            let cash_rounding = fields.next()?;
+            if cash {
+                Some((cash_digits.parse().ok()?, cash_rounding.parse().ok()?))
+            } else {
+                Some((normal.parse().ok()?, 0))
+            }
+        })
+        .unwrap_or((2, 0))
+}

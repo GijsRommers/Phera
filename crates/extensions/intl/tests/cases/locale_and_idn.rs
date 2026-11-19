@@ -185,7 +185,7 @@ fn idn_uts46() {
         "xn--a.b",
         "ab--cd",
         "www.fußball.com-",
-        "­",
+        "\u{ad}",
         "a..b",
         ".",
         "..",

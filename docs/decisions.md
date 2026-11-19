@@ -11,6 +11,7 @@ design or review work and the owner can overrule it.
 
 | Date | Decision | Why | Turned down | By |
 | --- | --- | --- | --- | --- |
+| 2026-11-19 | Intl preserves ICU4C's legacy grouping and half-even currency rounding, Arabic GMT offset signs, and the Gregorian calendar's Julian parsing cutover. | These outcomes differ between the APIs even with the same CLDR release. | Accepting deterministic differences as locale data drift. | Design |
 | 2026-11-19 | Phera verifies intl types, references, diagnostics and locale-independent results exactly against PHP 8.5. It checks the core locale data on the oracle host and records each accepted difference with both CLDR releases. | ICU4X and PHP's ICU4C can use different locale data even on the same PHP patch release. | Pinning all locale output to one machine. | Design |
 | 2026-11-19 | WordPress is a target next to Symfony and Laravel. `mysqli` and the `pg_*` functions are built as thin layers over the database drivers PDO already uses. | WordPress is the most used PHP application and talks to MySQL only through `mysqli`. One client per database keeps pooling, TLS and type mapping in one place. | A second, separate MySQL client for `mysqli`. | Owner |
 | 2026-11-19 | Phera follows the newest PHP 8.5 patch release. A comparison whose PHP answer changed in a patch release is marked with the version it holds from and is skipped, visibly, on an older PHP. It is never removed. | Patch releases are bug fixes; CI moves to them on its own; nobody runs an old patch on purpose. | Pinning CI to one patch version. | Owner |
@@ -22,6 +23,7 @@ design or review work and the owner can overrule it.
 
 | Date | Decision | Why | Turned down | By |
 | --- | --- | --- | --- | --- |
+| 2026-11-19 | Explicitly excluded intl classes return named unsupported errors from construction and static entry points. | A caller can distinguish the excluded operation from a general runtime lookup failure. | Returning empty transliteration or converter results. | Design |
 | 2026-11-19 | Intl links ICU4X 2.4 with full compiled coverage for the linked components. Retain CLDR pattern strings for PHP's mutable number and date styles. | This covers locales beyond the test matrix and preserves PHP's explicit pattern API. Release size is measured in the intl compatibility notes. | ICU4C and a custom core-locale data subset. | Design |
 | 2026-11-19 | Normalizer uses ICU4X and the Unicode Character Database's raw compatibility and NFKC case-fold mappings. Grapheme functions preserve PHP bytes, and searches use collation keys and a prefix table at cluster boundaries. | Raw decomposition must preserve its intermediate scalars. A prefix table avoids re-scanning the haystack for every candidate. | Lowercasing as case folding, recursive decomposition as a raw mapping and unbounded repeated substring comparison. | Design |
 | 2026-11-19 | UTS #46 uses ICU4X mapping and idna's Punycode, with PHP's separate bidi and joiner options. | PHP exposes per-condition error bits and by-reference output for failed names. | An all-or-nothing URL-host error with mandatory WHATWG restrictions. | Design |

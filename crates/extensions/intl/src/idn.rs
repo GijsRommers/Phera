@@ -215,7 +215,20 @@ fn decode(label: &str, std3: bool) -> Label {
     if let Some(payload) = label.strip_prefix("xn--") {
         let Some(decoded) = idna::punycode::decode_to_string(payload) else {
             return Label {
-                text: label.to_owned(),
+                text: if std3 {
+                    label
+                        .chars()
+                        .map(|scalar| {
+                            if scalar.is_ascii() && forbidden_ascii(scalar as u8) {
+                                '�'
+                            } else {
+                                scalar
+                            }
+                        })
+                        .collect()
+                } else {
+                    label.to_owned()
+                },
                 errors: PUNYCODE,
             };
         };

@@ -11,7 +11,7 @@ use phera_ext_date::{
 };
 use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, PhpArray, Value, args};
 
-use super::{Formatter, fail, render::Renderer};
+use super::{Formatter, fail, historical, render::Renderer};
 use crate::number::digit;
 
 pub fn parse(
@@ -21,15 +21,6 @@ pub fn parse(
     site: &str,
     localtime: bool,
 ) -> NativeResult {
-    let Ok(text) = std::str::from_utf8(args::bytes(arguments, 0)) else {
-        return fail(
-            context,
-            state,
-            site,
-            10,
-            "String conversion to UTF-16 failed",
-        );
-    };
     let offset = args::reference(arguments, 1);
     let start = offset
         .and_then(|cell| {
@@ -44,9 +35,32 @@ pub fn parse(
                 _ => 0,
             })
         })
-        .unwrap_or(0) as i32 as usize;
+        .unwrap_or(0);
+    let Ok(start) = i32::try_from(start) else {
+        return crate::error::fail(
+            context,
+            site,
+            1,
+            "String index is out of valid range.",
+            Value::Bool(false),
+        );
+    };
+    let source = args::bytes(arguments, 0);
+    if start < 0 || start as usize > source.len() {
+        return Ok(Value::Bool(false));
+    }
+    let Ok(text) = std::str::from_utf8(source) else {
+        return fail(
+            context,
+            state,
+            site,
+            10,
+            "Error converting timezone to UTF-16",
+        );
+    };
+    let start = start as usize;
     let Some(input) = text.get(start..) else {
-        return fail(context, state, site, 1, "Invalid UTF-8 offset");
+        return fail(context, state, site, 10, "Invalid UTF-8 offset");
     };
     let (parsed, length) = fields(state, input);
     if let Some(offset) = offset {
@@ -57,20 +71,21 @@ pub fn parse(
     let Some((civil, zone)) = parsed else {
         return fail(context, state, site, 9, "Date parsing failed");
     };
-    let timestamp = zone.resolve(civil, None);
+    let timestamp = historical::resolve(&zone, civil);
     if !localtime {
         return Ok(Value::Int(timestamp));
     }
     let shift = zone.offset(timestamp);
     let shifted = Civil::from_timestamp(timestamp.saturating_add(i64::from(shift.seconds)));
+    let (shifted, weekday, yearday) = historical::fields(shifted);
     let rows = [
         ("tm_sec", shifted.second),
         ("tm_min", shifted.minute),
         ("tm_hour", shifted.hour),
         ("tm_year", shifted.year - 1900),
         ("tm_mday", shifted.day),
-        ("tm_wday", shifted.weekday()),
-        ("tm_yday", shifted.yearday() + 1),
+        ("tm_wday", weekday),
+        ("tm_yday", yearday),
         ("tm_mon", shifted.month - 1),
         ("tm_isdst", i64::from(shift.daylight)),
     ];
@@ -109,7 +124,15 @@ fn fields(state: &Formatter, text: &str) -> (Option<(Civil, ZoneKind)>, usize) {
             scanner.literal(symbol)
         };
         if !valid {
-            return (None, text.len() - scanner.rest.len());
+            let consumed = text.len() - scanner.rest.len();
+            let attempted = if consumed == 0 && state.lenient && text.starts_with('-') {
+                text.bytes()
+                    .take_while(|byte| byte.is_ascii_digit() || matches!(byte, b'-' | b':' | b' '))
+                    .count()
+            } else {
+                consumed
+            };
+            return (None, attempted);
         }
     }
     if let Some(pm) = scanner.meridiem {
@@ -181,7 +204,7 @@ impl Scanner<'_> {
                 return self.meridiem.is_some();
             }
             'X' | 'x' | 'Z' | 'O' | 'z' | 'v' | 'V' => return self.timezone(),
-            'y' | 'u' | 'Y' => self.numeric(if width == 2 { 2 } else { width.max(4).min(10) }),
+            'y' | 'u' | 'Y' => self.numeric(if width == 2 { 2 } else { width.clamp(4, 10) }),
             'D' => self.numeric(3),
             'S' => self.numeric(width.min(9)),
             _ => self.numeric(2),

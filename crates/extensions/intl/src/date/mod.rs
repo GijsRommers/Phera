@@ -5,6 +5,7 @@
 //! $f->format(new DateTimeImmutable('2024-08-27T12:00:00Z'));
 //! ```
 
+mod historical;
 mod input;
 mod parse;
 mod pattern;
@@ -258,7 +259,7 @@ fn dispatch(
         Operation::Parse => return parse::parse(context, state, arguments, site, false),
         Operation::Localtime => return parse::parse(context, state, arguments, site, true),
         Operation::CalendarObject | Operation::TimeZone | Operation::ParseToCalendar => {
-            return Err(number::unsupported(site));
+            return Err(crate::unsupported::item(site));
         }
         Operation::ErrorCode | Operation::ErrorMessage => Value::Null,
     };

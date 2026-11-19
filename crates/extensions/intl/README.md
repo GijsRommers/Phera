@@ -39,4 +39,11 @@ supplies grandfathered tags.
 
 | Call | PHP / ICU4C CLDR | Phera / ICU4X CLDR | Difference and disposition |
 | --- | --- | --- | --- |
-| Locale formatting and display-name matrix | 49 on the Mac oracle | 49 | Under differential verification |
+| Decimal, currency and percent grouping of four-digit numbers in `es_ES` and `it_IT` | 49 | 49 | Fixed. PHP's legacy formatter groups before ICU4X's default minimum. |
+| Half-integer `JPY` values in `ja_JP` | 49 | 49 | Fixed. Round half-even before the ICU4X currency formatter applies its precision. |
+| Long date-time style in `ar_EG`, Brussels GMT offsets at Unix timestamps 0 and 1724727600 | 49 | 49 | Fixed. Match ICU4C's unmarked sign in the rendered Arabic time-zone field. |
+
+On macOS, all 8,646 Stage 1 differential cases pass with PHP 8.5.12 and
+ICU4C 79.1. That includes 675 display-name comparisons and 750 number and date
+format comparisons across the 15 core locales. The wider PHP intl suite
+covers additional patterns and API combinations.

@@ -21,12 +21,22 @@ pub fn number(
         return call.fail(context, state, 10, "String conversion to UTF-16 failed");
     };
     let start = position(arguments, 2);
-    let Some(remainder) = text.get(start..) else {
-        return call.fail(context, state, 1, "Invalid UTF-8 offset");
-    };
+    let in_bounds = (0..=text.len() as i64).contains(&start);
+    if in_bounds && !text.is_char_boundary(start as usize) {
+        return call.fail(context, state, 10, "Invalid UTF-8 offset");
+    }
     if !(1..=3).contains(&format_type) {
         return Err(render::type_error(call, format_type, true));
     }
+    if !in_bounds {
+        return Ok(if format_type == 3 {
+            Value::Float(0.0)
+        } else {
+            Value::Int(0)
+        });
+    }
+    let start = start as usize;
+    let remainder = &text[start..];
     let Some((parsed, length)) = scan(state, remainder) else {
         assign(arguments, 2, Value::Int(start as i64))?;
         return call.fail(context, state, 9, "Number parsing failed");
@@ -68,8 +78,12 @@ pub fn currency(
         return call.fail(context, state, 10, "String conversion to UTF-16 failed");
     };
     let start = position(arguments, 2);
+    if !(0..=text.len() as i64).contains(&start) {
+        return Ok(Value::Bool(false));
+    }
+    let start = start as usize;
     let Some(remainder) = text.get(start..) else {
-        return call.fail(context, state, 1, "Invalid UTF-8 offset");
+        return call.fail(context, state, 10, "Invalid UTF-8 offset");
     };
     let Some((code, parsed, length)) = scan_currency(state, remainder) else {
         assign(arguments, 2, Value::Int(start as i64))?;
@@ -208,7 +222,7 @@ fn scan(state: &Formatter, text: &str) -> Option<(String, usize)> {
     Some((number, text.len() - input.len()))
 }
 
-fn position(arguments: &[Value], index: usize) -> usize {
+fn position(arguments: &[Value], index: usize) -> i64 {
     args::reference(arguments, index)
         .and_then(|value| {
             let value = value.try_borrow().ok()?;
@@ -221,7 +235,7 @@ fn position(arguments: &[Value], index: usize) -> usize {
                     .unwrap_or(0),
                 _ => 0,
             };
-            Some(offset as i32 as usize)
+            Some(i64::from(offset as i32))
         })
         .unwrap_or(0)
 }

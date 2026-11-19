@@ -22,7 +22,7 @@ use icu_locale::Locale;
 use phera_extension_api::{Context, NativeError, NativeResult, Object, PhpArray, Registry};
 use phera_extension_api::{Value, args};
 
-use crate::{error, locale, locale_id, number_data};
+use crate::{error, locale, locale_id, number_data, unsupported::item as unsupported};
 
 pub fn register(registry: &mut Registry) {
     registration::register(registry);
@@ -92,13 +92,6 @@ impl Style {
             Self::CurrencyPlural => "#,##0.00 ¤¤¤",
         }
     }
-}
-
-pub(crate) fn unsupported(item: &str) -> NativeError {
-    NativeError::throw(
-        "Phera\\NotSupportedException",
-        format!("{item} is not supported"),
-    )
 }
 
 #[derive(Clone)]
@@ -230,10 +223,9 @@ pub(crate) fn known_language(language: &str) -> bool {
 pub(crate) fn resolve_locale(locale: &str) -> String {
     let id = locale_id::canonical(locale);
     let base = id.split('@').next().unwrap_or_default();
-    let table = include_str!("../../data/cldr-locales.txt");
     let mut candidate = base;
     loop {
-        if table.lines().any(|available| available == candidate) {
+        if crate::locale_matching::is_available(candidate) {
             return candidate.to_owned();
         }
         let Some((parent, _)) = candidate.rsplit_once('_') else {

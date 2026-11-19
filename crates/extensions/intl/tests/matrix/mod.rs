@@ -136,6 +136,13 @@ impl Matrix {
 
     pub fn compare(&self, name: &str) {
         let php = oracle::run_php(name, &self.script).expect("PHP 8.5 with intl required");
+        if std::env::var_os("PHERA_INTL_ORACLE_DIFF").is_some() {
+            for ((label, expected), actual) in self.labels.iter().zip(&php).zip(&self.results) {
+                if expected != actual {
+                    eprintln!("{name} {label}\n  php : {expected}\n  rust: {actual}");
+                }
+            }
+        }
         oracle::compare(name, &self.labels, &php, &self.results);
     }
 }

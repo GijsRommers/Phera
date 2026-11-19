@@ -167,6 +167,13 @@ pub fn change_likely(input: &str, minimize: bool) -> String {
     let original = canonical(input);
     let id = LocaleId::parse(&original);
     let mut modern = cldr(&original);
+    if modern.id.language.is_unknown() && id.language.is_empty() {
+        modern.id.language = icu_locale::langid!("en").language;
+    }
+    if minimize && id.region.len() == 3 && id.region.bytes().all(|byte| byte.is_ascii_alphabetic())
+    {
+        return original;
+    }
     if modern.id.language.is_unknown() && !id.language.is_empty() {
         return original;
     }
@@ -185,10 +192,15 @@ pub fn change_likely(input: &str, minimize: bool) -> String {
             .id
             .script
             .map_or_else(String::new, |value| value.to_string()),
-        region: modern
-            .id
-            .region
-            .map_or_else(String::new, |value| value.to_string()),
+        region: if id.region.len() == 3 && id.region.bytes().all(|byte| byte.is_ascii_alphabetic())
+        {
+            id.region
+        } else {
+            modern
+                .id
+                .region
+                .map_or_else(String::new, |value| value.to_string())
+        },
         variants: id.variants,
         ..LocaleId::default()
     };
@@ -275,4 +287,29 @@ fn grandfathered(tag: &str) -> Option<&'static str> {
         .lines()
         .filter_map(|line| line.split_once(';'))
         .find_map(|(name, preferred)| name.eq_ignore_ascii_case(tag).then_some(preferred))
+}
+
+pub fn variants(input: &str, id: &LocaleId<'_>) -> Vec<String> {
+    if id.grandfathered.is_some() {
+        return Vec::new();
+    }
+    let mut result = id.variants.clone();
+    let mut parts = input
+        .split(['.', '@'])
+        .next()
+        .unwrap_or_default()
+        .split(['_', '-'])
+        .skip(1);
+    if let Some(extension) = parts.find(|part| part.len() == 1 && !part.is_empty())
+        && result.is_empty()
+        && !matches!(extension.to_ascii_lowercase().as_str(), "x" | "u")
+    {
+        result.push(extension.to_ascii_uppercase());
+        result.extend(
+            parts
+                .take_while(|part| part.len() > 1)
+                .map(str::to_ascii_uppercase),
+        );
+    }
+    result
 }

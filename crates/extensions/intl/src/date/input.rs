@@ -8,7 +8,7 @@ use phera_ext_date::{DateTimeValue, ZoneKind, calendar::Civil, parse_timezone, r
 use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, PhpArray, Value, args};
 
 use super::{Formatter, Style, current_zone, fail, pattern, render::Renderer};
-use crate::{error, locale, locale_id, number};
+use crate::{error, locale, locale_id};
 
 pub const CALENDAR_ERROR: &str = concat!(
     "Invalid value for calendar type; it must be one of ",
@@ -36,7 +36,7 @@ pub fn timezone(
             read_timezone(object).map(Some)
         }
         Value::Object(object) if object.class.is_instance_of("IntlTimeZone") => {
-            Err(number::unsupported("IntlTimeZone"))
+            Err(crate::unsupported::item("IntlTimeZone"))
         }
         other => Err(type_error(
             site,
@@ -54,7 +54,7 @@ pub fn calendar(value: &Value, site: &str, index: usize) -> Result<Option<i64>, 
         Value::Int(value) => Ok(matches!(value, 0 | 1).then_some(*value)),
         Value::Bool(value) => Ok(Some(i64::from(*value))),
         Value::Object(object) if object.class.is_instance_of("IntlCalendar") => {
-            Err(number::unsupported("IntlCalendar"))
+            Err(crate::unsupported::item("IntlCalendar"))
         }
         other => Err(type_error(
             site,
@@ -102,7 +102,7 @@ pub fn format(
             (date.timestamp, date.micros)
         }
         Value::Object(value) if value.class.is_instance_of("IntlCalendar") => {
-            return Err(number::unsupported("IntlCalendar"));
+            return Err(crate::unsupported::item("IntlCalendar"));
         }
         Value::Object(_) => {
             return fail(
@@ -111,7 +111,8 @@ pub fn format(
                 site,
                 1,
                 concat!(
-                    "invalid object type for date/time (only IntlCalendar and DateTimeInterface permitted)",
+                    "invalid object type for date/time ",
+                    "(only IntlCalendar and DateTimeInterface permitted)",
                 ),
             );
         }
@@ -181,7 +182,7 @@ pub fn format_object(context: &mut dyn Context, arguments: &[Value], site: &str)
         ));
     };
     if object.class.is_instance_of("IntlCalendar") {
-        return Err(number::unsupported("IntlCalendar"));
+        return Err(crate::unsupported::item("IntlCalendar"));
     }
     if !object.class.is_instance_of("DateTimeInterface") {
         return Err(type_error(

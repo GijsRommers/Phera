@@ -145,12 +145,22 @@ fn query(context: &mut dyn Context, arguments: &[Value], site: &str, query: Quer
                 Value::from(id.language)
             }
         }
-        Query::Script if id.grandfathered.is_some() => Value::Null,
-        Query::Region if id.grandfathered.is_some() => Value::Null,
+        Query::Script if id.grandfathered.is_some() => {
+            return error::fail(context, site, 0, "unable to get locale script", Value::Null);
+        }
+        Query::Region if id.grandfathered.is_some() => {
+            return error::fail(context, site, 0, "unable to get locale region", Value::Null);
+        }
         Query::Script => Value::from(id.script),
+        Query::Region if id.language.is_empty() && input.starts_with(['x', 'X']) => Value::from(
+            id.private
+                .get(1)
+                .filter(|part| matches!(part.len(), 2 | 3))
+                .map_or_else(String::new, |part| part.to_ascii_uppercase()),
+        ),
         Query::Region => Value::from(id.region),
         Query::Variants => array(
-            id.variants
+            locale_id::variants(&input, &id)
                 .into_iter()
                 .enumerate()
                 .map(|(index, variant)| (ArrayKey::Int(index as i64), Value::from(variant))),
