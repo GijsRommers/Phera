@@ -25,7 +25,10 @@ pub(super) fn accepts(parameters: &[Param], slots: &[Option<Value>]) -> bool {
 pub(super) fn exact_types(parameter: &Param) -> TypeMask {
     use ParamType as P;
     use TypeMask as T;
-    if parameter.by_ref || parameter.variadic || parameter.ty == P::Callable {
+    if parameter.by_ref
+        || parameter.variadic
+        || matches!(parameter.ty, P::Callable | P::ReflectedObject)
+    {
         return T::default();
     }
     let mask = match parameter.ty {
@@ -46,7 +49,7 @@ pub(super) fn exact_types(parameter: &Param) -> TypeMask {
         P::ArrayOrFloat => T::ARRAY.union(T::FLOAT),
         P::ArrayOrBool => T::ARRAY.union(T::BOOL),
         P::Mixed => T::MIXED.union(RESOURCE),
-        P::Class(_) | P::Callable | P::RecursiveOrAggregate => T::default(),
+        P::Class(_) | P::Callable | P::ReflectedObject | P::RecursiveOrAggregate => T::default(),
     };
     if parameter.nullable {
         mask.union(T::NULL)

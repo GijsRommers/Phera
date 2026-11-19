@@ -24,6 +24,7 @@ impl Compiler<'_> {
         });
         self.block(body, DeclarationTiming::AtExecution)?;
         let continue_at = self.position();
+        self.fresh_temporaries();
         let register = self.compile_expression(condition)?;
         self.emit(
             Instruction::Branch {
@@ -73,6 +74,7 @@ impl Compiler<'_> {
         });
         self.block(body, DeclarationTiming::AtExecution)?;
         let continue_at = self.position();
+        self.fresh_temporaries();
         for expression in step {
             self.compile_expression(expression)?;
         }

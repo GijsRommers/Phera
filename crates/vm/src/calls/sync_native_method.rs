@@ -41,6 +41,11 @@ impl Vm {
         let slots = self.registers.window(call.base(), count);
         if context.invocation == Invocation::Constructor
             || matches!(method.declaring.as_str(), "Exception" | "Error")
+            || (self.classes.has_lazy_objects
+                && context
+                    .receiver
+                    .as_ref()
+                    .is_some_and(|object| object.lazy().is_some()))
             || entry.preparation.is_some()
             || !call.is_plain()
             || details.named.is_some()
@@ -79,10 +84,15 @@ impl Vm {
                 self.set(destination, value);
                 Ok(None)
             }
-            Err(error) if Self::is_reflected_hook(&error) => Ok(Some(BatchExit::NativeMethodHook(
-                destination,
-                Box::new((error, method)),
-            ))),
+            Err(error)
+                if Self::is_reflected_hook(&error)
+                    || crate::lazy_continuation::ReflectInitialize::is_pending(&error) =>
+            {
+                Ok(Some(BatchExit::NativeMethodHook(
+                    destination,
+                    Box::new((error, method)),
+                )))
+            }
             Err(error) => {
                 if matches!(&error, NativeError::Throw { .. }) {
                     self.failed_native = Some(crate::error_traces::NativeTrace::method(

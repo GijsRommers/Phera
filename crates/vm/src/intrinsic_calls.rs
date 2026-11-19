@@ -84,10 +84,6 @@ impl Vm {
                 drop(diagnostics);
                 self.runtime_function(function, arguments, origin)
             }
-            Intrinsic::GetIncludePath | Intrinsic::SetIncludePath => {
-                drop(diagnostics);
-                self.include_path_intrinsic(intrinsic, arguments, origin)
-            }
             Intrinsic::IsCallable => {
                 drop(diagnostics);
                 Box::pin(self.callable_introspection(arguments, origin)).await
@@ -152,9 +148,6 @@ impl Vm {
                 arguments,
             ),
             Intrinsic::ErrorReporting => diagnostics.vm.error_reporting_intrinsic(arguments),
-            Intrinsic::IniSet | Intrinsic::IniGet => {
-                diagnostics.vm.exception_ini_setting(intrinsic, &arguments)
-            }
         }
     }
 }

@@ -42,13 +42,16 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let value = self.read_local(source);
         let properties = with.map(|with| self.read_local(with));
-        let (object, properties) = self.copy_clone(value, properties).await?;
-        self.continue_clone_updates(destination, self.clone_updates(object, properties))
-            .await
+        self.start_clone(destination, value, properties).await
     }
 
     pub(crate) async fn clone_intrinsic(&mut self, arguments: Vec<Value>) -> NativeResult {
         let (value, properties) = clone_arguments(arguments)?;
+        if let Value::Object(object) = &value
+            && object.lazy().is_some()
+        {
+            self.initialize_lazy_via_callback(object.clone()).await?;
+        }
         let (object, properties) = self.copy_clone(value, properties).await?;
         let mut updates = self.clone_updates(object, properties);
         while let Some((name, value)) = updates.next()? {
@@ -69,6 +72,28 @@ impl Vm {
         arguments: Vec<Value>,
     ) -> Result<(), NativeError> {
         let (value, properties) = clone_arguments(arguments)?;
+        self.start_clone(destination, value, properties).await
+    }
+
+    pub(crate) async fn start_clone(
+        &mut self,
+        destination: Reg,
+        value: Value,
+        properties: Option<Value>,
+    ) -> Result<(), NativeError> {
+        if let Value::Object(original) = &value {
+            let object = crate::lazy_objects::resolved_lazy_instance(original.clone());
+            if object.is_uninitialized_lazy() {
+                let continuation = crate::lazy_continuation::LazyContinuation::Clone(
+                    destination,
+                    original.clone(),
+                    properties,
+                );
+                self.suspend_lazy_initialization(object, continuation)
+                    .await?;
+                return Ok(());
+            }
+        }
         let (object, properties) = self.copy_clone(value, properties).await?;
         self.continue_clone_updates(destination, self.clone_updates(object, properties))
             .await
@@ -95,6 +120,16 @@ impl Vm {
             }
             None => Rc::new(PhpArray::new()),
         };
+        let mut original = original;
+        let mut proxies = Vec::new();
+        while let Some(instance) = original.lazy_instance() {
+            let class = self
+                .classes
+                .for_object(&original)
+                .ok_or_else(|| internal_error!("clone proxy class"))?;
+            proxies.push(self.classes.allocate(class));
+            original = instance;
+        }
         let class = self
             .classes
             .for_object(&original)
@@ -158,7 +193,12 @@ impl Vm {
             self.invoke_magic_method(method, class.clone(), cloned.clone(), [])
                 .await?;
         }
-        Ok((cloned, with))
+        let mut result = cloned;
+        while let Some(proxy) = proxies.pop() {
+            proxy.replace_lazy(Some(Box::new(phera_value::LazyObject::Proxy(result))));
+            result = proxy;
+        }
+        Ok((result, with))
     }
 
     fn check_clone_visibility(&self, method: &super::Method) -> Result<(), NativeError> {

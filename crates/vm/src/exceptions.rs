@@ -271,10 +271,10 @@ impl Vm {
             let message = property_text(object, "message");
             let file = property_text(object, "file");
             let line = error_line(object);
-            self.out(format!("\nParse error: {message} in {file} on line {line}\n").as_bytes());
-            self.record_last_error(
+            self.report_diagnostic(
                 4,
-                message,
+                "Parse error",
+                message.into(),
                 crate::diagnostics::SourceLocation { file, line },
             );
             self.status = 255;
@@ -292,10 +292,10 @@ impl Vm {
         };
         let line = error_line(object);
         let message = format!("Uncaught {text}\n  thrown");
-        self.out(format!("\nFatal error: {message} in {file} on line {line}\n").as_bytes());
-        self.record_last_error(
+        self.report_diagnostic(
             1,
-            message,
+            "Fatal error",
+            message.into(),
             crate::diagnostics::SourceLocation { file, line },
         );
         self.status = 255;

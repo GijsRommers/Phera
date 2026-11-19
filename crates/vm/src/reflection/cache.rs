@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[derive(Default)]
-struct ReflectionCache {
+pub(crate) struct ReflectionCache {
     classes: HashMap<ClassIndex, ReflectedClass>,
     functions: HashMap<FunctionKey, Rc<FunctionInfo>>,
 }
@@ -44,12 +44,12 @@ impl ReflectedClass {
 }
 
 impl Vm {
+    fn reflection_cache(&mut self) -> &mut ReflectionCache {
+        self.reflection_cache.get_or_insert_with(Box::default)
+    }
+
     fn reflected_class_cache(&mut self, index: ClassIndex) -> &mut ReflectedClass {
-        self.state
-            .get_or_default::<ReflectionCache>()
-            .classes
-            .entry(index)
-            .or_default()
+        self.reflection_cache().classes.entry(index).or_default()
     }
 
     pub(super) fn cached_class_info(&mut self, class: &Class) -> Rc<ClassInfo> {
@@ -91,15 +91,12 @@ impl Vm {
                 return self.reflection_function(target).map(Rc::new);
             }
         };
-        let cache = self.state.get_or_default::<ReflectionCache>();
+        let cache = self.reflection_cache();
         if let Some(info) = cache.functions.get(&key) {
             return Ok(info.clone());
         }
         let info = Rc::new(self.reflection_function(target)?);
-        self.state
-            .get_or_default::<ReflectionCache>()
-            .functions
-            .insert(key, info.clone());
+        self.reflection_cache().functions.insert(key, info.clone());
         Ok(info)
     }
 }

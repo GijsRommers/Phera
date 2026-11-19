@@ -16,7 +16,13 @@ pub fn register(registry: &mut Registry) {
         Param::new("format", ParamType::String),
         Param::new("vars", ParamType::Mixed).by_ref().variadic(),
     ];
+    const STRING_PARAMS: &[Param] = &[
+        Param::new("string", ParamType::String),
+        Param::new("format", ParamType::String),
+        Param::new("vars", ParamType::Mixed).by_ref().variadic(),
+    ];
     registry.function(FunctionEntry::asynchronous("fscanf", PARAMS, scan));
+    registry.function(FunctionEntry::sync("sscanf", STRING_PARAMS, scan_string));
 }
 
 fn scan(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -42,6 +48,12 @@ fn scan(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
         let format = Format::parse(args::bytes(&arguments, 1), variables)?;
         scan_line(&data, format, &arguments)
     })
+}
+
+fn scan_string(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let variables = arguments.len().saturating_sub(2);
+    let format = Format::parse(args::bytes(arguments, 1), variables)?;
+    scan_line(args::bytes(arguments, 0), format, arguments)
 }
 
 pub(crate) fn scan_line(data: &[u8], format: Format<'_>, arguments: &[Value]) -> NativeResult {
@@ -141,7 +153,7 @@ fn contains(set: &[u8], byte: u8) -> bool {
     let mut matched = false;
     while let Some((&first, tail)) = set.split_first() {
         if let [b'-', last, rest @ ..] = tail {
-            matched |= (first..=*last).contains(&byte);
+            matched |= (first.min(*last)..=first.max(*last)).contains(&byte);
             set = rest;
         } else {
             matched |= first == byte;

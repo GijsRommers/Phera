@@ -65,6 +65,7 @@ impl Machine<'_> {
             MethodBody::Native(entry)
                 if entry.direct.is_some()
                     && method.visibility == Visibility::Public
+                    && (!self.classes.has_lazy_objects || object.lazy().is_none())
                     && !self.caller_has_other_private(key, method) =>
             {
                 let Some(class) = class.identity.upgrade() else {

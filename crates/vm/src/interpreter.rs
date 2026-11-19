@@ -103,9 +103,7 @@ impl Vm {
                 BatchExit::Handlers => {}
                 BatchExit::GeneratorTracking => {}
                 BatchExit::Compare(pending) => {
-                    let order = self.finish_string_comparison(pending.cast).await?;
-                    let value = crate::string_comparison::comparison_value(pending.operator, order);
-                    self.set(pending.destination, value);
+                    Box::pin(self.continue_comparison(pending)).await?;
                 }
                 BatchExit::BindCall(destination) => {
                     self.coerce_call_strings(self.argument_origin).await?;
@@ -134,7 +132,7 @@ impl Vm {
                 BatchExit::NativeMethodHook(destination, hook) => {
                     let (error, method) = *hook;
                     if let Some(value) = self
-                        .finish_reflected_hook(error, &method, Some(destination))
+                        .finish_native_method_continuation(error, &method, Some(destination))
                         .await?
                     {
                         self.set(destination, value);

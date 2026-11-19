@@ -36,15 +36,25 @@ impl Vm {
         message: PhpString,
         location: SourceLocation,
     ) {
-        if self.error_handlers.reporting & level != 0
-            && let Some(bytes) = self.diagnostic_reporter.report(
-                kind,
-                message.as_bytes(),
-                &location.file,
-                location.line,
-            )
-        {
-            self.out(&bytes);
+        if self.error_handlers.reporting & level != 0 {
+            if self.error_handlers.log_errors && self.diagnostic_reporter.is_visible() {
+                use std::io::Write;
+
+                let mut log = std::io::stderr().lock();
+                let _ = write!(log, "PHP {kind}:  ");
+                let _ = log.write_all(message.as_bytes());
+                let _ = writeln!(log, " in {} on line {}", location.file, location.line);
+            }
+            if self.error_handlers.display_errors
+                && let Some(bytes) = self.diagnostic_reporter.report(
+                    kind,
+                    message.as_bytes(),
+                    &location.file,
+                    location.line,
+                )
+            {
+                self.out(&bytes);
+            }
         }
         self.record_last_error(level, message, location);
     }

@@ -11,11 +11,57 @@ use super::{ObjectComparator, compare_resolved, smart_strcmp};
 pub enum StringComparisonStep {
     Complete(i8),
     Cast(Box<StringComparison>),
+    Initialize(Box<LazyComparison>),
 }
 
 pub struct StringComparison {
     pair: CastPair,
     remaining: Option<TableComparison>,
+}
+
+/// The exact object operands and parent table cursor survive initialization.
+pub struct LazyComparison {
+    left: Rc<Object>,
+    right: Rc<Object>,
+    remaining: Option<TableComparison>,
+}
+
+impl LazyComparison {
+    pub fn pending(&self) -> Option<Rc<Object>> {
+        [&self.left, &self.right].into_iter().find_map(|original| {
+            let mut object = original.clone();
+            while let Some(instance) = object.lazy_instance() {
+                object = instance;
+            }
+            object.is_uninitialized_lazy().then_some(object)
+        })
+    }
+
+    pub fn resume(
+        mut self,
+        objects: &mut ObjectComparator<'_>,
+        diagnostics: &mut dyn Diagnostics,
+    ) -> Result<StringComparisonStep, OpError> {
+        let mut comparison = Comparison::Native(objects);
+        match comparison.objects(&self.left, &self.right, diagnostics)? {
+            Pair::Compared(order) if order != 0 => Ok(StringComparisonStep::Complete(order)),
+            Pair::Compared(_) => match self.remaining {
+                Some(table) => resume_table(table, &mut comparison, diagnostics),
+                None => Ok(StringComparisonStep::Complete(0)),
+            },
+            Pair::Initialize => Ok(StringComparisonStep::Initialize(Box::new(self))),
+            Pair::Tables(left, right) => {
+                let table = match self.remaining.take() {
+                    Some(mut table) => {
+                        table.enter_child(left, right, &comparison)?;
+                        table
+                    }
+                    None => TableComparison::new(left, right, &comparison)?,
+                };
+                resume_table(table, &mut comparison, diagnostics)
+            }
+        }
+    }
 }
 
 pub(super) struct CastPair {
@@ -98,6 +144,13 @@ pub fn compare_with_string_objects(
         (Value::Object(left), Value::Object(right)) => {
             match comparison.objects(left, right, diagnostics)? {
                 Pair::Compared(result) => return Ok(StringComparisonStep::Complete(result)),
+                Pair::Initialize => {
+                    return Ok(StringComparisonStep::Initialize(Box::new(LazyComparison {
+                        left: left.clone(),
+                        right: right.clone(),
+                        remaining: None,
+                    })));
+                }
                 Pair::Tables(left, right) => (left, right),
             }
         }
@@ -120,6 +173,13 @@ fn resume_table(
 ) -> Result<StringComparisonStep, OpError> {
     match table.advance::<true>(comparison, diagnostics)? {
         CompareStep::Complete(order) => Ok(StringComparisonStep::Complete(order)),
+        CompareStep::Initialize(left, right) => {
+            Ok(StringComparisonStep::Initialize(Box::new(LazyComparison {
+                left,
+                right,
+                remaining: Some(table),
+            })))
+        }
         CompareStep::Cast(pair) => Ok(StringComparisonStep::Cast(Box::new(StringComparison {
             pair,
             remaining: Some(table),

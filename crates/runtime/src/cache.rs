@@ -26,6 +26,13 @@ impl CodeCache {
         }
     }
 
+    pub(crate) async fn compile(&self, path: PathBuf) -> Result<Arc<CompiledUnit>, RuntimeError> {
+        let cache = self.clone();
+        tokio::task::spawn_blocking(move || cache.load(&path))
+            .await
+            .map_err(|error| RuntimeError::Internal(error.to_string()))?
+    }
+
     /// Returns the compiled unit for `path`, compiling it on first use.
     ///
     /// Reads the file and compiles, both of which block, so async callers
@@ -80,5 +87,15 @@ impl CodeCache {
     /// (inserts are single operations), so a poisoned lock is still usable.
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<PathBuf, Arc<CompiledUnit>>> {
         self.units.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// An include uses the same native inventory as the file that includes it.
+impl phera_vm::CodeLoader for CodeCache {
+    fn load(
+        &self,
+        path: PathBuf,
+    ) -> phera_extension_api::LocalFuture<'_, Result<Arc<CompiledUnit>, String>> {
+        Box::pin(async move { self.compile(path).await.map_err(|error| error.to_string()) })
     }
 }

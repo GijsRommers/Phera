@@ -16,21 +16,16 @@ pub(super) fn folded_scalar(value: phera_bytecode::Constant) -> Option<Constant>
     })
 }
 
-/// Zend stringifies literal numeric names before checking `defined(23)`.
-pub(super) fn defined_literal(argument: &Expression) -> Option<Vec<u8>> {
+/// Zend accepts literal numeric names such as `defined(23)`. Float display
+/// can depend on precision, so send the value to the VM without converting it.
+pub(super) fn defined_literal(argument: &Expression) -> Option<Constant> {
     let name = match &argument.kind {
         ExpressionKind::Literal(Literal::String(value)) => value.clone(),
         ExpressionKind::Literal(Literal::Int(value)) => value.to_string().into_bytes(),
-        ExpressionKind::Literal(Literal::Float(value)) => phera_value::to_php_string(
-            &phera_value::Value::Float(*value),
-            &mut phera_value::NoDiagnostics,
-        )
-        .ok()?
-        .as_bytes()
-        .to_vec(),
+        ExpressionKind::Literal(Literal::Float(value)) => return Some(Constant::Float(*value)),
         _ => return None,
     };
-    (!name.iter().any(|byte| matches!(byte, b'\\' | b':'))).then_some(name)
+    (!name.iter().any(|byte| matches!(byte, b'\\' | b':'))).then_some(Constant::Bytes(name))
 }
 
 /// Zend folds strlen on strings, ord on single bytes, and chr on byte values.

@@ -44,7 +44,7 @@ pub(crate) enum BatchExit {
     NativeCall(Reg),
     /// A synchronous native call needs a PHP property getter to finish.
     NativeView(Reg, Box<NativeError>),
-    /// A synchronous reflection method needs a PHP hook to finish.
+    /// A synchronous reflection method needs a PHP hook or lazy initializer to finish.
     NativeMethodHook(Reg, Box<(NativeError, std::rc::Rc<crate::classes::Method>)>),
     /// A prepared PHP call whose weak string argument may invoke __toString.
     BindCall(Reg),

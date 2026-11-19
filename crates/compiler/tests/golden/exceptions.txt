@@ -7,56 +7,55 @@ file golden.php
   symbol#1 = Error
   symbol#2 = Throwable
 
-function {main} (17 registers, dynamic scope)
+function {main} (11 registers, dynamic scope)
   r0 = $error
-  handler#0 = Handler { start: @0, end: @8, catch: Some(@9), finally: None, exception: r4, cleanup: [r5, r6, r7, r8, r9] }
-  handler#1 = Handler { start: @0, end: @19, catch: None, finally: Some(@21), exception: r3, cleanup: [r5, r6, r7, r8, r9] }
-  handler#2 = Handler { start: @0, end: @25, catch: Some(@26), finally: None, exception: r2, cleanup: [r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13] }
-  handler#3 = Handler { start: @0, end: @39, catch: None, finally: Some(@41), exception: r1, cleanup: [r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13] }
+  handler#0 = Handler { start: @0, end: @7, catch: Some(@8), finally: None, exception: r4, cleanup: [r5, r6, r7] }
+  handler#1 = Handler { start: @0, end: @18, catch: None, finally: Some(@20), exception: r3, cleanup: [r5, r6, r7] }
+  handler#2 = Handler { start: @0, end: @24, catch: Some(@25), finally: None, exception: r2, cleanup: [r3, r4, r5, r6, r7, r8, r9] }
+  handler#3 = Handler { start: @0, end: @38, catch: None, finally: Some(@40), exception: r1, cleanup: [r3, r4, r5, r6, r7, r8, r9] }
   0000  line 1    New { class: symbol#0 }
   0001  line 1    LoadConst { dst: r5, constant: const#0 }
   0002  line 1    SendValue { src: r5 }
-  0003  line 1    Call { dst: r6, result: Used }
-  0004  line 1    Throw { source: r6 }
+  0003  line 1    Call { dst: r5, result: Used }
+  0004  line 1    Throw { source: r5 }
   0005  line 1    Clear { reg: r5 }
   0006  line 1    Clear { reg: r6 }
-  0007  line 1    Clear { reg: r7 }
-  0008  line 1    Jump { target: @19 }
-  0009  line 1    InstanceOf { dst: r8, src: r4, class: symbol#1 }
-  0010  line 1    JumpIf { condition: r8, target: @12 }
-  0011  line 1    Jump { target: @18 }
-  0012  line 1    Assign { local: r0, src: r4 }
-  0013  line 1    Clear { reg: r4 }
-  0014  line 1    LoadConst { dst: r9, constant: const#1 }
-  0015  line 1    Echo { src: r9 }
-  0016  line 1    Clear { reg: r9 }
-  0017  line 1    Jump { target: @19 }
-  0018  line 1    Throw { source: r4 }
-  0019  line 1    FinallyCall { state: r3, target: @21, reason: Fallthrough }
-  0020  line 1    Jump { target: @25 }
-  0021  line 1    LoadConst { dst: r10, constant: const#2 }
-  0022  line 1    Echo { src: r10 }
-  0023  line 1    Clear { reg: r10 }
-  0024  line 1    FinallyReturn { state: r3 }
-  0025  line 1    Jump { target: @39 }
-  0026  line 1    InstanceOf { dst: r11, src: r2, class: symbol#2 }
-  0027  line 1    JumpIf { condition: r11, target: @29 }
-  0028  line 1    Jump { target: @38 }
-  0029  line 1    Assign { local: r0, src: r2 }
-  0030  line 1    Clear { reg: r2 }
-  0031  line 1    Move { dst: r12, src: r0 }
-  0032  line 1    InitMethodCall { receiver: r12, method: name#1 }
-  0033  line 1    Call { dst: r13, result: Used }
-  0034  line 1    Echo { src: r13 }
-  0035  line 1    Clear { reg: r12 }
-  0036  line 1    Clear { reg: r13 }
-  0037  line 1    Jump { target: @39 }
-  0038  line 1    Throw { source: r2 }
-  0039  line 1    FinallyCall { state: r1, target: @41, reason: Fallthrough }
-  0040  line 1    Jump { target: @45 }
-  0041  line 1    LoadConst { dst: r14, constant: const#3 }
-  0042  line 1    Echo { src: r14 }
-  0043  line 1    Clear { reg: r14 }
-  0044  line 1    FinallyReturn { state: r1 }
-  0045  line 1    LoadInt { dst: r15, value: 1 }
-  0046  line 1    Return { src: r15 }
+  0007  line 1    Jump { target: @18 }
+  0008  line 1    InstanceOf { dst: r5, src: r4, class: symbol#1 }
+  0009  line 1    JumpIf { condition: r5, target: @11 }
+  0010  line 1    Jump { target: @17 }
+  0011  line 1    Assign { local: r0, src: r4 }
+  0012  line 1    Clear { reg: r4 }
+  0013  line 1    LoadConst { dst: r7, constant: const#1 }
+  0014  line 1    Echo { src: r7 }
+  0015  line 1    Clear { reg: r7 }
+  0016  line 1    Jump { target: @18 }
+  0017  line 1    Throw { source: r4 }
+  0018  line 1    FinallyCall { state: r3, target: @20, reason: Fallthrough }
+  0019  line 1    Jump { target: @24 }
+  0020  line 1    LoadConst { dst: r7, constant: const#2 }
+  0021  line 1    Echo { src: r7 }
+  0022  line 1    Clear { reg: r7 }
+  0023  line 1    FinallyReturn { state: r3 }
+  0024  line 1    Jump { target: @38 }
+  0025  line 1    InstanceOf { dst: r7, src: r2, class: symbol#2 }
+  0026  line 1    JumpIf { condition: r7, target: @28 }
+  0027  line 1    Jump { target: @37 }
+  0028  line 1    Assign { local: r0, src: r2 }
+  0029  line 1    Clear { reg: r2 }
+  0030  line 1    Move { dst: r8, src: r0 }
+  0031  line 1    InitMethodCall { receiver: r8, method: name#1 }
+  0032  line 1    Call { dst: r9, result: Used }
+  0033  line 1    Echo { src: r9 }
+  0034  line 1    Clear { reg: r8 }
+  0035  line 1    Clear { reg: r9 }
+  0036  line 1    Jump { target: @38 }
+  0037  line 1    Throw { source: r2 }
+  0038  line 1    FinallyCall { state: r1, target: @40, reason: Fallthrough }
+  0039  line 1    Jump { target: @44 }
+  0040  line 1    LoadConst { dst: r8, constant: const#3 }
+  0041  line 1    Echo { src: r8 }
+  0042  line 1    Clear { reg: r8 }
+  0043  line 1    FinallyReturn { state: r1 }
+  0044  line 1    LoadInt { dst: r8, value: 1 }
+  0045  line 1    Return { src: r8 }

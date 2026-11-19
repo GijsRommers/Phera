@@ -7,7 +7,7 @@ use phera_ast as ast;
 use phera_bytecode::{ClassKind, Visibility};
 use phera_source::attributes::AttributeTarget;
 
-use crate::ir::{ClassDeclaration, ClassMethod, ClassProperty, Instruction};
+use crate::ir::{ClassDeclaration, ClassProperty, Instruction};
 use crate::policies::{DeclarationTiming, NameKind};
 use crate::{CompileError, Compiler};
 
@@ -41,6 +41,9 @@ impl Compiler<'_> {
             self.validate_class_attributes(declaration, display, &mut metadata)?;
         }
         let mut methods = Vec::new();
+        // Lowercased, to find a redeclared method without comparing it with
+        // every earlier one: a generated class can have 100,000 methods.
+        let mut method_names = std::collections::HashSet::new();
         let mut properties = Vec::new();
         let mut constants = Vec::new();
         let mut traits = Vec::new();
@@ -224,10 +227,7 @@ impl Compiler<'_> {
                 return Err(self.error("Class properties and constants not supported yet", line));
             };
             self.reject_member_set_visibility(&method.modifiers, "method", method.span)?;
-            if methods
-                .iter()
-                .any(|entry: &ClassMethod| entry.name.eq_ignore_ascii_case(&method.name.name))
-            {
+            if !method_names.insert(method.name.name.to_ascii_lowercase()) {
                 return Err(self.error(
                     format!("Cannot redeclare {display}::{}()", method.name.name),
                     self.lines.line(method.name.span.start),

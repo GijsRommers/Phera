@@ -46,10 +46,12 @@ impl Vm {
             } else {
                 entry.insert(ArrayKey::str("function"), Value::from(native.name));
             }
-            entry.insert(ArrayKey::str("args"), native.arguments);
+            if !self.error_handlers.trace_ignore_args {
+                entry.insert(ArrayKey::str("args"), native.arguments);
+            }
             let _ = trace.push(Value::Array(Rc::new(entry)));
         }
-        Value::from(self.capture_trace(trace, false, true, 0))
+        Value::from(self.capture_trace(trace, false, !self.error_handlers.trace_ignore_args, 0))
     }
 
     /// Stop at the requested number of PHP-visible frames, including native callbacks.
@@ -70,6 +72,18 @@ impl Vm {
             arguments,
             limit,
         };
+        let mut trace = self.capture_stack_trace(trace, options);
+        if trace.len() < limit {
+            self.append_fiber_caller(&mut trace, options);
+        }
+        trace
+    }
+
+    pub(crate) fn capture_stack_trace(
+        &mut self,
+        trace: PhpArray,
+        options: TraceOptions,
+    ) -> PhpArray {
         if self.generator_traces.is_empty() {
             self.trace_frames::<false>(trace, options)
         } else {

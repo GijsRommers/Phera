@@ -2,7 +2,7 @@
 
 use crate::array::{ArrayKey, PhpArray};
 use crate::error::{Diagnostics, ErrorKind, OpError};
-use crate::float_format::{float_repr, float_to_string_precision14};
+use crate::float_format::{float_repr, float_repr_with_precision};
 use crate::string::PhpString;
 use crate::value::Value;
 
@@ -396,7 +396,10 @@ pub fn to_php_string(v: &Value, diag: &mut dyn Diagnostics) -> Result<PhpString,
             if f.is_nan() {
                 diag.warning("unexpected NAN value was coerced to string".to_string());
             }
-            Ok(PhpString::from(float_to_string_precision14(*f)))
+            Ok(PhpString::from(float_repr_with_precision(
+                *f,
+                diag.float_precision(),
+            )))
         }
         Value::String(s) => Ok(s.clone()),
         Value::Array(_) => {
@@ -425,7 +428,7 @@ pub fn to_array(v: &Value, diag: &mut dyn Diagnostics) -> PhpArray {
     match &*v.deref() {
         Value::Null => PhpArray::new(),
         Value::Array(a) => (**a).clone(),
-        Value::Object(o) => o.to_array(),
+        Value::Object(o) => o.lazy_properties(),
         val => {
             let scalar = match val {
                 Value::Bool(b) => Value::Bool(*b),

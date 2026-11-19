@@ -149,7 +149,7 @@ impl Compiler<'_> {
             let Some(name) = defined_literal(argument) else {
                 return Ok(None);
             };
-            self.literal(Constant::Bytes(name), line)?
+            self.literal(name, line)?
         } else {
             self.builtin_operand(argument, line)?
         };

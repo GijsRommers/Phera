@@ -70,11 +70,7 @@ impl<'ast> Compiler<'ast> {
             format!("{}\\{}", self.namespace, declaration.name)
         };
         if timing == DeclarationTiming::Hoisted
-            && self
-                .hoisted
-                .iter()
-                .filter_map(|i| self.functions.get(*i))
-                .any(|declaration| declaration.name.eq_ignore_ascii_case(&name))
+            && self.hoisted_names.contains(&name.to_ascii_lowercase())
         {
             return Err(self.error(format!("Cannot redeclare function {name}()"), line));
         }
@@ -157,7 +153,11 @@ impl<'ast> Compiler<'ast> {
     ) -> Result<(), CompileError> {
         let id = self.append_function_body(&mut builder)?;
         if timing == DeclarationTiming::Hoisted {
-            self.hoisted.push(id)
+            self.hoisted.push(id);
+            if let Some(function) = self.functions.get(id) {
+                self.hoisted_names
+                    .insert(function.name.to_ascii_lowercase());
+            }
         } else if timing == DeclarationTiming::AtExecution {
             self.emit(Instruction::Declare(id), line);
         }

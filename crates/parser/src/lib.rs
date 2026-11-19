@@ -10,6 +10,7 @@ mod declaration;
 mod error;
 mod expression;
 mod names;
+mod nesting;
 mod parser;
 mod statement;
 mod strings;

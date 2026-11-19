@@ -34,6 +34,8 @@ pub enum ParamType {
     String,
     Array,
     Object,
+    /// Printed as object, checked against the reflected class by the method.
+    ReflectedObject,
     /// `object|array`
     ObjectOrArray,
     Class(&'static str),

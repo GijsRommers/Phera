@@ -50,8 +50,12 @@ impl Vm {
                 "get_class"
             }
             BuiltinUnary::Defined => {
-                let Value::String(name) = value else {
-                    return Err(internal_error!("defined builtin literal"));
+                let name = match value {
+                    Value::String(name) => name,
+                    Value::Float(_) => {
+                        phera_value::to_php_string(&value, &mut phera_value::NoDiagnostics)?
+                    }
+                    _ => return Err(internal_error!("defined builtin literal")),
                 };
                 let name = name.to_string_lossy();
                 let exists = ["true", "false", "null"]

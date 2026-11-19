@@ -60,15 +60,23 @@ pub(crate) struct ClassTable {
     local: ClassDefinitions,
     pub(crate) has_dimensions: bool,
     pub(crate) has_property_views: bool,
+    pub(crate) has_lazy_objects: bool,
+    native_count: u32,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
 }
 
 impl ClassTable {
+    pub(crate) fn native_definitions(&self) -> Rc<ClassDefinitions> {
+        self.native.clone()
+    }
+
     pub(crate) fn new(native: Rc<ClassDefinitions>) -> Self {
         Self {
             has_dimensions: false,
             has_property_views: native.has_property_views,
+            has_lazy_objects: false,
+            native_count: native.numbered.len() as u32,
             native,
             local: ClassDefinitions::default(),
             objects: Vec::new(),
@@ -77,7 +85,7 @@ impl ClassTable {
     }
 
     pub(crate) fn next_index(&self) -> ClassIndex {
-        ClassIndex((self.native.numbered.len() + self.local.numbered.len()) as u32)
+        ClassIndex((self.native_count as usize + self.local.numbered.len()) as u32)
     }
 
     pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
@@ -108,7 +116,7 @@ impl ClassTable {
     #[inline]
     pub(crate) fn class(&self, index: ClassIndex) -> &Rc<Class> {
         let index = index.0 as usize;
-        let base = self.native.numbered.len();
+        let base = self.native_count as usize;
         if index < base {
             &self.native.numbered[index]
         } else {
@@ -118,7 +126,7 @@ impl ClassTable {
 
     pub(crate) fn numbered(&self, index: u32) -> Option<Rc<Class>> {
         let index = index as usize;
-        let base = self.native.numbered.len();
+        let base = self.native_count as usize;
         if index < base {
             self.native.numbered.get(index).cloned()
         } else {
@@ -142,11 +150,18 @@ impl ClassTable {
     /// Class identifiers ignore case, including names produced by dynamic expressions.
     pub(crate) fn get(&self, name: &str) -> Option<Rc<Class>> {
         let name = name.strip_prefix('\\').unwrap_or(name);
-        if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
-            self.get_lowercase(&name.to_ascii_lowercase()).cloned()
-        } else {
-            self.get_lowercase(name).cloned()
+        if !name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            return self.get_lowercase(name).cloned();
         }
+        let mut buffer = [0; 64];
+        if let Some(bytes) = buffer.get_mut(..name.len()) {
+            bytes.copy_from_slice(name.as_bytes());
+            bytes.make_ascii_lowercase();
+            if let Ok(name) = std::str::from_utf8(bytes) {
+                return self.get_lowercase(name).cloned();
+            }
+        }
+        self.get_lowercase(&name.to_ascii_lowercase()).cloned()
     }
 
     /// Value-owned leases implement PHP's LIFO reuse without inspecting weak handles.
