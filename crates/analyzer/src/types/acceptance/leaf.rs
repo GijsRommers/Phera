@@ -96,16 +96,19 @@ pub(super) fn atomic(
             };
         }
         (expected, given) if expected.class_name().is_some() && given.class_name().is_some() => {
-            let relation = nominal(
-                expected.class_name().unwrap_or_default(),
-                given.class_name().unwrap_or_default(),
-                index,
-            );
-            return if relation == Accepts && matches!(expected, Generic(_)) {
-                Uncertain
-            } else {
-                relation
-            };
+            let expected_name = expected.class_name().unwrap_or_default();
+            let given_name = given.class_name().unwrap_or_default();
+            let relation = nominal(expected_name, given_name, index);
+            // A generic return such as Result<T> has unknown template
+            // arguments when it comes through one of Result's interfaces.
+            let may_be_generic = matches!(expected, Generic(_))
+                && (relation == Accepts
+                    || policy != TypePolicy::Documentation
+                        && index
+                            .class(given_name)
+                            .is_some_and(|class| class.kind == phera_ast::ClassKind::Interface)
+                        && nominal(given_name, expected_name, index) == Accepts);
+            return if may_be_generic { Uncertain } else { relation };
         }
         (Projection(_) | TypeConstant(_), _) | (_, Projection(_) | TypeConstant(_)) => {
             return Uncertain;

@@ -17,3 +17,8 @@ class ChildResult extends ParentResult {
     public function finish(): static { return parent::finish(); }
 }
 $handler = fn (): int => 42;
+interface PointLike {}
+/** @template T */
+class PointResult implements PointLike {}
+/** @return PointResult<int> */
+function genericResult(PointLike $value) { return $value; }

@@ -188,6 +188,12 @@ impl ValueType {
         };
         for value in incoming {
             if !values.contains(&value) {
+                if values.len() >= 64 {
+                    // Generated code can join thousands of distinct literal
+                    // values. Keep that join bounded rather than storing an
+                    // ever-growing list in every subsequent scope.
+                    return Self::Mixed;
+                }
                 values.push(value);
             }
         }

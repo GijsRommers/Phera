@@ -24,4 +24,17 @@ pub fn refine(index: &mut Index) {
             }
         }
     }
+    if let Some(period) = index.classes.get_mut("dateperiod") {
+        let date =
+            ValueType::Class("DateTime".into()).join(&ValueType::Class("DateTimeImmutable".into()));
+        for method in ["getstartdate", "getenddate"] {
+            if let Some(signature) = period.methods.get_mut(method) {
+                signature.returns = if method == "getenddate" {
+                    date.join(&ValueType::Null)
+                } else {
+                    date.clone()
+                };
+            }
+        }
+    }
 }

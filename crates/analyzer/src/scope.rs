@@ -35,6 +35,7 @@ pub struct Scope {
 
 impl Scope {
     pub fn define(&mut self, name: &str, ty: ValueType) {
+        let ty = ty.limit_complexity();
         self.facts.forget_variable(name);
         self.values.remove(name);
         self.known.retain(|symbol| !symbol.refers_to(name));

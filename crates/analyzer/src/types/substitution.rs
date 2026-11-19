@@ -36,6 +36,26 @@ enum Step<'a> {
 }
 
 impl ValueType {
+    pub fn limit_complexity(self) -> Self {
+        // `$items = [$items]` can grow a type across statements even when
+        // each individual expression is shallow.
+        if !composite(&self) || fits(&self, 0) {
+            return self;
+        }
+        match self {
+            Self::Generic(generic) => Self::Class(generic.base.clone()),
+            Self::Shape(shape) if shape.kind == ShapeKind::Object => Self::Object,
+            Self::Shape(_) => Self::Array,
+            Self::Collection(collection) if collection.kind == CollectionKind::Iterable => {
+                Self::Iterable
+            }
+            Self::Collection(_) => Self::Array,
+            Self::Callable(_) => Self::UnknownCallable,
+            Self::ClassString(_) => Self::ClassString(Arc::new(Self::Object)),
+            _ => Self::Mixed,
+        }
+    }
+
     pub fn substitute(
         &self,
         templates: &BTreeMap<String, Self>,
@@ -213,6 +233,9 @@ impl ValueType {
 }
 
 fn fits(ty: &ValueType, depth: usize) -> bool {
+    if !composite(ty) {
+        return depth < MAX_TYPE_DEPTH;
+    }
     let mut pending = vec![(ty, depth)];
     let mut remaining = 128;
     while let Some((ty, depth)) = pending.pop() {
@@ -236,8 +259,43 @@ fn fits(ty: &ValueType, depth: usize) -> bool {
                 pending.extend(shape.fields.iter().map(|field| (&field.value, next)))
             }
             ValueType::Template(template) => pending.push((&template.bound, next)),
+            ValueType::Callable(signature) => {
+                pending.push((&signature.returns, next));
+                pending.extend(
+                    signature
+                        .parameters
+                        .iter()
+                        .map(|parameter| (&parameter.ty, next)),
+                );
+            }
+            ValueType::Conditional(conditional) => pending.extend([
+                (&conditional.yes, next),
+                (&conditional.no, next),
+                (&conditional.tested, next),
+                (&conditional.subject, next),
+            ]),
+            ValueType::Projection(projection) => {
+                let (Projection::Keys(ty) | Projection::Values(ty)) = projection.as_ref();
+                pending.push((ty, next));
+            }
             _ => {}
         }
     }
     true
+}
+
+fn composite(ty: &ValueType) -> bool {
+    matches!(
+        ty,
+        ValueType::Generic(_)
+            | ValueType::Union(_)
+            | ValueType::Intersection(_)
+            | ValueType::ClassString(_)
+            | ValueType::Collection(_)
+            | ValueType::Shape(_)
+            | ValueType::Template(_)
+            | ValueType::Callable(_)
+            | ValueType::Conditional(_)
+            | ValueType::Projection(_)
+    )
 }

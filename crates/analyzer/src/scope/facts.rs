@@ -79,7 +79,13 @@ impl Facts {
     }
 
     pub fn record(&mut self, place: Place, ty: ValueType, narrowed_at: Option<Span>) {
-        self.0.insert(place, Fact { ty, narrowed_at });
+        self.0.insert(
+            place,
+            Fact {
+                ty: ty.limit_complexity(),
+                narrowed_at,
+            },
+        );
     }
 
     pub fn forget_variable(&mut self, name: &str) {

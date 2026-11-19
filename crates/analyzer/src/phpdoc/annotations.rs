@@ -89,7 +89,7 @@ pub fn read(
             if !documentation.template_names.iter().any(|old| old == name) {
                 documentation.template_names.push(name.into());
             }
-            templates.insert(name.into(), bound);
+            templates.insert(name.into(), bound.limit_complexity());
         }
     }
     for tag in &tags {
@@ -99,7 +99,7 @@ pub fn read(
         {
             let body = body.trim_start().trim_start_matches('=').trim_start();
             if let Ok(parsed) = parse(body, names, &templates) {
-                templates.insert(alias.into(), parsed.ty);
+                templates.insert(alias.into(), parsed.ty.limit_complexity());
             }
         }
         if name == "import-type" {
