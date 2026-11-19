@@ -30,6 +30,7 @@
 
 mod owned_values;
 
+use std::collections::HashSet;
 use std::ops::Range;
 
 use phera_bytecode::Reg;
@@ -110,9 +111,21 @@ impl Compiler<'_> {
     }
 
     /// Clears the temporaries of an expression that has been used (a loop
-    /// subject, a `switch` comparison). A branch calls this on each way out.
+    /// subject). A branch calls this on each way out.
     pub(crate) fn clear_owning_temporaries(&mut self, temporaries: &Temporaries, line: usize) {
-        for register in self.owning(temporaries, None, false) {
+        let owning = self.owning_temporaries(temporaries);
+        self.clear_registers(&owning, line);
+    }
+
+    /// The temporaries of a used expression that may own an object. For a
+    /// statement with many ways out (a `switch` with a body per case), it
+    /// is found once and cleared on each with [`Self::clear_registers`].
+    pub(crate) fn owning_temporaries(&self, temporaries: &Temporaries) -> Vec<Reg> {
+        self.owning(temporaries, None, false)
+    }
+
+    pub(crate) fn clear_registers(&mut self, registers: &[Reg], line: usize) {
+        for &register in registers {
             self.emit(Instruction::Clear { register }, line);
         }
     }
@@ -138,14 +151,17 @@ impl Compiler<'_> {
             .instructions
             .get(temporaries.instructions())
             .unwrap_or_default();
-        let locals: Vec<Reg> = self.locals.values().copied().collect();
-        let expression = Expression {
-            code,
-            locals: &locals,
-            clean_start,
-        };
+        let locals: HashSet<Reg> = self.locals.values().copied().collect();
+        let expression = Expression::new(code, &locals, clean_start);
+        // A register an inner call released was cleared then, and holds
+        // nothing until it is allocated again. Skipping those keeps nested
+        // calls (`new A(new A(new A(...)))`) from looking at every register
+        // of every inner call.
         temporaries
             .registers()
+            .filter(|index| {
+                !u16::try_from(*index).is_ok_and(|index| self.released.contains(&index))
+            })
             .map(|index| Reg(index as u16))
             .filter(|register| Some(*register) != keep)
             .filter(|register| !locals.contains(register))
