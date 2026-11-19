@@ -2,6 +2,8 @@ name: CI
 
 on:
   pull_request:
+    # `ready_for_review` starts the long jobs when a draft becomes ready.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
@@ -60,6 +62,10 @@ jobs:
           - name: all other crates
             key: rest
             packages: --workspace --exclude phera-ext-mbstring --exclude phera-cli
+    # A draft gets the three short checks only. Work in progress is pushed
+    # often, and its long jobs kept finished pull requests waiting for a
+    # free runner.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -129,7 +135,7 @@ jobs:
     # passes when every part of the suite passed. `always()` makes it fail
     # when a part failed: a skipped job would count as passed.
     needs: test-part
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
       - name: Every part of the test suite passed
@@ -141,6 +147,7 @@ jobs:
     # is although the job now runs the SQLite and Redis comparisons too.
     # Runs the comparison scripts of PDO, SQLite3 and Redis through the release
     # binary; every one of them must match real PHP.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
