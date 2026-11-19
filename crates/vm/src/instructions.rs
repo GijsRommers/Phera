@@ -253,8 +253,8 @@ impl Vm {
             I::JumpIfNot { condition, target } => self.jump_if_not(condition, target, work)?,
             I::JumpIfNull { value, target } => self.jump_if_null(value, target)?,
             I::JumpIfNotNull { value, target } => self.jump_if_not_null(value, target)?,
-            I::BeginSilence => self.diagnostic_reporter.begin_silence(),
-            I::EndSilence => self.diagnostic_reporter.end_silence(),
+            I::BeginSilence => self.begin_silence(),
+            I::EndSilence => self.end_silence(),
             I::Raise { detail, .. } => self.raise_match_error(detail)?,
 
             I::Capture { src, kind } => self.capture(src, kind)?,

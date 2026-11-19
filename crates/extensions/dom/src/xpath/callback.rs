@@ -28,32 +28,51 @@ pub(crate) trait Callback {
         &'a mut self,
         name: &'a str,
         arguments: Vec<Value>,
+        arena: &'a mut Arena,
     ) -> LocalFuture<'a, Result<Value, Failure>>;
 }
 
 pub(crate) async fn evaluate(
-    arena: &Arena,
+    arena: &mut Arena,
     context: NodeId,
     namespaces: &std::collections::HashMap<String, String>,
     source: &str,
     callback: &mut dyn Callback,
 ) -> Result<Value, Failure> {
     let expression = parser::parse(source)?;
-    let evaluator = Eval {
-        arena,
+    let evaluator = Frame {
         namespaces,
         node: context,
         position: 1,
         size: 1,
     };
-    evaluator.run_async(&expression, 0, callback).await
+    evaluator.run_async(&expression, 0, arena, callback).await
 }
 
-impl Eval<'_> {
+#[derive(Clone, Copy)]
+struct Frame<'a> {
+    namespaces: &'a std::collections::HashMap<String, String>,
+    node: NodeId,
+    position: usize,
+    size: usize,
+}
+
+impl Frame<'_> {
+    fn evaluator<'a>(&'a self, arena: &'a Arena) -> Eval<'a> {
+        Eval {
+            arena,
+            namespaces: self.namespaces,
+            node: self.node,
+            position: self.position,
+            size: self.size,
+        }
+    }
+
     fn run_async<'a>(
         self,
         expression: &'a Expr,
         depth: usize,
+        arena: &'a mut Arena,
         callback: &'a mut dyn Callback,
     ) -> LocalFuture<'a, Result<Value, Failure>>
     where
@@ -69,34 +88,37 @@ impl Eval<'_> {
                 Expr::Number(value) => Value::Number(*value),
                 Expr::Negate(value) => Value::Number(
                     -self
-                        .run_async(value, next, callback)
+                        .run_async(value, next, arena, callback)
                         .await?
-                        .number(self.arena),
+                        .number(arena),
                 ),
                 Expr::Binary(op, lhs, rhs) => {
-                    let lhs = self.run_async(lhs, next, callback).await?;
+                    let lhs = self.run_async(lhs, next, arena, callback).await?;
                     match op {
                         Operator::And if !lhs.boolean() => return Ok(Value::Boolean(false)),
                         Operator::Or if lhs.boolean() => return Ok(Value::Boolean(true)),
                         _ => {}
                     }
-                    let rhs = self.run_async(rhs, next, callback).await?;
-                    self.binary(*op, lhs, rhs)?
+                    let rhs = self.run_async(rhs, next, arena, callback).await?;
+                    self.evaluator(arena).binary(*op, lhs, rhs)?
                 }
                 Expr::Function(name, arguments) => {
                     let mut values = Vec::with_capacity(arguments.len());
                     for argument in arguments {
-                        values.push(self.run_async(argument, next, callback).await?);
+                        values.push(self.run_async(argument, next, arena, callback).await?);
                     }
                     if name.contains(':') {
-                        callback.call(name, values).await?
+                        callback.call(name, values, arena).await?
                     } else {
-                        self.function(name, &values)?
+                        self.evaluator(arena).function(name, &values)?
                     }
                 }
                 Expr::Filter(base, predicates) => {
-                    let nodes = self.run_async(base, next, callback).await?.nodes()?;
-                    Value::Nodes(self.filter_async(nodes, predicates, next, callback).await?)
+                    let nodes = self.run_async(base, next, arena, callback).await?.nodes()?;
+                    Value::Nodes(
+                        self.filter_async(nodes, predicates, next, arena, callback)
+                            .await?,
+                    )
                 }
                 Expr::Path {
                     base,
@@ -104,7 +126,9 @@ impl Eval<'_> {
                     steps,
                 } => {
                     let mut nodes = if let Some(expression) = base {
-                        self.run_async(expression, next, callback).await?.nodes()?
+                        self.run_async(expression, next, arena, callback)
+                            .await?
+                            .nodes()?
                     } else if *absolute {
                         vec![Arena::DOCUMENT]
                     } else {
@@ -113,13 +137,13 @@ impl Eval<'_> {
                     for step in steps {
                         let mut output = Vec::new();
                         for node in nodes {
-                            let matches = self.axis(node, step)?;
+                            let matches = self.evaluator(arena).axis(node, step)?;
                             output.extend(
-                                self.filter_async(matches, &step.predicates, next, callback)
+                                self.filter_async(matches, &step.predicates, next, arena, callback)
                                     .await?,
                             );
                         }
-                        nodes = axes::document_order(self.arena, output);
+                        nodes = axes::document_order(arena, output);
                     }
                     Value::Nodes(nodes)
                 }
@@ -132,6 +156,7 @@ impl Eval<'_> {
         mut nodes: Vec<NodeId>,
         predicates: &[Expr],
         depth: usize,
+        arena: &mut Arena,
         callback: &mut dyn Callback,
     ) -> Result<Vec<NodeId>, Failure> {
         for predicate in predicates {
@@ -145,7 +170,7 @@ impl Eval<'_> {
                     size,
                     ..self
                 };
-                let value = context.run_async(predicate, depth, callback).await?;
+                let value = context.run_async(predicate, depth, arena, callback).await?;
                 if match value {
                     Value::Number(value) => value == position as f64,
                     value => value.boolean(),

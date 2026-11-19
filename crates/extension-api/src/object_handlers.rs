@@ -37,6 +37,8 @@ pub enum PropertyPurpose {
 #[derive(Clone, Copy)]
 pub enum NativeClone {
     Copy(fn(&Rc<Object>, &Object) -> Result<(), NativeError>),
+    /// Copy state that must keep a weak reference to the destination object.
+    CopyWithHandle(fn(&Rc<Object>, &Rc<Object>) -> Result<(), NativeError>),
     Forbidden,
 }
 

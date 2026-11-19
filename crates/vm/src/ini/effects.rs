@@ -30,13 +30,8 @@ impl Vm {
                 self.error_handlers.reporting =
                     value.map_or(30719, |text| i64::from(integer(text) as i32));
                 self.ini_overrides.reporting_number = None;
+                self.ini_overrides.reporting_ini_modified = false;
             }
-            "display_errors" => {
-                self.error_handlers.display_errors = boolean(bytes)
-                    || bytes.eq_ignore_ascii_case(b"stdout")
-                    || bytes.eq_ignore_ascii_case(b"stderr");
-            }
-            "log_errors" => self.error_handlers.log_errors = boolean(bytes),
             "fatal_error_backtraces" => self.error_handlers.fatal_error_backtraces = boolean(bytes),
             "max_execution_time" => self.execution_time.restart(integer(bytes)),
             "zend.exception_ignore_args" => {
