@@ -11,6 +11,22 @@ pub(crate) enum NativeFrame<'a> {
     Method(&'a Method),
 }
 
+pub(super) enum NativeArguments {
+    Empty,
+    One(Value),
+    Many(Vec<Value>),
+}
+
+impl NativeArguments {
+    fn as_slice(&self) -> &[Value] {
+        match self {
+            Self::Empty => &[],
+            Self::One(value) => std::slice::from_ref(value),
+            Self::Many(values) => values,
+        }
+    }
+}
+
 impl Vm {
     /// A native error only supplies a frame when the VM still has to create its
     /// Throwable. A callback's existing Throwable and VM continuations carry
@@ -52,24 +68,32 @@ impl Vm {
         }
     }
 
-    /// Async handlers own their arguments. Reuse a second buffer to retain the
-    /// values until the handler returns, and build the PHP trace only on error.
-    pub(super) fn retain_native_arguments(&mut self, arguments: &[Value]) -> Vec<Value> {
-        let mut retained = self.call_stack.native_arguments();
-        retained.extend_from_slice(arguments);
-        retained
+    /// Async handlers own their arguments. Keep the common zero- or one-argument
+    /// call in the VM's future, and borrow a buffer for larger calls.
+    pub(super) fn retain_native_arguments(&mut self, arguments: &[Value]) -> NativeArguments {
+        match arguments {
+            [] => NativeArguments::Empty,
+            [argument] => NativeArguments::One(argument.clone()),
+            arguments => {
+                let mut retained = self.call_stack.native_arguments();
+                retained.extend_from_slice(arguments);
+                NativeArguments::Many(retained)
+            }
+        }
     }
 
     pub(super) fn finish_native_future(
         &mut self,
         result: NativeResult,
         frame: NativeFrame<'_>,
-        arguments: Vec<Value>,
+        arguments: NativeArguments,
     ) -> NativeResult {
         if let Err(error) = &result {
-            self.record_native_failure(error, frame, &arguments);
+            self.record_native_failure(error, frame, arguments.as_slice());
         }
-        self.call_stack.recycle_native_arguments(arguments);
+        if let NativeArguments::Many(arguments) = arguments {
+            self.call_stack.recycle_native_arguments(arguments);
+        }
         result
     }
 }
