@@ -19,7 +19,7 @@ enum Pending {
         source: Pin<Box<RowStream>>,
         query: String,
     },
-    Formatted(VecDeque<Row>),
+    Buffered(VecDeque<Result<Row, DbError>>),
 }
 
 pub(super) struct Active {
@@ -36,6 +36,29 @@ impl Postgres {
         if self.lazy.as_ref().is_some_and(|lazy| lazy.owns(owner)) {
             self.discard_lazy();
         }
+    }
+
+    /// Make room for a side query without losing rows from the active statement.
+    pub async fn buffer_lazy(&mut self) {
+        let Some(Active {
+            rows: pending @ Pending::Stream { .. },
+            ..
+        }) = &mut self.lazy
+        else {
+            return;
+        };
+        let mut buffered = VecDeque::new();
+        loop {
+            match pending.next().await {
+                Ok(Some(row)) => buffered.push_back(Ok(row)),
+                Ok(None) => break,
+                Err(error) => {
+                    buffered.push_back(Err(error));
+                    break;
+                }
+            }
+        }
+        *pending = Pending::Buffered(buffered);
     }
 
     pub(super) async fn start_lazy(
@@ -83,9 +106,9 @@ impl Postgres {
             let mut formatted = VecDeque::with_capacity(buffered.len());
             for row in buffered {
                 let text = text::convert(&self.client, &row, &query).await?;
-                formatted.push_back(Row { binary: row, text });
+                formatted.push_back(Ok(Row { binary: row, text }));
             }
-            Pending::Formatted(formatted)
+            Pending::Buffered(formatted)
         } else {
             Pending::Stream {
                 first: Some(first),
@@ -149,7 +172,7 @@ impl Active {
 impl Pending {
     async fn next(&mut self) -> Result<Option<Row>, DbError> {
         match self {
-            Self::Formatted(rows) => Ok(rows.pop_front()),
+            Self::Buffered(rows) => rows.pop_front().transpose(),
             Self::Stream {
                 first,
                 source,

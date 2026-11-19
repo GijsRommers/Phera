@@ -207,7 +207,7 @@ impl Lease {
                 match (driver, attribute) {
                     (Driver::Mysql(mysql), ATTR_SERVER_INFO) => mysql.server_info().await,
                     (Driver::Postgres(postgres), ATTR_SERVER_INFO) => {
-                        postgres.discard_lazy();
+                        postgres.buffer_lazy().await;
                         postgres.server_info().await
                     }
                     (Driver::Mysql(mysql), _) => Ok(mysql.connection_status()),

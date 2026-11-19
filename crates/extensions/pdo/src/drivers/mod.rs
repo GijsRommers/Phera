@@ -251,7 +251,7 @@ impl Driver {
     pub async fn quote(&mut self, bytes: &[u8]) -> Result<String, DbError> {
         match self {
             Self::Postgres(driver) => {
-                driver.discard_lazy();
+                driver.buffer_lazy().await;
                 driver.quote(bytes).await
             }
             Self::Mysql(driver) => driver.quote(bytes).await,
