@@ -50,6 +50,11 @@ foreach ([
         printNativeError($error);
     }
 }
+try {
+    get_called_class();
+} catch (Throwable $error) {
+    printNativeError($error);
+}
 --EXPECT--
 strlen(): Argument #1 ($string) must be of type string, int given|11
 builtinLength:45
@@ -69,3 +74,4 @@ Object of class stdClass could not be converted to string|29
 builtinFormat:45
 Object of class stdClass could not be converted to string|32
 builtinCast:45
+get_called_class() must be called from within a class|51
