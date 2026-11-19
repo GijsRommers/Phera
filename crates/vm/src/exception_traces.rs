@@ -55,8 +55,18 @@ impl Vm {
             _ => return trace,
         };
         let mut callbacks = self.native_callback_sites.len();
+        let stack_depth = self.call_stack.depth();
         let mut child_file = None;
-        for depth in (0..self.call_stack.depth()).rev() {
+        if callbacks != 0 {
+            child_file = self.append_trace_callbacks(
+                &mut trace,
+                &mut callbacks,
+                stack_depth,
+                limit,
+                arguments,
+            );
+        }
+        for depth in (0..stack_depth).rev() {
             if trace.len() >= limit {
                 break;
             }
@@ -115,31 +125,57 @@ impl Vm {
                     arguments,
                 );
             }
-            while trace.len() < limit {
-                let Some(index) = callbacks.checked_sub(1) else {
-                    break;
-                };
-                let Some(site) = self
-                    .native_callback_sites
-                    .get(index)
-                    .filter(|site| site.boundary == depth)
-                else {
-                    break;
-                };
-                callbacks = index;
-                let nested = index
-                    .checked_sub(1)
-                    .and_then(|parent| self.native_callback_sites.get(parent))
-                    .is_some_and(|parent| parent.boundary == depth);
-                let location = depth
-                    .checked_sub(1)
-                    .and_then(|parent| self.frame_at(parent))
-                    .filter(|_| !nested)
-                    .map(|caller| (caller.unit().file.as_str(), caller.line()));
-                append_native(&mut trace, &site.native, location, arguments);
+            if callbacks != 0
+                && let Some(file) =
+                    self.append_trace_callbacks(&mut trace, &mut callbacks, depth, limit, arguments)
+            {
+                child_file = Some(file);
             }
         }
         trace
+    }
+
+    /// A native operation can call another native function without pushing any PHP frame.
+    fn append_trace_callbacks(
+        &self,
+        trace: &mut PhpArray,
+        callbacks: &mut usize,
+        boundary: usize,
+        limit: usize,
+        arguments: bool,
+    ) -> Option<Value> {
+        let mut last_file = None;
+        while trace.len() < limit {
+            let Some(index) = callbacks.checked_sub(1) else {
+                break;
+            };
+            let Some(site) = self
+                .native_callback_sites
+                .get(index)
+                .filter(|site| site.boundary == boundary)
+            else {
+                break;
+            };
+            *callbacks = index;
+            let nested = index
+                .checked_sub(1)
+                .and_then(|parent| self.native_callback_sites.get(parent))
+                .is_some_and(|parent| parent.boundary == boundary);
+            let caller = if nested {
+                None
+            } else {
+                boundary
+                    .checked_sub(1)
+                    .and_then(|parent| self.frame_at(parent))
+            };
+            let location = caller.map(|caller| (caller.unit().file.as_str(), caller.line()));
+            append_native(trace, &site.native, location, arguments);
+            if let Some(caller) = caller {
+                last_file = Some(caller.cache().trace_file(caller.unit()));
+                break;
+            }
+        }
+        last_file
     }
 }
 
@@ -151,28 +187,28 @@ impl Vm {
         };
         let mut snapshot = Vec::new();
         let params = &frame.function().parameters;
-        for (index, parameter) in params.iter().enumerate().take(frame.supplied_arguments()) {
-            let value = frame
-                .slots(&self.registers)
-                .get(index)
-                .and_then(Option::as_ref)
-                .unwrap_or(&Value::Null);
+        let variadic = params.last().is_some_and(|parameter| parameter.variadic);
+        let fixed = params.len() - usize::from(variadic);
+        let count = if variadic {
+            frame.argument_count()
+        } else {
+            frame.supplied_arguments()
+        };
+        for index in 0..fixed.min(count) {
+            let value = frame.argument(&self.registers, index);
             let sensitive = crate::sensitive_parameters::is_sensitive(frame, index);
-            if parameter.variadic {
-                if let Value::Array(items) = &*value.deref() {
-                    for (key, value) in items.iter() {
-                        let name = match key {
-                            ArrayKey::String(_) => Some(key),
-                            _ => None,
-                        };
-                        snapshot.push((name, value.deref().clone(), sensitive));
-                    }
-                }
-            } else {
-                snapshot.push((None, value.deref().clone(), sensitive));
-            }
+            snapshot.push((None, value, sensitive));
         }
-        if !params.iter().any(|parameter| parameter.variadic) {
+        if let Some(items) = &frame.extras.variadic {
+            let sensitive = crate::sensitive_parameters::is_sensitive(frame, fixed);
+            for (key, value) in items.iter() {
+                let name = match key {
+                    ArrayKey::String(_) => Some(key),
+                    _ => None,
+                };
+                snapshot.push((name, value.deref().clone(), sensitive));
+            }
+        } else if !variadic {
             for value in self
                 .registers
                 .window(frame.base() + frame.count(), frame.extras.arguments.extra)
@@ -235,10 +271,10 @@ fn add_location(entry: &mut PhpArray, caller: FrameView<'_>) {
 }
 
 fn add_function(entry: &mut PhpArray, callee: FrameView<'_>, objects: bool) {
-    let function = &callee.function().name;
+    let function = callee.code.function_name(callee.frame.function);
     let closure = function.starts_with("{closure:");
     let name = if closure {
-        function.as_str()
+        function
     } else {
         function.rsplit("::").next().unwrap_or(function)
     };

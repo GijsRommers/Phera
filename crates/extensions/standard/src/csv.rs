@@ -54,7 +54,11 @@ impl Dialect {
         let escape = match args::string(arguments, start + 2).map(PhpString::as_bytes) {
             None => {
                 context.deprecated(format!(
-                    "{function}(): the $escape parameter must be provided as its default value will change"
+                    concat!(
+                        "{}(): the $escape parameter must be provided ",
+                        "as its default value will change"
+                    ),
+                    function,
                 ));
                 Some(b'\\')
             }

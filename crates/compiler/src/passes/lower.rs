@@ -49,7 +49,13 @@ impl Tables {
             .unit
             .constants
             .iter()
-            .position(|entry| entry == &value)
+            .position(|entry| match (entry, &value) {
+                // PHP can observe the sign of zero through round() and string conversion.
+                (Constant::Float(left), Constant::Float(right)) => {
+                    left.to_bits() == right.to_bits()
+                }
+                _ => entry == &value,
+            })
             .unwrap_or_else(|| {
                 self.unit.constants.push(value);
                 self.unit.constants.len() - 1

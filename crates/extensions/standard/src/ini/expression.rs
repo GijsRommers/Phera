@@ -96,7 +96,9 @@ impl Parser<'_> {
                             _ => {
                                 while let Some(operator) = operators.pop() {
                                     if operator == Operator::Open {
-                                        return Err(self.syntax(", expecting ')'"));
+                                        return Err(
+                                            self.syntax(", expecting '^' or '|' or '&' or ')'")
+                                        );
                                     }
                                     reduce(&mut values, Some(operator))?;
                                 }

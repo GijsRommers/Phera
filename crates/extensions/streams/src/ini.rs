@@ -5,7 +5,11 @@ use phera_extension_api::{
     Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Registry, Value, args,
 };
 
-use crate::{errors::check_path, handles::FILENAME, wrapper::open};
+use crate::{
+    errors::{check_path, open_failed},
+    handles::FILENAME,
+    wrapper::{Target, open},
+};
 
 pub(crate) fn register(registry: &mut Registry) {
     registry.function(FunctionEntry::asynchronous(
@@ -27,6 +31,22 @@ fn parse_ini_file(
         if filename.is_empty() {
             return Err(NativeError::value_error(
                 "parse_ini_file(): Argument #1 ($filename) must not be empty",
+            ));
+        }
+        // PHP opens INI files in include mode, whose default rejects URL wrappers.
+        if matches!(Target::parse(filename), Target::Data(_)) {
+            context.warning(
+                concat!(
+                    "parse_ini_file(): data:// wrapper is disabled in the server configuration ",
+                    "by allow_url_include=0"
+                )
+                .into(),
+            );
+            return Ok(open_failed(
+                context,
+                function,
+                filename,
+                "no suitable wrapper could be found",
             ));
         }
         let Some(mut stream) = open(context, function, filename, b"rb", true).await? else {
