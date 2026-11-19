@@ -66,11 +66,10 @@ impl Session {
         call: AttributeCall,
     ) -> NativeResult {
         let actual = self.attributes.borrow().errors;
-        let state = DbError::general("");
-        *self.error.borrow_mut() = ErrorState::Failed(state.clone());
-        if matches!(call, AttributeCall::Construct) && !matches!(actual, ErrorMode::Exception) {
+        *self.error.borrow_mut() = ErrorState::Failed(DbError::general(""));
+        if !matches!(call, AttributeCall::Set) && !matches!(actual, ErrorMode::Exception) {
             return Err(crate::errors::exception(
-                format!("PDO::__construct(): {}", error.message()),
+                format!("{}(): {}", call.method(), error.message()),
                 None,
                 0,
             ));
@@ -79,9 +78,6 @@ impl Session {
             return error.report(context, actual, "PDO::setAttribute");
         }
         context.warning(format!("PDO::setAttribute(): {}", error.message()));
-        if matches!(actual, ErrorMode::Warning) {
-            context.warning(format!("PDO::setAttribute(): {}", state.message()));
-        }
         Ok(Value::Bool(false))
     }
 
@@ -250,7 +246,13 @@ pub fn connect<'a>(
                 "PDO allocation did not create an object",
             ));
         };
-        construct(context, Some(instance.clone()), arguments).await?;
+        construct::construct_with_call(
+            context,
+            Some(instance.clone()),
+            arguments,
+            AttributeCall::Connect,
+        )
+        .await?;
         Ok(object)
     })
 }

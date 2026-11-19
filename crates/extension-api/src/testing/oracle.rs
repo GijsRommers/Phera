@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 
 use phera_value::{ArrayKey, CollectDiagnostics, DiagnosticKind, Value, float_repr};
 
@@ -223,6 +224,25 @@ pub fn find_php() -> Option<PathBuf> {
     std::env::split_paths(&std::env::var_os("PATH")?)
         .map(|directory| directory.join("php"))
         .find(|candidate| candidate.is_file())
+}
+
+/// The oracle's `PHP_VERSION_ID`, queried once per test process.
+pub fn php_version_id() -> Option<u32> {
+    static VERSION_ID: OnceLock<Option<u32>> = OnceLock::new();
+    *VERSION_ID.get_or_init(|| {
+        let php = find_php()?;
+        let output = Command::new(php)
+            .args(["-n", "-r", "echo PHP_VERSION_ID;"])
+            .output()
+            .expect("query oracle PHP_VERSION_ID");
+        assert!(output.status.success(), "query oracle PHP_VERSION_ID");
+        Some(
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse()
+                .expect("numeric oracle PHP_VERSION_ID"),
+        )
+    })
 }
 
 /// Source path that PHP reports for a diagnostic raised in the oracle script.

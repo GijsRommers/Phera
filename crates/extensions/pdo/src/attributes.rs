@@ -28,7 +28,6 @@ pub enum NullHandling {
     Natural,
     EmptyString,
     ToString,
-    Other(u8),
 }
 
 impl NullHandling {
@@ -37,7 +36,6 @@ impl NullHandling {
             Self::Natural => 0,
             Self::EmptyString => 1,
             Self::ToString => 2,
-            Self::Other(number) => i64::from(number),
         }
     }
 }
@@ -126,14 +124,24 @@ fn boolean(value: &Value) -> Result<bool, NativeError> {
 #[derive(Clone, Copy)]
 pub enum AttributeCall {
     Construct,
+    Connect,
     Set,
 }
 
 impl AttributeCall {
     pub fn argument(self) -> &'static str {
         match self {
-            Self::Construct => "PDO::__construct(): Argument #3 ($password)",
+            Self::Construct => "PDO::__construct(): Argument #4 ($options)",
+            Self::Connect => "PDO::connect(): Argument #4 ($options)",
             Self::Set => "PDO::setAttribute(): Argument #2 ($value)",
+        }
+    }
+
+    pub fn method(self) -> &'static str {
+        match self {
+            Self::Construct => "PDO::__construct",
+            Self::Connect => "PDO::connect",
+            Self::Set => "PDO::setAttribute",
         }
     }
 }
@@ -234,11 +242,15 @@ fn change(
             }
         }
         (_, ATTR_ORACLE_NULLS) => {
-            attrs.oracle_nulls = match integer(value)? as u8 {
+            attrs.oracle_nulls = match integer(value)? {
                 0 => NullHandling::Natural,
                 1 => NullHandling::EmptyString,
                 2 => NullHandling::ToString,
-                other => NullHandling::Other(other),
+                _ => {
+                    return Err(NativeError::value_error(
+                        "PDO::ATTR_ORACLE_NULLS must be one of the PDO::NULL_* constants",
+                    ));
+                }
             };
         }
         (_, ATTR_STRINGIFY_FETCHES) => attrs.stringify = boolean(value)?,

@@ -20,6 +20,15 @@ pub fn construct<'a>(
     this: Option<Rc<Object>>,
     arguments: Vec<Value>,
 ) -> LocalFuture<'a, NativeResult> {
+    construct_with_call(context, this, arguments, AttributeCall::Construct)
+}
+
+pub(super) fn construct_with_call<'a>(
+    context: &'a mut dyn Context,
+    this: Option<Rc<Object>>,
+    arguments: Vec<Value>,
+    call: AttributeCall,
+) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let object = this.ok_or_else(|| NativeError::error("PDO object is missing"))?;
         if object.native.borrow().is_some() {
@@ -28,7 +37,7 @@ pub fn construct<'a>(
         let dsn_text = args::string(&arguments, 0)
             .map(|s| s.to_string_lossy())
             .unwrap_or_default();
-        let mut dsn = Dsn::parse(&dsn_text)?;
+        let mut dsn = Dsn::parse_named(&dsn_text, call.method())?;
         let username = args::string(&arguments, 1)
             .map(|s| s.to_string_lossy())
             .unwrap_or_else(|| dsn.get("user", "").to_owned());
@@ -101,14 +110,7 @@ pub fn construct<'a>(
         if let Some(options) = args::array(&arguments, 3) {
             for (key, value) in options.iter() {
                 if let ArrayKey::Int(attribute) = key {
-                    attributes::apply(
-                        context,
-                        &connection,
-                        attribute,
-                        value,
-                        AttributeCall::Construct,
-                    )
-                    .await?;
+                    attributes::apply(context, &connection, attribute, value, call).await?;
                 }
             }
         }

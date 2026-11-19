@@ -1,7 +1,7 @@
 <?php
 $pdo = new PDO('sqlite::memory:', options: [PDO::ATTR_ORACLE_NULLS => PDO::NULL_TO_STRING]);
 var_dump($pdo->getAttribute(PDO::ATTR_ORACLE_NULLS), $pdo->query('SELECT NULL')->fetchColumn());
-foreach ([PDO::NULL_NATURAL, PDO::NULL_EMPTY_STRING, PDO::NULL_TO_STRING, 9, -1, 257] as $mode) {
+foreach ([PDO::NULL_NATURAL, PDO::NULL_EMPTY_STRING, PDO::NULL_TO_STRING] as $mode) {
     var_dump($pdo->setAttribute(PDO::ATTR_ORACLE_NULLS, $mode));
     var_dump($pdo->getAttribute(PDO::ATTR_ORACLE_NULLS));
     foreach ([false, true] as $stringify) {

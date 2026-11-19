@@ -36,6 +36,7 @@ pub struct Dsn {
 }
 
 impl Dsn {
+    #[cfg(test)]
     pub fn parse(input: &str) -> Result<Self, NativeError> {
         Self::parse_named(input, "PDO::__construct")
     }
@@ -109,14 +110,30 @@ impl Dsn {
         };
         match self.driver {
             DriverName::Postgres => libpq_port(text),
-            // mysqlnd takes `atoi()` as an unsigned int, 0 meaning the
-            // default, and the socket keeps its low 16 bits: 98605 is 33069.
             DriverName::Sqlite => Ok(0),
-            DriverName::Mysql => Ok(match atoi(text) as u32 {
-                0 => self.default_port(),
-                port => port as u16,
-            }),
+            DriverName::Mysql => self.mysql_port(text),
         }
+    }
+
+    fn mysql_port(&self, text: &str) -> Result<u16, DbError> {
+        // mysqlnd passes atoi() as unsigned, then PHP's TCP transport checks the range.
+        let port = atoi(text) as u32;
+        if port == 0 {
+            return Ok(self.default_port());
+        }
+        u16::try_from(port).map_err(|_| {
+            let host = self.get("host", "localhost");
+            let address = if host.parse::<std::net::Ipv6Addr>().is_ok() {
+                format!("[{host}]:{port}")
+            } else {
+                format!("{host}:{port}")
+            };
+            DbError {
+                state: "HY000".into(),
+                code: Some(2002),
+                detail: format!("Failed to parse port of address \"{address}\""),
+            }
+        })
     }
 }
 
@@ -197,7 +214,10 @@ mod tests {
             Err("invalid port number: \"65536\"".into())
         );
         assert_eq!(port("mysql:port=33069abc"), Ok(33069));
-        assert_eq!(port("mysql:port=98605"), Ok(33069));
+        assert_eq!(
+            port("mysql:host=127.0.0.1;port=98605"),
+            Err("Failed to parse port of address \"127.0.0.1:98605\"".into())
+        );
         assert_eq!(port("mysql:port=x"), Ok(3306));
     }
 }
