@@ -25,6 +25,7 @@ mod substitute;
 mod substring;
 mod tags;
 mod text;
+mod tokens;
 mod trim;
 pub(crate) mod url;
 
@@ -52,6 +53,7 @@ pub(crate) fn register(registry: &mut Registry) {
         substring::FUNCTIONS,
         tags::FUNCTIONS,
         text::FUNCTIONS,
+        tokens::FUNCTIONS,
         trim::FUNCTIONS,
         url::FUNCTIONS,
     ];

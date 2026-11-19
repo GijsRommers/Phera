@@ -9,6 +9,7 @@ pub mod environment;
 mod math;
 mod natural;
 mod offsets;
+mod process;
 mod strings;
 mod time;
 mod version_compare;
@@ -34,6 +35,7 @@ impl Extension for Standard {
             registry.function(*entry);
         }
         environment::register(registry);
+        process::register(registry);
     }
 }
 
