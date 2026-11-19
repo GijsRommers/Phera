@@ -107,7 +107,12 @@ fn main() -> ExitCode {
 
     let parsed: Vec<_> = sources
         .iter()
-        .map(|source| phera_parser::parse(&source.code).map(|_| ()))
+        .map(|source| match phera_parser::parse(&source.code) {
+            // The PHP oracle compares grammar acceptance. TOKEN_PARSE checks the
+            // exception class and text independently in the tokenizer corpus.
+            Err(error) if error.is_compile_error() => Ok(()),
+            result => result.map(|_| ()),
+        })
         .collect();
 
     let mut passed = 0;

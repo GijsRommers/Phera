@@ -63,7 +63,13 @@ impl Compiler<'_> {
             line,
         );
         let destination = self.allocate_register()?;
-        self.emit(Instruction::FinishCall { destination }, line);
+        self.emit(
+            Instruction::FinishCall {
+                destination,
+                result: phera_bytecode::CallResult::Used,
+            },
+            line,
+        );
         Ok(destination)
     }
 
@@ -110,7 +116,13 @@ impl Compiler<'_> {
             self.send_argument(argument, line)?;
         }
         let dst = self.allocate_register()?;
-        self.emit(Instruction::FinishCall { destination: dst }, line);
+        self.emit(
+            Instruction::FinishCall {
+                destination: dst,
+                result: phera_bytecode::CallResult::Used,
+            },
+            line,
+        );
         Ok(dst)
     }
 

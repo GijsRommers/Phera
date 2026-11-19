@@ -1,11 +1,16 @@
 //! Native method signatures match PHP: `$pdo->query(query: 'SELECT 1', fetchMode: PDO::FETCH_NUM)`.
 
 use phera_extension_api::{
-    ClassEntry, ConstantValue, FunctionEntry, MethodEntry, Param, ParamType, PropertyEntry,
-    Registry, Visibility,
+    ClassEntry, ClassHooks, ConstantValue, FunctionEntry, MethodEntry, NativeClone, Param,
+    ParamType, PropertyEntry, Registry, Visibility,
 };
 
 use crate::{attributes, connection, constants, fetch, statement, transactions};
+
+static UNCOPYABLE_CONNECTION: ClassHooks = ClassHooks {
+    clone: Some(NativeClone::Forbidden),
+    ..ClassHooks::EMPTY
+};
 
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
@@ -23,6 +28,7 @@ pub fn register(registry: &mut Registry) {
         constants: constants::CONSTANTS,
         deprecated_constants: constants::SQLITE_DEPRECATED,
         methods: PDO_METHODS,
+        hooks: Some(&UNCOPYABLE_CONNECTION),
         ..ClassEntry::class("PDO")
     });
     for name in ["Pdo\\Pgsql", "Pdo\\Mysql"] {
@@ -47,6 +53,7 @@ pub fn register(registry: &mut Registry) {
             )]
         },
         methods: STATEMENT_METHODS,
+        hooks: Some(&UNCOPYABLE_CONNECTION),
         ..ClassEntry::class("PDOStatement")
     });
     registry.function(FunctionEntry::sync("pdo_drivers", &[], connection::drivers));
@@ -59,13 +66,13 @@ const PDO_METHODS: &[MethodEntry] = &[
             Param::new("dsn", ParamType::String),
             Param::new("username", ParamType::String)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null),
             Param::new("password", ParamType::String)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null),
             Param::new("options", ParamType::Array)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null),
         ],
         connection::construct,
     ),
@@ -75,18 +82,88 @@ const PDO_METHODS: &[MethodEntry] = &[
             Param::new("dsn", ParamType::String),
             Param::new("username", ParamType::String)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null),
             Param::new("password", ParamType::String)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null),
             Param::new("options", ParamType::Array)
                 .nullable()
-                .optional(),
+                .with_default(ConstantValue::Null),
         ],
         connection::connect,
     )
-    .static_(),
-    MethodEntry::public("getAvailableDrivers", &[], connection::available).static_(),
+    .static_()
+    .returning("static"),
+    MethodEntry::public_async("beginTransaction", &[], transactions::begin)
+        .tentative_return("bool"),
+    MethodEntry::public_async("commit", &[], transactions::commit).tentative_return("bool"),
+    MethodEntry::public("errorCode", &[], connection::error_code).tentative_return("?string"),
+    MethodEntry::public("errorInfo", &[], connection::error_info).tentative_return("array"),
+    MethodEntry::public_async(
+        "exec",
+        &[Param::new("statement", ParamType::String)],
+        connection::exec,
+    )
+    .tentative_return("int|false"),
+    MethodEntry::public(
+        "getAttribute",
+        &[Param::new("attribute", ParamType::Int)],
+        attributes::get,
+    )
+    .tentative_return("mixed"),
+    MethodEntry::public("getAvailableDrivers", &[], connection::available)
+        .static_()
+        .tentative_return("array"),
+    MethodEntry::public_async("inTransaction", &[], transactions::active).tentative_return("bool"),
+    MethodEntry::public_async(
+        "lastInsertId",
+        &[Param::new("name", ParamType::String)
+            .nullable()
+            .with_default(ConstantValue::Null)],
+        connection::last_id,
+    )
+    .tentative_return("string|false"),
+    MethodEntry::public_async(
+        "prepare",
+        &[
+            Param::new("query", ParamType::String),
+            Param::new("options", ParamType::Array).with_default(ConstantValue::EmptyArray),
+        ],
+        statement::prepare,
+    )
+    .tentative_return("PDOStatement|false"),
+    MethodEntry::public_async(
+        "query",
+        &[
+            Param::new("query", ParamType::String),
+            Param::new("fetchMode", ParamType::Int)
+                .nullable()
+                .with_default(ConstantValue::Null),
+            Param::new("fetchModeArgs", ParamType::Mixed).variadic(),
+        ],
+        statement::query,
+    )
+    .tentative_return("PDOStatement|false"),
+    MethodEntry::public_async(
+        "quote",
+        &[
+            Param::new("string", ParamType::String),
+            Param::new("type", ParamType::Int)
+                .with_default(ConstantValue::Int(constants::PARAM_STR)),
+        ],
+        connection::quote,
+    )
+    .tentative_return("string|false"),
+    MethodEntry::public_async("rollBack", &[], transactions::rollback).tentative_return("bool"),
+    MethodEntry::public_async(
+        "setAttribute",
+        &[
+            Param::new("attribute", ParamType::Int),
+            Param::new("value", ParamType::Mixed),
+        ],
+        attributes::set,
+    )
+    .tentative_return("bool"),
     MethodEntry::public(
         "pgsqlCopyFromArray",
         &[Param::new("args", ParamType::Mixed).variadic()],
@@ -106,62 +183,6 @@ const PDO_METHODS: &[MethodEntry] = &[
         "pgsqlCopyToFile",
         &[Param::new("args", ParamType::Mixed).variadic()],
         statement::unsupported_method,
-    ),
-    MethodEntry::public_async("beginTransaction", &[], transactions::begin),
-    MethodEntry::public_async("commit", &[], transactions::commit),
-    MethodEntry::public_async("rollBack", &[], transactions::rollback),
-    MethodEntry::public_async("inTransaction", &[], transactions::active),
-    MethodEntry::public("errorCode", &[], connection::error_code),
-    MethodEntry::public("errorInfo", &[], connection::error_info),
-    MethodEntry::public_async(
-        "exec",
-        &[Param::new("statement", ParamType::String)],
-        connection::exec,
-    ),
-    MethodEntry::public_async(
-        "prepare",
-        &[
-            Param::new("query", ParamType::String),
-            Param::new("options", ParamType::Array).optional(),
-        ],
-        statement::prepare,
-    ),
-    MethodEntry::public_async(
-        "query",
-        &[
-            Param::new("query", ParamType::String),
-            Param::new("fetchMode", ParamType::Int)
-                .nullable()
-                .optional(),
-            Param::new("fetchModeArgs", ParamType::Mixed).variadic(),
-        ],
-        statement::query,
-    ),
-    MethodEntry::public_async(
-        "quote",
-        &[
-            Param::new("string", ParamType::String),
-            Param::new("type", ParamType::Int).optional(),
-        ],
-        connection::quote,
-    ),
-    MethodEntry::public_async(
-        "lastInsertId",
-        &[Param::new("name", ParamType::String).nullable().optional()],
-        connection::last_id,
-    ),
-    MethodEntry::public_async(
-        "setAttribute",
-        &[
-            Param::new("attribute", ParamType::Int),
-            Param::new("value", ParamType::Mixed),
-        ],
-        attributes::set,
-    ),
-    MethodEntry::public(
-        "getAttribute",
-        &[Param::new("attribute", ParamType::Int)],
-        attributes::get,
     ),
 ];
 

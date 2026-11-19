@@ -59,3 +59,5 @@ pub trait Extension {
 
     fn register(&self, registry: &mut Registry);
 }
+
+pub mod reflection;

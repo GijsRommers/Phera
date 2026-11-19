@@ -1,9 +1,10 @@
 //! Efficient source offset to line conversion for generated PHP.
 
 /// Byte offsets of line beginnings; lookup is logarithmic even in generated files.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LineTable {
     starts: Vec<usize>,
+    first_line: usize,
 }
 impl LineTable {
     pub fn new(source: &str) -> Self {
@@ -11,14 +12,23 @@ impl LineTable {
     }
 
     pub fn from_bytes(source: &[u8]) -> Self {
+        Self::fragment(source, 1)
+    }
+
+    /// Preserve original line numbers when compiling part of a source file.
+    pub fn fragment(source: &[u8], first_line: usize) -> Self {
         let mut starts = vec![0];
         starts.extend(source.iter().enumerate().filter_map(|(i, &byte)| {
             (byte == b'\n' || (byte == b'\r' && source.get(i + 1) != Some(&b'\n'))).then_some(i + 1)
         }));
-        Self { starts }
+        Self { starts, first_line }
     }
     pub fn line(&self, offset: usize) -> usize {
-        self.starts.partition_point(|&s| s <= offset).max(1)
+        self.first_line
+            + self
+                .starts
+                .partition_point(|&s| s <= offset)
+                .saturating_sub(1)
     }
 }
 #[cfg(test)]

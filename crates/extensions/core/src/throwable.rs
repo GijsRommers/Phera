@@ -139,7 +139,7 @@ pub(crate) fn register(registry: &mut Registry) {
     });
     for root in ROOTS {
         registry.class(ClassEntry {
-            interfaces: &["Throwable"],
+            interfaces: &["Stringable", "Throwable"],
             properties: PROPERTIES,
             methods: METHODS,
             ..ClassEntry::class(root)

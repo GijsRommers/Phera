@@ -28,6 +28,7 @@ pub(crate) struct UnitCache {
     pub(crate) class_types: Vec<RefCell<Option<ClassTypeEntry>>>,
     main_sites: Vec<RefCell<CachedSite>>,
     function_sites: Vec<Vec<RefCell<CachedSite>>>,
+    pub(crate) closure_signatures: RefCell<Vec<Option<crate::calls::call_state::Callee>>>,
 }
 
 /// Keyed by unit TypeId and guarded by receiver class identity. Entries are made
@@ -94,6 +95,7 @@ impl UnitCache {
             class_types: unit.types.iter().map(|_| RefCell::new(None)).collect(),
             main_sites: instruction_sites(&unit.main),
             function_sites: unit.functions.iter().map(instruction_sites).collect(),
+            closure_signatures: RefCell::new(Vec::new()),
             class_names: unit
                 .symbols
                 .iter()

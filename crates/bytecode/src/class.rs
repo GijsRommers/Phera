@@ -48,6 +48,7 @@ pub enum EnumBacking {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumCase {
+    pub metadata: crate::reflection::DeclarationMetadata,
     pub name: NameId,
     pub backing: Option<FunctionId>,
 }
@@ -85,6 +86,7 @@ pub enum Initializer {
 /// One source declaration, before parents or interfaces are resolved.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassDeclaration {
+    pub metadata: crate::reflection::DeclarationMetadata,
     pub line: u32,
     pub name: String,
     pub parent: Option<SymbolId>,
@@ -106,6 +108,7 @@ pub struct ClassDeclaration {
 /// A class constant computes its value on first access in the declaring scope.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassConstant {
+    pub metadata: crate::reflection::DeclarationMetadata,
     pub name: NameId,
     pub visibility: Visibility,
     pub is_final: bool,
@@ -117,6 +120,10 @@ pub struct ClassConstant {
 /// An absent default on a typed property means uninitialized, rather than null.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PropertyDeclaration {
+    pub set_visibility: Option<Visibility>,
+    pub is_final: bool,
+    pub promoted: bool,
+    pub metadata: crate::reflection::DeclarationMetadata,
     pub name: NameId,
     pub visibility: Visibility,
     pub is_static: bool,

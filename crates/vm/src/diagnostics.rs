@@ -18,6 +18,12 @@ impl Vm {
         if let Some(location) = &self.diagnostic_location {
             return location.clone();
         }
+        if let Some(site) = self.attribute_call_site() {
+            return SourceLocation {
+                file: site.file.clone(),
+                line: site.line,
+            };
+        }
         self.current()
             .map(|frame| SourceLocation {
                 file: frame.unit().file.clone(),
