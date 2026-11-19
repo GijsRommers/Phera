@@ -17,12 +17,21 @@ impl Analyzer<'_> {
                 if ty == ValueType::Never {
                     return ty;
                 }
+                let guarded = match (&target.kind, name) {
+                    (
+                        ExpressionKind::Variable(Variable::Named(receiver)),
+                        MemberName::Identifier(name),
+                    ) => scope
+                        .known
+                        .contains(&Symbol::Property(receiver.clone(), name.name.clone())),
+                    _ => false,
+                };
                 self.property(
                     &ty,
                     name,
                     scope,
                     expression.span,
-                    quiet,
+                    quiet || guarded,
                     Access::object(target),
                 )
             }
@@ -100,13 +109,18 @@ impl Analyzer<'_> {
                     "{class}::{}",
                     name.name
                 ))))
-            && !self.index.constant(&class, &name.name)
         {
+            if let Some(constant) = self.index.constant(&class, &name.name) {
+                return self.relative_type(constant.ty.clone(), &class);
+            }
             if let Some(item) =
                 self.omitted_builtin_member(ItemKind::ClassConstant, &class, &name.name)
             {
                 self.report(Finding::NotSupported(item), name.span);
-            } else if self.index.class(&class).is_some()
+            } else if self
+                .index
+                .class(&class)
+                .is_some_and(|info| info.kind != ClassKind::Trait)
                 && self.index.complete(&class)
                 && !(late_static
                     && self

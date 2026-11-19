@@ -132,27 +132,33 @@ fn parse_worker(
 ) -> Result<(Vec<ParsedFile>, Vec<Diagnostic>), String> {
     let (mut files, mut diagnostics) = (Vec::new(), Vec::new());
     while let Some(path) = paths.get(next.fetch_add(1, Ordering::Relaxed)) {
-        // PHP source is bytes: a string literal may hold any of them (Symfony's
-        // cache ships such a file). The parser takes text for now, so bytes
-        // that are not UTF-8 become U+FFFD. That keeps every line and every
-        // declaration where it is, which is all the checks read.
-        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let source = String::from_utf8_lossy(&bytes).into_owned();
-        let lines = LineTable::new(&source);
-        match phera_parser::parse_on_current_stack(&source) {
-            Ok(program) => files.push(ParsedFile {
-                path: display_path(path),
-                source,
-                lines,
-                program,
-            }),
-            Err(error) => diagnostics.push(Diagnostic {
-                file: display_path(path),
-                line: lines.line(error.span.start),
-                identifier: "phpstan.parse".into(),
-                message: error.message,
-            }),
+        match parse_file(path)? {
+            Ok(file) => files.push(file),
+            Err(error) => diagnostics.push(error),
         }
     }
     Ok((files, diagnostics))
+}
+
+pub fn parse_file(path: &Path) -> Result<Result<ParsedFile, Diagnostic>, String> {
+    // PHP source is bytes. Keep every line in files with non-UTF-8 literals,
+    // even though the parser currently takes text.
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let source = String::from_utf8_lossy(&bytes).into_owned();
+    let lines = LineTable::new(&source);
+    let path = display_path(path);
+    Ok(match phera_parser::parse_on_current_stack(&source) {
+        Ok(program) => Ok(ParsedFile {
+            path,
+            source,
+            lines,
+            program,
+        }),
+        Err(error) => Err(Diagnostic {
+            file: path,
+            line: lines.line(error.span.start),
+            identifier: "phpstan.parse".into(),
+            message: error.message,
+        }),
+    })
 }
