@@ -14,6 +14,7 @@ pub(crate) enum NativeFrame<'a> {
 pub(super) enum NativeArguments {
     Empty,
     One(Value),
+    Two([Value; 2]),
     Many(Vec<Value>),
 }
 
@@ -22,6 +23,7 @@ impl NativeArguments {
         match self {
             Self::Empty => &[],
             Self::One(value) => std::slice::from_ref(value),
+            Self::Two(values) => values,
             Self::Many(values) => values,
         }
     }
@@ -68,12 +70,13 @@ impl Vm {
         }
     }
 
-    /// Async handlers own their arguments. Keep the common zero- or one-argument
-    /// call in the VM's future, and borrow a buffer for larger calls.
+    /// Async handlers own their arguments. Keep small calls in the VM's future
+    /// and borrow a buffer for larger calls.
     pub(super) fn retain_native_arguments(&mut self, arguments: &[Value]) -> NativeArguments {
         match arguments {
             [] => NativeArguments::Empty,
             [argument] => NativeArguments::One(argument.clone()),
+            [first, second] => NativeArguments::Two([first.clone(), second.clone()]),
             arguments => {
                 let mut retained = self.call_stack.native_arguments();
                 retained.extend_from_slice(arguments);

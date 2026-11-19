@@ -149,24 +149,22 @@ impl Vm {
         })
     }
 
-    fn run_async_native_function<'a>(
-        &'a mut self,
+    async fn run_async_native_function(
+        &mut self,
         name: &'static str,
         handler: phera_extension_api::AsyncFn,
         arguments: Vec<Value>,
         binding: ArgumentBinding,
-    ) -> phera_extension_api::LocalFuture<'a, NativeResult> {
+    ) -> NativeResult {
         if !binding.has_native_frame() {
-            return handler(self, arguments);
+            return handler(self, arguments).await;
         }
         if self.registry.has_callback_frame(name) {
-            return self.native_callback_frame(name, handler, arguments);
+            return self.native_callback_frame(name, handler, arguments).await;
         }
-        Box::pin(async move {
-            let retained = self.retain_native_arguments(&arguments);
-            let result = handler(self, arguments).await;
-            self.finish_native_future(result, NativeFrame::Function(name), retained)
-        })
+        let retained = self.retain_native_arguments(&arguments);
+        let result = handler(self, arguments).await;
+        self.finish_native_future(result, NativeFrame::Function(name), retained)
     }
 
     /// Publish the native frame while PHP callbacks are active, for Throwable::getTrace().

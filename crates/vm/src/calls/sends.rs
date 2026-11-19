@@ -99,8 +99,13 @@ impl Vm {
         mut value: Value,
     ) -> Result<(), NativeError> {
         let view = CallView::top(&self.code, &self.call_stack)?;
-        let slot = view.slots().slot(index);
         let parameters = view.parameters();
+        // Declared parameter slots are reserved at the start of the window.
+        let slot = if index < parameters.len() {
+            view.call.base() + index
+        } else {
+            view.slots().slot(index)
+        };
         let named = view.details.and_then(|details| details.named.as_ref());
         let extra = match named {
             Some(name) => self.check_named_send(&view, slot, name)?,

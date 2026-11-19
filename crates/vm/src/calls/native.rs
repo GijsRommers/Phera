@@ -151,7 +151,11 @@ impl Vm {
                 // Boxed: an intrinsic such as `eval` runs code, and its future
                 // must not make the future of every ordinary native call larger.
                 if !callee.argument_binding.has_native_frame()
-                    || matches!(intrinsic, crate::intrinsics::Intrinsic::ParentProperty(_))
+                    || matches!(
+                        intrinsic,
+                        crate::intrinsics::Intrinsic::ArrayMap
+                            | crate::intrinsics::Intrinsic::ParentProperty(_)
+                    )
                 {
                     return Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin))
                         .await
