@@ -967,6 +967,9 @@ What PHPStan and Psalm do: find errors without running the code.
 - **Output**: a readable report, JSON, and annotations for CI; a baseline
   file to adopt it on an existing code base; `@phpstan-ignore` and
   `@psalm-suppress` comments are honoured so existing code needs no edits.
+  Native union names use PHP's display order through the bytecode crate,
+  so `int|string` is displayed as `string|int` in both runtime and checker
+  diagnostics.
 - **How it is verified**: differentially. A corpus of small PHP files, each
   with one deliberate error or none, is run through PHPStan at the matching
   level and through `phera check`; both must flag the same lines. Then real

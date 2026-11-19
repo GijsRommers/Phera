@@ -106,6 +106,13 @@ impl Display for ValueType {
                 }
                 Self::Union(types) | Self::Intersection(types) => {
                     let union = matches!(ty, Self::Union(_));
+                    if union
+                        && let Some(names) =
+                            types.iter().map(native_member).collect::<Option<Vec<_>>>()
+                    {
+                        f.write_str(&phera_bytecode::union_in_php_order(&names.join("|")))?;
+                        continue;
+                    }
                     sequence(&mut parts, types, if union { "|" } else { "&" }, union);
                     continue;
                 }
@@ -174,6 +181,40 @@ impl Display for ValueType {
             f.write_str(name)?;
         }
         Ok(())
+    }
+}
+
+fn native_member(ty: &ValueType) -> Option<&str> {
+    Some(match ty {
+        ValueType::Null => "null",
+        ValueType::Bool => "bool",
+        ValueType::BoolLiteral(false) => "false",
+        ValueType::BoolLiteral(true) => "true",
+        ValueType::Int => "int",
+        ValueType::Float => "float",
+        ValueType::String => "string",
+        ValueType::Array => "array",
+        ValueType::Iterable => "iterable",
+        ValueType::Object => "object",
+        ValueType::UnknownCallable => "callable",
+        ValueType::Class(name) => name,
+        // A PHPDoc type such as array<int|string> can contain a pipe of
+        // its own. Only pass native members to the engine's native sorter.
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_members_use_the_same_order_as_runtime_diagnostics() {
+        assert_eq!(
+            ValueType::Int.join(&ValueType::String).to_string(),
+            "string|int"
+        );
+        assert_eq!(ValueType::Int.join(&ValueType::Null).to_string(), "?int");
     }
 }
 

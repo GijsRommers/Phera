@@ -22,3 +22,4 @@ interface PointLike {}
 class PointResult implements PointLike {}
 /** @return PointResult<int> */
 function genericResult(PointLike $value) { return $value; }
+function unionResult(): int|string { return 'ready'; }

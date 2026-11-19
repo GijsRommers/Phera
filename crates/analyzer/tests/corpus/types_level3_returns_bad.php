@@ -17,3 +17,4 @@ class PointResult implements PointLike {}
 class OtherResult implements PointLike {}
 /** @return PointResult<int> */
 function genericResult(OtherResult $value) { return $value; }
+function unionResult(): int|string { return [1]; }
