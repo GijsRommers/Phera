@@ -111,6 +111,19 @@ impl Context for Vm {
         Vm::ini_list(self, module, details)
     }
 
+    fn included_files(&self) -> phera_value::PhpArray {
+        self.include_state
+            .files()
+            .enumerate()
+            .map(|(index, file)| {
+                (
+                    phera_value::ArrayKey::Int(index as i64),
+                    Value::from(file.as_str()),
+                )
+            })
+            .collect()
+    }
+
     fn include_path(&self) -> phera_value::PhpString {
         Vm::include_path(self)
     }

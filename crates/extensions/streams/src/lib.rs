@@ -32,6 +32,7 @@ mod request;
 mod resource;
 mod scan;
 mod scan_format;
+mod source_tools;
 mod stream;
 mod stream_copy;
 mod stream_options;
@@ -77,6 +78,7 @@ impl Extension for Streams {
         pattern::register(registry);
         resource::register(registry);
         scan::register(registry);
+        source_tools::register(registry);
         stream_copy::register(registry);
         stream_options::register(registry);
         temporary::register(registry);
