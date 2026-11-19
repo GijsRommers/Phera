@@ -15,7 +15,7 @@ impl SequenceEncoder {
         value: Value,
     ) -> Result<(), NativeError> {
         self.0.output.append(prefix);
-        self.0.write_root(context, value).await
+        self.0.write_value(context, value).await
     }
 
     pub fn finish(self) -> Vec<u8> {

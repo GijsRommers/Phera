@@ -7,7 +7,7 @@ use phera_extension_api::serialization::{
 };
 use phera_extension_api::{ArrayKey, Context, NativeError, Object, Value};
 
-use super::{BuildResult, Container, Decoder, Failure, emit_diagnostic_for, graph::Place};
+use super::{BuildResult, Container, Decoder, Failure, graph::Place};
 use crate::wire::ObjectFormat;
 
 impl<'a> Decoder<'a> {
@@ -35,7 +35,7 @@ impl<'a> Decoder<'a> {
         match format {
             ObjectFormat::Custom => {
                 let payload = self.reader.custom_data();
-                emit_diagnostic_for(context, &mut self.reader, self.diagnostic_function);
+                self.emit_diagnostic(context);
                 let payload = payload?;
                 if !custom {
                     context.warning(format!("Class {name} has no unserializer"));
@@ -56,7 +56,7 @@ impl<'a> Decoder<'a> {
             }
             ObjectFormat::Properties => {
                 let count = self.reader.properties();
-                emit_diagnostic_for(context, &mut self.reader, self.diagnostic_function);
+                self.emit_diagnostic(context);
                 let count = count?;
                 let has_unserialize = info.as_ref().is_some_and(|info| info.has_unserialize);
                 if custom && !has_unserialize {

@@ -50,6 +50,7 @@ pub async fn serialize(context: &mut dyn Context, arguments: &[Value]) -> Native
             "serialize() expects exactly 1 argument, 0 given",
         ));
     };
+    let value = value.try_deref()?.clone();
     let inherited = context.state().take::<SerializationSlots>();
     let restore = inherited.is_some();
     let mut encoder = Encoder {
@@ -67,14 +68,6 @@ pub async fn serialize(context: &mut dyn Context, arguments: &[Value]) -> Native
 
 impl Encoder {
     async fn write_value(
-        &mut self,
-        context: &mut dyn Context,
-        value: &Value,
-    ) -> Result<(), NativeError> {
-        self.write_root(context, value.try_deref()?.clone()).await
-    }
-
-    async fn write_root(
         &mut self,
         context: &mut dyn Context,
         mut value: Value,
