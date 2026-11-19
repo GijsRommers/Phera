@@ -58,7 +58,7 @@ async fn hash(
     let _scope = context
         .language_level()
         .has(Change::SplObjectStorageHashMutation)
-        .then(|| hash_scope::enter(context));
+        .then(|| context.state().guard_dimension_mutations());
     let value = context
         .call_method(
             storage.clone(),

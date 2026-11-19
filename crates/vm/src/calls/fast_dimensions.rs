@@ -92,7 +92,7 @@ impl Machine<'_> {
         else {
             return Step::Slow;
         };
-        if (native.write)(object, offset, value) {
+        if (native.write)(self.request_state, object, offset, value) {
             Step::Done(position.ip)
         } else {
             Step::Slow

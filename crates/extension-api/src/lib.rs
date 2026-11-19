@@ -38,7 +38,7 @@ pub use object_handlers::{
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
 pub use registry::{ConstantValue, Registry};
-pub use state::{QuerySeparator, RequestState};
+pub use state::{DimensionMutationScope, QuerySeparator, RequestState};
 pub use working_directory::WorkingDirectory;
 
 /// The PHP version exposed by the engine and its built-in modules.

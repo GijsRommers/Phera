@@ -22,9 +22,9 @@ pub(super) const fn handlers<const CHECK: bool>() -> NativeDimensions {
                 };
                 lookup(storage, &Key::Handle(object.id)).ok()
             },
-            write: |storage, offset, info| {
-                if CHECK {
-                    return false; // The context-free path cannot check the current request.
+            write: |state, storage, offset, info| {
+                if CHECK && state.dimension_mutation_guarded() {
+                    return false;
                 }
                 let Value::Object(object) = offset else {
                     return false;

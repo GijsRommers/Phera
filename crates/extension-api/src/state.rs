@@ -1,7 +1,9 @@
 //! Storage that lives as long as one request.
 
 use std::any::{Any, TypeId};
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// What extensions remember during a request: the response headers, the
 /// output buffers, an open session.
@@ -24,6 +26,7 @@ use std::collections::HashMap;
 pub struct RequestState {
     /// One value per type. `TypeId` is Rust's run-time name for a type.
     slots: HashMap<TypeId, Box<dyn Any>>,
+    dimension_mutation_scope: Option<Rc<Cell<bool>>>,
 }
 
 impl RequestState {
@@ -54,6 +57,36 @@ impl RequestState {
     pub fn take<T: 'static>(&mut self) -> Option<T> {
         let slot = self.slots.remove(&TypeId::of::<T>())?;
         slot.downcast().ok().map(|state| *state)
+    }
+
+    /// Establishes a scope in which guarded native dimension writes must use
+    /// their error path, for example in an overridden `SplObjectStorage::getHash()`.
+    pub fn guard_dimension_mutations(&mut self) -> DimensionMutationScope {
+        let active = self
+            .dimension_mutation_scope
+            .get_or_insert_with(Rc::default)
+            .clone();
+        let previous = active.replace(true);
+        DimensionMutationScope { active, previous }
+    }
+
+    /// Whether a native callback is currently guarding dimension mutations.
+    pub fn dimension_mutation_guarded(&self) -> bool {
+        self.dimension_mutation_scope
+            .as_ref()
+            .is_some_and(|active| active.get())
+    }
+}
+
+/// Restores a request's dimension mutation scope after a callback returns or throws.
+pub struct DimensionMutationScope {
+    active: Rc<Cell<bool>>,
+    previous: bool,
+}
+
+impl Drop for DimensionMutationScope {
+    fn drop(&mut self) {
+        self.active.set(self.previous);
     }
 }
 

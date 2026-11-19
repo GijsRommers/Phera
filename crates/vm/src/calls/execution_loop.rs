@@ -73,6 +73,7 @@ pub(super) struct Machine<'a> {
     pub(super) classes: &'a mut ClassTable,
     pub(super) stack: &'a mut CallStack,
     pub(super) registers: &'a mut Registers,
+    pub(super) request_state: &'a phera_extension_api::RequestState,
     /// Loop rounds and calls since the last hand-over.
     work: usize,
     /// Instructions run, for `Vm::executed_instructions`.
@@ -116,6 +117,7 @@ impl Vm {
                 classes: &mut self.classes,
                 stack: &mut self.call_stack,
                 registers: &mut self.registers,
+                request_state: &self.state,
                 work: *work,
                 executed: 0,
                 stop,

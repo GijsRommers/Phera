@@ -100,7 +100,7 @@ pub type BindDimension = fn(&mut dyn Context, &Object, Value, Value) -> Result<(
 #[derive(Clone, Copy)]
 pub struct DirectDimensions {
     pub read: fn(&Object, &Value) -> Option<Value>,
-    pub write: fn(&Object, &Value, &Value) -> bool,
+    pub write: fn(&crate::RequestState, &Object, &Value, &Value) -> bool,
 }
 
 /// ArrayAccess's four methods can be serviced directly by native state.

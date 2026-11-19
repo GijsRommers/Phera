@@ -40,7 +40,12 @@ fn direct_get(object: &Object, offset: &Value) -> Option<Value> {
     .ok()?
 }
 
-fn direct_set(object: &Object, offset: &Value, value: &Value) -> bool {
+fn direct_set(
+    _: &phera_extension_api::RequestState,
+    object: &Object,
+    offset: &Value,
+    value: &Value,
+) -> bool {
     let key = match offset {
         Value::Null => None,
         _ => {
