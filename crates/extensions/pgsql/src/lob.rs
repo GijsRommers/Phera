@@ -253,7 +253,9 @@ async fn read(lob: &Lob, length: i64) -> Result<Option<Vec<u8>>, NativeError> {
         lob.descriptor
     );
     Ok(scalar(&lob.connection, expression).await?.map(|hex| {
-        hex.chunks_exact(2)
+        hex.as_chunks::<2>()
+            .0
+            .iter()
             .filter_map(|pair| {
                 let high = char::from(pair[0]).to_digit(16)?;
                 let low = char::from(pair[1]).to_digit(16)?;
