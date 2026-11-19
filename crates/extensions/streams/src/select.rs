@@ -91,9 +91,11 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
             }
         }
         if candidates.is_empty() {
-            return Err(NativeError::value_error("No stream arrays were passed"));
+            let error = NativeError::value_error("No stream arrays were passed");
+            return Err(context.native_call_error("stream_select", &arguments, error));
         }
-        let timeout = timeout(&arguments)?;
+        let timeout = timeout(&arguments)
+            .map_err(|error| context.native_call_error("stream_select", &arguments, error))?;
         let max_fd = candidates
             .iter()
             .map(|candidate| candidate.original_fd)

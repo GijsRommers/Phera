@@ -82,7 +82,9 @@ pub(crate) async fn configure(
     let directory = context.state().get_or_default::<WorkingDirectory>();
     if let Some(cwd) = cwd {
         let path = Path::new(OsStr::from_bytes(c_prefix(cwd)));
-        if let Ok(resolved) = directory.resolve(path) {
+        if path.as_os_str().is_empty() {
+            command.current_dir(path);
+        } else if let Ok(resolved) = directory.resolve(path) {
             command.current_dir(resolved);
         }
     } else if let Some(path) = directory.path() {

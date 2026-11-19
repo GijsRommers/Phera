@@ -136,6 +136,12 @@ async fn process_descriptors_and_status_match_php() {
             }
         }
     }
+    for cwd in ["''", "'/phera-absent-directory'", "'.'", "\"/\\0ignored\""] {
+        cases.check(format!(
+            "$child = proc_open('pwd', [1 => ['pipe', 'w']], $pipes, {cwd}); \
+             return $child ? [stream_get_contents($pipes[1]), proc_close($child)] : $child;"
+        ));
+    }
     for descriptors in [
         "['1a'=>['pipe','w']]",
         "[false]",
