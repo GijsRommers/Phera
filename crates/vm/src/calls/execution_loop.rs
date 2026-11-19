@@ -344,6 +344,7 @@ impl Machine<'_> {
                 dst,
                 ..
             } => self.enter_direct(position, function, (args, count), dst),
+            Instruction::InitCall { function } => self.prepare_named_call(position, function),
             Instruction::InitMethodCall { receiver, method } => {
                 self.prepare_method(position, receiver, method)
             }

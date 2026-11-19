@@ -29,6 +29,7 @@ mod fast_arguments;
 mod fast_calls;
 mod fast_dimensions;
 mod fast_methods;
+mod fast_named_calls;
 mod fast_native_methods;
 mod fast_objects;
 mod fast_properties;
