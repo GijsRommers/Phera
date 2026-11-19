@@ -16,6 +16,7 @@ use crate::Vm;
 pub(crate) struct ExecutionTime {
     seconds: Cell<i64>,
     charged: Cell<Duration>,
+    process_waits: Cell<Duration>,
     started: Cell<Option<Duration>>,
     polling: Cell<bool>,
     timed_out: Cell<bool>,
@@ -25,8 +26,13 @@ impl ExecutionTime {
     pub(crate) fn restart(&self, seconds: i64) {
         self.seconds.set(seconds.max(0));
         self.charged.set(Duration::ZERO);
+        self.process_waits.set(Duration::ZERO);
         self.started
             .set((seconds > 0 && self.polling.get()).then(thread_cpu_time));
+    }
+
+    fn elapsed(&self) -> Duration {
+        self.charged.get().saturating_add(self.process_waits.get())
     }
 
     fn charge(&self) {
@@ -67,10 +73,38 @@ impl Vm {
             return Ok(());
         }
         self.execution_time.charge();
-        if self.execution_time.charged.get().as_secs() < seconds as u64 {
+        if self.execution_time.elapsed().as_secs() < seconds as u64 {
             return Ok(());
         }
+        Err(self.execution_time_error(seconds))
+    }
+
+    pub(crate) fn process_wait_budget(&self) -> Option<Duration> {
+        let seconds = self.execution_time.seconds.get();
+        if seconds == 0 {
+            return None;
+        }
+        self.execution_time.charge();
+        Some(Duration::from_secs(seconds as u64).saturating_sub(self.execution_time.elapsed()))
+    }
+
+    pub(crate) fn process_wait_elapsed(&self, elapsed: Duration) {
+        let waits = &self.execution_time.process_waits;
+        waits.set(waits.get().saturating_add(elapsed));
+    }
+
+    pub(crate) fn process_wait_expired(&mut self) -> NativeError {
+        self.execution_time_error(self.execution_time.seconds.get())
+    }
+
+    fn execution_time_error(&mut self, seconds: i64) -> NativeError {
         self.execution_time.restart(seconds);
+        if let Some(cancel) = self
+            .state_mut()
+            .get::<phera_extension_api::ProcessCancellation>()
+        {
+            cancel.cancel();
+        }
         let mut location = self.location();
         // The fairness boundary publishes the target of a taken branch.
         // Zend reports the opcode where execution would resume.
@@ -84,11 +118,11 @@ impl Vm {
         self.execution_time.timed_out.set(true);
         self.set_hidden_fatal_status();
         self.mark_timed_out_objects();
-        Err(self.fatal_error(
+        self.fatal_error(
             1,
             format!("Maximum execution time of {seconds} second{suffix} exceeded"),
             location,
-        ))
+        )
     }
 
     /// Timeouts decide their HTTP response before entering shutdown.

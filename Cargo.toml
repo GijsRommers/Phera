@@ -106,6 +106,8 @@ phera-ext-serialize = { path = "crates/extensions/serialize" }
 phera-ext-session = { path = "crates/extensions/session" }
 phera-ext-spl = { path = "crates/extensions/spl" }
 phera-ext-standard = { path = "crates/extensions/standard" }
+command-fds = "0.3.3"
+phera-ext-process = { path = "crates/extensions/process" }
 phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
 aes = "0.9"
@@ -152,6 +154,7 @@ bytes = "1"
 percent-encoding = "2"
 nix = { version = "0.31", default-features = false, features = ["user", "resource", "feature", "net"] }
 rustix = { version = "1", features = ["fs", "param", "process", "system", "termios", "time"] }
+rustix-libc-wrappers = { version = "0.1.1", features = ["process"] }
 sysinfo = { version = "0.39.3", default-features = false, features = ["system"] }
 tempfile = "3"
 http-body-util = "0.1"

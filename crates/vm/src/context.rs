@@ -145,6 +145,16 @@ impl Context for Vm {
         self.request_callbacks.output.set_finalizer(callback);
     }
 
+    fn register_resource_finalizer(
+        &mut self,
+        key: &'static str,
+        callback: phera_extension_api::AsyncFn,
+    ) {
+        self.state_mut()
+            .get_or_default::<crate::request_callbacks::ResourceFinalizers>()
+            .register(key, callback);
+    }
+
     fn script_path(&self) -> Option<std::path::PathBuf> {
         Some(self.location().file.into())
     }
@@ -171,6 +181,18 @@ impl Context for Vm {
     fn entry_script_path(&self) -> Option<std::path::PathBuf> {
         let main = self.include_state.entry_script()?;
         Some(self.code.known_unit(main)?.file.as_str().into())
+    }
+
+    fn process_wait_budget(&self) -> Option<std::time::Duration> {
+        Vm::process_wait_budget(self)
+    }
+
+    fn process_wait_elapsed(&mut self, elapsed: std::time::Duration) {
+        Vm::process_wait_elapsed(self, elapsed);
+    }
+
+    fn process_wait_expired(&mut self) -> NativeError {
+        Vm::process_wait_expired(self)
     }
 
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {
