@@ -231,7 +231,7 @@ fn the_startup_display_setting_and_rfc_boundary_limit_apply_before_php() {
             );
             let headers = format!(
                 "Content-Type: multipart/form-data; boundary={}\r\n",
-                "a".repeat(71)
+                "a".repeat(5 * 1024 - 3)
             );
             let (_, text) = site.request("POST", "/", &headers, "form");
             assert_eq!(

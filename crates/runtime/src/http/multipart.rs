@@ -25,7 +25,12 @@ use std::sync::atomic::AtomicBool;
 
 use buffer::Buffer;
 
-const MAX_BOUNDARY_BYTES: usize = 70;
+/// PHP's own limit: its reader works in units of 5 KiB and refuses a
+/// boundary that does not fit one together with the `\r\n--` before it
+/// ("Boundary too large in multipart/form-data POST data"). RFC 2046 allows
+/// 70 bytes, but PHP accepts longer ones, so Phera does too. The search for
+/// the boundary is linear, so a boundary of this size costs nothing special.
+const MAX_BOUNDARY_BYTES: usize = 5 * 1024 - 4;
 
 /// Names and headers of the part currently being read.
 pub(super) struct PartHeaders {
