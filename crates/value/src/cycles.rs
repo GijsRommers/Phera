@@ -32,6 +32,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::rc::Rc;
 
 use crate::array::PhpArray;
@@ -126,6 +127,27 @@ fn key_of(value: &Value) -> Option<usize> {
     }
 }
 
+/// Hashes the address of a value. Addresses are already spread out, so
+/// one multiplication does what the default hasher's rounds would.
+#[derive(Default)]
+struct AddressHasher(u64);
+
+impl Hasher for AddressHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 = (self.0 << 8 | u64::from(*byte)).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        }
+    }
+
+    fn write_usize(&mut self, address: usize) {
+        self.0 = (address as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
 /// What the walk knows about one value.
 struct Entry {
     node: Node,
@@ -141,7 +163,7 @@ struct Entry {
 #[derive(Default)]
 struct Walk {
     entries: Vec<Entry>,
-    index_of: HashMap<usize, usize>,
+    index_of: HashMap<usize, usize, BuildHasherDefault<AddressHasher>>,
     /// Who holds whom: the indexes of the values each entry holds.
     edges: Vec<usize>,
     work: Vec<usize>,
