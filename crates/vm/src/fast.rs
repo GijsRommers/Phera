@@ -161,7 +161,7 @@ fn write_releasing(slot: &mut Option<Value>, value: Option<Value>) -> ScalarStep
 /// they are included because the four kinds are adjacent in `Value`, which
 /// makes this test a single comparison.
 #[inline(always)]
-fn owns_heap_values(slot: &Option<Value>) -> bool {
+pub(crate) fn owns_heap_values(slot: &Option<Value>) -> bool {
     matches!(
         slot,
         Some(Value::Array(_) | Value::Object(_) | Value::Resource(_) | Value::Reference(_))

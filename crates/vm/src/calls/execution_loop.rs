@@ -323,8 +323,19 @@ impl Machine<'_> {
             Instruction::AppendLocal { local, src } => {
                 self.write_native_dimension(position, local, None, src)
             }
-            Instruction::AssignPath { path, src } if self.classes.has_dimensions => {
-                self.write_dimension_path(position, path, src)
+            Instruction::AssignPath { path, src } => {
+                let written = if self.classes.has_dimensions {
+                    self.write_dimension_path(position, path, src)
+                } else {
+                    Step::Slow
+                };
+                match written {
+                    Step::Slow => self.assign_property::<GUARDED>(position, path, src),
+                    done => done,
+                }
+            }
+            Instruction::IncDecPath { mode, dst, path } => {
+                self.increment_property::<GUARDED>(position, (mode, dst), path)
             }
             Instruction::CallDirect {
                 function,
