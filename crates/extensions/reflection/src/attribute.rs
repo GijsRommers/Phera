@@ -228,13 +228,15 @@ fn instantiate(
             )));
         }
         let values = arguments(context, &attr.info).await?;
-        context.push_callback_frame("ReflectionAttribute->newInstance", this, &[]);
-        let result = async {
-            engine(context)?
-                .reflect_construct_attribute(&class, values, attr.info.site.clone())
-                .await
-        }
-        .await;
+        context.push_callback_frame("ReflectionAttribute->newInstance", this, Vec::new());
+        let result = match engine(context) {
+            Ok(engine) => {
+                engine
+                    .reflect_construct_attribute(&class, values, attr.info.site.clone())
+                    .await
+            }
+            Err(error) => Err(error),
+        };
         context.pop_callback_frame();
         result
     })

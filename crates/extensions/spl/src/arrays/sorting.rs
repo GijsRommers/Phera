@@ -51,11 +51,16 @@ fn sort<'a>(
             state.sorting = true;
             Ok(())
         })?;
-        let method =
-            matches!(name, "uasort" | "uksort").then(|| format!("{}->{name}", state::base(object)));
-        if let Some(method) = method.as_deref() {
-            context.push_callback_frame(method, this.clone(), args.get(1..).unwrap_or_default());
-            context.push_callback_frame(name, None, &args);
+        let method = match (state::base(object), name) {
+            (super::ITERATOR, "uasort") => Some("ArrayIterator->uasort"),
+            (super::ITERATOR, "uksort") => Some("ArrayIterator->uksort"),
+            (_, "uasort") => Some("ArrayObject->uasort"),
+            (_, "uksort") => Some("ArrayObject->uksort"),
+            _ => None,
+        };
+        if let Some(method) = method {
+            context.push_callback_frame(method, this.clone(), args[1..].to_vec());
+            context.push_callback_frame(name, None, args.clone());
         }
         let result = handler(context, args).await;
         if method.is_some() {

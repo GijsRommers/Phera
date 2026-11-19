@@ -205,7 +205,13 @@ pub trait Context {
     }
 
     /// Expose a native operation in the trace for the duration of its PHP callback.
-    fn push_callback_frame(&mut self, _name: &str, _object: Option<Rc<Object>>, _args: &[Value]) {}
+    fn push_callback_frame(
+        &mut self,
+        _name: &'static str,
+        _object: Option<Rc<Object>>,
+        _args: Vec<Value>,
+    ) {
+    }
 
     /// Restore the previous trace boundary after an opted-in native operation.
     fn pop_callback_frame(&mut self) {}

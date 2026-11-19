@@ -130,8 +130,8 @@ impl Vm {
             let include_parent =
                 depth > 1 && caller.is_some_and(|caller| caller.function_id().is_none());
             let mut entry = PhpArray::new();
-            if let Some(location) = callback.and_then(|site| site.native.child_location()) {
-                add_source_location(&mut entry, &location.file, location.line);
+            if let Some((file, line)) = callback.and_then(|site| site.native.child_location()) {
+                add_source_location(&mut entry, file, line);
             } else if let Some(caller) = caller.filter(|_| !internal) {
                 add_location(&mut entry, caller);
             }

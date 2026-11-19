@@ -463,16 +463,15 @@ fn instantiate<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let class = reflected_class(this.as_ref())?;
-        if let Some((method, args)) = &trace {
+        let traced = trace.is_some();
+        if let Some((method, args)) = trace {
             context.push_callback_frame(method, this, args);
         }
-        let result = async {
-            engine(context)?
-                .reflect_construct(&class.info, arguments)
-                .await
-        }
-        .await;
-        if trace.is_some() {
+        let result = match engine(context) {
+            Ok(engine) => engine.reflect_construct(&class.info, arguments).await,
+            Err(error) => Err(error),
+        };
+        if traced {
             context.pop_callback_frame();
         }
         result

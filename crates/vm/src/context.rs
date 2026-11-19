@@ -323,19 +323,19 @@ impl Context for Vm {
 
     fn push_callback_frame(
         &mut self,
-        name: &str,
+        name: &'static str,
         object: Option<std::rc::Rc<phera_value::Object>>,
-        args: &[Value],
+        arguments: Vec<Value>,
     ) {
         use crate::error_traces::{NativeCaller, NativeTrace};
-        let trace = NativeTrace::new(name, args);
         let native = match object {
             Some(object) => NativeCaller::Method {
-                trace,
+                name,
                 object,
-                child_location: None,
+                arguments,
+                declaration: None,
             },
-            None => NativeCaller::Saved(trace),
+            None => NativeCaller::Saved(NativeTrace::new(name, &arguments)),
         };
         self.push_native_callback(native);
     }

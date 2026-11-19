@@ -141,9 +141,10 @@ pub(crate) enum NativeCaller {
     Saved(NativeTrace),
     ArrayMap(Vec<Value>),
     Method {
-        trace: NativeTrace,
+        name: &'static str,
         object: std::rc::Rc<phera_value::Object>,
-        child_location: Option<crate::diagnostics::SourceLocation>,
+        arguments: Vec<Value>,
+        declaration: Option<std::rc::Rc<phera_extension_api::reflection::AttributeSite>>,
     },
     Internal(Option<crate::diagnostics::SourceLocation>),
 }
@@ -151,7 +152,8 @@ pub(crate) enum NativeCaller {
 impl NativeCaller {
     pub(crate) fn name(&self) -> Option<&str> {
         match self {
-            Self::Saved(trace) | Self::Method { trace, .. } => Some(&trace.name),
+            Self::Saved(trace) => Some(&trace.name),
+            Self::Method { name, .. } => Some(name),
             Self::ArrayMap(_) => Some("array_map"),
             Self::Internal(_) => None,
         }
@@ -159,8 +161,10 @@ impl NativeCaller {
 
     pub(crate) fn arguments(&self) -> Value {
         match self {
-            Self::Saved(trace) | Self::Method { trace, .. } => trace.arguments.clone(),
-            Self::ArrayMap(arguments) => NativeTrace::snapshot_arguments(arguments),
+            Self::Saved(trace) => trace.arguments.clone(),
+            Self::ArrayMap(arguments) | Self::Method { arguments, .. } => {
+                NativeTrace::snapshot_arguments(arguments)
+            }
             Self::Internal(_) => Value::Null,
         }
     }
@@ -172,11 +176,13 @@ impl NativeCaller {
         }
     }
 
-    pub(crate) fn child_location(&self) -> Option<&crate::diagnostics::SourceLocation> {
+    pub(crate) fn child_location(&self) -> Option<(&str, usize)> {
         match self {
-            Self::Method { child_location, .. } | Self::Internal(child_location) => {
-                child_location.as_ref()
-            }
+            Self::Method {
+                declaration: Some(site),
+                ..
+            } => Some((&site.file, site.line)),
+            Self::Internal(Some(location)) => Some((&location.file, location.line)),
             _ => None,
         }
     }
