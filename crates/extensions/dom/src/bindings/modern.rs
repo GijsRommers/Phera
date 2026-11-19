@@ -7,6 +7,7 @@
 
 mod document;
 mod element;
+mod interfaces;
 mod selectors;
 mod tokens;
 
@@ -23,6 +24,7 @@ use super::{Location, This, collection, location, node, properties};
 pub(super) fn register(registry: &mut Registry) {
     registry.constant("Dom\\HTML_NO_DEFAULT_NS", 1_i64 << 31);
     node::register_modern(registry);
+    interfaces::register(registry);
     document::register(registry);
     element::register(registry);
     tokens::register(registry);
@@ -37,7 +39,6 @@ pub(super) fn register(registry: &mut Registry) {
         ("Dom\\Entity", "Dom\\Node"),
         ("Dom\\EntityReference", "Dom\\Node"),
         ("Dom\\Notation", "Dom\\Node"),
-        ("Dom\\DocumentFragment", "Dom\\Node"),
     ] {
         registry.class(ClassEntry {
             parent: Some(parent),

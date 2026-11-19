@@ -56,6 +56,7 @@ pub fn save(document: &Document, root: NodeId, options: Options) -> Vec<u8> {
 
     let serializer = Serializer {
         arena: &document.arena,
+        root,
         mode: if options.html { Mode::Html } else { Mode::Xml },
         pretty: document.settings.format,
         modern: document.settings.modern,
@@ -78,6 +79,7 @@ pub fn save(document: &Document, root: NodeId, options: Options) -> Vec<u8> {
 
 struct Serializer<'a> {
     arena: &'a Arena,
+    root: NodeId,
     mode: Mode,
     pretty: bool,
     modern: bool,
@@ -193,8 +195,8 @@ impl Serializer<'_> {
             Kind::Element => {
                 output.push('<');
                 push_name(output, node);
-                if self.modern && self.html_document && !html {
-                    self.html_xml_namespace(node, output);
+                if self.modern && !html && (self.html_document || id == self.root) {
+                    self.modern_namespace(id, output);
                 }
                 self.attributes(id, output);
                 let xhtml =
@@ -375,14 +377,40 @@ impl Serializer<'_> {
         xhtml && markup::html5_void(&node.name.local)
     }
 
-    fn html_xml_namespace(&self, node: &Node, output: &mut String) {
+    fn modern_namespace(&self, id: NodeId, output: &mut String) {
+        let node = &self.arena[id];
         let current = node.name.namespace.as_deref();
-        let inherited = node
-            .parent()
-            .and_then(|parent| self.arena[parent].name.namespace.as_deref());
-        if current != inherited && node.name.prefix.is_none() {
+        let inherited = (id != self.root)
+            .then(|| {
+                node.parent()
+                    .and_then(|parent| self.arena[parent].name.namespace.as_deref())
+            })
+            .flatten();
+        let prefix = node.name.prefix.as_deref();
+        let declared = node.attributes().iter().any(|&id| {
+            let name = &self.arena[id].name;
+            name.namespace.as_deref() == Some(XMLNS)
+                && match prefix {
+                    Some(prefix) => name.prefix.is_some() && name.local == prefix,
+                    None => name.prefix.is_none(),
+                }
+        });
+        if current != inherited && !declared {
             let uri = current.unwrap_or_default();
-            let _ = write!(output, " xmlns=\"{uri}\"");
+            if let Some(prefix) = prefix {
+                let _ = write!(output, " xmlns:{prefix}=\"");
+            } else {
+                output.push_str(" xmlns=\"");
+            }
+            escape(
+                output,
+                uri,
+                Escaping::Xml {
+                    attribute: true,
+                    ascii: false,
+                },
+            );
+            output.push('"');
         }
     }
 }

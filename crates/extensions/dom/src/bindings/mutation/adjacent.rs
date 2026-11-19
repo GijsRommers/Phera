@@ -125,6 +125,11 @@ fn change_nodes(
     position: Position,
     method: &str,
 ) -> Result<bool, NativeError> {
+    let node_class = if node.shared.borrow().document.settings.modern {
+        "Dom\\Node"
+    } else {
+        "DOMNode"
+    };
     let (parent, before) = {
         let state = node.shared.borrow();
         let arena = &state.document.arena;
@@ -150,7 +155,7 @@ fn change_nodes(
     for (index, argument) in arguments.iter().enumerate() {
         let argument = argument.deref();
         let id = match &*argument {
-            Value::Object(object) if object.class.is_instance_of("DOMNode") => {
+            Value::Object(object) if object.class.is_instance_of(node_class) => {
                 let child = location(object)?;
                 if child.shared.borrow().document.arena[child.id].kind == Kind::Attribute {
                     return Err(dom_error(3, "Hierarchy Request Error"));
@@ -175,7 +180,7 @@ fn change_nodes(
             )),
             _ => {
                 return Err(NativeError::type_error(format!(
-                    "{method}(): Argument #{} must be of type DOMNode|string, {} given",
+                    "{method}(): Argument #{} must be of type {node_class}|string, {} given",
                     index + 1,
                     argument.type_name(),
                 )));
@@ -212,7 +217,7 @@ fn change_nodes(
         }
     }
     for &id in &nodes {
-        insert_nodes(arena, parent, id, before)?;
+        insert_nodes(&mut state.document, parent, id, before)?;
     }
     if matches!(position, Position::Replace) && !moving.contains(&node.id) {
         state.remove(node.id);

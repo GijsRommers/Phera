@@ -53,7 +53,7 @@ impl PrecomputedHash for Atom {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct Pseudo(pub String, pub Option<String>);
+pub(super) struct Pseudo(pub String);
 
 impl NonTSPseudoClass for Pseudo {
     fn is_active_or_hover(&self) -> bool {
@@ -67,11 +67,7 @@ impl NonTSPseudoClass for Pseudo {
 
 impl ToCss for Pseudo {
     fn to_css<W: Write>(&self, output: &mut W) -> fmt::Result {
-        write!(output, ":{}", self.0)?;
-        if let Some(argument) = &self.1 {
-            write!(output, "({argument})")?;
-        }
-        Ok(())
+        write!(output, ":{}", self.0)
     }
 }
 
@@ -128,6 +124,10 @@ impl<'i> Parser<'i> for Namespaces {
         true
     }
 
+    fn is_is_alias(&self, name: &str) -> bool {
+        name.eq_ignore_ascii_case("current")
+    }
+
     fn namespace_for_prefix(&self, prefix: &Atom) -> Option<Atom> {
         Some(
             self.0
@@ -149,25 +149,16 @@ impl<'i> Parser<'i> for Namespaces {
                 | "checked"
                 | "enabled"
                 | "disabled"
-                | "indeterminate"
-                | "valid"
-                | "invalid"
                 | "required"
                 | "optional"
                 | "read-only"
                 | "read-write"
                 | "placeholder-shown"
                 | "focus"
-                | "focus-within"
-                | "focus-visible"
                 | "hover"
                 | "active"
-                | "visited"
-                | "target"
-                | "defined"
-                | "default"
         ) {
-            Ok(Pseudo(name, None))
+            Ok(Pseudo(name))
         } else {
             Err(ParseError::custom(
                 SelectorParseErrorKind::UnsupportedPseudoClassOrElement,
@@ -181,12 +172,9 @@ impl<'i> Parser<'i> for Namespaces {
         input: &mut CssParser<'i>,
         _: bool,
     ) -> Result<Pseudo, ParseError<Self::Error>> {
-        if name.eq_ignore_ascii_case("lang") || name.eq_ignore_ascii_case("dir") {
-            let language = input.expect_ident_or_string()?;
-            return Ok(Pseudo(
-                name.to_ascii_lowercase(),
-                Some(language.to_string()),
-            ));
+        if name.eq_ignore_ascii_case("lexbor-contains") {
+            input.expect_ident_or_string()?;
+            return Ok(Pseudo(name.to_ascii_lowercase()));
         }
         Err(ParseError::custom(
             SelectorParseErrorKind::UnsupportedPseudoClassOrElement,
@@ -199,8 +187,20 @@ pub(super) fn error(
     error: &ParseError<SelectorParseErrorKind>,
 ) -> phera_extension_api::NativeError {
     let last = source.split(':').next_back().unwrap_or_default().trim();
-    let reason = if source.contains("::") && !last.is_empty() {
-        format!("Not supported: {last}")
+    let pseudo = last.split('(').next().unwrap_or_default();
+    if source.trim().eq_ignore_ascii_case(":blank") {
+        return dom_error(
+            9,
+            concat!(
+                ":blank selector is not implemented because CSSWG has not yet decided ",
+                "its semantics (https://github.com/w3c/csswg-drafts/issues/1967)",
+            ),
+        );
+    }
+    let reason = if (source.contains("::") || unsupported_pseudo(pseudo)) && !pseudo.is_empty() {
+        format!("Not supported: {pseudo}")
+    } else if source.trim_start().starts_with('@') {
+        format!("Unexpected token: {}", source.trim())
     } else if matches!(
         error.kind,
         cssparser::ParseErrorKind::Custom(SelectorParseErrorKind::UnsupportedPseudoClassOrElement)
@@ -211,6 +211,34 @@ pub(super) fn error(
         "Unexpected token: END-OF-FILE".into()
     };
     dom_error(12, format!("Invalid selector (Selectors. {reason})"))
+}
+
+fn unsupported_pseudo(name: &str) -> bool {
+    matches!(
+        name,
+        "default"
+            | "dir"
+            | "focus-visible"
+            | "focus-within"
+            | "fullscreen"
+            | "in-range"
+            | "indeterminate"
+            | "invalid"
+            | "lang"
+            | "local-link"
+            | "nth-col"
+            | "nth-last-col"
+            | "out-of-range"
+            | "past"
+            | "future"
+            | "scope"
+            | "target"
+            | "target-within"
+            | "user-invalid"
+            | "valid"
+            | "visited"
+            | "warning"
+    )
 }
 
 pub(super) fn bounded(source: &str) -> bool {

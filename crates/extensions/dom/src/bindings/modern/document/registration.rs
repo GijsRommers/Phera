@@ -36,6 +36,7 @@ const VARIADIC: P = document::VARIADIC;
 pub(in crate::bindings::modern) fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
         parent: Some("Dom\\Node"),
+        interfaces: &["Dom\\ParentNode"],
         kind: ClassKind::AbstractClass,
         methods: const {
             &[

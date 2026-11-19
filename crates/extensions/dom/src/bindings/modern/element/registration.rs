@@ -24,6 +24,7 @@ pub(in crate::bindings::modern) fn register(registry: &mut Registry) {
     const SELECTORS: P = P::new("selectors", T::String);
     registry.class(ClassEntry {
         parent: Some("Dom\\Node"),
+        interfaces: &["Dom\\ParentNode", "Dom\\ChildNode"],
         methods: const {
             &[
                 M::public("getAttribute", &[QUALIFIED], |c, t, a| {

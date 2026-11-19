@@ -40,7 +40,8 @@ pub fn parse(bytes: &[u8], options: Options) -> Document {
     } else {
         Cow::Owned(bytes.iter().copied().map(char::from).collect())
     };
-    let mut arena = parse_document(sink::Sink::default(), ParseOpts::default()).one(input.as_ref());
+    let (mut arena, _) =
+        parse_document(sink::Sink::default(), ParseOpts::default()).one(input.as_ref());
     let lower = input.to_ascii_lowercase();
     adjust_tree(&mut arena, &lower, options);
     if let Some((offset, _)) = lower.match_indices("<!doctype").next() {

@@ -67,6 +67,12 @@ fn find(
     source: &str,
     search: &Search,
 ) -> Result<Vec<NodeId>, phera_extension_api::NativeError> {
+    if source.trim().eq_ignore_ascii_case(":scope") {
+        return Err(dom_error(
+            12,
+            "Invalid selector (Selectors. Not supported: scope)",
+        ));
+    }
     if !syntax::bounded(source) {
         return Err(dom_error(
             12,
@@ -80,11 +86,16 @@ fn find(
     let selectors: SelectorList<Css> = SelectorList::parse(&parser, &mut input, ParseRelative::No)
         .map_err(|error| syntax::error(source, &error))?;
     let mut caches = SelectorCaches::default();
+    let quirks = if state.document.settings.quirks {
+        QuirksMode::Quirks
+    } else {
+        QuirksMode::NoQuirks
+    };
     let mut context = MatchingContext::new(
         MatchingMode::Normal,
         None,
         &mut caches,
-        QuirksMode::NoQuirks,
+        quirks,
         NeedsSelectorFlags::No,
         MatchingForInvalidation::No,
     );

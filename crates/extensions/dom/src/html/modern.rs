@@ -29,7 +29,7 @@ pub fn parse_modern(
     let (text, _, _) = encoding.decode(bytes);
     let mut sink = Sink::default();
     sink.modern = true;
-    let mut arena = parse_document(sink, ParseOpts::default()).one(text.as_ref());
+    let (mut arena, quirks) = parse_document(sink, ParseOpts::default()).one(text.as_ref());
     if no_implied {
         let lower = text.to_ascii_lowercase();
         for local in ["head", "body", "html"] {
@@ -57,6 +57,7 @@ pub fn parse_modern(
         settings: Settings {
             html: true,
             modern: true,
+            quirks,
             standalone: Some(true),
             encoding: Some(encoding.name().into()),
             uri: Some("about:blank".into()),
@@ -73,7 +74,7 @@ pub fn fragment(input: &str, parent: &Name) -> (Arena, NodeId) {
     );
     let mut sink = Sink::default();
     sink.modern = true;
-    let arena = parse_fragment(sink, ParseOpts::default(), name, Vec::new(), false).one(input);
+    let (arena, _) = parse_fragment(sink, ParseOpts::default(), name, Vec::new(), false).one(input);
     let root = arena[Arena::DOCUMENT]
         .first_child()
         .unwrap_or(Arena::DOCUMENT);

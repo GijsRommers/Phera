@@ -11,7 +11,6 @@ use selectors::matching::{ElementSelectorFlags, MatchingContext};
 
 use crate::html::XHTML;
 use crate::tree::{Arena, Kind, NodeId};
-use crate::xml::names::XML;
 
 use super::syntax::{Atom, Css, NoPseudoElement, Pseudo};
 
@@ -43,12 +42,6 @@ impl<'a> Element<'a> {
 
     fn has(self, name: &str) -> bool {
         self.attribute(name, None).is_some()
-    }
-
-    fn ancestor_attribute(self, name: &str, namespace: Option<&str>) -> Option<&'a str> {
-        std::iter::once(self.id)
-            .chain(self.arena.ancestors(self.id))
-            .find_map(|id| self.with_id(id).attribute(name, namespace))
     }
 }
 
@@ -155,21 +148,6 @@ impl selectors::Element for Element<'_> {
                     && self.has("placeholder")
                     && self.attribute("value", None).is_none_or(str::is_empty)
             }
-            "defined" => !name.contains('-'),
-            "lang" => self
-                .ancestor_attribute("lang", Some(XML))
-                .or_else(|| self.ancestor_attribute("lang", None))
-                .zip(pseudo.1.as_deref())
-                .is_some_and(|(actual, range)| {
-                    actual.eq_ignore_ascii_case(range)
-                        || actual
-                            .split_once('-')
-                            .is_some_and(|(prefix, _)| prefix.eq_ignore_ascii_case(range))
-                }),
-            "dir" => self
-                .ancestor_attribute("dir", None)
-                .unwrap_or("ltr")
-                .eq_ignore_ascii_case(pseudo.1.as_deref().unwrap_or_default()),
             _ => false,
         }
     }

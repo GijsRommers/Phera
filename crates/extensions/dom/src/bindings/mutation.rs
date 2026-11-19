@@ -19,7 +19,7 @@ pub(super) use adjacent::{
 
 use phera_extension_api::{Context, NativeError, NativeResult, Value, args};
 
-use crate::tree::{Arena, Kind, LinkError, NodeId};
+use crate::tree::{Kind, LinkError, NodeId};
 
 use super::{Location, This, dom_error, location, this_node};
 
@@ -98,7 +98,7 @@ fn insert(
                 );
             }
         }
-        insert_nodes(&mut state.document.arena, parent.id, child.id, reference)
+        insert_nodes(&mut state.document, parent.id, child.id, reference)
     };
     let first = match result {
         Ok(Some(id)) => id,
@@ -122,11 +122,13 @@ fn insert(
 }
 
 pub(super) fn insert_nodes(
-    arena: &mut Arena,
+    document: &mut crate::document::Document,
     parent: NodeId,
     child: NodeId,
     before: Option<NodeId>,
 ) -> Result<Option<NodeId>, NativeError> {
+    let modern = document.settings.modern;
+    let arena = &mut document.arena;
     if arena[child].kind == Kind::Fragment {
         if parent == child {
             return Err(dom_error(3, "Hierarchy Request Error"));
@@ -137,7 +139,9 @@ pub(super) fn insert_nodes(
         }
         for &id in &children {
             arena.insert(parent, id, before).map_err(link_error)?;
-            super::namespace::reconcile(arena, parent, id);
+            if !modern {
+                super::namespace::reconcile(arena, parent, id);
+            }
         }
         Ok(children.first().copied())
     } else if arena[child].kind == Kind::Attribute && arena[parent].kind == Kind::Element {
@@ -154,7 +158,9 @@ pub(super) fn insert_nodes(
         Ok(Some(child))
     } else {
         arena.insert(parent, child, before).map_err(link_error)?;
-        super::namespace::reconcile(arena, parent, child);
+        if !modern {
+            super::namespace::reconcile(arena, parent, child);
+        }
         Ok(Some(child))
     }
 }

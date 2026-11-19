@@ -19,6 +19,7 @@ pub(crate) const XHTML: &str = "http://www.w3.org/1999/xhtml";
 pub(super) struct Sink {
     arena: RefCell<Arena>,
     line: Cell<usize>,
+    quirks: Cell<bool>,
     pub(super) modern: bool,
 }
 
@@ -72,11 +73,11 @@ impl Sink {
 
 impl TreeSink for Sink {
     type Handle = Handle;
-    type Output = Arena;
+    type Output = (Arena, bool);
     type ElemName<'a> = &'a QualName;
 
-    fn finish(self) -> Arena {
-        self.arena.into_inner()
+    fn finish(self) -> Self::Output {
+        (self.arena.into_inner(), self.quirks.into_inner())
     }
 
     fn parse_error(&self, _msg: Cow<'static, str>) {
@@ -167,7 +168,9 @@ impl TreeSink for Sink {
         x.id == y.id
     }
 
-    fn set_quirks_mode(&self, _mode: QuirksMode) {}
+    fn set_quirks_mode(&self, mode: QuirksMode) {
+        self.quirks.set(mode == QuirksMode::Quirks);
+    }
 
     fn append_before_sibling(&self, sibling: &Handle, child: NodeOrText<Handle>) {
         let parent = self.arena.borrow()[sibling.id].parent();

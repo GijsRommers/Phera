@@ -66,6 +66,7 @@ Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
   `Dom\EntityReference`, `Dom\Notation`.
 - Collections and queries include `Dom\NodeList`, `Dom\NamedNodeMap`,
   `Dom\DtdNamedNodeMap`, `Dom\HTMLCollection`, `Dom\TokenList`, `Dom\XPath`.
+- `Dom\ParentNode` and `Dom\ChildNode` expose their shared operations.
 
 Unix scripts can launch programs with `shell_exec()`, backticks, and the process
 functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
