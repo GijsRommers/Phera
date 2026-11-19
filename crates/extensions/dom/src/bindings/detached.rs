@@ -74,6 +74,7 @@ impl DomState {
             {
                 arena.detach(child);
                 if retained(child) {
+                    super::namespace::reconcile_detached(arena, child);
                     if arena[child].first_child().is_some() || !arena[child].attributes().is_empty()
                     {
                         roots.insert(child);

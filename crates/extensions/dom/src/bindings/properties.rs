@@ -31,10 +31,13 @@ fn read(
     let location = match location(object) {
         Ok(location) => location,
         Err(_)
-            if matches!(
-                mode,
-                NativePropertyRead::Isset | NativePropertyRead::Quiet | NativePropertyRead::Exists
-            ) =>
+            if !known(uninitialized_kind(object), name)
+                || matches!(
+                    mode,
+                    NativePropertyRead::Isset
+                        | NativePropertyRead::Quiet
+                        | NativePropertyRead::Exists
+                ) =>
         {
             return Ok(None);
         }
@@ -55,6 +58,23 @@ fn read(
         context.deprecated("Property DOMDocument::$config is deprecated".into());
     }
     value(context, &location, name).map(Some)
+}
+
+fn uninitialized_kind(object: &Object) -> Kind {
+    [
+        ("DOMDocument", Kind::Document),
+        ("DOMElement", Kind::Element),
+        ("DOMAttr", Kind::Attribute),
+        ("DOMCharacterData", Kind::Text),
+        ("DOMProcessingInstruction", Kind::ProcessingInstruction),
+        ("DOMDocumentType", Kind::Doctype),
+        ("DOMDocumentFragment", Kind::Fragment),
+        ("DOMEntity", Kind::Entity),
+        ("DOMNotation", Kind::Notation),
+    ]
+    .into_iter()
+    .find_map(|(class, kind)| object.class.is_instance_of(class).then_some(kind))
+    .unwrap_or(Kind::EntityReference)
 }
 
 pub(super) fn known(kind: Kind, name: &str) -> bool {

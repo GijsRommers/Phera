@@ -122,8 +122,11 @@ fn read(
         (Read::Node, None) => Ok(if ns { Value::Null } else { Value::Bool(false) }),
         (Read::Remove, Some(attribute)) => {
             let mut state = node.shared.borrow_mut();
-            if !ns || state.document.arena[attribute].name.namespace.as_deref() != Some(XMLNS) {
+            if state.document.arena[attribute].name.namespace.as_deref() != Some(XMLNS) {
                 state.remove(attribute);
+            } else if !ns {
+                state.remove(attribute);
+                super::namespace::restore_used(&mut state.document.arena, node.id, attribute);
             }
             Ok(if ns { Value::Null } else { Value::Bool(true) })
         }
@@ -248,46 +251,36 @@ fn set_attribute_node(
         Ok(attr) => attr,
         Err(error) => return mutation::fail(context, &element, error),
     };
-    let result = {
+    let previous = {
         let mut state = element.shared.borrow_mut();
         let arena = &mut state.document.arena;
-        if arena[attr.id]
-            .parent()
-            .is_some_and(|parent| parent != element.id)
-        {
-            Err(dom_error(10, "Inuse Attribute Error"))
-        } else {
-            let mut name = arena[attr.id].name.clone();
-            let old = if by_namespace {
-                find(
-                    arena,
-                    element.id,
-                    Some(name.namespace.as_deref()),
-                    &name.local,
-                )
-            } else {
-                arena[element.id].attributes().iter().copied().find(|&id| {
-                    arena[id].name.local == name.local
-                        && arena[id].name.namespace.as_deref() != Some(XMLNS)
-                })
-            };
-            namespaces::bind(
+        let mut name = arena[attr.id].name.clone();
+        let old = if by_namespace {
+            find(
                 arena,
                 element.id,
-                &mut name,
-                namespaces::AttributeBinding::Attach,
-            );
-            arena[attr.id].name = name;
-            arena
-                .set_attribute(element.id, attr.id, old)
-                .map_err(mutation::link_error)?;
-            Ok(old.filter(|&id| id != attr.id))
-        }
+                Some(name.namespace.as_deref()),
+                &name.local,
+            )
+        } else {
+            arena[element.id].attributes().iter().copied().find(|&id| {
+                arena[id].name.local == name.local
+                    && arena[id].name.namespace.as_deref() != Some(XMLNS)
+            })
+        };
+        namespaces::bind(
+            arena,
+            element.id,
+            &mut name,
+            namespaces::AttributeBinding::Attach,
+        );
+        arena[attr.id].name = name;
+        arena
+            .set_attribute(element.id, attr.id, old)
+            .map_err(mutation::link_error)?;
+        old.filter(|&id| id != attr.id)
     };
-    match result {
-        Ok(value) => element.wrap_optional(context, value),
-        Err(error) => mutation::fail(context, &element, error),
-    }
+    element.wrap_optional(context, previous)
 }
 
 fn mark_node(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {

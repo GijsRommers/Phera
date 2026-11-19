@@ -11,6 +11,7 @@ design or review work and the owner can overrule it.
 
 | Date | Decision | Why | Turned down | By |
 | --- | --- | --- | --- | --- |
+| 2026-11-19 | Legacy DOM preserves declarations that still bind a name after removal, and copies the bindings of imported names into the target arena. | Detached and imported nodes retain their names and namespace URIs after the original parent is freed. | Resolving imported prefixes only during serialization. | Design |
 | 2026-11-19 | WordPress is a target next to Symfony and Laravel. `mysqli` and the `pg_*` functions are built as thin layers over the database drivers PDO already uses. | WordPress is the most used PHP application and talks to MySQL only through `mysqli`. One client per database keeps pooling, TLS and type mapping in one place. | A second, separate MySQL client for `mysqli`. | Owner |
 | 2026-11-19 | Phera follows the newest PHP 8.5 patch release. A comparison whose PHP answer changed in a patch release is marked with the version it holds from and is skipped, visibly, on an older PHP. It is never removed. | Patch releases are bug fixes; CI moves to them on its own; nobody runs an old patch on purpose. | Pinning CI to one patch version. | Owner |
 | 2026-11-19 | PHP 8.5 only. The two-version design for PHP 8.6 (architecture.md 6.3) is parked. | Decided by the owner after seeing the design. | Carrying 8.5 and 8.6 side by side now. | Owner |

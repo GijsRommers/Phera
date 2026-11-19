@@ -51,7 +51,8 @@ runner yet.
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
-date, dom (first stage), filter, hash, json, mbstring, openssl, pcre, PDO
+date, dom (`DOMDocument`, `DOMNode`, `DOMElement`, `DOMXPath`), filter,
+hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, SPL, sqlite3, streams, tokenizer.
 

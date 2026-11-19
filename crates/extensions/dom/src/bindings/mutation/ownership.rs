@@ -48,6 +48,8 @@ pub(in crate::bindings) fn import(
                 bind(arena, root, &mut name, AttributeBinding::Node);
                 arena[id].name = name;
             }
+        } else {
+            super::super::namespace::declare_import_bindings(arena, id);
         }
         id
     };

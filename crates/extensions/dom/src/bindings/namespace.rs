@@ -8,8 +8,8 @@
 mod reconciliation;
 mod removal;
 
-pub(super) use reconciliation::reconcile;
-pub(super) use removal::remove_by_uri;
+pub(super) use reconciliation::{declare_import_bindings, reconcile, reconcile_detached};
+pub(super) use removal::{remove_by_uri, restore_used};
 
 use std::rc::Rc;
 
