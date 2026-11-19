@@ -152,7 +152,11 @@ impl Vm {
             let plain = raw.deref().clone();
             raw = match (plain, key) {
                 (Value::Array(array), PathKey::Index(Some(key))) => {
-                    array.get(&key).cloned().unwrap_or_default()
+                    if steps.peek().is_none() {
+                        array.get_for_reference_binding(&key).unwrap_or_default()
+                    } else {
+                        array.get(&key).cloned().unwrap_or_default()
+                    }
                 }
                 (Value::Object(object), PathKey::Property(key)) => {
                     if steps.peek().is_none()
