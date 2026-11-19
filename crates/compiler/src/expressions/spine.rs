@@ -12,6 +12,41 @@ struct BinaryStep<'ast> {
     line: usize,
 }
 
+/// Whether compiling `operand` fills registers only with numbers, booleans,
+/// null or strings: it is made of literals, joined by operators, prefix
+/// operators and casts to those types. `$i * 2` qualifies through its `2`;
+/// `$a === $b` does not, since the copies of `$a` and `$b` may be objects.
+fn holds_only_scalars(operand: &ast::Expression) -> bool {
+    let mut pending = vec![operand];
+    while let Some(node) = pending.pop() {
+        match &node.kind {
+            ast::ExpressionKind::Literal(_) => {}
+            ast::ExpressionKind::Binary { left, right, .. } => {
+                pending.push(left);
+                pending.push(right);
+            }
+            ast::ExpressionKind::Unary { operator, operand }
+                if *operator != ast::UnaryOperator::ErrorSuppress =>
+            {
+                pending.push(operand)
+            }
+            ast::ExpressionKind::Cast { kind, operand }
+                if matches!(
+                    kind,
+                    ast::CastKind::Int
+                        | ast::CastKind::Float
+                        | ast::CastKind::Bool
+                        | ast::CastKind::String
+                ) =>
+            {
+                pending.push(operand)
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
 /// Joins the string literals a concatenation chain starts with, as PHP does
 /// while compiling: `'a' . 'b' . $c` loads `'ab'` and appends `$c`. The
 /// folded steps are taken off `spine` (top first, so the start is its end).
@@ -129,7 +164,11 @@ impl Compiler<'_> {
                         );
                     }
                 }
-                self.release_operand_temporaries(mark);
+                if holds_only_scalars(right) {
+                    self.release_scalar_temporaries(mark);
+                } else {
+                    self.release_temporaries(mark);
+                }
             }
             return Ok(lhs);
         }

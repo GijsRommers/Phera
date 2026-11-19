@@ -104,6 +104,16 @@ impl NativeError {
         }
     }
 
+    /// PHP messages can embed a filesystem path with bytes outside UTF-8.
+    pub fn throw_bytes(class: &'static str, message: Vec<u8>) -> Self {
+        match String::from_utf8(message) {
+            Ok(message) => Self::throw(class, message),
+            Err(error) => {
+                Self::throw(class, "").with_property("message", Value::from(error.into_bytes()))
+            }
+        }
+    }
+
     /// Like [`NativeError::throw`], for exceptions whose code matters, such
     /// as `JsonException`.
     pub fn throw_with_code(class: &'static str, message: impl Into<String>, code: i64) -> Self {

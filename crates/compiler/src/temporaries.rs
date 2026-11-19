@@ -58,11 +58,15 @@ impl Compiler<'_> {
         self.next = newest_local.map_or(mark.next, |end| end.max(mark.next));
     }
 
-    /// Like [`Compiler::release_temporaries`], for a step of an operator
-    /// chain: its temporaries are left out of the clearing at the end of the
-    /// statement. An operand of `+` or `.` is used up by the operator, and
-    /// clearing it would cost an instruction per step, in loops too.
-    pub(crate) fn release_operand_temporaries(&mut self, mark: TemporaryMark) {
+    /// Like [`Compiler::release_temporaries`], for registers known to hold
+    /// nothing whose release PHP code could observe: numbers, booleans, null
+    /// and strings, never an object or an array. They are left out of the
+    /// clearing at the end of the statement, which would cost an instruction
+    /// per statement, in loops too. Anything else must be released with
+    /// [`Compiler::release_temporaries`], so that the statement's end clears
+    /// it: a stale copy of an object keeps it alive, as a `WeakReference` or
+    /// `spl_object_id` shows.
+    pub(crate) fn release_scalar_temporaries(&mut self, mark: TemporaryMark) {
         self.release_temporaries(mark);
         self.reach = mark.reach.max(self.next);
     }

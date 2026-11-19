@@ -45,8 +45,10 @@ fn collect(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
             }
             Value::Object(object) => {
                 let mut cursor = context.traverse(object.clone()).await?;
-                cursor.step(context, IteratorStep::Rewind).await?;
-                while to_bool(&cursor.step(context, IteratorStep::Valid).await?) {
+                traversal::step(cursor.as_mut(), context, IteratorStep::Rewind).await?;
+                while to_bool(
+                    &traversal::step(cursor.as_mut(), context, IteratorStep::Valid).await?,
+                ) {
                     let (value, key) =
                         traversal::current(cursor.as_mut(), context, preserve).await?;
                     if let Some(key) = key {
@@ -54,7 +56,7 @@ fn collect(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
                     } else {
                         array.push(value)?;
                     }
-                    cursor.step(context, IteratorStep::Advance).await?;
+                    traversal::step(cursor.as_mut(), context, IteratorStep::Advance).await?;
                 }
             }
             _ => return Err(NativeError::error("Invalid iterable")),
@@ -75,13 +77,15 @@ fn count(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
             Value::Object(object) => {
                 let mut total = 0;
                 let mut cursor = context.traverse(object.clone()).await?;
-                cursor.step(context, IteratorStep::Rewind).await?;
-                while to_bool(&cursor.step(context, IteratorStep::Valid).await?) {
+                traversal::step(cursor.as_mut(), context, IteratorStep::Rewind).await?;
+                while to_bool(
+                    &traversal::step(cursor.as_mut(), context, IteratorStep::Valid).await?,
+                ) {
                     total += 1;
                     if total == i64::MAX {
                         break;
                     }
-                    cursor.step(context, IteratorStep::Advance).await?;
+                    traversal::step(cursor.as_mut(), context, IteratorStep::Advance).await?;
                 }
                 Ok(Value::Int(total))
             }
@@ -103,14 +107,14 @@ fn apply(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
             _ => &empty,
         };
         let mut cursor = context.traverse(object.clone()).await?;
-        cursor.step(context, IteratorStep::Rewind).await?;
+        traversal::step(cursor.as_mut(), context, IteratorStep::Rewind).await?;
         let mut total = 0i64;
-        while to_bool(&cursor.step(context, IteratorStep::Valid).await?) {
+        while to_bool(&traversal::step(cursor.as_mut(), context, IteratorStep::Valid).await?) {
             total = total.saturating_add(1);
             if !to_bool(&context.call_array(callback, parameters).await?) {
                 break;
             }
-            cursor.step(context, IteratorStep::Advance).await?;
+            traversal::step(cursor.as_mut(), context, IteratorStep::Advance).await?;
         }
         Ok(Value::Int(total))
     })

@@ -52,7 +52,7 @@ fn separator(byte: u8) -> bool {
 }
 
 /// Directory names are lexical, including written "." and ".." components.
-fn parent(path: &[u8]) -> &[u8] {
+pub fn parent(path: &[u8]) -> &[u8] {
     if path.is_empty() {
         return path;
     }
@@ -69,7 +69,7 @@ fn parent(path: &[u8]) -> &[u8] {
         .map_or(&path[..1], |last| &prefix[..=last])
 }
 
-fn basename(path: &[u8]) -> &[u8] {
+pub fn basename(path: &[u8]) -> &[u8] {
     let Some(end) = path.iter().rposition(|byte| !separator(*byte)) else {
         return b"";
     };

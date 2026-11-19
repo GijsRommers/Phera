@@ -46,11 +46,10 @@ impl Compiler<'_> {
         };
         // `assert($x > 1)` is called as `assert($x > 1, 'assert($x > 1)')`:
         // the message of a failed assertion is the condition as written.
-        if let ast::Arguments::List(arguments) = arguments {
-            for argument in arguments {
-                self.send_argument(argument, line)?;
-            }
-        }
+        let temporary_objects = match arguments {
+            ast::Arguments::List(arguments) => self.send_arguments(arguments, line)?,
+            _ => Vec::new(),
+        };
         let description = self.literal(Constant::Bytes(description), line)?;
         self.emit(
             Instruction::Send {
@@ -62,15 +61,7 @@ impl Compiler<'_> {
             },
             line,
         );
-        let destination = self.allocate_register()?;
-        self.emit(
-            Instruction::FinishCall {
-                destination,
-                result: phera_bytecode::CallResult::Used,
-            },
-            line,
-        );
-        Ok(destination)
+        self.finish_call(temporary_objects, line)
     }
 
     /// For `assert(condition)` with nothing else, the text `assert(condition)`
@@ -116,24 +107,56 @@ impl Compiler<'_> {
             self.emit(Instruction::FinishCallable { destination: dst }, line);
             return Ok(dst);
         };
+        let temporary_objects = self.send_arguments(arguments, line)?;
+        self.finish_call(temporary_objects, line)
+    }
+
+    fn send_arguments(
+        &mut self,
+        arguments: &[ast::Argument],
+        line: usize,
+    ) -> Result<Vec<Reg>, CompileError> {
+        let mut temporary_objects = Vec::new();
         for argument in arguments {
             let mark = self.mark_temporaries();
-            self.send_argument(argument, line)?;
-            self.release_temporaries(mark);
+            // An object created for the call (`f(new A)`) keeps its register
+            // until `finish_call` clears it after the call; any other
+            // argument's temporaries are free once it has been sent.
+            match self.send_argument(argument, line)? {
+                Some(register) => temporary_objects.push(register),
+                None => self.release_temporaries(mark),
+            }
         }
-        let dst = self.allocate_register()?;
+        Ok(temporary_objects)
+    }
+
+    fn finish_call(
+        &mut self,
+        temporary_objects: Vec<Reg>,
+        line: usize,
+    ) -> Result<Reg, CompileError> {
+        let destination = self.allocate_register()?;
         self.emit(
             Instruction::FinishCall {
-                destination: dst,
+                destination,
                 result: phera_bytecode::CallResult::Used,
             },
             line,
         );
-        Ok(dst)
+        // The argument window owns a constructed object for the duration of the call.
+        // Drop the compiler's copy before a following call can observe a weak reference.
+        for register in temporary_objects {
+            self.emit(Instruction::Clear { register }, line);
+        }
+        Ok(destination)
     }
 
     /// Evaluates one argument and hands it to the call being set up.
-    fn send_argument(&mut self, argument: &ast::Argument, line: usize) -> Result<(), CompileError> {
+    fn send_argument(
+        &mut self,
+        argument: &ast::Argument,
+        line: usize,
+    ) -> Result<Option<Reg>, CompileError> {
         let place = if !argument.spread && crate::helpers::reference_capable(&argument.value) {
             Some(self.readable_place(&argument.value)?)
         } else {
@@ -149,6 +172,14 @@ impl Compiler<'_> {
         } else {
             crate::ir::ArgumentSource::Value(self.compile_expression(&argument.value)?)
         };
+        let temporary = match &source {
+            crate::ir::ArgumentSource::Value(register)
+                if matches!(argument.value.kind, ast::ExpressionKind::New { .. }) =>
+            {
+                Some(*register)
+            }
+            _ => None,
+        };
         self.emit(
             Instruction::Send {
                 argument: Argument {
@@ -159,6 +190,6 @@ impl Compiler<'_> {
             },
             line,
         );
-        Ok(())
+        Ok(temporary)
     }
 }

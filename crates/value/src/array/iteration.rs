@@ -102,6 +102,11 @@ impl PhpArray {
         }
     }
 
+    /// The next physical slot, including holes left by previously removed entries.
+    pub fn end_position(&self) -> usize {
+        self.storage.len()
+    }
+
     /// Position of the first live slot after `pos`. `pos` may be stale: the
     /// array may have been compacted since, so it is not trusted to be in
     /// range.

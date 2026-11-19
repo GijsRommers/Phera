@@ -49,7 +49,7 @@ pub const HASH_CONTEXT: ClassEntry = ClassEntry {
     ..ClassEntry::class("HashContext")
 };
 
-fn clone_hash_context(source: &Object, destination: &Object) -> Result<(), NativeError> {
+fn clone_hash_context(source: &Rc<Object>, destination: &Object) -> Result<(), NativeError> {
     let state = source
         .native
         .borrow()
