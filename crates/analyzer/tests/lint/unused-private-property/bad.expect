@@ -1,1 +1,1 @@
-2	unused-private-property	Private member 'x' is never referenced in this class.
+2	unused-private-property	Private property '$x' is never read in this class.

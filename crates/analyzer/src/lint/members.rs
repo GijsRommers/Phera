@@ -25,8 +25,8 @@ pub(super) const RULES: &[Rule] = &[
     rule(
         Group::Unused,
         "unused-private-property",
-        "Detect a private property without a class-local reference.",
-        "class C { private int $x = 0; }",
+        "Detect a private property without a class-local read.",
+        "class C { private int $x; function reset() { $this->x = 0; } }",
         "class C {}",
         DefaultStatus::OptIn,
     ),
@@ -101,6 +101,8 @@ pub(super) struct Members<'a> {
 #[derive(Default)]
 struct ClassUses<'a> {
     names: HashSet<String>,
+    property_reads: HashSet<String>,
+    direct_writes: HashSet<usize>,
     writes: Vec<(&'a str, Span, Option<usize>)>,
     parent_constructed: bool,
     dynamic: bool,
@@ -138,24 +140,33 @@ impl<'a> Members<'a> {
                 }
                 uses.member(name);
             }
-            Expr::Property { name, .. }
-            | Expr::MethodCall { name, .. }
-            | Expr::ClassConstant { name, .. } => uses.member(name),
+            Expr::MethodCall { name, .. } | Expr::ClassConstant { name, .. } => uses.member(name),
+            Expr::Property { name, .. } => match name {
+                MemberName::Identifier(name) => uses.read_property(&name.name, expression.span),
+                MemberName::Expression(_) => uses.dynamic = true,
+            },
             Expr::StaticProperty { name, .. } => match name {
-                Variable::Named(name) => {
-                    uses.names.insert(name.to_ascii_lowercase());
-                }
+                Variable::Named(name) => uses.read_property(name, expression.span),
                 Variable::Dynamic(_) => uses.dynamic = true,
             },
             Expr::Literal(phera_ast::Literal::String(name)) => {
                 if let Ok(name) = std::str::from_utf8(name) {
                     uses.names.insert(name.to_ascii_lowercase());
+                    uses.property_reads.insert(name.to_owned());
                 }
             }
             Expr::Assign { target, .. }
             | Expr::AssignReference { target, .. }
             | Expr::CompoundAssign { target, .. }
             | Expr::IncDec { target, .. } => {
+                if matches!(expression.kind, Expr::Assign { .. })
+                    && matches!(
+                        target.kind,
+                        Expr::Property { .. } | Expr::StaticProperty { .. }
+                    )
+                {
+                    uses.direct_writes.insert(target.span.start);
+                }
                 if let Expr::Property {
                     target: receiver,
                     name: MemberName::Identifier(name),
@@ -216,7 +227,7 @@ impl<'a> Members<'a> {
                             && modifiers.visibility == Some(Visibility::Private)
                             && attributes.is_empty()
                         {
-                            uses.check(context, "unused-private-property", &item.name, item.span);
+                            uses.check_property(context, &item.name, item.span);
                         }
                     }
                 }
@@ -278,6 +289,22 @@ impl<'a> Members<'a> {
 }
 
 impl ClassUses<'_> {
+    fn read_property(&mut self, name: &str, span: Span) {
+        if !self.direct_writes.contains(&span.start) {
+            self.property_reads.insert(name.to_owned());
+        }
+    }
+
+    fn check_property(&self, context: &mut Context<'_>, name: &str, span: Span) {
+        if !self.property_reads.contains(name) {
+            context.report(
+                "unused-private-property",
+                span,
+                format!("Private property '${name}' is never read in this class."),
+            );
+        }
+    }
+
     fn member(&mut self, name: &MemberName) {
         match name {
             MemberName::Identifier(name) => {

@@ -14,16 +14,28 @@ use phera_source::Span;
 pub(super) const RULES: &[Rule] = &[style(
     "trailing-comma",
     "Use a final comma before the closing delimiter of multiline lists.",
-    "$values = [\n    1\n];",
-    "$values = [\n    1,\n];",
+    "function scale(\n    int $factor\n) {}",
+    "function scale(\n    int $factor,\n) {}",
     "Safe token insertion for PHP lists.",
-    Visit::Expression,
+    Visit::List,
     trailing_comma,
 )];
 
 fn trailing_comma(context: &mut Context<'_>, node: Node<'_>) {
-    let Node::Expression(expression, _) = node else {
-        return;
+    let expression = match node {
+        Node::Parameters(parameters) => {
+            if let Some(last) = parameters.last() {
+                check_end(
+                    context,
+                    last.span.end,
+                    context.source.bytes.len(),
+                    Some(Kind::RightParen),
+                );
+            }
+            return;
+        }
+        Node::Expression(expression, _) => expression,
+        _ => return,
     };
     let (last, close) = match &expression.kind {
         Expr::Array(items) => (items.last().map(|item| item.span.end), None),
@@ -59,16 +71,26 @@ fn trailing_comma(context: &mut Context<'_>, node: Node<'_>) {
     let Some(last) = last else {
         return;
     };
-    if context.lines.line(last) == context.lines.line(expression.span.end) {
-        return;
+    if context.lines.line(last) != context.lines.line(expression.span.end) {
+        check_end(context, last, expression.span.end, close);
     }
-    let tail = context.source.within(Span::new(last, expression.span.end));
-    let Some(token) = tail.iter().find(|token| {
-        !matches!(
-            token.kind,
-            Kind::Whitespace | Kind::Comment | Kind::DocComment
-        )
-    }) else {
+}
+
+fn check_end(context: &mut Context<'_>, last: usize, end: usize, close: Option<Kind>) {
+    let tokens = context.source.tokens();
+    let start = tokens.partition_point(|token| token.span.end <= last);
+    let Some(token) = tokens
+        .get(start..)
+        .into_iter()
+        .flatten()
+        .take_while(|token| token.span.start < end)
+        .find(|token| {
+            !matches!(
+                token.kind,
+                Kind::Whitespace | Kind::Comment | Kind::DocComment
+            )
+        })
+    else {
         return;
     };
     if close.map_or(

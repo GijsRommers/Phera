@@ -61,6 +61,7 @@ struct Enabled {
     methods: Vec<Check>,
     file_checks: Vec<Check>,
     types: Vec<Check>,
+    parameters: Vec<Check>,
     namespaces: Vec<Check>,
     locals: bool,
     members: bool,
@@ -86,6 +87,10 @@ impl Enabled {
                     Visit::Namespace => &mut enabled.namespaces,
                     Visit::File => &mut enabled.file_checks,
                     Visit::Type => &mut enabled.types,
+                    Visit::List => {
+                        enabled.parameters.push(check);
+                        &mut enabled.expressions
+                    }
                 };
                 checks.push(check);
             }
@@ -266,6 +271,7 @@ fn lint_namespace(context: &mut Context<'_>, namespace: String, statements: &[St
             Node::Class(_) => &enabled.classes,
             Node::Method(_) => &enabled.methods,
             Node::Type(_) => &enabled.types,
+            Node::Parameters(_) => &enabled.parameters,
             _ => return,
         };
         for check in checks {

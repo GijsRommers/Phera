@@ -54,6 +54,7 @@ pub(super) enum Visit {
     Class,
     Method,
     Type,
+    List,
     Namespace,
 }
 
