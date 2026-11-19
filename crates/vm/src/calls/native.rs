@@ -195,7 +195,10 @@ impl Vm {
             self.registers.truncate(slots.base);
             entry.handler = NativeFn::Sync(handler);
             let origin = callee.argument_binding.origin(self.argument_origin);
-            return self.native_entry_origin(entry, arguments, origin).await.map(Some);
+            return self
+                .native_entry_origin(entry, arguments, origin)
+                .await
+                .map(Some);
         }
         let mut arguments = self.call_stack.native_arguments();
         arguments.reserve(call.sent as usize);

@@ -71,10 +71,13 @@ pub(crate) fn register(registry: &mut Registry) {
                 MethodEntry::public("isProtected", &[], |_, o, _| has_modifier(o, 2)),
                 MethodEntry::public("isPrivate", &[], |_, o, _| has_modifier(o, 4)),
                 MethodEntry::public("isStatic", &[], |_, o, _| has_modifier(o, 16)),
-                MethodEntry::public("isFinal", &[], |_, o, _| has_modifier(o, 32)),
-                MethodEntry::public("isAbstract", &[], |_, o, _| has_modifier(o, 64)),
+                MethodEntry::public("isFinal", &[], |_, o, _| has_modifier(o, 32))
+                    .returning("bool"),
+                MethodEntry::public("isAbstract", &[], |_, o, _| has_modifier(o, 64))
+                    .returning("bool"),
                 MethodEntry::public("isReadOnly", &[], |_, o, _| has_modifier(o, 128)),
-                MethodEntry::public("isVirtual", &[], |_, o, _| has_modifier(o, 512)),
+                MethodEntry::public("isVirtual", &[], |_, o, _| has_modifier(o, 512))
+                    .returning("bool"),
                 MethodEntry::public("isProtectedSet", &[], |_, o, _| has_modifier(o, 2048)),
                 MethodEntry::public("isPrivateSet", &[], |_, o, _| has_modifier(o, 4096)),
                 MethodEntry::public("isDefault", &[], |_, o, _| {
@@ -98,7 +101,8 @@ pub(crate) fn register(registry: &mut Registry) {
                 }),
                 MethodEntry::public("getRawValue", RAW_OBJECT, |c, o, a| {
                     read(c, o, a, PropertyRead::Raw, "getRawValue")
-                }),
+                })
+                .returning("mixed"),
                 MethodEntry::public(
                     "setRawValue",
                     const {
@@ -116,7 +120,8 @@ pub(crate) fn register(registry: &mut Registry) {
                         }
                         set_raw(c, member, a)
                     },
-                ),
+                )
+                .returning("void"),
                 MethodEntry::public(
                     "setValue",
                     const {
