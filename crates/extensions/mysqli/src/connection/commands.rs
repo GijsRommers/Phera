@@ -50,6 +50,12 @@ pub async fn execute<const OP: usize>(
             "{item} {call}() is deprecated since 8.4, use KILL CONNECTION/QUERY SQL statement instead"
         ));
     }
+    if OP == KILL && flags <= 0 {
+        let argument = if is_method { 1 } else { 2 };
+        return Err(NativeError::value_error(format!(
+            "{call}(): Argument #{argument} ($process_id) must be greater than 0"
+        )));
+    }
     if OP == WARNINGS && handle.borrow().reply.warnings == 0 {
         return Ok(Value::Bool(false));
     }

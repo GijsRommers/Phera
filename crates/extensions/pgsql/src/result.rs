@@ -198,39 +198,69 @@ fn cell<const OP: usize>(
     call: &str,
 ) -> NativeResult {
     let (row, field) = if a.len() < 3 {
+        c.deprecated(format!(
+            "Calling {call}() with 2 arguments is deprecated, use the 3-parameter signature \
+             with a null $row parameter instead"
+        ));
         (None, args::value(a, 1))
     } else {
         (args::int(a, 1), args::value(a, 2))
     };
+    let index = match row {
+        Some(row) => usize::try_from(row).map_err(|_| {
+            NativeError::value_error(format!(
+                "{call}(): Argument #2 ($row) must be greater than or equal to 0"
+            ))
+        })?,
+        None => state.position,
+    };
+    let Some(values) = state.rows.values.get(index) else {
+        if let Some(row) = row {
+            c.warning(format!("{call}(): Unable to jump to row {row}"));
+        }
+        return Ok(Value::Bool(false));
+    };
+    if row.is_none() && OP == VALUE {
+        state.position += 1;
+    }
+    let argument = a.len();
     let field = match &*field.deref() {
-        Value::Int(index) => Some(fields::index(state, *index, call, a.len())?),
+        Value::Int(field) => {
+            let field = usize::try_from(*field).map_err(|_| {
+                NativeError::value_error(format!(
+                    "Argument #{argument} must be greater than or equal to 0"
+                ))
+            })?;
+            if field >= state.rows.columns.len() {
+                return Err(NativeError::value_error(format!(
+                    "Argument #{argument} must be less than the number of fields for this result set"
+                )));
+            }
+            field
+        }
         Value::String(name) => state
             .rows
             .columns
             .iter()
-            .position(|column| column.name.as_bytes() == name.as_bytes()),
-        _ => None,
-    };
-    if let Some(field) = field {
-        let row = row
-            .and_then(|row| usize::try_from(row).ok())
-            .or(Some(state.position));
-        if let Some(row) = row.and_then(|index| state.rows.values.get(index)) {
-            let cell = row.get(field).and_then(Option::as_ref);
-            return Ok(match OP {
-                LENGTH => Value::Int(cell.map_or(0, Vec::len) as i64),
-                IS_NULL => Value::Int(i64::from(cell.is_none())),
-                _ => from_cell(cell),
-            });
+            .position(|column| column.name.as_bytes() == name.as_bytes())
+            .ok_or_else(|| {
+                NativeError::value_error(format!(
+                    "Argument #{argument} must be a field name from this result set"
+                ))
+            })?,
+        value => {
+            return Err(NativeError::type_error(format!(
+                "{call}(): Argument #{argument} ($field) must be of type string|int, {} given",
+                value.type_name()
+            )));
         }
-        c.warning(format!(
-            "{call}(): Unable to jump to row {}",
-            row.unwrap_or_default()
-        ));
-    } else {
-        c.warning(format!("{call}(): Bad column offset"));
-    }
-    Ok(Value::Bool(false))
+    };
+    let cell = values.get(field).and_then(Option::as_ref);
+    Ok(match OP {
+        LENGTH => Value::Int(cell.map_or(0, Vec::len) as i64),
+        IS_NULL => Value::Int(i64::from(cell.is_none())),
+        _ => from_cell(cell),
+    })
 }
 
 fn from_cell(value: Option<&Vec<u8>>) -> Value {
@@ -249,7 +279,7 @@ impl ResultSet {
                 .ok()
                 .filter(|i| *i < self.rows.values.len());
             if let Some(index) = index {
-                self.position = index + 1;
+                self.position = index;
             } else {
                 c.warning(format!("{call}(): Unable to jump to row {row}"));
             }

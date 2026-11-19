@@ -21,7 +21,7 @@ const DEFAULT: &str = "pgsql.default";
 const CACHE: &str = "pgsql.connections";
 
 pub type Handle = Rc<RefCell<Connection>>;
-pub type Pending = JoinHandle<Result<Vec<Rows>, DbError>>;
+pub type Pending = JoinHandle<Result<Result<Vec<Rows>, DbError>, String>>;
 
 pub struct Connection {
     pub lease: Option<Lease<Driver>>,
@@ -32,14 +32,6 @@ pub struct Connection {
     pub server_version: String,
     pub pid: i32,
     pub encoding: String,
-}
-
-impl Drop for Connection {
-    fn drop(&mut self) {
-        if let Some(pending) = &self.busy {
-            pending.abort();
-        }
-    }
 }
 
 impl Connection {
@@ -88,6 +80,19 @@ where
         _ => Box::pin(async { Err(connection_error("Mismatched database driver")) }),
     })
     .await
+}
+
+/// A pg_send_* operation can progress even when PHP immediately polls for it.
+pub fn start<F>(lease: &Lease<Driver>, operation: F) -> Pending
+where
+    F: for<'a> FnOnce(&'a mut Postgres) -> Operation<'a, Result<Vec<Rows>, DbError>>
+        + Send
+        + 'static,
+{
+    lease.start(|driver| match driver {
+        Driver::Postgres(postgres) => operation(postgres),
+        _ => Box::pin(async { Err(connection_error("Mismatched database driver")) }),
+    })
 }
 
 pub fn connect<const PERSISTENT: bool>(
@@ -220,9 +225,7 @@ pub fn close(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let handle = argument(context, args::value(arguments, 0), "pg_close")?;
     let mut state = handle.borrow_mut();
     state.lease()?;
-    if let Some(pending) = state.busy.take() {
-        pending.abort();
-    }
+    state.busy = None;
     state.lease = None;
     state.results.clear();
     if context

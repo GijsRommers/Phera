@@ -98,14 +98,6 @@ pub fn parameters(
             .map(|(_, value)| parameter(context, value, Kind::String))
             .collect();
     }
-    if state.parameters.len() != count {
-        return Err(NativeError::throw_with_code(
-            "mysqli_sql_exception",
-            "No data supplied for parameters in prepared statement",
-            2031,
-        )
-        .with_property("sqlstate", Value::from("HY000")));
-    }
     let long = std::mem::take(&mut state.long_data);
     state
         .parameters

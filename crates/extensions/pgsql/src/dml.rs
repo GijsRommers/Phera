@@ -134,11 +134,8 @@ pub fn execute<const OP: usize>(
             return Ok(Value::from(sql));
         }
         if flags & 1024 != 0 {
-            handle.borrow_mut().busy = Some(tokio::spawn(async move {
-                connection::run(&lease, move |pg| {
-                    Box::pin(async move { pg.native_query(&sql).await })
-                })
-                .await
+            handle.borrow_mut().busy = Some(connection::start(&lease, move |pg| {
+                Box::pin(async move { pg.native_query(&sql).await })
             }));
             return Ok(Value::Bool(true));
         }

@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use tokio::runtime::Handle;
 use tokio::sync::{Mutex, OwnedSemaphorePermit};
+use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 use crate::Connection;
@@ -79,19 +80,27 @@ impl<C: Connection> Lease<C> {
         T: Send + 'static,
         F: for<'c> FnOnce(&'c mut C) -> Operation<'c, T> + Send + 'static,
     {
-        let shared = self.shared.clone();
-        self.shared
-            .runtime
-            .spawn(async move {
-                let mut connection = shared.connection.lock().await;
-                // `None` only after `Drop` took the connection back, which
-                // cannot happen while this task holds a clone of the lease.
-                let connection = connection.as_mut()?;
-                Some(operation(connection).await)
-            })
+        self.start(operation)
             .await
             .map_err(|lost| lost.to_string())?
-            .ok_or_else(|| "the connection was already returned to its pool".to_owned())
+    }
+
+    /// Starts work immediately on the I/O runtime. Dropping the returned
+    /// handle detaches the task, which still owns the lease until it finishes.
+    pub fn start<T, F>(&self, operation: F) -> JoinHandle<Result<T, String>>
+    where
+        T: Send + 'static,
+        F: for<'c> FnOnce(&'c mut C) -> Operation<'c, T> + Send + 'static,
+    {
+        let shared = self.shared.clone();
+        self.shared.runtime.spawn(async move {
+            let mut connection = shared.connection.lock().await;
+            // `None` is only possible when the connection has been returned.
+            let connection = connection
+                .as_mut()
+                .ok_or_else(|| "the connection was already returned to its pool".to_owned())?;
+            Ok(operation(connection).await)
+        })
     }
 }
 

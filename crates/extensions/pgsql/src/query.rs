@@ -150,8 +150,8 @@ pub fn execute<const OP: usize, const SEND: bool>(
                 c.warning(format!("{call}(): There are results on this connection. Call pg_get_result() until it returns FALSE"));
                 return Ok(Value::Bool(false));
             }
-            state.busy = Some(tokio::spawn(async move {
-                connection::run(&lease, |driver| Box::pin(command.run(driver))).await
+            state.busy = Some(connection::start(&lease, |driver| {
+                Box::pin(command.run(driver))
             }));
             return Ok(Value::Bool(true));
         }
@@ -179,10 +179,11 @@ fn fail(c: &mut dyn Context, state: &Handle, call: &str, detail: String) -> Nati
 async fn finish(state: &Handle) -> Result<(), NativeError> {
     let pending = state.borrow_mut().busy.take();
     if let Some(pending) = pending {
-        match pending
+        let result = pending
             .await
             .map_err(|error| NativeError::error(error.to_string()))?
-        {
+            .map_err(NativeError::error)?;
+        match result {
             Ok(results) => state.borrow_mut().results.extend(results),
             Err(e) => state.borrow_mut().results.push_back(Rows {
                 error: Some(e),

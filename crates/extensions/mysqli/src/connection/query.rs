@@ -50,7 +50,8 @@ pub async fn execute<const OP: usize>(
         if !matches!(mode, 0 | 1 | 16) {
             let index = if call.starts_with("mysqli::") { 2 } else { 3 };
             return Err(NativeError::value_error(format!(
-                "{call}(): Argument #{index} ($result_mode) must be either MYSQLI_USE_RESULT                  or MYSQLI_STORE_RESULT"
+                "{call}(): Argument #{index} ($result_mode) must be either MYSQLI_USE_RESULT \
+                 or MYSQLI_STORE_RESULT"
             )));
         }
     }

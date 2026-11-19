@@ -92,6 +92,23 @@ const CALLS: &[(&str, &str)] = &[
             pg_get_result($db), pg_connection_busy($db)]; })()",
     ),
     (
+        "positional-fetch-cursor",
+        "(function () use ($db) { $q = pg_query($db, 'SELECT generate_series(1, 3) AS num');
+            $explicit = pg_fetch_row($q, 1);
+            $length = pg_field_prtlen($q, null, 0);
+            return [$explicit, $length, pg_fetch_result($q, null, 'num'), pg_fetch_row($q)]; })()",
+    ),
+    (
+        "poll-a-send",
+        "(function () use ($db) { pg_send_query($db, 'SELECT 1 FROM pg_sleep(0.01)');
+            $start = hrtime(true);
+            while (pg_connection_busy($db) && hrtime(true) - $start < 2000000000) {
+                pg_consume_input($db);
+            }
+            $busy = pg_connection_busy($db);
+            return [$busy, pg_fetch_row(pg_get_result($db)), pg_get_result($db)]; })()",
+    ),
+    (
         "freed",
         "(function () use ($db) { $q = rows($db); pg_free_result($q);
         return pg_num_rows($q); })()",

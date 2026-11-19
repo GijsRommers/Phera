@@ -131,6 +131,16 @@ pub async fn execute(
     let (statement, connection, params) = {
         let mut state = handle.borrow_mut();
         let statement = state.statement()?.clone();
+        if list.is_none() && state.parameters.len() != usize::from(statement.num_params()) {
+            let error = DbError {
+                state: "HY000".into(),
+                code: Some(2031),
+                detail: "No data supplied for parameters in prepared statement".into(),
+            };
+            state.error = Some(error.clone());
+            state.rows = None;
+            return errors::report(context, &error, call, false);
+        }
         let params = binding::parameters(context, &mut state, list, call)?;
         (statement, state.connection.clone(), params)
     };
