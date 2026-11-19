@@ -216,10 +216,10 @@ impl Vm {
                     original.type_name(),
                     holder.declaring,
                     holder.name,
-                    ty.display,
+                    crate::types::php_type_display(ty),
                     property.declaring,
                     property.name,
-                    property_type.display
+                    crate::types::php_type_display(property_type)
                 )));
             }
         }

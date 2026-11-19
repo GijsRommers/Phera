@@ -20,7 +20,7 @@ use phera_value::Value;
 
 use crate::Vm;
 use crate::calls::call_stack::CallStack;
-use crate::calls::frame::Frame;
+use crate::calls::frame::{Frame, TraversalMode};
 use crate::calls::registers::Registers;
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
@@ -147,9 +147,10 @@ impl Machine<'_> {
     /// The loop itself. Simple instructions run in [`Machine::run_simple`];
     /// this loop takes the others and switches frames on calls and returns.
     fn run(&mut self) -> LoopExit {
-        let Some(frame) = self.stack.current().copied() else {
+        let [.., frame] = self.stack.frames() else {
             return LoopExit::Invalid;
         };
+        let frame = *frame;
         let mut position = Position {
             frame,
             ip: frame.ip(),
@@ -239,6 +240,33 @@ impl Machine<'_> {
                     true => Step::Done(ip),
                     false => Step::Slow,
                 }
+            }
+            Instruction::IterNextKeyed {
+                iter, key, value, ..
+            } if position.frame.has_extras() => {
+                let iterators = &mut self.stack.current_extras_mut().iterators;
+                let slots = self.registers.tail_mut(base);
+                if iterators.get_mut(iter.0).is_some_and(|state| {
+                    state.traversal_mode == TraversalMode::Value
+                        && crate::iteration::native_step(state, Some(key), value, slots)
+                }) {
+                    Step::Done(ip)
+                } else {
+                    Step::Slow
+                }
+            }
+            Instruction::FetchIndex {
+                dst,
+                base,
+                index,
+                mode: phera_bytecode::FetchMode::Read,
+                ..
+            } => self.fetch_native_dimension(position, dst, base, index),
+            Instruction::AppendLocal { local, src } => {
+                self.write_native_dimension(position, local, None, src)
+            }
+            Instruction::AssignPath { path, src } if self.classes.has_dimensions => {
+                self.write_dimension_path(position, path, src)
             }
             Instruction::CallDirect {
                 function,

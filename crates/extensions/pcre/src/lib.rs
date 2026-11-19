@@ -54,6 +54,16 @@ impl Extension for Pcre {
     }
 }
 
+/// Prepare a pattern for a native caller that owns the diagnostic, such as RegexIterator.
+pub fn validate_pattern(pattern: &[u8]) -> Result<(), String> {
+    cache::lookup(pattern).map(drop)
+}
+
+/// Match without altering the request's preg_last_error state.
+pub fn simple_match(pattern: &[u8], subject: &[u8]) -> bool {
+    cache::lookup(pattern).is_ok_and(|compiled| compiled.regex.is_match(subject).unwrap_or(false))
+}
+
 const CONSTANTS: &[(&str, i64)] = &[
     ("PREG_PATTERN_ORDER", flags::PATTERN_ORDER),
     ("PREG_SET_ORDER", flags::SET_ORDER),

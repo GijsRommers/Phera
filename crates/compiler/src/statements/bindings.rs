@@ -40,6 +40,7 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         let reference_subject = binding == crate::policies::IterationBinding::Reference
             || crate::expressions::places::contains_reference(value);
+        let first_source_slot = self.next;
         let src = if reference_subject && crate::writable(subject) {
             self.literal(Constant::Null, line)?
         } else {
@@ -130,6 +131,21 @@ impl Compiler<'_> {
         self.emit(Instruction::Jump(Target(start)), line);
         self.patch(jump, self.position());
         self.loop_end(start);
+
+        // Foreach result registers must not keep the last key or value alive
+        // after the loop leaves scope. The PHP targets keep their own values.
+        self.emit(
+            Instruction::Clear {
+                register: value_register,
+            },
+            line,
+        );
+        if let Some(register) = key_register {
+            self.emit(Instruction::Clear { register }, line);
+        }
+        if src.index() >= first_source_slot && !self.locals.values().any(|local| *local == src) {
+            self.emit(Instruction::Clear { register: src }, line);
+        }
 
         Ok(())
     }

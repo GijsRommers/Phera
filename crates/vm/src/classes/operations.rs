@@ -9,14 +9,41 @@ use super::{Class, Method};
 use std::{collections::HashMap, rc::Rc};
 
 #[derive(Clone, Copy, Default)]
-pub(crate) struct ClassOperations(u8);
+pub(crate) struct ClassOperations(u16);
+
+/// Linked once, so a dimension access does not search a subclass method table.
+#[derive(Clone, Copy)]
+pub(crate) enum NativeDimension {
+    Get = 1 << 5,
+    Exists = 1 << 6,
+    Set = 1 << 7,
+    Unset = 1 << 8,
+}
+
+impl NativeDimension {
+    const ALL: [Self; 4] = [Self::Get, Self::Exists, Self::Set, Self::Unset];
+
+    fn method(self) -> &'static str {
+        match self {
+            Self::Get => "offsetget",
+            Self::Exists => "offsetexists",
+            Self::Set => "offsetset",
+            Self::Unset => "offsetunset",
+        }
+    }
+
+    pub(crate) fn bit(self) -> u16 {
+        self as u16
+    }
+}
 
 impl ClassOperations {
-    pub(crate) const TRAVERSABLE: u8 = 1;
-    pub(crate) const ITERATOR: u8 = 2;
-    pub(crate) const AGGREGATE: u8 = 4;
-    pub(crate) const ARRAY_ACCESS: u8 = 8;
-    pub(crate) const COUNTABLE: u8 = 16;
+    pub(crate) const TRAVERSABLE: u16 = 1;
+    pub(crate) const ITERATOR: u16 = 2;
+    pub(crate) const AGGREGATE: u16 = 4;
+    pub(crate) const ARRAY_ACCESS: u16 = 8;
+    pub(crate) const COUNTABLE: u16 = 16;
+    pub(crate) const DIMENSIONS: u16 = 1 << 9;
 
     pub(crate) fn link(name: &str, parent: Option<&Class>, interfaces: &[Rc<Class>]) -> Self {
         let mut flags = match name {
@@ -36,7 +63,41 @@ impl ClassOperations {
         Self(flags)
     }
 
-    pub(crate) fn has(self, flag: u8) -> bool {
+    pub(crate) fn with_native_dimensions(
+        mut self,
+        hooks: Option<&phera_extension_api::ClassHooks>,
+        methods: &HashMap<String, Rc<super::Method>>,
+    ) -> Self {
+        for kind in NativeDimension::ALL {
+            self.0 &= !kind.bit();
+        }
+        let dimensions = hooks.and_then(|hooks| hooks.dimensions.as_ref());
+        if dimensions.is_some() || self.has(Self::ARRAY_ACCESS) {
+            self.0 |= Self::DIMENSIONS;
+        }
+        let Some(dimensions) = dimensions else {
+            return self;
+        };
+        let overridden = |name| {
+            methods
+                .get(name)
+                .is_some_and(|method| matches!(method.body, super::MethodBody::User(_)))
+        };
+        if !dimensions
+            .fallback_if_overridden
+            .iter()
+            .any(|name| overridden(*name))
+        {
+            for kind in NativeDimension::ALL {
+                if !overridden(kind.method()) {
+                    self.0 |= kind.bit();
+                }
+            }
+        }
+        self
+    }
+
+    pub(crate) fn has(self, flag: u16) -> bool {
         self.0 & flag != 0
     }
 }
@@ -57,8 +118,19 @@ pub(super) fn inherit_hooks(
         properties: own.properties.or(base.properties),
         property_access: own.property_access.or(base.property_access),
         iterator: own.iterator.or(base.iterator),
+        iterator_by_reference: if own.iterator.is_some() {
+            own.iterator_by_reference
+        } else {
+            base.iterator_by_reference
+        },
+        iterator_fallback_if_overridden: if own.iterator.is_some() {
+            own.iterator_fallback_if_overridden
+        } else {
+            base.iterator_fallback_if_overridden
+        },
         dimensions: own.dimensions.or(base.dimensions),
         count: own.count.or(base.count),
+        forward_method: own.forward_method.or(base.forward_method),
     }))
 }
 
@@ -80,16 +152,21 @@ pub(super) fn user_hooks(
     } else {
         &[]
     };
-    if iterator_methods.iter().any(|&name| {
-        methods.get(name).is_some_and(|method| {
-            parent
-                .methods
-                .get(name)
-                .is_none_or(|inherited| !Rc::ptr_eq(inherited, method))
+    if iterator_methods
+        .iter()
+        .chain(hooks.iterator_fallback_if_overridden)
+        .any(|&name| {
+            methods.get(name).is_some_and(|method| {
+                parent
+                    .methods
+                    .get(name)
+                    .is_none_or(|inherited| !Rc::ptr_eq(inherited, method))
+            })
         })
-    }) {
+    {
         Some(Rc::new(phera_extension_api::ClassHooks {
             iterator: None,
+            iterator_by_reference: None,
             ..**hooks
         }))
     } else {
