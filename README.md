@@ -54,7 +54,7 @@ Built in, each checked call by call against real PHP: core, standard, ctype,
 date, dom (`DOMDocument`, `DOMNode`, `DOMElement`, `DOMXPath`), filter,
 hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
-session, SPL, sqlite3, streams, tokenizer.
+session, SPL, sqlite3, streams, tokenizer, Unix process functions, and POSIX queries.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 
@@ -67,8 +67,12 @@ Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 - Collections and queries include `Dom\NodeList`, `Dom\NamedNodeMap`,
   `Dom\DtdNamedNodeMap`, `Dom\HTMLCollection`, `Dom\TokenList`, `Dom\XPath`.
 
-In progress: bcmath, curl, gmp, intl, mysqli, pgsql, process functions, sodium,
-zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
+Unix scripts can launch programs with `shell_exec()`, backticks, and the process
+functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
+launching for web requests, run `phera serve --no-process public`.
+
+In progress: bcmath, curl, gmp, intl, mysqli, pgsql, sodium, zlib.
+Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
 
 ## ✨ Goals
 

@@ -21,6 +21,8 @@ pub enum Backing {
 pub enum Wrapper {
     File,
     Standard,
+    Process,
+    ProcessSocket,
     Memory,
     Temp,
     Data,
@@ -30,6 +32,8 @@ pub enum Wrapper {
 
 pub struct Stream {
     pub backing: Backing,
+    pub attachment: Option<Box<dyn crate::child_pipe::CloseAttachment>>,
+    pub child_pipe: Option<crate::child_pipe::ChildPipe>,
     pub wrapper: Wrapper,
     pub mode: Vec<u8>,
     pub uri: Vec<u8>,
@@ -55,6 +59,8 @@ impl Stream {
         };
         Self {
             backing,
+            attachment: None,
+            child_pipe: None,
             wrapper,
             mode: mode.to_vec(),
             uri: uri.to_vec(),

@@ -40,7 +40,7 @@ pub fn register(registry: &mut Registry) {
     );
     for entry in const {
         [
-            FunctionEntry::sync("fclose", const { &[STREAM] }, fclose),
+            FunctionEntry::asynchronous("fclose", const { &[STREAM] }, fclose),
             FunctionEntry::sync("feof", const { &[STREAM] }, feof),
             FunctionEntry::sync("ftell", const { &[STREAM] }, ftell),
             FunctionEntry::asynchronous(
@@ -73,7 +73,9 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
     Box::pin(async move {
         let name = args::bytes(&arguments, 0);
         check_path("fopen", "#1 ($filename)", name)?;
-        validate(args::value(&arguments, 3), "fopen", 4)?;
+        let stream_context = args::value(&arguments, 3);
+        validate(stream_context, "fopen", 4)?;
+        files(context).use_default_context(stream_context);
         let stream = open(
             context,
             "fopen",
@@ -89,18 +91,24 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
     })
 }
 
-fn fclose(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let candidate = argument_resource(args::value(arguments, 0), "fclose", "#1 ($stream)")?;
-    if crate::directory::is_open(candidate) {
-        context.warning(
-            "fclose(): cannot close the provided stream, as it must not be manually closed".into(),
-        );
-        return Ok(Value::Bool(false));
-    }
-    let resource = stream_arg(arguments, "fclose")?;
-    resource.data.borrow_mut().take();
-    files(context).stream_contexts.remove(&resource.id);
-    Ok(Value::Bool(true))
+fn fclose(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let candidate = argument_resource(args::value(&arguments, 0), "fclose", "#1 ($stream)")?;
+        if crate::directory::is_open(candidate) {
+            context.warning(
+                "fclose(): cannot close the provided stream, as it must not be manually closed"
+                    .into(),
+            );
+            return Ok(Value::Bool(false));
+        }
+        let resource = stream_arg(&arguments, "fclose")?;
+        let attachment = crate::child_pipe::take_attachment(resource)?;
+        files(context).stream_contexts.remove(&resource.id);
+        if let Some(attachment) = attachment {
+            attachment.close(context).await?;
+        }
+        Ok(Value::Bool(true))
+    })
 }
 
 fn feof(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {

@@ -659,11 +659,11 @@ fn heredoc_start_must_be_followed_by_a_newline() {
 }
 
 #[test]
-fn backticks_are_rejected() {
-    assert!(matches!(
-        first_error("`ls`").kind,
-        LexErrorKind::Unsupported(_)
-    ));
+fn backticks_interpolate_variables_and_preserve_escaped_delimiters() {
+    assert_eq!(
+        kinds(r"`printf $word \``"),
+        [Backquote, StringPart, Variable, StringPart, Backquote]
+    );
 }
 
 // --- Operators --------------------------------------------------------------

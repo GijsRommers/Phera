@@ -56,6 +56,19 @@ impl OutputCallbacks {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct ResourceFinalizers(Vec<(&'static str, AsyncFn)>);
+
+impl ResourceFinalizers {
+    pub(crate) fn register(&mut self, key: &'static str, callback: AsyncFn) {
+        if let Some((_, registered)) = self.0.iter_mut().find(|(name, _)| *name == key) {
+            *registered = callback;
+        } else {
+            self.0.push((key, callback));
+        }
+    }
+}
+
 struct Shutdown {
     key: Option<&'static str>,
     callback: Callee,
@@ -143,6 +156,16 @@ impl Vm {
         self.resolve_callable(callable).map_err(|error| {
             self.invalid_callback(function, number, parameter, callable, error, false)
         })
+    }
+
+    pub(crate) async fn finish_resource_finalizers(&mut self) {
+        if let Some(finalizers) = self.state_mut().take::<ResourceFinalizers>() {
+            for (_, finalize) in finalizers.0 {
+                if let Err(error) = finalize(self, Vec::new()).await {
+                    self.report_uncaught(error).await;
+                }
+            }
+        }
     }
 
     pub(crate) async fn run_shutdown_callbacks(&mut self) {

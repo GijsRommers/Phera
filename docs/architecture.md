@@ -22,6 +22,7 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 | `phera-vm` | Executes bytecode: frames, classes, exceptions, generators | bytecode, value |
 | `phera-extension-api` | What native functions and classes see | value |
 | `phera-extensions/*` | Native functions grouped like PHP extensions | extension-api |
+| `phera-io-pool` | Shared PDO and Redis connection pools and TLS policy | tokio, rustls |
 | `phera-runtime` | Code cache, includes, autoload, superglobals, request lifecycle | compiler, vm, extensions |
 | `phera-server` | HTTP on Tokio, one worker thread per core | |
 | `phera-cli` | `phera run file.php`, `phera serve` | runtime, server |
@@ -46,6 +47,16 @@ to its input without a limit:
 
 Dependencies point one way. The VM never sees the AST, and the server never sees
 the VM: it talks to a `Handler` trait that the runtime implements.
+
+PDO and Redis share the client TLS policy in `phera-io-pool::tls`, where
+their pooled connections already share an I/O runtime abstraction. Rustls
+uses ring's default cipher suites with TLS 1.2 and 1.3. Ring builds its C and
+assembly with the platform toolchain. Phera's crates use the safe Rust API.
+PDO uses platform trust roots with WebPKI fallback and supports driver-specific
+trust and client certificate options. Redis uses the bundled WebPKI roots and
+verifies the server name. PostgreSQL and Redis receive the policy explicitly.
+`mysql_async` builds its own rustls configuration, so the runtime registers
+ring once at startup and PDO supplies the selected roots through its options.
 
 ## 2. Concurrency: M:N on Tokio, thread per core
 
@@ -419,6 +430,29 @@ Order: step 1 first, because it helps every application; then worker mode
 Laravel; then the snapshot (steps 2 and 3). They follow the destructors work
 (9.1), which changes the same object lifetime code.
 
+### 5.5 Child processes
+
+PHP can start programs through `proc_open()`, `popen()`, `exec()`,
+`shell_exec()`, backticks, `system()` and `passthru()`. The array form of
+`proc_open()` passes an argument vector directly to the program. String
+commands run through `/bin/sh -c`. Children inherit the request's working
+directory and effective environment unless a call supplies replacements.
+Process pipes, socket pairs and terminal streams share the stream API.
+Tokio waits for a child or work on its pipes without blocking the worker.
+
+`phera serve --no-process` makes program-starting functions throw `Error`.
+Program execution is enabled by default. The PHP execution time limit also
+counts waits on children and their streams toward the request budget. The HTTP
+request timeout covers the whole handler and cancels any pending wait.
+At CLI shutdown an open `proc_open()` handle closes its pipes and checks
+child status without waiting. An open `popen()` stream closes its pipe and
+reaps the child before the CLI returns. Explicit closure waits asynchronously
+and returns the child's exit status.
+
+Phera gives each web child its own process group and terminates abandoned
+children at request cleanup while their leader is still tracked. Programs
+that explicitly detach can keep running. [Process decisions](decisions.md)
+
 ## 6. Scope
 
 In: the PHP that Symfony and Laravel and their dependencies run in production.
@@ -429,9 +463,10 @@ classes, interfaces, traits, enums, readonly, attributes, anonymous classes, lat
 static binding, magic methods, exceptions with `finally`, generators, `match`,
 nullsafe, destructuring, alternative control syntax, heredoc and nowdoc,
 `declare(strict_types=1)` with parameter and return type checks, `include` and
-autoloading, `eval`, property hooks, asymmetric visibility, the pipe operator.
+autoloading, `eval`, property hooks, asymmetric visibility, and the pipe operator.
+Backticks are supported and emit PHP 8.5's compile-time deprecation.
 
-**Language, left out:** backticks, `(real)`, short and
+**Language, left out:** `(real)`, short and
 ASP tags, `goto`, `declare(ticks)` and `__halt_compiler` data access.
 `assert()` is checked, as under `php -n`: a failed assertion throws
 `AssertionError` with the condition as written. A setting that compiles
@@ -439,9 +474,14 @@ assertions out, as PHP's production configuration does, comes with the
 configuration file.
 Fiber switching and request-local state are described in section 9.5.
 
-**Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl, posix, the C
-extension ABI, `dl()`, startup configuration from an INI file, and functions
-removed or deprecated before PHP 8.
+**Runtime, in scope:** Unix program execution, including `shell_exec()` and
+`popen()`, plus POSIX queries. The CLI exposes named `SIG*` constants and
+reports a `Phera\NotSupportedException` for `pcntl_fork()`, `pcntl_exec()`, and
+the `pcntl_wait*()` calls.
+
+**Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl signal
+handlers and alarms, the C extension ABI, `dl()`, startup configuration from
+an INI file, and functions removed or deprecated before PHP 8.
 
 **Extensions, first wave:** standard (strings, arrays, math, output, variables,
 files, `sprintf`, `serialize`), spl, json, pcre (bound to PCRE2), ctype, mbstring,
@@ -524,8 +564,7 @@ silence:
   `function_exists()` and `class_exists()` answer false for these, so code
   that checks first takes its fallback. The list comes from the
   `#[\Deprecated]` attributes in PHP 8.5's own stub files, not from memory.
-- **Syntax** (the backtick operator): a compile error, "... is not
-  supported by Phera", with file and line.
+- **Removed syntax** such as `(real)` produces a compile error with file and line.
 - **Legacy package layouts** (PSR-0 autoloading, `target-dir`,
   `include-path`, PEAR-style trees): `phera install` stops and names the
   package and the field. Nothing is installed half.
