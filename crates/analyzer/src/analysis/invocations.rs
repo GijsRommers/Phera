@@ -22,10 +22,19 @@ impl Analyzer<'_> {
             } => {
                 let binding = self.pending_binding.take();
                 self.prepare_inline_receiver(target, name, arguments, scope);
-                let ty = self.expression(target, scope, quiet);
+                let mut ty = self.expression(target, scope, quiet);
                 self.pending_binding = binding;
                 if ty == ValueType::Never {
                     return ty;
+                }
+                if matches!(&target.kind, ExpressionKind::Variable(Variable::Named(receiver)) if receiver == "this")
+                    && let MemberName::Identifier(method) = name
+                    && let ValueType::Class(narrowed) = scope.get("this").ty
+                    && self.index.method(&narrowed, &method.name).is_some()
+                {
+                    // A guarded interface adds its members to $this; the
+                    // original class still supplies its other members.
+                    ty = ValueType::Class(narrowed);
                 }
                 let access = match (&target.kind, name) {
                     (

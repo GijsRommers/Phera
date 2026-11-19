@@ -26,21 +26,27 @@ fn run(options: &Options) -> Result<bool, String> {
         baseline::filter(path, &mut report.diagnostics)?;
     }
     print!("{}", diagnostic::render(&report, options.format));
-    if matches!(options.format, Format::Text) {
-        let affected = report.diagnostics.chunk_by(|a, b| a.file == b.file).count();
-        println!(
-            "{} findings in {} of {} files, level {}, {:.2} s",
-            report.diagnostics.len(),
-            affected,
-            report.files,
-            options.level,
-            report.elapsed.as_secs_f64(),
-        );
-    }
     if !options.no_progress && std::io::stderr().is_terminal() {
         eprintln!(
             "Parsed {} vendor files for declarations.",
             report.vendor_files
+        );
+    }
+    if matches!(options.format, Format::Text) {
+        let affected = report.diagnostics.chunk_by(|a, b| a.file == b.file).count();
+        println!(
+            "{} finding{} in {} of {} file{}, level {}, {:.2} s",
+            report.diagnostics.len(),
+            if report.diagnostics.len() == 1 {
+                ""
+            } else {
+                "s"
+            },
+            affected,
+            report.files,
+            if report.files == 1 { "" } else { "s" },
+            options.level,
+            report.elapsed.as_secs_f64(),
         );
     }
     Ok(!report.diagnostics.is_empty())

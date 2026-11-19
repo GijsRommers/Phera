@@ -142,11 +142,6 @@ impl<'a> Analyzer<'a> {
                     self.report(Finding::ThisContext, span);
                 }
             }
-            if let Some(narrowed) = scope.variables.get("this")
-                && matches!(narrowed.ty, ValueType::Class(_))
-            {
-                return narrowed.ty.clone();
-            }
             return self
                 .context
                 .this_class
@@ -200,6 +195,20 @@ impl<'a> Analyzer<'a> {
     pub fn class_expression(&mut self, expression: &Expression, scope: &mut Scope) -> ClassTarget {
         if let ExpressionKind::Name(name) = &expression.kind {
             let class = self.class_name(name, false);
+            if name.text.eq_ignore_ascii_case("parent")
+                && matches!(name.kind, NameKind::Unqualified)
+                && let Some(owner) = &self.context.class
+                && class
+                    .as_ref()
+                    .is_none_or(|class| self.index.class(class).is_none())
+                && self
+                    .index
+                    .class(owner)
+                    .is_some_and(|info| info.kind != ClassKind::Trait)
+            {
+                self.report(Finding::NoParent(owner.clone()), name.span);
+                return ClassTarget::Unknown;
+            }
             if let Some(class) = &class
                 && self.index.class(class).is_none()
                 && !self

@@ -67,7 +67,7 @@ fn composer_loads_helpers_and_class_ancestry_on_demand() {
     assert_eq!(output.status.code(), Some(1), "{text}");
     assert!(text.contains("[arguments.count]"), "{text}");
     assert!(
-        text.contains("1 findings in 1 of 1 files, level 1,"),
+        text.contains("1 finding in 1 of 1 file, level 1,"),
         "{text}"
     );
     assert_eq!(
@@ -93,7 +93,7 @@ fn scan_directories_supply_declarations_and_exclusions_still_apply() {
     assert_eq!(output.status.code(), Some(1));
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(text.contains("Function ignored"), "{text}");
-    assert!(text.contains("1 findings in 1 of 1 files"), "{text}");
+    assert!(text.contains("1 finding in 1 of 1 file"), "{text}");
 }
 
 #[test]
