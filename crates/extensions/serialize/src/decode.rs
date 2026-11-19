@@ -243,27 +243,34 @@ impl Decoder<'_> {
     }
 
     async fn run_hooks(&mut self, context: &mut dyn Context) -> Result<(), NativeError> {
-        for hook in std::mem::take(&mut self.delayed) {
-            // PHP gives the delayed magic callbacks an independent decoder.
-            let previous = ActiveUnserializePolicy::replace(context, None);
-            let result = match hook {
-                Delayed::Legacy(hook) => hook.invoke(context).await,
-                Delayed::Wakeup(object) => {
-                    context
-                        .call_serialization_method(object, "__wakeup", Vec::new())
-                        .await
-                }
-                Delayed::Unserialize(object, members) => {
-                    let argument = Value::Array(Rc::new(self.graph.array(members)));
-                    context
-                        .call_serialization_method(object, "__unserialize", vec![argument])
-                        .await
-                }
-            };
-            ActiveUnserializePolicy::replace(context, previous);
-            result?;
+        let hooks = std::mem::take(&mut self.delayed);
+        if hooks.is_empty() {
+            return Ok(());
         }
-        Ok(())
+        // PHP gives the delayed magic callbacks an independent decoder.
+        let previous = ActiveUnserializePolicy::replace(context, None);
+        let result = async {
+            for hook in hooks {
+                match hook {
+                    Delayed::Legacy(hook) => hook.invoke(context).await?,
+                    Delayed::Wakeup(object) => {
+                        context
+                            .call_serialization_method(object, "__wakeup", Vec::new())
+                            .await?
+                    }
+                    Delayed::Unserialize(object, members) => {
+                        let argument = Value::Array(Rc::new(self.graph.array(members)));
+                        context
+                            .call_serialization_method(object, "__unserialize", vec![argument])
+                            .await?
+                    }
+                };
+            }
+            Ok(())
+        }
+        .await;
+        ActiveUnserializePolicy::replace(context, previous);
+        result
     }
 }
 
