@@ -12,9 +12,11 @@ mod dtd;
 mod elements;
 mod encoding;
 mod entities;
+mod entity_resolver;
 pub(crate) mod names;
 mod replacement;
 pub use encoding::supported_encoding;
+pub use entity_resolver::EntityResolver;
 pub use names::valid as valid_name;
 
 use std::borrow::Cow;

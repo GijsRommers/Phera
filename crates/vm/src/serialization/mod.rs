@@ -95,6 +95,7 @@ impl Vm {
                         | "SQLite3"
                         | "SQLite3Result"
                         | "SQLite3Stmt"
+                        | "XMLParser"
                 )
             {
                 return true;

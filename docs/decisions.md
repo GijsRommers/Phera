@@ -21,6 +21,7 @@ design or review work and the owner can overrule it.
 
 | Date | Decision | Why | Turned down | By |
 | --- | --- | --- | --- | --- |
+| 2026-11-19 | `XMLParser` delivers callbacks as complete tokens arrive and shares DOM's bounded entity resolver. The PHP entry points follow the libxml SAX conventions. | WordPress uses chunked parsing and calls into PHP during parsing. The resolver keeps external identifiers inert. | Building a complete tree before calling handlers or linking Expat. | Design |
 | 2026-11-19 | `XMLReader` keeps a forward cursor over the shared DOM arena. The parser records the spelling of empty tags and DTD default attributes for the reader. | Reader properties and expansion reuse a single XML and namespace model. | A separate XML parser behind the reader. | Design |
 | 2026-11-19 | SimpleXML views pin nodes in the DOM arena and resolve their selections when accessed. Both extensions report into the same request-local XML error buffer. | Changes made through either API stay visible to the other, even after importing a node more than once. | Copying trees or maintaining an independent XML model for SimpleXML. | Design |
 | 2026-11-19 | `XMLWriter` writes from a stack of open XML constructs and shares XML name validation with DOM. It uses Tokio for file output and the native stream layer for PHP stream output. | PHP can flush an unfinished start tag, write raw bytes, and emit fragments without building a document. | Building a DOM arena and serializing it on flush. | Design |

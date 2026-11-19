@@ -68,6 +68,7 @@ phera-ext-core = { path = "crates/extensions/core" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
 phera-ext-dom = { path = "crates/extensions/dom" }
 phera-ext-simplexml = { path = "crates/extensions/simplexml" }
+phera-ext-xml = { path = "crates/extensions/xml" }
 phera-ext-xmlreader = { path = "crates/extensions/xmlreader" }
 phera-ext-xmlwriter = { path = "crates/extensions/xmlwriter" }
 quick-xml = "0.42"

@@ -58,6 +58,7 @@ memory, local file URI, and PHP stream output).
 
 `SimpleXMLElement` and `SimpleXMLIterator` share XML documents with DOM.
 `XMLReader` reads XML from strings, local files and PHP streams.
+`XMLParser` supports the `xml_*` event and structure APIs.
 
 In progress: bcmath, curl, gmp, intl, mysqli, pgsql, process functions, sodium,
 zlib. Not started: gd, fileinfo, zip, sockets.
