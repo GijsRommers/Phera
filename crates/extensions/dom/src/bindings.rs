@@ -35,6 +35,11 @@ impl Extension for Dom {
     fn name(&self) -> &'static str {
         "dom"
     }
+
+    fn module_version(&self) -> Option<&'static str> {
+        Some("20031129")
+    }
+
     fn register(&self, registry: &mut Registry) {
         registry.class(ClassEntry {
             parent: Some("Exception"),
