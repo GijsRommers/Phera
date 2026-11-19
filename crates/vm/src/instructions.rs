@@ -47,6 +47,16 @@ impl Vm {
                 dst,
                 ..
             } => return self.call_direct_general(function, args, count, dst, work),
+            I::CallNativeDirect {
+                function,
+                args,
+                count,
+                dst,
+                ..
+            } => {
+                *work += 1;
+                return self.call_native_direct(function, args, count, dst);
+            }
             I::GeneratorStart
             | I::Yield { .. }
             | I::YieldFrom { .. }
@@ -64,6 +74,17 @@ impl Vm {
             }
             I::InitCall { function } => self.init_call(function)?,
             I::InitDynamicCall { callee } => self.init_dynamic_call(callee)?,
+            I::InitUserCallback {
+                callback,
+                arguments,
+            } => {
+                if !self.autoload.callbacks.is_empty() {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
+                let callback = self.read_local(callback);
+                self.prepare_user_callback(callback, arguments)?;
+            }
+            I::SendUserCallback { src, arguments } => self.send_user_callback(src, arguments)?,
             I::InitMethodCall { receiver, method }
                 if TRACK_GENERATORS && self.prepare_ready_native_method(receiver, method) => {}
             I::InitMethodCall { receiver, method } => {
@@ -124,6 +145,19 @@ impl Vm {
             I::BinaryInt { op, dst, lhs, rhs } => self.execute_binary_int(op, dst, lhs, rhs)?,
             I::Binary { dst, op, lhs, rhs } => return self.execute_binary(op, dst, lhs, rhs),
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
+            I::BuiltinUnary { op, dst, src } => return self.execute_builtin_unary(op, src, dst),
+            I::BuiltinFrame { op, dst } => self.execute_builtin_frame(op, dst)?,
+            I::ArrayKeyExists { dst, key, array } => {
+                return self.execute_array_key_exists(key, array, dst);
+            }
+            I::InLiteralArray {
+                dst,
+                needle,
+                haystack,
+                strict,
+            } => {
+                return self.execute_in_literal_array(needle, haystack, strict, dst);
+            }
             I::Cast { to, dst, src } => {
                 if to == phera_bytecode::CastKind::String && self.operand(src).is_object() {
                     return Ok(Some(BatchExit::Instruction(instruction)));
@@ -315,10 +349,10 @@ impl Vm {
                     self.set(destination, value);
                     None
                 } else {
-                    Some(BatchExit::NativeCall(destination))
+                    return self.call_native(destination);
                 }
             }
-            CallEntry::Native => Some(BatchExit::NativeCall(destination)),
+            CallEntry::Native => return self.call_native(destination),
             CallEntry::ConvertStrings => Some(BatchExit::BindCall(destination)),
         })
     }

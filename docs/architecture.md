@@ -167,7 +167,7 @@ change:
 | Pause between two pieces of a request body | 30 s | a timer on each read; 408 and the connection is closed | yes |
 | Size of a request body (`post_max_size`) | 8 MiB | while reading; 413 beyond it | yes |
 | Open connections per worker | 10,000 | a worker takes a free slot before it accepts; beyond the limit, connections wait in the operating system's queue | yes |
-| Running time of a script (`max_execution_time`, `set_time_limit()`) | 30 s under `serve`, none on the command line | at the interpreter's hand-over points (every 65,536 loop rounds or calls), which already exist; the check is one clock read there, and the request ends with PHP's "Maximum execution time of N seconds exceeded" | no |
+| Running time of a script (`max_execution_time`, `set_time_limit()`) | 30 s under `serve`, none on the command line | the interpreter samples the request's CPU time at handoffs after 65,536 loop rounds or calls. Time spent suspended for I/O is excluded. A timeout ends the script with PHP's fatal diagnostic. | yes |
 | Memory of one request (`memory_limit`) | 128 MiB | to be decided | no |
 | Buffered response | 64 KiB, then it streams | output is handed to the connection in chunks once the buffer passes the threshold, and the script waits while the client is slow (so a slow reader costs a suspended task, not memory) | no; static files are sent in pieces already |
 
@@ -1082,8 +1082,8 @@ What remains, in order of expected gain: the destination-driven compiler
 
 ## 11. Tools built into the runtime
 
-Two tools that PHP projects today get from separate packages written in PHP
-are planned as part of the `phera` binary, sharing its lexer, parser and AST.
+Tools that PHP projects today get from separate packages written in PHP
+are part of the `phera` binary, sharing its lexer, parser and AST.
 One front end means the tools and the runtime cannot disagree about what a
 file means, and native code makes them fast enough to run on every save.
 
@@ -1157,12 +1157,30 @@ What PHPStan and Psalm do: find errors without running the code.
   count checks, and variable definition. Level 2 reads and validates
   PHPDoc and checks members of known receiver types. Level 3 checks
   returned values and typed property writes. Level 4 checks provably
-  constant predicates and unreachable code. Level 5 checks argument types
-  against resolved signatures. A call to `strlen(...)` has the same
-  parameter type as a direct call to `strlen`.
+  constant predicates, unreachable code, discarded pure results and unused
+  private members. The PHPStan version used for the differential tests
+  defines which rules run by default. A predicate gets a diagnostic only
+  when every possible input agrees on the outcome. For example, PHP can
+  narrow `object` after `$value instanceof User`, while doing the same
+  test on a value declared as `User` always succeeds. The flow walk knows
+  where a statement stops execution, so it can report the start of an
+  unreachable run of statements.
+  Level 5 checks argument types and reference passing against resolved
+  signatures. A call to `strlen(...)` has the same parameter type as a
+  direct call to `strlen`. Level 6 requires declaration types and their
+  iterable and generic arguments. Level 7 checks members of unions
+  independently. Level 8 also checks the null possibility. Level 9 checks
+  operations on explicit `mixed`, and level 10 includes implicit `mixed`.
+  The `max` level follows the highest supported level.
+- **Shared tooling.** The declaration index, scopes, source locations and
+  diagnostics form the data model for other tools. Checks that depend on
+  inferred types or resolved declarations belong in the checker. A style
+  check that needs only the AST can use the linter's own walk.
 - **Output**: a readable report, JSON, and annotations for CI; a baseline
   file to adopt it on an existing code base; `@phpstan-ignore` and
   `@psalm-suppress` comments are honoured so existing code needs no edits.
+  `phera check --baseline src` reads `phpstan-baseline.neon`. It uses
+  the generated baseline's paths, identifiers, messages and counts.
   Native union names use PHP's display order through the bytecode crate,
   so `int|string` is displayed as `string|int` in both runtime and checker
   diagnostics.
@@ -1426,6 +1444,104 @@ phera new shop --template symfony           asks nothing
 - **While Phera cannot run a framework**, the command says so after creating
   the project and names the PHP command that serves it meanwhile. One
   function, `Template::runs_on_phera`, holds that fact.
+
+### 11.9 `phera lint`: source checks and local edits
+
+`phera lint [paths...]` checks PHP source for suspicious constructs, unused
+code, deprecated features and consistency. With no paths it checks the
+project's own PHP files. Directory discovery skips `vendor/` unless it is
+explicitly requested. Expression types and type-dependent reachability are
+the responsibility of `phera check` (11.1).
+
+```text
+phera lint
+phera lint src tests --fix
+phera lint src --fix-unsafe
+phera lint --only style --skip strict-types
+phera lint --only all
+phera lint --rule unused-import --format github
+phera lint --explain unused-import
+```
+
+`--rule` and `--only` can be repeated to select rules and groups. `--only all`
+and `--all` select every rule. Use `phera lint --help` for the command options
+and `phera lint --list-rules` for the rule names and examples. `--skip`
+excludes a rule from that selection. Output uses the shared text, JSON or
+GitHub annotation renderer. A run returns 1 if findings remain and 2 if it
+cannot run. The parser and deprecation rules target PHP 8.5. The common
+baseline format stores stable rule names and messages.
+`[lint].baseline` loads a baseline and `--generate-baseline FILE` records
+the current findings.
+
+```toml
+[lint]
+exclude = ["generated", "tests/fixtures"]
+baseline = "lint-baseline.json"
+
+[lint.groups]
+style = true
+suspicious = true
+
+[lint.rules]
+unused-import = "error"
+variable-variables = "warn"
+debug-call = "off"
+
+[lint.style]
+strict_types = true
+
+[lint.naming]
+variables = "snake"
+
+[lint.complexity]
+cyclomatic = 10
+cognitive = 15
+nesting = 4
+function_lines = 80
+class_lines = 500
+parameters = 5
+```
+
+Syntax diagnostics are on by default. The suspicious, unused and modernize
+groups have default rules where the patterns are precise enough to pass a
+review against Symfony and Laravel. The false-finding budget for these
+defaults is zero on both trees. A rule with a proven false finding needs a
+narrower predicate or becomes opt-in. Style, naming and complexity are
+opt-in. Style thresholds and choices, such as requiring strict types, are
+project settings. The complexity thresholds govern function and class
+length, nesting, cyclomatic and cognitive complexity, and parameter counts.
+
+`// phera-ignore rule-name reason` suppresses that rule on its own line
+or the following line. `// phera-ignore-file rule-name` covers the file.
+Unused directives are findings. A string containing directive text has
+no effect.
+
+The analyzer owns one registry of rules. Each rule declares a stable,
+kebab-case identifier, a group, a short description, examples of bad and
+good PHP, the syntax nodes it visits and any fix. The registry supplies
+both `--explain` and the generated rule catalog. Discovery, parsing, the
+declaration index, structural traversal, suppression scanning, baseline
+and diagnostic rendering live in the analyzer and can be shared with
+`check`. Files are processed in parallel. Rules share one structural walk
+per file and defer their unused-code decisions until all references in the
+relevant lexical scope have been seen.
+
+Fixes describe byte ranges in the original source. The lexer and parser
+provide the token boundaries, including punctuation. A rule preserves
+comments and whitespace outside its edits. `--fix` applies safe edits and
+`--fix-unsafe` also applies edits whose behavior changes are described in
+their rule documentation. Edits in different findings can overlap. The
+fixer selects compatible edits in source order and makes a bounded
+number of passes on the new source. It parses the final candidate before
+writing it and rejects a candidate that introduces a finding. Each
+fixable rule has a fixture for the resulting bytes and a second run that
+leaves them unchanged.
+
+The catalogs of PHP_CodeSniffer, PHP CS Fixer, PHPMD, Psalm, PHPStan and
+Rector provide starting points for rule semantics. For a future
+`phera fmt`, a lossless token stream needs to retain comments, whitespace
+and PHP/HTML boundaries and associate them with AST nodes. Lint edits only
+need the spans for the particular tokens and trivia a rule examines.
 
 ## 12. What to take from Hack and HHVM, and what not
 

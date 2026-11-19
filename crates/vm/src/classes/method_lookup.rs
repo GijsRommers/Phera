@@ -43,15 +43,42 @@ impl Vm {
         invocation: Invocation,
     ) -> Result<Option<ResolvedMethod>, NativeError> {
         let caller = self.current().and_then(|frame| frame.scope().cloned());
+        self.find_method_with_visibility(class, lower, invocation, caller.as_ref(), |vm, method| {
+            vm.check_invocation_visibility(method, invocation)
+        })
+    }
+
+    pub(super) fn find_method_in_scope(
+        &mut self,
+        class: &Rc<Class>,
+        name: &str,
+        scope: Option<&Rc<Class>>,
+    ) -> Result<Option<ResolvedMethod>, NativeError> {
+        self.find_method_with_visibility(
+            class,
+            &name.to_ascii_lowercase(),
+            Invocation::Method,
+            scope,
+            |vm, method| vm.check_visibility_in_scope(method, Invocation::Method, scope),
+        )
+    }
+
+    fn find_method_with_visibility(
+        &mut self,
+        class: &Rc<Class>,
+        lower: &str,
+        invocation: Invocation,
+        caller: Option<&Rc<Class>>,
+        check: impl FnOnce(&Self, &Method) -> Result<(), NativeError>,
+    ) -> Result<Option<ResolvedMethod>, NativeError> {
         let private = caller
-            .as_ref()
             .filter(|scope| invocation == Invocation::Method && class.is_a(&scope.name))
             .and_then(|scope| scope.methods.get(lower))
             .filter(|method| method.visibility == Visibility::Private);
         let Some(method) = private.or_else(|| class.methods.get(lower)).cloned() else {
             return Ok(None);
         };
-        self.check_invocation_visibility(&method, invocation)?;
+        check(self, &method)?;
         if class.kind == ClassKind::Trait && method.is_static {
             self.deprecate_static_trait_method(class, &method.name);
         }

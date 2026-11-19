@@ -18,6 +18,7 @@ phera-ext-date.workspace = true
 phera-ext-dom.workspace = true
 phera-ext-filter.workspace = true
 phera-ext-hash.workspace = true
+phera-ext-openssl.workspace = true
 phera-ext-http.workspace = true
 phera-ext-mbstring.workspace = true
 phera-ext-json.workspace = true

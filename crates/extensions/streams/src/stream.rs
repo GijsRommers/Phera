@@ -4,16 +4,16 @@
 
 use std::fs::{File, Metadata};
 use std::io::{self, BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write};
-use std::sync::Arc;
 
 use tempfile::TempPath;
 
+use crate::input::InputStream;
 use crate::io_policy::{CHUNK, IoPolicy};
 
 pub enum Backing {
     File(BufReader<File>),
     Memory(Cursor<Vec<u8>>),
-    Input(Cursor<Arc<[u8]>>),
+    Input(InputStream),
     Output,
 }
 
@@ -115,7 +115,7 @@ impl Stream {
                 .map(|meta| meta.len())
                 .or_else(|| self.memory_size().map(|size| size as u64))
                 .or_else(|| match &self.backing {
-                    Backing::Input(cursor) => Some(cursor.get_ref().len() as u64),
+                    Backing::Input(input) => Some(input.size_hint() as u64),
                     _ => None,
                 })
                 .map(|length| length.saturating_sub(self.position))
@@ -171,7 +171,7 @@ impl Stream {
             }
             Backing::File(file) => file.read(buffer),
             Backing::Memory(cursor) => cursor.read(buffer),
-            Backing::Input(cursor) => cursor.read(buffer),
+            Backing::Input(input) => Ok(input.read(buffer, self.chunk_size)),
             Backing::Output => Ok(0),
         }
     }
@@ -182,7 +182,13 @@ impl Stream {
         match &mut self.backing {
             Backing::File(file) => file.take(limit).read_until(b'\n', &mut line)?,
             Backing::Memory(cursor) => cursor.take(limit).read_until(b'\n', &mut line)?,
-            Backing::Input(cursor) => cursor.take(limit).read_until(b'\n', &mut line)?,
+            Backing::Input(input) => {
+                line = input.line(
+                    usize::try_from(limit).unwrap_or(usize::MAX),
+                    self.chunk_size,
+                );
+                line.len()
+            }
             Backing::Output => 0,
         };
         self.position += line.len() as u64;

@@ -45,6 +45,8 @@ impl LazyContinuation {
 
 pub(crate) enum ReflectedOperation {
     Initialize,
+    Inspect(phera_extension_api::reflection::LazyReflectionRead),
+    HasProperty(String),
     Read(MemberInfo, PropertyRead),
     Write(MemberInfo, Value, PropertyWrite),
 }
@@ -55,6 +57,10 @@ pub(crate) struct ReflectInitialize {
 }
 
 impl ReflectInitialize {
+    pub(crate) fn is_pending(error: &NativeError) -> bool {
+        matches!(error, NativeError::Unwind(payload) if payload.0.is::<Self>())
+    }
+
     pub(crate) fn suspend(self) -> NativeError {
         NativeError::Unwind(Unwind(Box::new(self)))
     }
@@ -192,6 +198,11 @@ impl Vm {
         };
         match operation {
             ReflectedOperation::Initialize => Ok(Value::Object(object)),
+            ReflectedOperation::Inspect(read) => read(self, object),
+            ReflectedOperation::HasProperty(name) => {
+                let (exists, _) = self.lazy_property_exists_status(&object, &name)?;
+                Ok(Value::Bool(exists))
+            }
             ReflectedOperation::Read(member, mode) => {
                 self.reflect_property_read(&member, Some(object), mode)
             }

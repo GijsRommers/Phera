@@ -4,8 +4,11 @@ use std::collections::BTreeMap;
 
 use phera_extension_api::NativeError;
 
+use crate::connect_options::ConnectOptions;
 use crate::drivers::connection_error;
 use crate::errors::DbError;
+
+mod postgres;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DriverName {
@@ -29,9 +32,11 @@ impl DriverName {
 pub struct Dsn {
     pub driver: DriverName,
     pub fields: BTreeMap<String, String>,
+    pub options: ConnectOptions,
 }
 
 impl Dsn {
+    #[cfg(test)]
     pub fn parse(input: &str) -> Result<Self, NativeError> {
         Self::parse_named(input, "PDO::__construct")
     }
@@ -55,23 +60,33 @@ impl Dsn {
         // is the file name, semicolons included.
         if driver == DriverName::Sqlite {
             fields.insert("filename".into(), rest.into());
-            return Ok(Self { driver, fields });
+            return Ok(Self {
+                driver,
+                fields,
+                options: ConnectOptions::default(),
+            });
         }
-        for field in rest.split(';').filter(|field| !field.trim().is_empty()) {
-            if let Some((key, value)) = field.split_once('=') {
-                fields.insert(key.trim().to_owned(), value.trim().to_owned());
+        if driver == DriverName::Postgres {
+            fields = postgres::fields(rest).map_err(|detail| {
+                let error = connection_error(detail);
+                crate::errors::exception(
+                    format!("SQLSTATE[08006] [7] {}", error.detail),
+                    Some(&error),
+                    7,
+                )
+            })?;
+        } else {
+            for field in rest.split(';').filter(|field| !field.trim().is_empty()) {
+                if let Some((key, value)) = field.split_once('=') {
+                    fields.insert(key.trim().to_owned(), value.trim().to_owned());
+                }
             }
         }
-        for (key, value) in &fields {
-            if key.starts_with("ssl") && !(key == "sslmode" && value == "disable") {
-                return Err(crate::errors::exception(
-                    "TLS is not supported yet",
-                    None,
-                    0,
-                ));
-            }
-        }
-        Ok(Self { driver, fields })
+        Ok(Self {
+            driver,
+            fields,
+            options: ConnectOptions::default(),
+        })
     }
 
     pub fn get<'a>(&'a self, key: &str, default: &'a str) -> &'a str {
@@ -95,14 +110,30 @@ impl Dsn {
         };
         match self.driver {
             DriverName::Postgres => libpq_port(text),
-            // mysqlnd takes `atoi()` as an unsigned int, 0 meaning the
-            // default, and the socket keeps its low 16 bits: 98605 is 33069.
             DriverName::Sqlite => Ok(0),
-            DriverName::Mysql => Ok(match atoi(text) as u32 {
-                0 => self.default_port(),
-                port => port as u16,
-            }),
+            DriverName::Mysql => self.mysql_port(text),
         }
+    }
+
+    fn mysql_port(&self, text: &str) -> Result<u16, DbError> {
+        // mysqlnd passes atoi() as unsigned, then PHP's TCP transport checks the range.
+        let port = atoi(text) as u32;
+        if port == 0 {
+            return Ok(self.default_port());
+        }
+        u16::try_from(port).map_err(|_| {
+            let host = self.get("host", "localhost");
+            let address = if host.parse::<std::net::Ipv6Addr>().is_ok() {
+                format!("[{host}]:{port}")
+            } else {
+                format!("{host}:{port}")
+            };
+            DbError {
+                state: "HY000".into(),
+                code: Some(2002),
+                detail: format!("Failed to parse port of address \"{address}\""),
+            }
+        })
     }
 }
 
@@ -156,9 +187,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_tls_and_unknown_drivers() {
-        assert!(Dsn::parse("pgsql:sslmode=require").is_err());
-        assert!(Dsn::parse("mysql:ssl_ca=ca.pem").is_err());
+    fn preserves_tls_fields_and_rejects_unknown_drivers() {
+        let dsn = Dsn::parse("pgsql:sslmode=require;sslrootcert=ca.pem").unwrap();
+        assert_eq!(dsn.get("sslmode", ""), "require");
+        assert_eq!(dsn.get("sslrootcert", ""), "ca.pem");
+        assert!(Dsn::parse("unknown:host=localhost").is_err());
         assert_eq!(Dsn::parse("sqlite:foo").unwrap().get("filename", ""), "foo");
         assert!(Dsn::parse("pgsql:sslmode=disable").is_ok());
     }
@@ -181,7 +214,10 @@ mod tests {
             Err("invalid port number: \"65536\"".into())
         );
         assert_eq!(port("mysql:port=33069abc"), Ok(33069));
-        assert_eq!(port("mysql:port=98605"), Ok(33069));
+        assert_eq!(
+            port("mysql:host=127.0.0.1;port=98605"),
+            Err("Failed to parse port of address \"127.0.0.1:98605\"".into())
+        );
         assert_eq!(port("mysql:port=x"), Ok(3306));
     }
 }

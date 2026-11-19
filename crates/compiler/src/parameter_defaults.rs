@@ -110,6 +110,7 @@ pub(crate) fn initializer_error(
             Call {
                 callee,
                 arguments: Arguments::FirstClassCallable,
+                ..
             } if matches!(
                 callee.kind,
                 Name(_) | Literal(phera_ast::Literal::String(_))
@@ -118,6 +119,7 @@ pub(crate) fn initializer_error(
                 class,
                 name: MemberName::Identifier(_),
                 arguments: Arguments::FirstClassCallable,
+                ..
             } if matches!(class.kind, Name(_)) => {}
             Closure(closure) if closure.is_static && closure.uses.is_empty() => {}
             New {

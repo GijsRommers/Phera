@@ -101,6 +101,7 @@ impl Analyzer<'_> {
         self.context
             .documentation_class
             .clone_from(&self.context.class);
+        self.unused_private_members(class);
         self.check_attributes(&class.attributes, &mut Scope::default());
         if self.level >= 2 && class.doc_comment.is_some() {
             self.read_documentation(class.doc_comment);
@@ -119,6 +120,17 @@ impl Analyzer<'_> {
         } else {
             Vec::new()
         };
+        if self.report_unused_traits
+            && class.kind == ClassKind::Trait
+            && let Some(name) = &self.context.class
+            && !self.index.trait_has_users(name)
+        {
+            self.diagnose_dead_code(
+                "trait.unused",
+                class.span,
+                format!("Trait {name} is used zero times and is not analysed."),
+            );
+        }
         let declaring_class = self.context.class.clone();
         for member in &class.members {
             match &member.kind {
@@ -126,10 +138,7 @@ impl Analyzer<'_> {
                     if class.kind != ClassKind::Trait {
                         self.method_declaration(method, member.span, member.doc_comment);
                     } else {
-                        for consumer in &consumer_contexts {
-                            self.context.class = Some(consumer.clone());
-                            self.method_declaration(method, member.span, member.doc_comment);
-                        }
+                        self.trait_method_declaration(method, member, &consumer_contexts);
                         self.context.class.clone_from(&declaring_class);
                     }
                 }
@@ -203,7 +212,7 @@ impl Analyzer<'_> {
         self.return_scopes = returns;
     }
 
-    fn method_declaration(&mut self, method: &Method, span: Span, doc: Option<Span>) {
+    pub(super) fn method_declaration(&mut self, method: &Method, span: Span, doc: Option<Span>) {
         self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.object = !method.modifiers.is_static;

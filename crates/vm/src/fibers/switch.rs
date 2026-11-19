@@ -49,7 +49,7 @@ impl Vm {
                 .await
                 .map_err(|error| {
                     self.fiber_call_error(
-                        "Fiber::__construct",
+                        "Fiber->__construct",
                         std::slice::from_ref(&callable),
                         error,
                     )
@@ -61,7 +61,7 @@ impl Vm {
             if state.is_some() {
                 drop(state);
                 return Err(self.fiber_call_error(
-                    "Fiber::__construct",
+                    "Fiber->__construct",
                     std::slice::from_ref(&callable),
                     fiber_error("Cannot call constructor twice"),
                 ));
@@ -94,7 +94,7 @@ impl Vm {
                         .iter()
                         .map(|(_, value)| value.clone())
                         .collect::<Vec<_>>();
-                    self.fiber_call_error("Fiber::start", &arguments, error)
+                    self.fiber_call_error("Fiber->start", &arguments, error)
                 })?;
                 let site = Site::from_caller(self, Method::Start, &arguments);
                 let exchange = Exchange::new(self);
@@ -117,13 +117,13 @@ impl Vm {
             }
             FiberOperation::Resume(value) => {
                 let site = Site::with_value(self, Method::Resume, value.as_ref())?;
-                let stack = self.take_resumable(&object, "Fiber::resume", value.as_slice())?;
+                let stack = self.take_resumable(&object, "Fiber->resume", value.as_slice())?;
                 (stack, Input::Value(value.unwrap_or_default()), Some(site))
             }
             FiberOperation::Throw(value) => {
                 let site = Site::with_value(self, Method::Throw, Some(&value))?;
                 let stack =
-                    self.take_resumable(&object, "Fiber::throw", std::slice::from_ref(&value))?;
+                    self.take_resumable(&object, "Fiber->throw", std::slice::from_ref(&value))?;
                 (stack, Input::Throw(value), Some(site))
             }
             FiberOperation::Construct(_) => {
@@ -217,9 +217,11 @@ impl Vm {
                     Ok(value) => State::Returned(value.clone()),
                     Err(NativeError::Unwind(payload))
                         if payload.0.is::<()>()
+                            || payload.0.is::<crate::last_error::FatalDiagnostic>()
                             || payload.0.is::<crate::error_traces::DeclarationFailure>() =>
                     {
                         self.fiber_bailout = self.status == 255
+                            || payload.0.is::<crate::last_error::FatalDiagnostic>()
                             || payload.0.is::<crate::error_traces::DeclarationFailure>();
                         State::Exited
                     }

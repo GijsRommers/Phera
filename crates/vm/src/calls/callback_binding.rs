@@ -18,6 +18,8 @@ pub(crate) enum ArgumentOrigin {
 pub(crate) enum ArgumentBinding {
     #[default]
     Caller,
+    /// Zend compiled an operator such as `strlen($text)`, without a call frame.
+    Frameless,
     Internal,
 }
 
@@ -25,9 +27,13 @@ impl ArgumentBinding {
     /// Closure wrappers apply internal binding even when entered from PHP.
     pub(crate) fn origin(self, caller: ArgumentOrigin) -> ArgumentOrigin {
         match self {
-            Self::Caller => caller,
+            Self::Caller | Self::Frameless => caller,
             Self::Internal => ArgumentOrigin::Callback,
         }
+    }
+
+    pub(crate) fn has_native_frame(self) -> bool {
+        !matches!(self, Self::Frameless)
     }
 }
 

@@ -149,7 +149,10 @@ fn native_string_param(parameters: &[Param], index: usize) -> bool {
         .is_some_and(|parameter| {
             matches!(
                 parameter.ty,
-                ParamType::String | ParamType::ArrayOrString | ParamType::IntOrString
+                ParamType::String
+                    | ParamType::ArrayOrString
+                    | ParamType::IntOrString
+                    | ParamType::CertificateOrString
             )
         })
 }

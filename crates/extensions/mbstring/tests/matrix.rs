@@ -146,6 +146,7 @@ fn text_matrix() {
 #[test]
 fn hostile_arguments() {
     let mut m = Matrix::new();
+    let mut output_encoding_differs = false;
     let functions: Vec<_> = m.registry.functions().map(|e| e.name).collect();
     for f in functions {
         for value in [
@@ -158,7 +159,18 @@ fn hostile_arguments() {
             Value::from(phera_extension_api::PhpArray::new()),
         ] {
             for count in [0, 1, 6] {
-                m.case(f, vec![value.clone(); count]);
+                let empty_output_encoding = f == "mb_http_output"
+                    && count == 1
+                    && (matches!(value, Value::Bool(false))
+                        || matches!(&value, Value::String(text) if text.is_empty()));
+                let reads_output_encoding =
+                    count == 0 && matches!(f, "mb_http_output" | "mb_get_info");
+                let arguments = vec![value.clone(); count];
+                let minimum = (empty_output_encoding
+                    || (output_encoding_differs && reads_output_encoding))
+                    .then_some(80_513);
+                m.case_with_minimum(f, arguments, minimum);
+                output_encoding_differs |= empty_output_encoding;
             }
         }
     }

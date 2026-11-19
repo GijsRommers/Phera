@@ -8,6 +8,21 @@ fn file_tokens(source: &str) -> Vec<Token> {
     collect(source, Lexer::new(source))
 }
 
+#[test]
+fn a_cli_shebang_keeps_all_remaining_token_offsets() {
+    let source = "#!/usr/bin/env php\n<?php __halt_compiler();payload";
+    let tokens = collect(source, Lexer::new(source).after_shebang());
+    let open_tag = &tokens[0];
+    assert_eq!(open_tag.kind, OpenTag);
+    assert_eq!(open_tag.span.start, "#!/usr/bin/env php\n".len());
+    let payload = tokens
+        .iter()
+        .find(|token| token.kind == InlineHtml)
+        .unwrap();
+    assert_eq!(payload.span.start, source.find("payload").unwrap());
+    assert_eq!(&source[payload.span.start..payload.span.end], "payload");
+}
+
 /// Lexes PHP code (no `<?php` tag needed), returning every token including `Eof`.
 fn tokens(source: &str) -> Vec<Token> {
     collect(source, Lexer::new_php(source))

@@ -12,7 +12,7 @@ pub(crate) mod instantiation;
 mod link_members;
 mod linking;
 mod magic;
-mod magic_calls;
+pub(crate) mod magic_calls;
 pub(crate) mod method_lookup;
 pub(crate) mod method_table;
 mod methods;

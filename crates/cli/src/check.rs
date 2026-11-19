@@ -8,6 +8,22 @@ use phera_analyzer::{
 use std::io::IsTerminal;
 use std::process::ExitCode;
 
+pub(crate) const HELP: &str = "\
+Usage: phera check [OPTIONS] [paths...]
+
+Type-check PHP. Paths may also be set in [check].paths in phera.toml.
+
+Options:
+  --level LEVEL             Choose level 0, 1, 2 or 3 (default: 1).
+  --format FORMAT           Print text, json or github output.
+  --no-progress             Hide progress output.
+  --generate-baseline FILE  Save a baseline. Load it through [check].baseline.
+  -h, --help                Print this help.
+  --                        Treat the remaining arguments as paths.
+
+Exit codes: 0 clean, 1 findings, 2 command error.
+";
+
 pub(crate) fn check(options: Options) -> ExitCode {
     match run(&options) {
         Ok(found) => ExitCode::from(u8::from(found)),

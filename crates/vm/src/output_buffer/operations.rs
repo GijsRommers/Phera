@@ -2,10 +2,10 @@
 //! output handler returning `false` passes the original bytes through and
 //! is disabled for subsequent writes.
 
-use phera_extension_api::{Context, NativeError, NativeResult, Unwind};
+use phera_extension_api::{Context, NativeError, NativeResult};
 use phera_value::{Value, to_php_string};
 
-use crate::{Vm, error_traces::DeclarationFailure};
+use crate::Vm;
 
 use super::{CLEANABLE, FLUSHABLE, OutputFunction, REMOVABLE, Running};
 
@@ -90,19 +90,23 @@ impl Operation {
 }
 
 impl Vm {
-    pub(crate) fn check_output_handler(&mut self, function: &str) -> Result<(), NativeError> {
+    pub(crate) fn check_output_handler(
+        &mut self,
+        function: &str,
+        arguments: &[Value],
+    ) -> Result<(), NativeError> {
         if self.output_writer.buffers.running.is_none() {
             return Ok(());
         }
         self.output_writer.buffers.lock_broken = true;
-        let location = self.location();
-        Err(NativeError::Unwind(Unwind(Box::new(DeclarationFailure {
-            message: format!(
+        Err(self.fatal_native_error(
+            1,
+            format!(
                 "{function}(): Cannot use output buffering in output buffering display handlers"
             ),
-            file: location.file,
-            line: location.line,
-        }))))
+            function,
+            arguments,
+        ))
     }
 
     pub(crate) async fn change_buffer(
@@ -110,7 +114,7 @@ impl Vm {
         function: OutputFunction,
         operation: Operation,
     ) -> NativeResult {
-        self.check_output_handler(function.name())?;
+        self.check_output_handler(function.name(), &[])?;
         let stack = &self.output_writer.buffers.stack;
         let Some((index, buffer)) = stack.iter().enumerate().next_back() else {
             if let Some(message) = operation.empty_notice() {

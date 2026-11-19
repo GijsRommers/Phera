@@ -65,7 +65,7 @@ impl Analyzer<'_> {
         }
     }
 
-    fn value_policy(&self) -> TypePolicy {
+    pub(super) fn value_policy(&self) -> TypePolicy {
         if self.strict_types {
             TypePolicy::Strict
         } else {

@@ -13,15 +13,17 @@ impl Vm {
         declaration_type: &phera_bytecode::Type,
         function: &str,
         index: usize,
-        parameter: &str,
+        parameter: (&str, Option<&crate::classes::MethodContext>),
     ) -> NativeResult {
         let crate::diagnostics::SourceLocation { file, line } = self.location();
         let location_suffix = self.argument_origin.location_suffix(&file, line);
-        let result = types::coerce(
+        let (parameter, scope) = parameter;
+        let result = types::coerce_in_scope(
             value.deref().clone(),
             declaration_type,
             self.strict_types().into(),
             self,
+            scope,
         )
         .map_err(|error| match error {
             NativeError::Throw { class, message, .. } => {

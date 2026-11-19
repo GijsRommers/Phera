@@ -23,7 +23,7 @@ use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::php_windows::push_php_call;
 use crate::calls::prepared_call::CallKind;
 use crate::calls::window_context::WindowContext;
-use crate::classes::method_table::{FoundMethod, MethodTable};
+use crate::classes::method_table::FoundMethod;
 use crate::classes::{Class, ClassIndex, MethodBody};
 use crate::code_table::{FunctionIndex, NameKey};
 
@@ -47,7 +47,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let key = self.code.unit_name_key(position.frame.function, name);
-        let Some(found) = self.method_table(class).get(key) else {
+        let Some(found) = self.classes.method_table(class, self.code).get(key) else {
             return Step::Slow;
         };
         let method = found.method;
@@ -65,6 +65,7 @@ impl Machine<'_> {
             MethodBody::Native(entry)
                 if entry.direct.is_some()
                     && method.visibility == Visibility::Public
+                    && (!self.classes.has_lazy_objects || object.lazy().is_none())
                     && !self.caller_has_other_private(key, method) =>
             {
                 let Some(class) = class.identity.upgrade() else {
@@ -119,7 +120,7 @@ impl Machine<'_> {
             },
         };
         let key = self.code.unit_symbol_key(function, method_symbol);
-        let Some(found) = self.method_table(&class).get(key) else {
+        let Some(found) = self.classes.method_table(&class, self.code).get(key) else {
             return Step::Slow;
         };
         let receiver = match (found.method.is_static, relative) {
@@ -211,23 +212,17 @@ impl Machine<'_> {
         })
     }
 
-    /// The class's method table, built on first use.
-    fn method_table<'c>(&self, class: &'c Class) -> &'c MethodTable {
-        class.method_table.get_or_init(|| {
-            MethodTable::build(class, self.code, |method| {
-                self.classes.get(&method.declaring)
-            })
-        })
-    }
-
     /// Whether the running method's class has a different, private method
     /// of this name, which a call from inside that class could reach instead.
     fn caller_has_other_private(&self, key: NameKey, method: &Rc<crate::classes::Method>) -> bool {
         let Some(scope) = self.current_context().and_then(|context| context.scope()) else {
             return false;
         };
-        self.method_table(scope).get(key).is_some_and(|found| {
-            found.method.visibility == Visibility::Private && !Rc::ptr_eq(found.method, method)
-        })
+        self.classes
+            .method_table(scope, self.code)
+            .get(key)
+            .is_some_and(|found| {
+                found.method.visibility == Visibility::Private && !Rc::ptr_eq(found.method, method)
+            })
     }
 }

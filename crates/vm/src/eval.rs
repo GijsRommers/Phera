@@ -3,9 +3,9 @@
 use std::sync::Arc;
 
 use phera_bytecode::Reg;
-use phera_extension_api::{CompileDiagnosticSite, Context, NativeError};
+use phera_extension_api::NativeError;
 
-use crate::{Vm, diagnostics::SourceLocation};
+use crate::Vm;
 
 impl Vm {
     /// Evaluated units belong to this request and use the same frame protocol as includes.
@@ -30,30 +30,9 @@ impl Vm {
         })
         .await
         .map_err(|error| NativeError::error(format!("Eval compiler failed: {error}")))?;
-        if let Err(error) = &compiled {
-            for diagnostic in &error.scanner_diagnostics {
-                self.compile_diagnostic(diagnostic, CompileDiagnosticSite::Source(&error.file));
-            }
-            self.drain_error_handlers().await?;
-        }
         match compiled {
             Ok(unit) => self.enter_scoped_unit(Arc::new(unit), Some(destination)),
-            Err(error) if error.parse => {
-                let previous = self.diagnostic_location.replace(SourceLocation {
-                    file: error.file,
-                    line: error.line,
-                });
-                let error = self.materialize_error(NativeError::throw("ParseError", error.message));
-                self.diagnostic_location = previous;
-                Err(error)
-            }
-            Err(error) => Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                crate::error_traces::DeclarationFailure {
-                    message: error.message,
-                    file: error.file,
-                    line: error.line,
-                },
-            )))),
+            Err(error) => Err(self.dynamic_compile_failure(error).await),
         }
     }
 }

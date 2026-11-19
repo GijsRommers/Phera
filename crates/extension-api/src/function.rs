@@ -8,6 +8,10 @@ use crate::{ConstantValue, Context, LocalFuture, NativeResult};
 /// through the reference to change the caller's variable.
 pub type SyncFn = fn(&mut dyn Context, &[Value]) -> NativeResult;
 
+/// Select a synchronous body for already typed arguments. For example,
+/// `str_replace('a', 'b', $text)` cannot call PHP when all three are strings.
+pub type SyncSelector = fn(&[Option<Value>]) -> Option<SyncFn>;
+
 /// A native function that may wait: for I/O, a timer, or a PHP callback. The
 /// interpreter awaits it, which lets other requests run on the same thread
 /// meanwhile. It must never block the thread instead.
@@ -49,6 +53,8 @@ pub enum ParamType {
     ArrayOrString,
     /// `object|string`
     ObjectOrString,
+    /// `OpenSSLCertificate|string`
+    CertificateOrString,
     /// `Closure|string`
     ClosureOrString,
     /// `string|int|float`, used by phpredis blocking pop timeouts.
@@ -80,7 +86,11 @@ pub struct Param {
     pub optional: bool,
     /// Fills a skipped position when a later named argument is supplied.
     pub default: Option<ConstantValue>,
+    /// The constant spelling PHP uses in a declaration, when the value is symbolic.
+    pub default_name: Option<&'static str>,
     pub by_ref: bool,
+    /// Replace the argument value in PHP traces.
+    pub sensitive: bool,
     pub variadic: bool,
 }
 
@@ -92,7 +102,9 @@ impl Param {
             nullable: false,
             optional: false,
             default: None,
+            default_name: None,
             by_ref: false,
+            sensitive: false,
             variadic: false,
         }
     }
@@ -112,11 +124,27 @@ impl Param {
     pub const fn with_default(mut self, default: ConstantValue) -> Self {
         self.optional = true;
         self.default = Some(default);
+        self.default_name = None;
+        self
+    }
+
+    pub const fn with_constant_default(
+        mut self,
+        name: &'static str,
+        default: ConstantValue,
+    ) -> Self {
+        self = self.with_default(default);
+        self.default_name = Some(name);
         self
     }
 
     pub const fn by_ref(mut self) -> Self {
         self.by_ref = true;
+        self
+    }
+
+    pub const fn sensitive(mut self) -> Self {
+        self.sensitive = true;
         self
     }
 

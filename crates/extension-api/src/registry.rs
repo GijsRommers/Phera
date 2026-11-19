@@ -64,6 +64,7 @@ pub struct Registry {
     functions: HashMap<String, FunctionEntry>,
     /// Only calls already holding a first-argument object need to check this table.
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
+    sync_selectors: HashMap<&'static str, crate::SyncSelector>,
     extra_named_handlers: HashMap<&'static str, crate::SyncFn>,
     callback_frames: HashSet<&'static str>,
     function_modules: HashMap<&'static str, &'static str>,
@@ -283,6 +284,13 @@ impl Registry {
         self.constants.get(name).map(|constant| &constant.value)
     }
 
+    /// `constant('PHP_VERSION')` may be folded. A deprecated constant still
+    /// needs a runtime access so it can raise its diagnostic.
+    pub fn persistent_constant(&self, name: &str) -> Option<ConstantValue> {
+        let constant = self.constants.get(name)?;
+        constant.deprecated.is_none().then_some(constant.value)
+    }
+
     /// Keep a synchronous implementation for other arguments, such as count($array).
     pub fn function_with_object_handler(&mut self, entry: FunctionEntry, callback: crate::AsyncFn) {
         self.function(entry);
@@ -292,6 +300,15 @@ impl Registry {
     /// The first argument is already bound and checked when the VM selects this handler.
     pub fn object_handler(&self, name: &str) -> Option<crate::AsyncFn> {
         self.object_handlers.get(name).copied()
+    }
+
+    /// An async function can select a synchronous handler for an exact shape.
+    pub fn register_sync_selector(&mut self, name: &'static str, selector: crate::SyncSelector) {
+        self.sync_selectors.insert(name, selector);
+    }
+
+    pub fn sync_selector(&self, name: &str) -> Option<crate::SyncSelector> {
+        self.sync_selectors.get(name).copied()
     }
 
     /// Provide an alternate body when a native variadic call supplies extra names.

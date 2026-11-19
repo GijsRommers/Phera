@@ -20,19 +20,43 @@ impl Analyzer<'_> {
         }
         self.depth += 1;
         let mut flow = Flow::Next;
+        let mut reported_unreachable = false;
         for (position, statement) in statements.iter().enumerate() {
             if flow != Flow::Next {
                 if !contains_label(statement) {
+                    if !reported_unreachable {
+                        self.discarded_statements(statement);
+                        reported_unreachable = true;
+                    }
                     continue;
                 }
                 scope.unknown_writes();
+                reported_unreachable = false;
             }
             let binding = self.pending_binding.clone();
+            let last_condition = self.last_condition;
             if let Some(next) = statements.get(position + 1) {
                 self.prepare_local_rebinding(statement, next, scope);
+                if self.level >= 4
+                    && position + 2 == statements.len()
+                    && is_throw(next)
+                    && let StatementKind::If {
+                        condition,
+                        elseifs,
+                        otherwise: None,
+                        ..
+                    } = &statement.kind
+                {
+                    self.last_condition = Some(
+                        elseifs
+                            .last()
+                            .map_or(condition.span, |branch| branch.condition.span),
+                    );
+                }
             }
             flow = self.statement(statement, scope);
             self.pending_binding = binding;
+            self.last_condition = last_condition;
         }
         self.depth -= 1;
         flow
@@ -85,7 +109,7 @@ impl Analyzer<'_> {
                 body: Some(body), ..
             } => return self.block(body, scope),
             StatementKind::Expression(expression) => {
-                if self.expression(expression, scope, false) == ValueType::Never {
+                if self.expression_statement(expression, scope) == ValueType::Never {
                     return Flow::Terminal;
                 }
             }
@@ -206,6 +230,16 @@ impl Analyzer<'_> {
         let flow = self.block(body, &mut scope);
         (flow, (flow == Flow::Next).then_some(scope))
     }
+}
+
+pub(super) fn is_throw(statement: &Statement) -> bool {
+    matches!(
+        statement.kind,
+        StatementKind::Expression(Expression {
+            kind: ExpressionKind::Throw(_),
+            ..
+        })
+    )
 }
 
 /// A label can re-enter a block after an otherwise terminal statement.

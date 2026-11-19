@@ -17,6 +17,7 @@ impl Analyzer<'_> {
         callee: &Expression,
         arguments: &Arguments,
         scope: &mut Scope,
+        span: Span,
     ) -> ValueType {
         let resolved = if let ExpressionKind::Name(name) = &callee.kind
             && callee.span == name.span
@@ -27,9 +28,14 @@ impl Analyzer<'_> {
             if ty == ValueType::Never {
                 return ty;
             }
+            let label = if matches!(ty, ValueType::StringLiteral(_) | ValueType::Shape(_)) {
+                format!("callable {ty}")
+            } else {
+                "callable".into()
+            };
             ResolvedCall {
                 signature: self.callable_signature(ty),
-                label: "callable".into(),
+                label,
                 intrinsic: None,
                 kind: CallKind::Callable,
             }
@@ -68,10 +74,39 @@ impl Analyzer<'_> {
             self.intrinsic(name, arguments, scope);
         }
         if matches!(arguments, Arguments::FirstClassCallable) {
-            resolved.signature.map_or(ValueType::Mixed, |s| {
-                ValueType::Callable(std::sync::Arc::new(s))
-            })
+            resolved
+                .signature
+                .map_or(ValueType::Mixed, crate::index::Signature::as_closure)
         } else {
+            self.discarded_function_result(
+                span,
+                &resolved.label,
+                resolved.intrinsic.as_deref(),
+                resolved.signature.as_ref(),
+            );
+            if self.level >= 4
+                && let Some(name) = &resolved.intrinsic
+                && let Some(ty) =
+                    self.constant_type_test(name, arguments, &facts.types, scope, span)
+            {
+                return ty;
+            }
+            if self.level >= 5
+                && resolved.intrinsic.as_deref() == Some("call_user_func")
+                && let Arguments::List(arguments) = arguments
+                && let (Some((_, passed)), Some((callback, types))) =
+                    (arguments.split_first(), facts.types.split_first())
+                && let Some(signature) = self.callable_signature(callback.clone())
+            {
+                self.check_argument_contracts(
+                    passed,
+                    types,
+                    &signature,
+                    "callable passed to call_user_func()",
+                    scope,
+                );
+                return signature.returns;
+            }
             if self.level >= 2
                 && let Some(name) = &resolved.intrinsic
                 && let Some(ty) = self.builtin_result(name, arguments, &facts.types, scope)

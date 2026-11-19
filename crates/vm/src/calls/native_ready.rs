@@ -38,7 +38,11 @@ impl Vm {
             return false;
         };
         let key = self.code.unit_name_key(frame.frame.function, name);
-        let Some(found) = class.method_table.get().and_then(|table| table.get(key)) else {
+        let Some(found) = self
+            .classes
+            .cached_method_table(&class)
+            .and_then(|table| table.get(key))
+        else {
             return false;
         };
         let MethodBody::Native(entry) = found.method.body else {

@@ -8,11 +8,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::net::{TcpStream, UnixStream};
 
-trait Socket: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
-impl Socket for TcpStream {}
-impl Socket for UnixStream {}
+pub(super) trait Socket: AsyncRead + AsyncWrite + Send + Sync + Unpin {}
+impl<T: AsyncRead + AsyncWrite + Send + Sync + Unpin> Socket for T {}
 
 pub struct ObservedStream {
     socket: Box<dyn Socket>,
@@ -20,19 +18,11 @@ pub struct ObservedStream {
 }
 
 impl ObservedStream {
-    /// A host that starts with `/` is the directory of a Unix socket, as in libpq.
-    pub async fn connect(host: &str, port: u16, status: Arc<AtomicU8>) -> io::Result<Self> {
-        let socket: Box<dyn Socket> = if host.starts_with('/') {
-            Box::new(UnixStream::connect(format!("{host}/.s.PGSQL.{port}")).await?)
-        } else {
-            let stream = TcpStream::connect((host, port)).await?;
-            stream.set_nodelay(true)?;
-            Box::new(stream)
-        };
-        Ok(Self {
+    pub(super) fn new(socket: Box<dyn Socket>, status: Arc<AtomicU8>) -> Self {
+        Self {
             socket,
             parser: Parser::new(status),
-        })
+        }
     }
 }
 

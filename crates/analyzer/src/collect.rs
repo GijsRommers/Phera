@@ -150,6 +150,7 @@ fn collect_expression_declarations<'a>(
         if let ExpressionKind::Call {
             callee,
             arguments: Arguments::List(arguments),
+            ..
         } = &expression.kind
             && let ExpressionKind::Name(name) = &callee.kind
             && name.text.eq_ignore_ascii_case("define")
@@ -204,6 +205,7 @@ fn function_signature(
         location,
     );
     signature.accepts_extra = uses_argument_introspection(&function.body);
+    signature.returns_reference = function.by_reference;
     signature.global_effects = crate::global_effects::of(&function.body);
     signature
 }

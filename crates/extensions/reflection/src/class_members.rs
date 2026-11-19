@@ -13,6 +13,11 @@ use phera_extension_api::{
 use crate::class::{ReflectedClass, reflected_class};
 use crate::{allocate, engine, exception};
 
+mod instance;
+
+pub(crate) use instance::with_instance;
+use instance::{append_instance_members, dynamic_property, properties};
+
 const NAME: &[Param] = const { &[Param::new("name", ParamType::String)] };
 const FILTER: &[Param] = const {
     &[Param::new("filter", ParamType::Int)
@@ -42,9 +47,7 @@ pub(crate) const METHODS: [MethodEntry; 17] = [
     MethodEntry::public("getMethods", FILTER, |c, o, a| {
         all(c, o, a, MemberKind::Method)
     }),
-    MethodEntry::public("getProperties", FILTER, |c, o, a| {
-        all(c, o, a, MemberKind::Property)
-    }),
+    MethodEntry::public("getProperties", FILTER, properties),
     MethodEntry::public("getReflectionConstants", FILTER, |c, o, a| {
         all(c, o, a, MemberKind::Constant)
     }),
@@ -95,23 +98,7 @@ pub(crate) fn members(
     if matches!(kind, MemberKind::Property)
         && let Some(object) = class.object.as_ref().and_then(std::rc::Weak::upgrade)
     {
-        for (key, _) in object.to_array().iter() {
-            let ArrayKey::String(key) = key else { continue };
-            if key.as_bytes().starts_with(b"\0") {
-                continue;
-            }
-            let name = key.to_string_lossy();
-            if !result.iter().any(|property| property.name == name) {
-                Rc::make_mut(&mut result).push(Rc::new(MemberInfo {
-                    name,
-                    class: class.info.name.clone(),
-                    lookup_class: class.info.name.clone(),
-                    modifiers: 1,
-                    dynamic: true,
-                    ..MemberInfo::default()
-                }));
-            }
-        }
+        append_instance_members(&mut result, &class.info.name, &object);
     }
     Ok(result)
 }
@@ -132,6 +119,16 @@ fn has(
         return Ok(Value::Bool(
             engine(context)?.reflect_function(&target).is_ok(),
         ));
+    }
+    if matches!(kind, MemberKind::Property) {
+        let declared = engine(context)?.reflect_members(ClassSelector::Linked(class.info.id), kind);
+        if find(declared, &name, kind).is_some() {
+            return Ok(Value::Bool(true));
+        }
+        if let Some(object) = class.object.and_then(|object| object.upgrade()) {
+            return engine(context)?.reflect_instance_has_property(object, name);
+        }
+        return Ok(Value::Bool(false));
     }
     Ok(Value::Bool(
         find(members(context, &class, kind)?, &name, kind).is_some(),
@@ -155,8 +152,23 @@ fn one(
             },
         );
     }
-    if let Some(member) = find(members(context, &class, kind)?, &name, kind) {
+    let declared = engine(context)?.reflect_members(ClassSelector::Linked(class.info.id), kind);
+    if let Some(member) = find(declared, &name, kind) {
         return member_object(context, member, kind);
+    }
+    if matches!(kind, MemberKind::Property)
+        && let Some(object) = class.object.and_then(|object| object.upgrade())
+    {
+        return with_instance(context, object, move |context, object| {
+            if !name.starts_with('\0') && object.has(&ArrayKey::str(name.as_str())) {
+                let member = dynamic_property(&class.info.name, name);
+                return member_object(context, member, kind);
+            }
+            Err(exception(format!(
+                "Property {}::${name} does not exist",
+                class.info.name
+            )))
+        });
     }
     match kind {
         MemberKind::Constant => Ok(Value::Bool(false)),

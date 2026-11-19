@@ -19,11 +19,16 @@ async fn every_shipped_extension_reports_php_module_membership() {
         .map(|name| format!("'{name}'"))
         .collect::<Vec<_>>()
         .join(", ");
+    let compare_php_version = oracle::php_version_id().is_some()
+        && oracle::supports_php_since("versions of modules bundled with PHP", 80_513);
+    let compare_php_version = if compare_php_version { "true" } else { "false" };
     let source = format!(
         r#"<?php
 foreach ([{entries}] as $name) {{
     $loaded = extension_loaded($name);
-    echo $name, ':', (int) $loaded, ':', phpversion($name), PHP_EOL;
+    $version = phpversion($name);
+    echo $name, ':', (int) $loaded, ':', {compare_php_version} || $version !== PHP_VERSION
+        ? $version : 'bundled', PHP_EOL;
     echo (int) in_array(strtolower($name), array_map('strtolower', get_loaded_extensions()), true), PHP_EOL;
 }}
 "#

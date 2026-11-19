@@ -111,6 +111,19 @@ impl Context for Vm {
         Vm::ini_list(self, module, details)
     }
 
+    fn included_files(&self) -> phera_value::PhpArray {
+        self.include_state
+            .files()
+            .enumerate()
+            .map(|(index, file)| {
+                (
+                    phera_value::ArrayKey::Int(index as i64),
+                    Value::from(file.as_str()),
+                )
+            })
+            .collect()
+    }
+
     fn include_path(&self) -> phera_value::PhpString {
         Vm::include_path(self)
     }
@@ -140,11 +153,14 @@ impl Context for Vm {
         self.error_handlers
             .last_error
             .as_ref()
-            .map_or(Value::Null, crate::last_error::LastError::to_value)
+            .map_or(Value::Null, |error| {
+                error.to_value(self.error_handlers.fatal_trace.as_ref())
+            })
     }
 
     fn clear_last_error(&mut self) {
         self.error_handlers.last_error = None;
+        self.error_handlers.fatal_trace = None;
     }
 
     fn named_constant(&mut self, name: &str) -> Option<Value> {
@@ -186,7 +202,7 @@ impl Context for Vm {
         error: NativeError,
     ) -> NativeError {
         if matches!(error, NativeError::Throw { .. }) {
-            self.failed_native = Some(crate::error_traces::NativeTrace::new(name, arguments));
+            self.failed_native = Some(self.native_function_trace(name, arguments));
         }
         error
     }
@@ -346,7 +362,12 @@ impl Context for Vm {
         if function == "var_dump"
             && let Some(class) = self.hooked_property_class(&object).or_else(|| {
                 self.classes.for_object(&object).filter(|class| {
-                    class.has_only_php_ancestors()
+                    // A native dump projection (for example DateTime's) exposes its
+                    // own entries. Exception uses the ordinary declared property table.
+                    class
+                        .hooks
+                        .as_ref()
+                        .is_none_or(|hooks| hooks.properties.is_none())
                         && class.defaults.iter().any(|property| property.ty.is_some())
                 })
             })
@@ -390,6 +411,7 @@ impl Context for Vm {
         {
             self.enqueue_diagnostic(event);
         } else {
+            self.error_handlers.fatal_trace = None;
             self.report_event(event);
         }
     }

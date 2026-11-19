@@ -20,6 +20,7 @@ mod glob;
 mod handles;
 mod include_path;
 mod ini;
+mod input;
 mod io_policy;
 mod locking;
 mod metadata;
@@ -32,6 +33,7 @@ mod request;
 mod resource;
 mod scan;
 mod scan_format;
+mod source_tools;
 mod stream;
 mod stream_copy;
 mod stream_options;
@@ -41,7 +43,9 @@ mod whole_file;
 mod whole_write;
 mod wrapper;
 
-pub use request::{set_request, track_standard};
+pub use input::RequestInput;
+pub use path_text::parent as dirname_parent;
+pub use request::{request_input, set_request, track_standard};
 pub use whole_write::append_log;
 pub use wrapper::standard_constants;
 
@@ -77,6 +81,7 @@ impl Extension for Streams {
         pattern::register(registry);
         resource::register(registry);
         scan::register(registry);
+        source_tools::register(registry);
         stream_copy::register(registry);
         stream_options::register(registry);
         temporary::register(registry);

@@ -109,7 +109,7 @@ const PDO_METHODS: &[MethodEntry] = &[
         connection::exec,
     )
     .tentative_return("int|false"),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "getAttribute",
         &[Param::new("attribute", ParamType::Int)],
         attributes::get,
