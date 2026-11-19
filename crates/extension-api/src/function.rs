@@ -49,6 +49,8 @@ pub enum ParamType {
     ArrayOrString,
     /// `object|string`
     ObjectOrString,
+    /// `OpenSSLCertificate|string`
+    CertificateOrString,
     /// `Closure|string`
     ClosureOrString,
     /// `string|int|float`, used by phpredis blocking pop timeouts.
@@ -83,6 +85,8 @@ pub struct Param {
     /// The constant spelling PHP uses in a declaration, when the value is symbolic.
     pub default_name: Option<&'static str>,
     pub by_ref: bool,
+    /// Replace the argument value in PHP traces.
+    pub sensitive: bool,
     pub variadic: bool,
 }
 
@@ -96,6 +100,7 @@ impl Param {
             default: None,
             default_name: None,
             by_ref: false,
+            sensitive: false,
             variadic: false,
         }
     }
@@ -131,6 +136,11 @@ impl Param {
 
     pub const fn by_ref(mut self) -> Self {
         self.by_ref = true;
+        self
+    }
+
+    pub const fn sensitive(mut self) -> Self {
+        self.sensitive = true;
         self
     }
 

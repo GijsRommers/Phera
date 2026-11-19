@@ -6,7 +6,7 @@
 
 use phera_extension_api::{NativeError, Registry};
 
-mod base64;
+pub(crate) mod base64;
 mod case;
 mod compare;
 mod decimal;

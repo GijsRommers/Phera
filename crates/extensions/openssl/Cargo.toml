@@ -1,0 +1,47 @@
+[package]
+name = "phera-ext-openssl"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+phera-extension-api.workspace = true
+phera-ext-standard.workspace = true
+aes.workspace = true
+aes-gcm.workspace = true
+cbc.workspace = true
+ccm.workspace = true
+cfb-mode.workspace = true
+chacha20poly1305.workspace = true
+ctr.workspace = true
+ecb.workspace = true
+ofb.workspace = true
+pbkdf2.workspace = true
+getrandom = { workspace = true, features = ["std"] }
+digest.workspace = true
+md-5.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+sha3.workspace = true
+ripemd.workspace = true
+rsa.workspace = true
+p256.workspace = true
+p384.workspace = true
+p521.workspace = true
+ed25519-dalek.workspace = true
+x25519-dalek.workspace = true
+pkcs8.workspace = true
+sec1.workspace = true
+x509-cert.workspace = true
+
+
+sha1-rsa.workspace = true
+md5-rsa.workspace = true
+sha3-rsa.workspace = true
+ripemd-rsa.workspace = true
+subtle.workspace = true
+tokio = { workspace = true, features = ["fs"] }
+
+[lints]
+workspace = true

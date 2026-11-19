@@ -62,3 +62,5 @@ pub use arrays::associative_sort;
 pub use arrays::zend_sort::order as php_sort_order;
 
 pub use strings::format::{Values as FormatValues, render as render_format};
+
+pub use strings::base64::{decode as decode_base64, encode as encode_base64};

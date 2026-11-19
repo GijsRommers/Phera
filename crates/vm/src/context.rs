@@ -202,7 +202,7 @@ impl Context for Vm {
         error: NativeError,
     ) -> NativeError {
         if matches!(error, NativeError::Throw { .. }) {
-            self.failed_native = Some(crate::error_traces::NativeTrace::new(name, arguments));
+            self.failed_native = Some(self.native_function_trace(name, arguments));
         }
         error
     }

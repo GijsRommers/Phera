@@ -111,6 +111,7 @@ impl Runtime {
         registry.load(&phera_ext_http::Http);
         http::register_request_parse_body(&mut registry);
         registry.load(&phera_ext_hash::Hash);
+        registry.load(&phera_ext_openssl::OpenSsl);
         registry.load(&phera_ext_random::Random);
         registry.load(&phera_ext_reflection::Reflection);
         registry.load(&phera_ext_serialize::Serialize);

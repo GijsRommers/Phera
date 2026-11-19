@@ -1,6 +1,6 @@
 //! Native warning snapshots follow argument conversion without changing the extension API.
 
-use crate::{Vm, error_traces::NativeTrace};
+use crate::Vm;
 use phera_extension_api::{NativeError, Param, prepare_call};
 use phera_value::Value;
 
@@ -32,7 +32,8 @@ impl Vm {
         }
         for index in 0..arguments.len() {
             if traced {
-                self.error_handlers.native_site = Some(NativeTrace::new(name, arguments));
+                self.error_handlers.native_site =
+                    Some(self.native_parameter_trace(name, parameters, arguments));
             }
             let parameter_end = (index + 1).min(parameters.len());
             prepare_call(

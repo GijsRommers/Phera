@@ -31,12 +31,8 @@ impl Vm {
         origin: crate::calls::callback_binding::ArgumentOrigin,
     ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
         Box::pin(async move {
-            let previous =
-                self.error_handlers
-                    .native_site
-                    .replace(crate::error_traces::NativeTrace::new(
-                        entry.name, &arguments,
-                    ));
+            let trace = self.native_parameter_trace(entry.name, entry.params, &arguments);
+            let previous = self.error_handlers.native_site.replace(trace);
             let result = self.native_entry_body(entry, arguments, origin).await;
             self.error_handlers.native_site = previous;
             result
@@ -68,9 +64,8 @@ impl Vm {
                 entry.name,
                 "strlen" | "count" | "sizeof" | "array_key_exists"
             ) {
-                self.failed_native = Some(crate::error_traces::NativeTrace::new(
-                    entry.name, &arguments,
-                ));
+                self.failed_native =
+                    Some(self.native_parameter_trace(entry.name, entry.params, &arguments));
             }
             self.call_stack.recycle_native_arguments(arguments);
             return Err(error);
@@ -89,9 +84,8 @@ impl Vm {
                         "strlen" | "count" | "sizeof" | "array_key_exists"
                     )
                 {
-                    self.failed_native = Some(crate::error_traces::NativeTrace::new(
-                        entry.name, &arguments,
-                    ));
+                    self.failed_native =
+                        Some(self.native_parameter_trace(entry.name, entry.params, &arguments));
                 }
                 self.call_stack.recycle_native_arguments(arguments);
                 result
@@ -133,7 +127,7 @@ impl Vm {
         handler: phera_extension_api::AsyncFn,
         arguments: Vec<Value>,
     ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
-        let native = crate::error_traces::NativeTrace::new(name, &arguments);
+        let native = self.native_function_trace(name, &arguments);
         Box::pin(async move {
             self.native_callback_sites
                 .push(crate::error_traces::NativeCallbackSite {
@@ -228,7 +222,7 @@ impl Vm {
         }
         self.registers.truncate(slots.base);
         if let Some((function, number, parameter)) = missing {
-            self.failed_native = Some(crate::error_traces::NativeTrace::new(function, &arguments));
+            self.failed_native = Some(self.native_function_trace(function, &arguments));
             self.call_stack.recycle_native_arguments(arguments);
             return Err(NativeError::argument_count_error(format!(
                 "{function}(): Argument #{number} (${parameter}) not passed"
