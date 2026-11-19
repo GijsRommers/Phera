@@ -89,7 +89,12 @@ enum Action {
         id: NodeId,
         depth: usize,
         pretty: bool,
-        indent: bool,
+    },
+    Children {
+        next: NodeId,
+        depth: usize,
+        pretty: bool,
+        layout: ChildLayout,
     },
     Close {
         id: NodeId,
@@ -99,13 +104,19 @@ enum Action {
     Newline,
 }
 
+#[derive(Clone, Copy)]
+enum ChildLayout {
+    Document,
+    Indented,
+    Inline,
+}
+
 impl Serializer<'_> {
     fn write_tree(&self, root: NodeId, output: &mut String) {
         let mut pending = vec![Action::Visit {
             id: root,
             depth: 0,
             pretty: self.pretty,
-            indent: false,
         }];
         while let Some(action) = pending.pop() {
             match action {
@@ -118,16 +129,33 @@ impl Serializer<'_> {
                     push_name(output, &self.arena[id]);
                     output.push('>');
                 }
-                Action::Visit {
-                    id,
+                Action::Visit { id, depth, pretty } => {
+                    self.visit(id, depth, pretty, &mut pending, output);
+                }
+                Action::Children {
+                    next,
                     depth,
                     pretty,
-                    indent,
+                    layout,
                 } => {
-                    if indent {
+                    if let Some(sibling) = self.arena[next].next_sibling() {
+                        pending.push(Action::Children {
+                            next: sibling,
+                            depth,
+                            pretty,
+                            layout,
+                        });
+                    }
+                    if matches!(layout, ChildLayout::Indented)
+                        || (matches!(layout, ChildLayout::Document)
+                            && self.document_separator(next))
+                    {
+                        pending.push(Action::Newline);
+                    }
+                    if matches!(layout, ChildLayout::Indented) {
                         padding(output, depth);
                     }
-                    self.visit(id, depth, pretty, &mut pending, output);
+                    self.visit(next, depth, pretty, &mut pending, output);
                 }
             }
         }
@@ -145,17 +173,16 @@ impl Serializer<'_> {
         let html = matches!(self.mode, Mode::Html);
         match node.kind {
             Kind::Document | Kind::Fragment => {
-                let mut child = node.last_child();
-                while let Some(id) = child {
-                    child = self.arena[id].previous_sibling();
-                    if node.kind == Kind::Document && self.document_separator(id) {
-                        pending.push(Action::Newline);
-                    }
-                    pending.push(Action::Visit {
-                        id,
+                if let Some(next) = node.first_child() {
+                    pending.push(Action::Children {
+                        next,
                         depth,
                         pretty,
-                        indent: false,
+                        layout: if node.kind == Kind::Document {
+                            ChildLayout::Document
+                        } else {
+                            ChildLayout::Inline
+                        },
                     });
                 }
             }
@@ -190,17 +217,16 @@ impl Serializer<'_> {
                     depth,
                     indent: block,
                 });
-                let mut child = node.last_child();
-                while let Some(id) = child {
-                    child = self.arena[id].previous_sibling();
-                    if block {
-                        pending.push(Action::Newline);
-                    }
-                    pending.push(Action::Visit {
-                        id,
+                if let Some(next) = node.first_child() {
+                    pending.push(Action::Children {
+                        next,
                         depth: depth + 1,
-                        indent: block,
                         pretty: block,
+                        layout: if block {
+                            ChildLayout::Indented
+                        } else {
+                            ChildLayout::Inline
+                        },
                     });
                 }
                 if block {

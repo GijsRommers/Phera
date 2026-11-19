@@ -45,7 +45,6 @@ impl Serializer<'_> {
                 id,
                 depth,
                 pretty: true,
-                indent: false,
             });
         }
         if block && node.first_child().is_some_and(|id| !text(id)) {

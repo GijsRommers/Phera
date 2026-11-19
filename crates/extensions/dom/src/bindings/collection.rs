@@ -56,7 +56,7 @@ impl Collection {
         let id = self.root.id;
         match &self.selection {
             Selection::Snapshot(nodes) => nodes.to_vec(),
-            Selection::Located(nodes) => (0..nodes.len()).map(NodeId).collect(),
+            Selection::Located(nodes) => (0..nodes.len()).map(NodeId::from_index).collect(),
             Selection::Children if arena[id].kind == Kind::EntityReference => {
                 std::iter::successors(arena.reference_declaration(id), |&id| {
                     arena[id]
@@ -100,7 +100,7 @@ impl Collection {
     fn wrap_node(&self, context: &mut dyn Context, id: Option<NodeId>) -> NativeResult {
         let root = self.root();
         if let Selection::Located(nodes) = &self.selection {
-            return match id.and_then(|id| nodes.get(id.0)) {
+            return match id.and_then(|id| nodes.get(id.index())) {
                 Some(node) => super::namespace::wrap(context, node.clone()),
                 None => Ok(Value::Null),
             };

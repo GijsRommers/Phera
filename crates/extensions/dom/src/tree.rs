@@ -12,13 +12,24 @@ mod links;
 mod namespaces;
 mod walk;
 
+use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
 
 pub use links::LinkError;
 pub use walk::{Children, Descendants};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct NodeId(pub(crate) usize);
+pub struct NodeId(NonZeroUsize);
+
+impl NodeId {
+    pub(crate) const fn from_index(index: usize) -> Self {
+        Self(NonZeroUsize::MIN.saturating_add(index))
+    }
+
+    pub(crate) const fn index(self) -> usize {
+        self.0.get() - 1
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Kind {
@@ -167,16 +178,16 @@ impl Default for Arena {
 }
 
 impl Arena {
-    pub const DOCUMENT: NodeId = NodeId(0);
+    pub const DOCUMENT: NodeId = NodeId::from_index(0);
 
     pub fn allocate(&mut self, node: Node) -> NodeId {
-        let id = NodeId(self.nodes.len());
+        let id = NodeId::from_index(self.nodes.len());
         self.nodes.push(node);
         id
     }
 
     pub fn get(&self, id: NodeId) -> Option<&Node> {
-        self.nodes.get(id.0)
+        self.nodes.get(id.index())
     }
 
     pub(crate) fn node_count(&self) -> usize {
@@ -243,12 +254,12 @@ impl Index<NodeId> for Arena {
     type Output = Node;
 
     fn index(&self, id: NodeId) -> &Node {
-        &self.nodes[id.0]
+        &self.nodes[id.index()]
     }
 }
 
 impl IndexMut<NodeId> for Arena {
     fn index_mut(&mut self, id: NodeId) -> &mut Node {
-        &mut self.nodes[id.0]
+        &mut self.nodes[id.index()]
     }
 }

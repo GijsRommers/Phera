@@ -39,7 +39,7 @@ impl Nodes {
 
     pub(super) fn add(&mut self, arena: &mut Arena, document: &Location, node: Location) -> NodeId {
         let same_document = node.same_document(document);
-        if same_document && node.id.0 < self.original_count {
+        if same_document && node.id.index() < self.original_count {
             return node.id;
         }
         let source_key = Rc::as_ptr(&node.shared) as usize;

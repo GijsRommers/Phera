@@ -9,10 +9,13 @@ use std::fmt::Write;
 use crate::document::ParseError;
 use crate::tree::{Arena, Kind};
 
-use super::{Options, Parser, parse};
+use super::{Options, Parser, entities::predefined, parse};
 
 impl Parser<'_> {
     pub(super) fn reference(&mut self, name: &str, line: usize) -> Result<(), ParseError> {
+        if let Some(value) = predefined(name) {
+            return self.text(value, Kind::Text);
+        }
         let (value, general) = match self.entities.replacement(name) {
             Ok(result) => result,
             Err(error) if error.code == 26 => {

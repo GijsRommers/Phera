@@ -115,7 +115,12 @@ pub(super) fn position(_: &mut dyn Context, this: This<'_>, arguments: &[Value])
         .collect();
     if left_path.last() != right_path.last() {
         return Ok(Value::Int(
-            1 | 32 | if left.id.0 < right.id.0 { 4 } else { 2 },
+            1 | 32
+                | if left.id.index() < right.id.index() {
+                    4
+                } else {
+                    2
+                },
         ));
     }
     let mut common = None;

@@ -189,13 +189,22 @@ pub(super) fn quoted(input: &str) -> Option<(&str, &str)> {
     }
 }
 
+pub(super) fn predefined(name: &str) -> Option<&'static str> {
+    match name {
+        "lt" => Some("<"),
+        "gt" => Some(">"),
+        "amp" => Some("&"),
+        "apos" => Some("'"),
+        "quot" => Some("\""),
+        _ => None,
+    }
+}
+
 fn special(name: &str) -> Result<Option<String>, ParseError> {
+    if let Some(value) = predefined(name) {
+        return Ok(Some(value.to_owned()));
+    }
     let character = match name {
-        "lt" => '<',
-        "gt" => '>',
-        "amp" => '&',
-        "apos" => '\'',
-        "quot" => '"',
         reference if reference.starts_with('#') => {
             let number = match reference.strip_prefix("#x") {
                 Some(hex) => u32::from_str_radix(hex, 16),
