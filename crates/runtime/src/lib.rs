@@ -67,9 +67,20 @@ pub struct WebWorker {
     native: Rc<NativeTables>,
     environment: Rc<PhpArray>,
     snapshots: Rc<snapshots::WorkerSnapshots>,
+    /// Whether this worker runs on a `LocalSet`, where a boot can run in
+    /// the background (`phera serve`); see [`WebWorker::with_background_boots`].
+    background_boots: bool,
 }
 
 impl WebWorker {
+    /// Lets this worker boot scripts in the background (a first request
+    /// that reached `Phera\snapshot()`, a changed file). Only for a worker
+    /// whose requests run on a Tokio `LocalSet`, as `phera serve`'s do.
+    pub fn with_background_boots(mut self) -> Self {
+        self.background_boots = true;
+        self
+    }
+
     /// The worker's number.
     pub fn index(&self) -> usize {
         self.index
@@ -237,6 +248,7 @@ impl Runtime {
             native: Rc::new(NativeTables::new(self.web_registry.clone())),
             environment: self.inherited_environment(),
             snapshots: Default::default(),
+            background_boots: false,
         }
     }
 

@@ -41,3 +41,6 @@ pub(crate) fn push(
 ) -> Result<(), phera_extension_api::NativeError> {
     dimensions::set(context, object, phera_extension_api::Value::Null, value)
 }
+
+pub(crate) const FORK: crate::native_state::StoredFork =
+    crate::native_state::fork_as::<state::State>;

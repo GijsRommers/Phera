@@ -57,6 +57,9 @@ impl WebWorker {
     /// Starts a boot in the background of this worker; requests are answered
     /// meanwhile (from the old snapshot, or classically).
     pub(crate) fn boot_in_background(&self, script: &Path, document_root: &Path) {
+        if !self.background_boots {
+            return;
+        }
         let worker = self.clone();
         let (script, document_root) = (script.to_path_buf(), document_root.to_path_buf());
         tokio::task::spawn_local(async move {

@@ -223,6 +223,7 @@ const NO_DYNAMIC_PROPERTIES: NativePropertyAccess = NativePropertyAccess {
 };
 
 const MAP_HOOKS: ClassHooks = ClassHooks {
+    fork: Some(crate::native_state::fork_spl),
     clone: Some(NativeClone::Copy(clone_map)),
     properties: Some(view),
     property_access: Some(&NO_DYNAMIC_PROPERTIES),
@@ -243,6 +244,7 @@ const MAP_HOOKS: ClassHooks = ClassHooks {
 };
 
 const REFERENCE_HOOKS: ClassHooks = ClassHooks {
+    fork: Some(crate::native_state::fork_spl),
     clone: Some(NativeClone::Forbidden),
     properties: Some(reference_view),
     property_access: Some(&NO_DYNAMIC_PROPERTIES),
@@ -301,3 +303,19 @@ fn fork_references(
     }
     Some(Box::new(References(copies)))
 }
+
+pub(crate) const FORK: crate::native_state::StoredFork = crate::native_state::fork_as::<Map>;
+
+/// A `WeakReference` in a fork refers to the fork's copy of its object.
+impl crate::native_state::ForkValues for phera_extension_api::value::WeakObject {
+    fn fork_values(
+        &mut self,
+        fork: &mut phera_extension_api::value::Fork<'_>,
+    ) -> Result<(), String> {
+        *self = fork.weak(self);
+        Ok(())
+    }
+}
+
+pub(crate) const REFERENCE_FORK: crate::native_state::StoredFork =
+    crate::native_state::fork_as::<phera_extension_api::value::WeakObject>;

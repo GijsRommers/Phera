@@ -185,7 +185,10 @@ struct SiteHandlerFactory {
 impl HandlerFactory for SiteHandlerFactory {
     fn create(&self, worker_index: usize) -> Rc<dyn Handler> {
         Rc::new(SiteHandler {
-            runtime: self.runtime.web_worker(worker_index),
+            runtime: self
+                .runtime
+                .web_worker(worker_index)
+                .with_background_boots(),
             adapter: self.adapter,
             site: self.site.clone(),
             compress: self.compress,
