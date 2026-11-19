@@ -116,7 +116,21 @@ impl Compiler<'_> {
                 callee,
                 arguments,
                 opening,
-            } => self.compile_call(callee, arguments, line, self.lines.line(*opening)),
+            } => {
+                let opening_line = self.lines.line(*opening);
+                if self.source.get(*opening) == Some(&b'`') {
+                    self.compile_diagnostics
+                        .borrow_mut()
+                        .push(phera_source::CompileDiagnostic {
+                            kind: phera_source::CompileDiagnosticKind::Deprecated,
+                            message:
+                                "The backtick (`) operator is deprecated, use shell_exec() instead"
+                                    .into(),
+                            line: opening_line,
+                        });
+                }
+                self.compile_call(callee, arguments, line, opening_line)
+            }
             ExpressionKind::Array(items) => self.compile_array(items, line),
             ExpressionKind::InterpolatedString(parts) => self.compile_interpolation(parts, line),
             ExpressionKind::Empty(value) => self.compile_empty(value, line),

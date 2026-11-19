@@ -630,6 +630,7 @@ impl Parser<'_> {
             }
             TokenKind::String => return self.parse_string_token(),
             TokenKind::DoubleQuote => return self.parse_interpolated_string(),
+            TokenKind::Backquote => return self.parse_shell_string(),
             TokenKind::StartHeredoc => return self.parse_heredoc(),
             TokenKind::True => literal_expr(Literal::Bool(true), self.bump()?.span),
             TokenKind::False => literal_expr(Literal::Bool(false), self.bump()?.span),
@@ -1475,6 +1476,7 @@ impl Parser<'_> {
                 | Float
                 | String
                 | DoubleQuote
+                | Backquote
                 | StartHeredoc
                 | True
                 | False

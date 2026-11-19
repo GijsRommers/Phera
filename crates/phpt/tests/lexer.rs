@@ -2,7 +2,7 @@
 //! `--FILE--` section of each selected `.phpt` test.
 //!
 //! Only tests the lexer is meant to handle are compared: a test is "not
-//! relevant" if PHP produces a token Phera rejects on purpose (backticks,
+//! relevant" if PHP produces a token Phera rejects on purpose (such as
 //! `${}` interpolation, short open tags, ...), or if Phera rejects the code
 //! and the test expects a parse error anyway. Those are counted, not failed.
 //!
@@ -270,8 +270,8 @@ fn expected_tokens(tokens: &[PhpToken]) -> Result<Vec<(TokenKind, &str)>, String
             "T_END_HEREDOC" => Some(TokenKind::EndHeredoc),
             "T_CURLY_OPEN" => Some(TokenKind::CurlyOpen),
             "T_NUM_STRING" => Some(TokenKind::NumString),
-            // Phera rejects `${...}` interpolation and backticks on purpose.
-            "T_DOLLAR_OPEN_CURLY_BRACES" | "T_STRING_VARNAME" | "`" => None,
+            "`" => Some(TokenKind::Backquote),
+            "T_DOLLAR_OPEN_CURLY_BRACES" | "T_STRING_VARNAME" => None,
 
             // Keywords, and names PHP treats as plain strings in context, like
             // `$a->class`: Phera always lexes names as keywords where possible.

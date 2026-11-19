@@ -21,7 +21,9 @@ design or review work and the owner can overrule it.
 
 | Date | Decision | Why | Turned down | By |
 | --- | --- | --- | --- | --- |
-| 2026-11-19 | TLS uses rustls with the `ring` provider, for databases, Redis and HTTP clients. A CI job scans the lock file for known advisories. | `ring` is audited and widely deployed. The pure Rust provider used before was a pre-release that calls itself not ready for production. `ring` holds C and assembly inside the dependency; Phera's own crates stay free of `unsafe`. | Keeping the pre-release provider; OpenSSL. | Design |
+| 2026-11-19 | TLS uses rustls with ring for databases, Redis and HTTP clients. PDO and Redis share TLS 1.2 and 1.3 policy in `phera-io-pool`. | Ring is audited, widely deployed and already in the dependency tree. Its bundled C and assembly sit behind safe Rust APIs. The removed pure-Rust provider was a pre-release that labeled itself unsuitable for production. | Keeping the pre-release provider or linking OpenSSL for TLS. | Owner |
+| 2026-11-19 | The [Advisories job](../.github/workflows/ci.yml) scans the whole lockfile on pull requests and on `main`. The [ignore file](../.github/advisory-ignores.json) requires a reason for every exception. | New advisories fail the check. An existing exception stays visible until the dependency can be replaced. | Warning-only scans or a blanket exemption for maintenance advisories. | Owner |
+| 2026-11-19 | RustSec flags `chrono` as unmaintained (RUSTSEC-2026-0543). Replace it with a maintained date API, then remove the advisory exception once `chrono` leaves the lockfile. | Preserve PostgreSQL date and timestamp decoding, HTTP cookie expiry formatting, and session cookie and cache-header dates during the migration. | Combining the date-compatibility migration with the TLS provider change. | Owner |
 | 2026-11-19 | Cryptography (`openssl_*`, `sodium_*`, password hashing) is built from audited Rust crates. Phera implements no cipher, hash, padding or secret comparison itself. What no audited crate offers is left out and listed. | Home-made cryptography is where runtimes get broken. | Linking OpenSSL or libsodium. | Design |
 | 2026-11-19 | DOM and XML are Phera's own safe tree with pure Rust parsers (`quick-xml`, `html5ever`), not libxml2. No external entity is ever loaded while parsing a string. `DOMDocument::loadHTML()` therefore differs from PHP for malformed HTML 4. | A C parser fed with documents from the network gives up the memory safety the runtime exists for. | Binding libxml2 for byte-exact output. | Design |
 | 2026-11-19 | curl is built on `hyper` and rustls, not on libcurl. Only `http` and `https` exist; other protocols are refused with libcurl's error. | Same reason as DOM. Refusing `file://`, `gopher://` and the like also closes a class of request-forgery problems. | Binding libcurl. | Design |
@@ -32,9 +34,12 @@ design or review work and the owner can overrule it.
 
 | Date | Decision | Why | Turned down | By |
 | --- | --- | --- | --- | --- |
-| 2026-11-19 | Snapshot and fork is built in four steps: linked code shared per worker; a snapshot at `Phera\snapshot()` with a copy per request; adapters for Symfony and Laravel; copy on first write only if measurements ask for it (architecture.md 5.4). | One Laravel request costs 10 to 17 times PHP's time, and most of that is work repeated per request that opcache does once. Step 1 helps every application; the snapshot removes the framework's boot. | Worker mode as in FrankenPHP or Octane: faster still, but state leaks between requests unless the application is written for it. | Owner asked for it; design |
-| 2026-11-19 | A program started by a web request (`proc_open`, `exec`) is terminated when the request ends. `phera serve --no-process` forbids starting programs. `pcntl_fork` is not built. | One process serves many requests on few threads: an abandoned child would outlive its request unseen, and a multi-threaded async process cannot fork safely. | PHP-FPM's behaviour of letting children live. | Design |
-| 2026-11-19 | The execution time limit counts the CPU time a request spends running PHP code and is checked where the interpreter already hands over to the scheduler. One long call into a built-in function is not interrupted. | A check per instruction would slow every script; waiting for a database must not count, as in PHP on Unix. | A wall-clock limit; a clock read in the interpreter loop. | Design |
+| 2026-11-19 | Worker mode is supported too, through FrankenPHP's interface (`frankenphp_handle_request()`), so that Laravel Octane, Symfony's runtime packages and FrankenPHP applications run unchanged. Phera keeps many running copies of the worker script per thread, each answering one request at a time, so that waiting stays cheap. | The owner wants applications written for long-running use to run as they are. An existing interface means no new package for anyone to write. | A Phera-only worker interface; one copy of the worker script per thread, which would give up many requests per thread. This reverses the first draft of the design, which left worker mode out. | Owner |
+| 2026-11-19 | Snapshot and fork is built in four steps: linked code shared per worker; a snapshot at `Phera\snapshot()` with a copy per request; adapters for Symfony and Laravel; copy on first write only if measurements ask for it (architecture.md 5.4). | One Laravel request costs 10 to 17 times PHP's time, and most of that is work repeated per request that opcache does once. Step 1 helps every application; the snapshot removes the framework's boot. | Offering only worker mode: state leaks between requests unless the application is written for it, so it cannot be the default for every application. | Owner asked for it; design |
+| 2026-11-19 | When a web request ends, terminate an abandoned child and its process group while Phera still tracks the group leader. | A child can retain descriptors and consume resources after the response or deadline of a request. | PHP-FPM leaves ordinary children running. Waiting for them would tie request cleanup to the life of the child. | Design |
+| 2026-11-19 | Program execution is enabled by default. `phera serve --no-process` makes every program launch entry point throw `Error`, including `shell_exec()` and backticks. | Frameworks expect process functions to be available. Deployments that never launch children can disable them together. | Disabling them by default or requiring a list of individual functions. | Design |
+| 2026-11-19 | CLI `pcntl_fork()` throws `Phera\NotSupportedException`. | Forking leaves one thread in the child, which inherits runtime and allocator locks that other threads may have held. | Calling Unix `fork()` and continuing to run the interpreter in the child. | Design |
+| 2026-11-19 | The execution time limit counts the CPU time a request spends running PHP code and is checked where the interpreter already hands over to the scheduler. Process and process-stream waits also count toward the budget. Other native calls check the limit when they return control to the interpreter. | A check per instruction would slow every script; waiting for a database must not count, as in PHP on Unix. | A wall-clock limit; a clock read in the interpreter loop. | Design |
 | 2026-11-19 | A multipart boundary longer than 70 bytes is refused, and parsing stops when the request is abandoned. | RFC 2046's limit. A very long boundary made parsing take minutes after the client had gone (security round 3). | | Design |
 
 ## Tools
@@ -58,7 +63,7 @@ design or review work and the owner can overrule it.
 
 | Date | Decision | Why | Turned down | By |
 | --- | --- | --- | --- | --- |
-| 2026-11-19 | CI runs the test suite as three jobs side by side, and a draft pull request gets only the three short checks. | One job took 20 to 24 minutes; work in progress filled the runners. | | Design |
+| 2026-11-19 | CI runs the test suite as three jobs side by side, and a draft pull request gets the short checks, including Advisories. | One job took 20 to 24 minutes; work in progress filled the runners. | | Design |
 | 2026-11-19 | Finished pull requests are merged into one batch branch, reviewed together and merged with one CI run. A batch merges only when a run of all php-src tests shows no test going from pass to fail. | Every merge makes the other branches out of date; the full php-src run finds regressions the repository's own selection does not. | Merging one by one. | Design |
 | 2026-11-17 | Every pull request is reviewed against real PHP before it merges, whoever wrote it: its own scripts, the php-src tests, the benchmarks. The review is recorded on the pull request. | CI is only the first filter. | | Owner |
 
@@ -226,3 +231,12 @@ Secretbox reaches `salsa20` 0.10.2 and `poly1305` 0.8.0 through
 portable backend on Apple silicon and detects AVX2 at runtime on x86.
 Keep portable builds and runtime feature selection. Forcing CPU flags
 would narrow which machines can run the binary.
+
+## 2026-11-19 — Record the BLAKE2b macro dependency in the advisory gate
+
+Keep the public BLAKE2b compressor with default features disabled. Its Alloy
+dependency uses the `paste` compile-time identifier macro. Record the
+RustSec unmaintained notice for that macro in the existing exception file.
+The notice identifies maintenance status. Keep runtime vulnerability checks
+and all other warnings in the gate. Adopting a GPL compressor or maintaining
+a fork of the hash implementation would introduce a larger change.

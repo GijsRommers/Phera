@@ -6,7 +6,7 @@
 //! (`tests/upstream` + `tests/fixtures`) run. Needs a `php` binary (override
 //! with `PHERA_PHP=/path/to/php`); skipped without one.
 //!
-//! Files Phera rejects on purpose (lexer `Unsupported`: backticks,
+//! Files Phera rejects on purpose (lexer `Unsupported`:
 //! `(real)`, short tags), non-UTF-8 sources and nesting beyond Phera's limit
 //! are counted as "not relevant".
 
