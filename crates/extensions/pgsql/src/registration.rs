@@ -39,6 +39,9 @@ pub fn register(registry: &mut Registry) {
     aliases::register(registry, groups.into_iter().flatten());
     return_types::register(registry);
     large_objects::register(registry);
+    registry.describe_function("pg_connection_reset", "bool", None);
+    registry.describe_function("pg_jit", "array", None);
+    registry.describe_function("pg_tty", "string", None);
 }
 
 const METHODS: [MethodEntry; 1] =

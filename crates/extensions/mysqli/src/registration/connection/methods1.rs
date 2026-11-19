@@ -36,7 +36,11 @@ pub const ENTRIES: &[MethodEntry] = &[
         &[],
         dispatch::command_call::<{ commands::PING }, true>,
     )
-    .tentative_return("bool"),
+    .tentative_return("bool")
+    .with_preparation(|context, _, _| {
+        commands::deprecated_command(context, "mysqli::ping", true, true);
+        Ok(phera_extension_api::MethodPreparation::Default)
+    }),
     MethodEntry::public_async(
         "stat",
         &[],
@@ -48,7 +52,11 @@ pub const ENTRIES: &[MethodEntry] = &[
         &[Param::new("process_id", ParamType::Int)],
         dispatch::command_call::<{ commands::KILL }, true>,
     )
-    .tentative_return("bool"),
+    .tentative_return("bool")
+    .with_preparation(|context, _, _| {
+        commands::deprecated_command(context, "mysqli::kill", true, false);
+        Ok(phera_extension_api::MethodPreparation::Default)
+    }),
     MethodEntry::public_async(
         "change_user",
         &[

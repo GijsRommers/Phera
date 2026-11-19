@@ -196,6 +196,49 @@ fn large_objects_match_php() {
     comparison.check_matrix(&script, 26);
 }
 
+#[test]
+fn large_object_files_and_reconnect_match_php() {
+    let Some(comparison) = Comparison::from_environment("pgsql-lob-files") else {
+        return;
+    };
+    let script = format!("<?php\n{}\n{LARGE_OBJECT_FILES}", oracle::PHP_PREAMBLE);
+    comparison.check_matrix(&script, 7);
+}
+
+const LARGE_OBJECT_FILES: &str = r#"
+$db = pg_connect('host=127.0.0.1 port=54329 dbname=pgsql_ext user=phera password=phera');
+$input = tempnam(sys_get_temp_dir(), 'pg-in-');
+$output = tempnam(sys_get_temp_dir(), 'pg-out-');
+$bytes = str_repeat("a\0b\xff", 33000);
+file_put_contents($input, $bytes);
+pg_query($db, 'BEGIN');
+try {
+    run('file-roundtrip', function () use ($db, $input, $output, $bytes) {
+        $oid = pg_lo_import($db, $input);
+        return [$oid !== false, pg_lo_export($db, (string)$oid, $output),
+            file_get_contents($output) === $bytes];
+    });
+    run('file-aliases', function () use ($db, $input, $output, $bytes) {
+        $oid = pg_loimport($input);
+        return [$oid !== false, pg_loexport($oid, $output), file_get_contents($output) === $bytes];
+    });
+    run('missing-input', fn() => pg_lo_import($db, $input . '.missing'));
+    run('nul-in-filename', fn() => pg_lo_import($db, $input . "\0invalid"));
+} finally {
+    pg_query($db, 'ROLLBACK');
+    unlink($input);
+    unlink($output);
+}
+run('jit', fn() => pg_jit($db));
+run('tty', fn() => pg_tty($db));
+run('reset-replaces-session', function () use ($db) {
+    $pid = pg_get_pid($db);
+    pg_query($db, "BEGIN; SET application_name TO 'reset-me'");
+    return [pg_connection_reset($db), pg_get_pid($db) !== $pid, pg_transaction_status($db),
+        pg_parameter_status($db, 'application_name')];
+});
+"#;
+
 const LARGE_OBJECTS: &str = r#"
 $db = pg_connect('host=127.0.0.1 port=54329 dbname=pgsql_ext user=phera password=phera');
 pg_query($db, 'BEGIN');

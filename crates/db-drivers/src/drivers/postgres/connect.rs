@@ -169,6 +169,25 @@ fn certificate_name_error(presented: &[String], host: &str) -> String {
 }
 
 impl Postgres {
+    pub async fn reconnect(
+        &mut self,
+        dsn: &Dsn,
+        user: &str,
+        password: &str,
+    ) -> Result<(), DbError> {
+        match Self::connect(dsn, user, password).await {
+            Ok(connection) => {
+                *self = connection;
+                Ok(())
+            }
+            Err(error) => {
+                self.task.abort();
+                let _ = (&mut self.task).await;
+                Err(error)
+            }
+        }
+    }
+
     pub async fn connect(dsn: &Dsn, user: &str, password: &str) -> Result<Self, DbError> {
         let transaction = Arc::new(AtomicU8::new(IDLE));
         let observations = dsn

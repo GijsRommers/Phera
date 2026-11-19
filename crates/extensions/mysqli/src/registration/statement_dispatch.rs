@@ -188,6 +188,10 @@ pub fn property<const OP: usize>(_: &mut dyn Context, a: &[Value]) -> NativeResu
     statements::properties::value(args::object(a, 0).ok_or_else(missing)?, OP)
 }
 
+pub fn num_rows(_: &mut dyn Context, object: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
+    statements::properties::value(object.ok_or_else(missing)?, 2)
+}
+
 fn missing() -> NativeError {
     NativeError::error("mysqli_stmt object is missing")
 }

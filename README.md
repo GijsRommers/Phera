@@ -89,6 +89,7 @@ row at a time, including in `foreach`. PostgreSQL supports the `pg_exec` alias
 and other PHP 8.5 aliases for supported operations. `pg_copy_from()` accepts
 arrays and traversable row sources. PostgreSQL large objects can be opened,
 read, written, sought, truncated and unlinked in the current transaction.
+`pg_lo_import()` and `pg_lo_export()` transfer local files in bounded chunks.
 Native function return types are visible through reflection. Compatibility
 testing is in progress. MySQL LOCAL INFILE is disabled.
 

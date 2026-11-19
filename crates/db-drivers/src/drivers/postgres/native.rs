@@ -2,11 +2,13 @@
 
 mod copy;
 mod extended;
+mod lob_file;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use futures_util::TryStreamExt;
 use tokio_postgres::types::Type;
 use tokio_postgres::{Notification, SimpleQueryMessage};
 
@@ -91,6 +93,24 @@ impl State {
 }
 
 impl Postgres {
+    pub fn can_cancel_native_query(sql: &str) -> bool {
+        !copy::is_copy_from_stdin(sql)
+    }
+
+    async fn recover_capture(&self, observations: &Observations) -> Result<(), DbError> {
+        if observations.is_capturing() {
+            // A dropped caller no longer receives its rows. The connection
+            // still drains them. A barrier keeps its headers out of the next
+            // caller's result, including after a failed transaction.
+            self.client
+                .batch_execute("")
+                .await
+                .map_err(|cause| error(cause, ""))?;
+            observations.finish();
+        }
+        Ok(())
+    }
+
     fn native(&self) -> Result<&State, DbError> {
         self.native
             .as_ref()
@@ -136,32 +156,48 @@ impl Postgres {
         if self.native()?.copy.is_some() {
             return Err(DbError::general("COPY is in progress"));
         }
-        if copy::is_copy_from_stdin(sql) {
+        let observations = self.native()?.observations.clone();
+        self.recover_capture(&observations).await?;
+        if !Self::can_cancel_native_query(sql) {
             self.begin_copy(sql).await?;
             return Ok(vec![NativeResult {
                 copy_in: true,
                 ..NativeResult::default()
             }]);
         }
-        let observations = self.native()?.observations.clone();
         observations.capture();
-        let response = self.client.simple_query(sql).await;
-        let mut headers = observations.finish();
+        let result = self.read_simple_query(sql, &observations).await;
+        observations.finish();
+        match result {
+            Ok(results) => Ok(results),
+            Err(error) => Ok(vec![NativeResult {
+                error: Some(error),
+                ..NativeResult::default()
+            }]),
+        }
+    }
+
+    async fn read_simple_query(
+        &self,
+        sql: &str,
+        observations: &Observations,
+    ) -> Result<NativeSequence, DbError> {
+        let response = self
+            .client
+            .simple_query_raw(sql)
+            .await
+            .map_err(|cause| error(cause, sql))?;
+        let mut response = std::pin::pin!(response);
         let mut finished = Vec::new();
         let mut result = NativeResult::default();
-        let messages = match response {
-            Ok(messages) => messages,
-            Err(cause) => {
-                return Ok(vec![NativeResult {
-                    error: Some(error(cause, sql)),
-                    ..NativeResult::default()
-                }]);
-            }
-        };
-        for message in messages {
+        while let Some(message) = response
+            .try_next()
+            .await
+            .map_err(|cause| error(cause, sql))?
+        {
             match message {
                 SimpleQueryMessage::RowDescription(columns) => {
-                    result.columns = match headers.pop_front() {
+                    result.columns = match observations.next() {
                         Some(Header::Columns(columns)) => columns,
                         _ => columns
                             .iter()
@@ -179,7 +215,7 @@ impl Postgres {
                 }
                 SimpleQueryMessage::CommandComplete(count) => {
                     result.affected = count;
-                    result.command = match headers.pop_front() {
+                    result.command = match observations.next() {
                         Some(Header::Command(tag)) => tag,
                         _ => String::new(),
                     };

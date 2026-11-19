@@ -28,8 +28,8 @@ pub fn register(registry: &mut Registry) {
     }
 }
 
-const METHODS: [MethodEntry; 16] = {
-    let mut methods = [methods0::ENTRIES[0]; 16];
+const METHODS: [MethodEntry; 17] = {
+    let mut methods = [methods0::ENTRIES[0]; 17];
     let mut index = 0;
     let groups = [methods0::ENTRIES];
     let mut group = 0;

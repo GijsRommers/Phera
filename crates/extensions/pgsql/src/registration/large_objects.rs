@@ -1,6 +1,6 @@
 //! PHP declarations for `pg_lo_read($lob, 8192)` and the large-object API.
 
-use crate::lob;
+use crate::{lob, lob_file};
 use phera_extension_api::{ConstantValue, FunctionEntry, Param, ParamType, Registry};
 
 const LOB: Param = Param::new("lob", ParamType::Class("PgSql\\Lob"));
@@ -31,6 +31,16 @@ const SEEK: &[Param] = &[
     Param::new("whence", ParamType::Int).with_constant_default("SEEK_CUR", ConstantValue::Int(1)),
 ];
 const TRUNCATE: &[Param] = &[LOB, Param::new("size", ParamType::Int)];
+const IMPORT: &[Param] = &[
+    CONNECTION,
+    Param::new("filename", ParamType::Untyped).optional(),
+    OID,
+];
+const EXPORT: &[Param] = &[
+    CONNECTION,
+    OID,
+    Param::new("filename", ParamType::Untyped).optional(),
+];
 
 pub(super) fn register(registry: &mut Registry) {
     add_alias::<{ lob::CREATE }>(registry, CREATE, "string|int|false");
@@ -43,6 +53,35 @@ pub(super) fn register(registry: &mut Registry) {
     add::<{ lob::SEEK }, false>(registry, SEEK, "bool");
     add::<{ lob::TELL }, false>(registry, HANDLE, "int");
     add::<{ lob::TRUNCATE }, false>(registry, TRUNCATE, "bool");
+    for (name, params, handler, returns) in [
+        (
+            "pg_lo_import",
+            IMPORT,
+            lob_file::transfer::<true, false> as _,
+            "string|int|false",
+        ),
+        (
+            "pg_loimport",
+            IMPORT,
+            lob_file::transfer::<true, true> as _,
+            "string|int|false",
+        ),
+        (
+            "pg_lo_export",
+            EXPORT,
+            lob_file::transfer::<false, false> as _,
+            "bool",
+        ),
+        (
+            "pg_loexport",
+            EXPORT,
+            lob_file::transfer::<false, true> as _,
+            "bool",
+        ),
+    ] {
+        registry.function(FunctionEntry::asynchronous(name, params, handler));
+        registry.describe_function(name, returns, None);
+    }
 }
 
 fn add_alias<const OP: usize>(

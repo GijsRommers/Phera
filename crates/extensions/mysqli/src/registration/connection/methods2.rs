@@ -2,9 +2,18 @@
 
 use phera_extension_api::{ConstantValue, MethodEntry, Param, ParamType};
 
-use super::super::statement_dispatch;
+use super::super::{dispatch, statement_dispatch};
+use super::methods0;
 
 pub const ENTRIES: &[MethodEntry] = &[
+    MethodEntry::public_async(
+        "connect",
+        methods0::CONNECT.params,
+        dispatch::connect_method::<false>,
+    )
+    .tentative_return("bool"),
+    MethodEntry::public("get_client_info", &[], dispatch::client_info).tentative_return("string"),
+    MethodEntry::public("thread_safe", &[], dispatch::thread_safe).tentative_return("bool"),
     MethodEntry::public_async(
         "prepare",
         &[Param::new("query", ParamType::String)],

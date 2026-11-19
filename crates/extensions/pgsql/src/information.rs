@@ -19,6 +19,29 @@ pub const PING: usize = 12;
 pub const PARAMETER: usize = 13;
 pub const SET_ENCODING: usize = 14;
 pub const POLL: usize = 15;
+pub const TTY: usize = 16;
+
+pub fn jit(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let state = connection::argument(context, args::value(&arguments, 0), "pg_jit")?;
+        let lease = state.borrow().lease()?;
+        let values = connection::run(&lease, |driver| {
+            Box::pin(async move {
+                Ok([
+                    driver.parameter_status("jit_provider").await.ok().flatten(),
+                    driver.parameter_status("jit").await.ok().flatten(),
+                ])
+            })
+        })
+        .await
+        .map_err(|cause| phera_extension_api::NativeError::error(cause.detail))?;
+        let mut result = PhpArray::new();
+        for (name, value) in ["jit_provider", "jit"].into_iter().zip(values) {
+            result.insert(ArrayKey::str(name), value.map_or(Value::Null, Value::from));
+        }
+        Ok(Value::from(result))
+    })
+}
 
 const NAMES: &[&str] = &[
     "pg_dbname",
@@ -37,6 +60,7 @@ const NAMES: &[&str] = &[
     "pg_parameter_status",
     "pg_set_client_encoding",
     "pg_connect_poll",
+    "pg_tty",
 ];
 
 pub fn sync<const OP: usize>(c: &mut dyn Context, a: &[Value]) -> NativeResult {
@@ -56,6 +80,7 @@ pub(crate) fn sync_named<const OP: usize>(
         HOST => Value::from(state.dsn.get("host", "localhost").to_owned()),
         PORT => Value::from(state.dsn.get("port", "5432").to_owned()),
         OPTIONS => Value::from(state.dsn.get("options", "").to_owned()),
+        TTY => Value::from(state.dsn.get("tty", "").to_owned()),
         ENCODING => Value::from(state.encoding.clone()),
         LAST_ERROR => return connection::last_error(&state),
         PID => Value::Int(state.pid.into()),

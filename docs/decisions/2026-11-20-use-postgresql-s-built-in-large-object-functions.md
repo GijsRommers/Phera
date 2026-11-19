@@ -1,5 +1,7 @@
 # Use PostgreSQL's built-in large-object functions on the active pgsql lease. Defer file import and export
 
+The file transfer deferral was replaced by [client-side large-object transfers](2026-11-20-transfer-large-objects-on-the-client.md).
+
 - Date: 2026-11-20
 - Area: Scope and compatibility
 - Decided by: Design

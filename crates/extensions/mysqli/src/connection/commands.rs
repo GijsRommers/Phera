@@ -37,18 +37,8 @@ pub async fn execute<const OP: usize>(
     let flags = args::int(arguments, 0).unwrap_or_default();
     let transaction_name = text(1);
     let is_method = call.contains("::");
-    let item = if is_method { "Method" } else { "Function" };
-    if OP == PING {
-        let kind = if is_method { "method" } else { "function" };
-        context.deprecated(format!(
-            "{item} {call}() is deprecated since 8.4, because the reconnect feature has been \
-             removed in PHP 8.2 and this {kind} is now redundant"
-        ));
-    }
-    if OP == KILL {
-        context.deprecated(format!(
-            "{item} {call}() is deprecated since 8.4, use KILL CONNECTION/QUERY SQL statement instead"
-        ));
+    if !is_method && matches!(OP, PING | KILL) {
+        deprecated_command(context, call, false, OP == PING);
     }
     if OP == KILL && flags <= 0 {
         let argument = if is_method { 1 } else { 2 };
@@ -137,6 +127,22 @@ pub async fn execute<const OP: usize>(
         }
         Err(error) => failure(context, &mut state, error, call),
     }
+}
+
+pub(crate) fn deprecated_command(context: &mut dyn Context, call: &str, method: bool, ping: bool) {
+    let (item, kind) = if method {
+        ("Method", "method")
+    } else {
+        ("Function", "function")
+    };
+    let detail = if ping {
+        format!(
+            "because the reconnect feature has been removed in PHP 8.2 and this {kind} is now redundant"
+        )
+    } else {
+        "use KILL CONNECTION/QUERY SQL statement instead".to_owned()
+    };
+    context.deprecated(format!("{item} {call}() is deprecated since 8.4, {detail}"));
 }
 
 enum Answer {

@@ -135,7 +135,7 @@ async fn connect_operation<const OP: usize>(
     }
 }
 
-fn oid(value: &Value, allow_zero: bool) -> Result<u32, NativeError> {
+pub(crate) fn oid(value: &Value, allow_zero: bool) -> Result<u32, NativeError> {
     let invalid = || NativeError::value_error("Invalid OID value passed");
     match &*value.deref() {
         Value::Int(value) if *value > 0 || (allow_zero && *value == 0) => Ok(*value as u32),

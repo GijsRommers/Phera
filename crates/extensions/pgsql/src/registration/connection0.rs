@@ -5,6 +5,32 @@ use phera_extension_api::{ConstantValue, FunctionEntry, Param, ParamType};
 
 pub const ENTRIES: &[FunctionEntry] = &[
     FunctionEntry::sync(
+        "pg_tty",
+        &[
+            Param::new("connection", ParamType::Class("PgSql\\Connection"))
+                .nullable()
+                .with_default(ConstantValue::Null),
+        ],
+        information::sync::<{ information::TTY }>,
+    ),
+    FunctionEntry::asynchronous(
+        "pg_connection_reset",
+        &[Param::new(
+            "connection",
+            ParamType::Class("PgSql\\Connection"),
+        )],
+        connection::reset,
+    ),
+    FunctionEntry::asynchronous(
+        "pg_jit",
+        &[
+            Param::new("connection", ParamType::Class("PgSql\\Connection"))
+                .nullable()
+                .with_default(ConstantValue::Null),
+        ],
+        information::jit,
+    ),
+    FunctionEntry::sync(
         "pg_dbname",
         &[
             Param::new("connection", ParamType::Class("PgSql\\Connection"))

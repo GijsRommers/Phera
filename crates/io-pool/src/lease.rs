@@ -85,6 +85,19 @@ impl<C: Connection> Lease<C> {
             .map_err(|lost| lost.to_string())?
     }
 
+    /// Poll a client future on the caller's runtime. Dropping it cancels the
+    /// operation, so use this only when the client can recover independently.
+    pub async fn run_cancellable<T, F>(&self, operation: F) -> Result<T, String>
+    where
+        F: for<'c> FnOnce(&'c mut C) -> Operation<'c, T>,
+    {
+        let mut connection = self.shared.connection.lock().await;
+        let connection = connection
+            .as_mut()
+            .ok_or_else(|| "the connection was already returned to its pool".to_owned())?;
+        Ok(operation(connection).await)
+    }
+
     /// Starts work immediately on the I/O runtime. Dropping the returned
     /// handle detaches the task, which still owns the lease until it finishes.
     pub fn start<T, F>(&self, operation: F) -> JoinHandle<Result<T, String>>

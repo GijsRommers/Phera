@@ -64,6 +64,7 @@ impl Postgres {
 
     async fn prepare_native_statement(&mut self, sql: &str) -> Result<NativeStatement, DbError> {
         let observations = self.native()?.observations.clone();
+        self.recover_capture(&observations).await?;
         observations.capture();
         let prepared = self.prepare_query(sql).await;
         let description = observations
@@ -105,6 +106,7 @@ impl Postgres {
             .collect();
         let statement = &prepared.statement;
         let observations = self.native()?.observations.clone();
+        self.recover_capture(&observations).await?;
         observations.capture();
         let mut result = NativeResult {
             columns: prepared.columns.clone(),

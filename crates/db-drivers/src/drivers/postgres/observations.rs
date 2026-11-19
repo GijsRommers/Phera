@@ -27,6 +27,10 @@ pub enum Header {
 }
 
 impl Observations {
+    pub fn is_capturing(&self) -> bool {
+        self.capture.load(Ordering::Relaxed)
+    }
+
     pub fn interested(&self, kind: u8) -> bool {
         kind == b'K' || self.capture.load(Ordering::Relaxed) && matches!(kind, b'T' | b'C')
     }
@@ -47,6 +51,13 @@ impl Observations {
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner()),
         )
+    }
+
+    pub fn next(&self) -> Option<Header> {
+        self.replies
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .pop_front()
     }
 
     pub fn pid(&self) -> i32 {
@@ -125,6 +136,7 @@ impl Observations {
     }
 
     pub fn reset(&self) {
+        self.finish();
         self.notices(true);
         self.notifications
             .lock()

@@ -3,7 +3,7 @@
 use super::super::dispatch;
 use crate::connection;
 use crate::connection::query;
-use phera_extension_api::{ConstantValue, MethodEntry, Param, ParamType};
+use phera_extension_api::{ConstantValue, MethodEntry, MethodPreparation, Param, ParamType};
 
 pub const ENTRIES: &[MethodEntry] = &[
     MethodEntry::public_async(
@@ -55,10 +55,17 @@ pub const ENTRIES: &[MethodEntry] = &[
                 .with_default(ConstantValue::Null),
             Param::new("flags", ParamType::Int).with_default(ConstantValue::Int(0)),
         ],
-        dispatch::connect_method,
+        dispatch::connect_method::<true>,
     )
     .tentative_return("bool"),
-    MethodEntry::public("init", &[], dispatch::initialize),
+    MethodEntry::public("init", &[], dispatch::initialize).with_preparation(|context, _, _| {
+        context.deprecated(
+            "Method mysqli::init() is deprecated since 8.1, replace calls to parent::init() with \
+             parent::__construct()"
+                .into(),
+        );
+        Ok(MethodPreparation::Default)
+    }),
     MethodEntry::public("get_server_info", &[], dispatch::server_info).tentative_return("string"),
     MethodEntry::public(
         "options",
@@ -145,3 +152,5 @@ pub const ENTRIES: &[MethodEntry] = &[
     )
     .tentative_return("mysqli_result|false"),
 ];
+
+pub const CONNECT: &MethodEntry = &ENTRIES[0];

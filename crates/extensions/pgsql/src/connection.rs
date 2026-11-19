@@ -32,6 +32,12 @@ pub struct Connection {
     pub server_version: String,
     pub pid: i32,
     pub encoding: String,
+    credentials: Credentials,
+}
+
+struct Credentials {
+    user: String,
+    password: String,
 }
 
 impl Connection {
@@ -86,6 +92,26 @@ where
         _ => Box::pin(async { Err(connection_error("Mismatched database driver")) }),
     })
     .await
+}
+
+pub async fn run_simple(lease: &Lease<Driver>, sql: String) -> Result<Vec<Rows>, DbError> {
+    if !Postgres::can_cancel_native_query(&sql) {
+        return run(lease, move |driver| {
+            Box::pin(async move { driver.native_query(&sql).await })
+        })
+        .await;
+    }
+    lease
+        .run_cancellable(move |driver| {
+            Box::pin(async move {
+                match driver {
+                    Driver::Postgres(postgres) => postgres.native_query(&sql).await,
+                    _ => Err(connection_error("Mismatched database driver")),
+                }
+            })
+        })
+        .await
+        .map_err(connection_error)?
 }
 
 /// A pg_send_* operation can progress even when PHP immediately polls for it.
@@ -175,6 +201,7 @@ pub fn connect<const PERSISTENT: bool>(
                 server_version,
                 pid,
                 encoding: "UTF8".into(),
+                credentials: Credentials { user, password },
             }));
             *object.native.borrow_mut() = Some(Box::new(state));
         }
@@ -192,6 +219,45 @@ fn fail_connect(context: &mut dyn Context, call: &str, error: &str) -> NativeRes
         "{call}(): Unable to connect to PostgreSQL server: {error}"
     ));
     Ok(Value::Bool(false))
+}
+
+pub fn reset(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let state = argument(context, args::value(&arguments, 0), "pg_connection_reset")?;
+        let (lease, dsn, user, password) = {
+            let mut state = state.borrow_mut();
+            let lease = state.lease()?;
+            state.busy = None;
+            state.results.clear();
+            state.last_error.clear();
+            (
+                lease,
+                state.dsn.clone(),
+                state.credentials.user.clone(),
+                state.credentials.password.clone(),
+            )
+        };
+        let response = run(&lease, move |driver| {
+            Box::pin(async move {
+                driver.reconnect(&dsn, &user, &password).await?;
+                Ok((driver.pid(), driver.version.clone()))
+            })
+        })
+        .await;
+        let mut state = state.borrow_mut();
+        match response {
+            Ok((pid, version)) => {
+                state.pid = pid;
+                state.server_version = version;
+                state.encoding = "UTF8".into();
+                Ok(Value::Bool(true))
+            }
+            Err(error) => {
+                state.last_error = error.detail;
+                Ok(Value::Bool(false))
+            }
+        }
+    })
 }
 
 fn parse(source: &str) -> Result<Dsn, String> {

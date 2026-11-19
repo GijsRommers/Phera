@@ -6,7 +6,7 @@ use std::rc::Rc;
 use crate::connection::{self, commands, escape, properties, query};
 use crate::{errors, options, result};
 
-pub fn connect_method<'a>(
+pub fn connect_method<'a, const REAL: bool>(
     context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
@@ -16,10 +16,26 @@ pub fn connect_method<'a>(
             context,
             connection::handle(this.as_ref())?,
             &args,
-            "mysqli::real_connect",
+            if REAL {
+                "mysqli::real_connect"
+            } else {
+                "mysqli::connect"
+            },
         )
         .await
     })
+}
+
+pub fn client_info(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
+    Ok(Value::from(properties::CLIENT_INFO))
+}
+
+pub fn thread_safe(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
+    Ok(Value::Bool(true))
+}
+
+pub fn thread_safe_function(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+    thread_safe(context, None, args)
 }
 
 pub fn connect_function(

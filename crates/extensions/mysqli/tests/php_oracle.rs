@@ -48,6 +48,12 @@ function rows($db) {
 }
 "#;
 const CALLS: &[(&str, &str)] = &[
+    ("deprecated-init-before-arity", "$db->init(0)"),
+    ("deprecated-ping-before-arity", "$db->ping(0)"),
+    (
+        "deprecated-kill-before-type-check",
+        "$db->kill(new stdClass)",
+    ),
     ("default-report", "(new mysqli_driver())->report_mode"),
     ("host-info", "mysqli_get_host_info($db)"),
     ("charset", "$db->character_set_name()"),

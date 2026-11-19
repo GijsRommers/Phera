@@ -7,6 +7,7 @@ mod dml;
 mod escape;
 mod information;
 mod lob;
+mod lob_file;
 mod query;
 mod registration;
 mod result;

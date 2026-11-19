@@ -170,7 +170,10 @@ pub(crate) fn execute_named<'a, const OP: usize, const SEND: bool>(
             state.results.clear();
             state.last_error.clear();
         }
-        let response = connection::run(&lease, |driver| Box::pin(command.run(driver))).await;
+        let response = match command {
+            Command::Simple(sql) => connection::run_simple(&lease, sql).await,
+            command => connection::run(&lease, |driver| Box::pin(command.run(driver))).await,
+        };
         match response.and_then(|mut rows| rows.pop().ok_or_else(|| DbError::general("No result")))
         {
             Ok(rows) if rows.error.is_none() => result::create(c, rows, Some(&state)),
