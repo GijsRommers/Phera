@@ -141,7 +141,9 @@ def build_call(name, spelling, parameters, sample, named):
         else:
             target = f'{cls}::{method}'
     call = f'{target}({", ".join(supplied)})'
-    return PROBE.replace('SETUP', '\n    '.join(assignments)).replace('CALL', call).replace('CLEANUP', cleanup)
+    return (PROBE.replace('    SETUP\n', '    ' + '\n    '.join(assignments) + '\n')
+            .replace('    $result = CALL;\n', f'    $result = {call};\n')
+            .replace('    CLEANUP\n', '    ' + cleanup + '\n'))
 
 
 def openssl_key(php, directory):
