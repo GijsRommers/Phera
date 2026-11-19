@@ -6,6 +6,9 @@ license.workspace = true
 
 [dependencies]
 tokio.workspace = true
+rustls.workspace = true
+rustls-native-certs.workspace = true
+webpki-roots.workspace = true
 
 [lints]
 workspace = true
