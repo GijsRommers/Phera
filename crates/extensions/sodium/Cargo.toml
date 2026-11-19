@@ -12,6 +12,7 @@ hex.workspace = true
 aes-gcm.workspace = true
 argon2.workspace = true
 blake2b_simd.workspace = true
+revm-precompile.workspace = true
 block-padding.workspace = true
 chacha20.workspace = true
 chacha20poly1305.workspace = true

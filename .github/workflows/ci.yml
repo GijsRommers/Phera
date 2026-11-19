@@ -127,7 +127,16 @@ jobs:
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
       - name: Test against real PHP
-        run: cargo test ${{ matrix.part.packages }} --no-fail-fast
+        run: |
+          if [ "${{ matrix.part.key }}" = rest ]; then
+            # Poly1305 0.8 selects the AVX2 backend on capable x86 runners.
+            if grep -qw avx2 /proc/cpuinfo; then
+              echo "Secretbox Poly1305 backend: AVX2"
+            else
+              echo "Secretbox Poly1305 backend: portable"
+            fi
+          fi
+          cargo test ${{ matrix.part.packages }} --no-fail-fast
 
   test:
     name: Test (Linux, PHP 8.5, PostgreSQL 17, MySQL 8.4)

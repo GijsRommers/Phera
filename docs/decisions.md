@@ -168,3 +168,61 @@ Sodium's little-endian integer helpers use the width accepted by RustCrypto's
 fixed-precision constructor. Their input size is therefore below 512 MiB.
 Replacing the constant-time arithmetic with variable-time big integers would
 change the security behavior of those helpers.
+
+## 2026-11-19 — Serialize bounded, copyable Sodium hash state
+
+Store BLAKE2b chaining words, the compressed byte count, and at most one
+pending block in a 384-byte string, matching the length of PHP's opaque
+state. Include a version marker and a checksummed payload. Each call validates
+the representation before constructing a native state. PHP exposes no state
+size constant. Preserve PHP's independent digest lengths at initialization
+and finalization by retaining all chaining words through the final compression.
+
+The earlier deferral is superseded. `blake2b_simd` still keeps the state and
+compression internal. Use the public EIP-152 compression API in the MIT-licensed
+`revm-precompile` with default features disabled. It derives its implementation
+from `blake2b_simd` and runs 12 rounds for this API. This brings in additional
+Rust dependencies. The standalone `eip-152` package has a GPL-3.0 license.
+An in-memory handle would break value copies, and retaining the full message
+would give streaming callers unbounded memory use.
+
+## 2026-11-19 — Compose secretstream using the libsodium transcript
+
+Use RustCrypto HChaCha20, IETF ChaCha20, and Poly1305 for the documented
+secretstream transcript and ratchet. Keep the derived key, counter, nonce and
+checksum in a 52-byte opaque string. The checksum diagnoses accidental
+corruption and allows state strings to resume across processes. The runtime
+checks a frame's MAC before decrypting or advancing the state. Keep the
+ciphertext-dependent zero padding of libsodium's historical transcript for
+wire compatibility. The standard IETF AEAD computes a different MAC on
+unaligned messages, and RustCrypto's secretstream wrapper keeps its state
+and explicit rekey private. This supersedes the previous secretstream
+deferral.
+
+## 2026-11-19 — Use full-width byte operations and scan ISO/IEC 7816-4 padding
+
+Use a carry over the complete little-endian PHP string for addition and
+increment. Use `subtle` to select the last differing byte for comparison and
+scan the complete final block for unpadding. This removes the integer
+constructor's width limit and the early exit in the block-padding decoder.
+Continue to use `block-padding` for encoding ISO/IEC 7816-4.
+
+## 2026-11-19 — Retain the Ed25519 and AEGIS boundaries
+
+Dalek requires a decodable public point for its expanded-key signing API.
+Deriving the public half from the seed changes the signature transcript
+when the stored half differs. Keep dalek's rejection for undecodable points
+and document it on both signing operations.
+
+The `aegis` crate offers an optional pure Rust backend. A published audit
+covering that backend could not be verified. Keep the PHP compatibility
+constants and leave the six AEGIS functions absent. The crate's default
+configuration uses C.
+
+## 2026-11-19 — Preserve backend dispatch for secretbox
+
+Secretbox reaches `salsa20` 0.10.2 and `poly1305` 0.8.0 through
+`crypto_secretbox`. Salsa20 uses a portable backend. Poly1305 uses its
+portable backend on Apple silicon and detects AVX2 at runtime on x86.
+Keep portable builds and runtime feature selection. Forcing CPU flags
+would narrow which machines can run the binary.

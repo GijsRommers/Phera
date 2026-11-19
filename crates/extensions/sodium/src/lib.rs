@@ -1,8 +1,19 @@
 //! PHP's Sodium extension, for example `sodium_bin2hex("\\x00\\xff")` returns `'00ff'`.
+//!
+//! Generic hash and secretstream states are opaque PHP strings. Their length
+//! matches PHP's, and scripts can copy them and resume each copy independently.
+//! Secretstream headers and ciphertext interoperate with PHP.
+//!
+//! The `sodium_crypto_aead_aegis128l_*` and `sodium_crypto_aead_aegis256_*`
+//! functions (encrypt, decrypt and keygen) are absent pending a published audit
+//! of a pure Rust backend.
+//! `sodium_crypto_sign` and `sodium_crypto_sign_detached` reject secret keys
+//! whose stored public half dalek cannot decode, a deliberate difference from PHP.
 
 use phera_extension_api::{ClassEntry, Extension, FunctionEntry, NativeError, Registry};
 
 mod aead;
+mod blake_state;
 mod box_crypto;
 mod bytes;
 mod constants;
@@ -10,13 +21,17 @@ mod encoding;
 mod hash;
 mod key_exchange;
 mod legacy_aead;
+mod opaque_state;
 mod password;
 mod ristretto;
 mod ristretto_scalar;
 mod scrypt_password;
 mod secretbox;
+mod secretstream;
+mod secretstream_state;
 mod sign;
 mod stream;
+mod streaming_hash;
 mod x25519;
 
 pub struct Sodium;
@@ -42,21 +57,12 @@ impl Extension for Sodium {
         register(registry, scrypt_password::FUNCTIONS);
         register(registry, key_exchange::FUNCTIONS);
         register(registry, hash::FUNCTIONS);
+        register(registry, streaming_hash::FUNCTIONS);
         register(registry, x25519::FUNCTIONS);
         register(registry, sign::FUNCTIONS);
         register(registry, secretbox::FUNCTIONS);
         register(registry, box_crypto::FUNCTIONS);
-        register(
-            registry,
-            &[(
-                FunctionEntry::sync(
-                    "sodium_crypto_secretstream_xchacha20poly1305_keygen",
-                    &[],
-                    keygen::<32>,
-                ),
-                "string",
-            )],
-        );
+        register(registry, secretstream::FUNCTIONS);
         constants::register(registry);
     }
 }

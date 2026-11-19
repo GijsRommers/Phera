@@ -95,6 +95,7 @@ phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
 crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 blake2b_simd = "1"
+revm-precompile = { version = "43.0.3", default-features = false }
 curve25519-dalek = "5"
 hmac = "0.12"
 siphasher = "1"

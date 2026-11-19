@@ -53,18 +53,19 @@ runner yet.
 Built in, each checked call by call against real PHP: core, standard, ctype,
 date, dom (first stage), filter, hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
-session, SPL, sqlite3, streams, tokenizer.
+session, sodium, SPL, sqlite3, streams, tokenizer.
 
-In progress: bcmath, curl, gmp, intl, mysqli, pgsql, process functions, sodium,
-zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
+In progress: bcmath, curl, gmp, intl, mysqli, pgsql, process functions, zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
 
 ### Sodium
 
 Phera implements PHP's `sodium` module in Rust. It supports NaCl secret boxes
 and sealed boxes, Ed25519 signatures, X25519 and Ristretto255, ChaCha20-Poly1305
-and AES-256-GCM, BLAKE2b and SipHash, key derivation and exchange, Argon2 and
-scrypt passwords, and binary encodings. Streaming BLAKE2b, secretstream, AEGIS,
-and `sodium_unpad()` are pending.
+and AES-256-GCM, BLAKE2b (including streaming) and SipHash, XChaCha20-Poly1305 secretstream,
+key derivation and exchange, Argon2 and scrypt passwords, binary encodings,
+and ISO/IEC 7816-4 padding. The six AEGIS-128L and AEGIS-256 functions are
+absent pending a published audit of a pure Rust backend. Ed25519 signing
+rejects secret keys whose embedded public half cannot be decoded as a point.
 
 ## ✨ Goals
 

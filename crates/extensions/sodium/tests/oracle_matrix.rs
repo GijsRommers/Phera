@@ -247,3 +247,175 @@ async fn deterministic_crypto_cases() {
 fn binary(hexadecimal: &str) -> Value {
     Value::from(hex::decode(hexadecimal).unwrap())
 }
+
+#[tokio::test]
+async fn stateful_argument_errors_match_php() {
+    if oracle::find_php().is_none() {
+        return;
+    }
+    let mut matrix = Matrix::new();
+    for len in [0, 1, 31, 33, 51, 53, 383, 385] {
+        let invalid = Value::from(vec![0; len]);
+        matrix
+            .case(
+                "sodium_crypto_generichash_update",
+                vec![invalid.clone(), Value::from("")],
+            )
+            .await;
+        matrix
+            .case(
+                "sodium_crypto_generichash_final",
+                vec![invalid.clone(), Value::Int(32)],
+            )
+            .await;
+        if len != 52 {
+            matrix
+                .case(
+                    "sodium_crypto_secretstream_xchacha20poly1305_push",
+                    vec![invalid.clone(), Value::from("")],
+                )
+                .await;
+            matrix
+                .case(
+                    "sodium_crypto_secretstream_xchacha20poly1305_pull",
+                    vec![invalid.clone(), Value::from("")],
+                )
+                .await;
+            matrix
+                .case(
+                    "sodium_crypto_secretstream_xchacha20poly1305_rekey",
+                    vec![invalid],
+                )
+                .await;
+        }
+    }
+    for size in [1, 15, 65] {
+        matrix
+            .case(
+                "sodium_crypto_generichash_init",
+                vec![Value::from(vec![0; size]), Value::Int(32)],
+            )
+            .await;
+    }
+    for size in [-1, 0, 15, 65, i64::MAX] {
+        matrix
+            .case(
+                "sodium_crypto_generichash_init",
+                vec![Value::from(""), Value::Int(size)],
+            )
+            .await;
+    }
+    matrix
+        .case(
+            "sodium_crypto_generichash_update",
+            vec![Value::Int(1), Value::from("")],
+        )
+        .await;
+    matrix
+        .case(
+            "sodium_crypto_generichash_final",
+            vec![Value::Null, Value::Int(32)],
+        )
+        .await;
+    matrix
+        .case(
+            "sodium_crypto_secretstream_xchacha20poly1305_push",
+            vec![Value::Int(1), Value::from("")],
+        )
+        .await;
+    matrix
+        .case(
+            "sodium_crypto_secretstream_xchacha20poly1305_pull",
+            vec![Value::Null, Value::from("")],
+        )
+        .await;
+    matrix
+        .case(
+            "sodium_crypto_secretstream_xchacha20poly1305_rekey",
+            vec![Value::Int(1)],
+        )
+        .await;
+    for size in [0, 23, 25, 31, 33] {
+        let invalid = Value::from(vec![0; size]);
+        matrix
+            .case(
+                "sodium_crypto_secretstream_xchacha20poly1305_init_push",
+                vec![invalid.clone()],
+            )
+            .await;
+        matrix
+            .case(
+                "sodium_crypto_secretstream_xchacha20poly1305_init_pull",
+                vec![Value::from(vec![0; 24]), invalid.clone()],
+            )
+            .await;
+        matrix
+            .case(
+                "sodium_crypto_secretstream_xchacha20poly1305_init_pull",
+                vec![invalid, Value::from(vec![0; 32])],
+            )
+            .await;
+    }
+    matrix.compare("sodium opaque-state argument errors");
+}
+
+#[tokio::test]
+async fn padding_and_little_endian_boundaries_match_php() {
+    if oracle::find_php().is_none() {
+        return;
+    }
+    let mut matrix = Matrix::new();
+    for size in (1..=129).chain([257, 511, 1024]) {
+        for length in [0, 1, size - 1, size, size + 1, size * 2 - 1] {
+            let mut padded = vec![0xa5; length];
+            matrix
+                .case(
+                    "sodium_pad",
+                    vec![Value::from(padded.clone()), Value::Int(size as i64)],
+                )
+                .await;
+            padded.push(0x80);
+            padded.resize(length + size - length % size, 0);
+            matrix
+                .case(
+                    "sodium_unpad",
+                    vec![Value::from(padded), Value::Int(size as i64)],
+                )
+                .await;
+        }
+        for padding in [vec![0; size], vec![0x81; size], vec![0x80; size]] {
+            matrix
+                .case(
+                    "sodium_unpad",
+                    vec![Value::from(padding), Value::Int(size as i64)],
+                )
+                .await;
+        }
+    }
+    for size in [-1, 0, 3, 4, i64::MAX] {
+        matrix
+            .case("sodium_unpad", vec![binary("03038000"), Value::Int(size)])
+            .await;
+    }
+    matrix
+        .case("sodium_unpad", vec![binary("80000100"), Value::Int(4)])
+        .await;
+    for length in [0, 1, 7, 8, 9, 127, 1024, 16385] {
+        let ones = repeated(0xff, length);
+        let mut one = vec![0; length];
+        if let Some(byte) = one.first_mut() {
+            *byte = 1;
+        }
+        matrix.case("sodium_increment", vec![ones.clone()]).await;
+        matrix
+            .case("sodium_add", vec![ones.clone(), Value::from(one)])
+            .await;
+        matrix
+            .case("sodium_compare", vec![ones.clone(), ones.clone()])
+            .await;
+        matrix
+            .case("sodium_compare", vec![ones, repeated(0, length)])
+            .await;
+    }
+    matrix.compare("sodium padding and arithmetic boundaries");
+}

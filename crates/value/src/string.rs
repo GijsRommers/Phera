@@ -22,6 +22,11 @@ impl PhpString {
         Rc::get_mut(&mut self.0).map(Vec::as_mut_slice)
     }
 
+    /// Mutate the bytes, preserving other PHP values that share this buffer.
+    pub fn make_mut_bytes(&mut self) -> &mut [u8] {
+        Rc::make_mut(&mut self.0).as_mut_slice()
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
