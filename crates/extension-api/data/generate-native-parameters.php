@@ -210,7 +210,7 @@ function is_runtime_stub(string $file): bool {
 
 function default_value(?string $expression, string $function, string $namespace): string {
     if ($expression === null || $expression === 'UNKNOWN') {
-        return '';
+        return '-';
     }
     try {
         $scope = $namespace === '' ? '' : "namespace $namespace; ";
