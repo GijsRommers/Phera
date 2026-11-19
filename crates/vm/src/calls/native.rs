@@ -64,10 +64,7 @@ impl Vm {
                 .retry_native_strings(entry, &mut arguments, origin, error)
                 .await
         {
-            if !matches!(
-                entry.name,
-                "strlen" | "count" | "sizeof" | "array_key_exists"
-            ) {
+            if !omits_native_trace(entry.name) {
                 self.failed_native = Some(crate::error_traces::NativeTrace::new(
                     entry.name, &arguments,
                 ));
@@ -83,12 +80,7 @@ impl Vm {
         match entry.handler {
             NativeFn::Sync(handler) => {
                 let result = handler(self, &arguments);
-                if result.is_err()
-                    && !matches!(
-                        entry.name,
-                        "strlen" | "count" | "sizeof" | "array_key_exists"
-                    )
-                {
+                if result.is_err() && !omits_native_trace(entry.name) {
                     self.failed_native = Some(crate::error_traces::NativeTrace::new(
                         entry.name, &arguments,
                     ));
@@ -455,4 +447,9 @@ fn named_default(parameters: &[phera_extension_api::Param], index: usize) -> Val
         .and_then(|parameter| parameter.default)
         .map(|default| default.to_value())
         .unwrap_or_default()
+}
+
+/// Zend emits these operators without a native frame in PHP stack traces.
+pub(super) fn omits_native_trace(name: &str) -> bool {
+    matches!(name, "strlen" | "count" | "sizeof" | "array_key_exists")
 }

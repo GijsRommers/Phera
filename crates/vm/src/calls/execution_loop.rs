@@ -42,6 +42,8 @@ pub(crate) enum BatchExit {
     Instruction(Instruction),
     /// A prepared call to a native function, whose result goes to this register.
     NativeCall(Reg),
+    /// A synchronous native call needs a PHP property getter to finish.
+    NativeView(Reg, Box<NativeError>),
     /// A prepared PHP call whose weak string argument may invoke __toString.
     BindCall(Reg),
     /// A comparison reached an object whose __toString must run.

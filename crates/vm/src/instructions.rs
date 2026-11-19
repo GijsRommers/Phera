@@ -315,10 +315,10 @@ impl Vm {
                     self.set(destination, value);
                     None
                 } else {
-                    Some(BatchExit::NativeCall(destination))
+                    return self.call_native(destination);
                 }
             }
-            CallEntry::Native => Some(BatchExit::NativeCall(destination)),
+            CallEntry::Native => return self.call_native(destination),
             CallEntry::ConvertStrings => Some(BatchExit::BindCall(destination)),
         })
     }
