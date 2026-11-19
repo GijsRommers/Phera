@@ -53,6 +53,7 @@ pub(super) enum Visit {
     Expression,
     Class,
     Method,
+    Type,
     Namespace,
 }
 
@@ -107,7 +108,7 @@ impl Rule {
 pub(super) const SYNTAX: Rule = Rule {
     name: "syntax-error",
     group: Group::Syntax,
-    description: "Report the first source error at the selected PHP language level.",
+    description: "Report the first PHP 8.5 source error.",
     default: DefaultStatus::Enabled,
     bad: "<?php\necho ;",
     good: "<?php\necho 'Hello';",
@@ -136,6 +137,9 @@ pub fn rules() -> impl Iterator<Item = &'static Rule> {
         .chain(super::locals::RULES)
         .chain(super::members::RULES)
         .chain(super::modernize::rules())
+        .chain(super::style::rules())
+        .chain(super::naming::RULES)
+        .chain(super::complexity::RULES)
 }
 
 pub fn find(name: &str) -> Option<&'static Rule> {

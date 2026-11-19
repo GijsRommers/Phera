@@ -11,33 +11,37 @@
 //! A fix is a set of byte edits. The fixer applies compatible sets, parses the
 //! result before saving it and checks that the edits introduce no findings.
 
+mod complexity;
 mod fix;
 mod imports;
 mod index;
 mod locals;
 mod members;
 mod modernize;
+mod naming;
 mod options;
+mod pipeline;
 mod rule;
 mod source;
+mod style;
 mod suspicious;
 mod traversal;
 
-pub use options::{Command, FixMode, Language, Options};
+pub use options::{Command, FixMode, Options};
+pub use pipeline::run;
 pub use rule::{Group, Rule, catalog, find, rules};
 
 use crate::{
-    Report, baseline,
+    Report,
     diagnostic::{self, Diagnostic, Severity},
     names::Names,
-    project, suppress,
+    suppress,
 };
-use options::FixMode as Mode;
 use phera_ast::{Statement, StatementKind};
 use phera_source::{LineTable, Span};
 use rule::{Check, Visit};
 use source::Source;
-use std::{collections::HashMap, path::Path, time::Instant};
+use std::collections::HashMap;
 use traversal::Node;
 
 const MAX_FIX_PASSES: usize = 8;
@@ -55,10 +59,13 @@ struct Enabled {
     expressions: Vec<Check>,
     classes: Vec<Check>,
     methods: Vec<Check>,
+    file_checks: Vec<Check>,
+    types: Vec<Check>,
     namespaces: Vec<Check>,
     locals: bool,
     members: bool,
     member_references: bool,
+    complexity: bool,
 }
 
 impl Enabled {
@@ -77,7 +84,8 @@ impl Enabled {
                     Visit::Class => &mut enabled.classes,
                     Visit::Method => &mut enabled.methods,
                     Visit::Namespace => &mut enabled.namespaces,
-                    Visit::File => continue,
+                    Visit::File => &mut enabled.file_checks,
+                    Visit::Type => &mut enabled.types,
                 };
                 checks.push(check);
             }
@@ -97,6 +105,9 @@ impl Enabled {
         ]
         .iter()
         .any(|name| enabled.severities.contains_key(name));
+        enabled.complexity = complexity::RULES.iter().any(|rule| {
+            rule.visit == Visit::Namespace && enabled.severities.contains_key(rule.name)
+        });
         enabled
     }
 }
@@ -111,7 +122,7 @@ struct Context<'a> {
     source: Source<'a>,
     lines: LineTable,
     enabled: &'a Enabled,
-    language: Language,
+    options: &'a Options,
     names: Names,
     index: Option<&'a crate::index::Index>,
     scope: RuleScope,
@@ -149,109 +160,8 @@ impl Context<'_> {
     }
 }
 
-pub fn run(options: &Options) -> Result<Report, String> {
-    let start = Instant::now();
-    let paths = project::discover(&options.paths, &options.exclude)?;
-    let enabled = Enabled::new(options);
-    let (index, vendor_files) = if [
-        "missing-parent-constructor",
-        "unreachable-catch",
-        "override-attribute",
-    ]
-    .iter()
-    .any(|name| enabled.severities.contains_key(name))
-    {
-        let (index, vendor_files) = index::load(options, &paths)?;
-        (Some(index), vendor_files)
-    } else {
-        (None, 0)
-    };
-    let files = project::parallel_files(&paths, options.workers, |path| {
-        lint_file(path, options, &enabled, index.as_ref())
-    })?;
-    let mut diagnostics: Vec<_> = files.into_iter().flatten().collect();
-    diagnostics.sort();
-    diagnostics.dedup();
-    if let Some(path) = &options.generate_baseline {
-        baseline::write(path, &diagnostics)?;
-    } else if let Some(path) = &options.baseline {
-        baseline::filter(path, &mut diagnostics)?;
-    }
-    Ok(Report {
-        diagnostics,
-        files: paths.len(),
-        vendor_files,
-        elapsed: start.elapsed(),
-    })
-}
-
 pub fn render(report: &Report, format: diagnostic::Format) -> String {
     diagnostic::render_lint(report, format)
-}
-
-fn lint_file(
-    path: &Path,
-    options: &Options,
-    enabled: &Enabled,
-    index: Option<&crate::index::Index>,
-) -> Result<Vec<Diagnostic>, String> {
-    let original = project::read_source(path)?;
-    let file = project::display_path(path);
-    let (_, mut findings) = analyze(&file, &original, options, enabled, index);
-    let mut previous: Option<Vec<u8>> = None;
-    if options.fix != Mode::None {
-        for _ in 0..MAX_FIX_PASSES {
-            let current = previous.as_deref().unwrap_or(&original);
-            let Some(next) = fix::apply(
-                current,
-                options.fix,
-                findings.iter().filter_map(|f| f.fix.as_ref()),
-            ) else {
-                break;
-            };
-            let (valid, next_findings) = analyze(&file, &next, options, enabled, index);
-            if !valid || introduces_findings(&findings, &next_findings) {
-                break;
-            }
-            findings = next_findings;
-            previous = Some(next);
-        }
-    }
-    if let Some(fixed) = previous
-        && fixed != original
-    {
-        if project::read_source(path)? != original {
-            return Err(format!("{file}: source changed while linting"));
-        }
-        std::fs::write(path, fixed).map_err(|error| format!("{file}: {error}"))?;
-    }
-    Ok(findings
-        .into_iter()
-        .map(|finding| finding.diagnostic)
-        .collect())
-}
-
-fn introduces_findings(before: &[Finding], after: &[Finding]) -> bool {
-    let signature = |finding: &Finding| {
-        (
-            finding.diagnostic.identifier.clone(),
-            finding.diagnostic.message.clone(),
-        )
-    };
-    let mut counts = HashMap::new();
-    for finding in before {
-        *counts.entry(signature(finding)).or_insert(0usize) += 1;
-    }
-    after.iter().any(|finding| {
-        let Some(count) = counts.get_mut(&signature(finding)) else {
-            return true;
-        };
-        if *count == 0 {
-            return true;
-        }
-        *count -= 1;
-        false
-    })
 }
 
 fn analyze(
@@ -266,7 +176,7 @@ fn analyze(
         source: Source::new(source),
         lines: LineTable::from_bytes(source),
         enabled,
-        language: options.language,
+        options,
         names: Names::default(),
         index,
         scope: RuleScope::default(),
@@ -279,8 +189,10 @@ fn analyze(
                 || !enabled.blocks.is_empty()
                 || !enabled.classes.is_empty()
                 || !enabled.methods.is_empty()
+                || !enabled.types.is_empty()
                 || !enabled.namespaces.is_empty()
                 || enabled.locals
+                || enabled.complexity
                 || enabled.members
                 || enabled.severities.contains_key("unused-import")
             {
@@ -297,6 +209,9 @@ fn analyze(
                         );
                     }
                 }
+            }
+            for check in &enabled.file_checks {
+                check(&mut context, Node::Block(&program.statements));
             }
             context.filter_suppressions();
             (true, context.findings)
@@ -323,8 +238,12 @@ fn lint_namespace(context: &mut Context<'_>, namespace: String, statements: &[St
     );
     let mut locals = enabled.locals.then(locals::Locals::default);
     let mut members = enabled.members.then(members::Members::default);
+    let mut complexity = enabled.complexity.then(complexity::Counts::default);
     let mut classes = Vec::new();
     traversal::visit(statements, |node, scope| {
+        if let Some(complexity) = &mut complexity {
+            complexity.observe(context, node, scope);
+        }
         if let Some(members) = &mut members {
             if let Node::Class(class) = node {
                 classes.push(class);
@@ -346,6 +265,7 @@ fn lint_namespace(context: &mut Context<'_>, namespace: String, statements: &[St
             Node::Expression(..) => &enabled.expressions,
             Node::Class(_) => &enabled.classes,
             Node::Method(_) => &enabled.methods,
+            Node::Type(_) => &enabled.types,
             _ => return,
         };
         for check in checks {
@@ -353,6 +273,9 @@ fn lint_namespace(context: &mut Context<'_>, namespace: String, statements: &[St
         }
     });
     imports.report(context, statements);
+    if let Some(complexity) = complexity {
+        complexity.report(context);
+    }
     if let Some(locals) = locals {
         locals.report(context);
     }
@@ -396,3 +319,6 @@ impl Context<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod verification;

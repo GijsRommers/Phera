@@ -1375,7 +1375,7 @@ the responsibility of `phera check` (11.1).
 ```text
 phera lint
 phera lint src tests --fix
-phera lint src --fix-unsafe --php 8.6
+phera lint src --fix-unsafe
 phera lint --only style --skip strict-types
 phera lint --rule unused-import --format github
 phera lint --explain unused-import
@@ -1384,8 +1384,8 @@ phera lint --explain unused-import
 `--rule` and `--only` can be repeated to select rules and groups. `--skip`
 excludes a rule from that selection. Output uses the shared text, JSON or
 GitHub annotation renderer. A run returns 1 if findings remain and 2 if it
-cannot run. `--php` selects the syntax and deprecations for a language level
-(6.3). The common baseline format stores stable rule names and messages.
+cannot run. The parser and deprecation rules target PHP 8.5. The common
+baseline format stores stable rule names and messages.
 `[lint].baseline` loads a baseline and `--generate-baseline FILE` records
 the current findings.
 
@@ -1402,6 +1402,20 @@ suspicious = true
 unused-import = "error"
 variable-variables = "warn"
 debug-call = "off"
+
+[lint.style]
+strict_types = true
+
+[lint.naming]
+variables = "snake"
+
+[lint.complexity]
+cyclomatic = 10
+cognitive = 15
+nesting = 4
+function_lines = 80
+class_lines = 500
+parameters = 5
 ```
 
 Syntax diagnostics are on by default. The suspicious, unused and modernize

@@ -1,7 +1,7 @@
 //! Block checks detect `return; echo 1;` without control-flow or type inference.
 
 use super::{Context, Node, condition, variable};
-use crate::lint::{Language, source::is_comment};
+use crate::lint::source::is_comment;
 use phera_ast::{ExpressionKind as Expr, Literal, Statement, StatementKind as Stmt};
 use phera_source::Span;
 
@@ -219,11 +219,11 @@ pub(super) fn return_in_finally(context: &mut Context<'_>, node: Node<'_>) {
         && let Node::Statement(statement) = node
         && matches!(statement.kind, Stmt::Return(_))
     {
-        let message = match context.language {
-            Language::Php85 => "Returning from finally overrides a pending return or exception.",
-            Language::Php86 => "Returning from finally is deprecated in PHP 8.6.",
-        };
-        context.report("return-in-finally", statement.span, message);
+        context.report(
+            "return-in-finally",
+            statement.span,
+            "Returning from finally overrides a pending return or exception.",
+        );
     }
 }
 

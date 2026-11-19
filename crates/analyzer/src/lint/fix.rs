@@ -99,3 +99,27 @@ pub(super) fn apply<'a>(
     output.extend_from_slice(source.get(previous..)?);
     (output != source).then_some(output)
 }
+
+/// Publish a complete, checked candidate and preserve the input file's mode.
+pub(super) fn write(
+    path: &std::path::Path,
+    expected: &[u8],
+    candidate: &[u8],
+) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let directory = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+    temporary.write_all(candidate)?;
+    temporary
+        .as_file()
+        .set_permissions(std::fs::metadata(path)?.permissions())?;
+    if std::fs::read(path)? != expected {
+        return Err(std::io::Error::other("source changed while linting"));
+    }
+    temporary.persist(path)?;
+    Ok(())
+}

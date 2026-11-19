@@ -23,6 +23,7 @@ pub(super) struct Scope<'a> {
     pub class: Option<&'a ClassDeclaration>,
     pub callable: Option<usize>,
     pub finally: bool,
+    pub nesting: usize,
 }
 
 impl<'a> Scope<'a> {
@@ -30,6 +31,7 @@ impl<'a> Scope<'a> {
         Self {
             callable: Some(expression_or_declaration),
             finally: false,
+            nesting: 0,
             ..self
         }
     }
@@ -172,10 +174,26 @@ fn visit_statement<'a>(s: &'a Statement, scope: Scope<'a>, pending: &mut Pending
         }
         _ => {}
     }
+    let body_scope = if matches!(
+        s.kind,
+        StatementKind::If { .. }
+            | StatementKind::While { .. }
+            | StatementKind::DoWhile { .. }
+            | StatementKind::For { .. }
+            | StatementKind::Foreach { .. }
+            | StatementKind::Switch { .. }
+    ) {
+        Scope {
+            nesting: scope.nesting.saturating_add(1),
+            ..scope
+        }
+    } else {
+        scope
+    };
     pending.extend(
         child_blocks(s)
             .into_iter()
-            .map(|body| (Node::Block(body), scope)),
+            .map(|body| (Node::Block(body), body_scope)),
     );
 }
 

@@ -1,4 +1,4 @@
-//! Use `[$item]` and `$value ?? $fallback` in PHP 8.5 and 8.6.
+//! Use `[$item]` and `$value ?? $fallback` in PHP 8.5.
 
 use super::rule;
 use crate::lint::{
