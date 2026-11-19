@@ -15,7 +15,7 @@ use std::rc::Rc;
 const CAPACITY: usize = 4096;
 #[derive(Default)]
 struct Cache {
-    patterns: HashMap<(Vec<u8>, Settings), Rc<Compiled>>,
+    patterns: HashMap<Settings, HashMap<Vec<u8>, Rc<Compiled>>>,
     insertion_order: VecDeque<(Vec<u8>, Settings)>,
 }
 
@@ -42,23 +42,40 @@ pub(crate) fn get(
 
 /// The compiled pattern, or the text of the warning.
 pub(crate) fn lookup(pattern: &[u8], settings: Settings) -> Result<Rc<Compiled>, String> {
-    let key = (pattern.to_vec(), settings);
-    let cached = CACHE.with(|cache| cache.borrow().patterns.get(&key).cloned());
+    let cached = CACHE.with(|cache| {
+        cache
+            .borrow()
+            .patterns
+            .get(&settings)?
+            .get(pattern)
+            .cloned()
+    });
     if let Some(compiled) = cached {
         return Ok(compiled);
     }
     let compiled = Rc::new(compile::compile(pattern, settings)?);
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if cache.patterns.len() == CAPACITY {
+        if cache.insertion_order.len() == CAPACITY {
             for _ in 0..CAPACITY / 8 {
-                if let Some(key) = cache.insertion_order.pop_front() {
-                    cache.patterns.remove(&key);
+                if let Some((key, settings)) = cache.insertion_order.pop_front()
+                    && let Some(patterns) = cache.patterns.get_mut(&settings)
+                {
+                    patterns.remove(&key);
+                    if patterns.is_empty() {
+                        cache.patterns.remove(&settings);
+                    }
                 }
             }
         }
-        cache.insertion_order.push_back(key.clone());
-        cache.patterns.insert(key, compiled.clone());
+        cache
+            .insertion_order
+            .push_back((pattern.to_vec(), settings));
+        cache
+            .patterns
+            .entry(settings)
+            .or_default()
+            .insert(pattern.to_vec(), compiled.clone());
     });
     Ok(compiled)
 }
@@ -78,7 +95,7 @@ mod tests {
         for index in 0..CAPACITY {
             lookup(format!("/entry{index}/").as_bytes(), Settings::default()).unwrap();
         }
-        CACHE.with(|cache| assert!(cache.borrow().patterns.len() <= CAPACITY));
+        CACHE.with(|cache| assert!(cache.borrow().insertion_order.len() <= CAPACITY));
         assert!(plain.regex.is_match(b"a").unwrap());
     }
 }

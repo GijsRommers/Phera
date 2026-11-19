@@ -123,7 +123,11 @@ fn definition(line: &'static str) -> Option<IniDefinition> {
     } else if encoded == "=" {
         Some(Vec::new())
     } else {
-        let bytes = encoded.as_bytes().chunks_exact(2).map(|pair| {
+        let (pairs, remainder) = encoded.as_bytes().as_chunks::<2>();
+        if !remainder.is_empty() {
+            return None;
+        }
+        let bytes = pairs.iter().map(|pair| {
             let text = std::str::from_utf8(pair).ok()?;
             u8::from_str_radix(text, 16).ok()
         });
@@ -154,16 +158,14 @@ pub fn integer(bytes: &[u8]) -> i64 {
         Some((b'+', tail)) => (false, tail),
         _ => (false, bytes),
     };
-    let value =
-        digits
-            .iter()
-            .take_while(|byte| byte.is_ascii_digit())
-            .fold(0_i64, |value, digit| {
-                let digit = i64::from(digit - b'0');
-                let digit = if negative { -digit } else { digit };
-                value.saturating_mul(10).saturating_add(digit)
-            });
-    value
+    digits
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .fold(0_i64, |value, digit| {
+            let digit = i64::from(digit - b'0');
+            let digit = if negative { -digit } else { digit };
+            value.saturating_mul(10).saturating_add(digit)
+        })
 }
 
 /// Resolve an explicit encoding override and then the request's default charset.
