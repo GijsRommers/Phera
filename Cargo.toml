@@ -89,6 +89,19 @@ chacha20poly1305 = "0.11"
 ctr = "0.10"
 ecb = "0.2"
 ofb = "0.7"
+rsa = { version = "0.10", features = ["pkcs1v15"] }
+p256 = { version = "0.14", features = ["ecdh"] }
+p384 = { version = "0.14", features = ["ecdh"] }
+p521 = { version = "0.14", features = ["ecdh"] }
+ed25519-dalek = { version = "3", features = ["pem"] }
+x25519-dalek = { version = "3", features = ["static_secrets"] }
+pkcs8 = { version = "0.11", features = ["pem", "encryption", "sha1-insecure", "3des"] }
+sec1 = "0.8"
+
+sha1-rsa = { package = "sha1", version = "0.11", features = ["oid"] }
+md5-rsa = { package = "md-5", version = "0.11", features = ["oid"] }
+sha3-rsa = { package = "sha3", version = "0.11", features = ["oid"] }
+ripemd-rsa = { package = "ripemd", version = "0.2", features = ["oid"] }
 pbkdf2 = "0.12"
 digest = "0.10"
 md2 = "0.10"

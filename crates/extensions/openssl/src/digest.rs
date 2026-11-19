@@ -130,12 +130,10 @@ const ALGORITHMS: &[(&str, Algorithm, &[&str])] = &[
 
 impl Algorithm {
     pub(crate) fn resolve(context: &mut dyn Context, function: &str, bytes: &[u8]) -> Option<Self> {
-        let name = c_name(bytes).unwrap_or_default();
-        for (canonical, algorithm, aliases) in ALGORITHMS {
-            if name == *canonical || aliases.iter().any(|alias| name.eq_ignore_ascii_case(alias)) {
-                return Some(*algorithm);
-            }
+        if let Some(algorithm) = Self::lookup(bytes) {
+            return Some(algorithm);
         }
+        let name = c_name(bytes).unwrap_or_default();
         match name.as_str() {
             "md2"
             | "md4"
@@ -164,6 +162,16 @@ impl Algorithm {
             _ => context.warning(format!("{function}(): Unknown digest algorithm")),
         }
         None
+    }
+
+    pub(crate) fn lookup(bytes: &[u8]) -> Option<Self> {
+        let name = c_name(bytes)?;
+        ALGORITHMS
+            .iter()
+            .find_map(|(canonical, algorithm, aliases)| {
+                (name == *canonical || aliases.iter().any(|alias| name.eq_ignore_ascii_case(alias)))
+                    .then_some(*algorithm)
+            })
     }
 
     pub(crate) fn hash(self, data: &[u8]) -> Vec<u8> {
