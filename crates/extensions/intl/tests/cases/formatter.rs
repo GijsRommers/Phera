@@ -1,8 +1,11 @@
 //! Format with the PHP objects across locales and check number and date parsing.
 
-use crate::matrix::Matrix;
-use phera_extension_api::Value;
-use phera_extension_api::testing::oracle;
+use std::{any::Any, rc::Rc};
+
+use crate::matrix::{Matrix, registry};
+use phera_extension_api::testing::{TestContext, call_method, instantiate, oracle};
+use phera_extension_api::{Object, Value};
+use phera_value::ClassHandle;
 
 const LOCALES: &[(&str, &str)] = &[
     ("en_US", "USD"),
@@ -76,6 +79,71 @@ fn core_date_formats() {
         }
     }
     matrix.compare("intl-core-date-formats");
+}
+
+#[test]
+fn format_gregorian_calendar_object() {
+    // The VM links class ancestry. Native test objects carry only their class name.
+    struct GregorianCalendar;
+
+    impl ClassHandle for GregorianCalendar {
+        fn name(&self) -> &str {
+            "IntlGregorianCalendar"
+        }
+
+        fn is_instance_of(&self, name: &str) -> bool {
+            name.eq_ignore_ascii_case(self.name()) || name.eq_ignore_ascii_case("IntlCalendar")
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    let name = "intl-format-gregorian-calendar-object";
+    let script = format!(
+        "<?php\n{}\n{}",
+        oracle::PHP_PREAMBLE,
+        r#"run('0', function () {
+            $calendar = new IntlGregorianCalendar('Europe/Brussels', 'nl_BE');
+            $calendar->setTime(1724727600000.0);
+            return IntlDateFormatter::formatObject($calendar, 'yyyy-MM-dd HH:mm', 'nl_BE');
+        });"#
+    );
+    let registry = registry();
+    let mut context = TestContext::default();
+    let calendar = Rc::new(Object::new(1, Rc::new(GregorianCalendar)));
+    call_method(
+        &registry,
+        &mut context,
+        &calendar,
+        "__construct",
+        vec![Value::from("Europe/Brussels"), Value::from("nl_BE")],
+    )
+    .unwrap();
+    call_method(
+        &registry,
+        &mut context,
+        &calendar,
+        "setTime",
+        vec![Value::Float(1_724_727_600_000.0)],
+    )
+    .unwrap();
+    let formatter = instantiate(&registry, "IntlDateFormatter").unwrap();
+    let result = call_method(
+        &registry,
+        &mut context,
+        &formatter,
+        "formatObject",
+        vec![
+            Value::Object(calendar),
+            Value::from("yyyy-MM-dd HH:mm"),
+            Value::from("nl_BE"),
+        ],
+    );
+    let php = oracle::run_php(name, &script).expect("PHP 8.5 with intl required");
+    let rust = oracle::encode_case("0", &result, &context.output, &context.diagnostics);
+    oracle::compare(name, &[], &php, &[rust]);
 }
 
 #[test]

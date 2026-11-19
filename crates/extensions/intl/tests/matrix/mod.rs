@@ -8,6 +8,16 @@ use phera_ext_intl::Intl;
 use phera_extension_api::testing::{TestContext, call, call_method, instantiate, oracle};
 use phera_extension_api::{ArrayKey, ClassEntry, PhpArray, Registry, Value};
 
+pub fn registry() -> Registry {
+    let mut registry = Registry::new();
+    registry.class(ClassEntry::class("Exception"));
+    for interface in ["Iterator", "IteratorAggregate", "Countable"] {
+        registry.class(ClassEntry::interface(interface));
+    }
+    registry.load(&Intl);
+    registry
+}
+
 pub struct Matrix {
     registry: Registry,
     script: String,
@@ -17,16 +27,9 @@ pub struct Matrix {
 
 impl Matrix {
     pub fn new() -> Self {
-        let mut registry = Registry::new();
-        registry.class(ClassEntry::class("Exception"));
-        for interface in ["Iterator", "IteratorAggregate", "Countable"] {
-            registry.class(ClassEntry::interface(interface));
-        }
-
-        registry.load(&Intl);
         let script = format!("<?php\n{}\n", oracle::PHP_PREAMBLE);
         Self {
-            registry,
+            registry: registry(),
             script,
             labels: Vec::new(),
             results: Vec::new(),

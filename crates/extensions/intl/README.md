@@ -63,12 +63,15 @@ reads files asynchronously. The implementation follows the
 | Explicit date patterns using `ss.SSS` in `fr_FR`, `nl_BE` and `ar_EG` | 49 | 49 | Fixed. PHP keeps the literal dot between seconds and milliseconds. |
 | `INTL_ICU_VERSION` and `INTL_ICU_DATA_VERSION` | 49 (`79.1` for both PHP constants) | 49 (`2.4.0` and `49`) | Accepted. Phera reports the ICU4X backend and compiled CLDR release. The PHP eligibility sweep covers ICU-version-gated fixtures on this host. |
 | `IntlTimeZone::getIDForWindowsID` with India or an absent Pacific region override | 49 | 49 | Fixed. Resolve through the world region and return ICU's legacy `Asia/Calcutta` alias. |
+| `DECIMAL_COMPACT_SHORT` for legacy `en_UK` | 49 | 49 | Open. PHP renders `1.2M` and Phera resolves the legacy region alias and renders `1.2m`. |
+| Full date and time style with `en_US@calendar=hebrew` | 49 | 49 | Open. Traditional calendars currently use medium fields and omit the full weekday and time-zone fields. |
 
 ## Validation on macOS
 
-PHP 8.5.12 with ICU4C 79.1 matched all 8,863 focused comparisons. The 8,646
-Stage 1 calls include 675 display names and 750 number and date formats over
-the 15 core locales. The 217 Stage 2 calls cover collation, transliteration,
+PHP 8.5.12 with ICU4C 79.1 matched all 8,864 focused comparisons. The 8,647
+Stage 1 calls include 675 display names, 750 number and date formats over
+the 15 core locales, and a Gregorian calendar object. The 217 Stage 2 calls
+cover collation, transliteration,
 MessageFormat, time-zone identifiers and character operations.
 The three comparisons for negative offsets below `INT32_MIN` are tagged with
 PHP 8.5.13. PHP 8.5.12 truncated those offsets before parsing.
@@ -143,10 +146,13 @@ components. The macOS arm64 CLI measured 33,940,832 bytes before intl,
 build would require exporting and maintaining a separate data bundle. Its
 size remains unmeasured.
 
-Each loop timed 100,000 calls with the formatter reused. These are median
-wall times from three runs on this Mac for the Stage 2 release checkpoint.
+Each loop made 100,000 calls with the formatter reused. These are median
+process counters from three runs on macOS arm64 at the Stage 2 checkpoint.
+The process counters include startup and the loop. CPU time is user plus
+system time. Each currency run produced 1,300,000 bytes and each date run
+produced 2,100,000 bytes on both runtimes.
 
-| Operation | PHP 8.5.12 | Phera release | Output bytes per run |
-| --- | ---: | ---: | ---: |
-| `NumberFormatter::formatCurrency` | 0.923 s | 2.775 s | 1,300,000 |
-| `IntlDateFormatter::format` | 2.778 s | 1.064 s | 2,100,000 |
+| Operation | PHP instructions / cycles / CPU | Phera instructions / cycles / CPU |
+| --- | ---: | ---: |
+| `NumberFormatter::formatCurrency` | 1,591 M / 388 M / 0.10 s | 3,021 M / 718 M / 0.21 s |
+| `IntlDateFormatter::format` | 3,342 M / 765 M / 0.22 s | 1,231 M / 303 M / 0.08 s |
