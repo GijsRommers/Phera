@@ -296,6 +296,24 @@ pub(crate) fn ancestor_names(
 }
 
 impl Class {
+    /// `Service::$instance = new Service` points back to this class.
+    pub(super) fn release_values(&self) {
+        for property in &self.static_properties {
+            if let Some(storage) = &property.static_storage {
+                storage.release_value();
+            }
+        }
+        for constant in self.constants.values() {
+            if let ConstantInitializer::Compiled { state, .. } = &constant.initializer {
+                let previous = state
+                    .try_borrow_mut()
+                    .ok()
+                    .map(|mut state| std::mem::replace(&mut *state, ConstantState::Uninitialized));
+                drop(previous);
+            }
+        }
+    }
+
     /// Avoid repeated lowercase allocation for names from compiled type declarations.
     pub(crate) fn matches_declaration(&self, name: &str) -> bool {
         if self.name.eq_ignore_ascii_case(name) {

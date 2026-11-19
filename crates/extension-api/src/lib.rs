@@ -11,6 +11,7 @@ mod error;
 mod function;
 mod object_handlers;
 mod registry;
+mod request_references;
 pub mod serialization;
 mod state;
 pub mod testing;

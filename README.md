@@ -54,6 +54,9 @@ each request during development, or `-d opcache.validate_timestamps=0` to keep
 cached code until the server restarts. `opcache.revalidate_path=1` checks the
 include search path on each lookup.
 
+Request teardown releases circular arrays and objects held by their class's
+static properties or cached constant values.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
