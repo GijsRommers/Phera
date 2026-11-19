@@ -131,9 +131,10 @@ impl Machine<'_> {
     /// The loop itself. Simple instructions run in [`Machine::run_simple`];
     /// this loop takes the others and switches frames on calls and returns.
     fn run(&mut self) -> LoopExit {
-        let Some(frame) = self.stack.current().copied() else {
+        let [.., frame] = self.stack.frames() else {
             return LoopExit::Invalid;
         };
+        let frame = *frame;
         let mut position = Position {
             frame,
             ip: frame.ip(),

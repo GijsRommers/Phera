@@ -52,16 +52,17 @@ impl Machine<'_> {
             return Step::Slow;
         }
         let arguments = self.registers.window(from, count);
-        for (index, argument) in arguments.iter().enumerate() {
+        let mut typed = facts.typed_parameters();
+        for (argument, mask) in arguments.iter().zip(facts.parameter_masks.iter()) {
             let Some(value) = argument else {
                 return Step::Slow;
             };
             if value.is_reference()
-                || (facts.is_typed(index)
-                    && !facts.parameter_masks[index].intersects(crate::types::own_type(value)))
+                || (typed & 1 != 0 && !mask.intersects(crate::types::own_type(value)))
             {
                 return Step::Slow;
             }
+            typed >>= 1;
         }
         self.registers.grow_to(base + size);
         for index in 0..count {
