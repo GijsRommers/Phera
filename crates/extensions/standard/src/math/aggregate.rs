@@ -1,7 +1,9 @@
 //! `array_sum` and `array_product`, which use PHP's `+` and `*`.
 
 use phera_extension_api::value::{add, mul};
-use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value};
+use phera_extension_api::{
+    Context, FunctionEntry, NativeBinaryOp, NativeResult, Param, ParamType, Value,
+};
 
 use crate::arguments::required_array;
 
@@ -14,6 +16,15 @@ enum Operation {
 impl Operation {
     /// Reuse scalar operators so coercion warnings match ordinary PHP arithmetic.
     fn apply(self, context: &mut dyn Context, left: &Value, right: &Value) -> NativeResult {
+        let operator = match self {
+            Self::Sum => NativeBinaryOp::Add,
+            Self::Product => NativeBinaryOp::Multiply,
+        };
+        if (left.is_object() || right.is_object())
+            && let Some(value) = context.native_binary(operator, left, right)?
+        {
+            return Ok(value);
+        }
         Ok(match self {
             Self::Sum => add(left, right, context.diagnostics())?,
             Self::Product => mul(left, right, context.diagnostics())?,

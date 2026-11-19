@@ -1,6 +1,5 @@
 //! Native GMP signatures and conversion entry points.
 
-use num_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::Signed;
 use phera_extension_api::{
@@ -10,10 +9,11 @@ use phera_extension_api::{
 use crate::{
     BASE, GMP_NUMBER,
     arithmetic::{self, Division},
-    binary_io, bits,
-    integer::{self, Argument},
-    number_theory, object, random,
+    binary_io, bits, number_theory, random,
 };
+
+mod conversion;
+use conversion::{compare, init, intval, sign, strval};
 
 const NUM: Param = Param::new("num", GMP_NUMBER);
 const ONE: &[Param] = &[NUM];
@@ -346,37 +346,3 @@ pub(crate) const FUNCTIONS: &[(FunctionEntry, &str)] = &[
         "int",
     ),
 ];
-
-fn init(context: &mut dyn Context, values: &[Value]) -> NativeResult {
-    let number = Argument("gmp_init", 1, "num")
-        .init(args::value(values, 0), args::int(values, 1).unwrap_or(0))?;
-    object::create(context, number)
-}
-
-fn intval(_: &mut dyn Context, values: &[Value]) -> NativeResult {
-    Ok(Value::Int(integer::to_int(&integer::unary(
-        "gmp_intval",
-        values,
-    )?)))
-}
-
-fn strval(_: &mut dyn Context, values: &[Value]) -> NativeResult {
-    let number = integer::unary("gmp_strval", values)?;
-    let base = args::int(values, 1).unwrap_or(10);
-    if !(2..=62).contains(&base) && !(-36..=-2).contains(&base) {
-        return Err(Argument("gmp_strval", 2, "base")
-            .value_error("must be between 2 and 62, or -2 and -36"));
-    }
-    Ok(Value::from(integer::render(&number, base)))
-}
-
-fn compare(_: &mut dyn Context, values: &[Value]) -> NativeResult {
-    let (left, right) = integer::pair("gmp_cmp", values)?;
-    Ok(Value::Int(left.cmp(&right) as i64))
-}
-
-fn sign(_: &mut dyn Context, values: &[Value]) -> NativeResult {
-    Ok(Value::Int(
-        integer::unary("gmp_sign", values)?.cmp(&BigInt::ZERO) as i64,
-    ))
-}
