@@ -3,10 +3,12 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::{LocalFuture, NativeError, PropertyView, Unwind};
+use phera_extension_api::{LocalFuture, NativeError, PropertyView};
 use phera_value::{Object, Value};
 
 use crate::Vm;
+
+const INVALID_RESULT: &str = "__debuginfo() must return an array";
 
 impl Vm {
     pub(crate) fn has_debug_info(&self, object: &Object) -> bool {
@@ -53,10 +55,17 @@ impl Vm {
                 boundary: self.call_stack.depth(),
                 native: crate::error_traces::NativeCaller::Saved(native),
             });
-        let result = self.invoke_magic_method(method, class, object, []).await;
+        let result = self
+            .invoke_magic_method(method, class, object, [])
+            .await
+            .map(|value| value.deref().clone());
+        let result = match result {
+            Ok(Value::Array(_) | Value::Null) | Err(_) => result,
+            Ok(_) => Err(self.fatal_error(1, INVALID_RESULT, self.location())),
+        };
         self.native_callback_sites.pop();
         self.debug_objects.pop();
-        match result.map(|value| value.deref().clone()) {
+        match result {
             Ok(Value::Array(properties)) => Ok(PropertyView::DebugInfo(properties)),
             Ok(Value::Null) => Err(NativeError::error(format!(
                 "Returning null from {qualified} is not supported by Phera: deprecated since PHP 8.5, return an empty array instead"
@@ -83,18 +92,11 @@ impl Vm {
                 } else {
                     return Err(error);
                 }
-                Err(self.invalid_debug_info())
+                Err(self.fatal_during_exception(INVALID_RESULT))
             }
-            _ => Err(self.invalid_debug_info()),
+            Ok(_) => Err(internal_error!(
+                "unexpected debug info result after validation"
+            )),
         }
-    }
-
-    fn invalid_debug_info(&self) -> NativeError {
-        let location = self.location();
-        NativeError::Unwind(Unwind(Box::new(crate::error_traces::DeclarationFailure {
-            message: "__debuginfo() must return an array".into(),
-            file: location.file,
-            line: location.line,
-        })))
     }
 }

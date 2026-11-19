@@ -97,11 +97,16 @@ impl Vm {
         stop: usize,
         work: &mut usize,
     ) -> Result<BatchExit, NativeError> {
-        if self.generator_releases.is_some() {
+        let exit = if self.generator_releases.is_some() {
             self.run_batch_loop::<true>(stop, work)
         } else {
             self.run_batch_loop::<false>(stop, work)
+        }?;
+        if matches!(exit, BatchExit::Yield) || *work >= YIELD_AFTER_STEPS {
+            *work = 0;
+            self.check_execution_time()?;
         }
+        Ok(exit)
     }
 
     #[inline(never)]
@@ -171,6 +176,7 @@ impl Machine<'_> {
                     self.publish(position.ip);
                     return LoopExit::Slow(instruction);
                 }
+                Step::Yield => return LoopExit::Yield,
             }
         }
     }
@@ -333,4 +339,6 @@ pub(super) enum Step {
     Switched(Position),
     /// Needs the VM.
     Slow,
+    /// A call spent the rest of the budget and published the next frame.
+    Yield,
 }

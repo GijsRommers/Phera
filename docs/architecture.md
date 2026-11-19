@@ -167,7 +167,7 @@ change:
 | Pause between two pieces of a request body | 30 s | a timer on each read; 408 and the connection is closed | yes |
 | Size of a request body (`post_max_size`) | 8 MiB | while reading; 413 beyond it | yes |
 | Open connections per worker | 10,000 | a worker takes a free slot before it accepts; beyond the limit, connections wait in the operating system's queue | yes |
-| Running time of a script (`max_execution_time`, `set_time_limit()`) | 30 s under `serve`, none on the command line | at the interpreter's hand-over points (every 65,536 loop rounds or calls), which already exist; the check is one clock read there, and the request ends with PHP's "Maximum execution time of N seconds exceeded" | no |
+| Running time of a script (`max_execution_time`, `set_time_limit()`) | 30 s under `serve`, none on the command line | the interpreter samples the request's CPU time at handoffs after 65,536 loop rounds or calls. Time spent suspended for I/O is excluded. A timeout ends the script with PHP's fatal diagnostic. | yes |
 | Memory of one request (`memory_limit`) | 128 MiB | to be decided | no |
 | Buffered response | 64 KiB, then it streams | output is handed to the connection in chunks once the buffer passes the threshold, and the script waits while the client is slow (so a slow reader costs a suspended task, not memory) | no; static files are sent in pieces already |
 

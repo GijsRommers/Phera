@@ -33,7 +33,6 @@ engine behavior. A directive is visible only when its owning module is loaded.
 - `error_prepend_string`
 - `expose_php`
 - `extension_dir`
-- `fatal_error_backtraces`
 - `filter.default`
 - `filter.default_flags`
 - `from`
@@ -56,7 +55,6 @@ engine behavior. A directive is visible only when its owning module is loaded.
 - `mail.force_extra_parameters`
 - `mail.log`
 - `mail.mixed_lf_and_crlf`
-- `max_execution_time`
 - `max_input_nesting_level`
 - `max_input_time`
 - `max_memory_limit`

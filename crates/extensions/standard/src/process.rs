@@ -57,9 +57,7 @@ fn get_cfg_var(_: &mut dyn Context, _: &[Value]) -> NativeResult {
     Ok(Value::Bool(false))
 }
 
-/// `set_time_limit(int $seconds): bool`. Accepted and without effect: how
-/// long a request may run is decided by the server (`--request-timeout`),
-/// and a script on the command line has no limit, as in PHP.
+/// `set_time_limit(int $seconds): bool` restarts the request's execution clock.
 const SET_TIME_LIMIT: FunctionEntry = FunctionEntry::sync(
     "set_time_limit",
     &[Param::new("seconds", ParamType::Int)],

@@ -153,11 +153,14 @@ impl Context for Vm {
         self.error_handlers
             .last_error
             .as_ref()
-            .map_or(Value::Null, crate::last_error::LastError::to_value)
+            .map_or(Value::Null, |error| {
+                error.to_value(self.error_handlers.fatal_trace.as_ref())
+            })
     }
 
     fn clear_last_error(&mut self) {
         self.error_handlers.last_error = None;
+        self.error_handlers.fatal_trace = None;
     }
 
     fn named_constant(&mut self, name: &str) -> Option<Value> {
@@ -408,6 +411,7 @@ impl Context for Vm {
         {
             self.enqueue_diagnostic(event);
         } else {
+            self.error_handlers.fatal_trace = None;
             self.report_event(event);
         }
     }

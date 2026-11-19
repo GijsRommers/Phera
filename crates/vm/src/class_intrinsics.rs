@@ -102,7 +102,12 @@ impl Vm {
             }
             Operation::ClassAlias => {
                 return self
-                    .class_alias(&string(&value), &string(&arguments[1]), option(2, true))
+                    .class_alias(
+                        &string(&value),
+                        &string(&arguments[1]),
+                        option(2, true),
+                        &arguments,
+                    )
                     .await;
             }
             _ => {}

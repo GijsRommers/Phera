@@ -47,6 +47,7 @@ mod closure_tests;
 mod closure_types;
 mod closures;
 mod code_table;
+mod compile_failures;
 mod constant_listings;
 mod constant_table;
 mod constants;
@@ -73,6 +74,7 @@ mod exception_tests;
 mod exception_traces;
 mod exception_unwind;
 mod exceptions;
+mod execution_time;
 mod extract;
 mod fast;
 mod fibers;
@@ -152,6 +154,7 @@ mod static_variables;
 mod string_comparison;
 mod string_offsets;
 mod stringable;
+mod timeout_shutdown;
 mod traversable_foreach;
 mod traversable_unpack;
 mod traversal;
@@ -164,7 +167,16 @@ mod unsupported_items;
 
 /// Resolves PHP includes through the embedding runtime code cache.
 pub trait CodeLoader: Send + Sync {
-    fn load(&self, path: std::path::PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, String>>;
+    fn load(
+        &self,
+        path: std::path::PathBuf,
+    ) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>>;
+}
+
+/// PHP retries missing include paths, while compilation errors abort that lookup.
+pub enum CodeLoadError {
+    Unavailable(String),
+    Compile(phera_compiler::CompileError),
 }
 
 /// Receives each PHP output write while Vm also retains its output buffer.
@@ -239,6 +251,8 @@ pub struct Vm {
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
     ini_overrides: ini::IniOverrides,
+    execution_time: Rc<execution_time::ExecutionTime>,
+    timed_out_objects: Option<Vec<std::rc::Weak<phera_value::Object>>>,
     active_fiber: Option<Box<fibers::Active>>,
     fiber_bailout: bool,
     suspended_fibers: fibers::SuspendedFibers,
@@ -262,6 +276,8 @@ impl Vm {
             classes: classes::ClassTable::new(native.classes.clone()),
             autoload: Default::default(),
             ini_overrides: Default::default(),
+            execution_time: Default::default(),
+            timed_out_objects: None,
             active_fiber: None,
             fiber_bailout: false,
             suspended_fibers: Default::default(),
@@ -350,6 +366,13 @@ impl Vm {
 
     /// Run a compiled top-level function on the request heap stack and report its exit status.
     pub async fn run(&mut self, unit: Arc<CompiledUnit>) -> i32 {
+        self.execution_time
+            .clone()
+            .track(self.run_request(unit))
+            .await
+    }
+
+    async fn run_request(&mut self, unit: Arc<CompiledUnit>) -> i32 {
         let main = self.code.load(&unit);
         for id in &unit.hoisted {
             if let Some(function) = unit.functions.get(id.index()) {
@@ -385,6 +408,9 @@ impl Vm {
             self.unwind(error);
         }
         self.run_shutdown_callbacks().await;
+        if let Some(before) = self.timed_out_objects.take() {
+            self.destroy_objects_after_timeout(before).await;
+        }
         if !self.suspended_fibers.is_empty() {
             Box::pin(self.close_fibers()).await;
         }

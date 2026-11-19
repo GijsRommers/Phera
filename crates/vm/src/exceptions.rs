@@ -183,6 +183,24 @@ impl Vm {
     pub(crate) fn materialize_error(&mut self, error: NativeError) -> NativeError {
         let (class, message, code, properties) = match error.into_exception_parts() {
             Ok(parts) => parts,
+            Err(NativeError::Unwind(payload))
+                if payload.0.is::<crate::error_traces::DeclarationFailure>() =>
+            {
+                let Ok(failure) = payload
+                    .0
+                    .downcast::<crate::error_traces::DeclarationFailure>()
+                else {
+                    return internal_error!("declaration diagnostic payload");
+                };
+                return self.fatal_error(
+                    64,
+                    failure.message,
+                    crate::diagnostics::SourceLocation {
+                        file: failure.file,
+                        line: failure.line,
+                    },
+                );
+            }
             Err(error) => {
                 if matches!(&error, NativeError::Unwind(payload) if payload.0.is::<Thrown>()) {
                     self.failed_native = None;

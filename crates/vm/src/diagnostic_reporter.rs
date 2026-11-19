@@ -74,6 +74,7 @@ impl DiagnosticReporter {
         message: &[u8],
         file: &str,
         line: usize,
+        trace: Option<&str>,
     ) -> Option<Vec<u8>> {
         if !self.is_visible() && kind != "Fatal error" {
             return None;
@@ -81,6 +82,11 @@ impl DiagnosticReporter {
         let mut bytes = format!("\n{kind}: ").into_bytes();
         bytes.extend_from_slice(message);
         bytes.extend_from_slice(format!(" in {file} on line {line}\n").as_bytes());
+        if let Some(trace) = trace {
+            bytes.extend_from_slice(b"Stack trace:\n");
+            bytes.extend_from_slice(trace.as_bytes());
+            bytes.push(b'\n');
+        }
         if let Some(capture) = &mut self.diagnostic_capture {
             capture.push(bytes);
             None

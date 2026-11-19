@@ -189,7 +189,7 @@ impl Vm {
             ));
         }
         if self.constants.contains_key(&name) {
-            self.warn(format!("Constant {name} already defined"));
+            self.warn_duplicate_constant(&name);
             return Ok(Value::Bool(false));
         }
         let origin = self

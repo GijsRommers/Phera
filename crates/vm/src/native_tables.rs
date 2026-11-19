@@ -31,11 +31,13 @@ impl NativeTables {
 impl crate::Vm {
     /// A detached fiber stack starts with the same immutable definitions as its caller.
     pub(crate) fn new_fiber_stack(&self) -> Self {
-        Self::with_native_tables(&NativeTables {
+        let mut child = Self::with_native_tables(&NativeTables {
             registry: self.registry.clone(),
             classes: self.classes.native_definitions(),
             constants: self.constants.native_definitions(),
-        })
+        });
+        child.execution_time = self.execution_time.clone();
+        child
     }
 }
 

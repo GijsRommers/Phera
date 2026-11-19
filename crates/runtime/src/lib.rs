@@ -26,7 +26,7 @@ use phera_ext_http::{RequestHeaders, ResponseHead, Sapi, UploadedFiles};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
 use phera_extension_api::{LocalFuture, Registry};
 use phera_value::{PhpArray, Value};
-use phera_vm::{CodeLoader, NativeTables, Vm};
+use phera_vm::{CodeLoadError, CodeLoader, NativeTables, Vm};
 
 use cache::{CodeCache, FileMode};
 
@@ -41,6 +41,7 @@ pub struct Runtime {
     cache: CodeCache,
     cli_cache: CodeCache,
     environment: Arc<Environment>,
+    startup_ini: Arc<[(String, String)]>,
 }
 
 /// A web worker links the process's native definitions once on its own thread.
@@ -125,7 +126,14 @@ impl Runtime {
             cache: CodeCache::default(),
             cli_cache: CodeCache::default(),
             environment: Arc::new(environment),
+            startup_ini: Arc::new([]),
         }
+    }
+
+    /// Settings supplied by the host before each request begins.
+    pub fn with_startup_ini(mut self, settings: Vec<(String, String)>) -> Self {
+        self.startup_ini = settings.into();
+        self
     }
 
     /// Compiles a file, or returns it from the cache.
@@ -216,6 +224,13 @@ impl Runtime {
             Err(RuntimeError::Read { .. }) => {
                 return HttpResponse::plain(404, "File not found.\n");
             }
+            Err(RuntimeError::Compile(error)) => {
+                let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
+                vm.report_entry_compile_failure(error);
+                let mut response = HttpResponse::plain(500, "");
+                response.body = vm.output;
+                return response;
+            }
             Err(error) => return HttpResponse::plain(500, error.to_string()),
         };
 
@@ -247,7 +262,7 @@ impl Runtime {
                 .header("Content-Type")
                 .is_some_and(|content_type| !http::is_multipart(content_type));
         *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders(request.headers);
-        vm.prepare_web_headers_with(ResponseHead::prepare);
+        vm.prepare_web_headers_with(ResponseHead::prepare, ResponseHead::set_error_status);
         *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);
         phera_ext_streams::set_request(
             vm.state_mut(),
@@ -272,7 +287,7 @@ impl Runtime {
         };
         // An uncaught error is a server error, unless the script had already
         // chosen a status of its own.
-        if exit_status == 255 && response.status == 200 {
+        if exit_status == 255 && response.status == 200 && !vm.timed_out() {
             response.status = 500;
         }
         response
@@ -307,6 +322,13 @@ impl Runtime {
         )
     }
 
+    /// Render compilation failure with the CLI request's startup settings.
+    pub fn cli_compile_output(&self, error: phera_compiler::CompileError) -> Vec<u8> {
+        let mut vm = self.new_cli_vm();
+        vm.report_entry_compile_failure(error);
+        vm.output
+    }
+
     fn inherited_environment(&self) -> Rc<PhpArray> {
         Rc::new(php_array(self.environment.iter()))
     }
@@ -314,6 +336,12 @@ impl Runtime {
     fn new_vm(&self, native: &NativeTables, sapi: Sapi, environment: Rc<PhpArray>) -> Vm {
         let mut vm = Vm::with_native_tables(native);
         *vm.state_mut().get_or_default::<Sapi>() = sapi;
+        if matches!(sapi, Sapi::Web) {
+            vm.use_web_execution_time();
+        }
+        for (name, value) in self.startup_ini.iter() {
+            vm.set_startup_ini(name, value);
+        }
         // A script's writes copy the inherited array before changing it.
         vm.set_global("_ENV", Value::Array(environment));
         *vm.state_mut().get_or_default::<RequestEnvironment>() =
@@ -344,12 +372,15 @@ struct FileLoader {
 }
 
 impl CodeLoader for FileLoader {
-    fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, String>> {
+    fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
         Box::pin(async move {
             self.runtime
                 .load_file(&path, self.mode)
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| match error {
+                    RuntimeError::Compile(error) => CodeLoadError::Compile(error),
+                    error => CodeLoadError::Unavailable(error.to_string()),
+                })
         })
     }
 }
