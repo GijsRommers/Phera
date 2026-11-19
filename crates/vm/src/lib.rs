@@ -3,7 +3,7 @@
 use std::{rc::Rc, sync::Arc};
 
 use phera_bytecode::{CompiledUnit, Reg};
-use phera_extension_api::{LocalFuture, Registry, RequestState};
+use phera_extension_api::{Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
 pub use native_tables::NativeTables;
