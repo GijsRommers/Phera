@@ -7,7 +7,7 @@ use phera_extension_api::{
 };
 
 fn bytes(hexadecimal: &str) -> Value {
-    Value::from(hex::decode(hexadecimal).unwrap())
+    Value::from(base16ct::mixed::decode_vec(hexadecimal).unwrap())
 }
 
 fn invoke(registry: &Registry, name: &str, args: Vec<Value>) -> Value {

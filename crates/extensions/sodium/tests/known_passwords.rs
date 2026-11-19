@@ -21,14 +21,14 @@ async fn libsodium_known_password_hashes() {
     registry.class(ClassEntry::class("Exception"));
     registry.load(&Sodium);
     // pwhash_argon2i.c / pwhash_argon2id.c, first deterministic fixture.
-    let password = hex::decode(concat!(
+    let password = base16ct::mixed::decode_vec(concat!(
         "a347ae92bce9f80f6f595a4480fc9c2fe7e7d7148d371e9487d75f5c23008ffae06557",
         "7a928febd9b1973a5a95073acdbeb6a030cfc0d79caa2dc5cd011cef02c08da232d76d",
         "52dfbca38ca8dcbd665b17d1665f7cf5fe59772ec909733b24de97d6f58d220b20c60d",
         "7c07ec1fd93c52c31020300c6c1facd77937a597c7a6",
     ))
     .unwrap();
-    let salt = hex::decode("5541fbc995d5c197ba290346d2c559de").unwrap();
+    let salt = base16ct::mixed::decode_vec("5541fbc995d5c197ba290346d2c559de").unwrap();
     let hashes = [
         (
             1,
@@ -65,7 +65,10 @@ async fn libsodium_known_password_hashes() {
             ],
         )
         .await;
-        assert_eq!(hash, Value::from(hex::decode(expected).unwrap()));
+        assert_eq!(
+            hash,
+            Value::from(base16ct::mixed::decode_vec(expected).unwrap())
+        );
     }
 
     // pwhash_scrypt.c, final valid password string from the verification table.

@@ -13,6 +13,7 @@
 use phera_extension_api::{ClassEntry, Extension, FunctionEntry, NativeError, Registry};
 
 mod aead;
+mod blake2b_compress;
 mod blake_state;
 mod box_crypto;
 mod bytes;

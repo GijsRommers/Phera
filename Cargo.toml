@@ -76,8 +76,8 @@ phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-mbstring = { path = "crates/extensions/mbstring" }
 iconv-native = "0.1"
 encoding_rs = "0.8.35"
+base16ct = { version = "1", features = ["alloc"] }
 base64 = "0.22"
-hex = "0.4"
 phera-ext-json = { path = "crates/extensions/json" }
 phera-ext-sodium = { path = "crates/extensions/sodium" }
 phera-ext-openssl = { path = "crates/extensions/openssl" }
@@ -97,7 +97,6 @@ phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
 crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 blake2b_simd = "1"
-eth-valkyoth-evm-core = { version = "0.30.0", default-features = false }
 curve25519-dalek = "5"
 hmac = "0.12"
 siphasher = "1"

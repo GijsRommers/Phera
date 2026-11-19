@@ -45,7 +45,9 @@ fn ignored(ignore: Option<&[u8]>, byte: u8) -> bool {
 }
 
 fn bin2hex(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(Value::from(hex::encode(args::bytes(arguments, 0))))
+    Ok(Value::from(base16ct::lower::encode_string(args::bytes(
+        arguments, 0,
+    ))))
 }
 
 fn hex2bin(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -57,7 +59,7 @@ fn hex2bin(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             digits.push(byte);
         }
     }
-    hex::decode(digits)
+    base16ct::mixed::decode_vec(digits)
         .map(Value::from)
         .map_err(|_| argument(HEX2BIN, 1, "string", "must be a valid hexadecimal string"))
 }

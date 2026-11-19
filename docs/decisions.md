@@ -72,7 +72,8 @@ design or review work and the owner can overrule it.
 ## 2026-11-19 — Register Sodium as a native extension
 
 Register the PHP module and exception through the extension API. Use the existing
-`base64` crate and the `hex` crate for the encoding functions. Match Sodium's
+`base64` crate for MIME and URL alphabets and padding variants. Sodium
+hexadecimal conversion uses RustCrypto `base16ct` as recorded below. Match Sodium's
 variant identifiers and ignore-string rules at the PHP boundary. The standard
 extension's base64 decoder has different padding and invalid-input semantics.
 The PHP oracle loads Sodium in both hosted test jobs so those semantics are
@@ -117,9 +118,8 @@ interoperate with PHP's scrypt password strings.
 
 ## 2026-11-19 — Preserve reference mutation and copy-on-write
 
-Use constant-time comparisons from `subtle` and `crypto-bigint`. Increment,
-add, and Ristretto scalar addition use the latter's fixed-precision unsigned
-arithmetic. Reducing Ristretto inputs first changes Sodium's wrapping behavior
+Use constant-time comparisons from `subtle`. Ristretto scalar addition uses
+`crypto-bigint` fixed-precision unsigned arithmetic. Reducing Ristretto inputs first changes Sodium's wrapping behavior
 for non-canonical scalars. Erase a PHP
 string in place when its backing buffer has a single owner, and set the
 reference to null. Shared values retain their bytes. A raw-reference parameter exposes PHP's
@@ -162,17 +162,12 @@ Record Sodium's function order in the extension introspection catalog. The
 runtime filters this catalog against the actual registered functions. This
 preserves PHP's ordering without exposing functions whose backends are pending.
 
-## 2026-11-19 — Keep dalek's Ed25519 key validation and RustCrypto's integer width
+## 2026-11-19 — Keep dalek's Ed25519 key validation
 
 Signing uses dalek's expanded secret key operation so that a decodable embedded
 public key takes part in the signature as it does in PHP. Dalek still rejects
 embedded public bytes that cannot be decoded as a point. Reimplementing the
 signature transcript to accept malformed keys would move a primitive into Phera.
-
-Sodium's little-endian integer helpers use the width accepted by RustCrypto's
-fixed-precision constructor. Their input size is therefore below 512 MiB.
-Replacing the constant-time arithmetic with variable-time big integers would
-change the security behavior of those helpers.
 
 ## 2026-11-19 — Serialize bounded, copyable Sodium hash state
 
@@ -183,18 +178,12 @@ the representation before constructing a native state. PHP exposes no state
 size constant. Preserve PHP's independent digest lengths at initialization
 and finalization by retaining all chaining words through the final compression.
 
-The earlier deferral is superseded. `blake2b_simd` keeps state and compression
-internal. Use the documented EIP-152 BLAKE2F interface in
-`eth-valkyoth-evm-core` with default features disabled. Its fixed-size input
-contains the chaining words, pending block, byte count and final flag. Ask it
-to run exactly 12 rounds. The implementation was covered by the project's
-[external BLAKE2F review](https://github.com/valkyoth/eth/blob/main/security/pentest/v0.51.0.md).
+An in-memory handle would break value copies. Retaining the full message would
+give callers unbounded memory use. The compression backend is recorded below.
 
-REVM also exposes BLAKE2b compression. Its elliptic-curve dependency tree
-introduces the vulnerable `crypto-bigint` 0.5.5 and the unmaintained `paste`
-macro. The dependency-free BLAKE2F interface removes both. The standalone
-`eip-152` package has a GPL-3.0 license. An in-memory handle would break value
-copies, and retaining the full message would give callers unbounded memory use.
+| Date | Decision | Why | Rejected | Verification |
+| --- | --- | --- | --- | --- |
+| 2026-11-20 | Implement only BLAKE2b's compression function F by hand in `blake2b_compress.rs` as a narrow exception to the cryptography policy. Production runs exactly 12 rounds per RFC 7693 §3.2. Mixing uses 64-bit wrapping addition, XOR and fixed rotations. The message schedule depends only on the public round number. | RustCrypto `blake2` 0.10.6 and 0.11.0 keep compression private and expose no state round trip. `blake2b_simd` 1.0.5 offers `Clone` and `count`, with private chaining words and buffered block. | REVM brought a vulnerable `crypto-bigint`; the alternate EVM crate added unacceptable supply-chain risk. | RFC 7693 Appendix A, EIP-152 vectors 4–7, 4,144 streaming comparisons with `blake2b_simd`, and the existing PHP oracle. The EIP tests cover zero, one and twelve rounds and both final flags. Other EIP vectors exercise precompile input validation or a 4,294,967,295-round workload. |
 
 ## 2026-11-19 — Compose secretstream using the libsodium transcript
 
@@ -236,3 +225,37 @@ Secretbox reaches `salsa20` 0.10.2 and `poly1305` 0.8.0 through
 portable backend on Apple silicon and detects AVX2 at runtime on x86.
 Keep portable builds and runtime feature selection. Forcing CPU flags
 would narrow which machines can run the binary.
+
+## 2026-11-20 — Review Sodium's direct dependencies
+
+| Date | Decision | Why | Rejected |
+| --- | --- | --- | --- |
+| 2026-11-20 | Use RustCrypto `base16ct` for Sodium's hexadecimal conversion and test fixtures. | It is already in the workspace lockfile and supplies lowercase encoding and mixed-case decoding. The PHP oracle covers the ignore-string rules and error text. | Keep `hex` (KokaKiwi and contributors) as a separate hexadecimal codec in Sodium. |
+| 2026-11-20 | Retain RustCrypto `crypto-bigint` for Ristretto scalar addition and subtraction. | Libsodium wraps at 256 bits before reducing non-canonical inputs. | Reduce before adding or maintain a second carry loop for these scalar functions. |
+
+| Dependency | Maintainer | Use in Sodium |
+| --- | --- | --- |
+| `aes-gcm` | RustCrypto | AES-256-GCM authenticated encryption. |
+| `argon2` | RustCrypto | Argon2i and Argon2id password hashing and verification. |
+| `base16ct` | RustCrypto | Hexadecimal encoding and decoding. |
+| `base64` | Marshall Pierce and contributors | Established codec shared by the workspace. Provides all four PHP Base64 variants. |
+| `blake2b_simd` | Jack O’Connor, BLAKE3 co-author | Parameterised BLAKE2b one-shot hashing, KDF, KX, sealed-box nonces, state checksums, and the streaming test oracle. |
+| `block-padding` | RustCrypto | ISO/IEC 7816-4 padding. |
+| `chacha20` | RustCrypto | ChaCha20, XChaCha20 and HChaCha20 for streams, legacy AEAD and secretstream. |
+| `chacha20poly1305` | RustCrypto | ChaCha20-Poly1305 IETF and XChaCha20-Poly1305 IETF AEAD. |
+| `crypto-bigint` | RustCrypto | Fixed-width wrap before reduction for Ristretto scalar add and subtract. |
+| `crypto_secretbox` | RustCrypto | XSalsa20-Poly1305 secretboxes and NaCl box payloads. |
+| `curve25519-dalek` 5 | dalek-cryptography | Ristretto points and scalars, and Ed25519 point decoding and conversion. |
+| `ed25519-dalek` | dalek-cryptography | Ed25519 signing, verification and key derivation. |
+| `getrandom` | Rust Random Project | OS randomness for keys, salts, headers and ephemeral secrets. |
+| `hmac` | RustCrypto | HMAC-SHA-512 for Sodium authentication. |
+| `phera-extension-api` | Phera | PHP functions, values, reference arguments and exception registration. |
+| `poly1305` | RustCrypto | MAC computation for the original ChaCha20 AEAD and secretstream. |
+| `salsa20` | RustCrypto | XSalsa20 streams and HSalsa20 box key derivation. |
+| `scrypt` | RustCrypto | The memory-hard KDF for Sodium's scrypt password APIs. |
+| `sha2` | RustCrypto | SHA-512 for authentication, Ed25519 key conversion and seeded boxes. |
+| `siphasher` | Frank Denis, libsodium maintainer | SipHash-2-4 for `sodium_crypto_shorthash`. |
+| `subtle` | dalek-cryptography | Constant-time comparisons and selection, including the unpadding scan. |
+| `tokio` | Tokio project | Runs password hashing on the blocking pool. |
+| `x25519-dalek` | dalek-cryptography | X25519 public keys and Diffie–Hellman for boxes and key exchange. |
+| `zeroize` | RustCrypto | Clears owned key bytes and temporary state. |

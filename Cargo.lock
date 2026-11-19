@@ -910,12 +910,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "eth-valkyoth-evm-core"
-version = "0.30.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65eefec9bbae81cde0d519c26b935a220d21eb95686b0e8c6ecb9bac2717be71"
-
-[[package]]
 name = "fallible-iterator"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1140,12 +1134,6 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "foldhash",
 ]
-
-[[package]]
-name = "hex"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hkdf"
@@ -2332,6 +2320,7 @@ version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "argon2",
+ "base16ct",
  "base64 0.22.1",
  "blake2b_simd",
  "block-padding",
@@ -2341,9 +2330,7 @@ dependencies = [
  "crypto_secretbox",
  "curve25519-dalek",
  "ed25519-dalek",
- "eth-valkyoth-evm-core",
  "getrandom 0.3.4",
- "hex",
  "hmac 0.12.1",
  "phera-extension-api",
  "poly1305 0.9.1",

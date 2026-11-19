@@ -245,7 +245,7 @@ async fn deterministic_crypto_cases() {
 }
 
 fn binary(hexadecimal: &str) -> Value {
-    Value::from(hex::decode(hexadecimal).unwrap())
+    Value::from(base16ct::mixed::decode_vec(hexadecimal).unwrap())
 }
 
 #[tokio::test]

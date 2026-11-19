@@ -1,28 +1,14 @@
 //! `sodium_crypto_generichash_update($state, $chunk)` retains only one BLAKE2b block.
 
 use blake2b_simd::Params;
-use eth_valkyoth_evm_core::{
-    EVM_BLAKE2F_INPUT_BYTES, EVM_BLAKE2F_OUTPUT_BYTES, EvmBlake2F, EvmFork, EvmGas, EvmGasMeter,
-    EvmPrecompileKind, EvmPrecompileRegistry, EvmPrecompileStatus,
-};
 use subtle::ConstantTimeEq;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroize;
+
+use crate::blake2b_compress::{BLOCK_LEN, IV, compress};
 
 pub(crate) const STATE_LEN: usize = 384;
 const MAGIC: &[u8; 8] = b"PHERAGH1";
-const BLOCK_LEN: usize = 128;
 const CHECKSUM_OFFSET: usize = STATE_LEN - 32;
-
-const IV: [u64; 8] = [
-    0x6a09e667f3bcc908,
-    0xbb67ae8584caa73b,
-    0x3c6ef372fe94f82b,
-    0xa54ff53a5f1d36f1,
-    0x510e527fade682d1,
-    0x9b05688c2b3e6c1f,
-    0x1f83d9abfb41bd6b,
-    0x5be0cd19137e2179,
-];
 
 pub(crate) struct BlakeState {
     words: [u64; 8],
@@ -93,7 +79,7 @@ impl BlakeState {
             let (prefix, tail) = input.split_at(space);
             self.pending[self.used..].copy_from_slice(prefix);
             self.compressed = self.compressed.checked_add(BLOCK_LEN as u128)?;
-            compress_block(&mut self.words, &self.pending, self.compressed, false)?;
+            compress(&mut self.words, &self.pending, self.compressed, false);
             self.pending.zeroize();
             self.used = 0;
             input = tail;
@@ -101,7 +87,7 @@ impl BlakeState {
             while input.len() > BLOCK_LEN {
                 let (block, tail) = input.split_first_chunk::<BLOCK_LEN>()?;
                 self.compressed = self.compressed.checked_add(BLOCK_LEN as u128)?;
-                compress_block(&mut self.words, block, self.compressed, false)?;
+                compress(&mut self.words, block, self.compressed, false);
                 input = tail;
             }
         }
@@ -113,7 +99,7 @@ impl BlakeState {
     pub(crate) fn finish(mut self) -> Option<[u8; 64]> {
         let total = self.compressed.checked_add(self.used as u128)?;
         self.pending[self.used..].fill(0);
-        compress_block(&mut self.words, &self.pending, total, true)?;
+        compress(&mut self.words, &self.pending, total, true);
         let mut digest = [0; 64];
         for (dst, word) in digest.as_chunks_mut::<8>().0.iter_mut().zip(self.words) {
             *dst = word.to_le_bytes();
@@ -129,53 +115,83 @@ impl Drop for BlakeState {
     }
 }
 
-fn compress_block(
-    words: &mut [u64; 8],
-    block: &[u8; BLOCK_LEN],
-    length: u128,
-    final_block: bool,
-) -> Option<()> {
-    const ROUNDS: u32 = 12;
-    // EIP-152 encodes the round count in big-endian order and the BLAKE2b
-    // chaining words and byte count in little-endian order.
-    let mut input = Zeroizing::new([0; EVM_BLAKE2F_INPUT_BYTES]);
-    input[..4].copy_from_slice(&ROUNDS.to_be_bytes());
-    for (bytes, word) in input[4..68]
-        .as_chunks_mut::<8>()
-        .0
-        .iter_mut()
-        .zip(words.iter())
-    {
-        *bytes = word.to_le_bytes();
-    }
-    input[68..196].copy_from_slice(block);
-    input[196..212].copy_from_slice(&length.to_le_bytes());
-    input[212] = u8::from(final_block);
-
-    let mut output = Zeroizing::new([0; EVM_BLAKE2F_OUTPUT_BYTES]);
-    let mut gas = EvmGasMeter::try_new(EvmGas::new(u64::from(ROUNDS))).ok()?;
-    let outcome = EvmPrecompileRegistry::try_new(EvmFork::ISTANBUL)
-        .ok()?
-        .descriptor(EvmPrecompileKind::Blake2F)
-        .ok()?
-        .quote::<EvmBlake2F>(input.as_slice())
-        .ok()?
-        .authorize_and_execute_blake2f(&mut gas, output.as_mut_slice())
-        .ok()?;
-    if outcome.status() != EvmPrecompileStatus::Success
-        || outcome.output_len() != EVM_BLAKE2F_OUTPUT_BYTES
-    {
-        return None;
-    }
-    for (word, bytes) in words.iter_mut().zip(output.as_chunks::<8>().0) {
-        *word = u64::from_le_bytes(*bytes);
-    }
-    Some(())
-}
-
 fn checksum(payload: &[u8]) -> blake2b_simd::Hash {
     Params::new()
         .hash_length(32)
         .personal(b"Phera GH state")
         .hash(payload)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streaming_matches_blake2b_simd_one_shot() {
+        let mut cases = 0;
+        let mut data = (1_u64..)
+            .map(|seed| {
+                let mut word = seed.wrapping_mul(0x9e3779b97f4a7c15);
+                word ^= word >> 31;
+                word ^= word << 17;
+                word as u8
+            })
+            .take(2 * 1024 * 1024 + 129)
+            .collect::<Vec<_>>();
+        for key_len in [0, 64] {
+            for salt_len in [0, 16] {
+                for personal_len in [0, 16] {
+                    let key = &b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                        [..key_len];
+                    let salt = &b"test salt bytes!"[..salt_len];
+                    let personal = &b"streaming BLAKE2"[..personal_len];
+                    for length in (0..=257).chain([data.len()]) {
+                        for digest_len in [16 + length % 48, 64] {
+                            let input = &data[..length];
+                            let expected = Params::new()
+                                .hash_length(digest_len)
+                                .key(key)
+                                .salt(salt)
+                                .personal(personal)
+                                .hash(input);
+                            let mut state = BlakeState::new(key, digest_len);
+                            // These parameter words are used here to exercise F.
+                            // PHP's streaming API takes only a key and digest length.
+                            let mut params = [0_u8; 32];
+                            params[..salt_len].copy_from_slice(salt);
+                            params[16..16 + personal_len].copy_from_slice(personal);
+                            for (word, field) in
+                                state.words[4..].iter_mut().zip(params.as_chunks::<8>().0)
+                            {
+                                *word ^= u64::from_le_bytes(*field);
+                            }
+                            let split = if digest_len == 64 {
+                                length.min(BLOCK_LEN)
+                            } else {
+                                length / 3
+                            };
+                            let (first, rest) = input.split_at(split);
+                            state.update(first).unwrap();
+                            let mut state = BlakeState::decode(&state.encode()).unwrap();
+                            for chunk in rest.chunks(1 + length % 131) {
+                                state.update(chunk).unwrap();
+                            }
+                            assert_eq!(
+                                &state.finish().unwrap()[..digest_len],
+                                expected.as_bytes(),
+                                "input {length}, output {digest_len}, key {key_len}, \
+                                 salt {salt_len}, personalisation {personal_len}"
+                            );
+                            cases += 1;
+                            // Vary the last byte for the second output length.
+                            if length != 0 {
+                                data[length - 1] ^= 0xa5;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 4144);
+    }
 }

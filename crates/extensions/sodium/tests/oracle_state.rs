@@ -225,7 +225,7 @@ fn secretstream_matches_fixed_wire_vector_and_interoperates_through_rekeys() {
     assert_eq!(
         fixed
             .iter()
-            .map(|v| hex::encode(bytes(v)))
+            .map(|v| base16ct::lower::encode_string(&bytes(v)))
             .collect::<Vec<_>>(),
         fixed_php
     );
@@ -234,7 +234,7 @@ fn secretstream_matches_fixed_wire_vector_and_interoperates_through_rekeys() {
         &registry,
         STREAM_INIT_PULL,
         vec![
-            Value::from(hex::decode(&php_stream[0]).unwrap()),
+            Value::from(base16ct::mixed::decode_vec(&php_stream[0]).unwrap()),
             key.clone(),
         ],
     ));
@@ -248,7 +248,7 @@ fn secretstream_matches_fixed_wire_vector_and_interoperates_through_rekeys() {
     };
     let php_frames: Vec<_> = php_stream[1..]
         .iter()
-        .map(|v| Value::from(hex::decode(v).unwrap()))
+        .map(|v| Value::from(base16ct::mixed::decode_vec(v).unwrap()))
         .collect();
     assert!(matches!(
         receive_frame(php_frames[1].clone(), vec![0x1b; 17]),
