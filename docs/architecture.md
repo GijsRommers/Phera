@@ -542,11 +542,20 @@ each with its own fixtures checked against real PHP.
   running the body. The object owns a frame that is not on the call stack.
 - `yield` suspends: the frame's registers are moved out of the VM's register
   stack into the generator, and control returns to whoever resumed it.
-  `current`, `next`, `send` and `throw` move them back and continue. This is
-  why frames were kept detachable from the start.
-- `yield from` keeps a stack of inner generators inside the outer one.
+  A scalar resume runs in that window. When an instruction needs the VM,
+  the interpreter installs the same frame, with the receiver and pending
+  call state restored, before executing the instruction.
+- `foreach` advances a suspended generator in `IterNext` and reads the
+  yielded value and any requested key together.
+- `yield from` walks an explicit stack of inner generators. The outer
+  generator keeps a weak link to a yielded leaf while that leaf can resume
+  directly. A shared leaf that finishes or delegates again returns to the
+  stack walk.
 - A generator dropped while suspended inside a `try` runs its `finally`
-  blocks through the destructor queue.
+  blocks through a request-local release queue. The VM drains it at an
+  instruction boundary. A temporary that Phera still owns can delay that
+  release compared with PHP. References kept by closures or reference
+  cycles can also outlive the script's last explicit use of the generator.
 
 ### 9.5 Order of work
 

@@ -6,13 +6,15 @@ use phera_bytecode::{NameId, Reg, Visibility};
 use phera_extension_api::NativeError;
 use phera_value::{Object, Value};
 
-use super::{Class, Invocation, Method, MethodContext, magic_calls::MethodSyntax};
+use super::{
+    Class, Invocation, Method, MethodContext, class::ClassOrigin, magic_calls::MethodSyntax,
+};
 use crate::Vm;
 use crate::calls::call_state::{CallTarget, Callee};
 
 impl Vm {
     /// Receiver errors precede argument evaluation, matching ordinary PHP calls.
-    pub(crate) fn init_method_call(
+    pub(crate) fn init_method_call<const TRACK_GENERATORS: bool>(
         &mut self,
         receiver: Reg,
         method: NameId,
@@ -37,6 +39,9 @@ impl Vm {
             .classes
             .for_object(&object)
             .ok_or_else(|| internal_error!("receiver class"))?;
+        if TRACK_GENERATORS && class.origin == ClassOrigin::Native && class.name == "Generator" {
+            self.discard_generator_temporary(receiver);
+        }
         self.prepare_method(class, Some(object), name, Invocation::Method)
     }
 
