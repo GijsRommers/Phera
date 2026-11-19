@@ -1111,13 +1111,16 @@ impl Parser<'_> {
             let ExpressionKind::Variable(variable) = var_expr.into_kind() else {
                 return Err(self.error("expected a variable after '::'"));
             };
-            class = Expression {
+            let property = Expression {
                 kind: ExpressionKind::StaticProperty {
                     class: Box::new(class),
                     name: variable,
                 },
                 span: self.span_since(span),
             };
+            // `new static::$classes[$key]`: the static property is a
+            // variable like any other, so offsets and properties may follow.
+            class = self.parse_new_target_steps(property)?;
         }
 
         let arguments = if self.at(TokenKind::LeftParen) {
@@ -1137,7 +1140,15 @@ impl Parser<'_> {
 
     /// `new $a`, `new $a[0]`, `new $a->b`, `new $a::$b`.
     fn parse_new_target_variable(&mut self) -> Result<Expression, ParseError> {
-        let mut expr = self.parse_simple_variable()?;
+        let variable = self.parse_simple_variable()?;
+        self.parse_new_target_steps(variable)
+    }
+
+    /// The offsets, properties and static properties that may follow the
+    /// variable naming the class: `[0]`, `->b`, `::$b`, in any number. A call
+    /// is not one of them: the first `(` starts the constructor's arguments.
+    fn parse_new_target_steps(&mut self, variable: Expression) -> Result<Expression, ParseError> {
+        let mut expr = variable;
 
         loop {
             match self.kind() {
