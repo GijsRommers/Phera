@@ -124,24 +124,18 @@ async fn subscribed_socket_is_cleaned_before_reuse() {
     let pool = isolated(1);
     // A socket that receives pushes, as a subscription would use.
     let subscriber = async {
-        let client = endpoint().client()?;
-        let info = client.get_connection_info().clone();
-        let settings = info
-            .redis_settings()
-            .clone()
-            .set_protocol(redis::ProtocolVersion::RESP3);
+        let settings =
+            redis::RedisConnectionInfo::default().set_protocol(redis::ProtocolVersion::RESP3);
         let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
-        let connection = redis::Client::open(info.set_redis_settings(settings))?
-            .get_multiplexed_async_connection_with_config(
-                &redis::AsyncConnectionConfig::new()
+        endpoint()
+            .open(
+                settings,
+                redis::AsyncConnectionConfig::new()
                     .set_push_sender(sender)
                     .set_response_timeout(None),
+                Some(Duration::from_secs(1)),
             )
-            .await?;
-        Ok(Socket {
-            connection,
-            reusable: true,
-        })
+            .await
     };
     let first = Lease(pool.acquire(endpoint(), subscriber).await.unwrap());
     let mut subscribe = redis::cmd("SUBSCRIBE");
