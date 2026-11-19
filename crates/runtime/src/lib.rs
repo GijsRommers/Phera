@@ -97,6 +97,8 @@ impl Runtime {
         registry.load(&phera_ext_streams::Streams);
         registry.load(&phera_ext_ctype::Ctype);
         registry.load(&phera_ext_date::Date);
+        registry.load(&phera_ext_dom::Libxml);
+        registry.load(&phera_ext_dom::Dom);
         registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_json::Json);
         registry.load(&phera_ext_mbstring::Mbstring);
