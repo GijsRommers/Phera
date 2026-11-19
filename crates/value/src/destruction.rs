@@ -70,6 +70,10 @@ pub(crate) struct DoomedObjects {
     waiting: Cell<bool>,
     /// The request has ended: objects are freed, not queued.
     closed: Cell<bool>,
+    /// How many live objects still have their destructor due. While there
+    /// are none, no release can make one due, and the interpreter runs its
+    /// fast paths without looking.
+    due: Cell<usize>,
 }
 
 impl DoomedObjects {
@@ -91,7 +95,23 @@ impl Object {
 
     /// Marks a new object of a class that declares `__destruct`.
     pub fn expect_destructor(&self) {
-        self.destruction.set(Destruction::Due);
+        if self.destruction.get() != Destruction::Due {
+            self.destruction.set(Destruction::Due);
+            if let Some(lease) = &self.lease {
+                lease.pool.doomed.due.set(lease.pool.doomed.due.get() + 1);
+            }
+        }
+    }
+
+    /// The object's destructor is no longer due (it is queued, has run, or
+    /// must not run): one fewer for the pool's count.
+    fn no_longer_due(&self) {
+        if self.destruction.get() == Destruction::Due
+            && let Some(lease) = &self.lease
+        {
+            let due = &lease.pool.doomed.due;
+            due.set(due.get().saturating_sub(1));
+        }
     }
 
     /// The id pool of the object's request, which also says whether a
@@ -102,12 +122,14 @@ impl Object {
 
     /// Records that the destructor has run (or must no longer run).
     pub fn mark_destructed(&self) {
+        self.no_longer_due();
         self.destruction.set(Destruction::Done);
     }
 
     /// The contents of an object being dropped, moved into a new object
     /// that waits in the queue for its destructor.
     fn hand_over(&mut self) {
+        self.no_longer_due();
         let Some(lease) = self.lease.take() else {
             return;
         };
@@ -139,6 +161,13 @@ impl Drop for Object {
 }
 
 impl ObjectIds {
+    /// Whether some live object still has its destructor due. While none
+    /// has, no release can queue one.
+    #[inline]
+    pub fn has_due(&self) -> bool {
+        self.doomed.due.get() != 0
+    }
+
     /// Whether some object waits for its destructor. Cheap: one flag.
     #[inline]
     pub fn has_doomed(&self) -> bool {

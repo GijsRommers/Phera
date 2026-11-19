@@ -28,7 +28,7 @@ impl Vm {
         use Instruction as I;
         // A simple instruction that only fell back because it overwrites
         // an array or object (see `crate::fast`).
-        if self.release_and_store(instruction) {
+        if self.classes.ids().has_due() && self.release_and_store(instruction) {
             return Ok(None);
         }
         match instruction {

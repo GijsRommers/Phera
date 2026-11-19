@@ -38,12 +38,21 @@ fn integer_at(slots: &[Option<Value>], register: Reg) -> Option<i64> {
 /// That is the usual case in a loop, and it spares the general "drop the old
 /// value, write the new one", which has to ask whether the old value owns
 /// memory.
+///
+/// `GUARDED` (see [`scalar_step`]): a register that holds an array, object
+/// or reference is written out of line, where its release is looked at.
 #[inline(always)]
-fn store_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -> ScalarStep {
+fn store_integer<const GUARDED: bool>(
+    slots: &mut [Option<Value>],
+    register: Reg,
+    integer: i64,
+) -> ScalarStep {
     match slots.get_mut(register.index()) {
         Some(Some(Value::Int(target))) => *target = integer,
-        Some(slot) if !owns_heap_values(slot) => *slot = Some(Value::Int(integer)),
-        Some(slot) => return replace(slot, Value::Int(integer)),
+        Some(slot) if GUARDED && owns_heap_values(slot) => {
+            return replace(slot, Value::Int(integer));
+        }
+        Some(slot) => *slot = Some(Value::Int(integer)),
         None => return ScalarStep::Fallback,
     }
     ScalarStep::Complete
@@ -62,13 +71,17 @@ fn overwrite_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -
 
 /// Stores any result, dropping what the register held before.
 #[inline(always)]
-fn store(slots: &mut [Option<Value>], register: Reg, value: Value) -> ScalarStep {
+fn store<const GUARDED: bool>(
+    slots: &mut [Option<Value>],
+    register: Reg,
+    value: Value,
+) -> ScalarStep {
     match slots.get_mut(register.index()) {
-        Some(slot) if !owns_heap_values(slot) => {
+        Some(slot) if GUARDED && owns_heap_values(slot) => replace(slot, value),
+        Some(slot) => {
             *slot = Some(value);
             ScalarStep::Complete
         }
-        Some(slot) => replace(slot, value),
         None => ScalarStep::Fallback,
     }
 }
@@ -157,7 +170,7 @@ fn integer_arithmetic(operator: BinaryOp, left: i64, right: i64) -> Option<i64> 
 /// A binary operator on two integers: arithmetic gives an integer, a
 /// comparison gives a boolean. Anything else falls back.
 #[inline(always)]
-fn integer_binary(
+fn integer_binary<const GUARDED: bool>(
     slots: &mut [Option<Value>],
     operator: BinaryOp,
     destination: Reg,
@@ -165,10 +178,10 @@ fn integer_binary(
     right: i64,
 ) -> ScalarStep {
     if let Some(result) = integer_arithmetic(operator, left, right) {
-        return store_integer(slots, destination, result);
+        return store_integer::<GUARDED>(slots, destination, result);
     }
     match integer_condition(operator, left, right) {
-        Some(condition) => store(slots, destination, Value::Bool(condition)),
+        Some(condition) => store::<GUARDED>(slots, destination, Value::Bool(condition)),
         None => ScalarStep::Fallback,
     }
 }
@@ -182,16 +195,18 @@ fn integer_binary(
 /// reference, an unset variable, an overflow) returns `Fallback`, and the
 /// general handler for that instruction does it with full PHP semantics.
 #[inline(always)]
-pub(crate) fn scalar_step(
+pub(crate) fn scalar_step<const GUARDED: bool>(
     instruction: Instruction,
     slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> ScalarStep {
     match instruction {
         Instruction::Nop => ScalarStep::Complete,
-        Instruction::LoadInt { dst, value } => store_integer(slots, dst, i64::from(value)),
-        Instruction::LoadNull { dst } => store(slots, dst, Value::Null),
-        Instruction::LoadBool { dst, value } => store(slots, dst, Value::Bool(value)),
+        Instruction::LoadInt { dst, value } => {
+            store_integer::<GUARDED>(slots, dst, i64::from(value))
+        }
+        Instruction::LoadNull { dst } => store::<GUARDED>(slots, dst, Value::Null),
+        Instruction::LoadBool { dst, value } => store::<GUARDED>(slots, dst, Value::Bool(value)),
         Instruction::Cast {
             to: phera_bytecode::CastKind::Bool,
             dst,
@@ -202,17 +217,17 @@ pub(crate) fn scalar_step(
                 return ScalarStep::Fallback;
             };
             let value = *value;
-            store(slots, dst, Value::Bool(value))
+            store::<GUARDED>(slots, dst, Value::Bool(value))
         }
         Instruction::Move { dst, src } => {
             if let Some(integer) = integer_at(slots, src) {
-                return store_integer(slots, dst, integer);
+                return store_integer::<GUARDED>(slots, dst, integer);
             }
             let Some(Some(value)) = slots.get(src.index()) else {
                 return ScalarStep::Fallback;
             };
             let value = value.deref().clone();
-            store(slots, dst, value)
+            store::<GUARDED>(slots, dst, value)
         }
         Instruction::Assign { local, src } => {
             // Assigning to a PHP reference writes through it: general handler.
@@ -220,13 +235,13 @@ pub(crate) fn scalar_step(
                 return ScalarStep::Fallback;
             }
             if let Some(integer) = integer_at(slots, src) {
-                return store_integer(slots, local, integer);
+                return store_integer::<GUARDED>(slots, local, integer);
             }
             let Some(Some(value)) = slots.get(src.index()) else {
                 return ScalarStep::Fallback;
             };
             let value = value.deref().clone();
-            store(slots, local, value)
+            store::<GUARDED>(slots, local, value)
         }
         Instruction::AppendLocal { local, src } => {
             let Some(Some(value)) = slots.get(src.index()) else {
@@ -270,13 +285,13 @@ pub(crate) fn scalar_step(
         Instruction::BinaryInt { op, dst, lhs, rhs } => {
             let right = i64::from(rhs);
             if let Some(left) = integer_at(slots, lhs) {
-                return integer_binary(slots, op, dst, left, right);
+                return integer_binary::<GUARDED>(slots, op, dst, left, right);
             }
             let Some(Some(left)) = slots.get(lhs.index()) else {
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, &Value::Int(right)) {
-                Some(value) => store(slots, dst, value),
+                Some(value) => store::<GUARDED>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -284,7 +299,7 @@ pub(crate) fn scalar_step(
             if let Some(left) = integer_at(slots, lhs)
                 && let Some(right) = integer_at(slots, rhs)
             {
-                return integer_binary(slots, op, dst, left, right);
+                return integer_binary::<GUARDED>(slots, op, dst, left, right);
             }
             let (Some(Some(left)), Some(Some(right))) =
                 (slots.get(lhs.index()), slots.get(rhs.index()))
@@ -292,7 +307,7 @@ pub(crate) fn scalar_step(
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, right) {
-                Some(value) => store(slots, dst, value),
+                Some(value) => store::<GUARDED>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -301,7 +316,7 @@ pub(crate) fn scalar_step(
                 && let Some(right) = integer_at(slots, src)
             {
                 return match integer_arithmetic(op, left, right) {
-                    Some(result) => store_integer(slots, local, result),
+                    Some(result) => store_integer::<GUARDED>(slots, local, result),
                     None => ScalarStep::Fallback,
                 };
             }
@@ -311,7 +326,7 @@ pub(crate) fn scalar_step(
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, right) {
-                Some(value) => store(slots, local, value),
+                Some(value) => store::<GUARDED>(slots, local, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -331,7 +346,7 @@ pub(crate) fn scalar_step(
                 IncDec::PostIncrement | IncDec::PostDecrement => old,
                 IncDec::PreIncrement | IncDec::PreDecrement => new,
             };
-            if store_integer(slots, local, new) == ScalarStep::Fallback {
+            if store_integer::<GUARDED>(slots, local, new) == ScalarStep::Fallback {
                 return ScalarStep::Fallback;
             }
             // The variable has changed, so this store must not fall back.
@@ -358,21 +373,21 @@ pub(crate) fn scalar_step(
             ScalarStep::Complete
         }
         Instruction::Clear { reg: register } => match slots.get_mut(register.index()) {
-            Some(slot) if !owns_heap_values(slot) => {
+            Some(slot) if GUARDED && owns_heap_values(slot) => clear(slot),
+            Some(slot) => {
                 *slot = None;
                 ScalarStep::Complete
             }
-            Some(slot) => clear(slot),
             None => ScalarStep::Fallback,
         },
         // Unsetting a variable bound to a PHP reference has more to undo.
         Instruction::UnsetLocal { local } => match slots.get_mut(local.index()) {
             Some(Some(Value::Reference(_))) | None => ScalarStep::Fallback,
-            Some(slot) if !owns_heap_values(slot) => {
+            Some(slot) if GUARDED && owns_heap_values(slot) => clear(slot),
+            Some(slot) => {
                 *slot = None;
                 ScalarStep::Complete
             }
-            Some(slot) => clear(slot),
         },
         _ => ScalarStep::Fallback,
     }
@@ -397,7 +412,7 @@ fn integer_condition(operator: BinaryOp, left: i64, right: i64) -> Option<bool> 
 /// Keep this out of scalar_step's arithmetic dispatch; every failed guard uses
 /// the normal PHP offset/reference/diagnostic handler.
 #[inline]
-pub(crate) fn array_index_step(
+pub(crate) fn array_index_step<const GUARDED: bool>(
     destination: Reg,
     base: Reg,
     index: Reg,
@@ -416,7 +431,7 @@ pub(crate) fn array_index_step(
     let Some(target) = slots.get_mut(destination.index()) else {
         return ScalarStep::Fallback;
     };
-    if frees_on_drop(target) {
+    if GUARDED && frees_on_drop(target) {
         return ScalarStep::Fallback;
     }
     *target = Some(value);

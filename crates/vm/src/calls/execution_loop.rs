@@ -113,7 +113,15 @@ impl Vm {
                 frame_limit: self.frame_limit,
                 ids: &ids,
             };
-            let exit = machine.run();
+            // While no live object has a destructor due, no release can
+            // make one due, and the loop is the plain one (see
+            // `crate::destructors`). Making such an object leaves the loop,
+            // so the next batch is guarded.
+            let exit = if ids.has_due() {
+                machine.run::<true>()
+            } else {
+                machine.run::<false>()
+            };
             *work = machine.work;
             self.executed_instructions += machine.executed;
             let instruction = match exit {
@@ -142,7 +150,7 @@ impl Vm {
 impl Machine<'_> {
     /// The loop itself. Simple instructions run in [`Machine::run_simple`];
     /// this loop takes the others and switches frames on calls and returns.
-    fn run(&mut self) -> LoopExit {
+    fn run<const GUARDED: bool>(&mut self) -> LoopExit {
         let Some(frame) = self.stack.current().copied() else {
             return LoopExit::Invalid;
         };
@@ -152,17 +160,17 @@ impl Machine<'_> {
         };
         let mut instructions = self.code.instructions(frame.function);
         loop {
-            let instruction = match self.run_simple(instructions, &mut position) {
+            let instruction = match self.run_simple::<GUARDED>(instructions, &mut position) {
                 Ok(instruction) => instruction,
                 Err(exit) => return exit,
             };
-            match self.step(instruction, position) {
+            match self.step::<GUARDED>(instruction, position) {
                 Step::Done(ip) => position.ip = ip,
                 Step::Switched(next) => {
                     // A return releases the frame's variables. Simple
                     // instructions release nothing (see `crate::fast`), and
                     // other steps write registers that hold nothing.
-                    if self.ids.has_doomed() {
+                    if GUARDED && self.ids.has_doomed() {
                         return destructors_due();
                     }
                     position = next;
@@ -180,7 +188,7 @@ impl Machine<'_> {
     /// the counters in locals, until one is not simple. Returns that one,
     /// with `position` just past it.
     #[inline(always)]
-    fn run_simple(
+    fn run_simple<const GUARDED: bool>(
         &mut self,
         instructions: &[Instruction],
         position: &mut Position,
@@ -196,11 +204,11 @@ impl Machine<'_> {
             let previous = ip;
             ip += 1;
             executed += 1;
-            let step = match scalar_step(instruction, slots, &mut ip) {
+            let step = match scalar_step::<GUARDED>(instruction, slots, &mut ip) {
                 ScalarStep::Fallback => match instruction {
                     Instruction::FetchIndex {
                         dst, base, index, ..
-                    } => array_index_step(dst, base, index, slots),
+                    } => array_index_step::<GUARDED>(dst, base, index, slots),
                     _ => ScalarStep::Fallback,
                 },
                 complete => complete,
@@ -230,7 +238,7 @@ impl Machine<'_> {
     /// The instructions that are not simple but need only the borrowed
     /// state: `foreach` over a snapshot, direct calls and plain returns.
     #[inline(always)]
-    fn step(&mut self, instruction: Instruction, position: Position) -> Step {
+    fn step<const GUARDED: bool>(&mut self, instruction: Instruction, position: Position) -> Step {
         let base = position.frame.base();
         let mut ip = position.ip;
         match instruction {
@@ -267,13 +275,13 @@ impl Machine<'_> {
             Instruction::LoadConst { dst, constant } => self.load_constant(position, dst, constant),
             Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
             Instruction::Call { dst } => self.enter_prepared(position, dst),
-            Instruction::New { class } => self.new_object(position, class),
+            Instruction::New { class } => self.new_object::<GUARDED>(position, class),
             Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
             Instruction::FetchThis { dst } | Instruction::ThisOrNull { dst } => {
                 self.fetch_this(position, dst)
             }
-            Instruction::Return { src } => self.leave_plain(Some(src)),
-            Instruction::ReturnNull => self.leave_plain(None),
+            Instruction::Return { src } => self.leave_plain::<GUARDED>(Some(src)),
+            Instruction::ReturnNull => self.leave_plain::<GUARDED>(None),
             _ => Step::Slow,
         }
     }

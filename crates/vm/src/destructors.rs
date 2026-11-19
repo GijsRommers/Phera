@@ -83,6 +83,10 @@ impl Vm {
         error: NativeError,
         stop: usize,
     ) -> Result<(), NativeError> {
+        // With no destructor due anywhere, unwinding cannot make one due.
+        if !self.classes.ids().has_due() {
+            return self.handle_exception(error, stop);
+        }
         let mut error = error;
         loop {
             let unwound = self.materialize_error(error);
