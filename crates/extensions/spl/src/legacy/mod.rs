@@ -4,6 +4,7 @@
 //! (new ArrayObject([7]))->serialize(); // x:i:0;a:1:{i:0;i:7;};m:a:0:{}
 //! ```
 
+mod hooks;
 mod read;
 mod write;
 

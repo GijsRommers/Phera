@@ -167,7 +167,7 @@ pub(super) fn legacy_unserialize(
         let object = receiver(this.as_ref())?;
         let input = args::string(&arguments, 0)
             .ok_or_else(|| NativeError::error("Missing serialized storage data"))?;
-        let mut reader = Reader::new(input.as_bytes());
+        let mut reader = Reader::new(context, input.as_bytes(), "SplObjectStorage");
         if reader.is_empty() {
             return Ok(Value::Null);
         }
@@ -202,6 +202,7 @@ pub(super) fn legacy_unserialize(
                 }
             })
             .ok_or_else(crate::busy)?;
+        reader.finish(context).await?;
         Ok(Value::Null)
     })
 }

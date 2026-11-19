@@ -9,6 +9,7 @@ mod scenarios {
     mod proxy;
     mod request_headers;
     mod session;
+    mod spl_policy;
     mod static_files;
     mod uploads;
 }

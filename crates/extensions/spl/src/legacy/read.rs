@@ -6,18 +6,27 @@
 
 use std::{collections::HashMap, rc::Rc};
 
+use phera_extension_api::serialization::{
+    ActiveUnserializePolicy, INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME, UnserializePolicy,
+};
 use phera_extension_api::{ArrayKey, Context, NativeError, Object, PhpArray, Value};
+
+use super::hooks::Hooks;
 
 pub(crate) struct Reader<'a> {
     input: &'a [u8],
     offset: usize,
     sequence: usize,
     objects: HashMap<usize, Rc<Object>>,
+    policy: UnserializePolicy,
+    function: String,
+    pub(super) hooks: Hooks,
 }
 
 enum Layout {
     Array,
     Object(Rc<Object>),
+    Magic(Rc<Object>),
 }
 
 struct Container {
@@ -33,12 +42,16 @@ enum Token {
 }
 
 impl<'a> Reader<'a> {
-    pub fn new(input: &'a [u8]) -> Self {
+    pub fn new(context: &mut dyn Context, input: &'a [u8], class: &str) -> Self {
+        let policy = ActiveUnserializePolicy::current(context);
         Self {
             input,
             offset: 0,
             sequence: 0,
             objects: HashMap::new(),
+            policy,
+            function: format!("{class}::unserialize"),
+            hooks: Hooks::default(),
         }
     }
 
@@ -113,7 +126,7 @@ impl<'a> Reader<'a> {
         if self.take(b"i:") {
             let index: i64 = self.number(b';')?;
             return Ok(match layout {
-                Layout::Array => ArrayKey::Int(index),
+                Layout::Array | Layout::Magic(_) => ArrayKey::Int(index),
                 Layout::Object(_) => ArrayKey::str(index.to_string()),
             });
         }
@@ -164,22 +177,32 @@ impl<'a> Reader<'a> {
         } else if self.take(b"O:") {
             let class = self.string(b"\":")?;
             let class = std::str::from_utf8(class).map_err(|_| self.error())?;
-            let Value::Object(object) = context.create_object(class, PhpArray::new())? else {
+            let allowed = self.policy.allows(class.as_bytes());
+            let name = if allowed { class } else { INCOMPLETE_CLASS };
+            let Value::Object(object) = context.create_unserialized_object(name)? else {
                 return Err(self.error());
             };
-            if object.class.has_native_properties()
-                || object.class.is_instance_of("WeakReference")
-                || object.class.is_instance_of("Closure")
-                || context.is_user_method(&object, "__unserialize")
-                || context.is_user_method(&object, "__wakeup")
+            if !allowed {
+                object.set(ArrayKey::str(INCOMPLETE_CLASS_NAME), Value::from(class));
+            }
+            let magic = allowed && context.has_serialization_method(&object, "__unserialize");
+            if !magic
+                && (object.class.has_native_properties()
+                    || context.serialization_forbidden(&object))
             {
                 return Err(NativeError::throw(
                     "UnexpectedValueException",
-                    format!("{} uses custom serialization", object.class.name(),),
+                    format!("{} uses custom serialization", object.class.name()),
                 ));
             }
             self.objects.insert(self.sequence, object.clone());
-            Layout::Object(object)
+            if magic {
+                Layout::Magic(object)
+            } else {
+                Layout::Object(object)
+            }
+        } else if self.take(b"C:") {
+            return self.custom_object(context);
         } else {
             return Err(self.error());
         };
@@ -193,6 +216,30 @@ impl<'a> Reader<'a> {
         }))
     }
 
+    fn custom_object(&mut self, context: &mut dyn Context) -> Result<Token, NativeError> {
+        let class = self.string(b"\":")?;
+        if self.policy.allows(class) {
+            return Err(self.error());
+        }
+        let length: usize = self.number(b':')?;
+        self.expect(b"{")?;
+        let end = self
+            .offset
+            .checked_add(length)
+            .ok_or_else(|| self.error())?;
+        if self.input.get(end) != Some(&b'}') {
+            return Err(self.error());
+        }
+        self.offset = end + 1;
+        context.warning("Class __PHP_Incomplete_Class has no unserializer".into());
+        let Value::Object(object) = context.create_unserialized_object(INCOMPLETE_CLASS)? else {
+            return Err(self.error());
+        };
+        object.set(ArrayKey::str(INCOMPLETE_CLASS_NAME), Value::from(class));
+        self.objects.insert(self.sequence, object.clone());
+        Ok(Token::Value(Value::Object(object)))
+    }
+
     pub fn value(&mut self, context: &mut dyn Context) -> Result<Value, NativeError> {
         let mut stack: Vec<Container> = Vec::new();
         loop {
@@ -202,23 +249,43 @@ impl<'a> Reader<'a> {
                 match frame.layout {
                     Layout::Array => Value::from(frame.values),
                     Layout::Object(object) => {
-                        object
-                            .update(|props| {
-                                for (key, value) in frame.values.iter() {
-                                    props.insert(key, value.clone());
-                                }
-                            })
-                            .ok_or_else(crate::busy)?;
+                        context.finish_unserialized_object(&object, frame.values)?;
+                        if context.has_serialization_method(&object, "__wakeup") {
+                            self.hooks.wakeup(object.clone());
+                        }
+                        Value::Object(object)
+                    }
+                    Layout::Magic(object) => {
+                        self.hooks.unserialize(object.clone(), frame.values);
                         Value::Object(object)
                     }
                 }
             } else {
                 if let Some(frame) = stack.last_mut() {
-                    frame.key = Some(self.key(&frame.layout)?);
+                    let key = self.key(&frame.layout)?;
+                    let key = match &frame.layout {
+                        Layout::Object(object) => {
+                            let key = context
+                                .unserialized_property_key(object, key)?
+                                .ok_or_else(|| self.error())?;
+                            if !frame.values.contains_key(&key) && !object.has(&key) {
+                                context.unserialized_dynamic_property(object, &key)?;
+                            }
+                            key
+                        }
+                        _ => key,
+                    };
+                    frame.key = Some(key);
                 }
                 match self.token(context)? {
                     Token::Value(value) => value,
                     Token::Open(frame) => {
+                        if !(frame.remaining == 0 && matches!(frame.layout, Layout::Array))
+                            && self.policy.depth_exceeded(stack.len())
+                        {
+                            context.warning(self.policy.depth_warning(&self.function));
+                            return Err(self.error());
+                        }
                         stack.push(frame);
                         continue;
                     }

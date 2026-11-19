@@ -6,7 +6,8 @@
 //! ```
 
 use phera_extension_api::{
-    ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, PropertyPurpose, Value, args,
+    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, PropertyPurpose,
+    Value, args,
 };
 use std::rc::Rc;
 
@@ -239,32 +240,35 @@ pub(super) fn legacy_serialize(_: &mut dyn Context, this: This<'_>, _: &[Value])
 
 pub(super) fn legacy_unserialize(
     context: &mut dyn Context,
-    this: This<'_>,
-    args: &[Value],
-) -> NativeResult {
-    let object = receiver(this)?;
-    let input =
-        args::string(args, 0).ok_or_else(|| NativeError::error("Missing serialized list data"))?;
-    let mut reader = Reader::new(input.as_bytes());
-    if reader.is_empty() {
-        return Ok(Value::Null);
-    }
-    update(object, |list| list.entries.clear())?;
-    let Value::Int(flags) = reader.value(context)? else {
-        return Err(reader.error());
-    };
-    update(object, |list| {
-        list.mode = Some(Mode::parse(i64::from(flags as i32)))
-    })?;
-    while reader.take(b":") {
-        let value = reader.value(context)?;
+    this: Option<Rc<Object>>,
+    args: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let object = receiver(this.as_ref())?;
+        let input = args::string(&args, 0)
+            .ok_or_else(|| NativeError::error("Missing serialized list data"))?;
+        let mut reader = Reader::new(context, input.as_bytes(), "SplDoublyLinkedList");
+        if reader.is_empty() {
+            return Ok(Value::Null);
+        }
+        update(object, |list| list.entries.clear())?;
+        let Value::Int(flags) = reader.value(context)? else {
+            return Err(reader.error());
+        };
         update(object, |list| {
-            let entry = list.entry(value);
-            list.entries.push_back(entry);
+            list.mode = Some(Mode::parse(i64::from(flags as i32)))
         })?;
-    }
-    if !reader.is_empty() {
-        return Err(reader.error());
-    }
-    Ok(Value::Null)
+        while reader.take(b":") {
+            let value = reader.value(context)?;
+            update(object, |list| {
+                let entry = list.entry(value);
+                list.entries.push_back(entry);
+            })?;
+        }
+        if !reader.is_empty() {
+            return Err(reader.error());
+        }
+        reader.finish(context).await?;
+        Ok(Value::Null)
+    })
 }

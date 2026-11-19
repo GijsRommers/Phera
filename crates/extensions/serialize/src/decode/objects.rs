@@ -3,7 +3,8 @@
 use std::rc::Rc;
 
 use phera_extension_api::serialization::{
-    EnumCaseLookup, INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME, SerializationClass,
+    ActiveUnserializePolicy, EnumCaseLookup, INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME,
+    SerializationClass,
 };
 use phera_extension_api::{ArrayKey, Context, NativeError, Object, Value};
 
@@ -43,13 +44,18 @@ impl<'a> Decoder<'a> {
                 let object = allocate(context, name)?;
                 self.graph.value(place, Value::Object(object.clone()));
                 if custom {
-                    context
+                    let mut policy = self.options.clone();
+                    policy.depth += self.frames.len();
+                    let previous = ActiveUnserializePolicy::replace(context, Some(policy));
+                    let result = context
                         .call_serialization_method(
                             object,
                             "unserialize",
                             vec![Value::from(payload)],
                         )
-                        .await?;
+                        .await;
+                    ActiveUnserializePolicy::replace(context, previous);
+                    result?;
                 } else if info.is_none() {
                     object.set(ArrayKey::str(INCOMPLETE_CLASS_NAME), Value::from(class));
                 }
@@ -63,9 +69,8 @@ impl<'a> Decoder<'a> {
                     context.warning(format!("Erroneous data format for unserializing '{name}'"));
                     return Err(Failure::Parse);
                 }
-                let limit = self.options.max_depth;
                 if !self.tracks_references
-                    && (limit == 0 || self.frames.len() < limit)
+                    && !self.options.depth_exceeded(self.frames.len())
                     && let Some(layout) = info.as_ref().and_then(|info| info.plain.as_ref())
                     && let Some(object) =
                         super::plain_object::read(context, &mut self.reader, layout, count)
