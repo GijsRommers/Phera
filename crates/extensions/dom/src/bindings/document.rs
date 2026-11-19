@@ -117,22 +117,28 @@ pub(super) fn register(registry: &mut Registry) {
                     M::public("prepend", &[VARIADIC], mutation::prepend).returning("void"),
                     M::public("replaceChildren", &[VARIADIC], mutation::replace_children)
                         .returning("void"),
-                    M::public("validate", &[], not_supported).tentative_return("bool"),
+                    M::public("validate", &[], |_, _, _| not_supported("validate"))
+                        .tentative_return("bool"),
                     M::public(
                         "schemaValidate",
                         const { &[FILE, P::new("flags", T::Int).with_default(C::Int(0))] },
-                        not_supported,
+                        |_, _, _| not_supported("schemaValidate"),
                     )
                     .tentative_return("bool"),
                     M::public(
                         "schemaValidateSource",
                         const { &[SOURCE, P::new("flags", T::Int).with_default(C::Int(0))] },
-                        not_supported,
+                        |_, _, _| not_supported("schemaValidateSource"),
                     )
                     .tentative_return("bool"),
-                    M::public("relaxNGValidate", &[FILE], not_supported).tentative_return("bool"),
-                    M::public("relaxNGValidateSource", &[SOURCE], not_supported)
-                        .tentative_return("bool"),
+                    M::public("relaxNGValidate", &[FILE], |_, _, _| {
+                        not_supported("relaxNGValidate")
+                    })
+                    .tentative_return("bool"),
+                    M::public("relaxNGValidateSource", &[SOURCE], |_, _, _| {
+                        not_supported("relaxNGValidateSource")
+                    })
+                    .tentative_return("bool"),
                 ]
             }
         },
@@ -171,13 +177,9 @@ fn by_id(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nati
     location.wrap_optional(context, found)
 }
 
-fn not_supported(context: &mut dyn Context, _: This<'_>, _: &[Value]) -> NativeResult {
-    let method = context
-        .diagnostic_function()
-        .unwrap_or("DOMDocument validation");
-    Err(NativeError::Throw {
-        class: "Phera\\NotSupportedException",
-        message: format!("{method}() is not supported by Phera"),
-        code: 0,
-    })
+fn not_supported(method: &str) -> NativeResult {
+    Err(NativeError::throw(
+        "Phera\\NotSupportedException",
+        format!("DOMDocument::{method}() is not supported by Phera"),
+    ))
 }
