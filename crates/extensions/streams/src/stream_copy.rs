@@ -50,7 +50,11 @@ fn get_contents(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture
         if offset >= 0 && !seek(context, resource, name, offset as u64, Seek::Current).await? {
             return Ok(Value::Bool(false));
         }
-        let result = read(resource, length).await?;
+        let result = if let Some(pipe) = crate::child_pipe::of(resource)? {
+            crate::child_pipe::bounded(context, resource, pipe.contents(resource, length)).await??
+        } else {
+            read(resource, length).await?
+        };
         match result {
             Ok(data) => Ok(Value::from(data)),
             Err(error) => {
@@ -101,7 +105,12 @@ pub async fn copy(
         } else {
             with_stream(from, |stream| stream.read_policy(Some(requested)))?
         };
-        let bytes = match operate(from, policy, move |stream| stream.read(Some(requested))).await? {
+        let result = if crate::child_pipe::of(from)?.is_some() {
+            crate::child_pipe::bounded(context, from, read(from, Some(requested))).await??
+        } else {
+            operate(from, policy, move |stream| stream.read(Some(requested))).await?
+        };
+        let bytes = match result {
             Ok(bytes) if bytes.is_empty() => break,
             Ok(bytes) => bytes,
             Err(error) => {

@@ -34,7 +34,7 @@ fn fread(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
     Box::pin(async move {
         let resource = stream_arg(&arguments, "fread")?;
         let length = positive("fread", args::int(&arguments, 1).unwrap_or(0))?;
-        match read(resource, Some(length)).await? {
+        match crate::child_pipe::bounded(context, resource, read(resource, Some(length))).await?? {
             Ok(bytes) => Ok(Value::from(bytes)),
             Err(error) => {
                 read_notice(context, "fread", &error, read_amount(Some(length)));
@@ -47,7 +47,7 @@ fn fread(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
 fn fgetc(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let resource = stream_arg(&arguments, "fgetc")?;
-        match read(resource, Some(1)).await? {
+        match crate::child_pipe::bounded(context, resource, read(resource, Some(1))).await?? {
             Ok(bytes) if !bytes.is_empty() => Ok(Value::from(bytes)),
             Ok(_) => Ok(Value::Bool(false)),
             Err(error) => {
@@ -64,7 +64,7 @@ fn fgets(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let length = args::int(&arguments, 1)
             .map(|length| positive("fgets", length).map(|length| length - 1))
             .transpose()?;
-        match line(resource, length).await? {
+        match crate::child_pipe::bounded(context, resource, line(resource, length)).await?? {
             Ok(bytes) if !bytes.is_empty() => Ok(Value::from(bytes)),
             Ok(_) => Ok(Value::Bool(false)),
             Err(error) => {
@@ -79,6 +79,9 @@ pub async fn line(
     resource: &Resource,
     length: Option<u64>,
 ) -> Result<io::Result<Vec<u8>>, phera_extension_api::NativeError> {
+    if let Some(pipe) = crate::child_pipe::of(resource)? {
+        return pipe.line(resource, length).await;
+    }
     let policy = with_stream(resource, |stream| stream.read_policy(length))?;
     operate(resource, policy, move |stream| stream.line(length)).await
 }
@@ -87,6 +90,9 @@ pub async fn read(
     resource: &Resource,
     length: Option<u64>,
 ) -> Result<io::Result<Vec<u8>>, phera_extension_api::NativeError> {
+    if let Some(pipe) = crate::child_pipe::of(resource)? {
+        return pipe.read(resource, length).await;
+    }
     let policy = with_stream(resource, |stream| stream.read_policy(length))?;
     operate(resource, policy, move |stream| stream.read(length)).await
 }
@@ -124,13 +130,19 @@ pub async fn write(
     let (wrapper, policy) = with_stream(resource, |stream| {
         (stream.wrapper, stream.write_policy(length as u64))
     })?;
-    let result = match policy {
-        crate::io_policy::IoPolicy::Inline => with_stream(resource, |stream| stream.write(data))?,
-        policy if wrapper != Wrapper::Output => {
-            let data = data.to_vec();
-            operate(resource, policy, move |stream| write_bytes(stream, &data)).await?
+    let result = if let Some(pipe) = crate::child_pipe::of(resource)? {
+        crate::child_pipe::bounded(context, resource, pipe.write(resource, data)).await??
+    } else {
+        match policy {
+            crate::io_policy::IoPolicy::Inline => {
+                with_stream(resource, |stream| stream.write(data))?
+            }
+            policy if wrapper != Wrapper::Output => {
+                let data = data.to_vec();
+                operate(resource, policy, move |stream| write_bytes(stream, &data)).await?
+            }
+            _ => with_stream(resource, |stream| stream.write(data))?,
         }
-        _ => with_stream(resource, |stream| stream.write(data))?,
     };
     finish_write(context, wrapper, data, function, result)
 }
@@ -174,12 +186,9 @@ fn fpassthru(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
     Box::pin(async move {
         let stream = stream_arg(&arguments, "fpassthru")?;
         let mut total = 0;
-        let policy = with_stream(stream, |stream| stream.read_policy(None))?;
         loop {
-            let result = operate(stream, policy, |stream| {
-                stream.read(Some(crate::io_policy::CHUNK as u64))
-            })
-            .await?;
+            let read = read(stream, Some(crate::io_policy::CHUNK as u64));
+            let result = crate::child_pipe::bounded(context, stream, read).await??;
             match result {
                 Ok(bytes) if bytes.is_empty() => break,
                 Ok(bytes) => {
