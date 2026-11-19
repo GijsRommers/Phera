@@ -285,7 +285,7 @@ impl Vm {
         &mut self,
         object: Rc<Object>,
         continuation: crate::lazy_continuation::LazyContinuation,
-    ) -> Result<Option<crate::property_hook_continuation::ReturnedHook>, NativeError> {
+    ) -> Result<(), NativeError> {
         let (initialization, callee) = self.begin_lazy_initialization(object.clone())?;
         let origin = callee.argument_binding.origin(ArgumentOrigin::Callback);
         self.prepare_call(callee)?;
@@ -302,16 +302,20 @@ impl Vm {
         let continuation = Box::new(HookContinuation::Lazy(initialization, continuation));
         if matches!(entry, CallEntry::Php) {
             self.call_stack.current_extras_mut().property_hook = Some(continuation);
-            Ok(None)
         } else {
             let previous = std::mem::replace(&mut self.argument_origin, origin);
             let result = Box::pin(self.finish_native_window()).await;
             self.argument_origin = previous;
-            Ok(Some(crate::property_hook_continuation::ReturnedHook {
+            if self.returned_hook.is_some() {
+                return Err(internal_error!("overlapping lazy continuation"));
+            }
+            self.returned_hook = Some(crate::property_hook_continuation::ReturnedHook {
                 continuation,
                 value: result?,
-            }))
+            });
+            self.pending_callbacks = true;
         }
+        Ok(())
     }
 }
 

@@ -84,12 +84,8 @@ impl Vm {
                         let trace = NativeTrace::new(request.function, &request.arguments);
                         let continuation =
                             LazyContinuation::NativeView(destination, Box::new(request), trace);
-                        if let Some(returned) = self
-                            .suspend_lazy_initialization(object, continuation)
-                            .await?
-                        {
-                            Box::pin(self.resume_property_hook(returned)).await?;
-                        }
+                        self.suspend_lazy_initialization(object, continuation)
+                            .await?;
                         return Ok(None);
                     }
                     if let Some(class) = self.hooked_property_class(&object)

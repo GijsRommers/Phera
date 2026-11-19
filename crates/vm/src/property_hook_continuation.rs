@@ -272,12 +272,8 @@ impl Vm {
             PathReadStep::Lazy(object) => {
                 let continuation =
                     crate::lazy_continuation::LazyContinuation::Read(path, completion);
-                if let Some(returned) = self
-                    .suspend_lazy_initialization(object, continuation)
-                    .await?
-                {
-                    Box::pin(self.resume_property_hook(returned)).await?;
-                }
+                self.suspend_lazy_initialization(object, continuation)
+                    .await?;
                 Ok(())
             }
             PathReadStep::Complete(result) => match completion {
@@ -348,12 +344,8 @@ impl Vm {
             ReferenceStep::Lazy(object) => {
                 let continuation =
                     crate::lazy_continuation::LazyContinuation::Reference(path, completion);
-                if let Some(returned) = self
-                    .suspend_lazy_initialization(object, continuation)
-                    .await?
-                {
-                    Box::pin(self.resume_property_hook(returned)).await?;
-                }
+                self.suspend_lazy_initialization(object, continuation)
+                    .await?;
                 Ok(())
             }
             ReferenceStep::Complete(value) => completion.finish(self, value).await,
@@ -382,12 +374,8 @@ impl Vm {
             MutationStep::Lazy(object) => {
                 let continuation =
                     crate::lazy_continuation::LazyContinuation::Mutation(path, completion);
-                if let Some(returned) = self
-                    .suspend_lazy_initialization(object, continuation)
-                    .await?
-                {
-                    Box::pin(self.resume_property_hook(returned)).await?;
-                }
+                self.suspend_lazy_initialization(object, continuation)
+                    .await?;
                 Ok(())
             }
             MutationStep::Complete(converted) => {

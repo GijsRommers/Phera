@@ -89,12 +89,8 @@ impl Vm {
                     original.clone(),
                     properties,
                 );
-                if let Some(returned) = self
-                    .suspend_lazy_initialization(object, continuation)
-                    .await?
-                {
-                    Box::pin(self.resume_property_hook(returned)).await?;
-                }
+                self.suspend_lazy_initialization(object, continuation)
+                    .await?;
                 return Ok(());
             }
         }

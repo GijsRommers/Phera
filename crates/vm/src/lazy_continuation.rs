@@ -92,12 +92,8 @@ impl Vm {
                 &[Value::Object(original.clone()), Value::String(name.clone())],
             );
             let continuation = LazyContinuation::PropertyExists(destination, original, name, trace);
-            if let Some(returned) = self
-                .suspend_lazy_initialization(object, continuation)
-                .await?
-            {
-                Box::pin(self.resume_property_hook(returned)).await?;
-            }
+            self.suspend_lazy_initialization(object, continuation)
+                .await?;
         } else {
             self.set(destination, Value::Bool(exists));
         }
@@ -128,12 +124,8 @@ impl Vm {
         let object = crate::lazy_objects::resolved_lazy_instance(original.clone());
         if object.is_uninitialized_lazy() && !object.class.is_traversable() {
             let continuation = LazyContinuation::Iterate(iterator, subject, original);
-            if let Some(returned) = self
-                .suspend_lazy_initialization(object, continuation)
-                .await?
-            {
-                Box::pin(self.resume_property_hook(returned)).await?;
-            }
+            self.suspend_lazy_initialization(object, continuation)
+                .await?;
             return Ok(());
         }
         if object.class.is_traversable() {
@@ -161,12 +153,8 @@ impl Vm {
         if object.is_uninitialized_lazy() {
             let trace = NativeTrace::new(function.name(), &[Value::Object(original.clone())]);
             let continuation = LazyContinuation::ObjectVars(destination, function, original, trace);
-            if let Some(returned) = self
-                .suspend_lazy_initialization(object, continuation)
-                .await?
-            {
-                Box::pin(self.resume_property_hook(returned)).await?;
-            }
+            self.suspend_lazy_initialization(object, continuation)
+                .await?;
             return Ok(());
         }
         let properties = if matches!(function, ClassFunction::GetObjectVars) {
@@ -199,12 +187,8 @@ impl Vm {
             &[Value::Object(object.clone())],
         );
         let continuation = LazyContinuation::Reflection(destination, Box::new(operation), trace);
-        if let Some(returned) = self
-            .suspend_lazy_initialization(object, continuation)
-            .await?
-        {
-            self.resume_property_hook(returned).await?;
-        }
+        self.suspend_lazy_initialization(object, continuation)
+            .await?;
         Ok(None)
     }
 
