@@ -140,7 +140,7 @@ names in Hyper's header map. Preserving client spelling would require
 `crates/server` to capture the original names at HTTP/1 parsing and pass them
 alongside the normalized headers to the runtime.
 
-Phase 2 is snapshot and fork. A worker boots the application once (autoloader,
+Phase 2 is snapshot and fork (the design is in 5.4). A worker boots the application once (autoloader,
 container, routes), freezes that heap as a snapshot, and gives each request a
 fork of it. Arrays and strings are already copy-on-write, so a fork copies only
 objects and references, lazily where possible. Rules that make this safe:
@@ -281,7 +281,108 @@ advisory lock. Like PHP's files handler, garbage collection can unlink a stale
 name while a request locks its descriptor. A request opening that name after
 collection may create a new inode.
 
-### Child processes
+### 5.4 Snapshot and fork: the design
+
+Why now. Measured on the batch 9 build against PHP 8.5.12 without Xdebug: one
+Laravel API request costs about 150 ms and 2.1 billion instructions under
+`phera serve`, and 9 to 17 ms on PHP's built-in server. The interpreter alone
+explains at most a factor of 5 (section 10). The rest is work Phera repeats on
+every request and PHP with opcache does once per process: linking some 500
+classes, resolving includes, booting the framework.
+
+The work has four steps. Each is useful without the next.
+
+**Step 1: linked code is shared by all requests of a worker.** A class, function
+or constant that a file declares is linked once per worker thread and never
+changes afterwards. A request's class table points at the shared class. What a
+request can change moves out of the class into a table of the request, indexed
+by the class's number: static properties, static variables of functions and
+methods, and constant values that are objects (enum cases, `new` in
+initializers). This is what opcache's inheritance cache does for PHP. Include
+resolution (path to compiled unit) is cached per worker as well. Whether a
+changed file is noticed follows `opcache.validate_timestamps` and
+`opcache.revalidate_freq`; `phera serve --dev` checks on every request. Step 1
+needs no cooperation from the application, so it also helps applications that
+have no boot phase to snapshot, such as WordPress.
+
+**Step 2: a snapshot at a point the application names, and a fork per request.**
+
+```php
+// public/index.php
+$kernel = new Kernel('prod', false);
+$kernel->boot();              // runs once per worker
+Phera\snapshot();             // the worker keeps the state as it is here
+$response = $kernel->handle(Request::createFromGlobals());   // runs per request
+$response->send();
+```
+
+The first request of a worker runs the script from the top. At
+`Phera\snapshot()` the worker freezes the whole state of the VM: globals,
+static properties, the call stack with its registers, the tables of step 1, and
+what the script registered (autoloaders, error and exception handlers, shutdown
+functions, output handlers, stream wrappers, INI values). Every later request
+starts as a copy of that state and continues after the call, with its own
+superglobals. The frozen state is never executed again, so no request can
+change it.
+
+- What a fork copies: every object that can be reached from the frozen state,
+  once each, so that sharing and cycles stay as they were, and every reference
+  cell (`&`). Object ids stay the same. Strings are shared. An array is shared
+  (copy-on-write, as always) unless it holds an object or a reference somewhere
+  inside; then it is rebuilt with the copies.
+- Built-in classes with state of their own (`ArrayObject`, `SplObjectStorage`,
+  `WeakMap`, `Closure`, `DateTime`, ...) get a fork hook in the extension API. It
+  returns a copy of the state with the objects inside replaced by their copies,
+  or says that the object cannot be forked.
+- What cannot be in a snapshot: an open file, socket or process, a database
+  connection in the middle of a transaction, a started session, a running
+  generator or fiber that holds one of these. `Phera\snapshot()` then throws
+  `Phera\SnapshotException`, which names the class and the path from a global or
+  static property to the object. A pooled database handle is fine: it holds the
+  pool's key, and takes a connection again on first use.
+- What is reset in every fork: the superglobals, the request time, the time
+  limit, the header list, the seeds of `rand()` and `mt_rand()`. Output written
+  before the snapshot is not sent again.
+- A value read from `$_SERVER` or `$_GET` before the snapshot is the value of the
+  request that booted the worker. In `--dev`, Phera warns when a request field
+  was read before the snapshot.
+- The snapshot remembers the files it included. When one changes (same policy as
+  step 1) the worker drops the snapshot and boots again. If booting fails, the
+  request is answered the classic way and the next one tries again.
+- Destructors: a copied object is destroyed at the end of its request, as in
+  PHP-FPM, where every request has its own instance. Objects of the frozen state
+  are not destroyed while the worker lives.
+- The call must come from PHP frames only: not from inside a callback of a
+  built-in function.
+
+Each worker thread has its own snapshot, since values are not shared between
+threads. Memory per worker is measured before this ships.
+
+**Step 3: adapters, so that an application needs no change.** For Symfony, a
+runtime class that boots the kernel, takes the snapshot and then handles the
+request; `symfony/runtime` selects it through `APP_RUNTIME`, which `phera serve`
+sets when the application uses that component. For Laravel, an entry script
+that bootstraps the application and its providers before the snapshot; `phera
+new` writes it into new projects and `phera serve` uses it when it exists. Any
+other application calls `Phera\snapshot()` itself. Without an adapter or a call,
+step 1 still applies.
+
+**Step 4, only if a profile asks for it: copy on first write.** Objects are
+reached through a table of the request, and a fork copies an object only when
+the request first writes to it. A fork then costs nothing up front. This is a
+larger change to the value representation and waits until the copy of step 2
+shows up in measurements.
+
+Not chosen: worker mode as in FrankenPHP, RoadRunner or Laravel Octane, where
+one long-lived application object answers request after request. It is faster
+still, but state leaks from one request into the next unless the application is
+written for it. A fork keeps PHP's contract: a request starts from a known
+state and nothing it does is seen by another.
+
+Order: step 1 first, because it helps every application; then 2 and 3. They
+follow the destructors work (9.1), which changes the same object lifetime code.
+
+### 5.5 Child processes
 
 PHP can start programs through `proc_open()`, `popen()`, `exec()`,
 `shell_exec()`, backticks, `system()` and `passthru()`. The array form of
