@@ -28,6 +28,25 @@ impl Vm {
             })?)
         };
         let arrays = map_arguments(&arguments)?;
+        if callee.is_some() {
+            self.native_callback_sites
+                .push(crate::error_traces::NativeCallbackSite {
+                    boundary: self.call_stack.depth(),
+                    native: crate::error_traces::NativeTrace::new("array_map", &arguments),
+                });
+        }
+        let result = self.map_rows(callee.as_ref(), &arrays).await;
+        if callee.is_some() {
+            self.native_callback_sites.pop();
+        }
+        result
+    }
+
+    async fn map_rows(
+        &mut self,
+        callee: Option<&crate::calls::call_state::Callee>,
+        arrays: &[Rc<PhpArray>],
+    ) -> NativeResult {
         let length = arrays.iter().map(|array| array.len()).max().unwrap_or(0);
         let mut iterators: Vec<_> = arrays.iter().map(|array| array.iter()).collect();
         let mut result = PhpArray::new();
@@ -42,7 +61,7 @@ impl Vm {
                     })
                     .unwrap_or_default()
             });
-            let value = if let Some(callee) = &callee {
+            let value = if let Some(callee) = callee {
                 self.invoke_resolved_callable(callee.clone(), values)
                     .await?
             } else if arrays.len() == 1 {

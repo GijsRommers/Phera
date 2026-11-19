@@ -33,6 +33,18 @@ impl Context for Vm {
         self.out(bytes)
     }
 
+    fn backtrace(&mut self, objects: bool, arguments: bool, limit: i32) -> Value {
+        Value::from(self.capture_trace(phera_value::PhpArray::new(), objects, arguments, limit))
+    }
+
+    fn print_backtrace(&mut self, trace: &Value) {
+        let text = crate::exception_rendering::render_backtrace(
+            trace,
+            self.error_handlers.trace_string_limit,
+        );
+        self.out(text.as_bytes());
+    }
+
     fn output_origin(&self) -> Option<(&str, usize)> {
         let origin = self.output_writer.origin.as_ref()?;
         Some((&origin.file, origin.line))

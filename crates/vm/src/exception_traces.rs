@@ -1,4 +1,4 @@
-//! Capture PHP array-shaped traces while the heap frames still own their arguments.
+//! `debug_backtrace()` and `$exception->getTrace()` read the same heap frames.
 
 use std::rc::Rc;
 
@@ -38,87 +38,108 @@ impl Vm {
             entry.insert(ArrayKey::str("args"), native.arguments);
             let _ = trace.push(Value::Array(Rc::new(entry)));
         }
-        for callee_index in (1..self.call_stack.depth()).rev() {
-            let arguments = self.trace_arguments(callee_index);
-            let (Some(caller), Some(callee)) =
-                (self.frame_at(callee_index - 1), self.frame_at(callee_index))
-            else {
-                continue;
-            };
-            let mut entry = PhpArray::new();
-            entry.insert(
-                ArrayKey::str("file"),
-                caller.cache().trace_file(caller.unit()),
-            );
-            entry.insert(ArrayKey::str("line"), Value::Int(caller.line() as i64));
-            if callee.function_id().is_none()
-                && let Some(name) = scoped_unit_name(caller)
-            {
-                let arguments = PhpArray::new();
-                entry.insert(ArrayKey::str("function"), Value::from(name));
-                entry.insert(ArrayKey::str("args"), Value::Array(Rc::new(arguments)));
-                let _ = trace.push(Value::Array(Rc::new(entry)));
-                continue;
+        Value::from(self.capture_trace(trace, false, true, 0))
+    }
+
+    /// Stop at the requested number of PHP-visible frames, including native callbacks.
+    pub(crate) fn capture_trace(
+        &mut self,
+        mut trace: PhpArray,
+        objects: bool,
+        arguments: bool,
+        limit: i32,
+    ) -> PhpArray {
+        let limit = match limit {
+            0 => usize::MAX,
+            positive if positive > 0 => positive as usize,
+            _ => return trace,
+        };
+        let mut callbacks = self.native_callback_sites.len();
+        let mut child_file = None;
+        for depth in (0..self.call_stack.depth()).rev() {
+            if trace.len() >= limit {
+                break;
             }
-            let function = &callee.function().name;
-            let closure = function.starts_with("{closure:");
-            let name = if closure {
-                function.as_str()
-            } else {
-                function.rsplit("::").next().unwrap_or(function)
-            };
-            entry.insert(ArrayKey::str("function"), Value::from(name));
-            let class = if closure {
-                callee.scope().map(|scope| scope.name.as_str())
-            } else {
-                function.split_once("::").map(|(class, _)| class)
-            };
-            if let Some(class) = class {
-                entry.insert(ArrayKey::str("class"), Value::from(class));
-                let kind = if callee.this().is_some() { "->" } else { "::" };
-                entry.insert(ArrayKey::str("type"), Value::from(kind));
-            }
-            entry.insert(ArrayKey::str("args"), arguments);
             let warning = self
                 .error_handlers
                 .warning_site
                 .as_ref()
-                .filter(|site| site.boundary == callee_index);
-            let mut callbacks = self
-                .native_callback_sites
-                .iter()
-                .rev()
-                .filter(|site| site.boundary == callee_index)
-                .peekable();
-            if warning.is_some() || callbacks.peek().is_some() {
-                entry.remove(&ArrayKey::str("file"));
-                entry.remove(&ArrayKey::str("line"));
+                .filter(|site| site.boundary == depth);
+            let callback = callbacks
+                .checked_sub(1)
+                .and_then(|index| self.native_callback_sites.get(index))
+                .filter(|site| site.boundary == depth);
+            let internal = warning.is_some() || callback.is_some();
+            let Some(callee) = self.frame_at(depth) else {
+                break;
+            };
+            let caller = depth.checked_sub(1).and_then(|index| self.frame_at(index));
+            let mut entry = PhpArray::new();
+            if let Some(caller) = caller.filter(|_| !internal) {
+                add_location(&mut entry, caller);
             }
-            let _ = trace.push(Value::Array(Rc::new(entry)));
-            if let Some(site) = warning {
+            if callee.function_id().is_some() {
+                add_function(&mut entry, callee, objects);
+                if arguments {
+                    entry.insert(ArrayKey::str("args"), self.trace_arguments(depth));
+                }
+            } else if let Some(kind) = caller.and_then(scoped_unit_name) {
+                // The include path comes from its child frame's call site. PHP omits it
+                // when the backtrace runs directly in the included top-level code.
+                if kind != "eval"
+                    && let Some(file) = child_file.take()
+                {
+                    let mut paths = PhpArray::new();
+                    let _ = paths.push(file);
+                    entry.insert(ArrayKey::str("args"), Value::from(paths));
+                }
+                entry.insert(ArrayKey::str("function"), Value::from(kind));
+            } else {
+                break;
+            }
+            child_file = entry.get(&ArrayKey::str("file")).cloned();
+            let _ = trace.push(Value::from(entry));
+            if trace.len() >= limit {
+                break;
+            }
+            if let Some(site) = self
+                .error_handlers
+                .warning_site
+                .as_ref()
+                .filter(|site| site.boundary == depth)
+            {
                 append_native(
                     &mut trace,
                     &site.native,
-                    &site.location.file,
-                    site.location.line,
+                    Some((&site.location.file, site.location.line)),
+                    arguments,
                 );
-            } else {
-                for site in callbacks {
-                    append_native(&mut trace, &site.native, &caller.unit().file, caller.line());
-                }
+            }
+            while trace.len() < limit {
+                let Some(index) = callbacks.checked_sub(1) else {
+                    break;
+                };
+                let Some(site) = self
+                    .native_callback_sites
+                    .get(index)
+                    .filter(|site| site.boundary == depth)
+                else {
+                    break;
+                };
+                callbacks = index;
+                let nested = index
+                    .checked_sub(1)
+                    .and_then(|parent| self.native_callback_sites.get(parent))
+                    .is_some_and(|parent| parent.boundary == depth);
+                let location = depth
+                    .checked_sub(1)
+                    .and_then(|parent| self.frame_at(parent))
+                    .filter(|_| !nested)
+                    .map(|caller| (caller.unit().file.as_str(), caller.line()));
+                append_native(&mut trace, &site.native, location, arguments);
             }
         }
-        if let Some(name) = self
-            .frame_at(0)
-            .filter(|frame| frame.function_id().is_some())
-            .map(|frame| frame.function().name.clone())
-        {
-            let mut entry = PhpArray::new();
-            entry.insert(ArrayKey::str("function"), Value::from(name));
-            entry.insert(ArrayKey::str("args"), self.trace_arguments(0));
-            let _ = trace.push(Value::Array(Rc::new(entry)));
-        }
-        Value::Array(Rc::new(trace))
+        trace
     }
 }
 
@@ -131,9 +152,11 @@ impl Vm {
         let mut snapshot = Vec::new();
         let params = &frame.function().parameters;
         for (index, parameter) in params.iter().enumerate().take(frame.supplied_arguments()) {
-            let Some(Some(value)) = frame.slots(&self.registers).get(index) else {
-                continue;
-            };
+            let value = frame
+                .slots(&self.registers)
+                .get(index)
+                .and_then(Option::as_ref)
+                .unwrap_or(&Value::Null);
             let sensitive = crate::sensitive_parameters::is_sensitive(frame, index);
             if parameter.variadic {
                 if let Value::Array(items) = &*value.deref() {
@@ -203,16 +226,58 @@ fn scoped_unit_name(frame: FrameView<'_>) -> Option<&'static str> {
     )
 }
 
+fn add_location(entry: &mut PhpArray, caller: FrameView<'_>) {
+    entry.insert(
+        ArrayKey::str("file"),
+        caller.cache().trace_file(caller.unit()),
+    );
+    entry.insert(ArrayKey::str("line"), Value::Int(caller.line() as i64));
+}
+
+fn add_function(entry: &mut PhpArray, callee: FrameView<'_>, objects: bool) {
+    let function = &callee.function().name;
+    let closure = function.starts_with("{closure:");
+    let name = if closure {
+        function.as_str()
+    } else {
+        function.rsplit("::").next().unwrap_or(function)
+    };
+    entry.insert(ArrayKey::str("function"), Value::from(name));
+    let object = callee.this();
+    let class = callee
+        .scope()
+        .map(|scope| scope.name.as_str())
+        .or_else(|| {
+            function
+                .split_once("::")
+                .filter(|_| !closure)
+                .map(|(class, _)| class)
+        })
+        .or_else(|| object.map(|object| object.class.name()));
+    if let Some(class) = class {
+        entry.insert(ArrayKey::str("class"), Value::from(class));
+        if objects && let Some(object) = object {
+            entry.insert(ArrayKey::str("object"), Value::Object(Rc::clone(object)));
+        }
+        let kind = if object.is_some() { "->" } else { "::" };
+        entry.insert(ArrayKey::str("type"), Value::from(kind));
+    }
+}
+
 fn append_native(
     trace: &mut PhpArray,
     native: &crate::error_traces::NativeTrace,
-    file: &str,
-    line: usize,
+    location: Option<(&str, usize)>,
+    arguments: bool,
 ) {
     let mut entry = PhpArray::new();
-    entry.insert(ArrayKey::str("file"), Value::from(file));
-    entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
+    if let Some((file, line)) = location {
+        entry.insert(ArrayKey::str("file"), Value::from(file));
+        entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
+    }
     entry.insert(ArrayKey::str("function"), Value::from(native.name.clone()));
-    entry.insert(ArrayKey::str("args"), native.arguments.clone());
-    let _ = trace.push(Value::Array(Rc::new(entry)));
+    if arguments {
+        entry.insert(ArrayKey::str("args"), native.arguments.clone());
+    }
+    let _ = trace.push(Value::from(entry));
 }
