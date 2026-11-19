@@ -69,7 +69,7 @@ pub(crate) fn step_native_cursor<'a>(
 ) -> StepFuture<'a> {
     if iterator.needs_input(operation) {
         StepFuture::Pending(Box::pin(async move {
-            iterator.read_input().await?;
+            iterator.read_input(context).await?;
             native_step(iterator, context, operation)
         }))
     } else {

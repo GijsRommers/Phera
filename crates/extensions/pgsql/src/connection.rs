@@ -50,14 +50,20 @@ pub fn argument(
     if let Value::Object(object) = &*value.deref() {
         return object_handle(object);
     }
-    let default = context.extension_value(DEFAULT);
-    let Some(Value::Object(object)) = default else {
+    let Some(state) = default_handle(context)? else {
         return Err(NativeError::error("No PostgreSQL connection opened yet"));
     };
     context.deprecated(format!(
         "{call}(): Automatic fetching of PostgreSQL connection is deprecated"
     ));
-    object_handle(&object)
+    Ok(state)
+}
+
+pub(crate) fn default_handle(context: &dyn Context) -> Result<Option<Handle>, NativeError> {
+    match context.extension_value(DEFAULT) {
+        Some(Value::Object(object)) => object_handle(&object).map(Some),
+        _ => Ok(None),
+    }
 }
 
 pub fn object_handle(object: &Object) -> Result<Handle, NativeError> {

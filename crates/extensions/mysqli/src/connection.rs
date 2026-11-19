@@ -72,6 +72,15 @@ impl Connection {
         Ok(())
     }
 
+    pub fn waiting_for_result(&self) -> bool {
+        self.pending.is_some()
+            || !self.more.is_empty()
+            || self
+                .pending_stream
+                .as_ref()
+                .is_some_and(|owner| owner.strong_count() > 0)
+    }
+
     pub fn close(&mut self) -> Result<(), NativeError> {
         self.ensure_not_closed()?;
         self.pending = None;

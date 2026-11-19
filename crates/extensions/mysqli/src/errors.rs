@@ -57,6 +57,14 @@ pub fn sqlstate(error: Option<&DbError>) -> Value {
     )
 }
 
+pub fn out_of_sync() -> DbError {
+    DbError {
+        state: "HY000".into(),
+        code: Some(2014),
+        detail: "Commands out of sync; you can't run this command now".into(),
+    }
+}
+
 pub fn report(
     context: &mut dyn Context,
     error: &DbError,

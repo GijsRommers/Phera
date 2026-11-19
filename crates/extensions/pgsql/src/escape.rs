@@ -1,7 +1,7 @@
 //! `pg_escape_literal($db, $text)` quotes a PostgreSQL string literal.
 
 use crate::connection;
-use phera_extension_api::{Context, LocalFuture, NativeResult, Value, args};
+use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Value, args};
 
 pub const STRING: usize = 0;
 pub const LITERAL: usize = 1;
@@ -15,14 +15,21 @@ pub fn escape<const OP: usize>(
     Box::pin(async move {
         let explicit = args::object(&a, 0).is_some();
         let value = args::bytes(&a, usize::from(explicit));
-        let standard = if explicit {
-            let call = match OP {
-                STRING => "pg_escape_string",
-                LITERAL => "pg_escape_literal",
-                IDENTIFIER => "pg_escape_identifier",
-                _ => "pg_escape_bytea",
-            };
-            let state = connection::argument(c, args::value(&a, 0), call)?;
+        let call = match OP {
+            STRING => "pg_escape_string",
+            LITERAL => "pg_escape_literal",
+            IDENTIFIER => "pg_escape_identifier",
+            _ => "pg_escape_bytea",
+        };
+        let state = if explicit {
+            Some(connection::argument(c, args::value(&a, 0), call)?)
+        } else {
+            c.deprecated(format!(
+                "{call}(): Automatic fetching of PostgreSQL connection is deprecated"
+            ));
+            connection::default_handle(c)?
+        };
+        let standard = if let Some(state) = state {
             let lease = state.borrow().lease()?;
             if matches!(OP, STRING | BYTEA) {
                 connection::run(&lease, |driver| {
@@ -39,7 +46,11 @@ pub fn escape<const OP: usize>(
                 true
             }
         } else {
-            true
+            match OP {
+                STRING => false,
+                BYTEA => return Ok(Value::from(escape_legacy_bytea(value))),
+                _ => return Err(NativeError::error("No PostgreSQL connection opened yet")),
+            }
         };
         if OP == BYTEA {
             return Ok(Value::from(escape_bytea(value, standard)));
@@ -77,6 +88,25 @@ fn escape_bytea(bytes: &[u8], standard: bool) -> Vec<u8> {
     for byte in bytes {
         encoded.push(HEX[usize::from(byte >> 4)]);
         encoded.push(HEX[usize::from(byte & 15)]);
+    }
+    encoded
+}
+
+fn escape_legacy_bytea(bytes: &[u8]) -> Vec<u8> {
+    let mut encoded = Vec::new();
+    for &byte in bytes {
+        match byte {
+            b'\'' => encoded.extend_from_slice(b"''"),
+            b'\\' => encoded.extend_from_slice(b"\\\\\\\\"),
+            0x20..=0x7e => encoded.push(byte),
+            _ => encoded.extend_from_slice(&[
+                b'\\',
+                b'\\',
+                b'0' + (byte >> 6),
+                b'0' + (byte >> 3 & 7),
+                b'0' + (byte & 7),
+            ]),
+        }
     }
     encoded
 }

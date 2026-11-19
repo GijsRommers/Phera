@@ -300,6 +300,39 @@ fn mysqli_php_matrix() {
         run('statement-bind-' . (int)$api, fn() => bound_statement($db, $api));
         run('multi-' . (int)$api, fn() => multi_calls($db, $api));
     }
+    run('stmt-no-rows-and-eof', function () use ($db) {
+        $db->query('CREATE TEMPORARY TABLE matrix_stmt (n INT)');
+        $insert = $db->prepare('INSERT INTO matrix_stmt VALUES (42)');
+        $out = [$insert->store_result(), $insert->execute(), $insert->store_result(), $insert->num_rows];
+        $select = $db->prepare('SELECT n FROM matrix_stmt');
+        $out[] = [$select->execute(), $select->fetch(), $select->num_rows,
+            $select->fetch(), $select->num_rows];
+        $db->query('DROP TEMPORARY TABLE matrix_stmt');
+        return $out;
+    });
+    run('stmt-blob-reset', function () use ($db) {
+        $stmt = $db->prepare('SELECT ? AS b');
+        $value = 'bound';
+        $stmt->bind_param('b', $value);
+        $stmt->send_long_data(0, 'discarded');
+        $stmt->reset();
+        $stmt->execute();
+        return $stmt->get_result()->fetch_column();
+    });
+    run('multi-next-error', function () use ($db) {
+        mysqli_report(MYSQLI_REPORT_OFF);
+        try {
+            $start = $db->multi_query('SELECT 1 AS n; FOO;');
+            $busy = [$db->autocommit(true), $db->errno];
+            $st = $db->stmt_init();
+            $blocked = [$st->prepare('SELECT 2'), $st->errno];
+            $first = $db->store_result()->fetch_row();
+            return [$start, $busy, $blocked, $first, $db->more_results(),
+                $db->next_result(), $db->errno, $db->more_results(), $db->query('SELECT 2')->fetch_row()];
+        } finally {
+            mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+        }
+    });
     run('stream-status', function () use ($db) {
         $db->real_query('SELECT 7 AS n UNION ALL SELECT 8');
         $result = $db->use_result();
@@ -323,12 +356,19 @@ fn mysqli_php_matrix() {
             return [$before, $opened, $rows, $db->affected_rows, $r->num_rows];
         });
     }
-    run('stream-after-connection-close', function () {
-        $db = matrix_connect(false);
-        $r = $db->query('SELECT 1 AS n UNION ALL SELECT 2', MYSQLI_USE_RESULT);
-        $db->close();
-        return $r->fetch_row();
-    });
+    foreach ([0, 1, 2, 3, 255] as $mode) {
+        run("stream-after-connection-close-$mode", function () use ($mode) {
+            $db = matrix_connect(false);
+            $r = $db->query('SELECT 1 AS n UNION ALL SELECT 2', MYSQLI_USE_RESULT);
+            $db->close();
+            mysqli_report($mode);
+            try {
+                return $r->fetch_row();
+            } finally {
+                mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+            }
+        });
+    }
     foreach ([0, 1, 2, 3, 4, 5, 6, 7, 255] as $report) {
         foreach (['SELECT FROM', 'SELECT missing_column FROM (SELECT 1) AS t', 'SELECT * FROM no_matrix_table'] as $i => $sql) {
             run("report-$report-$i", function () use ($db, $sql, $report) {
@@ -346,5 +386,5 @@ fn mysqli_php_matrix() {
     }
 "#,
     );
-    comparison.check_matrix(&script, COLUMNS.len() * 120 + 41);
+    comparison.check_matrix(&script, COLUMNS.len() * 120 + 48);
 }

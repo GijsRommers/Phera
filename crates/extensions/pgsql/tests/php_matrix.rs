@@ -42,8 +42,15 @@ const TYPES: &[(&str, &str, &str)] = &[
 ];
 
 const MATRIX: &str = r#"
+function legacy_escape_cases($label) {
+    foreach (['pg_escape_string', 'pg_escape_bytea', 'pg_escape_literal', 'pg_escape_identifier'] as $f) {
+        run("$label-$f", fn() => $f("abc\x5c\x27\x22\x00\xff"));
+    }
+}
+legacy_escape_cases('no-default');
 $db = pg_connect('host=127.0.0.1 port=54329 dbname=pgsql_ext user=phera password=phera');
 pg_query($db, "SET TIME ZONE 'UTC'");
+legacy_escape_cases('default');
 function matrix_read($r, $mode) {
     return match ($mode) {
         'assoc' => [pg_fetch_assoc($r), pg_fetch_assoc($r), pg_fetch_assoc($r), pg_fetch_assoc($r)],
@@ -167,5 +174,5 @@ fn pgsql_php_matrix() {
         ));
     }
     script.push_str("fixed_cases($db);\npg_close($db);\n");
-    comparison.check_matrix(&script, TYPES.len() * 72 + 32);
+    comparison.check_matrix(&script, TYPES.len() * 72 + 40);
 }

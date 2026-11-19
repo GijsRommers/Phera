@@ -98,6 +98,11 @@ pub async fn prepare(
 ) -> NativeResult {
     let connection = handle.borrow().connection.clone();
     let lease = connection.borrow().lease()?;
+    if connection.borrow().waiting_for_result() {
+        let error = errors::out_of_sync();
+        handle.borrow_mut().error = Some(error.clone());
+        return connection::query::failure(context, &mut connection.borrow_mut(), error, call);
+    }
     let statement = connection::run(&lease, move |mysql| {
         Box::pin(async move { mysql.prepare_native(&sql).await })
     })
@@ -145,6 +150,11 @@ pub async fn execute(
         (statement, state.connection.clone(), params)
     };
     let lease = connection.borrow().lease()?;
+    if connection.borrow().waiting_for_result() {
+        let error = errors::out_of_sync();
+        handle.borrow_mut().error = Some(error.clone());
+        return connection::query::failure(context, &mut connection.borrow_mut(), error, call);
+    }
     let outcome = connection::run(&lease, move |mysql| {
         Box::pin(async move {
             mysql

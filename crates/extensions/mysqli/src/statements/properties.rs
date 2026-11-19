@@ -61,8 +61,13 @@ pub fn value(object: &Object, index: usize) -> NativeResult {
         0 if error.is_some() => Value::Int(-1),
         0 => uint(state.reply.affected),
         1 => uint(state.reply.insert_id),
-        2 if state.stored => uint(state.rows.as_ref().map_or(0, |rows| rows.values.len()) as u64),
-        2 => Value::Int(0),
+        2 => uint(state.rows.as_ref().map_or(0, |rows| {
+            if state.stored || state.row > rows.values.len() {
+                rows.values.len() as u64
+            } else {
+                0
+            }
+        })),
         3 => Value::Int(statement.as_ref().map_or(0, |s| i64::from(s.num_params()))),
         4 => Value::Int(statement.as_ref().map_or(0, |s| s.columns().len() as i64)),
         5 => errors::errno(error),

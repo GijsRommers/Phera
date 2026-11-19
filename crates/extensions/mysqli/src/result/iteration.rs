@@ -50,8 +50,18 @@ impl NativeIterator for Cursor {
                 .is_some_and(|result| result.stream.is_some())
     }
 
-    fn read_input(&mut self) -> LocalFuture<'_, Result<(), NativeError>> {
-        Box::pin(super::stream::load(&self.object, false))
+    fn read_input<'a>(
+        &'a mut self,
+        context: &'a mut dyn Context,
+    ) -> LocalFuture<'a, Result<(), NativeError>> {
+        Box::pin(async move {
+            if !super::stream::load(context, &self.object, false, "mysqli_result::fetch_assoc")
+                .await?
+            {
+                self.current = None;
+            }
+            Ok(())
+        })
     }
 
     fn rewind(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {

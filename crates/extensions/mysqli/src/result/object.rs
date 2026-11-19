@@ -23,7 +23,9 @@ pub async fn fetch_object(
             "{call}(): Argument #{argument} ($class) must be a valid class name, {name} given"
         )));
     }
-    super::stream::load(object, false).await?;
+    if !super::stream::load(context, object, false, call).await? {
+        return Ok(Value::Bool(false));
+    }
     let handle = handle(object)?;
     let row = {
         let mut state = handle.borrow_mut();

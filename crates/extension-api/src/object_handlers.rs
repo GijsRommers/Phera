@@ -81,7 +81,10 @@ pub trait NativeIterator {
         false
     }
 
-    fn read_input(&mut self) -> LocalFuture<'_, Result<(), NativeError>> {
+    fn read_input<'a>(
+        &'a mut self,
+        _context: &'a mut dyn Context,
+    ) -> LocalFuture<'a, Result<(), NativeError>> {
         Box::pin(async { Ok(()) })
     }
 

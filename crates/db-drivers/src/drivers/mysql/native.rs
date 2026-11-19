@@ -179,7 +179,9 @@ impl Mysql {
             if let Some(error_value) = next_error {
                 if multiple {
                     outcomes.push(Err(error_value));
-                    break;
+                    // mysql_async may also surface the queued result error during cleanup.
+                    let _ = result.drop_result().await;
+                    return Ok(outcomes);
                 }
                 return Err(error_value);
             }

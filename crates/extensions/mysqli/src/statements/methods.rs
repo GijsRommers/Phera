@@ -47,10 +47,12 @@ pub fn execute<const OP: usize>(
             if let Some(rows) = state.rows.as_ref().filter(|rows| !rows.columns.is_empty()) {
                 state.reply.affected = rows.values.len() as u64;
                 state.stored = true;
-            } else {
-                state.stored = false;
+            } else if !statement.columns().is_empty() {
+                let error = crate::errors::out_of_sync();
+                state.error = Some(error.clone());
+                return crate::errors::report(context, &error, call, false);
             }
-            Ok(Value::Bool(state.stored))
+            Ok(Value::Bool(true))
         }
         RESULT => {
             if let Some(rows) = state.rows.take().filter(|rows| !rows.columns.is_empty()) {
@@ -125,6 +127,7 @@ fn fetch(state: &mut State) -> NativeResult {
         return Ok(Value::Null);
     };
     let Some(row) = values.get(state.row) else {
+        state.row = values.len().saturating_add(1);
         return Ok(Value::Null);
     };
     for (reference, value) in state.output.iter().zip(row) {

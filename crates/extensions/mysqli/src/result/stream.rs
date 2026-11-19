@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use phera_db_drivers::drivers::{Driver, Rows};
 use phera_db_drivers::errors::DbError;
-use phera_extension_api::{NativeError, Object};
+use phera_extension_api::{Context, NativeError, Object};
 use phera_io_pool::Lease;
 
 use super::{closed, decode, handle};
@@ -36,11 +36,7 @@ impl Stream {
             .upgrade()
             .is_some_and(|state| !state.borrow().connected())
         {
-            return Err(DbError {
-                state: "HY000".into(),
-                code: Some(2014),
-                detail: "Commands out of sync; you can't run this command now".into(),
-            });
+            return Err(crate::errors::out_of_sync());
         }
         let owner = self.owner.clone();
         let response = connection::run(&self.lease, move |driver| {
@@ -80,19 +76,27 @@ impl Stream {
     }
 }
 
-pub async fn load(object: &Object, all: bool) -> Result<(), NativeError> {
+pub async fn load(
+    context: &mut dyn Context,
+    object: &Object,
+    all: bool,
+    call: &str,
+) -> Result<bool, NativeError> {
     let handle = handle(object)?;
     let stream = {
         let state = handle.borrow();
         state.as_ref().ok_or_else(closed)?.stream.clone()
     };
     let Some(stream) = stream else {
-        return Ok(());
+        return Ok(true);
     };
-    let (rows, done) = stream
-        .read(all)
-        .await
-        .map_err(|error| NativeError::error(error.detail))?;
+    let (rows, done) = match stream.read(all).await {
+        Ok(batch) => batch,
+        Err(error) => {
+            crate::errors::report(context, &error, call, false)?;
+            return Ok(false);
+        }
+    };
     let mut state = handle.borrow_mut();
     let result = state.as_mut().ok_or_else(closed)?;
     let valid = result
@@ -114,7 +118,7 @@ pub async fn load(object: &Object, all: bool) -> Result<(), NativeError> {
         stream.complete(0);
         result.stream = None;
     }
-    Ok(())
+    Ok(true)
 }
 
 pub async fn free(object: &Object) -> Result<(), NativeError> {
@@ -164,6 +168,8 @@ pub async fn execute<const OP: usize>(
             )));
         }
     }
-    load(object, OP == ALL).await?;
+    if !load(context, object, OP == ALL, call).await? {
+        return Ok(Value::Bool(false));
+    }
     super::execute::<OP>(context, object, arguments, call)
 }

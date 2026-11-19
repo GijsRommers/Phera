@@ -85,17 +85,17 @@ function	odbc_result_all	8.1		omit
 function	openssl_free_key	8.0	as OpenSSLAsymmetricKey objects are freed automatically	omit
 function	openssl_pkey_free	8.0	as OpenSSLAsymmetricKey objects are freed automatically	keep
 function	openssl_x509_free	8.0	as OpenSSLCertificate objects are freed automatically	omit
-function	pg_clientencoding	8.0	use pg_client_encoding() instead	omit
-function	pg_cmdtuples	8.0	use pg_affected_rows() instead	omit
-function	pg_errormessage	8.0	use pg_last_error() instead	omit
+function	pg_clientencoding	8.0	use pg_client_encoding() instead	keep
+function	pg_cmdtuples	8.0	use pg_affected_rows() instead	keep
+function	pg_errormessage	8.0	use pg_last_error() instead	keep
 function	pg_fieldisnull	8.0	use pg_field_is_null() instead	omit
-function	pg_fieldname	8.0	use pg_field_name() instead	omit
-function	pg_fieldnum	8.0	use pg_field_num() instead	omit
+function	pg_fieldname	8.0	use pg_field_name() instead	keep
+function	pg_fieldnum	8.0	use pg_field_num() instead	keep
 function	pg_fieldprtlen	8.0	use pg_field_prtlen() instead	omit
-function	pg_fieldsize	8.0	use pg_field_size() instead	omit
-function	pg_fieldtype	8.0	use pg_field_type() instead	omit
-function	pg_freeresult	8.0	use pg_free_result() instead	omit
-function	pg_getlastoid	8.0	use pg_last_oid() instead	omit
+function	pg_fieldsize	8.0	use pg_field_size() instead	keep
+function	pg_fieldtype	8.0	use pg_field_type() instead	keep
+function	pg_freeresult	8.0	use pg_free_result() instead	keep
+function	pg_getlastoid	8.0	use pg_last_oid() instead	keep
 function	pg_loclose	8.0	use pg_lo_close() instead	omit
 function	pg_locreate	8.0	use pg_lo_create() instead	omit
 function	pg_loexport	8.0	use pg_lo_export() instead	omit
@@ -105,10 +105,10 @@ function	pg_loread	8.0	use pg_lo_read() instead	omit
 function	pg_loreadall	8.0	use pg_lo_read_all() instead	omit
 function	pg_lounlink	8.0	use pg_lo_unlink() instead	omit
 function	pg_lowrite	8.0	use pg_lo_write() instead	omit
-function	pg_numfields	8.0	use pg_num_fields() instead	omit
-function	pg_numrows	8.0	use pg_num_rows() instead	omit
-function	pg_result	8.0	use pg_fetch_result() instead	omit
-function	pg_setclientencoding	8.0	use pg_set_client_encoding() instead	omit
+function	pg_numfields	8.0	use pg_num_fields() instead	keep
+function	pg_numrows	8.0	use pg_num_rows() instead	keep
+function	pg_result	8.0	use pg_fetch_result() instead	keep
+function	pg_setclientencoding	8.0	use pg_set_client_encoding() instead	keep
 function	shmop_close	8.0	as Shmop objects are freed automatically	omit
 function	socket_set_timeout	8.5	use stream_set_timeout() instead	omit
 function	strftime	8.1	use IntlDateFormatter::format() instead	omit

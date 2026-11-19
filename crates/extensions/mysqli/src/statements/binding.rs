@@ -123,7 +123,8 @@ fn parameter(
     Ok(match kind {
         Kind::Integer => Parameter::Int(to_int(value, context.diagnostics())?),
         Kind::Double => Parameter::Double(to_float(value, context.diagnostics())?),
-        Kind::String | Kind::Blob => Parameter::Bytes(
+        Kind::Blob => Parameter::Bytes(Vec::new()),
+        Kind::String => Parameter::Bytes(
             to_php_string(value, context.diagnostics())?
                 .as_bytes()
                 .to_vec(),

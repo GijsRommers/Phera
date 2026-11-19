@@ -59,6 +59,14 @@ pub async fn execute<const OP: usize>(
     if OP == WARNINGS && handle.borrow().reply.warnings == 0 {
         return Ok(Value::Bool(false));
     }
+    if handle.borrow().waiting_for_result() {
+        return failure(
+            context,
+            &mut handle.borrow_mut(),
+            crate::errors::out_of_sync(),
+            call,
+        );
+    }
     let requested = name.clone();
     let answer = run(&lease, move |mysql| {
         Box::pin(async move {

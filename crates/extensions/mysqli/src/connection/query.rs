@@ -67,15 +67,11 @@ pub async fn execute<const OP: usize>(
             )));
         }
     }
-    if state.borrow().pending.is_some() || !state.borrow().more.is_empty() {
+    if state.borrow().waiting_for_result() {
         return failure(
             context,
             &mut state.borrow_mut(),
-            DbError {
-                state: "HY000".into(),
-                code: Some(2014),
-                detail: "Commands out of sync; you can't run this command now".into(),
-            },
+            errors::out_of_sync(),
             call,
         );
     }
@@ -194,7 +190,7 @@ pub fn failure(
     call: &str,
 ) -> NativeResult {
     if error.code == Some(2014) {
-        error.detail = "Commands out of sync; you can't run this command now".into();
+        error = errors::out_of_sync();
     }
     state.error = Some(error.clone());
     state.reply.affected = 0;
