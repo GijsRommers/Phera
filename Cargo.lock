@@ -2083,6 +2083,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-bcmath"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-core"
 version = "0.1.0"
 dependencies = [
@@ -2133,6 +2143,17 @@ dependencies = [
  "phera-extension-api",
  "phera-runtime",
  "url",
+]
+
+[[package]]
+name = "phera-ext-gmp"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "phera-extension-api",
 ]
 
 [[package]]
@@ -2365,6 +2386,7 @@ name = "phera-ext-streams"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "flate2",
  "nix",
  "percent-encoding",
  "phera-ext-standard",
@@ -2387,9 +2409,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-zlib"
+version = "0.1.0"
+dependencies = [
+ "adler2",
+ "flate2",
+ "phera-ext-http",
+ "phera-ext-streams",
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-extension-api"
 version = "0.1.0"
 dependencies = [
+ "phera-bytecode",
  "phera-source",
  "phera-value",
 ]
@@ -2438,11 +2472,13 @@ dependencies = [
  "phera-bytecode",
  "phera-compiler",
  "phera-dotenv",
+ "phera-ext-bcmath",
  "phera-ext-core",
  "phera-ext-ctype",
  "phera-ext-date",
  "phera-ext-dom",
  "phera-ext-filter",
+ "phera-ext-gmp",
  "phera-ext-hash",
  "phera-ext-http",
  "phera-ext-json",
@@ -2461,6 +2497,7 @@ dependencies = [
  "phera-ext-standard",
  "phera-ext-streams",
  "phera-ext-tokenizer",
+ "phera-ext-zlib",
  "phera-extension-api",
  "phera-io-pool",
  "phera-value",

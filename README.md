@@ -65,7 +65,8 @@ Built in, each checked call by call against real PHP: core, standard, ctype,
 date, dom (`DOMDocument`, `DOMNode`, `DOMElement`, `DOMXPath`), filter,
 hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
-session, SPL, sqlite3, streams, tokenizer, Unix process functions, and POSIX queries.
+session, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
+functions, and POSIX queries.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 
@@ -88,7 +89,19 @@ Unix scripts can launch programs with `shell_exec()`, backticks, and the process
 functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
 launching for web requests, run `phera serve --no-process public`.
 
-In progress: bcmath, curl, gmp, intl, mysqli, pgsql, sodium, zlib.
+BCMath provides arbitrary-precision decimal functions and the immutable
+`BcMath\Number` class. Set the default procedural scale with `bcmath.scale`
+or `bcscale()`.
+
+GMP provides arbitrary-precision integer functions, binary import and export,
+and the `GMP` class with arithmetic, bitwise operators, and scalar casts.
+
+zlib provides string compression, incremental deflate and inflate contexts,
+gzip file functions, and the `compress.zlib://` wrapper. The
+`zlib.output_compression` directive stores its value. Use `ob_gzhandler` for
+PHP output-buffer compression or `phera serve --compress` for server compression.
+
+In progress: curl, intl, mysqli, pgsql, sodium.
 Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
 
 ## ✨ Goals

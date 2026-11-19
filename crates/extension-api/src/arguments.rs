@@ -177,6 +177,7 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
         ParamType::Iterable => "Traversable|array",
         ParamType::Number => "int|float",
         ParamType::IntOrString => "string|int",
+        ParamType::NativeNumeric(numeric) => numeric.declaration,
         ParamType::ArrayOrString => "array|string",
         ParamType::ObjectOrString => "object|string",
         ParamType::CertificateOrString => "OpenSSLCertificate|string",
@@ -191,6 +192,9 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
 }
 
 fn expected(param: &Param) -> String {
+    if let ParamType::NativeNumeric(numeric) = param.ty {
+        return format!("of type {}", numeric.type_error);
+    }
     // Zend's array-or-object parser reports "array" for other argument types.
     let text = if param.ty == ParamType::ArrayOrObject {
         "array"
@@ -273,6 +277,26 @@ fn convert(
             Value::Int(_) | Value::Float(_) => Some(None),
             _ if strict => None,
             _ => to_number(value, site, context).map(Some),
+        },
+        ParamType::NativeNumeric(numeric) => match value {
+            Value::Object(object) if object.class.is_instance_of(numeric.class) => Some(None),
+            Value::String(text) => {
+                if let Some(message) = numeric
+                    .string_error
+                    .and_then(|check| check(text.as_bytes()))
+                {
+                    return Err(NativeError::value_error(format!(
+                        "{}(): Argument #{}{} {message}",
+                        site.function,
+                        site.number,
+                        site.name(),
+                    )));
+                }
+                Some(None)
+            }
+            Value::Int(_) => Some(None),
+            _ if strict => None,
+            _ => to_int(value, site, context).map(Some),
         },
         ParamType::IntOrString => match value {
             Value::Int(_) | Value::String(_) => Some(None),

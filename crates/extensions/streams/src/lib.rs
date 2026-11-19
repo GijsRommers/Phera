@@ -18,6 +18,8 @@ mod file_attributes;
 pub mod file_io;
 mod formatted;
 mod glob;
+mod gzip;
+pub use gzip::register as register_gzip_functions;
 mod handles;
 mod include_path;
 mod ini;

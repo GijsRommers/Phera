@@ -112,6 +112,9 @@ impl Runtime {
         registry.load(&phera_ext_streams::Streams);
         registry.load(&phera_ext_process::Process);
         registry.load(&phera_ext_process::Posix);
+        registry.load(&phera_ext_zlib::Zlib);
+        registry.load(&phera_ext_bcmath::BcMath);
+        registry.load(&phera_ext_gmp::Gmp);
         registry.load(&phera_ext_ctype::Ctype);
         registry.load(&phera_ext_date::Date);
         registry.load(&phera_ext_dom::Libxml);
