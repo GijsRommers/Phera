@@ -108,6 +108,7 @@ impl Runtime {
         registry.load(&phera_ext_redis::Redis);
         registry.load(&phera_ext_http::Http);
         registry.load(&phera_ext_hash::Hash);
+        registry.load(&phera_ext_openssl::OpenSsl);
         registry.load(&phera_ext_random::Random);
         registry.load(&phera_ext_reflection::Reflection);
         registry.load(&phera_ext_serialize::Serialize);

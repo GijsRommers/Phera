@@ -67,6 +67,7 @@ iconv-native = "0.1"
 encoding_rs = "0.8.35"
 base64 = "0.22"
 phera-ext-json = { path = "crates/extensions/json" }
+phera-ext-openssl = { path = "crates/extensions/openssl" }
 phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-sqlite = { path = "crates/sqlite" }
 phera-ext-sqlite3 = { path = "crates/extensions/sqlite3" }
@@ -79,6 +80,16 @@ phera-ext-spl = { path = "crates/extensions/spl" }
 phera-ext-standard = { path = "crates/extensions/standard" }
 phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
+aes = "0.9"
+aes-gcm = { version = "0.11", features = ["hazmat"] }
+cbc = "0.2"
+ccm = "0.6"
+cfb-mode = "0.9"
+chacha20poly1305 = "0.11"
+ctr = "0.10"
+ecb = "0.2"
+ofb = "0.7"
+pbkdf2 = "0.12"
 digest = "0.10"
 md2 = "0.10"
 md4 = "0.10"
