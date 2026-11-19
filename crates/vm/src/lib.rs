@@ -356,7 +356,7 @@ impl Vm {
                     .insert(function.name.to_ascii_lowercase(), index);
             }
         }
-        self.include_state.record_entry(unit.file.clone());
+        self.include_state.record_entry(main, unit.file.clone());
         let registers = unit.main.registers as usize;
         self.registers.grow_to(registers);
         self.call_stack.push(Frame::new(main, 0, None));
@@ -383,7 +383,9 @@ impl Vm {
             self.unwind(error);
         }
         self.run_shutdown_callbacks().await;
-        self.close_fibers().await;
+        if !self.suspended_fibers.is_empty() {
+            Box::pin(self.close_fibers()).await;
+        }
         self.finish_buffers().await;
         self.finish_request_headers().await;
         self.status

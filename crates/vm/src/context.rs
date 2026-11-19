@@ -90,6 +90,10 @@ impl Context for Vm {
         Vm::ini_get(self, name)
     }
 
+    fn serialization_precision(&self) -> i32 {
+        Vm::serialization_precision(self)
+    }
+
     fn ini_set(
         &mut self,
         function: &str,
@@ -149,9 +153,8 @@ impl Context for Vm {
     }
 
     fn entry_script_path(&self) -> Option<std::path::PathBuf> {
-        self.include_state
-            .entry_script()
-            .map(std::path::PathBuf::from)
+        let main = self.include_state.entry_script()?;
+        Some(self.code.known_unit(main)?.file.as_str().into())
     }
 
     fn diagnostics(&mut self) -> &mut dyn Diagnostics {

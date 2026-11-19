@@ -2,13 +2,13 @@
 
 use std::{collections::HashSet, sync::Arc};
 
-use crate::CodeLoader;
+use crate::{CodeLoader, code_table::FunctionIndex};
 
 /// The runtime supplies code; the VM remembers which files have executed.
 pub(crate) struct IncludeState {
     loader: Option<Arc<dyn CodeLoader>>,
     included: HashSet<String>,
-    entry_script: Option<String>,
+    entry_script: Option<FunctionIndex>,
 }
 
 impl IncludeState {
@@ -29,12 +29,12 @@ impl IncludeState {
         self.loader.clone()
     }
 
-    pub(crate) fn entry_script(&self) -> Option<&str> {
-        self.entry_script.as_deref()
+    pub(crate) fn entry_script(&self) -> Option<FunctionIndex> {
+        self.entry_script
     }
 
-    pub(crate) fn record_entry(&mut self, file: String) {
-        self.entry_script = Some(file.clone());
+    pub(crate) fn record_entry(&mut self, main: FunctionIndex, file: String) {
+        self.entry_script = Some(main);
         self.record(file);
     }
 

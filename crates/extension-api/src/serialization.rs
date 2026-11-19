@@ -44,9 +44,7 @@ pub fn incomplete_object_message(object: &crate::Object, action: &str) -> String
 
 /// Return the current decimal precision for serialize(), var_dump(), and var_export().
 pub fn precision(context: &mut dyn crate::Context) -> i32 {
-    context
-        .ini_get(b"serialize_precision")
-        .map_or(-1, |setting| crate::ini::integer(setting.as_bytes()) as i32)
+    context.serialization_precision()
 }
 
 /// Resolve the class and constant in a serialized `E:` token.

@@ -56,7 +56,13 @@ impl Vm {
                 }
                 self.ini_overrides.precision = Some(precision as i32);
             }
-            "serialize_precision" if integer(bytes) < -1 => return Ok(false),
+            "serialize_precision" => {
+                let precision = integer(bytes);
+                if precision < -1 {
+                    return Ok(false);
+                }
+                self.ini_overrides.serialization_precision = Some(precision as i32);
+            }
             "unserialize_max_depth" | "zend.assertions" | "memory_limit" | "fiber.stack_size" => {
                 if !self.ini_quantity(entry.name, bytes) {
                     return Ok(false);

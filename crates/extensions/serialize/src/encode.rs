@@ -144,7 +144,7 @@ impl Encoder {
             if let Some(object) = self.value(context, value)?
                 && !self.write_plain_object(context, &object)?
             {
-                if let Some(names) = self.object(context, object.clone()).await? {
+                if let Some(names) = self.object(context, &object).await? {
                     if matches!(views, Views::Defer)
                         && context.property_view_can_suspend(&object, PropertyPurpose::Serialize)
                     {

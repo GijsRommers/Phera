@@ -11,11 +11,9 @@
 //! execution time limits are recorded without changing those engine limits.
 //! No PHP configuration file is loaded.
 //!
-//! The session extension can register its update callbacks with
-//! `Registry::ini_update`. Loading its PHP module installs the generated
-//! session entries and their access modes. Session methods that change an INI
-//! directive should write through `Context::ini_set`; the extension can
-//! reject writes while a session is active using its update callback.
+//! The session extension registers validators for its catalog entries through
+//! `Registry::ini_update`. Session functions and INI calls share the same
+//! values and reject writes PHP forbids while a session is active.
 //!
 //! Some recorded options have partial effects. The assertion guard is checked
 //! after argument evaluation; bail and callback are only remembered.
@@ -38,6 +36,7 @@ pub(crate) struct IniOverrides {
     values: Vec<Option<PhpString>>,
     reporting_number: Option<i64>,
     precision: Option<i32>,
+    serialization_precision: Option<i32>,
 }
 
 impl IniOverrides {
@@ -56,6 +55,10 @@ impl IniOverrides {
 impl Vm {
     pub(crate) fn float_precision(&self) -> i32 {
         self.ini_overrides.precision.unwrap_or(14)
+    }
+
+    pub(crate) fn serialization_precision(&self) -> i32 {
+        self.ini_overrides.serialization_precision.unwrap_or(-1)
     }
 
     pub(crate) fn ini_get(&self, name: &[u8]) -> Option<PhpString> {

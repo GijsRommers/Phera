@@ -120,6 +120,12 @@ pub trait Context {
         None
     }
 
+    /// Decimal precision for serialization and PHP variable dumps.
+    fn serialization_precision(&self) -> i32 {
+        self.ini_get(b"serialize_precision")
+            .map_or(-1, |setting| crate::ini::integer(setting.as_bytes()) as i32)
+    }
+
     /// Change a user-modifiable setting, returning its previous value.
     fn ini_set(
         &mut self,

@@ -13,10 +13,10 @@ impl Encoder {
     pub(super) async fn object(
         &mut self,
         context: &mut dyn Context,
-        object: Rc<Object>,
+        object: &Rc<Object>,
     ) -> Result<Option<Option<Rc<PhpArray>>>, NativeError> {
         let name = object.class.name();
-        if context.serialization_forbidden(&object) {
+        if context.serialization_forbidden(object) {
             return Err(NativeError::throw(
                 "Exception",
                 format!(
@@ -32,7 +32,7 @@ impl Encoder {
             self.output.enum_case(name.as_bytes(), case.as_bytes());
             return Ok(None);
         }
-        if context.has_serialization_method(&object, "__serialize") {
+        if context.has_serialization_method(object, "__serialize") {
             let value = context
                 .call_serialization_method(object.clone(), "__serialize", Vec::new())
                 .await?;
@@ -59,7 +59,7 @@ impl Encoder {
                     .output
                     .custom_object(name.as_bytes(), payload.as_bytes()),
                 Value::Null => {
-                    let identity = Identity::Object(Rc::as_ptr(&object) as usize);
+                    let identity = Identity::Object(Rc::as_ptr(object) as usize);
                     if let Some((slot, _)) = self.slots.identities.get_mut(&identity) {
                         *slot = 0;
                     }
@@ -72,7 +72,7 @@ impl Encoder {
                     ));
                 }
             }
-        } else if context.has_serialization_method(&object, "__sleep") {
+        } else if context.has_serialization_method(object, "__sleep") {
             let names = context
                 .call_serialization_method(object.clone(), "__sleep", Vec::new())
                 .await?;

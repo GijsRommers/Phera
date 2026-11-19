@@ -9,7 +9,7 @@ use phera_vm::NativeTables;
 
 async fn run(runtime: &super::Runtime, tables: &NativeTables, source: &str) -> String {
     let unit = phera_compiler::compile(source, "ini-probe.php").unwrap();
-    let mut vm = runtime.new_vm(tables, Sapi::Cli);
+    let mut vm = runtime.new_vm(tables, Sapi::Cli, runtime.inherited_environment());
     assert_eq!(vm.run(Arc::new(unit)).await, 0);
     String::from_utf8(vm.output).unwrap()
 }

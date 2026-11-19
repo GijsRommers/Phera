@@ -51,7 +51,9 @@ impl Vm {
                     }
                     Self::effective_property(property, slot, &object)
                 };
-                let object = resolved_lazy_instance(object.clone());
+                let has_lazy_objects = self.classes.has_lazy_objects;
+                let resolved = has_lazy_objects.then(|| resolved_lazy_instance(object.clone()));
+                let object = resolved.as_ref().unwrap_or(&object);
                 if let Some(linked) = &property.hooks {
                     let hooks = &linked.hooks;
                     if matches!(mode, PropertyRead::Value)
@@ -59,7 +61,7 @@ impl Vm {
                     {
                         return Err(ReflectedHookCall::Property {
                             function: getter.function,
-                            object,
+                            object: object.clone(),
                             value: None,
                         }
                         .suspend());
@@ -69,7 +71,7 @@ impl Vm {
                             return Ok(Value::Bool(true));
                         }
                         return Err(crate::classes::property_hooks::property_error(
-                            &object,
+                            object,
                             &property.name,
                             if hooks.get.is_some() {
                                 "Must not read from virtual property "
@@ -84,16 +86,16 @@ impl Vm {
                         ));
                     }
                 }
-                if is_lazy_slot(&object, property) {
+                if has_lazy_objects && is_lazy_slot(object, property) {
                     return Err(ReflectInitialize {
-                        object,
+                        object: object.clone(),
                         operation: ReflectedOperation::Read(member.clone(), mode),
                     }
                     .suspend());
                 }
                 return self.reflected_backing_value(
                     property,
-                    crate::property_storage::read_at(&object, &property.key, slot),
+                    crate::property_storage::read_at(object, &property.key, slot),
                     mode,
                 );
             }
@@ -145,8 +147,13 @@ impl Vm {
             }
             _ => (property, instance_slot(slot)),
         };
-        let object = object.as_ref().cloned().map(resolved_lazy_instance);
-        if let (Some(object), Some(linked)) = (&object, &property.hooks) {
+        let has_lazy_objects = self.classes.has_lazy_objects;
+        let resolved = object
+            .as_ref()
+            .filter(|_| has_lazy_objects)
+            .map(|object| resolved_lazy_instance(object.clone()));
+        let object = resolved.as_ref().or(object.as_ref());
+        if let (Some(object), Some(linked)) = (object, &property.hooks) {
             let hooks = &linked.hooks;
             if matches!(mode, PropertyWrite::Value)
                 && let Some(setter) = &hooks.set
@@ -176,7 +183,8 @@ impl Vm {
             }
         }
         if !matches!(mode, PropertyWrite::RawWithoutInitialization)
-            && let Some(object) = &object
+            && has_lazy_objects
+            && let Some(object) = object
             && is_lazy_slot(object, property)
         {
             return Err(ReflectInitialize {
@@ -199,7 +207,7 @@ impl Vm {
             property.static_initialized.set(true);
             property.value_initialized.set(true);
         } else {
-            let object = required_object(object.as_ref())?;
+            let object = required_object(object)?;
             if property.is_readonly && object.has(&property.key) {
                 return Err(NativeError::error(format!(
                     "Cannot modify readonly property {}::${}",
