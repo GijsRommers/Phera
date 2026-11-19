@@ -4,7 +4,20 @@
 use crate::{diagnostic::Diagnostic, project::ParsedFile};
 use phera_lexer::{Lexer, TokenKind};
 
-pub fn suppressed(file: &ParsedFile, diagnostic: &Diagnostic) -> bool {
+enum Directive<'a> {
+    All,
+    Identifiers(&'a str),
+}
+
+pub fn filter(file: &ParsedFile, diagnostics: &mut Vec<Diagnostic>) {
+    if diagnostics.is_empty()
+        || !file.source.contains("-ignore") && !file.source.contains("@psalm-suppress")
+    {
+        return;
+    }
+    // A file with many diagnostics still needs just one walk over its tokens.
+    let mut lines = std::collections::BTreeMap::<usize, Vec<Directive<'_>>>::new();
+    let mut ranges = Vec::new();
     let mut lexer = Lexer::new(&file.source);
     let mut end = 0;
     while let Ok(token) = lexer.next_token() {
@@ -20,42 +33,40 @@ pub fn suppressed(file: &ParsedFile, diagnostic: &Diagnostic) -> bool {
             let comment_line = file.lines.line(offset);
             let next_line = file.lines.line(token.span.start);
             if line.contains("@phpstan-ignore-next-line") {
-                if diagnostic.line == comment_line + 1 {
-                    return true;
-                }
+                lines
+                    .entry(comment_line + 1)
+                    .or_default()
+                    .push(Directive::All);
             } else if line.contains("@phpstan-ignore-line") {
-                if diagnostic.line == comment_line {
-                    return true;
-                }
+                lines.entry(comment_line).or_default().push(Directive::All);
             } else if let Some((_, identifiers)) = line.split_once("@phpstan-ignore") {
-                let code_before = file
-                    .source
-                    .lines()
-                    .nth(comment_line - 1)
-                    .is_some_and(|l| !l.trim_start().starts_with(['/', '*', '#']));
+                let start = file.source[..offset]
+                    .rfind('\n')
+                    .map_or(0, |newline| newline + 1);
+                let code_before = !file.source[start..]
+                    .trim_start()
+                    .starts_with(['/', '*', '#']);
                 let target = if code_before { comment_line } else { next_line };
-                if diagnostic.line == target && has_identifier(identifiers, &diagnostic.identifier)
-                {
-                    return true;
-                }
+                lines
+                    .entry(target)
+                    .or_default()
+                    .push(Directive::Identifiers(identifiers));
             } else if let Some((_, identifiers)) = line.split_once("@phera-ignore") {
-                if (diagnostic.line == comment_line || diagnostic.line == next_line)
-                    && (identifiers.trim().trim_end_matches("*/").is_empty()
-                        || has_identifier(identifiers, &diagnostic.identifier))
-                {
-                    return true;
+                for target in [comment_line, next_line] {
+                    let directive = if identifiers.trim().trim_end_matches("*/").is_empty() {
+                        Directive::All
+                    } else {
+                        Directive::Identifiers(identifiers)
+                    };
+                    lines.entry(target).or_default().push(directive);
                 }
-            } else if let Some((_, identifiers)) = line.split_once("@psalm-suppress") {
-                let range = declaration_end(file, token.span.start);
-                if diagnostic.line >= next_line
-                    && diagnostic.line <= range
-                    && identifiers
-                        .split_whitespace()
-                        .next()
-                        .is_some_and(|id| psalm_matches(id, &diagnostic.identifier))
-                {
-                    return true;
-                }
+            } else if let Some((_, identifiers)) = line.split_once("@psalm-suppress")
+                && let Some(identifier) = identifiers.split_whitespace().next()
+            {
+                ranges.push((
+                    next_line..=declaration_end(file, token.span.start),
+                    identifier,
+                ));
             }
         }
         end = token.span.end;
@@ -63,7 +74,18 @@ pub fn suppressed(file: &ParsedFile, diagnostic: &Diagnostic) -> bool {
             break;
         }
     }
-    false
+    diagnostics.retain(|diagnostic| {
+        !lines.get(&diagnostic.line).is_some_and(|directives| {
+            directives.iter().any(|directive| match directive {
+                Directive::All => true,
+                Directive::Identifiers(identifiers) => {
+                    has_identifier(identifiers, &diagnostic.identifier)
+                }
+            })
+        }) && !ranges.iter().any(|(range, identifier)| {
+            range.contains(&diagnostic.line) && psalm_matches(identifier, &diagnostic.identifier)
+        })
+    });
 }
 
 fn has_identifier(text: &str, identifier: &str) -> bool {

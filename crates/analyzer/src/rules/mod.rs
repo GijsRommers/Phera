@@ -9,6 +9,7 @@ mod magic_constant;
 mod missing_method;
 mod missing_return;
 mod named_argument;
+mod no_parent;
 mod not_supported;
 mod possible_variable;
 mod static_call;
@@ -37,6 +38,7 @@ pub enum Finding {
     PossibleVariable(String),
     ThisContext,
     AbstractNew(String),
+    NoParent(String),
     InterfaceNew(String),
     UnknownStaticProperty(String, String),
     UnknownClassConstant(String),
@@ -69,6 +71,7 @@ pub fn all() -> Vec<&'static dyn Rule> {
         &possible_variable::PossibleVariable,
         &this_context::ThisContext,
         &abstract_new::AbstractNew,
+        &no_parent::NoParent,
         &interface_new::InterfaceNew,
         &unknown_static_property::UnknownStaticProperty,
         &unknown_class_constant::UnknownClassConstant,

@@ -2,6 +2,7 @@
 //! Recursive nesting is bounded at 256; uncertain or deeper expressions are mixed.
 
 use crate::{
+    dependencies::Dependencies,
     diagnostic::Diagnostic,
     index::Index,
     names::Names,
@@ -16,6 +17,7 @@ use phera_source::Span;
 mod arguments;
 mod assignments;
 mod atoms;
+mod attributes;
 mod binding_statements;
 mod bindings;
 mod callable_signatures;
@@ -23,12 +25,15 @@ mod calls;
 mod closure_binding;
 mod coalesce_assignment;
 mod composite;
+mod condition;
 mod control;
 mod declarations;
 mod deferred_declarations;
 mod exceptions;
 mod expressions;
 mod finally;
+mod function_calls;
+mod generators;
 mod intrinsics;
 mod invocations;
 mod logical;
@@ -56,6 +61,7 @@ pub struct Context {
     pub unbound_this: Option<Vec<crate::index::Location>>,
     pub returns: ValueType,
     pub declared_return: bool,
+    pub generator: bool,
     pub by_reference: bool,
     pub function: String,
     pub scope_kind: ScopeKind,
@@ -63,7 +69,8 @@ pub struct Context {
 }
 
 pub struct Analyzer<'a> {
-    pub index: &'a Index,
+    pub index: &'a mut Index,
+    pub dependencies: &'a mut Dependencies,
     pub file: &'a ParsedFile,
     pub level: u8,
     pub diagnostics: Vec<Diagnostic>,
@@ -77,9 +84,15 @@ pub struct Analyzer<'a> {
 }
 
 impl<'a> Analyzer<'a> {
-    pub fn new(index: &'a Index, file: &'a ParsedFile, level: u8) -> Self {
+    pub fn new(
+        index: &'a mut Index,
+        dependencies: &'a mut Dependencies,
+        file: &'a ParsedFile,
+        level: u8,
+    ) -> Self {
         Self {
             index,
+            dependencies,
             file,
             level,
             diagnostics: Vec::new(),
@@ -98,6 +111,7 @@ impl<'a> Analyzer<'a> {
                 unbound_this: None,
                 returns: ValueType::Mixed,
                 declared_return: false,
+                generator: false,
                 by_reference: false,
                 function: "top level".into(),
                 scope_kind: ScopeKind::Global,
@@ -158,6 +172,9 @@ impl<'a> Analyzer<'a> {
                 .cloned(),
             _ => Some(self.context.names.resolve(name, UseKind::Class)[0].clone()),
         };
+        if let Some(class) = &resolved {
+            self.dependencies.resolve(self.index, class);
+        }
         if let Some(class) = &resolved
             && self.index.class(class).is_none()
             && !self
@@ -178,6 +195,20 @@ impl<'a> Analyzer<'a> {
     pub fn class_expression(&mut self, expression: &Expression, scope: &mut Scope) -> ClassTarget {
         if let ExpressionKind::Name(name) = &expression.kind {
             let class = self.class_name(name, false);
+            if name.text.eq_ignore_ascii_case("parent")
+                && matches!(name.kind, NameKind::Unqualified)
+                && let Some(owner) = &self.context.class
+                && class
+                    .as_ref()
+                    .is_none_or(|class| self.index.class(class).is_none())
+                && self
+                    .index
+                    .class(owner)
+                    .is_some_and(|info| info.kind != ClassKind::Trait)
+            {
+                self.report(Finding::NoParent(owner.clone()), name.span);
+                return ClassTarget::Unknown;
+            }
             if let Some(class) = &class
                 && self.index.class(class).is_none()
                 && !self

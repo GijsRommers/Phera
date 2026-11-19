@@ -46,10 +46,14 @@ pub enum Format {
     Github,
 }
 
-pub fn render(diagnostics: &[Diagnostic], format: Format) -> String {
+pub fn render(report: &crate::Report, format: Format) -> String {
+    let diagnostics = &report.diagnostics;
     match format {
         Format::Json => format!(
-            "{{\"version\":1,\"diagnostics\":[{}]}}\n",
+            "{{\"version\":1,\"files\":{},\"vendor_files\":{},\"seconds\":{:.6},\"diagnostics\":[{}]}}\n",
+            report.files,
+            report.vendor_files,
+            report.elapsed.as_secs_f64(),
             diagnostics
                 .iter()
                 .map(Diagnostic::json)
