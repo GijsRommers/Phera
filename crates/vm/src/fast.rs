@@ -270,15 +270,27 @@ pub(crate) fn scalar_step(
             }
             ScalarStep::Complete
         }
-        Instruction::Clear { reg: register } | Instruction::UnsetLocal { local: register } => {
-            match slots.get_mut(register.index()) {
-                Some(slot) => {
-                    *slot = None;
-                    ScalarStep::Complete
-                }
-                None => ScalarStep::Fallback,
+        Instruction::UnsetLocal { local } => match slots.get_mut(local.index()) {
+            Some(slot)
+                if slot.as_ref().is_none_or(|value| {
+                    !matches!(
+                        value,
+                        Value::Object(_) | Value::Array(_) | Value::Reference(_)
+                    )
+                }) =>
+            {
+                *slot = None;
+                ScalarStep::Complete
             }
-        }
+            _ => ScalarStep::Fallback,
+        },
+        Instruction::Clear { reg: register } => match slots.get_mut(register.index()) {
+            Some(slot) => {
+                *slot = None;
+                ScalarStep::Complete
+            }
+            None => ScalarStep::Fallback,
+        },
         _ => ScalarStep::Fallback,
     }
 }

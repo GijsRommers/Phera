@@ -6,6 +6,17 @@ use phera_value::{ArrayKey, PhpArray, Value};
 
 use crate::{Vm, calls::frame::FrameView};
 
+mod arguments;
+
+pub(crate) use arguments::{TraceArguments, materialize_trace_arguments, snapshot_arguments};
+
+#[derive(Clone, Copy)]
+pub(crate) struct TraceOptions {
+    pub(crate) objects: bool,
+    pub(crate) arguments: bool,
+    pub(crate) limit: usize,
+}
+
 impl Vm {
     pub(crate) fn exception_location(&self) -> (Value, usize) {
         if let Some(location) = &self.diagnostic_location {
@@ -44,7 +55,7 @@ impl Vm {
     /// Stop at the requested number of PHP-visible frames, including native callbacks.
     pub(crate) fn capture_trace(
         &mut self,
-        mut trace: PhpArray,
+        trace: PhpArray,
         objects: bool,
         arguments: bool,
         limit: i32,
@@ -53,6 +64,33 @@ impl Vm {
             0 => usize::MAX,
             positive if positive > 0 => positive as usize,
             _ => return trace,
+        };
+        let options = TraceOptions {
+            objects,
+            arguments,
+            limit,
+        };
+        if self.generator_traces.is_empty() {
+            self.trace_frames::<false>(trace, options)
+        } else {
+            self.trace_frames::<true>(trace, options)
+        }
+    }
+
+    fn trace_frames<const GENERATORS: bool>(
+        &mut self,
+        mut trace: PhpArray,
+        options: TraceOptions,
+    ) -> PhpArray {
+        let TraceOptions {
+            objects,
+            arguments,
+            limit,
+        } = options;
+        let mut generators = if GENERATORS {
+            self.generator_traces.len()
+        } else {
+            0
         };
         let mut callbacks = self.native_callback_sites.len();
         let stack_depth = self.call_stack.depth();
@@ -119,7 +157,32 @@ impl Vm {
             } else {
                 None
             };
-            let _ = trace.push(Value::from(entry));
+            if GENERATORS
+                && generators != 0
+                && self.generator_traces[generators - 1].boundary == depth
+            {
+                generators -= 1;
+                let caller = depth
+                    .checked_sub(1)
+                    .and_then(|index| self.frame_at(index))
+                    .filter(|_| !internal)
+                    .map(|frame| {
+                        (
+                            self.code.unit(frame.frame.function).file.as_str(),
+                            frame.line(),
+                        )
+                    });
+                self.generator_traces[generators].append_generator_trace(
+                    &self.code,
+                    &mut self.classes,
+                    &mut trace,
+                    entry,
+                    caller,
+                    options,
+                );
+            } else {
+                let _ = trace.push(Value::from(entry));
+            }
             if !internal {
                 continue;
             }
@@ -193,65 +256,6 @@ impl Vm {
     }
 }
 
-impl Vm {
-    /// PHP snapshots live parameter values, flattening variadics and wrapping secrets.
-    fn trace_arguments(&mut self, depth: usize) -> Value {
-        let Some(frame) = self.frame_at(depth) else {
-            return Value::from(PhpArray::new());
-        };
-        let mut snapshot = Vec::new();
-        let params = &frame.function().parameters;
-        let variadic = params.last().is_some_and(|parameter| parameter.variadic);
-        let fixed = params.len() - usize::from(variadic);
-        let count = if variadic {
-            frame.argument_count()
-        } else {
-            frame.supplied_arguments()
-        };
-        for index in 0..fixed.min(count) {
-            let value = frame
-                .slots(&self.registers)
-                .get(index)
-                .and_then(Option::as_ref)
-                .map_or(Value::Null, |value| value.deref().clone());
-            let sensitive = crate::sensitive_parameters::is_sensitive(frame, index);
-            snapshot.push((None, value, sensitive));
-        }
-        if let Some(items) = &frame.extras.variadic {
-            let sensitive = crate::sensitive_parameters::is_sensitive(frame, fixed);
-            for (key, value) in items.iter() {
-                let name = match key {
-                    ArrayKey::String(_) => Some(key),
-                    _ => None,
-                };
-                snapshot.push((name, value.deref().clone(), sensitive));
-            }
-        } else if !variadic {
-            for value in self
-                .registers
-                .window(frame.base() + frame.count(), frame.extras.arguments.extra)
-            {
-                let value = value.as_ref().unwrap_or(&Value::Null);
-                snapshot.push((None, value.deref().clone(), false));
-            }
-        }
-        let mut arguments = PhpArray::new();
-        for (key, value, sensitive) in snapshot {
-            let value = if sensitive {
-                self.sensitive_trace_value(value)
-            } else {
-                value
-            };
-            if let Some(key) = key {
-                arguments.insert(key, value);
-            } else {
-                let _ = arguments.push(value);
-            }
-        }
-        Value::from(arguments)
-    }
-}
-
 /// A native warning invokes a PHP handler through an internal frame at this stack boundary.
 pub(crate) struct WarningSite {
     pub(crate) boundary: usize,
@@ -290,11 +294,26 @@ fn add_location(entry: &mut PhpArray, caller: FrameView<'_>) {
 
 fn add_function(entry: &mut PhpArray, callee: FrameView<'_>, objects: bool) {
     let function = callee.code.function_name(callee.frame.function);
+    let scope = if function.starts_with("{closure:") {
+        callee.scope().map(|scope| scope.name.as_str())
+    } else {
+        None
+    };
+    add_trace_function(entry, function, scope, callee.this(), objects);
+}
+
+/// Receiver and declaring scope are independent when a closure is bound.
+pub(crate) fn add_trace_function(
+    entry: &mut PhpArray,
+    function: &str,
+    scope: Option<&str>,
+    object: Option<&Rc<phera_value::Object>>,
+    objects: bool,
+) {
     let (name, class) = if function.starts_with("{closure:") {
-        let class = callee.scope().map(|scope| scope.name.as_str());
         (
             function,
-            class.or_else(|| callee.this().map(|object| object.class.name())),
+            scope.or_else(|| object.map(|object| object.class.name())),
         )
     } else if let Some((class, name)) = function.split_once("::") {
         (name, Some(class))
@@ -303,7 +322,6 @@ fn add_function(entry: &mut PhpArray, callee: FrameView<'_>, objects: bool) {
     };
     entry.insert(ArrayKey::str("function"), Value::from(name));
     if let Some(class) = class {
-        let object = callee.this();
         entry.insert(ArrayKey::str("class"), Value::from(class));
         if objects && let Some(object) = object {
             entry.insert(ArrayKey::str("object"), Value::Object(Rc::clone(object)));

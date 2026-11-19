@@ -355,6 +355,9 @@ impl Vm {
                     phera_extension_api::NativeMethod::Async(handler) => {
                         handler(self, context.receiver.clone(), arguments).await
                     }
+                    phera_extension_api::NativeMethod::Window(method) => {
+                        (method.run)(self, context.receiver.clone(), arguments).await
+                    }
                     phera_extension_api::NativeMethod::AsyncNamed(handler) => {
                         handler(self, context.receiver.clone(), arguments, named).await
                     }

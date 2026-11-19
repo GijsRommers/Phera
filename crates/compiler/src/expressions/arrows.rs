@@ -22,6 +22,7 @@ impl Compiler<'_> {
             attributes: &arrow.attributes,
             name: &name,
             by_reference: arrow.by_reference,
+            is_generator: arrow.is_generator,
             parameters: &arrow.parameters,
             return_type: arrow.return_type.as_ref(),
             body: FunctionBody::Arrow(&arrow.body),

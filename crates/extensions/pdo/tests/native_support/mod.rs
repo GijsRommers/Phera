@@ -46,6 +46,9 @@ impl Harness {
             NativeMethod::Async(handler) => {
                 handler(&mut self.context, Some(object.clone()), args).await
             }
+            NativeMethod::Window(method) => {
+                (method.run)(&mut self.context, Some(object.clone()), args).await
+            }
             NativeMethod::AsyncNamed(handler) => {
                 handler(&mut self.context, Some(object.clone()), args, &[]).await
             }

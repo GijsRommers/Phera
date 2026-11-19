@@ -9,8 +9,6 @@ const IGNORE_ARGS: i64 = 2;
 const LIMIT: Param = Param::new("limit", ParamType::Int).with_default(ConstantValue::Int(0));
 
 pub(crate) fn register(registry: &mut Registry) {
-    registry.constant("DEBUG_BACKTRACE_PROVIDE_OBJECT", PROVIDE_OBJECT);
-    registry.constant("DEBUG_BACKTRACE_IGNORE_ARGS", IGNORE_ARGS);
     registry.function(FunctionEntry::sync(
         "debug_backtrace",
         const {
