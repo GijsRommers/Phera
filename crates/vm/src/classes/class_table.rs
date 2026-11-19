@@ -8,6 +8,7 @@ use std::{
 use phera_value::{Object, ObjectIds, PhpArray};
 
 use super::Class;
+use super::operations::ClassOperations;
 
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
@@ -49,16 +50,6 @@ impl ClassTable {
     /// lowercased name.
     pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
         debug_assert_eq!(class.index, self.next_index());
-        self.has_dimensions |= (!matches!(
-            class.kind,
-            phera_bytecode::ClassKind::Interface | phera_bytecode::ClassKind::Trait
-        ) && class
-            .operations
-            .has(super::operations::ClassOperations::ARRAY_ACCESS))
-            || class
-                .hooks
-                .as_ref()
-                .is_some_and(|hooks| hooks.dimensions.is_some());
         self.has_property_views |= class
             .hooks
             .as_ref()
@@ -106,6 +97,7 @@ impl ClassTable {
         class: Rc<Class>,
         properties: PhpArray,
     ) -> Rc<Object> {
+        self.has_dimensions |= class.operations.has(ClassOperations::DIMENSIONS);
         let has_destructor = class
             .magic
             .as_ref()

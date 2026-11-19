@@ -139,7 +139,11 @@ impl crate::Vm {
                 "Cannot redeclare {base} {parent}::${name} as {child} {class}::${name}"
             )));
         }
-        if property.is_readonly != inherited.is_readonly {
+        let inherited_abstract = inherited
+            .hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.methods().any(|hook| hook.is_abstract));
+        if property.is_readonly != inherited.is_readonly && !inherited_abstract {
             let (base, child) = if inherited.is_readonly {
                 ("readonly", "non-readonly")
             } else {
@@ -157,7 +161,11 @@ impl crate::Vm {
                 Some(Visibility::Protected | Visibility::Private)
             ) | (Visibility::Protected, Some(Visibility::Private))
         );
-        if narrower_set {
+        let read_only_virtual = inherited
+            .hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.hooks.is_virtual && hooks.hooks.set.is_none());
+        if narrower_set && !read_only_virtual {
             let required = if inherited.set_visibility.is_some() {
                 format!("protected(set) (as in class {parent}) or weaker")
             } else {
@@ -179,7 +187,10 @@ impl crate::Vm {
                 "Access level to {class}::${name} must be {visibility} (as in class {parent}){suffix}"
             )));
         }
-        if property.set_visibility.is_some() || inherited.set_visibility.is_some() {
+        if (property.set_visibility.is_some() || inherited.set_visibility.is_some())
+            && property.hooks.is_none()
+            && inherited.hooks.is_none()
+        {
             let child = property.ty.as_ref().map(|ty| ty.display.as_str());
             let base = inherited.ty.as_ref().map(|ty| ty.display.as_str());
             if child.is_some() != base.is_some()

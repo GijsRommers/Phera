@@ -21,6 +21,15 @@ impl Vm {
             return Ok(false);
         }
         let object_snapshot = if let Value::Object(object) = &element {
+            if let Some(class) = self.hooked_property_class(object) {
+                self.start_hooked_property_iteration(
+                    iterator,
+                    object.clone(),
+                    class,
+                    crate::access_mode::Binding::ByValue,
+                );
+                return Ok(true);
+            }
             Some(std::rc::Rc::new(self.visible_properties(
                 object,
                 phera_extension_api::PropertyPurpose::Foreach,
@@ -53,9 +62,10 @@ impl Vm {
                     None
                 },
                 traversal: None,
+                traversal_mode: frame::TraversalMode::Value,
+                property_hooks: None,
                 source: if object_iteration { None } else { place },
                 position: None,
-                traversal_reference: false,
                 started: false,
             },
         );
@@ -85,9 +95,10 @@ impl Vm {
             frame::IteratorState {
                 snapshot: None,
                 traversal: None,
+                traversal_mode: frame::TraversalMode::Value,
+                property_hooks: None,
                 source: Some(place),
                 position: None,
-                traversal_reference: false,
                 started: false,
             },
         );
@@ -120,7 +131,8 @@ impl Vm {
             .iterators
             .remove(&iterator.0)
             .ok_or_else(|| internal_error!("missing iterator"))?;
-        if state.snapshot.is_none() && state.traversal.is_some() {
+        if state.snapshot.is_none() && (state.traversal.is_some() || state.property_hooks.is_some())
+        {
             self.keep_iterator(iterator, state);
             return Ok(false);
         }
@@ -258,7 +270,8 @@ pub(crate) fn snapshot_step(
         return false;
     }
     let Some(array) = &state.snapshot else {
-        return false;
+        return state.traversal_mode == frame::TraversalMode::Value
+            && native_step(state, None, destination, slots);
     };
     // Plain matches rather than `Option` combinators: this runs on every
     // round of a `foreach`, and a closure is a separate function that the
@@ -284,6 +297,40 @@ pub(crate) fn snapshot_step(
         None => *ip = end.index(),
     }
     true
+}
+
+/// Consume a combined entry from a by-value cursor on the ordinary path.
+pub(crate) fn native_step(
+    state: &mut frame::IteratorState,
+    key: Option<Reg>,
+    destination: Reg,
+    slots: &mut [Option<Value>],
+) -> bool {
+    let Some((value, index)) = state
+        .traversal
+        .as_mut()
+        .and_then(|cursor| cursor.next_entry(key.is_some()))
+    else {
+        return false;
+    };
+    state.started = true;
+    if let Some((key, index)) = key.zip(index)
+        && let Some(slot) = slots.get_mut(key.index())
+    {
+        *slot = Some(owned_value(index));
+    }
+    if let Some(slot) = slots.get_mut(destination.index()) {
+        *slot = Some(owned_value(value));
+    }
+    true
+}
+
+fn owned_value(value: Value) -> Value {
+    if value.is_reference() {
+        value.deref().clone()
+    } else {
+        value
+    }
 }
 
 impl Vm {

@@ -36,6 +36,11 @@ pub enum RequestCallback {
 pub enum PropertyView {
     Snapshot(Rc<PhpArray>),
     DebugInfo(Rc<PhpArray>),
+    /// var_dump displays typed slots even when the object does not store a value.
+    DebugSlots {
+        slots: Rc<PhpArray>,
+        uninitialized: std::collections::HashMap<phera_value::ArrayKey, String>,
+    },
     Recursive,
 }
 
@@ -178,6 +183,16 @@ pub trait Context {
         Box::pin(std::future::ready(Err(NativeError::error(message))))
     }
 
+    /// Invokes an overridable method in a native class's own inheritance scope.
+    fn call_protected_method(
+        &mut self,
+        object: Rc<Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        self.call_method(object, name, arguments)
+    }
+
     /// Invokes a public instance method required by a PHP language protocol.
     fn call_protocol_method(
         &mut self,
@@ -312,6 +327,19 @@ pub trait Context {
         })
     }
 
+    /// Resolves a class name, including autoloading and class aliases.
+    fn lookup_class<'a>(
+        &'a mut self,
+        _name: &'a str,
+    ) -> LocalFuture<'a, Result<Option<Rc<dyn phera_value::ClassHandle>>, NativeError>> {
+        Box::pin(std::future::ready(Ok(None)))
+    }
+
+    /// Tests whether a language operation should dispatch to a PHP implementation.
+    fn is_user_method(&self, _object: &Object, _name: &str) -> bool {
+        false
+    }
+
     /// The class selected by a native static method call, including inherited factories.
     fn called_class(&self) -> Option<&str> {
         None
@@ -328,6 +356,20 @@ pub trait Context {
 
     /// Whether the requesting operation will need to run a PHP property hook.
     fn property_view_runs_code(&self, _object: &Object, _purpose: crate::PropertyPurpose) -> bool {
+        false
+    }
+
+    /// Whether a stored property exists and is visible to the current PHP caller.
+    fn has_visible_property(&self, object: &Object, name: &str) -> bool {
+        object.has(&phera_value::ArrayKey::str(name))
+    }
+
+    /// Whether the caller can return a `PropertyViewRequest` and resume later.
+    fn property_view_can_suspend(
+        &self,
+        _object: &Object,
+        _purpose: crate::PropertyPurpose,
+    ) -> bool {
         false
     }
 
@@ -425,6 +467,11 @@ pub trait Context {
 
     fn warning(&mut self, message: String) {
         self.diagnostics().warning(message);
+    }
+
+    /// Warnings containing PHP strings may need to preserve non-UTF-8 bytes.
+    fn warning_bytes(&mut self, message: &[u8]) {
+        self.warning(String::from_utf8_lossy(message).into_owned());
     }
 
     fn notice(&mut self, message: String) {

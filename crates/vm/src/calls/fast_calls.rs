@@ -47,19 +47,25 @@ impl Machine<'_> {
             return Step::Slow;
         }
         let from = caller.frame.base() + args.index();
-        let arguments = self.registers.window(from, count);
-        let acceptable = arguments.iter().enumerate().all(|(index, argument)| {
-            argument.as_ref().is_some_and(|value| {
-                !value.is_reference()
-                    && (!facts.is_typed(index)
-                        || facts.parameter_masks[index].intersects(crate::types::own_type(value)))
-            })
-        });
-        if !acceptable {
+        let base = self.registers.len();
+        let size = facts.registers as usize;
+        if from + count > base || count > size {
             return Step::Slow;
         }
-        let base = self.registers.len();
-        self.registers.grow_to(base + facts.registers as usize);
+        let arguments = self.registers.window(from, count);
+        let mut typed = facts.typed_parameters();
+        for (argument, mask) in arguments.iter().zip(facts.parameter_masks.iter()) {
+            let Some(value) = argument else {
+                return Step::Slow;
+            };
+            if value.is_reference()
+                || (typed & 1 != 0 && !mask.intersects(crate::types::own_type(value)))
+            {
+                return Step::Slow;
+            }
+            typed >>= 1;
+        }
+        self.registers.grow_to(base + size);
         for index in 0..count {
             self.registers.move_slot(from + index, base + index);
         }
@@ -83,16 +89,20 @@ impl Machine<'_> {
         let Some(frame) = self.stack.current().copied() else {
             return Step::Slow;
         };
-        let facts = self.code.facts(frame.function);
         let Some(destination) = frame.destination() else {
-            return Step::Slow;
+            return if frame.discards_result() {
+                self.leave_discarded(frame, source)
+            } else {
+                Step::Slow
+            };
         };
+        let facts = self.code.facts(frame.function);
         let depth = self.stack.depth();
         let kind = frame.kind();
         let start = frame.base() - kind.prefix();
         if depth <= self.stop + 1
             || facts.local.is_none()
-            || (frame.has_extras() && !self.stack.extras(depth - 1).holds_only_called_class())
+            || (frame.has_extras() && !self.stack.extras(depth - 1).plain_return_can_release())
             || self.stack.has_calls_from(start)
         {
             return Step::Slow;
@@ -172,6 +182,44 @@ impl Machine<'_> {
             self.registers
                 .put(caller.base() + destination.index(), value);
         }
+        Step::Switched(Position {
+            frame: caller,
+            ip: caller.ip(),
+        })
+    }
+
+    /// A setter with no suspended caller action returns without publishing a result.
+    #[inline(never)]
+    fn leave_discarded(&mut self, frame: Frame, source: Option<Reg>) -> Step {
+        if self.stack.depth() <= self.stop + 1
+            || frame.has_extras()
+            || self.stack.has_calls_from(frame.start())
+        {
+            return Step::Slow;
+        }
+        let value = match source {
+            None => &Value::Null,
+            Some(source) => match self.registers.window(frame.base() + source.index(), 1) {
+                [Some(value)] if !value.is_reference() => value,
+                _ => return Step::Slow,
+            },
+        };
+        if self
+            .code
+            .facts(frame.function)
+            .return_mask
+            .is_some_and(|mask| {
+                !mask.intersects(crate::types::own_type(value))
+                    && !(mask.intersects(phera_bytecode::TypeMask::VOID) && value.is_null())
+            })
+        {
+            return Step::Slow;
+        }
+        let Some(caller) = self.stack.caller().copied() else {
+            return Step::Slow;
+        };
+        self.stack.pop();
+        self.registers.truncate(frame.start());
         Step::Switched(Position {
             frame: caller,
             ip: caller.ip(),
@@ -304,7 +352,9 @@ impl Machine<'_> {
         let function = match call.callee {
             PreparedCallee::Php(function) => function,
             PreparedCallee::Constructed => return self.finish_construction(position, destination),
-            PreparedCallee::General => return Step::Slow,
+            PreparedCallee::General => {
+                return self.finish_direct_method(position, destination, call);
+            }
         };
         let facts = self.code.facts(function);
         let sent = call.sent as usize;

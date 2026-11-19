@@ -23,6 +23,16 @@ pub trait ClassHandle: Any {
         self.is_instance_of("Countable")
     }
 
+    /// Whether the class declares a property, including uninitialized properties.
+    fn has_property(&self, _name: &str) -> bool {
+        false
+    }
+
+    /// Whether the object's property table is supplied by native code.
+    fn has_native_properties(&self) -> bool {
+        false
+    }
+
     fn as_any(&self) -> &dyn Any;
     fn is_enum(&self) -> bool {
         false
@@ -97,6 +107,11 @@ impl Object {
             destruction: Cell::new(Destruction::Never),
             lease: Some(lease),
         }
+    }
+
+    /// PHP's stable string representation of an object handle.
+    pub fn handle_hash(&self) -> String {
+        format!("{:016x}{:016x}", self.id, 0)
     }
 
     /// The value of a property, if the object has it.

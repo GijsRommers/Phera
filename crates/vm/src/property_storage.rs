@@ -73,6 +73,41 @@ pub(crate) fn write_at(object: &Object, key: ArrayKey, slot: Option<usize>, valu
     });
 }
 
+/// A cached write may replace a value, but must preserve writable reference cells.
+pub(crate) fn write_direct_at(
+    object: &Object,
+    key: &ArrayKey,
+    slot: Option<usize>,
+    value: &Value,
+    may_initialize: impl FnOnce() -> bool,
+) -> bool {
+    object
+        .update(|properties| {
+            let destination = match slot.and_then(|slot| {
+                properties
+                    .entry_at(slot)
+                    .filter(|(stored, _)| stored == key)
+                    .map(|_| slot)
+            }) {
+                Some(slot) => properties.entry_at_mut(slot).map(|(_, value)| value),
+                None => properties.get_mut(key),
+            };
+            match destination {
+                Some(Value::Reference(_)) => false,
+                Some(destination) => {
+                    *destination = value.clone();
+                    true
+                }
+                None if may_initialize() => {
+                    properties.insert(key.clone(), value.clone());
+                    true
+                }
+                None => false,
+            }
+        })
+        .unwrap_or(false)
+}
+
 /// Mutate a stored array in place. References and absent/nonarray slots return
 /// None so the general path retains type, promotion and alias diagnostics.
 pub(crate) fn append_at(

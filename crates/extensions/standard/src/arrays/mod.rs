@@ -23,6 +23,15 @@ mod range_values;
 mod sets;
 mod slice;
 mod sort;
+
+/// Registered implementations shared with the SPL array containers.
+pub fn associative_sort(name: &str) -> Option<phera_extension_api::FunctionEntry> {
+    sort::FUNCTIONS
+        .iter()
+        .chain(callback_sort::FUNCTIONS)
+        .find(|entry| entry.name == name)
+        .copied()
+}
 mod stack;
 mod tables;
 mod walk;

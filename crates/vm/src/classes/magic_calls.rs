@@ -7,7 +7,7 @@ use phera_bytecode::ClassKind;
 use phera_extension_api::NativeError;
 use phera_value::Object;
 
-use super::method_lookup::ResolvedMethod;
+use super::method_lookup::{ResolvedMethod, declaring_class};
 use super::{Class, Invocation, MethodContext};
 use crate::Vm;
 use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
@@ -18,6 +18,12 @@ use crate::calls::magic_dispatch::MagicCall;
 pub(super) enum MethodSyntax {
     Instance,
     Static,
+}
+
+struct ForwardedMethod {
+    class: Rc<Class>,
+    object: Rc<Object>,
+    resolved: Option<ResolvedMethod>,
 }
 
 impl Vm {
@@ -66,6 +72,26 @@ impl Vm {
         if syntax == MethodSyntax::Static && name.eq_ignore_ascii_case("__construct") {
             return Err(error.unwrap_or_else(|| NativeError::error("Cannot call constructor")));
         }
+        let (receiver, forwarded_class) = if syntax == MethodSyntax::Instance && error.is_none() {
+            match self.forward_method(&class, receiver.as_ref(), name)? {
+                Some(ForwardedMethod {
+                    class,
+                    object,
+                    resolved: Some(resolved),
+                }) => {
+                    return self.prepare_resolved_method(
+                        class,
+                        Some(object),
+                        resolved,
+                        Invocation::Method,
+                    );
+                }
+                Some(ForwardedMethod { class, object, .. }) => (Some(object), Some(class)),
+                None => (receiver, None),
+            }
+        } else {
+            (receiver, None)
+        };
         let instance = receiver
             .as_ref()
             .filter(|_| {
@@ -75,7 +101,7 @@ impl Vm {
                         .as_ref()
                         .is_some_and(|magic| magic.call.is_some())
             })
-            .and_then(|object| self.classes.for_object(object))
+            .and_then(|object| forwarded_class.or_else(|| self.classes.for_object(object)))
             .and_then(|class| {
                 let method = class.magic.as_ref()?.call.clone()?;
                 Some((class, method))
@@ -124,5 +150,67 @@ impl Vm {
                 context,
             })),
         })
+    }
+
+    fn forward_method(
+        &self,
+        class: &Rc<Class>,
+        receiver: Option<&Rc<Object>>,
+        name: &str,
+    ) -> Result<Option<ForwardedMethod>, NativeError> {
+        let Some(receiver) = receiver else {
+            return Ok(None);
+        };
+        let mut forward = class.hooks.as_ref().and_then(|hooks| hooks.forward_method);
+        if forward.is_none()
+            || class
+                .magic
+                .as_ref()
+                .is_some_and(|magic| magic.call.is_some())
+        {
+            return Ok(None);
+        }
+        let lower = name.to_ascii_lowercase();
+        let mut object = receiver.clone();
+        for _ in 0..self.frame_limit {
+            let Some(next) = forward else {
+                break;
+            };
+            let Some(inner) = next(&object)? else {
+                break;
+            };
+            let inner_class = self
+                .classes
+                .for_object(&inner)
+                .ok_or_else(|| internal_error!("forwarded receiver class"))?;
+            // Iterator adapters expose the inner method table even for non-public methods.
+            if let Some(method) = inner_class.methods.get(&lower).cloned() {
+                let scope = declaring_class(&inner_class, &method)
+                    .or_else(|| self.classes.get(&method.declaring))
+                    .ok_or_else(|| internal_error!("forwarded method scope"))?;
+                return Ok(Some(ForwardedMethod {
+                    class: inner_class,
+                    object: inner,
+                    resolved: Some(ResolvedMethod { method, scope }),
+                }));
+            }
+            if inner_class
+                .magic
+                .as_ref()
+                .is_some_and(|magic| magic.call.is_some())
+            {
+                return Ok(Some(ForwardedMethod {
+                    class: inner_class,
+                    object: inner,
+                    resolved: None,
+                }));
+            }
+            forward = inner_class
+                .hooks
+                .as_ref()
+                .and_then(|hooks| hooks.forward_method);
+            object = inner;
+        }
+        Ok(None)
     }
 }

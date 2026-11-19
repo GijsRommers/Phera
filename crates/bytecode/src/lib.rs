@@ -44,8 +44,8 @@ mod unit;
 
 pub use class::{
     ClassConstant, ClassDeclaration, ClassKind, EnumBacking, EnumCase, Initializer,
-    MethodDeclaration, PropertyDeclaration, TRAIT_CLASS_NAME, TraitAdaptation, TraitUse,
-    Visibility,
+    MethodDeclaration, PropertyDeclaration, PropertyHook, PropertyHooks, TRAIT_CLASS_NAME,
+    TraitAdaptation, TraitUse, Visibility,
 };
 pub use function::{ArgumentLayout, Function, Handler, Parameter, Path, PathBase, Step};
 pub use ids::{
@@ -55,4 +55,7 @@ pub use instruction::{
     BinaryOp, CallResult, CaptureKind, CastKind, ClassBinding, ClosureBinding, FetchMode,
     FinallyEntry, IncDec, IncludeKind, Instruction, RuntimeError, UnaryOp,
 };
-pub use unit::{CompiledUnit, Constant, ConstantKey, DeclarationWarning, Symbol, Type, TypeMask};
+pub use unit::{
+    CompiledUnit, Constant, ConstantKey, DeclarationWarning, Symbol, Type, TypeMask,
+    union_in_php_order,
+};

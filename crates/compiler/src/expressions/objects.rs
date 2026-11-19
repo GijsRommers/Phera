@@ -132,6 +132,9 @@ impl Compiler<'_> {
                 name,
                 arguments,
             } => {
+                if let Some(result) = self.compile_parent_hook(class, name, arguments, line)? {
+                    return Ok(result);
+                }
                 let binding = if matches!(&class.kind, ast::ExpressionKind::Name(name)
                     if matches!(name.text.to_ascii_lowercase().as_str(), "self" | "static" | "parent"))
                 {

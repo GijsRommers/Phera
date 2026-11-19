@@ -22,7 +22,7 @@ use phera_extension_api::value::{
 };
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, PropertyPurpose,
-    Value, args,
+    PropertyViewContinuation, PropertyViewRequest, Value, args,
 };
 use std::rc::Rc;
 use std::{cell::RefCell, collections::HashSet};
@@ -76,6 +76,32 @@ struct Encoder {
     work: Vec<Work>,
 }
 
+struct EncodingView {
+    object: Rc<Object>,
+    level: usize,
+}
+
+struct PendingEncoding {
+    encoder: Encoder,
+    view: EncodingView,
+}
+
+impl PropertyViewContinuation for PendingEncoding {
+    fn resume(
+        self: Box<Self>,
+        context: &mut dyn Context,
+        properties: Rc<PhpArray>,
+    ) -> LocalFuture<'_, NativeResult> {
+        let Self { mut encoder, view } = *self;
+        encoder.object_entries(view.object, view.level, properties);
+        Box::pin(complete_encoding(context, encoder))
+    }
+
+    fn abandon(self: Box<Self>, context: &mut dyn Context) {
+        self.encoder.record_exception(context);
+    }
+}
+
 /// PHP checks `$depth` when a container is finished, so a too deep value
 /// is still written in full with `JSON_PARTIAL_OUTPUT_ON_ERROR`.
 pub(crate) fn json_encode(
@@ -88,7 +114,7 @@ pub(crate) fn json_encode(
 async fn encode(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResult {
     let flags = EncodeFlags::from_bits(args::int(&arguments, 1).unwrap_or(0));
     let value = arguments.first().cloned().unwrap_or_default();
-    let mut encoder = Encoder {
+    let encoder = Encoder {
         flags,
         // PHP keeps the depth in a C int.
         depth: i64::from(args::int(&arguments, 2).unwrap_or(512) as i32),
@@ -97,12 +123,28 @@ async fn encode(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResul
         active: HashSet::new(),
         work: vec![Work::Value { value, level: 0 }],
     };
-    if let Err(exception) = encoder.run(context).await {
-        if !flags.throw_on_error || flags.partial_output {
-            error::finish(context, encoder.error, false, Value::Null)?;
+    complete_encoding(context, encoder).await
+}
+
+async fn complete_encoding(context: &mut dyn Context, mut encoder: Encoder) -> NativeResult {
+    match encoder.run(context).await {
+        Ok(Some(view)) => {
+            return Err(PropertyViewRequest {
+                object: view.object.clone(),
+                purpose: PropertyPurpose::Json,
+                function: "json_encode",
+                arguments: Vec::new(),
+                continuation: Box::new(PendingEncoding { encoder, view }),
+            }
+            .suspend());
         }
-        return Err(exception);
+        Ok(None) => {}
+        Err(exception) => {
+            encoder.record_exception(context);
+            return Err(exception);
+        }
     }
+    let flags = encoder.flags;
     let result = if encoder.error == Error::None || flags.partial_output {
         Value::from(encoder.output)
     } else {
@@ -117,16 +159,27 @@ async fn encode(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResul
 }
 
 impl Encoder {
+    fn record_exception(&self, context: &mut dyn Context) {
+        if !self.flags.throw_on_error || self.flags.partial_output {
+            let _ = error::finish(context, self.error, false, Value::Null);
+        }
+    }
+
     /// Works until done, or until the first error unless the output is
     /// partial: then it goes on, and the last error is the one reported.
-    async fn run(&mut self, context: &mut dyn Context) -> Result<(), NativeError> {
+    async fn run(
+        &mut self,
+        context: &mut dyn Context,
+    ) -> Result<Option<EncodingView>, NativeError> {
         while let Some(work) = self.work.pop() {
             match work {
                 Work::Value {
                     value: Value::Object(object),
                     level,
                 } => {
-                    self.object(context, object, level).await?;
+                    if let Some(view) = self.object(context, object, level).await? {
+                        return Ok(Some(view));
+                    }
                 }
                 Work::Value { value, level } => self.value(value, level),
                 Work::ReleaseSerializer(guard) => drop(guard),
@@ -156,7 +209,7 @@ impl Encoder {
                 break;
             }
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Records an error and writes what PHP writes in place of the value:
@@ -242,11 +295,11 @@ impl Encoder {
         context: &mut dyn Context,
         object: Rc<Object>,
         level: usize,
-    ) -> Result<(), NativeError> {
+    ) -> Result<Option<EncodingView>, NativeError> {
         if object.class.is_instance_of("JsonSerializable") {
             let Some(guard) = Serializing::start(context, object.clone()) else {
                 self.failure(Error::Recursion);
-                return Ok(());
+                return Ok(None);
             };
             let value = context
                 .call_protocol_method(object.clone(), "jsonSerialize", Vec::new())
@@ -254,7 +307,7 @@ impl Encoder {
             if !matches!(&*value.deref(), Value::Object(result) if Rc::ptr_eq(&object, result)) {
                 self.work.push(Work::ReleaseSerializer(guard));
                 self.work.push(Work::Value { value, level });
-                return Ok(());
+                return Ok(None);
             }
         } else if object.class.is_enum() {
             if let Some(value) = object.get(&ArrayKey::str("value")) {
@@ -262,14 +315,37 @@ impl Encoder {
             } else {
                 self.failure(Error::NonBackedEnum);
             }
-            return Ok(());
+            return Ok(None);
         }
         let identity = Rc::as_ptr(&object) as usize;
         if self.active.contains(&identity) {
             self.failure(Error::Recursion);
-            return Ok(());
+            return Ok(None);
         }
-        let properties = context.object_properties(&object, PropertyPurpose::Json)?;
+        if context.property_view_can_suspend(&object, PropertyPurpose::Json) {
+            return Ok(Some(EncodingView { object, level }));
+        }
+        let properties = if context.property_view_runs_code(&object, PropertyPurpose::Json) {
+            match context
+                .property_view(object.clone(), PropertyPurpose::Json, "json_encode", &[])
+                .await?
+            {
+                phera_extension_api::PropertyView::Snapshot(properties)
+                | phera_extension_api::PropertyView::DebugInfo(properties) => properties,
+                phera_extension_api::PropertyView::DebugSlots { slots, .. } => slots,
+                phera_extension_api::PropertyView::Recursive => {
+                    self.failure(Error::Recursion);
+                    return Ok(None);
+                }
+            }
+        } else {
+            Rc::new(context.object_properties(&object, PropertyPurpose::Json)?)
+        };
+        self.object_entries(object, level, properties);
+        Ok(None)
+    }
+
+    fn object_entries(&mut self, object: Rc<Object>, level: usize, properties: Rc<PhpArray>) {
         let entries = properties
             .iter()
             .filter(|(key, _)| match key {
@@ -281,7 +357,6 @@ impl Encoder {
             .map(|(key, value)| (key, value.clone()))
             .collect();
         self.container(Owner::Object(object), entries, true, level);
-        Ok(())
     }
 
     /// Writes the opening bracket and schedules the entries and the closing

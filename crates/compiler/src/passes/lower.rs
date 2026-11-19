@@ -126,7 +126,7 @@ impl Tables {
             mask,
             classes,
             intersection: display.contains('&'),
-            display: display.into(),
+            display: phera_bytecode::union_in_php_order(display),
         });
         TypeId(index as u32)
     }
@@ -360,6 +360,20 @@ pub(crate) fn lower(source: ir::CompiledUnit) -> CompiledUnit {
                     is_static: property.is_static,
                     is_readonly: property.is_readonly,
                     ty: property.ty.map(|name| tables.ty(&name)),
+                    hooks: property.hooks.map(|hooks| {
+                        let lower_hook = |hook: phera_bytecode::PropertyHook<usize>| {
+                            phera_bytecode::PropertyHook {
+                                function: FunctionId(hook.function as u32),
+                                is_abstract: hook.is_abstract,
+                                is_final: hook.is_final,
+                            }
+                        };
+                        Box::new(phera_bytecode::PropertyHooks {
+                            get: hooks.get.map(lower_hook),
+                            set: hooks.set.map(lower_hook),
+                            is_virtual: hooks.is_virtual,
+                        })
+                    }),
                     default: property.default.map(|index| {
                         phera_bytecode::Initializer::Function(FunctionId(index as u32))
                     }),

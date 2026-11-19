@@ -71,19 +71,24 @@ impl Vm {
                 let _ = trace.push(Value::Array(Rc::new(entry)));
                 continue;
             }
-            let function = &callee.function().name;
-            let closure = function.starts_with("{closure:");
-            let name = if closure {
-                function.as_str()
+            let function = callee.function().name.as_str();
+            let (class, name) = if function.starts_with("{closure:") {
+                (callee.scope().map(|scope| scope.name.as_str()), function)
+            } else if let Some((class, method)) = function.split_once("::") {
+                if method.starts_with('$')
+                    && let Some((class, method)) = self
+                        .code
+                        .function_name(callee.frame.function)
+                        .split_once("::")
+                {
+                    (Some(class), method)
+                } else {
+                    (Some(class), method)
+                }
             } else {
-                function.rsplit("::").next().unwrap_or(function)
+                (None, function)
             };
             entry.insert(ArrayKey::str("function"), Value::from(name));
-            let class = if closure {
-                callee.scope().map(|scope| scope.name.as_str())
-            } else {
-                function.split_once("::").map(|(class, _)| class)
-            };
             if let Some(class) = class {
                 entry.insert(ArrayKey::str("class"), Value::from(class));
                 let kind = if callee.this().is_some() { "->" } else { "::" };
@@ -98,6 +103,12 @@ impl Vm {
                 .warning_site
                 .as_ref()
                 .filter(|site| site.boundary == callee_index);
+            let suspended_native = self
+                .call_stack
+                .extras(callee_index)
+                .property_hook
+                .as_deref()
+                .and_then(crate::property_hook_continuation::HookContinuation::native_trace);
             let mut callbacks = self
                 .native_callback_sites
                 .iter()
@@ -107,7 +118,10 @@ impl Vm {
             // At the end of the request PHP calls destructors from no code
             // at all: "[internal function]".
             let from_shutdown = self.request_end.shutting_down && callee_index == 1;
-            let via_callback = warning.is_some() || callbacks.peek().is_some() || from_shutdown;
+            let via_callback = warning.is_some()
+                || suspended_native.is_some()
+                || callbacks.peek().is_some()
+                || from_shutdown;
             if INCLUDE_GENERATORS
                 && let Some(site) = self
                     .generator_traces
@@ -137,6 +151,9 @@ impl Vm {
                     site.location.line,
                 );
             } else {
+                if let Some(native) = suspended_native {
+                    append_native(&mut trace, native, caller_file, caller_line);
+                }
                 for site in callbacks {
                     append_native(&mut trace, &site.native, caller_file, caller_line);
                 }
@@ -274,7 +291,13 @@ fn append_native(
     let mut entry = PhpArray::new();
     entry.insert(ArrayKey::str("file"), Value::from(file));
     entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
-    entry.insert(ArrayKey::str("function"), Value::from(native.name.clone()));
+    if let Some((class, method)) = native.name.split_once("->") {
+        entry.insert(ArrayKey::str("function"), Value::from(method));
+        entry.insert(ArrayKey::str("class"), Value::from(class));
+        entry.insert(ArrayKey::str("type"), Value::from("->"));
+    } else {
+        entry.insert(ArrayKey::str("function"), Value::from(native.name.clone()));
+    }
     entry.insert(ArrayKey::str("args"), native.arguments.clone());
     let _ = trace.push(Value::Array(Rc::new(entry)));
 }

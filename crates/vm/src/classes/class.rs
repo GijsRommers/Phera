@@ -74,6 +74,7 @@ pub(crate) struct PropertyDefault {
     pub(crate) is_readonly: bool,
     pub(crate) static_initialized: Rc<std::cell::Cell<bool>>,
     pub(crate) value_initialized: Rc<std::cell::Cell<bool>>,
+    pub(crate) hooks: Option<Rc<super::property_hooks::LinkedPropertyHooks>>,
 }
 
 /// A method remembers its declaring scope independently of the receiver's class.
@@ -135,6 +136,16 @@ impl ClassHandle for Class {
     fn name(&self) -> &str {
         &self.name
     }
+    fn has_property(&self, name: &str) -> bool {
+        self.defaults.iter().any(|property| property.name == name)
+    }
+
+    fn has_native_properties(&self) -> bool {
+        self.hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.properties.is_some())
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

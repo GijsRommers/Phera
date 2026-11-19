@@ -18,6 +18,10 @@ pub(crate) mod method_table;
 mod methods;
 mod native;
 pub(crate) mod operations;
+pub(crate) mod parent_property_hooks;
+mod property_hook_contracts;
+mod property_hook_inheritance;
+pub(crate) mod property_hooks;
 mod protocol_methods;
 mod signatures;
 mod static_calls;
@@ -26,6 +30,7 @@ mod trait_adaptations;
 mod trait_defaults;
 mod trait_members;
 pub(crate) mod trait_methods;
+mod trait_property_overrides;
 
 pub(crate) use class::{
     Class, ConstantState, Invocation, LinkedConstant, Method, MethodBody, MethodContext,

@@ -58,6 +58,7 @@ impl ClassTable {
             .map(|_| &crate::internal_iterator::ENTRY);
         for entry in registry
             .classes()
+            .filter(|entry| !matches!(entry.kind, NativeKind::UnitEnum(_)))
             .chain(std::iter::once(&closure))
             .chain(internal_iterator)
             .chain(
@@ -71,6 +72,11 @@ impl ClassTable {
                     .map(|_| &crate::generators::class::CLOSED_EXCEPTION),
             )
             .chain(super::enums::INTERFACES)
+            .chain(
+                registry
+                    .classes()
+                    .filter(|entry| matches!(entry.kind, NativeKind::UnitEnum(_))),
+            )
         {
             let parent = entry.parent.and_then(|name| table.get(name));
             let mut methods = parent
@@ -151,16 +157,26 @@ impl ClassTable {
                     is_readonly: property.is_readonly,
                     static_initialized: Rc::new(std::cell::Cell::new(true)),
                     value_initialized: Rc::new(std::cell::Cell::new(property.default.is_some())),
+                    hooks: None,
                 });
             }
             if table.get(entry.name).is_none() {
                 table.order.push(entry.name.into());
             }
-            let interfaces: Vec<Rc<Class>> = entry
+            let mut interfaces: Vec<Rc<Class>> = entry
                 .interfaces
                 .iter()
                 .filter_map(|name| table.get(name))
                 .collect();
+            if entry.kind == NativeKind::Interface {
+                for interface in &interfaces {
+                    for (name, method) in &interface.methods {
+                        methods
+                            .entry(name.clone())
+                            .or_insert_with(|| method.clone());
+                    }
+                }
+            }
             let mut constants = parent
                 .as_ref()
                 .map(|class| class.constants.clone())
@@ -185,12 +201,30 @@ impl ClassTable {
                     }),
                 );
             }
+            let enum_info = if let NativeKind::UnitEnum(cases) = entry.kind {
+                interfaces.extend(table.get("UnitEnum"));
+                Some(super::enums::native_unit_enum(
+                    entry.name,
+                    cases,
+                    &mut methods,
+                    &mut defaults,
+                    &mut constants,
+                ))
+            } else {
+                None
+            };
             let is_throwable = entry.name == "Throwable"
                 || parent.as_ref().is_some_and(|parent| parent.is_throwable)
                 || interfaces
                     .iter()
                     .any(|interface: &Rc<Class>| interface.is_throwable);
             let hooks = super::operations::inherit_hooks(entry.hooks, parent.as_deref());
+            let operations = super::operations::ClassOperations::link(
+                entry.name,
+                parent.as_deref(),
+                &interfaces,
+            )
+            .with_native_dimensions(hooks.as_deref(), &methods);
             let index = table.next_index();
             table.insert(
                 entry.name.to_ascii_lowercase(),
@@ -198,11 +232,7 @@ impl ClassTable {
                     index,
                     property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
                     hooks,
-                    operations: super::operations::ClassOperations::link(
-                        entry.name,
-                        parent.as_deref(),
-                        &interfaces,
-                    ),
+                    operations,
                     origin: if entry.name == "Closure" {
                         super::class::ClassOrigin::Closure
                     } else {
@@ -216,16 +246,19 @@ impl ClassTable {
                     parent,
                     interfaces,
                     traits: Vec::new(),
-                    enum_info: None,
-                    kind: if entry.kind == NativeKind::Interface {
-                        ClassKind::Interface
-                    } else {
-                        ClassKind::Class
+                    enum_info,
+                    kind: match entry.kind {
+                        NativeKind::Interface => ClassKind::Interface,
+                        NativeKind::UnitEnum(_) => ClassKind::Enum,
+                        _ => ClassKind::Class,
                     },
                     is_abstract: entry.kind == NativeKind::AbstractClass,
                     is_throwable,
                     has_native_layout: true,
-                    is_final: entry.kind == NativeKind::FinalClass,
+                    is_final: matches!(
+                        entry.kind,
+                        NativeKind::FinalClass | NativeKind::UnitEnum(_)
+                    ),
                     is_readonly: false,
                     allows_dynamic_properties: false,
                     constructor: methods.get("__construct").cloned(),

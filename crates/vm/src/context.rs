@@ -58,6 +58,10 @@ impl Context for Vm {
         self
     }
 
+    fn warning_bytes(&mut self, message: &[u8]) {
+        self.diagnostic_bytes("Warning", message);
+    }
+
     fn native_call_error(
         &mut self,
         name: &str,
@@ -113,7 +117,32 @@ impl Context for Vm {
         object: &phera_value::Object,
         purpose: phera_extension_api::PropertyPurpose,
     ) -> bool {
-        purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(object)
+        match purpose {
+            phera_extension_api::PropertyPurpose::Debug => self.has_debug_info(object),
+            phera_extension_api::PropertyPurpose::Json => {
+                self.hooked_property_class(object).is_some()
+            }
+            _ => false,
+        }
+    }
+
+    fn property_view_can_suspend(
+        &self,
+        object: &phera_value::Object,
+        purpose: phera_extension_api::PropertyPurpose,
+    ) -> bool {
+        self.native_view_depth == Some(self.call_stack.depth())
+            && matches!(
+                purpose,
+                phera_extension_api::PropertyPurpose::Json
+                    | phera_extension_api::PropertyPurpose::Export
+            )
+            && self.hooked_property_class(object).is_some()
+    }
+
+    fn has_visible_property(&self, object: &phera_value::Object, name: &str) -> bool {
+        self.property_key(object, name)
+            .is_ok_and(|key| object.has(&key))
     }
 
     fn property_view(
@@ -123,8 +152,30 @@ impl Context for Vm {
         function: &'static str,
         arguments: &[Value],
     ) -> LocalFuture<'_, Result<phera_extension_api::PropertyView, NativeError>> {
-        if self.property_view_runs_code(&object, purpose) {
+        if purpose == phera_extension_api::PropertyPurpose::Debug && self.has_debug_info(&object) {
             return self.debug_properties(object, function, arguments);
+        }
+        if matches!(
+            purpose,
+            phera_extension_api::PropertyPurpose::Json
+                | phera_extension_api::PropertyPurpose::Export
+        ) && let Some(class) = self.hooked_property_class(&object)
+        {
+            let native = crate::error_traces::NativeTrace::new(function, arguments);
+            return Box::pin(async move {
+                let properties = self
+                    .enumerate_hooked_native(object, class, purpose, native)
+                    .await?;
+                Ok(phera_extension_api::PropertyView::Snapshot(
+                    std::rc::Rc::new(properties),
+                ))
+            });
+        }
+        if function == "var_dump"
+            && let Some(class) = self.hooked_property_class(&object)
+        {
+            let view = self.dump_hooked_slots(&object, &class);
+            return Box::pin(std::future::ready(Ok(view)));
         }
         let view = self.object_properties(&object, purpose).map(|properties| {
             phera_extension_api::PropertyView::Snapshot(std::rc::Rc::new(properties))
@@ -151,7 +202,7 @@ impl Context for Vm {
         let event = crate::error_handlers::DiagnosticEvent {
             level,
             kind: diagnostic.kind.label().into(),
-            message: diagnostic.message.clone(),
+            message: diagnostic.message.as_str().into(),
             location,
             native: self.error_handlers.native_site.clone(),
             trace_location: Some(caller),
@@ -240,6 +291,42 @@ impl Context for Vm {
             Ok(callee) => Box::pin(self.invoke_resolved_callable(callee, arguments)),
             Err(error) => Box::pin(std::future::ready(Err(error))),
         }
+    }
+
+    fn call_protected_method(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        name: &str,
+        arguments: Vec<Value>,
+    ) -> LocalFuture<'_, NativeResult> {
+        match self.protocol_method_in_scope(object, name, phera_bytecode::Visibility::Protected) {
+            Ok(callee) => Box::pin(self.invoke_resolved_callable(callee, arguments)),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
+    fn lookup_class<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<
+        'a,
+        Result<Option<std::rc::Rc<dyn phera_value::ClassHandle>>, phera_extension_api::NativeError>,
+    > {
+        Box::pin(async move {
+            Ok(Vm::lookup_class(self, name)
+                .await?
+                .map(|class| class as std::rc::Rc<dyn phera_value::ClassHandle>))
+        })
+    }
+
+    fn is_user_method(&self, object: &phera_value::Object, name: &str) -> bool {
+        object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+            .filter(|class| class.origin == crate::classes::class::ClassOrigin::User)
+            .and_then(|class| class.methods.get(&name.to_ascii_lowercase()))
+            .is_some_and(|method| matches!(method.body, crate::classes::MethodBody::User(_)))
     }
 
     fn generator_ready(
@@ -416,6 +503,11 @@ impl Context for Vm {
         object: &phera_value::Object,
         purpose: phera_extension_api::PropertyPurpose,
     ) -> Result<phera_value::PhpArray, phera_extension_api::NativeError> {
+        if purpose == phera_extension_api::PropertyPurpose::ArrayCast
+            && let Some(class) = self.hooked_property_class(object)
+        {
+            return Ok(self.raw_hooked_slots(object, &class));
+        }
         let projection = object
             .class
             .as_any()

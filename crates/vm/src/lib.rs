@@ -87,6 +87,8 @@ mod global_instructions;
 mod global_paths;
 mod globals;
 mod handler_installation;
+mod hooked_property_iteration;
+mod hooked_property_views;
 mod include_scope;
 mod include_state;
 mod includes;
@@ -111,6 +113,7 @@ mod magic_properties;
 mod magic_property_write;
 mod magic_references;
 mod native_diagnostics;
+mod native_property_views;
 mod object_comparison;
 mod object_iteration;
 mod operators;
@@ -124,6 +127,8 @@ mod path_update;
 mod place_mutation;
 mod places;
 mod properties;
+mod property_hook_continuation;
+mod property_hook_sites;
 mod property_mutation;
 mod property_set_visibility;
 mod property_sites;
@@ -184,7 +189,7 @@ pub struct Vm {
     debug_objects: Vec<u32>,
     property_guards: Vec<magic_properties::PropertyGuard>,
     unset_typed_properties: std::collections::HashMap<u32, magic_properties::UnsetProperties>,
-    clone_scopes: Vec<classes::cloning::CloneScope>,
+    clone_scopes: classes::cloning::CloneScopes,
     closure_captures: Vec<closures::PendingCapture>,
     /// Pure defaults retain lexical class scope while running outside a method frame.
     initializer_scope: Option<String>,
@@ -192,6 +197,8 @@ pub struct Vm {
     argument_origin: calls::callback_binding::ArgumentOrigin,
     native_called_class: Option<std::rc::Rc<classes::Class>>,
     pending_dimension: Option<dimensions::DimensionPath>,
+    returned_hook: Option<property_hook_continuation::ReturnedHook>,
+    native_view_depth: Option<usize>,
     prelinked_classes: std::collections::HashSet<(usize, usize)>,
     function_table: function_table::FunctionTable,
     /// Every loaded file and function of the request, by number.
@@ -263,7 +270,7 @@ impl Vm {
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
             unset_typed_properties: Default::default(),
-            clone_scopes: Vec::new(),
+            clone_scopes: classes::cloning::CloneScopes::default(),
             property_references: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,
@@ -271,6 +278,8 @@ impl Vm {
             argument_origin: calls::callback_binding::ArgumentOrigin::Php,
             native_called_class: None,
             pending_dimension: None,
+            returned_hook: None,
+            native_view_depth: None,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::default(),

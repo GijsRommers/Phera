@@ -37,7 +37,7 @@ impl Vm {
         let event = DiagnosticEvent {
             level,
             kind: kind.into(),
-            message,
+            message: message.into(),
             location: self.location(),
             trace_location: None,
             native: Some(crate::error_traces::NativeTrace::new(
