@@ -21,9 +21,10 @@ impl Compiler<'_> {
             return self.literal(condition, line);
         }
         match &expression.kind {
-            ExpressionKind::Yield { .. } | ExpressionKind::YieldFrom(_) => {
-                Err(self.error("Generators not supported yet", line))
+            ExpressionKind::Yield { key, value } => {
+                self.compile_yield(key.as_deref(), value.as_deref(), line)
             }
+            ExpressionKind::YieldFrom(source) => self.compile_yield_from(source, line),
             ExpressionKind::ArrowFunction(arrow) => self.compile_arrow(arrow, line),
             ExpressionKind::Closure(closure) => self.compile_closure(closure, line),
             ExpressionKind::Throw(operand) => {
@@ -185,6 +186,7 @@ pub(crate) mod assertion_text;
 pub(crate) mod assignments;
 mod calls;
 pub(crate) mod conditionals;
+mod generators;
 pub(crate) mod matching;
 pub(crate) mod nullsafe;
 pub(crate) mod objects;

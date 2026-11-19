@@ -25,9 +25,9 @@ pub use arguments::{args, prepare_arguments, prepare_call, prepare_single_argume
 pub use class::{
     AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, PrepareMethod, PropertyEntry,
-    PropertyType, SyncMethod, Visibility,
+    PropertyType, SyncMethod, Visibility, WindowMethod,
 };
-pub use context::{Context, LocalFuture, PropertyView, RequestCallback};
+pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn};

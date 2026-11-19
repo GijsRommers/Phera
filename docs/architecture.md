@@ -515,11 +515,20 @@ each with its own fixtures checked against real PHP.
   running the body. The object owns a frame that is not on the call stack.
 - `yield` suspends: the frame's registers are moved out of the VM's register
   stack into the generator, and control returns to whoever resumed it.
-  `current`, `next`, `send` and `throw` move them back and continue. This is
-  why frames were kept detachable from the start.
-- `yield from` keeps a stack of inner generators inside the outer one.
+  A scalar resume runs in that window. When an instruction needs the VM,
+  the interpreter installs the same frame, with the receiver and pending
+  call state restored, before executing the instruction.
+- `foreach` advances a suspended generator in `IterNext` and reads the
+  yielded value and any requested key together.
+- `yield from` walks an explicit stack of inner generators. The outer
+  generator keeps a weak link to a yielded leaf while that leaf can resume
+  directly. A shared leaf that finishes or delegates again returns to the
+  stack walk.
 - A generator dropped while suspended inside a `try` runs its `finally`
-  blocks through the destructor queue.
+  blocks through a request-local release queue. The VM drains it at an
+  instruction boundary. A temporary that Phera still owns can delay that
+  release compared with PHP. References kept by closures or reference
+  cycles can also outlive the script's last explicit use of the generator.
 
 ### 9.5 Order of work
 
@@ -896,6 +905,20 @@ What PHPStan and Psalm do: find errors without running the code.
   unions, class names with their ancestry, `list<T>` and `array<K, V>`,
   array shapes, `callable` signatures, `mixed`, `never`. Declared native
   types are facts; everything else is inferred.
+- **Composer projects.** Check paths such as `src` or `app routes` from a
+  directory with `composer.json` and `vendor/composer`, or pass paths
+  inside that project from elsewhere. Phera parses Composer's generated
+  classmap, PSR-4 map and files map without executing PHP. It reads
+  autoload files for helper declarations and loads classes and their
+  ancestry as references are encountered. PSR-0 is unsupported.
+  Dependency declarations inform checks, and diagnostics are limited
+  to the requested files. Passing a path explicitly inside `vendor`
+  checks that path too.
+- **Project paths.** In `phera.toml`, `[check].paths` selects what to
+  report on. `scan = ["legacy/lib"]` indexes additional directories
+  without reporting on them, as with PHPStan's `scanDirectories`.
+  `exclude = ["src/generated"]` leaves files or directories out of
+  discovery in both lists, as with PHPStan's `excludePaths`.
 - **Knowledge of PHP itself** comes from php-src's own `.stub.php` files,
   parsed by Phera's parser at build time into a compact table. So the checker
   knows every built-in function and class of PHP, not only those the runtime

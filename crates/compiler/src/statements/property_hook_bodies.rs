@@ -39,11 +39,11 @@ impl Compiler<'_> {
             ast::HookBody::Block(block) => self.block(block, DeclarationTiming::AtExecution)?,
             ast::HookBody::None => {}
         }
-        if !setter && self.function.return_type.is_some() {
+        if !self.function.is_generator && !setter && self.function.return_type.is_some() {
             self.emit(Instruction::ReturnMissing, end_line);
         } else {
             let register = self.literal(Constant::Null, end_line)?;
-            let instruction = if self.function.returns_reference {
+            let instruction = if self.function.returns_reference && !self.function.is_generator {
                 Instruction::ReturnReference(register)
             } else {
                 Instruction::Return(register)

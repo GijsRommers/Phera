@@ -11,6 +11,7 @@ pub(crate) enum DispatchedReturn {
     Value(Reg),
     Reference(Reg),
     Checked(Reg),
+    Generator(Reg),
 }
 
 /// Retain code metadata while coercion mutably borrows the interpreter.
@@ -240,9 +241,13 @@ impl Vm {
             let source = match kind {
                 DispatchedReturn::Value(source)
                 | DispatchedReturn::Reference(source)
-                | DispatchedReturn::Checked(source) => source,
+                | DispatchedReturn::Checked(source)
+                | DispatchedReturn::Generator(source) => source,
             };
-            let value = if matches!(kind, DispatchedReturn::Value(_)) {
+            let value = if matches!(
+                kind,
+                DispatchedReturn::Value(_) | DispatchedReturn::Generator(_)
+            ) {
                 self.read_local(source)
             } else {
                 self.current()
@@ -265,7 +270,10 @@ impl Vm {
             if !self.error_handlers.pending.is_empty() {
                 self.drain_return_handlers().await?;
             }
-            if matches!(kind, DispatchedReturn::Checked(_)) {
+            if matches!(
+                kind,
+                DispatchedReturn::Checked(_) | DispatchedReturn::Generator(_)
+            ) {
                 self.finish_return_value(value, stop)
                     .map(DispatchResult::from_return)
             } else {

@@ -31,6 +31,9 @@ impl Vm {
         let Value::Object(object) = self.get(source) else {
             return Err(internal_error!("Traversable spread source"));
         };
+        if crate::generators::generator_object(&object) {
+            self.discard_generator_temporary(source);
+        }
         let mut cursor = self.make_traversal(object, false).await?;
         cursor.step(self, IteratorStep::Rewind).await?;
         while to_bool(&cursor.step(self, IteratorStep::Valid).await?) {

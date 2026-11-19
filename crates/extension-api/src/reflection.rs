@@ -125,8 +125,28 @@ pub enum ClassSelector<'a> {
     Name(&'a str),
 }
 
+/// Observes a generator without running any PHP instructions.
+#[derive(Clone, Copy)]
+pub enum GeneratorQuery {
+    Line,
+    File,
+    This,
+    Executing,
+    Closed,
+    Trace(i64),
+}
+
 /// Introspection and privileged operations requested by PHP's Reflection extension.
 pub trait ReflectionContext {
+    /// Reads a generator's declaration even after its activation closes.
+    fn reflect_generator_function(
+        &self,
+        object: &Object,
+    ) -> Result<FunctionTarget, crate::NativeError>;
+
+    /// Reads a live generator's location, receiver, delegate or backtrace.
+    fn reflect_generator(&mut self, object: &Rc<Object>, query: GeneratorQuery) -> NativeResult;
+
     /// Gets a declared global constant without emitting its read-time deprecation.
     fn reflect_constant(&self, name: &str) -> Result<ConstantInfo, crate::NativeError>;
 

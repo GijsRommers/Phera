@@ -5,8 +5,9 @@ use std::rc::Rc;
 use phera_bytecode::Visibility;
 use phera_extension_api::reflection::{
     AttributeInfo, AttributeSite, AttributeTarget, ClassInfo, ClassSelector, ExtensionInfo,
-    FunctionTarget, Initializer, MemberInfo, MemberKind, Members, PropertyHandle, PropertyHookKind,
-    PropertyRead, PropertyWrite, ReflectedClassKind, ReflectionContext, SourceInfo,
+    FunctionTarget, GeneratorQuery, Initializer, MemberInfo, MemberKind, Members, PropertyHandle,
+    PropertyHookKind, PropertyRead, PropertyWrite, ReflectedClassKind, ReflectionContext,
+    SourceInfo,
 };
 use phera_extension_api::{LocalFuture, NativeError, NativeResult};
 use phera_value::{Object, PhpArray, Value};
@@ -52,6 +53,14 @@ fn flags(enabled: bool, bits: i64) -> i64 {
 }
 
 impl ReflectionContext for Vm {
+    fn reflect_generator_function(&self, object: &Object) -> Result<FunctionTarget, NativeError> {
+        self.generator_function(object)
+    }
+
+    fn reflect_generator(&mut self, object: &Rc<Object>, query: GeneratorQuery) -> NativeResult {
+        self.inspect_generator(object, query)
+    }
+
     fn reflect_constant(
         &self,
         name: &str,
@@ -324,6 +333,16 @@ impl Vm {
         }
     }
 
+    fn reflection_class_module(&self, name: &str) -> Option<&'static str> {
+        self.registry.class_module(name).or_else(|| {
+            matches!(
+                name,
+                "stdClass" | "Closure" | "Generator" | "ClosedGeneratorException"
+            )
+            .then_some("Core")
+        })
+    }
+
     fn reflection_class_info(&self, class: &Class) -> ClassInfo {
         use crate::classes::class::ClassOrigin;
         let kind = match class.kind {
@@ -369,11 +388,7 @@ impl Vm {
             name: class.name.clone(),
             kind,
             source,
-            extension: self
-                .registry
-                .class_module(&class.name)
-                .or_else(|| matches!(class.name.as_str(), "stdClass" | "Closure").then_some("Core"))
-                .map(str::to_owned),
+            extension: self.reflection_class_module(&class.name).map(str::to_owned),
             parent: class.parent.as_ref().map(|parent| parent.name.clone()),
             interfaces: crate::class_listings::interfaces_in_php_order(class)
                 .into_iter()

@@ -126,7 +126,7 @@ impl Parser<'_> {
         let parameters = self.parse_parameter_list()?;
         let return_type = self.parse_return_type()?;
         self.expect(TokenKind::LeftBrace, "'{'")?;
-        let body = self.parse_inner_statements()?;
+        let (body, is_generator) = self.generator_body(Self::parse_inner_statements)?;
         self.close_brace()?;
 
         Ok(FunctionDeclaration {
@@ -135,6 +135,7 @@ impl Parser<'_> {
             attributes,
             name,
             by_reference,
+            is_generator,
             parameters,
             return_type,
             body,
@@ -594,13 +595,13 @@ impl Parser<'_> {
         let parameters = self.parse_parameter_list()?;
         let return_type = self.parse_return_type()?;
 
-        let body = if self.eat(TokenKind::Semicolon)? {
-            None
+        let (body, is_generator) = if self.eat(TokenKind::Semicolon)? {
+            (None, false)
         } else {
             self.expect(TokenKind::LeftBrace, "'{' or ';'")?;
-            let statements = self.parse_inner_statements()?;
+            let (statements, is_generator) = self.generator_body(Self::parse_inner_statements)?;
             self.close_brace()?;
-            Some(statements)
+            (Some(statements), is_generator)
         };
 
         Ok(Method {
@@ -609,6 +610,7 @@ impl Parser<'_> {
             modifiers,
             name,
             by_reference,
+            is_generator,
             parameters,
             return_type,
             body,
@@ -708,19 +710,20 @@ impl Parser<'_> {
                 Vec::new()
             };
 
-            let body = if self.eat(TokenKind::Semicolon)? {
-                HookBody::None
-            } else if self.at(TokenKind::LeftBrace) {
-                self.bump()?;
-                let statements = self.parse_inner_statements()?;
-                self.close_brace()?;
-                HookBody::Block(statements)
-            } else {
-                self.expect(TokenKind::FatArrow, "'=>'")?;
-                let expression = self.parse_expr(0)?;
-                self.expect(TokenKind::Semicolon, "';'")?;
-                HookBody::Expression(expression)
-            };
+            let (body, is_generator) = self.generator_body(|parser| {
+                if parser.eat(TokenKind::Semicolon)? {
+                    Ok(HookBody::None)
+                } else if parser.eat(TokenKind::LeftBrace)? {
+                    let statements = parser.parse_inner_statements()?;
+                    parser.close_brace()?;
+                    Ok(HookBody::Block(statements))
+                } else {
+                    parser.expect(TokenKind::FatArrow, "'=>'")?;
+                    let expression = parser.parse_expr(0)?;
+                    parser.expect(TokenKind::Semicolon, "';'")?;
+                    Ok(HookBody::Expression(expression))
+                }
+            })?;
 
             hooks.push(PropertyHook {
                 doc_comment,
@@ -732,6 +735,7 @@ impl Parser<'_> {
                 has_parameter_list,
                 parameters,
                 body,
+                is_generator,
                 span: self.span_since(start),
             });
         }

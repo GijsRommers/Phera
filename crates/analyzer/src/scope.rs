@@ -31,6 +31,7 @@ pub struct Scope {
 impl Scope {
     pub fn define(&mut self, name: &str, ty: ValueType) {
         self.values.remove(name);
+        self.known.retain(|symbol| !symbol.refers_to(name));
         self.variables.insert(
             name.into(),
             VariableInfo {
@@ -41,6 +42,7 @@ impl Scope {
         if let Some(aliases) = self.aliases.get(name).cloned() {
             for alias in aliases {
                 self.values.remove(&alias);
+                self.known.retain(|symbol| !symbol.refers_to(&alias));
                 self.variables.insert(
                     alias,
                     VariableInfo {
@@ -55,6 +57,8 @@ impl Scope {
     pub fn unknown_writes(&mut self) {
         self.dynamic = true;
         self.values.clear();
+        self.known
+            .retain(|symbol| !matches!(symbol, Symbol::Property(..) | Symbol::Method(..)));
         for variable in self.variables.values_mut() {
             variable.ty = ValueType::Mixed;
         }
@@ -180,9 +184,15 @@ pub enum Symbol {
     Class(String),
     Function(String),
     Constant(String),
+    Property(String, String),
+    Method(String, String),
 }
 
 impl Symbol {
+    fn refers_to(&self, receiver: &str) -> bool {
+        matches!(self, Self::Property(name, _) | Self::Method(name, _) if name == receiver)
+    }
+
     pub fn constant_name(name: &str) -> String {
         let name = name.trim_start_matches('\\');
         name.split_once("::").map_or_else(

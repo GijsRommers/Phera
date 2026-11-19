@@ -168,6 +168,7 @@ impl Compiler<'_> {
                 parameters,
                 return_type: if setter { None } else { declaration.ty },
                 body: FunctionBody::Statements(&[]),
+                is_generator: hook.is_generator,
             };
             let definition_line = self.lines.line(hook.name.span.start);
             let mut body = self.function_builder(&source, &hook_name, &[], definition_line)?;
@@ -205,6 +206,10 @@ impl Compiler<'_> {
                     message: format!("{property}::{name}(): Returning by reference from a void function is deprecated"),
                     line,
                 });
+            }
+            body.validate_generator_type()?;
+            if hook.is_generator {
+                body.emit(Instruction::GeneratorStart, definition_line);
             }
             body.compile_hook_body(&hook.body, setter, self.lines.line(hook.span.end))?;
             result.is_virtual &= !body.uses_hook_backing;

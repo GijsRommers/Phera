@@ -179,8 +179,7 @@ impl Vm {
             MethodBody::Native(entry) => {
                 reflected.parameters = native_parameters(entry.params);
                 reflected.extension = self
-                    .registry
-                    .class_module(&method.declaring)
+                    .reflection_class_module(&method.declaring)
                     .map(str::to_owned);
                 match entry.return_type {
                     Some(MethodReturn::Required(ty)) => reflected.return_type = Some(ty.into()),
@@ -248,6 +247,7 @@ impl Vm {
             .return_type
             .map(|id| unit.types[id.index()].display.clone());
         reflected.returns_reference = body.returns_reference;
+        reflected.is_generator = body.is_generator;
         let required = body
             .parameters
             .iter()

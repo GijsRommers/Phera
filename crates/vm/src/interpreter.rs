@@ -49,7 +49,18 @@ impl Vm {
                                 Err(handler_error) => handler_error,
                             }
                         };
-                        self.handle_exception(error, stop)?;
+                        let error = if self.generator_releases_pending() {
+                            self.unwind_generator_releases(error).await
+                        } else {
+                            error
+                        };
+                        if let Err(error) = self.handle_exception(error, stop) {
+                            return Err(if self.generator_releases_pending() {
+                                self.unwind_generator_releases(error).await
+                            } else {
+                                error
+                            });
+                        }
                     }
                 }
             }
@@ -71,9 +82,26 @@ impl Vm {
                 None => self.run_batch(stop, work)?,
             };
             match exit {
-                BatchExit::Returned(value) => return Ok(value),
+                BatchExit::Returned(value) => {
+                    if self.generator_releases_pending() {
+                        self.drain_generator_releases().await?;
+                    }
+                    return Ok(value);
+                }
+                BatchExit::GeneratorSuspended => {
+                    let suspension = self.generator_suspension.take();
+                    if self.pending_callbacks {
+                        Box::pin(self.drain_pending_callbacks()).await?;
+                    }
+                    if self.generator_releases_pending() {
+                        self.drain_generator_releases().await?;
+                    }
+                    self.generator_suspension = suspension;
+                    return Ok(phera_value::Value::Null);
+                }
                 BatchExit::Yield => tokio::task::yield_now().await,
                 BatchExit::Handlers => {}
+                BatchExit::GeneratorTracking => {}
                 BatchExit::Compare(pending) => {
                     let order = self.finish_string_comparison(pending.cast).await?;
                     let value = crate::string_comparison::comparison_value(pending.operator, order);
@@ -105,6 +133,9 @@ impl Vm {
             }
             if self.pending_callbacks {
                 Box::pin(self.drain_pending_callbacks()).await?;
+            }
+            if self.generator_releases_pending() {
+                self.drain_generator_releases().await?;
             }
         }
     }

@@ -284,6 +284,43 @@ impl Context for Vm {
         }
     }
 
+    fn generator_ready(
+        &mut self,
+        object: &phera_value::Object,
+        operation: &phera_extension_api::GeneratorOperation,
+    ) -> Option<NativeResult> {
+        crate::generators::local_observation(object, operation)
+            .or_else(|| self.resume_generator_operation(object, operation))
+    }
+
+    fn generator_operation(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        operation: phera_extension_api::GeneratorOperation,
+    ) -> phera_extension_api::traversal::StepFuture<'_> {
+        use phera_extension_api::traversal::StepFuture;
+        if let Some(result) = self.generator_ready(&object, &operation) {
+            return StepFuture::ready(result);
+        }
+        StepFuture::Pending(Box::pin(async move {
+            self.call_stack.enter_callback()?;
+            self.generator_traces
+                .push(crate::generators::trace::Site::new(
+                    self.call_stack.depth(),
+                    &operation,
+                ));
+            let result = self.operate_generator(object, operation).await;
+            if let Some(site) = self.generator_traces.pop() {
+                self.failed_native = self
+                    .failed_native
+                    .take()
+                    .or_else(|| site.failed_call(&result));
+            }
+            self.call_stack.leave_callback();
+            result
+        }))
+    }
+
     fn serialization_class<'a>(
         &'a mut self,
         name: &'a str,
@@ -544,6 +581,11 @@ impl Vm {
     pub(crate) fn check_factory_class(
         class: &crate::classes::Class,
     ) -> Result<(), phera_extension_api::NativeError> {
+        if class.name == "Generator" {
+            return Err(NativeError::error(
+                crate::generators::class::INSTANTIATION_ERROR,
+            ));
+        }
         if class.origin == crate::classes::class::ClassOrigin::Closure {
             return Err(phera_extension_api::NativeError::error(
                 "Instantiation of class Closure is not allowed",

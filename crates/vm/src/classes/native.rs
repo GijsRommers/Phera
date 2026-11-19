@@ -61,6 +61,16 @@ impl ClassTable {
             .filter(|entry| !matches!(entry.kind, NativeKind::UnitEnum(_)))
             .chain(std::iter::once(&closure))
             .chain(internal_iterator)
+            .chain(
+                registry
+                    .get_class("Iterator")
+                    .map(|_| &crate::generators::class::ENTRY),
+            )
+            .chain(
+                registry
+                    .get_class("Exception")
+                    .map(|_| &crate::generators::class::CLOSED_EXCEPTION),
+            )
             .chain(super::enums::INTERFACES)
             .chain(
                 registry

@@ -15,6 +15,7 @@ pub(crate) struct FunctionSource<'a> {
     pub(crate) attributes: &'a [ast::Attribute],
     pub(crate) name: &'a str,
     pub(crate) by_reference: bool,
+    pub(crate) is_generator: bool,
     pub(crate) parameters: &'a [ast::Parameter],
     pub(crate) return_type: Option<&'a ast::Type>,
     pub(crate) body: FunctionBody<'a>,
@@ -40,6 +41,7 @@ impl<'ast> Compiler<'ast> {
                 attributes: &declaration.attributes,
                 name: &declaration.name.name,
                 by_reference: declaration.by_reference,
+                is_generator: declaration.is_generator,
                 parameters: &declaration.parameters,
                 return_type: declaration.return_type.as_ref(),
                 body: FunctionBody::Statements(&declaration.body),
@@ -83,6 +85,13 @@ impl<'ast> Compiler<'ast> {
             builder.emit(Instruction::AttributeDiagnostics, line);
         }
         builder.compile_parameter_defaults(declaration.parameters, line)?;
+        if declaration.is_generator {
+            let entry = declaration
+                .parameters
+                .first()
+                .map_or(declaration.span.start, |p| p.span.start);
+            builder.emit(Instruction::GeneratorStart, self.lines.line(entry));
+        }
         let scope = builder.class_scope.clone();
         builder.function.metadata.declaration = builder.declaration_metadata(
             declaration.attributes,
@@ -113,21 +122,23 @@ impl<'ast> Compiler<'ast> {
         builder.function.return_type = declaration
             .return_type
             .map(|declared_type| self.declaration_type(declared_type));
+        builder.validate_generator_type()?;
         match declaration.body {
             FunctionBody::Statements(body) => {
                 builder.block(body, DeclarationTiming::AtExecution)?
             }
             FunctionBody::Arrow(body) => builder.compile_return(Some(body), line)?,
         }
-        let implicit_return = if declaration
-            .name
-            .rsplit_once("::")
-            .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__toString"))
+        let implicit_return = if !declaration.is_generator
+            && declaration
+                .name
+                .rsplit_once("::")
+                .is_some_and(|(_, method)| method.eq_ignore_ascii_case("__toString"))
         {
             Instruction::ReturnMissing
         } else {
             let register = builder.literal(Constant::Null, line)?;
-            if declaration.by_reference {
+            if declaration.by_reference && !declaration.is_generator {
                 Instruction::ReturnReference(register)
             } else {
                 Instruction::Return(register)
@@ -239,6 +250,7 @@ impl<'ast> Compiler<'ast> {
         };
         builder.function.definition_line = line;
         builder.function.returns_reference = declaration.by_reference;
+        builder.function.is_generator = declaration.is_generator;
         builder.imports = self.imports.clone();
         builder.function.strict_types = self.function.strict_types;
         for parameter in declaration.parameters {

@@ -19,7 +19,6 @@ fn later_milestones_remain_compile_errors() {
     for source in [
         "<?php $callback = function () {};",
         "<?php $callback = fn () => 1;",
-        "<?php function generator() { yield 1; }",
         "<?php class Example {static function method(){}} Example::method(...);",
         "<?php class Example {function method(){}} (new Example)->method(...);",
     ] {
@@ -69,6 +68,17 @@ fn property_hooks_and_set_visibility_emit_access_metadata() {
         Some(phera_bytecode::Visibility::Private)
     );
     assert!(properties[1].is_final);
+}
+
+#[test]
+fn generator_body_starts_with_a_suspension_boundary() {
+    let unit = phera_compiler::compile("<?php function generator() { yield 1; }", "generator.php")
+        .unwrap();
+    assert!(matches!(
+        unit.functions.as_slice(),
+        [function] if function.is_generator
+            && matches!(function.instructions.first(), Some(phera_bytecode::Instruction::GeneratorStart))
+    ));
 }
 
 #[test]

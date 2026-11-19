@@ -226,6 +226,7 @@ impl Vm {
                         if class.is_readonly
                             || class.kind == phera_bytecode::ClassKind::Enum
                             || class.origin == crate::classes::class::ClassOrigin::Closure
+                            || crate::generators::generator_object(object)
                         {
                             return Err(NativeError::error(format!(
                                 "Cannot create dynamic property {}::${name}",

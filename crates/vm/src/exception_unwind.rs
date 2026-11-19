@@ -153,15 +153,20 @@ impl Vm {
 
     /// A throw escaping finally appends its saved exception to the new previous chain.
     fn replace_finally_exceptions(&mut self, object: &Rc<Object>, target: Option<usize>) {
-        let Some(frame_base) = self.current().map(|frame| frame.base()) else {
+        if self.finally_stack.is_empty() {
+            return;
+        }
+        let Some(frame) = self.call_stack.current() else {
             return;
         };
+        let frame_base = frame.base();
+        let instructions = &self.code.function(frame.function).instructions;
         let mut index = self.finally_stack.len();
         while index > 0 {
             index -= 1;
             let saved = &self.finally_stack[index];
             if saved.frame_base != frame_base
-                || target.is_some_and(|target| saved.start <= target && target <= saved.end)
+                || target.is_some_and(|target| saved.contains(target, instructions))
             {
                 continue;
             }
@@ -175,7 +180,7 @@ impl Vm {
 }
 
 /// Append at the tail, avoiding self-links and cycles as Zend does on replacement throws.
-fn append_previous(object: &Rc<Object>, previous: Rc<Object>) {
+pub(crate) fn append_previous(object: &Rc<Object>, previous: Rc<Object>) {
     let mut ancestor = Some(previous.clone());
     let mut ancestors = Vec::new();
     while let Some(candidate) = ancestor {
