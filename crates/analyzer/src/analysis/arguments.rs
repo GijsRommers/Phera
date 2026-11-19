@@ -55,7 +55,22 @@ impl Analyzer<'_> {
             if parameter.is_some_and(|p| p.by_reference) {
                 self.ensure_reference(&argument.value, scope);
             }
+            let previous_binding = self.pending_binding.clone();
+            if let Some(class) = parameter.and_then(|p| p.closure_receiver.as_deref()) {
+                self.prepare_documented_binding(&argument.value, class);
+            }
             let ty = self.expression(&argument.value, scope, signature.is_none());
+            let explicitly_bound = self
+                .pending_binding
+                .as_ref()
+                .is_some_and(|(offset, _)| *offset == argument.value.span.start);
+            self.pending_binding = previous_binding;
+            if !explicitly_bound
+                && closure_binding::is_closure(&argument.value)
+                && let ValueType::Callable(signature) = &ty
+            {
+                self.unbound_invocation(signature);
+            }
             if ty == ValueType::Never {
                 return Evaluation::Never;
             }

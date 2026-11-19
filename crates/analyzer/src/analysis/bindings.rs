@@ -35,6 +35,7 @@ impl Analyzer<'_> {
 
     pub fn parameter_scope(&mut self, parameters: &[Parameter], scope: &mut Scope) {
         for parameter in parameters {
+            self.check_attributes(&parameter.attributes, scope);
             self.check_type(parameter.ty.as_ref());
             if let Some(default) = &parameter.default {
                 self.expression(default, scope, false);
@@ -87,15 +88,19 @@ impl Analyzer<'_> {
         self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.object = previous.object && !closure.is_static;
-        self.context.unbound_this = (!closure.is_static && !previous.object).then(Vec::new);
-        if !closure.is_static {
-            self.apply_binding(span);
+        if !self.context.object {
+            self.context.this_class = None;
         }
+        self.context.unbound_this = (!closure.is_static && !previous.object).then(Vec::new);
+        self.apply_binding(span, closure.is_static);
         self.context.function = "Closure".into();
         self.context.declared_return = closure.return_type.is_some();
+        self.context.generator =
+            self.context.declared_return && generators::body_yields(&closure.body);
         self.context.by_reference = closure.by_reference;
         self.context.returns =
             ValueType::declared(closure.return_type.as_ref(), &self.context.names);
+        self.check_attributes(&closure.attributes, &mut inner);
         self.parameter_scope(&closure.parameters, &mut inner);
         self.check_type(closure.return_type.as_ref());
         let flow = self.block(&closure.body, &mut inner);
@@ -128,10 +133,12 @@ impl Analyzer<'_> {
         self.context.scope_kind = ScopeKind::Function;
         self.context.incomplete = false;
         self.context.object = previous.object && !arrow.is_static;
-        self.context.unbound_this = (!arrow.is_static && !previous.object).then(Vec::new);
-        if !arrow.is_static {
-            self.apply_binding(span);
+        if !self.context.object {
+            self.context.this_class = None;
         }
+        self.context.unbound_this = (!arrow.is_static && !previous.object).then(Vec::new);
+        self.apply_binding(span, arrow.is_static);
+        self.check_attributes(&arrow.attributes, &mut inner);
         self.parameter_scope(&arrow.parameters, &mut inner);
         self.check_type(arrow.return_type.as_ref());
         self.expression(&arrow.body, &mut inner, false);
