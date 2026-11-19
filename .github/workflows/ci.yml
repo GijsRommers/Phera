@@ -108,7 +108,7 @@ jobs:
         with:
           php-version: '8.5'
           extensions: >-
-            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, libxml, dom,
+            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, libxml, dom, posix,
             timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
@@ -122,7 +122,7 @@ jobs:
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
           echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
-          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "libxml", "dom", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
+          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "libxml", "dom", "posix", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
@@ -190,7 +190,7 @@ jobs:
         with:
           php-version: '8.5'
           extensions: >-
-            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, libxml, dom,
+            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, libxml, dom, posix,
             timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
@@ -204,7 +204,7 @@ jobs:
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
           echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
-          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "libxml", "dom", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
+          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "libxml", "dom", "posix", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
