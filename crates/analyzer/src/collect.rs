@@ -16,7 +16,9 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                 file: file.into(),
                 line: lines.line(offset),
             };
-            for block in collect_expression_declarations(index, statement, &names, &location) {
+            for block in
+                collect_expression_declarations(index, statement, &names, source, &location)
+            {
                 pending.push((block, names.clone()));
             }
             match &statement.kind {
@@ -28,7 +30,7 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                 }
                 StatementKind::Class(class) => {
                     if let Some(name) = &class.name {
-                        let info = class_info(class, &names, &location);
+                        let info = class_info(class, &names, source, &location);
                         let name = names.declaration(&name.name).to_ascii_lowercase();
                         if !index.builtin_classes.contains(&name) {
                             index.classes.insert(name, info);
@@ -43,8 +45,10 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                     }
                 }
                 StatementKind::Function(function) => {
-                    let signature =
+                    let mut signature =
                         function_signature(function, &names, location(statement.span.start));
+                    signature
+                        .apply_phpdoc(crate::phpdoc::text(source, function.doc_comment), &names);
                     let name = names.declaration(&function.name.name).to_ascii_lowercase();
                     if !index.builtin_functions.contains(&name) {
                         index.functions.insert(name, signature);
@@ -124,6 +128,7 @@ fn collect_expression_declarations<'a>(
     index: &mut Index,
     statement: &'a Statement,
     names: &Names,
+    source: &str,
     location: &impl Fn(usize) -> Location,
 ) -> Vec<&'a [Statement]> {
     let mut blocks = Vec::new();
@@ -156,7 +161,7 @@ fn collect_expression_declarations<'a>(
                     blocks.push(body.as_slice());
                 }
             }
-            let mut info = class_info(class, names, location);
+            let mut info = class_info(class, names, source, location);
             info.name = anonymous_name(&location(class.span.start).file, class.span.start);
             index.classes.insert(info.name.to_ascii_lowercase(), info);
         }

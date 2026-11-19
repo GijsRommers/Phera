@@ -1,6 +1,10 @@
 //! `phera check src/`: report static mistakes without loading or executing PHP.
 
-use phera_analyzer::{baseline, config::Options, diagnostic};
+use phera_analyzer::{
+    baseline,
+    config::Options,
+    diagnostic::{self, Format},
+};
 use std::io::IsTerminal;
 use std::process::ExitCode;
 
@@ -21,16 +25,28 @@ fn run(options: &Options) -> Result<bool, String> {
     } else if let Some(path) = &options.baseline {
         baseline::filter(path, &mut report.diagnostics)?;
     }
-    print!(
-        "{}",
-        diagnostic::render(&report.diagnostics, options.format)
-    );
+    print!("{}", diagnostic::render(&report, options.format));
     if !options.no_progress && std::io::stderr().is_terminal() {
         eprintln!(
-            "Checked {} files in {:.3}s ({:.0} files/s).",
+            "Parsed {} vendor files for declarations.",
+            report.vendor_files
+        );
+    }
+    if matches!(options.format, Format::Text) {
+        let affected = report.diagnostics.chunk_by(|a, b| a.file == b.file).count();
+        println!(
+            "{} finding{} in {} of {} file{}, level {}, {:.2} s",
+            report.diagnostics.len(),
+            if report.diagnostics.len() == 1 {
+                ""
+            } else {
+                "s"
+            },
+            affected,
             report.files,
+            if report.files == 1 { "" } else { "s" },
+            options.level,
             report.elapsed.as_secs_f64(),
-            report.files as f64 / report.elapsed.as_secs_f64()
         );
     }
     Ok(!report.diagnostics.is_empty())
