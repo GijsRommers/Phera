@@ -17,6 +17,7 @@ pub mod testing;
 pub mod traversal;
 mod working_directory;
 
+pub use phera_bytecode::BinaryOp as NativeBinaryOp;
 pub use phera_source::{CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite};
 pub use phera_value as value;
 pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
@@ -32,8 +33,8 @@ mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn, SyncSelector};
 pub use object_handlers::{
-    ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeClone,
-    NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,
+    ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeBinary,
+    NativeClone, NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,
     PropertyProjection, PropertyPurpose,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};

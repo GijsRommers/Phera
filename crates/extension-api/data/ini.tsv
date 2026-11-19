@@ -205,3 +205,5 @@ core	zend.multibyte	bool	2	30
 core	zend.reserved_stack_size	quantity	4	30
 core	zend.script_encoding	string	7	-
 core	zend.signal_check	bool	4	30
+
+bcmath	bcmath.scale	int	7	30

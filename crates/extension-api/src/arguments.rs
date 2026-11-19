@@ -173,6 +173,7 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
         ParamType::Iterable => "Traversable|array",
         ParamType::Number => "int|float",
         ParamType::IntOrString => "string|int",
+        ParamType::ClassOrIntOrString(_, spelling) => spelling,
         ParamType::ArrayOrString => "array|string",
         ParamType::ObjectOrString => "object|string",
         ParamType::CertificateOrString => "OpenSSLCertificate|string",
@@ -187,6 +188,9 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
 }
 
 fn expected(param: &Param) -> String {
+    if let ParamType::ClassOrIntOrString(class @ "BcMath\\Number", _) = param.ty {
+        return format!("of type int, string, or {class}");
+    }
     // Zend's array-or-object parser reports "array" for other argument types.
     let text = if param.ty == ParamType::ArrayOrObject {
         "array"
@@ -269,6 +273,12 @@ fn convert(
             Value::Int(_) | Value::Float(_) => Some(None),
             _ if strict => None,
             _ => to_number(value, site, context).map(Some),
+        },
+        ParamType::ClassOrIntOrString(class, _) => match value {
+            Value::Object(object) if object.class.is_instance_of(class) => Some(None),
+            Value::Int(_) | Value::String(_) => Some(None),
+            _ if strict => None,
+            _ => to_int(value, site, context).map(Some),
         },
         ParamType::IntOrString => match value {
             Value::Int(_) | Value::String(_) => Some(None),

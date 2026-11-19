@@ -2020,6 +2020,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-bcmath"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-core"
 version = "0.1.0"
 dependencies = [
@@ -2308,6 +2318,7 @@ dependencies = [
 name = "phera-extension-api"
 version = "0.1.0"
 dependencies = [
+ "phera-bytecode",
  "phera-source",
  "phera-value",
 ]
@@ -2352,6 +2363,7 @@ dependencies = [
  "phera-bytecode",
  "phera-compiler",
  "phera-dotenv",
+ "phera-ext-bcmath",
  "phera-ext-core",
  "phera-ext-ctype",
  "phera-ext-date",

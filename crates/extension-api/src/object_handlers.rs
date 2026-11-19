@@ -129,10 +129,19 @@ pub type PropertyProjection =
 pub type NativeCount = fn(&mut dyn Context, &Object) -> Result<i64, NativeError>;
 pub type MethodForwarder = fn(&Object) -> Result<Option<Rc<Object>>, NativeError>;
 
+/// A native operand can handle an operator or decline ordinary PHP dispatch.
+pub type NativeBinary = fn(
+    &mut dyn Context,
+    crate::NativeBinaryOp,
+    &Value,
+    &Value,
+) -> Result<Option<Value>, NativeError>;
+
 #[derive(Clone, Copy, Default)]
 pub struct ClassHooks {
     pub clone: Option<NativeClone>,
     pub compare: Option<NativeCompare>,
+    pub binary: Option<NativeBinary>,
     /// Whole-object enumeration, with the consuming operation supplied as a purpose.
     pub properties: Option<PropertyProjection>,
     /// Direct read, mutation or presence check for one virtual property.
@@ -152,6 +161,7 @@ impl ClassHooks {
     pub const EMPTY: Self = Self {
         clone: None,
         compare: None,
+        binary: None,
         properties: None,
         property_access: None,
         iterator: None,

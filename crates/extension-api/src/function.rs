@@ -47,6 +47,8 @@ pub enum ParamType {
     Number,
     /// `int|string`
     IntOrString,
+    /// The class name and the declared class|string|int spelling.
+    ClassOrIntOrString(&'static str, &'static str),
     /// `array|int`
     ArrayOrInt,
     /// `array|string`

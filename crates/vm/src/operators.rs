@@ -56,6 +56,14 @@ impl Vm {
         let left = left.unwrap_or(&null).deref();
         let right = right.unwrap_or(&null).deref();
         let result = match fast_binary(operator, &left, &right) {
+            None if crate::object_operators::has_binary(&left, &right) => {
+                return Ok(Some(BatchExit::Instruction(Instruction::Binary {
+                    dst: destination,
+                    op: operator,
+                    lhs,
+                    rhs,
+                })));
+            }
             Some(value) => Ok(value),
             None if needs_comparison_step(operator, &left, &right) => {
                 if self.classes.has_property_views
@@ -361,13 +369,14 @@ impl Vm {
                 return Ok(None);
             }
         }
+        let left = self.operand(local);
+        let right = self.operand(source);
+        if let Some(value) = self.native_binary(operator, &left, &right)? {
+            self.assign_local(local, value)?;
+            return Ok(None);
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        let value = ops::binary(
-            operator,
-            &diagnostics.vm.operand(local),
-            &diagnostics.vm.operand(source),
-            &mut diagnostics.buffer,
-        );
+        let value = ops::binary(operator, &left, &right, &mut diagnostics.buffer);
         drop(diagnostics);
         self.assign_local(local, value?)?;
         Ok(None)

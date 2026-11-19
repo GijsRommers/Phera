@@ -99,6 +99,9 @@ impl Vm {
         mut left: Value,
         mut right: Value,
     ) -> NativeResult {
+        if let Some(value) = self.native_binary(op, &left, &right)? {
+            return Ok(value);
+        }
         if op == BinaryOp::Concat {
             let lhs = self.stringify_value(&left).await?;
             let rhs = self.stringify_value(&right).await?;

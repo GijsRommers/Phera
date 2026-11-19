@@ -115,6 +115,7 @@ pub(super) fn inherit_hooks(
     Some(Rc::new(phera_extension_api::ClassHooks {
         clone: own.clone.or(base.clone),
         compare: own.compare.or(base.compare),
+        binary: own.binary.or(base.binary),
         properties: own.properties.or(base.properties),
         property_access: own.property_access.or(base.property_access),
         iterator: own.iterator.or(base.iterator),

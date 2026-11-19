@@ -65,6 +65,12 @@ Crates planned for later include `io`, `stdlib`, `postgres`, `mysql`, `redis`,
 and eventually a `jit`. See [`docs/architecture.md`](docs/architecture.md) for
 the details.
 
+## Built-in extensions
+
+BCMath provides arbitrary-precision decimal functions and the immutable
+`BcMath\Number` class. Set the default procedural scale with `bcmath.scale`
+or `bcscale()`.
+
 ## 🛠️ Building
 
 You'll need a recent stable Rust toolchain with 2024 edition support (1.85+).
