@@ -37,6 +37,18 @@ pub enum Change {
     /// The following SplFileObject methods are now deprecated: fgetcsv(),
     /// fputcsv(), setCsvControl(), and getCsvControl().
     SplFileObjectCsvMethodsDeprecated,
+    /// SplFileObject::next() now advances the stream when no prior current()
+    /// call has cached a line.
+    SplFileObjectNextWithoutCachedLine,
+    /// SplFileObject::fgets() no longer caches the returned line for subsequent current() calls.
+    SplFileObjectFgetsConsumesLine,
+    /// SplFileObject::next() past EOF no longer increments key() without bound.
+    SplFileObjectNextAtEof,
+    /// SplFileObject::seek() past EOF now produces the same key() value as SplTempFileObject.
+    SplFileObjectSeekAtEof,
+    /// SplObjectStorage::getHash() implementations may no longer mutate any
+    /// SplObjectStorage instance. Attempting to do so now throws an Error.
+    SplObjectStorageHashMutation,
     /// The following ArrayIterator methods are now deprecated: getFlags(),
     /// setFlags(), asort(), ksort(), uasort(), uksort(), natsort(),
     /// natcasesort(), unserialize(), and serialize().
@@ -166,6 +178,11 @@ impl LanguageLevel {
             | Change::DateTentativeStaticReturnTypes
             | Change::DirectoryIteratorReturnTypes
             | Change::SplFileObjectCsvMethodsDeprecated
+            | Change::SplFileObjectNextWithoutCachedLine
+            | Change::SplFileObjectFgetsConsumesLine
+            | Change::SplFileObjectNextAtEof
+            | Change::SplFileObjectSeekAtEof
+            | Change::SplObjectStorageHashMutation
             | Change::ArrayIteratorMethodsDeprecated
             | Change::SplClassesDeprecated
             | Change::SplObjectHashDeprecated

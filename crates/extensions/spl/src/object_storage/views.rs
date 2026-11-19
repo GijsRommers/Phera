@@ -12,7 +12,7 @@ use phera_extension_api::{
     value::{Diagnostics, OpError},
 };
 
-use super::{CLASS, Key, attach, hash, read};
+use super::{CLASS, Key, attach, hash, hash_scope::require_mutation_allowed, read};
 use crate::{
     This,
     legacy::{Reader, Writer},
@@ -100,7 +100,7 @@ pub(super) fn serialize(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> Nat
     ))
 }
 
-pub(super) fn unserialize(
+pub(super) fn unserialize<const CHECK: bool>(
     context: &mut dyn Context,
     this: Option<Rc<Object>>,
     arguments: Vec<Value>,
@@ -121,6 +121,7 @@ pub(super) fn unserialize(
             let Value::Object(key) = key else {
                 return Err(invalid("Non-object key"));
             };
+            require_mutation_allowed::<CHECK>(context)?;
             let hash = hash(context, object, key).await?;
             attach(object, hash, key.clone(), info.deref().clone())?;
         }
@@ -158,7 +159,7 @@ pub(super) fn legacy_serialize(_: &mut dyn Context, this: This<'_>, _: &[Value])
     Ok(writer.finish())
 }
 
-pub(super) fn legacy_unserialize(
+pub(super) fn legacy_unserialize<const CHECK: bool>(
     context: &mut dyn Context,
     this: Option<Rc<Object>>,
     arguments: Vec<Value>,
@@ -188,6 +189,7 @@ pub(super) fn legacy_unserialize(
                 Value::Null
             };
             reader.expect(b";")?;
+            require_mutation_allowed::<CHECK>(context)?;
             let key = hash(context, object, &item).await?;
             attach(object, key, item, info)?;
         }

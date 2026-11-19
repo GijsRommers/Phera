@@ -40,6 +40,7 @@ pub(super) struct File {
     number: i64,
     current: Option<Value>,
     text: Option<PhpString>,
+    lines: lines::Behavior,
 }
 
 impl File {
@@ -96,6 +97,7 @@ async fn initialize(
     if object.class.is_instance_of(TEMP) {
         location.path = PhpString::from("");
     }
+    let lines = lines::Behavior::for_level(context.language_level());
     update(object, |state| {
         state.data = Data::File(Box::new(File {
             location,
@@ -107,6 +109,7 @@ async fn initialize(
             current: None,
             text: None,
             number: 0,
+            lines,
         }))
     })?;
     Ok(Value::Null)

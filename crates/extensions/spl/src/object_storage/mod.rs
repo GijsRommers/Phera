@@ -6,6 +6,7 @@
 //! ```
 
 mod dimensions;
+mod hash_scope;
 mod iteration;
 mod registration;
 mod views;
@@ -15,7 +16,7 @@ pub(crate) use registration::register;
 use std::rc::Rc;
 
 use indexmap::IndexMap;
-use phera_extension_api::{Context, NativeError, Object, PhpString, Value};
+use phera_extension_api::{Change, Context, NativeError, Object, PhpString, Value};
 
 const CLASS: &str = "SplObjectStorage";
 
@@ -54,6 +55,10 @@ async fn hash(
     if !context.is_user_method(storage, "getHash") {
         return Ok(Key::Handle(object.id));
     }
+    let _scope = context
+        .language_level()
+        .has(Change::SplObjectStorageHashMutation)
+        .then(|| hash_scope::enter(context));
     let value = context
         .call_method(
             storage.clone(),

@@ -13,7 +13,9 @@ use std::rc::Rc;
 use super::{DROP_NEW_LINE, File, READ_AHEAD, READ_CSV, SKIP_EMPTY, change, csv, get, stream_call};
 use crate::{This, receiver};
 
+mod behavior;
 mod settings;
+pub(super) use behavior::Behavior;
 pub(super) use settings::{flags, max_line, set_flags, set_max_line};
 
 #[derive(Clone, Copy)]
@@ -42,13 +44,14 @@ pub(super) async fn raw_line(
     numbering: LineNumber,
     require_line: bool,
 ) -> NativeResult {
-    let (stream, path, limit, flags, buffered) = get(object, |file| {
+    let (stream, path, limit, flags, buffered, stop_at_eof) = get(object, |file| {
         (
             file.stream.clone(),
             file.location.pathname.clone(),
             file.max_line,
             file.flags,
             file.text.is_some() || file.current.is_some(),
+            file.lines.next_at_eof,
         )
     })?;
     change(object, clear)?;
@@ -59,7 +62,22 @@ pub(super) async fn raw_line(
             Ok(Value::Bool(false))
         };
     }
-    let line = stream.read_line(limit).await?.unwrap_or_default();
+    let result = stream.read_line(limit).await?;
+    let unavailable = result.is_err() && stop_at_eof
+        || result.as_ref().is_ok_and(Vec::is_empty)
+            && if stop_at_eof {
+                stream.eof()?
+            } else {
+                stream.memory_eof()?
+            };
+    if unavailable {
+        return if require_line {
+            Err(unreadable(&path))
+        } else {
+            Ok(Value::Bool(false))
+        };
+    }
+    let line = result.unwrap_or_default();
     let mut line = line.as_slice();
     if flags & DROP_NEW_LINE != 0
         && let Some(without_lf) = line.strip_suffix(b"\n")
@@ -179,6 +197,17 @@ pub(super) fn next(
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let object = receiver(this.as_ref())?;
+        let needs_line = get(object, |file| {
+            file.lines.next_without_cache && file.current.is_none() && file.text.is_none()
+        })?;
+        if needs_line
+            && matches!(
+                iteration_line(context, object, false).await?,
+                Value::Bool(false)
+            )
+        {
+            return Ok(Value::Null);
+        }
         let read_ahead = change(object, |file| {
             clear(file);
             file.flags & READ_AHEAD != 0
@@ -221,7 +250,8 @@ pub(super) fn string(
         if let Some(text) = get(object, |file| file.text.clone())? {
             return Ok(Value::String(text));
         }
-        iteration_line(context, object, true).await?;
+        let require_line = get(object, |file| !file.lines.next_at_eof)?;
+        iteration_line(context, object, require_line).await?;
         get(object, |file| {
             file.text.clone().map_or(Value::from(""), Value::String)
         })
@@ -233,9 +263,33 @@ pub(super) fn fgets(
     this: Option<Rc<Object>>,
     _: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    Box::pin(
-        async move { raw_line(receiver(this.as_ref())?, LineNumber::AlwaysAdvance, true).await },
-    )
+    Box::pin(async move {
+        let object = receiver(this.as_ref())?;
+        if !get(object, |file| file.lines.fgets_consumes_line)? {
+            return raw_line(object, LineNumber::AlwaysAdvance, true).await;
+        }
+        if let Some(line) = change(object, |file| {
+            let text = file.text.take()?;
+            clear(file);
+            file.number = file.number.saturating_add(1);
+            Some(text)
+        })? {
+            return Ok(Value::String(line));
+        }
+        let line = raw_line(object, LineNumber::AlwaysAdvance, false).await?;
+        if matches!(line, Value::Bool(false)) {
+            let (stream, path) = get(object, |file| {
+                (file.stream.clone(), file.location.pathname.clone())
+            })?;
+            return if stream.eof()? {
+                Ok(Value::from(""))
+            } else {
+                Err(unreadable(&path))
+            };
+        }
+        change(object, clear)?;
+        Ok(line)
+    })
 }
 
 pub(super) fn seek(
@@ -246,7 +300,9 @@ pub(super) fn seek(
     Box::pin(async move {
         let object = receiver(this.as_ref())?;
         let target = args::int(&arguments, 0).unwrap_or_default();
-        let read_ahead = get(object, |file| file.flags & READ_AHEAD != 0)?;
+        let (read_ahead, seek_at_eof) = get(object, |file| {
+            (file.flags & READ_AHEAD != 0, file.lines.seek_at_eof)
+        })?;
         if target < 0 {
             return Err(NativeError::value_error(concat!(
                 "SplFileObject::seek(): Argument #1 ($line) ",
@@ -259,7 +315,10 @@ pub(super) fn seek(
                 iteration_line(context, object, false).await?,
                 Value::Bool(false)
             ) {
-                return Ok(Value::Null);
+                if !seek_at_eof {
+                    return Ok(Value::Null);
+                }
+                break;
             }
         }
         if target > 0 && !read_ahead {

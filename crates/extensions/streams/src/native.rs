@@ -120,6 +120,18 @@ impl FileStream {
         crate::resource::with_stream(&self.0, |stream| stream.eof)
     }
 
+    /// The end of a memory-backed stream, such as a small `new SplTempFileObject`.
+    pub fn memory_eof(&self) -> Result<bool, phera_extension_api::NativeError> {
+        crate::resource::with_stream(&self.0, |stream| {
+            stream.eof
+                && matches!(
+                    stream.wrapper,
+                    crate::stream::Wrapper::Memory | crate::stream::Wrapper::Temp
+                )
+                && stream.memory_size().is_some()
+        })
+    }
+
     pub async fn read_line(
         &self,
         limit: Option<u64>,

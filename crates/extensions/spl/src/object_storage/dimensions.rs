@@ -10,47 +10,56 @@ use phera_extension_api::{
     Context, LocalFuture, NativeDimensions, NativeError, NativeResult, Object, Value,
 };
 
-use super::{CLASS, Key, attach, detach, hash, read};
+use super::{CLASS, Key, attach, detach, hash, hash_scope::require_mutation_allowed, read};
 use crate::receiver;
 
-pub(super) const HANDLERS: NativeDimensions = NativeDimensions {
-    direct: Some(phera_extension_api::DirectDimensions {
-        read: |storage, offset| {
-            let Value::Object(object) = offset else {
-                return None;
-            };
-            lookup(storage, &Key::Handle(object.id)).ok()
+pub(super) const fn handlers<const CHECK: bool>() -> NativeDimensions {
+    NativeDimensions {
+        direct: Some(phera_extension_api::DirectDimensions {
+            read: |storage, offset| {
+                let Value::Object(object) = offset else {
+                    return None;
+                };
+                lookup(storage, &Key::Handle(object.id)).ok()
+            },
+            write: |storage, offset, info| {
+                if CHECK {
+                    return false; // The context-free path cannot check the current request.
+                }
+                let Value::Object(object) = offset else {
+                    return false;
+                };
+                attach(
+                    storage,
+                    Key::Handle(object.id),
+                    object.clone(),
+                    info.deref().clone(),
+                )
+                .is_ok()
+            },
+        }),
+        reference: None,
+        bind: None,
+        fallback_if_overridden: &["gethash"],
+        get: |_, storage, value| lookup(storage, &Key::Handle(object(value, "offsetGet")?.id)),
+        exists: |_, storage, value| {
+            contains(storage, &Key::Handle(object(value, "offsetExists")?.id))
         },
-        write: |storage, offset, info| {
-            let Value::Object(object) = offset else {
-                return false;
-            };
-            attach(
+        set: |context, storage, value, info| {
+            require_mutation_allowed::<CHECK>(context)?;
+            let object = object(value, "offsetSet")?;
+            attach(storage, Key::Handle(object.id), object, info)
+        },
+        unset: |context, storage, value| {
+            require_mutation_allowed::<CHECK>(context)?;
+            detach(
                 storage,
-                Key::Handle(object.id),
-                object.clone(),
-                info.deref().clone(),
+                &Key::Handle(object(value, "offsetUnset")?.id),
+                false,
             )
-            .is_ok()
         },
-    }),
-    reference: None,
-    bind: None,
-    fallback_if_overridden: &["gethash"],
-    get: |_, storage, value| lookup(storage, &Key::Handle(object(value, "offsetGet")?.id)),
-    exists: |_, storage, value| contains(storage, &Key::Handle(object(value, "offsetExists")?.id)),
-    set: |_, storage, value, info| {
-        let object = object(value, "offsetSet")?;
-        attach(storage, Key::Handle(object.id), object, info)
-    },
-    unset: |_, storage, value| {
-        detach(
-            storage,
-            &Key::Handle(object(value, "offsetUnset")?.id),
-            false,
-        )
-    },
-};
+    }
+}
 
 fn object(value: Value, method: &str) -> Result<Rc<Object>, NativeError> {
     let value = value.deref();
@@ -87,7 +96,7 @@ enum Operation {
     Exists,
 }
 
-fn invoke<'a>(
+fn invoke<'a, const CHECK: bool>(
     context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
     arguments: Vec<Value>,
@@ -104,6 +113,9 @@ fn invoke<'a>(
         let storage = receiver(this.as_ref())?;
         let mut arguments = arguments.into_iter();
         let object = object(arguments.next().unwrap_or(Value::Null), method)?;
+        if matches!(operation, Operation::Set | Operation::Unset) {
+            require_mutation_allowed::<CHECK>(context)?;
+        }
         let key = hash(context, storage, &object).await?;
         match operation {
             Operation::Get => lookup(storage, &key),
@@ -125,12 +137,12 @@ fn invoke<'a>(
     })
 }
 
-pub(super) fn offset_set(
+pub(super) fn offset_set<const CHECK: bool>(
     context: &mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(context, this, args, Operation::Set, "offsetSet", None)
+    invoke::<CHECK>(context, this, args, Operation::Set, "offsetSet", None)
 }
 
 pub(super) fn offset_get(
@@ -138,7 +150,7 @@ pub(super) fn offset_get(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(context, this, args, Operation::Get, "offsetGet", None)
+    invoke::<false>(context, this, args, Operation::Get, "offsetGet", None)
 }
 
 pub(super) fn offset_exists(
@@ -146,23 +158,23 @@ pub(super) fn offset_exists(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(context, this, args, Operation::Exists, "offsetExists", None)
+    invoke::<false>(context, this, args, Operation::Exists, "offsetExists", None)
 }
 
-pub(super) fn offset_unset(
+pub(super) fn offset_unset<const CHECK: bool>(
     context: &mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(context, this, args, Operation::Unset, "offsetUnset", None)
+    invoke::<CHECK>(context, this, args, Operation::Unset, "offsetUnset", None)
 }
 
-pub(super) fn attach_old(
+pub(super) fn attach_old<const CHECK: bool>(
     context: &mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(
+    invoke::<CHECK>(
         context,
         this,
         args,
@@ -172,12 +184,12 @@ pub(super) fn attach_old(
     )
 }
 
-pub(super) fn detach_old(
+pub(super) fn detach_old<const CHECK: bool>(
     context: &mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(
+    invoke::<CHECK>(
         context,
         this,
         args,
@@ -192,7 +204,7 @@ pub(super) fn contains_old(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(
+    invoke::<false>(
         context,
         this,
         args,

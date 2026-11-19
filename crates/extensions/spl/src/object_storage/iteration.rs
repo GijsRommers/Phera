@@ -10,7 +10,7 @@ use phera_extension_api::{
     Context, LocalFuture, NativeError, NativeIterator, NativeResult, Object, Value, args,
 };
 
-use super::{Storage, attach, detach, hash, read, update};
+use super::{Storage, attach, detach, hash, hash_scope::require_mutation_allowed, read, update};
 use crate::{This, receiver};
 
 fn rewind_cursor(object: &Object) -> Result<(), NativeError> {
@@ -144,7 +144,12 @@ pub(super) fn get_info(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> Nati
     })
 }
 
-pub(super) fn set_info(_: &mut dyn Context, this: This<'_>, args: &[Value]) -> NativeResult {
+pub(super) fn set_info<const CHECK: bool>(
+    context: &mut dyn Context,
+    this: This<'_>,
+    args: &[Value],
+) -> NativeResult {
+    require_mutation_allowed::<CHECK>(context)?;
     update(receiver(this)?, |state| {
         if let Some((_, entry)) = state.entries.get_index_mut(state.slot) {
             entry.info = args::value(args, 0).deref().clone();
@@ -185,7 +190,7 @@ enum Bulk {
     Keep,
 }
 
-fn bulk<'a>(
+fn bulk<'a, const CHECK: bool>(
     context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
@@ -208,16 +213,19 @@ fn bulk<'a>(
             };
             match operation {
                 Bulk::Add => {
+                    require_mutation_allowed::<CHECK>(context)?;
                     let key = hash(context, object, item).await?;
                     attach(object, key, item.clone(), entry.info)?;
                 }
                 Bulk::Remove => {
+                    require_mutation_allowed::<CHECK>(context)?;
                     let key = hash(context, object, item).await?;
                     detach(object, &key, false)?;
                 }
                 Bulk::Keep => {
                     let other_key = hash(context, other, item).await?;
                     if !read(other, |state| state.entries.contains_key(&other_key))? {
+                        require_mutation_allowed::<CHECK>(context)?;
                         let key = hash(context, object, item).await?;
                         detach(object, &key, false)?;
                     }
@@ -231,26 +239,26 @@ fn bulk<'a>(
     })
 }
 
-pub(super) fn add_all(
+pub(super) fn add_all<const CHECK: bool>(
     context: &mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    bulk(context, this, args, Bulk::Add)
+    bulk::<CHECK>(context, this, args, Bulk::Add)
 }
 
-pub(super) fn remove_all(
+pub(super) fn remove_all<const CHECK: bool>(
     context: &mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    bulk(context, this, args, Bulk::Remove)
+    bulk::<CHECK>(context, this, args, Bulk::Remove)
 }
 
-pub(super) fn remove_all_except(
+pub(super) fn remove_all_except<const CHECK: bool>(
     context: &mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    bulk(context, this, args, Bulk::Keep)
+    bulk::<CHECK>(context, this, args, Bulk::Keep)
 }
