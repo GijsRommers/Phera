@@ -71,7 +71,7 @@ impl Connection {
     }
 
     pub fn close(&mut self) -> Result<(), NativeError> {
-        self.lease()?;
+        self.ensure_not_closed()?;
         self.pending = None;
         self.more.clear();
         self.status = Status::Closed;

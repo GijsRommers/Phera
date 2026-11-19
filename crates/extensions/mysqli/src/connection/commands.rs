@@ -36,14 +36,18 @@ pub async fn execute<const OP: usize>(
     let enabled = args::bool(arguments, 0).unwrap_or_default();
     let flags = args::int(arguments, 0).unwrap_or_default();
     let transaction_name = text(1);
+    let is_method = call.contains("::");
+    let item = if is_method { "Method" } else { "Function" };
     if OP == PING {
+        let kind = if is_method { "method" } else { "function" };
         context.deprecated(format!(
-            "Function {call}() is deprecated since 8.4, because the reconnect feature has been              removed in PHP 8.2 and this function is now redundant"
+            "{item} {call}() is deprecated since 8.4, because the reconnect feature has been \
+             removed in PHP 8.2 and this {kind} is now redundant"
         ));
     }
     if OP == KILL {
         context.deprecated(format!(
-            "Function {call}() is deprecated since 8.4, use KILL CONNECTION/QUERY SQL statement instead"
+            "{item} {call}() is deprecated since 8.4, use KILL CONNECTION/QUERY SQL statement instead"
         ));
     }
     if OP == WARNINGS && handle.borrow().reply.warnings == 0 {

@@ -104,7 +104,7 @@ pub fn parameters(
             "No data supplied for parameters in prepared statement",
             2031,
         )
-        .with_property("\0*\0sqlstate", Value::from("HY000")));
+        .with_property("sqlstate", Value::from("HY000")));
     }
     let long = std::mem::take(&mut state.long_data);
     state

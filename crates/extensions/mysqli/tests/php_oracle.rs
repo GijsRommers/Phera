@@ -11,7 +11,7 @@ mysqli_real_connect($db, '127.0.0.1', 'phera', 'phera', 'mysqli_ext', 33069);
 $db->set_charset('utf8mb4');
 function rows($db) {
     return mysqli_query($db, "SELECT 42 AS i, 1e0 AS f, CAST(1.25 AS DECIMAL(5,2)) AS d,
-        CAST('2026-02-01' AS DATE) AS day, NULL AS n, '🐾' AS utf8, 0xFF AS binary");
+        CAST('2026-02-01' AS DATE) AS day, NULL AS n, '🐾' AS utf8, 0xFF AS binary_value");
 }
 "#;
 const CALLS: &[(&str, &str)] = &[

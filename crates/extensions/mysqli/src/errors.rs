@@ -69,7 +69,7 @@ pub fn report(
             error.detail.clone(),
             error.code.unwrap_or(0),
         )
-        .with_property("\0*\0sqlstate", Value::from(error.state.clone())));
+        .with_property("sqlstate", Value::from(error.state.clone())));
     }
     if connect || mode(context) & 1 != 0 {
         context.warning(format!(

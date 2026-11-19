@@ -12,10 +12,18 @@ pub const TYPE_OID: usize = 3;
 pub const NUM: usize = 4;
 
 pub fn index(result: &ResultSet, field: i64, call: &str, arg: usize) -> Result<usize, NativeError> {
-    usize::try_from(field).ok().filter(|field| *field < result.rows.columns.len())
-        .ok_or_else(|| NativeError::value_error(format!(
-            "{call}(): Argument #{arg} ($field) must be less than the number of fields for this result"
-        )))
+    let field = usize::try_from(field).map_err(|_| {
+        NativeError::value_error(format!(
+            "{call}(): Argument #{arg} ($field) must be greater than or equal to 0"
+        ))
+    })?;
+    if field >= result.rows.columns.len() {
+        return Err(NativeError::value_error(format!(
+            "{call}(): Argument #{arg} ($field) must be less than the number of fields \
+             for this result set"
+        )));
+    }
+    Ok(field)
 }
 
 pub fn sync<const OP: usize>(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {

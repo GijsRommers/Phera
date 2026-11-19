@@ -56,7 +56,8 @@ impl Fetch {
             2 => Ok(Self::Num),
             3 => Ok(Self::Both),
             _ => Err(NativeError::value_error(format!(
-                "{call}(): Argument #{number} ($mode) must be one of MYSQLI_NUM, MYSQLI_ASSOC,                  or MYSQLI_BOTH"
+                "{call}(): Argument #{number} ($mode) must be one of MYSQLI_NUM, MYSQLI_ASSOC, \
+                 or MYSQLI_BOTH"
             ))),
         }
     }
