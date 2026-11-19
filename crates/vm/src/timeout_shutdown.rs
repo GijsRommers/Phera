@@ -15,32 +15,13 @@ impl Vm {
 
     /// Globals outlive the abandoned main frame and remain visible in shutdown.
     pub(crate) fn retain_timeout_globals(&mut self) {
-        let Some(main) = self
-            .frame_at(0)
-            .filter(|frame| frame.function_id().is_none())
-        else {
+        let Some(main) = self.global_frame() else {
             return;
         };
         let slots = main.slots(&self.registers);
-        let named = main
-            .function()
-            .locals
-            .iter()
-            .enumerate()
-            .filter_map(|(index, name)| {
-                main.unit()
-                    .names
-                    .get(name.index())
-                    .map(|name| (name, index))
-            });
-        let dynamic = main
-            .extras
-            .dynamic
-            .iter()
-            .map(|(name, register)| (name, register.index()));
-        let values: Vec<_> = named
-            .chain(dynamic)
-            .map(|(name, index)| (name.clone(), slots.get(index).cloned().flatten()))
+        let values: Vec<_> = main
+            .named_registers()
+            .map(|(name, register)| (name.clone(), slots.get(register.index()).cloned().flatten()))
             .collect();
         for (name, value) in values {
             if let Some(value) = value {

@@ -205,6 +205,9 @@ impl Runtime {
         let server =
             environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
         vm.set_global("_SERVER", Value::from(server));
+        for name in ["_GET", "_POST", "_COOKIE", "_FILES"] {
+            vm.set_global(name, Value::from(PhpArray::new()));
+        }
         for (name, stream) in phera_ext_streams::standard_constants() {
             phera_ext_streams::track_standard(vm.state_mut(), &stream);
             vm.set_constant(name, stream);

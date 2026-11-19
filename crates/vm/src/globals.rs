@@ -24,6 +24,10 @@ impl Globals {
         self.values.insert(name, value);
     }
 
+    pub(crate) fn take(&mut self, name: &str) -> Option<Value> {
+        self.values.remove(name)
+    }
+
     /// Unset detaches the global name while existing references remain alive.
     pub(crate) fn remove(&mut self, name: &str) {
         self.values.remove(name);

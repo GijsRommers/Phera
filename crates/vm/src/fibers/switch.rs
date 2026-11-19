@@ -160,7 +160,10 @@ impl Vm {
         exchange.caller_depth.set(depth);
         self.export_main_globals();
         exchange.input.set(Some(input));
-        exchange.transfer(self)?;
+        if let Err(error) = exchange.transfer(self) {
+            self.import_main_globals();
+            return Err(error);
+        }
         if exchange
             .site
             .borrow()

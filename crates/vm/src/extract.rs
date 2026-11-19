@@ -94,19 +94,10 @@ impl Vm {
     /// A defined symbol may hold null; undefined slots must not satisfy EXTR_IF_EXISTS.
     fn extracted_symbol_status(&self, name: &str) -> SymbolStatus {
         self.current().map_or(SymbolStatus::Missing, |frame| {
-            let register = frame
-                .function()
-                .locals
-                .iter()
-                .position(|candidate| {
-                    frame
-                        .unit()
-                        .names
-                        .get(candidate.index())
-                        .is_some_and(|candidate| candidate == name)
-                })
-                .map(|index| phera_bytecode::Reg(index as u16))
-                .or_else(|| frame.extras.dynamic.get(name).copied());
+            let register = frame.named_register(name);
+            if register.is_none() && self.in_global_scope() && self.globals.get(name).is_some() {
+                return SymbolStatus::Defined;
+            }
             match register.and_then(|register| frame.slots(&self.registers).get(register.index())) {
                 Some(Some(_)) => SymbolStatus::Defined,
                 Some(None) => SymbolStatus::Undefined,

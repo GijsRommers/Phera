@@ -350,7 +350,7 @@ impl Vm {
     /// Defines a global variable before the script starts, such as a
     /// superglobal the runtime fills from the request.
     pub fn set_global(&mut self, name: &str, value: Value) {
-        self.globals.insert(name.to_string(), value);
+        self.publish_global(name.into(), value);
     }
 
     /// The extensions' per-request state, for the runtime to read once the
@@ -392,14 +392,9 @@ impl Vm {
         let registers = unit.main.registers as usize;
         self.registers.grow_to(registers);
         self.call_stack.push(Frame::new(main, 0, None));
-        for (name, value) in self.globals.iter() {
-            if let Some(i) = unit
-                .main
-                .locals
-                .iter()
-                .position(|candidate| unit.names.get(candidate.index()) == Some(name))
-            {
-                self.registers.window_mut(i, 1)[0] = Some(value.clone());
+        for (index, name) in unit.main.locals.iter().enumerate() {
+            if let Some(name) = unit.names.get(name.index()) {
+                self.registers.window_mut(index, 1)[0] = self.globals.take(name);
             }
         }
         self.publish_declaration_warnings(&unit);
@@ -483,15 +478,6 @@ impl Vm {
     #[inline]
     fn current_slot_mut(&mut self, register: Reg) -> Option<&mut Option<Value>> {
         let frame = self.current()?;
-        let (base, count) = (frame.base(), frame.count());
-        self.registers
-            .window_mut(base, count)
-            .get_mut(register.index())
-    }
-
-    /// A register of the script's top-level code, where globals live.
-    fn main_slot_mut(&mut self, register: Reg) -> Option<&mut Option<Value>> {
-        let frame = self.frame_at(0)?;
         let (base, count) = (frame.base(), frame.count());
         self.registers
             .window_mut(base, count)

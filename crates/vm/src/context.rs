@@ -134,7 +134,7 @@ impl Context for Vm {
     }
 
     fn request_global(&self, name: &str) -> Option<Value> {
-        self.globals.get(name).cloned()
+        self.request_global_value(name).cloned()
     }
 
     fn replace_request_global(&mut self, name: &str, value: Value) {

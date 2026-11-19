@@ -61,19 +61,12 @@ impl Vm {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("place without frame"))?;
-        if let Some(index) = frame.function().locals.iter().position(|candidate| {
-            frame
-                .unit()
-                .names
-                .get(candidate.index())
-                .is_some_and(|value| value == &name)
-        }) {
-            return Ok(Some(Reg(index as u16)));
+        if let Some(register) = frame.named_register(&name) {
+            return Ok(Some(register));
         }
-        if let Some(register) = frame.extras.dynamic.get(&name) {
-            return Ok(Some(*register));
-        }
-        if creation == Creation::Create {
+        if creation == Creation::Create
+            || (self.in_global_scope() && self.globals.get(&name).is_some())
+        {
             self.named_slot(&name).map(Some)
         } else {
             if missing == Missing::Warn {
