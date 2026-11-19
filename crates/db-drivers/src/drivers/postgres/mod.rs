@@ -103,7 +103,12 @@ impl Postgres {
         self.client
             .batch_execute("DISCARD ALL")
             .await
-            .map_err(|e| error(e, "DISCARD ALL"))
+            .map_err(|e| error(e, "DISCARD ALL"))?;
+        if let Some(native) = &mut self.native {
+            // ROLLBACK can emit a notice even for a clean session.
+            native.reset();
+        }
+        Ok(())
     }
 
     pub fn is_broken(&self) -> bool {

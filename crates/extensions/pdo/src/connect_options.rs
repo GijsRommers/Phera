@@ -99,6 +99,7 @@ impl FromPhp for ConnectOptions {
                 found_rows,
                 ignore_space,
                 multiple,
+                restore_empty_database: false,
                 ssl,
             },
         })

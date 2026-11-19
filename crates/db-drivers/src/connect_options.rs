@@ -15,6 +15,7 @@ pub struct MysqlOptions {
     pub found_rows: bool,
     pub ignore_space: bool,
     pub multiple: bool,
+    pub restore_empty_database: bool,
     pub ssl: Option<MysqlTls>,
 }
 
@@ -27,6 +28,7 @@ impl Default for MysqlOptions {
             found_rows: false,
             ignore_space: false,
             multiple: true,
+            restore_empty_database: false,
             ssl: None,
         }
     }

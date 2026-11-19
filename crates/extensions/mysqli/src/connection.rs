@@ -197,6 +197,7 @@ pub async fn connect(
     if let Some(charset) = &state.borrow().charset {
         dsn.fields.insert("charset".into(), charset.clone());
     }
+    dsn.options.mysql.restore_empty_database = true;
     options::flags(
         &mut dsn.options.mysql,
         args::int(args, 6).unwrap_or_default(),

@@ -47,7 +47,9 @@ impl Mysql {
     pub async fn reset(&mut self) -> Result<(), DbError> {
         self.finish_stream().await;
         let connection = self.connection.as_mut().ok_or_else(Self::closed)?;
-        if !connection.reset().await.map_err(error)? {
+        // COM_CHANGE_USER also restores a connection opened without a database.
+        let empty_database = self.options.restore_empty_database && self.database.is_empty();
+        if empty_database || !connection.reset().await.map_err(error)? {
             connection
                 .change_user(Default::default())
                 .await
