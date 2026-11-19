@@ -71,7 +71,7 @@ impl Vm {
         if !linked
             .as_ref()
             .is_some_and(|class| self.needs_enum_backing(class))
-            && let Some(value) = ready_value(&constant.initializer)
+            && let Some(value) = self.ready_value(&constant.initializer)
         {
             self.check_constant_access(&constant, name, access)?;
             return Ok(value);
@@ -125,8 +125,8 @@ impl Vm {
                 })))
             }
             ConstantInitializer::Value(value) => Ok(Progress::Done(value.clone())),
-            ConstantInitializer::Compiled { function, state } => {
-                match &*state.borrow() {
+            ConstantInitializer::Compiled { function, slot } => {
+                match self.class_states.constant(*slot) {
                     ConstantState::Ready(value) => return Ok(Progress::Done(value.clone())),
                     ConstantState::Evaluating => {
                         let receiver = spelling.as_deref().unwrap_or(&constant.declaring);
@@ -136,7 +136,8 @@ impl Vm {
                     }
                     ConstantState::Uninitialized => {}
                 }
-                *state.borrow_mut() = ConstantState::Evaluating;
+                self.class_states
+                    .set_constant(*slot, ConstantState::Evaluating);
                 let initializer =
                     InitializerTask::Expression(*function, constant.declaring.clone());
                 Ok(Progress::Await(
@@ -250,7 +251,7 @@ impl Vm {
         name: &str,
         value: Value,
     ) -> NativeResult {
-        let ConstantInitializer::Compiled { state, .. } = &constant.initializer else {
+        let ConstantInitializer::Compiled { slot, .. } = &constant.initializer else {
             return Err(internal_error!("class constant completion"));
         };
         let result = if let Some(declaration_type) = &constant.ty {
@@ -271,28 +272,32 @@ impl Vm {
         } else {
             Ok(value)
         };
-        *state.borrow_mut() = match &result {
+        let state = match &result {
             Ok(value) => ConstantState::Ready(value.clone()),
             Err(_) => ConstantState::Uninitialized,
         };
+        self.class_states.set_constant(*slot, state);
         result
     }
 
-    pub(crate) fn cancel_class_constant(constant: &LinkedConstant) {
-        if let ConstantInitializer::Compiled { state, .. } = &constant.initializer {
-            *state.borrow_mut() = ConstantState::Uninitialized;
+    pub(crate) fn cancel_class_constant(&mut self, constant: &LinkedConstant) {
+        if let ConstantInitializer::Compiled { slot, .. } = &constant.initializer {
+            self.class_states
+                .set_constant(*slot, ConstantState::Uninitialized);
         }
     }
-}
 
-fn ready_value(initializer: &ConstantInitializer) -> Option<Value> {
-    match initializer {
-        ConstantInitializer::Value(value) => Some(value.clone()),
-        ConstantInitializer::Compiled { state, .. } => match &*state.borrow() {
-            ConstantState::Ready(value) => Some(value.clone()),
-            _ => None,
-        },
-        ConstantInitializer::EnumCase { .. } => None,
+    /// A constant's value if it needs no evaluation, or was evaluated in
+    /// this request already.
+    fn ready_value(&self, initializer: &ConstantInitializer) -> Option<Value> {
+        match initializer {
+            ConstantInitializer::Value(value) => Some(value.clone()),
+            ConstantInitializer::Compiled { slot, .. } => match self.class_states.constant(*slot) {
+                ConstantState::Ready(value) => Some(value.clone()),
+                _ => None,
+            },
+            ConstantInitializer::EnumCase { .. } => None,
+        }
     }
 }
 

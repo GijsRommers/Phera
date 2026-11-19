@@ -49,13 +49,20 @@ struct ObjectReferences {
 pub(crate) struct StaticProperty {
     pub(crate) reference: RefCell<Rc<RefCell<Value>>>,
     binding: RefCell<Option<PropertyBinding>>,
+    /// Whether the default's initializer expression has run in this request.
+    pub(crate) initialized: std::cell::Cell<bool>,
+    /// Whether the property holds a value: a typed static without a
+    /// default has none until the first write.
+    pub(crate) value_initialized: std::cell::Cell<bool>,
 }
 
 impl StaticProperty {
-    pub(crate) fn new(value: Value) -> Rc<Self> {
+    pub(crate) fn new(value: Value, initialized: bool, value_initialized: bool) -> Rc<Self> {
         Rc::new(Self {
             reference: RefCell::new(Rc::new(RefCell::new(value))),
             binding: RefCell::new(None),
+            initialized: std::cell::Cell::new(initialized),
+            value_initialized: std::cell::Cell::new(value_initialized),
         })
     }
 

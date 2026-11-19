@@ -231,6 +231,8 @@ pub struct Vm {
     function_table: function_table::FunctionTable,
     /// Every loaded file and function of the request, by number.
     code: code_table::CodeTable,
+    /// Static properties and evaluated class constants of this request.
+    class_states: classes::class_state::ClassStates,
     globals: globals::Globals,
     static_variables: static_variables::StaticVariables,
     diagnostic_reporter: diagnostic_reporter::DiagnosticReporter,
@@ -320,6 +322,7 @@ impl Vm {
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::default(),
+            class_states: Default::default(),
             globals: globals::Globals::new(),
             static_variables: static_variables::StaticVariables::new(),
             diagnostic_reporter: diagnostic_reporter::DiagnosticReporter::new(),

@@ -39,7 +39,6 @@ impl ClassDefinitions {
                 is_readonly: false,
                 allows_dynamic_properties: true,
                 methods: HashMap::new(),
-                method_table: std::cell::OnceCell::new(),
                 serialized_fields: std::cell::OnceCell::new(),
                 constructor: None,
                 magic: None,
@@ -156,8 +155,6 @@ impl ClassDefinitions {
                     initializer: None,
                     ty: property.ty.map(property_type),
                     is_readonly: property.is_readonly,
-                    static_initialized: Rc::new(std::cell::Cell::new(true)),
-                    value_initialized: Rc::new(std::cell::Cell::new(property.default.is_some())),
                     hooks: None,
                 });
             }
@@ -265,7 +262,6 @@ impl ClassDefinitions {
                     constructor: methods.get("__construct").cloned(),
                     magic: super::magic::MagicMethods::link(&methods),
                     methods,
-                    method_table: std::cell::OnceCell::new(),
                     serialized_fields: std::cell::OnceCell::new(),
                     property_template: super::class::property_template(&defaults),
                     defaults,

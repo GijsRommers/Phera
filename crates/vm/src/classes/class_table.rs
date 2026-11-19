@@ -68,6 +68,11 @@ pub(crate) struct ClassTable {
     pub(crate) has_lazy_objects: bool,
     native_count: u32,
     native_methods: OnceCell<NativeMethodTables>,
+    /// The method tables of the request's own classes, by number after the
+    /// built-in ones. Kept here, not in the class: a table uses this
+    /// request's name numbers, and a class can be shared with other copies
+    /// of the request's state that number names differently.
+    local_methods: Vec<OnceCell<MethodTable>>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
     /// Allocations left before the cycle collector should run (see
@@ -88,6 +93,7 @@ impl ClassTable {
             has_lazy_objects: false,
             native_count: native.numbered.len() as u32,
             native_methods: OnceCell::new(),
+            local_methods: Vec::new(),
             native,
             local: ClassDefinitions::default(),
             objects: Vec::new(),
@@ -101,24 +107,28 @@ impl ClassTable {
         ClassIndex((self.native_count as usize + self.local.numbered.len()) as u32)
     }
 
-    /// `$reflection->getName()` uses this request's name numbers, even when
-    /// the class definition is shared with another request on this worker.
+    /// The class's methods by this request's name numbers, built on first
+    /// use. `None` only for a class missing from this table, which a linked
+    /// class never is.
     #[inline]
     pub(crate) fn method_table<'c>(
         &'c self,
         class: &'c Class,
         code: &CodeTable,
-    ) -> &'c MethodTable {
+    ) -> Option<&'c MethodTable> {
         let index = class.index.0 as usize;
-        let cell = if index < self.native_count as usize {
-            &self
+        let cell = match index.checked_sub(self.native_count as usize) {
+            None => &self
                 .native_methods
                 .get()
-                .unwrap_or_else(|| self.allocate_native_method_tables())[index]
-        } else {
-            &class.method_table
+                .unwrap_or_else(|| self.allocate_native_method_tables())[index],
+            Some(local) => self.local_methods.get(local)?,
         };
-        cell.get_or_init(|| MethodTable::build(class, code, |method| self.get(&method.declaring)))
+        Some(
+            cell.get_or_init(|| {
+                MethodTable::build(class, code, |method| self.get(&method.declaring))
+            }),
+        )
     }
 
     #[cold]
@@ -129,10 +139,9 @@ impl ClassTable {
 
     pub(crate) fn cached_method_table<'c>(&'c self, class: &'c Class) -> Option<&'c MethodTable> {
         let index = class.index.0 as usize;
-        if index < self.native_count as usize {
-            self.native_methods.get()?[index].get()
-        } else {
-            class.method_table.get()
+        match index.checked_sub(self.native_count as usize) {
+            None => self.native_methods.get()?[index].get(),
+            Some(local) => self.local_methods.get(local)?.get(),
         }
     }
 
@@ -140,6 +149,7 @@ impl ClassTable {
         debug_assert_eq!(class.index, self.next_index());
         self.local.order.push(class.name.clone());
         self.local.insert(lowercase_name, class);
+        self.local_methods.push(OnceCell::new());
         self.has_property_views |= self.local.has_property_views;
     }
 
