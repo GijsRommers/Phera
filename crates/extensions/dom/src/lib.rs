@@ -10,6 +10,7 @@
 //! entity substitution or DTD loading flags.
 
 mod bindings;
+pub use bindings::shared;
 pub use bindings::{Dom, Libxml};
 
 pub mod document;

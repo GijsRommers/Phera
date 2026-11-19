@@ -24,7 +24,8 @@ pub use float_format::{
 };
 pub use lazy_object::{LazyObject, LazyStrategy};
 pub use object::{
-    ClassHandle, Object, ObjectIds, PropertyScope, Resource, class_display_name, split_property_key,
+    ClassHandle, Object, ObjectIds, PropertyScope, Resource, ScalarCast, class_display_name,
+    split_property_key,
 };
 pub use ops::{
     LazyComparison, ObjectComparator, ObjectComparison, StringComparison, StringComparisonStep,

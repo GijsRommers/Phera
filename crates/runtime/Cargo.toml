@@ -16,6 +16,7 @@ phera-ext-core.workspace = true
 phera-ext-ctype.workspace = true
 phera-ext-date.workspace = true
 phera-ext-dom.workspace = true
+phera-ext-simplexml.workspace = true
 phera-ext-xmlwriter.workspace = true
 phera-ext-filter.workspace = true
 phera-ext-hash.workspace = true

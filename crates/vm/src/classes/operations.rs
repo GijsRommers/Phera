@@ -114,6 +114,7 @@ pub(super) fn inherit_hooks(
     let base = base.map_or(phera_extension_api::ClassHooks::EMPTY, |hooks| **hooks);
     Some(Rc::new(phera_extension_api::ClassHooks {
         clone: own.clone.or(base.clone),
+        scalar_cast: own.scalar_cast.or(base.scalar_cast),
         compare: own.compare.or(base.compare),
         properties: own.properties.or(base.properties),
         property_access: own.property_access.or(base.property_access),

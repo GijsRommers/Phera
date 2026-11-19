@@ -7,6 +7,14 @@ use std::rc::Rc;
 use crate::array::{ArrayKey, PhpArray};
 use crate::value::Value;
 
+/// Scalar casts that a native class may define for its own instances.
+#[derive(Clone, Copy)]
+pub enum ScalarCast {
+    Bool,
+    Int,
+    Float,
+}
+
 /// The VM's per-class data. Implemented by other crates; tests use a dummy.
 pub trait ClassHandle: Any {
     fn name(&self) -> &str;
@@ -30,6 +38,10 @@ pub trait ClassHandle: Any {
     /// Whether the object's property table is supplied by native code.
     fn has_native_properties(&self) -> bool {
         false
+    }
+
+    fn native_scalar_cast(&self, _object: &Object, _kind: ScalarCast) -> Option<Value> {
+        None
     }
 
     fn as_any(&self) -> &dyn Any;

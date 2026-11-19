@@ -3,6 +3,7 @@
 use crate::array::{ArrayKey, PhpArray};
 use crate::error::{Diagnostics, ErrorKind, OpError};
 use crate::float_format::{float_repr, float_repr_with_precision};
+use crate::object::ScalarCast;
 use crate::string::PhpString;
 use crate::value::Value;
 
@@ -318,7 +319,10 @@ pub fn to_bool(v: &Value) -> bool {
         Value::Float(f) => *f != 0.0, // NaN is true, -0.0 is false
         Value::String(s) => !(s.is_empty() || (s.len() == 1 && s[0] == b'0')),
         Value::Array(a) => !a.is_empty(),
-        Value::Object(_) => true,
+        Value::Object(object) => !matches!(
+            object.class.native_scalar_cast(object, ScalarCast::Bool),
+            Some(Value::Bool(false))
+        ),
         Value::Resource(_) => true,
         Value::Reference(_) => unreachable!("deref returns non-reference values"),
     }
@@ -352,6 +356,9 @@ pub fn to_int(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, OpError> {
         Value::Array(a) => Ok(i64::from(!a.is_empty())),
         // Casting an object warns and gives 1; only arithmetic on one throws.
         Value::Object(o) => {
+            if let Some(Value::Int(result)) = o.class.native_scalar_cast(o, ScalarCast::Int) {
+                return Ok(result);
+            }
             diag.warning(format!(
                 "Object of class {} could not be converted to int",
                 o.class.name()
@@ -373,6 +380,9 @@ pub fn to_float(v: &Value, diag: &mut dyn Diagnostics) -> Result<f64, OpError> {
         Value::String(s) => Ok(strtod_prefix(s.as_bytes())),
         Value::Array(a) => Ok(if a.is_empty() { 0.0 } else { 1.0 }),
         Value::Object(o) => {
+            if let Some(Value::Float(result)) = o.class.native_scalar_cast(o, ScalarCast::Float) {
+                return Ok(result);
+            }
             diag.warning(format!(
                 "Object of class {} could not be converted to float",
                 o.class.name()

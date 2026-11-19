@@ -5,7 +5,7 @@ use std::{any::Any, collections::HashMap, rc::Rc};
 use crate::calls::call_state::ParameterSpec;
 use phera_bytecode::{ClassKind, Visibility};
 use phera_extension_api::MethodEntry;
-use phera_value::{ArrayKey, ClassHandle, Object, Value};
+use phera_value::{ArrayKey, ClassHandle, Object, ScalarCast, Value};
 
 /// A linked class is immutable; its parent keeps inherited metadata alive.
 pub(crate) struct Class {
@@ -144,6 +144,10 @@ impl ClassHandle for Class {
         self.hooks
             .as_ref()
             .is_some_and(|hooks| hooks.properties.is_some())
+    }
+
+    fn native_scalar_cast(&self, object: &Object, kind: ScalarCast) -> Option<Value> {
+        (self.hooks.as_ref()?.scalar_cast?)(object, kind)
     }
 
     fn as_any(&self) -> &dyn Any {

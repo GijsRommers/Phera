@@ -121,6 +121,7 @@ impl Runtime {
         registry.load(&phera_ext_serialize::Serialize);
         Vm::register_fiber_classes(&mut registry);
         registry.load(&phera_ext_spl::Spl);
+        registry.load(&phera_ext_simplexml::SimpleXml);
         registry.load(&phera_ext_session::Session);
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);

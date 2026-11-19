@@ -34,11 +34,7 @@ pub(super) fn publish(
 ) {
     for mut error in diagnostics {
         error.file = source.into();
-        let state = context.state().get_or_default::<Errors>();
-        state.last = Some(error.clone());
-        if state.internal {
-            state.all.push(error);
-        } else if (flags & if error.level == 1 { 64 } else { 32 }) == 0 {
+        if record(context, &error) && (flags & if error.level == 1 { 64 } else { 32 }) == 0 {
             let file = if source.is_empty() { "Entity" } else { source };
             context.warning(format!(
                 "{function}(): {} in {file}, line: {}",
@@ -46,6 +42,56 @@ pub(super) fn publish(
                 error.line
             ));
         }
+    }
+}
+
+pub(super) fn publish_with_source(
+    context: &mut dyn Context,
+    function: &str,
+    source: &str,
+    input: &[u8],
+    diagnostics: Vec<ParseError>,
+    flags: i64,
+) {
+    let input = String::from_utf8_lossy(input);
+    let lines: Vec<_> = input.lines().collect();
+    for mut error in diagnostics {
+        error.file = source.into();
+        let warning = error.level == 1;
+        if !record(context, &error) || flags & if warning { 64 } else { 32 } != 0 {
+            continue;
+        }
+        let file = if source.is_empty() { "Entity" } else { source };
+        let domain = if (200..=205).contains(&error.code) {
+            "namespace"
+        } else {
+            "parser"
+        };
+        let severity = if warning { "warning" } else { "error" };
+        context.warning(format!(
+            "{function}(): {file}:{}: {domain} {severity} : {}",
+            error.line,
+            error.message.trim_end()
+        ));
+        if let Some(line) = lines.get(error.line.saturating_sub(1)) {
+            let position = error.column.saturating_sub(1);
+            let start = position.saturating_sub(70);
+            let snippet: String = line.chars().skip(start).take(80).collect();
+            context.warning(format!("{function}(): {snippet}"));
+            let spaces = " ".repeat(position.saturating_sub(start).min(80));
+            context.warning(format!("{function}(): {spaces}^"));
+        }
+    }
+}
+
+fn record(context: &mut dyn Context, error: &ParseError) -> bool {
+    let state = context.state().get_or_default::<Errors>();
+    state.last = Some(error.clone());
+    if state.internal {
+        state.all.push(error.clone());
+        false
+    } else {
+        true
     }
 }
 

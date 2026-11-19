@@ -129,11 +129,13 @@ pub type NativeCompare = fn(
 pub type PropertyProjection =
     fn(&mut dyn Context, &Object, PropertyPurpose) -> Result<PhpArray, NativeError>;
 pub type NativeCount = fn(&mut dyn Context, &Object) -> Result<i64, NativeError>;
+pub type NativeScalarCast = fn(&Object, crate::value::ScalarCast) -> Option<Value>;
 pub type MethodForwarder = fn(&Object) -> Result<Option<Rc<Object>>, NativeError>;
 
 #[derive(Clone, Copy, Default)]
 pub struct ClassHooks {
     pub clone: Option<NativeClone>,
+    pub scalar_cast: Option<NativeScalarCast>,
     pub compare: Option<NativeCompare>,
     /// Whole-object enumeration, with the consuming operation supplied as a purpose.
     pub properties: Option<PropertyProjection>,
@@ -153,6 +155,7 @@ pub struct ClassHooks {
 impl ClassHooks {
     pub const EMPTY: Self = Self {
         clone: None,
+        scalar_cast: None,
         compare: None,
         properties: None,
         property_access: None,
