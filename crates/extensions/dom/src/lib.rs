@@ -9,4 +9,8 @@
 //! makes network requests. The same restriction applies when callers set
 //! entity substitution or DTD loading flags.
 
+pub mod document;
+pub mod html;
+pub mod serialize;
 pub mod tree;
+pub mod xml;

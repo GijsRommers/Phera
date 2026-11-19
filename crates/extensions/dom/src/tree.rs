@@ -31,7 +31,7 @@ pub enum Kind {
     Fragment,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
 pub struct Name {
     pub local: String,
     pub prefix: Option<String>,
