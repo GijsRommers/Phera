@@ -10,10 +10,12 @@ use std::sync::Arc;
 
 use phera_extension_api::{Context, RequestState, Value, WorkingDirectory, value::Resource};
 
+use crate::input::RequestInput;
+
 pub struct Files {
     pub mask: u32,
     pub directory: Option<Rc<Resource>>,
-    pub input: Arc<[u8]>,
+    pub input: RequestInput,
     pub stream_contexts: HashMap<i64, Rc<Resource>>,
     resources: Vec<Weak<Resource>>,
     next_id: i64,
@@ -24,7 +26,7 @@ impl Default for Files {
         Self {
             mask: 0o022,
             directory: None,
-            input: Arc::default(),
+            input: RequestInput::default(),
             stream_contexts: HashMap::new(),
             resources: Vec::new(),
             next_id: 5,
@@ -52,7 +54,11 @@ pub fn set_request(state: &mut RequestState, cwd: Option<PathBuf>, input: Arc<[u
     if let Some(cwd) = cwd {
         state.get_or_default::<WorkingDirectory>().set(cwd);
     }
-    state.get_or_default::<Files>().input = input;
+    state.get_or_default::<Files>().input = RequestInput::new(input);
+}
+
+pub fn request_input(state: &RequestState) -> Option<&RequestInput> {
+    state.get::<Files>().map(|files| &files.input)
 }
 
 pub fn new_resource(

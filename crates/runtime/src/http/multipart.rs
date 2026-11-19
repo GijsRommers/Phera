@@ -22,6 +22,7 @@
 /// One part of the body: a form field, or a file when `filename` is set.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Part<'a> {
+    pub(crate) has_disposition: bool,
     /// The form control's name; `None` if the part did not give one.
     pub(crate) name: Option<Vec<u8>>,
     /// The file's name as the client sent it, possibly with a path.
@@ -76,15 +77,17 @@ pub(crate) fn parts<'a>(body: &'a [u8], boundary: &[u8]) -> Vec<Part<'a>> {
             Some((content, next)) => (content, Some(next)),
             None => (after_headers, None),
         };
-        let disposition = parameters_of(header(headers, b"content-disposition"));
+        let disposition = header(headers, b"content-disposition");
+        let parameters = parameters_of(disposition.unwrap_or_default());
         let parameter = |wanted: &str| {
-            disposition
+            parameters
                 .iter()
-                .find(|(name, _)| name == wanted)
+                .rfind(|(name, _)| name == wanted)
                 .map(|(_, value)| value.clone())
         };
-        let claimed_type = header(headers, b"content-type");
+        let claimed_type = header(headers, b"content-type").unwrap_or_default();
         parts.push(Part {
+            has_disposition: disposition.is_some(),
             name: parameter("name"),
             filename: parameter("filename"),
             content_type: claimed_type
@@ -140,17 +143,14 @@ fn content_before<'a>(input: &'a [u8], delimiter: &[u8]) -> Option<(&'a [u8], &'
 }
 
 /// The value of the header `name` (given in lower case) among `headers`.
-fn header<'a>(headers: &'a [u8], name: &[u8]) -> &'a [u8] {
-    headers
-        .split(|&byte| byte == b'\n')
-        .find_map(|line| {
-            let colon = line.iter().position(|&byte| byte == b':')?;
-            line[..colon]
-                .trim_ascii()
-                .eq_ignore_ascii_case(name)
-                .then(|| line[colon + 1..].trim_ascii())
-        })
-        .unwrap_or_default()
+fn header<'a>(headers: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
+    headers.split(|&byte| byte == b'\n').find_map(|line| {
+        let colon = line.iter().position(|&byte| byte == b':')?;
+        line[..colon]
+            .trim_ascii()
+            .eq_ignore_ascii_case(name)
+            .then(|| line[colon + 1..].trim_ascii())
+    })
 }
 
 /// The `key=value` parameters of a header value such as
@@ -160,12 +160,12 @@ fn header<'a>(headers: &'a [u8], name: &[u8]) -> &'a [u8] {
 fn parameters_of(value: &[u8]) -> Vec<(String, Vec<u8>)> {
     let mut parameters = Vec::new();
     let mut rest = value;
-    while let Some(semicolon) = rest.iter().position(|&byte| byte == b';') {
-        rest = &rest[semicolon + 1..];
+    while !rest.is_empty() {
         let Some(equals) = rest.iter().position(|&byte| byte == b'=' || byte == b';') else {
             break;
         };
         if rest[equals] == b';' {
+            rest = &rest[equals + 1..];
             continue;
         }
         // As in PHP, a space before the `=` makes the key another key:
@@ -176,6 +176,41 @@ fn parameters_of(value: &[u8]) -> Vec<(String, Vec<u8>)> {
         rest = after;
     }
     parameters
+}
+
+/// PHP searches for "boundary" anywhere in the header, then reads the value
+/// through the next quote, semicolon or comma, depending on its opening byte.
+pub(super) fn explicit_boundary(content_type: &[u8]) -> Result<&[u8], BoundaryError> {
+    let start = find(content_type, b"boundary")
+        .or_else(|| find(&content_type.to_ascii_lowercase(), b"boundary"))
+        .ok_or(BoundaryError::Missing)?;
+    let value = content_type[start..]
+        .iter()
+        .position(|&byte| byte == b'=')
+        .map(|equals| &content_type[start + equals + 1..])
+        .ok_or(BoundaryError::Missing)?;
+    let boundary = if let Some(quoted) = value.strip_prefix(b"\"") {
+        quoted
+            .iter()
+            .position(|&byte| byte == b'"')
+            .map(|end| &quoted[..end])
+            .ok_or(BoundaryError::Invalid)?
+    } else {
+        value
+            .split(|&byte| matches!(byte, b';' | b','))
+            .next()
+            .unwrap_or_default()
+    };
+    if boundary.len() > 5120 - 4 {
+        return Err(BoundaryError::TooLarge);
+    }
+    Ok(boundary)
+}
+
+pub(super) enum BoundaryError {
+    Missing,
+    Invalid,
+    TooLarge,
 }
 
 /// One parameter value, quoted or bare, and the input after it.

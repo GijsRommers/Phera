@@ -8,6 +8,7 @@ mod scenarios {
     mod new_project;
     mod proxy;
     mod request_headers;
+    mod request_parse_body;
     mod session;
     mod static_files;
     mod uploads;

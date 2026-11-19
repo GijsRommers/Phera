@@ -63,18 +63,38 @@ fn parse(variables: &mut PhpArray, input: &[u8], separator: u8, duplicates: Dupl
         if index == MAX_INPUT_VARIABLES {
             return true;
         }
-        let (name, value) = match pair.iter().position(|&byte| byte == b'=') {
-            Some(equals) => (&pair[..equals], &pair[equals + 1..]),
-            None => (pair, &[][..]),
-        };
-        register_variable(
-            variables,
-            &url_decode(name),
-            || Value::from(url_decode(value)),
-            duplicates,
-        );
+        store_pair(variables, pair, duplicates);
     }
     false
+}
+
+/// The POST reader applies its limit after storing the current pair. An empty
+/// pair before an ampersand also counts toward the limit.
+pub fn parse_post(variables: &mut PhpArray, input: &[u8], limit: u64) -> bool {
+    for (index, pair) in input.split_inclusive(|&byte| byte == b'&').enumerate() {
+        store_pair(
+            variables,
+            pair.strip_suffix(b"&").unwrap_or(pair),
+            Duplicates::Replace,
+        );
+        if index as u64 >= limit {
+            return true;
+        }
+    }
+    false
+}
+
+fn store_pair(variables: &mut PhpArray, pair: &[u8], duplicates: Duplicates) {
+    let (name, value) = match pair.iter().position(|&byte| byte == b'=') {
+        Some(equals) => (&pair[..equals], &pair[equals + 1..]),
+        None => (pair, &[][..]),
+    };
+    register_variable(
+        variables,
+        &url_decode(name),
+        || Value::from(url_decode(value)),
+        duplicates,
+    );
 }
 
 /// Stores a multipart field under its literal name, as in `name="a[b][]"`.

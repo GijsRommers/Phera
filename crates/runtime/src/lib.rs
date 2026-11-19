@@ -108,6 +108,7 @@ impl Runtime {
         registry.load(&phera_ext_sqlite3::Sqlite3);
         registry.load(&phera_ext_redis::Redis);
         registry.load(&phera_ext_http::Http);
+        http::register_request_parse_body(&mut registry);
         registry.load(&phera_ext_hash::Hash);
         registry.load(&phera_ext_random::Random);
         registry.load(&phera_ext_reflection::Reflection);
@@ -241,6 +242,10 @@ impl Runtime {
             php_array(self.environment.iter()),
             form,
         );
+        let urlencoded_post = request.method == "POST"
+            && request
+                .header("Content-Type")
+                .is_some_and(http::is_urlencoded);
         *vm.state_mut().get_or_default::<RequestHeaders>() = RequestHeaders(request.headers);
         vm.prepare_web_headers_with(ResponseHead::prepare);
         *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);
@@ -249,6 +254,9 @@ impl Runtime {
             script.parent().map(Path::to_path_buf),
             request.body.into(),
         );
+        if urlencoded_post && let Some(input) = phera_ext_streams::request_input(vm.state_mut()) {
+            input.mark_post_read();
+        }
         let exit_status = vm.run(unit).await;
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
 

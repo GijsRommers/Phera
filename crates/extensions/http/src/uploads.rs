@@ -25,19 +25,37 @@ use phera_extension_api::{
 #[derive(Default)]
 pub struct UploadedFiles {
     waiting: Vec<PathBuf>,
+    first_active: usize,
 }
 
 impl UploadedFiles {
     pub fn new(waiting: Vec<PathBuf>) -> UploadedFiles {
-        UploadedFiles { waiting }
+        UploadedFiles {
+            waiting,
+            first_active: 0,
+        }
+    }
+
+    /// PHP replaces the active upload table when a new multipart parse starts.
+    /// Keep the earlier files on the cleanup list.
+    pub fn replace_active(&mut self, files: Vec<PathBuf>) {
+        self.first_active = self.waiting.len();
+        self.waiting.extend(files);
     }
 
     fn holds(&self, path: &Path) -> bool {
-        self.waiting.iter().any(|waiting| waiting == path)
+        self.waiting[self.first_active..]
+            .iter()
+            .any(|waiting| waiting == path)
     }
 
     fn forget(&mut self, path: &Path) {
-        self.waiting.retain(|waiting| waiting != path);
+        if let Some(index) = self.waiting[self.first_active..]
+            .iter()
+            .position(|file| file == path)
+        {
+            self.waiting.remove(self.first_active + index);
+        }
     }
 
     /// The files nobody moved. The runtime deletes them after the request.

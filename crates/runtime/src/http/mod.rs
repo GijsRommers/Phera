@@ -4,15 +4,22 @@
 //! converts between the server's types and these, so the runtime can be used
 //! and tested without a socket.
 
+mod form_limits;
 mod multipart;
 mod query;
+mod request_parse_body;
 mod superglobals;
 mod uploads;
 
 use std::net::SocketAddr;
 
+pub(crate) use request_parse_body::{is_urlencoded, register_request_parse_body};
 pub(crate) use superglobals::define_superglobals;
-pub(crate) use uploads::{Form, receive as receive_form};
+pub(crate) use uploads::Form;
+
+pub(crate) fn receive_form(body: &[u8], boundary: &[u8]) -> Form {
+    uploads::receive(body, boundary, form_limits::FormLimits::default())
+}
 
 /// The boundary of a `multipart/form-data` request that PHP would read as a
 /// form: only `POST` fills `$_POST` and `$_FILES`.
