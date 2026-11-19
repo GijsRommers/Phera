@@ -12,6 +12,7 @@ mod cookies;
 mod head;
 mod log;
 mod request;
+mod syslog;
 mod uploads;
 
 use phera_extension_api::{
@@ -72,6 +73,7 @@ impl Extension for Http {
     fn register(&self, registry: &mut Registry) {
         cookies::register(registry);
         log::register(registry);
+        syslog::register(registry);
         registry.function(FunctionEntry::sync(
             "php_sapi_name",
             &[],
