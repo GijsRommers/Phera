@@ -1842,6 +1842,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-spl"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "phera-ext-pcre",
+ "phera-ext-standard",
+ "phera-ext-streams",
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-sqlite3"
 version = "0.1.0"
 dependencies = [
@@ -1946,6 +1957,7 @@ dependencies = [
  "phera-ext-redis",
  "phera-ext-reflection",
  "phera-ext-serialize",
+ "phera-ext-spl",
  "phera-ext-sqlite3",
  "phera-ext-standard",
  "phera-ext-streams",

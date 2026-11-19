@@ -267,15 +267,18 @@ fn link_destination(mut destination: PathBuf) -> io::Result<PathBuf> {
 fn readlink(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let name = args::bytes(arguments, 0);
     check_path("readlink", "#1 ($path)", name)?;
-    let resolved = if name.is_empty() {
-        Err(rustix::io::Errno::NOENT.into())
-    } else {
-        directory(context).resolve(path(name))
-    };
-    match resolved.and_then(fs::read_link) {
-        Ok(path) => Ok(Value::from(bytes(&path).to_vec())),
+    match read_link(context, name) {
+        Ok(target) => Ok(Value::from(target)),
         Err(error) => warn_false(context, format!("readlink(): {}", reason(&error))),
     }
+}
+
+pub(crate) fn read_link(context: &mut dyn Context, name: &[u8]) -> io::Result<Vec<u8>> {
+    if name.is_empty() {
+        return Err(rustix::io::Errno::NOENT.into());
+    }
+    let resolved = directory(context).resolve(path(name))?;
+    fs::read_link(resolved).map(|target| bytes(&target).to_vec())
 }
 
 fn umask(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {

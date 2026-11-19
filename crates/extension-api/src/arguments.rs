@@ -179,11 +179,18 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
         ParamType::ArrayOrNumber => "array|int|float",
         ParamType::ArrayOrFloat => "array|float",
         ParamType::ArrayOrBool => "array|bool",
+        ParamType::ArrayOrObject => "array|object",
+        ParamType::RecursiveOrAggregate => "RecursiveIterator|IteratorAggregate",
     }
 }
 
 fn expected(param: &Param) -> String {
-    let text = type_text(param.ty);
+    // Zend's array-or-object parser reports "array" for other argument types.
+    let text = if param.ty == ParamType::ArrayOrObject {
+        "array"
+    } else {
+        type_text(param.ty)
+    };
     match (param.nullable, text.contains('|')) {
         (false, _) => format!("of type {text}"),
         (true, false) => format!("of type ?{text}"),
@@ -280,6 +287,13 @@ fn convert(
             _ if strict => None,
             _ => to_float(value, site, context).map(Some),
         },
+        ParamType::RecursiveOrAggregate => matches!(value, Value::Object(object)
+            if object.class.is_instance_of("RecursiveIterator")
+                || object.class.is_instance_of("IteratorAggregate"))
+        .then_some(None),
+        ParamType::ArrayOrObject => {
+            matches!(value, Value::Array(_) | Value::Object(_)).then_some(None)
+        }
         ParamType::ArrayOrBool => match value {
             Value::Array(_) | Value::Bool(_) => Some(None),
             _ if strict => None,

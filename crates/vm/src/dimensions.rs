@@ -8,13 +8,18 @@
 use std::rc::Rc;
 
 use phera_bytecode::{FetchMode, Step};
-use phera_extension_api::{Context, NativeDimensions, NativeError, NativeResult};
+use phera_extension_api::{
+    Context, DimensionReferenceMode, NativeDimensions, NativeError, NativeResult,
+};
 use phera_value::{ArrayKey, Object, Value, to_bool};
 
 use crate::{
     Vm,
     access_mode::Missing,
-    classes::{Class, operations::ClassOperations},
+    classes::{
+        Class,
+        operations::{ClassOperations, NativeDimension},
+    },
 };
 
 pub(crate) struct DimensionPath {
@@ -96,7 +101,7 @@ impl Vm {
         object: Rc<Object>,
         offset: Value,
     ) -> NativeResult {
-        if let Some(native) = native(&object, "offsetget") {
+        if let Some(native) = native(&object, NativeDimension::Get) {
             (native.get)(self, &object, offset)
         } else {
             self.call_protocol_method(object, "offsetGet", vec![offset])
@@ -104,12 +109,32 @@ impl Vm {
         }
     }
 
+    pub(crate) fn dimension_reference(
+        &mut self,
+        object: &Object,
+        offset: Value,
+        mode: DimensionReferenceMode,
+    ) -> Option<NativeResult> {
+        let reference = native(object, NativeDimension::Get)?.reference?;
+        Some(reference(self, object, offset, mode))
+    }
+
+    pub(crate) fn bind_dimension(
+        &mut self,
+        object: &Object,
+        offset: Value,
+        value: Value,
+    ) -> Option<Result<(), NativeError>> {
+        let bind = native(object, NativeDimension::Set)?.bind?;
+        Some(bind(self, object, offset, value))
+    }
+
     async fn dimension_exists(
         &mut self,
         object: Rc<Object>,
         offset: Value,
     ) -> Result<bool, NativeError> {
-        if let Some(native) = native(&object, "offsetexists") {
+        if let Some(native) = native(&object, NativeDimension::Exists) {
             (native.exists)(self, &object, offset)
         } else {
             Ok(to_bool(
@@ -126,7 +151,7 @@ impl Vm {
         offset: Value,
         value: Value,
     ) -> Result<(), NativeError> {
-        if let Some(native) = native(&object, "offsetset") {
+        if let Some(native) = native(&object, NativeDimension::Set) {
             (native.set)(self, &object, offset, value)
         } else {
             self.call_protocol_method(object, "offsetSet", vec![offset, value])
@@ -140,7 +165,7 @@ impl Vm {
         object: Rc<Object>,
         offset: Value,
     ) -> Result<(), NativeError> {
-        if let Some(native) = native(&object, "offsetunset") {
+        if let Some(native) = native(&object, NativeDimension::Unset) {
             (native.unset)(self, &object, offset)
         } else {
             self.call_protocol_method(object, "offsetUnset", vec![offset])
@@ -246,17 +271,12 @@ impl Vm {
     }
 }
 
-fn native(object: &Object, method: &str) -> Option<NativeDimensions> {
+pub(crate) fn native(object: &Object, method: NativeDimension) -> Option<&NativeDimensions> {
     let class = object.class.as_any().downcast_ref::<Class>()?;
-    let handler = class.hooks.as_ref()?.dimensions?;
-    if class
-        .methods
-        .get(method)
-        .is_some_and(|method| matches!(method.body, crate::classes::MethodBody::User(_)))
-    {
+    if !class.operations.has(method.bit()) {
         return None;
     }
-    Some(handler)
+    class.hooks.as_ref()?.dimensions.as_ref()
 }
 
 pub(crate) fn has_dimension(object: &Object) -> bool {

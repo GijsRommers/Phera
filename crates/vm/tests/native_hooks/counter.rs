@@ -104,7 +104,7 @@ fn accept(_: &mut dyn Context, _: Option<&Rc<Object>>, arguments: &[Value]) -> N
         .ok_or_else(missing)
 }
 
-fn copy(object: &Object, copy: &Object) -> Result<(), NativeError> {
+fn copy(object: &std::rc::Rc<Object>, copy: &Object) -> Result<(), NativeError> {
     if let Some(value) = counter(object) {
         store(copy, value)?;
     }

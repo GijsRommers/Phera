@@ -105,6 +105,8 @@ impl CallFlags {
     pub(crate) const MAGIC: Self = Self(1 << 5);
     /// A native window accepts one positional mixed argument by value.
     pub(crate) const WINDOW_ARGUMENT: Self = Self(1 << 6);
+    /// A legal simple native call may return straight from its argument window.
+    pub(crate) const DIRECT_NATIVE: Self = Self(1 << 7);
 
     pub(crate) fn contains(self, flag: Self) -> bool {
         self.0 & flag.0 != 0

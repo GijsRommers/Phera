@@ -1,0 +1,16 @@
+[package]
+name = "phera-ext-spl"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+indexmap.workspace = true
+phera-extension-api.workspace = true
+phera-ext-standard.workspace = true
+phera-ext-pcre.workspace = true
+phera-ext-streams.workspace = true
+
+[lints]
+workspace = true

@@ -25,7 +25,7 @@ use crate::calls::prepared_call::CallKind;
 use crate::calls::window_context::WindowContext;
 use crate::classes::method_table::{FoundMethod, MethodTable};
 use crate::classes::{Class, ClassIndex, MethodBody};
-use crate::code_table::NameKey;
+use crate::code_table::{FunctionIndex, NameKey};
 
 impl Machine<'_> {
     /// `InitMethodCall` of a public instance method written in PHP: reserve
@@ -39,24 +39,52 @@ impl Machine<'_> {
     ) -> Step {
         let slot = position.frame.base() + receiver.index();
         let object = match self.registers.window(slot, 1) {
-            [Some(Value::Object(object))] => object.clone(),
+            [Some(Value::Object(object))] => object,
             _ => return Step::Slow,
         };
-        let class = object.class.as_any().downcast_ref::<Class>();
-        let Some(class) = class.and_then(|class| class.identity.upgrade()) else {
+        // The receiver owns its class through this lookup.
+        let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
             return Step::Slow;
         };
         let key = self.code.unit_name_key(position.frame.function, name);
-        let Some(found) = self.method_table(&class).get(key) else {
+        let Some(found) = self.method_table(class).get(key) else {
             return Step::Slow;
         };
-        if !self.may_call(&found)
-            || found.method.is_static
-            || self.caller_has_other_private(key, found.method)
-        {
+        let method = found.method;
+        if method.is_abstract || method.is_static {
             return Step::Slow;
         }
-        self.prepare_found(found, Some(object), None, position.ip)
+        match method.body {
+            MethodBody::User(function) => {
+                if !self.may_call(&found) || self.caller_has_other_private(key, method) {
+                    return Step::Slow;
+                }
+                let receiver = Some(object.clone());
+                self.prepare_php_method(function, receiver, None, position.ip)
+            }
+            MethodBody::Native(entry)
+                if entry.direct.is_some()
+                    && method.visibility == Visibility::Public
+                    && !self.caller_has_other_private(key, method) =>
+            {
+                let Some(class) = class.identity.upgrade() else {
+                    return Step::Slow;
+                };
+                let receiver = object.clone();
+                let Some(scope) = found.scope.upgrade() else {
+                    return Step::Slow;
+                };
+                let method = method.clone();
+                let context = crate::classes::MethodContext {
+                    receiver: Some(receiver),
+                    scope,
+                    called: class,
+                    invocation: crate::classes::Invocation::Method,
+                };
+                self.prepare_direct_method(position, context, method, entry)
+            }
+            _ => Step::Slow,
+        }
     }
 
     /// `InitStaticCall` of `self::`, `parent::`, `static::` or a named class,
@@ -109,34 +137,31 @@ impl Machine<'_> {
             (ClassBinding::Forward, Some(context)) => context.called().map(|called| called.index),
             _ => Some(class.index),
         };
-        self.prepare_found(found, receiver, called, position.ip)
+        let MethodBody::User(function) = found.method.body else {
+            return Step::Slow;
+        };
+        if found.method.is_abstract {
+            return Step::Slow;
+        }
+        self.prepare_php_method(function, receiver, called, position.ip)
     }
 
-    /// Record a prepared call of a found method written in PHP, with
-    /// `$this` in the window's first register. `called` is the class a
-    /// static method was called on.
-    fn prepare_found(
+    /// Record a PHP method call with `$this` in the window's first register.
+    /// Static calls supply `called` for late static binding.
+    fn prepare_php_method(
         &mut self,
-        found: FoundMethod<'_>,
+        function: FunctionIndex,
         receiver: Option<Rc<Object>>,
         called: Option<ClassIndex>,
         ip: usize,
     ) -> Step {
-        let method = found.method;
-        let MethodBody::User(function) = method.body else {
-            return Step::Slow;
-        };
-        if method.is_abstract {
-            return Step::Slow;
-        }
-        let this = receiver.filter(|_| !method.is_static).map(Value::Object);
+        let this = receiver.map(Value::Object);
         let has_this = this.is_some();
         let parts = (&mut *self.stack, &mut *self.registers);
         push_php_call(self.code, parts, function, CallKind::Method, [this]);
-        let scope = self.code.facts(function).class;
-        if let Some(call) = self.stack.last_call_mut()
-            && !has_this
-            && called != scope
+        if !has_this
+            && let Some(call) = self.stack.last_call_mut()
+            && called != self.code.facts(function).class
         {
             call.called = called;
         }

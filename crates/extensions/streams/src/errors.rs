@@ -35,23 +35,30 @@ pub fn warn_false(context: &mut dyn Context, message: String) -> NativeResult {
     Ok(Value::Bool(false))
 }
 
-pub fn open_failed(context: &mut dyn Context, function: &str, path: &[u8], reason: &str) -> Value {
-    let path = String::from_utf8_lossy(path);
-    context.warning(format!(
-        "{function}({path}): Failed to open stream: {reason}"
-    ));
-    Value::Bool(false)
+pub(crate) fn open_failure_message(function: &str, path: &[u8], reason: &[u8]) -> Vec<u8> {
+    let prefix = format!("{function}(");
+    [
+        prefix.as_bytes(),
+        path,
+        b"): Failed to open stream: ",
+        reason,
+    ]
+    .concat()
 }
 
 pub fn wrapper_warning(context: &mut dyn Context, function: &str, scheme: &[u8]) {
+    context.warning(wrapper_message(function, scheme));
+}
+
+pub(crate) fn wrapper_message(function: &str, scheme: &[u8]) -> String {
     let scheme = String::from_utf8_lossy(scheme);
-    context.warning(format!(
+    format!(
         concat!(
             "{}(): Unable to find the wrapper \"{}\" - did you forget to enable ",
             "it when you configured PHP?"
         ),
         function, scheme
-    ));
+    )
 }
 
 pub fn nonnegative(function: &str, argument: &str, value: i64) -> Result<u64, NativeError> {
