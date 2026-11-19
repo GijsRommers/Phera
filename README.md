@@ -48,6 +48,12 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 `phera <command> --help` lists the options. There is no formatter and no test
 runner yet.
 
+`phera serve` caches compiled PHP files and rechecks their paths and timestamps
+every two seconds by default. Use `-d opcache.revalidate_freq=0` to check on
+each request during development, or `-d opcache.validate_timestamps=0` to keep
+cached code until the server restarts. `opcache.revalidate_path=1` checks the
+include search path on each lookup.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,

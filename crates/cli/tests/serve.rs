@@ -2,6 +2,7 @@
 //! over a socket, and check what comes back.
 
 mod scenarios {
+    mod code_cache;
     mod compression;
     mod environment;
     mod execution_time;

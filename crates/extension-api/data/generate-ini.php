@@ -85,7 +85,7 @@ if ($storageOnly) {
 }
 foreach ($all as $name => $entry) {
     $module = $owners[$name] ?? 'core';
-    // Phera has no OPcache or JIT module.
+    // Phera supplies its server cache settings separately.
     if ($module !== 'core' && !in_array($module, $modules, true)) {
         continue;
     }
@@ -117,4 +117,11 @@ foreach ($all as $name => $entry) {
     };
     printf("%s\t%s\t%s\t%d\t%s\n", $module, $name, $kind, $entry['access'],
         match ($default) { null => '-', '' => '=', default => bin2hex($default) });
+}
+
+if (!$storageOnly) {
+    // These PHP directives control Phera's own request file cache.
+    echo "phera_server\topcache.revalidate_freq\tint\t7\t32\n";
+    echo "phera_server\topcache.revalidate_path\tbool\t7\t30\n";
+    echo "phera_server\topcache.validate_timestamps\tbool\t7\t31\n";
 }

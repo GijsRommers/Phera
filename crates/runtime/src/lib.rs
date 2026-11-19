@@ -16,6 +16,7 @@ mod http;
 mod ini_tests;
 #[cfg(test)]
 mod process_oracle_tests;
+mod worker_code_cache;
 
 use std::path::Path;
 use std::rc::Rc;
@@ -30,6 +31,7 @@ use phera_value::{PhpArray, Value};
 use phera_vm::{NativeTables, Vm};
 
 use cache::{CodeCache, FileMode};
+use worker_code_cache::{RequestCodeCache, WorkerCodeCache};
 
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse};
@@ -50,6 +52,7 @@ pub struct WebWorker {
     runtime: Runtime,
     native: NativeTables,
     environment: Rc<PhpArray>,
+    code: Rc<WorkerCodeCache>,
 }
 
 impl WebWorker {
@@ -123,6 +126,7 @@ impl Runtime {
         registry.load(&phera_ext_session::Session);
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);
+        web_registry.sapi_ini("phera_server");
         registry.constant("PHP_SAPI", Sapi::Cli.name());
         let registry = Arc::new(registry);
         let web_registry = Arc::new(web_registry);
@@ -185,6 +189,7 @@ impl Runtime {
             runtime: self.clone(),
             native: NativeTables::new(self.web_registry.clone()),
             environment: self.inherited_environment(),
+            code: Rc::new(WorkerCodeCache::new(self.web_cache.clone())),
         }
     }
 
@@ -207,13 +212,14 @@ impl Runtime {
         document_root: &Path,
         request: HttpRequest,
     ) -> HttpResponse {
-        let unit = match self.web_cache.compile(script.to_path_buf()).await {
+        let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
+        let code = Rc::new(RequestCodeCache::new(worker.code.clone()));
+        let unit = match code.entry(script, vm.include_cache_policy()).await {
             Ok(unit) => unit,
             Err(RuntimeError::Read { .. }) => {
                 return HttpResponse::plain(404, "File not found.\n");
             }
             Err(RuntimeError::Compile(error)) => {
-                let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
                 vm.report_entry_compile_failure(error);
                 let mut response = HttpResponse::plain(500, "");
                 response.body = vm.output;
@@ -236,7 +242,7 @@ impl Runtime {
             None => None,
         };
 
-        let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
+        vm.set_local_loader(code);
         let uploads = http::define_superglobals(
             &mut vm,
             &request,
@@ -334,11 +340,9 @@ impl Runtime {
         vm.set_global("_ENV", Value::Array(environment));
         *vm.state_mut().get_or_default::<RequestEnvironment>() =
             RequestEnvironment::new(self.environment.clone());
-        let cache = match sapi {
-            Sapi::Cli => &self.cache,
-            Sapi::Web => &self.web_cache,
-        };
-        vm.set_loader(Arc::new(cache.clone()));
+        if matches!(sapi, Sapi::Cli) {
+            vm.set_local_loader(Rc::new(self.cache.clone()));
+        }
         vm
     }
 }
