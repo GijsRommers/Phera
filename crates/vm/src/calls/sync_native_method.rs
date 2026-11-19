@@ -83,7 +83,15 @@ impl Vm {
                 destination,
                 Box::new((error, method)),
             ))),
-            Err(error) => Err(error),
+            Err(error) => {
+                if matches!(&error, NativeError::Throw { .. }) {
+                    self.failed_native = Some(crate::error_traces::NativeTrace::method(
+                        &method,
+                        &arguments[..count],
+                    ));
+                }
+                Err(error)
+            }
         }
     }
 }

@@ -414,6 +414,10 @@ impl Vm {
                         if track {
                             self.error_handlers.native_site = previous;
                         }
+                        if matches!(&result, Err(NativeError::Throw { .. })) {
+                            self.failed_native =
+                                Some(crate::error_traces::NativeTrace::method(method, &arguments));
+                        }
                         self.call_stack.recycle_native_arguments(arguments);
                         result
                     }

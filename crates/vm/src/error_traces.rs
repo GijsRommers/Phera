@@ -19,6 +19,16 @@ impl NativeTrace {
         }
     }
 
+    /// A PHP trace distinguishes `$reflector->getName()` from `Class::method()`.
+    #[cold]
+    pub(crate) fn method(method: &crate::classes::Method, arguments: &[Value]) -> Self {
+        let operator = if method.is_static { "::" } else { "->" };
+        Self {
+            name: format!("{}{operator}{}", method.declaring, method.name),
+            arguments: Self::snapshot_arguments(arguments),
+        }
+    }
+
     fn snapshot_arguments(arguments: &[Value]) -> Value {
         let mut array = phera_value::PhpArray::new();
         for value in arguments {

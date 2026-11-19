@@ -112,8 +112,9 @@ const SUB: MethodEntry = MethodEntry::public("sub", &[INTERVAL], interval_arithm
 const DIFF: MethodEntry =
     MethodEntry::public("diff", &[TARGET, ABSOLUTE], interval_arithmetic::diff)
         .tentative_return("DateInterval");
-const FORMAT_DATE: MethodEntry =
-    MethodEntry::public("format", &[FORMAT], datetime::format).tentative_return("string");
+const FORMAT_DATE: MethodEntry = MethodEntry::public("format", &[FORMAT], datetime::format)
+    .with_direct(datetime::direct_format)
+    .tentative_return("string");
 const TIMEZONE: MethodEntry = MethodEntry::public("getTimezone", &[], datetime::timezone)
     .tentative_return("DateTimeZone|false");
 const OFFSET: MethodEntry =

@@ -60,6 +60,11 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
         ),
         MethodEntry::public("getName", &[], |_, o, _| {
             data(o, |r| Value::from(r.name.as_str()))
+        })
+        .with_direct(|object, _| {
+            let state = object.native.try_borrow().ok()?;
+            let reflection = state.as_ref()?.downcast_ref::<ReflectedClass>()?;
+            Some(Value::from(reflection.info.name.as_str()))
         }),
         MethodEntry::public("getShortName", &[], |_, o, _| {
             data(o, |r| Value::from(split(&r.name).1))
