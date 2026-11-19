@@ -1,5 +1,7 @@
 //! `popen('printf hello', 'r')` returns a stream whose child is reaped by `pclose`.
 
+mod cleanup;
+
 use std::io;
 use std::os::fd::OwnedFd;
 use std::process::Stdio;
@@ -14,7 +16,7 @@ use phera_extension_api::{
 };
 
 use super::super::child::{ManagedChild, exit_code};
-use super::super::command::{configure, reason, shell, spawn};
+use super::super::command::{configure, popen_command, reason, spawn};
 
 pub(crate) fn register(registry: &mut Registry) {
     registry.function(FunctionEntry::asynchronous(
@@ -51,7 +53,7 @@ fn open(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
                 ));
             }
         };
-        let mut command = shell(bytes);
+        let mut command = popen_command(bytes);
         configure(context, &mut command, None, &Value::Null, web).await?;
         let (reader, writer) = match io::pipe() {
             Ok(pipe) => pipe,
@@ -67,7 +69,7 @@ fn open(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
             command.stdin(Stdio::from(reader));
             writer.into()
         };
-        let mut child = match spawn(context, command, web).await? {
+        let child = match spawn(context, command, web).await? {
             Ok(child) => child,
             Err(error) => {
                 warning(context, bytes, &posix_mode, &reason(&error));
@@ -81,9 +83,12 @@ fn open(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
                 return Ok(Value::Bool(false));
             }
         };
-        child.detach_on_cli_cleanup();
         if let Value::Resource(resource) = &value {
-            set_attachment(resource, Box::new(child))?;
+            if web {
+                set_attachment(resource, Box::new(child))?;
+            } else {
+                cleanup::track(context, resource, child)?;
+            }
         }
         Ok(value)
     })
@@ -94,14 +99,16 @@ fn close(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
 }
 
 impl CloseAttachment for ManagedChild {
-    fn close(mut self: Box<Self>, context: &mut dyn Context) -> LocalFuture<'_, NativeResult> {
-        Box::pin(async move {
-            let code = wait_with_execution_limit(context, self.wait())
-                .await?
-                .map_or(-1, exit_code);
-            Ok(Value::Int(code))
-        })
+    fn close(self: Box<Self>, context: &mut dyn Context) -> LocalFuture<'_, NativeResult> {
+        Box::pin(reap(context, *self))
     }
+}
+
+async fn reap(context: &mut dyn Context, mut child: ManagedChild) -> NativeResult {
+    let code = wait_with_execution_limit(context, child.wait())
+        .await?
+        .map_or(-1, exit_code);
+    Ok(Value::Int(code))
 }
 
 fn warning(context: &mut dyn Context, command: &[u8], mode: &[u8], message: &str) {

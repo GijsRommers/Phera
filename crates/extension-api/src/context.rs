@@ -113,6 +113,9 @@ pub trait Context {
     /// Flushes an extension after user shutdown callbacks and output finalization.
     fn register_request_finalizer(&mut self, _callback: crate::AsyncFn) {}
 
+    /// Releases resources after output and extension finalizers have run.
+    fn register_resource_finalizer(&mut self, _key: &'static str, _callback: crate::AsyncFn) {}
+
     /// The PHP file making this call, for include-path lookups.
     fn script_path(&self) -> Option<std::path::PathBuf> {
         None
