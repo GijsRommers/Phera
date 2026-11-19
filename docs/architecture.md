@@ -377,6 +377,98 @@ Each falls in one of three groups:
 
 An item moves from group 2 to group 1 when a later scan no longer finds it.
 
+### 6.3 PHP versions: 8.5 and 8.6
+
+PHP releases a minor version every November and maintains the two newest.
+Phera does the same: it knows the two newest minor versions, and one
+project runs at one of them, its **language level**.
+
+```
+phera --php 8.6 run script.php       # for one command
+[runtime] php = "8.6"                # in phera.toml, for the project
+```
+
+Without either, the level is the lower bound of `require.php` in the
+project's `composer.json` when that names one of the two versions, and
+otherwise the default. The default stays 8.5 until PHP 8.6.0 is released and
+the fixtures of this section pass against it; then it becomes 8.6. When PHP
+8.7 appears, 8.5 is dropped.
+
+Why a level and not simply "the newest": a minor version of PHP is almost
+all additions, but code tests for them. Frameworks compare
+`PHP_VERSION_ID`, and polyfill packages define `clamp()` only when
+`function_exists('clamp')` says no. A runtime that reports 8.5 while it
+has 8.6's functions, or reports 8.6 while a project's lock file was resolved
+for 8.5, behaves like neither. And "the same output as PHP" needs one
+definite PHP to compare with.
+
+**What the level decides**, and nothing else:
+
+| | Example in 8.6 | How it is expressed in the code |
+| --- | --- | --- |
+| The version constants | `PHP_VERSION`, `PHP_VERSION_ID`, `PHP_MINOR_VERSION` | read from the level |
+| Which functions, classes and constants exist | `clamp()`, `Time\Duration`, `stream_last_errors()` | each registry entry may carry "since 8.6"; below that it is not registered, so `function_exists()` is false |
+| Which syntax is accepted | `f(1, ?, 3)` | the parser is given the level; below it, PHP 8.5's own parse error |
+| Deprecations that are new | `return` inside `finally`, `spl_object_hash()` | a named change, asked as `level.has(Change::ReturnInFinallyDeprecated)` |
+| Behaviour that changed | `trim()` also strips form feed; `session.use_strict_mode` defaults to 1 | the same: a named change |
+
+A named change is one variant of one enum, with the sentence from PHP's
+`UPGRADING` file as its documentation. Code never compares version numbers.
+When a version is dropped, the variants that every remaining level has are
+deleted and the compiler points at each place to simplify.
+
+**What PHP 8.6 changes**, from the `UPGRADING` file of the `PHP-8.6.0`
+branch (release candidate 7 on 2026-11-19), for the parts Phera ships:
+
+*Language.* Partial function application (`f(?, 2)`, `f(1, ...)`); default
+values on readonly properties; `__debugInfo()` on enums; `#[\Override]` on
+class constants and enum cases; writing to a property of an object held in
+a constant (`CONFIG->debug = true`); reference assignment into a `WeakMap`
+for a key that is not there yet.
+
+*Functions and classes.* `clamp()`; `<` and `>` byte-order modifiers in
+`pack()` and `unpack()`; the position of the error in JSON error messages;
+`Time\Duration`; the stream errors API (`stream_last_errors()`,
+`stream_clear_errors()`, the `error_mode` context option); the polling API;
+`ReflectionProperty::isReadable()` and `isWritable()`,
+`ReflectionParameter::getDocComment()`, the namespace methods of
+`ReflectionAttribute` and `ReflectionConstant`; `builtin_default_value` in
+`ini_get_all()`; `SessionHandler::validateId()`.
+
+*Changed behaviour.* By-reference `foreach` after an array was compacted;
+`??` and `empty()` on a magic property that `__isset()` created; `trim()`
+and its relatives strip form feed; `preg_grep()` returns false on an
+execution error; `fclose()`, `file_put_contents()` and `copy()` return false
+when the final flush fails; a group of functions throw `ValueError` for
+arguments they used to accept (`array_filter()` mode,
+`array_change_key_case()` case, NUL bytes in `getenv()`, `putenv()`,
+`parse_str()`, `setlocale()`); `array_intersect()` converts values earlier;
+`SplFileObject` line caching; the three session defaults
+(`use_strict_mode`, `cookie_httponly`, `cookie_samesite`);
+`session_encode()` on an empty session; boolean constants in reflection
+dumps; Unicode 18 tables in mbstring.
+
+*Newly deprecated.* `return` in a `finally` block; a value returned from
+`__construct()` or `__destruct()`, and either of them being a generator;
+`namespace` as a class constant name; a function named `readonly`; `let`,
+`is` and `_` as names; a third argument to `define()`; `is_a()` with a
+string and `$allow_string` false; `spl_object_hash()` and `spl_classes()`;
+ten `ArrayIterator` methods; the CSV methods of `SplFileObject`;
+`metaphone()`; `ReflectionProperty::setValue()` with an object of another
+class; a session handler without `create_sid()` and `validateId()`; mbregex.
+
+The rule of 6.2 applies to the new deprecations as it does to the old: a
+named item that the scan of 6.1 finds in use stays, with PHP's deprecation
+message at level 8.6 (`spl_object_hash()` is called all over current
+libraries); one that nothing uses is not registered at level 8.6.
+
+**Testing two versions.** Fixtures in `tests/fixtures/` state what PHP
+prints. A fixture whose output differs between the versions exists twice,
+under `tests/fixtures/php85/` and `tests/fixtures/php86/`; all others run at
+both levels and must print the same. CI runs the suite once per level, each
+against that PHP. The php-src sweep of 7.1 is taken from the matching
+branch.
+
 ## 7. Testing
 
 Real PHP is the oracle at every layer.
