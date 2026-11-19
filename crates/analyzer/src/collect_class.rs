@@ -26,7 +26,7 @@ pub fn class_info(
         constants: BTreeMap::new(),
         location: location(class.span.start),
         open_properties: false,
-        documented: crate::phpdoc::preceding(source, class.span.start)
+        documented: crate::phpdoc::text(source, class.doc_comment)
             .map_or_else(Default::default, |doc| crate::phpdoc::members(doc, names)),
     };
     for member in &class.members {
@@ -49,7 +49,8 @@ fn add_member(
 ) {
     match &member.kind {
         ClassMemberKind::Method(method) => {
-            add_method(info, method, names, source, member.span.start, location)
+            let doc = crate::phpdoc::text(source, member.doc_comment);
+            add_method(info, method, names, doc, member.span.start, location);
         }
         ClassMemberKind::Property {
             modifiers,
@@ -95,7 +96,7 @@ fn add_method(
     info: &mut ClassInfo,
     method: &Method,
     names: &Names,
-    source: &str,
+    doc: Option<&str>,
     offset: usize,
     location: &impl Fn(usize) -> Location,
 ) {
@@ -105,7 +106,7 @@ fn add_method(
         names,
         location(offset),
     );
-    signature.apply_phpdoc(crate::phpdoc::preceding(source, offset), names);
+    signature.apply_phpdoc(doc, names);
     signature.modifiers = method.modifiers;
     signature.global_effects = method
         .body

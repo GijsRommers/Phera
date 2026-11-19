@@ -47,10 +47,8 @@ pub fn collect(index: &mut Index, file: &str, source: &str, program: &Program) {
                 StatementKind::Function(function) => {
                     let mut signature =
                         function_signature(function, &names, location(statement.span.start));
-                    signature.apply_phpdoc(
-                        crate::phpdoc::preceding(source, statement.span.start),
-                        &names,
-                    );
+                    signature
+                        .apply_phpdoc(crate::phpdoc::text(source, function.doc_comment), &names);
                     let name = names.declaration(&function.name.name).to_ascii_lowercase();
                     if !index.builtin_functions.contains(&name) {
                         index.functions.insert(name, signature);

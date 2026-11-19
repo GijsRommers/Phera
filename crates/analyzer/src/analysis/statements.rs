@@ -55,7 +55,9 @@ impl Analyzer<'_> {
             | StatementKind::DoWhile { .. }
             | StatementKind::For { .. }
             | StatementKind::Foreach { .. } => return self.iteration(statement, scope),
-            StatementKind::Const { attributes, items } => {
+            StatementKind::Const {
+                attributes, items, ..
+            } => {
                 self.check_attributes(attributes, scope);
                 for constant in items {
                     self.expression(&constant.value, scope, false);

@@ -13,10 +13,12 @@ pub struct Members {
     pub mixins: Vec<String>,
 }
 
-pub fn preceding(source: &str, offset: usize) -> Option<&str> {
-    let prefix = source.get(..offset)?.trim_end().strip_suffix("*/")?;
-    let (_, comment) = prefix.rsplit_once("/**")?;
-    (!comment.contains("*/")).then_some(comment)
+pub fn text(source: &str, span: Option<Span>) -> Option<&str> {
+    let span = span?;
+    source
+        .get(span.start..span.end)?
+        .strip_prefix("/**")?
+        .strip_suffix("*/")
 }
 
 fn tags(doc: &str) -> impl Iterator<Item = (&str, &str)> {
