@@ -31,6 +31,23 @@ pub fn register(registry: &mut Registry) {
         hooks: Some(&UNCOPYABLE_CONNECTION),
         ..ClassEntry::class("PDO")
     });
+    for (name, constants) in [
+        ("Pdo\\Pgsql", constants::PGSQL),
+        ("Pdo\\Mysql", constants::MYSQL),
+    ] {
+        registry.class(ClassEntry {
+            parent: Some("PDO"),
+            constants,
+            methods: PDO_METHODS,
+            ..ClassEntry::class(name)
+        });
+    }
+    registry.class(ClassEntry {
+        parent: Some("PDO"),
+        constants: crate::constants::SQLITE,
+        methods: SQLITE_METHODS,
+        ..ClassEntry::class("Pdo\\Sqlite")
+    });
     registry.class(ClassEntry {
         properties: const {
             &[PropertyEntry::new(
@@ -286,34 +303,3 @@ const SQLITE_METHODS: &[MethodEntry] = &[MethodEntry::public(
     &[Param::new("name", ParamType::String)],
     crate::drivers::sqlite::methods::load,
 )];
-
-/// `Pdo\Mysql`, the class of a MySQL connection. It belongs to the
-/// `pdo_mysql` extension, as in PHP.
-pub(crate) fn register_mysql(registry: &mut Registry) {
-    registry.class(ClassEntry {
-        parent: Some("PDO"),
-        constants: constants::MYSQL,
-        methods: PDO_METHODS,
-        ..ClassEntry::class("Pdo\\Mysql")
-    });
-}
-
-/// `Pdo\Pgsql`, the class of a PostgreSQL connection (`pdo_pgsql`).
-pub(crate) fn register_pgsql(registry: &mut Registry) {
-    registry.class(ClassEntry {
-        parent: Some("PDO"),
-        constants: constants::PGSQL,
-        methods: PDO_METHODS,
-        ..ClassEntry::class("Pdo\\Pgsql")
-    });
-}
-
-/// `Pdo\Sqlite`, the class of a SQLite connection (`pdo_sqlite`).
-pub(crate) fn register_sqlite(registry: &mut Registry) {
-    registry.class(ClassEntry {
-        parent: Some("PDO"),
-        constants: constants::SQLITE,
-        methods: SQLITE_METHODS,
-        ..ClassEntry::class("Pdo\\Sqlite")
-    });
-}

@@ -94,9 +94,6 @@ impl Runtime {
         registry.load(&phera_ext_mbstring::Mbstring);
         registry.load(&phera_ext_pcre::Pcre);
         registry.load(&phera_ext_pdo::Pdo);
-        registry.load(&phera_ext_pdo::PdoMysql);
-        registry.load(&phera_ext_pdo::PdoPgsql);
-        registry.load(&phera_ext_pdo::PdoSqlite);
         registry.load(&phera_ext_sqlite3::Sqlite3);
         registry.load(&phera_ext_redis::Redis);
         registry.load(&phera_ext_http::Http);
