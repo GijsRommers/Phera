@@ -108,7 +108,7 @@ jobs:
         with:
           php-version: '8.5'
           extensions: >-
-            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, libxml, dom,
+            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, sodium, libxml, dom,
             timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
@@ -190,7 +190,7 @@ jobs:
         with:
           php-version: '8.5'
           extensions: >-
-            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, libxml, dom,
+            json, pcre, ctype, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, sodium, libxml, dom,
             timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:

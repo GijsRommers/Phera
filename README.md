@@ -21,6 +21,8 @@ to work.
 > place and the lexer is complete, but the parser is just getting started. It
 > can't run PHP yet.
 
+PHP’s `sodium` module provides binary encodings with Sodium’s base64 variants and `SodiumException`.
+
 ## ✨ Goals
 
 - 🐘 **Framework-driven scope.** If Symfony and Laravel need it, it's in. If nothing modern uses it, it probably isn't.

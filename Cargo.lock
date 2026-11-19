@@ -1076,6 +1076,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "hkdf"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2247,6 +2253,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-sodium"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "hex",
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-spl"
 version = "0.1.0"
 dependencies = [
@@ -2369,6 +2384,7 @@ dependencies = [
  "phera-ext-reflection",
  "phera-ext-serialize",
  "phera-ext-session",
+ "phera-ext-sodium",
  "phera-ext-spl",
  "phera-ext-sqlite3",
  "phera-ext-standard",

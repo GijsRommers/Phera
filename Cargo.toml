@@ -77,7 +77,9 @@ phera-ext-mbstring = { path = "crates/extensions/mbstring" }
 iconv-native = "0.1"
 encoding_rs = "0.8.35"
 base64 = "0.22"
+hex = "0.4"
 phera-ext-json = { path = "crates/extensions/json" }
+phera-ext-sodium = { path = "crates/extensions/sodium" }
 phera-ext-openssl = { path = "crates/extensions/openssl" }
 phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-sqlite = { path = "crates/sqlite" }
