@@ -113,7 +113,8 @@ fn hook_list(
                 indent(output, depth + 1);
                 output.extend_from_slice(before.trim_ascii().strip_suffix(b"=>")?.trim_ascii_end());
                 output.extend_from_slice(b" => ");
-                output.extend_from_slice(slice(source, expression.span)?.trim_ascii());
+                let body = source.get(expression.span.start..hook.span.end)?;
+                output.extend_from_slice(body.trim_ascii().strip_suffix(b";")?.trim_ascii_end());
                 output.extend_from_slice(b";\n");
             }
             HookBody::Block(statements) => block(output, source, hook.span, statements, depth + 1)?,

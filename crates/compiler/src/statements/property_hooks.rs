@@ -169,7 +169,8 @@ impl Compiler<'_> {
                 return_type: if setter { None } else { declaration.ty },
                 body: FunctionBody::Statements(&[]),
             };
-            let mut body = self.function_builder(&source, &hook_name, &[], line)?;
+            let definition_line = self.lines.line(hook.name.span.start);
+            let mut body = self.function_builder(&source, &hook_name, &[], definition_line)?;
             body.function.metadata.declaration = body.declaration_metadata(
                 source.attributes,
                 source.span,

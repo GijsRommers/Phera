@@ -394,7 +394,13 @@ impl Vm {
                 | flags(class.is_readonly, 65536),
             is_abstract: class.is_abstract
                 || kind == ReflectedClassKind::Interface
-                    && class.methods.values().any(|method| method.is_abstract),
+                    && (class.methods.values().any(|method| method.is_abstract)
+                        || class.defaults.iter().any(|property| {
+                            property
+                                .hooks
+                                .as_ref()
+                                .is_some_and(|hooks| hooks.methods().any(|hook| hook.is_abstract))
+                        })),
             instantiable: concrete && constructor_public && class.origin != ClassOrigin::Closure,
             cloneable,
             iterable: concrete && class.is_a("Traversable"),
