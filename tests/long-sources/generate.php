@@ -116,6 +116,15 @@ $shapes = [
     'parameters-wide' => fn ($n) => 'function f(' . numbered('$p# = #', $n, ', ') . ') { return $p' . ($n - 1) . '; } echo f();',
     'attributes-wide' => fn ($n) => '#[' . chain('A', ', ', 'A', $n - 1) . '] function f() { return "ok"; } echo f();',
 
+    // Attributes and constant expressions, read back through reflection.
+    'class-attributes-wide' => fn ($n) => str_repeat('#[A] ', $n) . 'class C {} echo count((new ReflectionClass("C"))->getAttributes());',
+    'attribute-arguments-wide' => fn ($n) => '#[A(' . chain('1', ', ', '1', $n - 1) . ')] class C {} echo count((new ReflectionClass("C"))->getAttributes()[0]->getArguments());',
+    'attribute-argument-nested' => fn ($n) => '#[A(' . str_repeat('[', $n) . '1' . str_repeat(']', $n) . ')] class C {} echo count((new ReflectionClass("C"))->getAttributes()[0]->getArguments());',
+    'attribute-argument-chain' => fn ($n) => '#[A(' . chain('1', ' + ', '1', $n) . ')] class C {} echo (new ReflectionClass("C"))->getAttributes()[0]->getArguments()[0];',
+    'class-constant-chain' => fn ($n) => 'class C { const K = ' . chain('1', ' + ', '1', $n) . '; } echo C::K;',
+    'property-default-chain' => fn ($n) => 'class C { public $p = ' . chain('1', ' + ', '1', $n) . '; } echo (new C)->p;',
+    'parameter-default-chain' => fn ($n) => 'function f($p = ' . chain('1', ' + ', '1', $n) . ') { return $p; } echo f();',
+
     // Classes.
     'class-methods' => fn ($n) => 'class C { ' . numbered('function m#() { return #; }', $n, ' ') . ' } echo (new C)->m' . ($n - 1) . '();',
     'class-constants' => fn ($n) => 'class C { ' . numbered('const K# = #;', $n, ' ') . ' } echo C::K' . ($n - 1) . ';',

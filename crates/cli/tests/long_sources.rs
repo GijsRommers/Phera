@@ -88,6 +88,14 @@ const CASES: &[(&str, usize, Expect)] = &[
     ("parameters-wide", 10_000, SameAsPhp),
     ("functions", 20_000, SameAsPhp),
     ("class-constants", 10_000, SameAsPhp),
+    // Attributes and constant expressions, read back through reflection.
+    ("class-attributes-wide", 100_000, SameAsPhp),
+    ("attribute-arguments-wide", 100_000, SameAsPhp),
+    ("attribute-argument-chain", 100_000, SameAsPhp),
+    ("class-constant-chain", 100_000, SameAsPhp),
+    ("property-default-chain", 100_000, SameAsPhp),
+    ("parameter-default-chain", 100_000, SameAsPhp),
+    ("attribute-argument-nested", 1_000, SameAsPhp),
     // Nesting that PHP accepts at a thousand levels was a nesting error.
     ("coalesce", 1_000, SameAsPhp),
     ("power", 1_000, SameAsPhp),
@@ -124,6 +132,7 @@ const CASES: &[(&str, usize, Expect)] = &[
     ("calls-nested", 10_000, NestingError),
     ("if-nested", 10_000, NestingError),
     ("closures-nested", 10_000, NestingError),
+    ("attribute-argument-nested", 10_000, NestingError),
 ];
 
 fn repository() -> PathBuf {

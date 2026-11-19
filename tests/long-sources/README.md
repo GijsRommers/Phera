@@ -6,7 +6,7 @@ far larger than anything written by hand. These tools check that Phera
 compiles and runs such sources as PHP does, and never overflows the Rust
 stack on them.
 
-- `generate.php` builds one of 76 shapes at a given size and prints the
+- `generate.php` builds one of 83 shapes at a given size and prints the
   source. Every source prints a short result, so outputs can be compared.
 
       php -n tests/long-sources/generate.php --list
@@ -19,7 +19,7 @@ stack on them.
       tests/long-sources/table.py --phera target/release/phera
       tests/long-sources/table.py --phera target/debug/phera --sizes 1000,10000 --only add,concat
 
-- `crates/cli/tests/long_sources.rs` runs 78 cases of the generator in the
+- `crates/cli/tests/long_sources.rs` runs 86 cases of the generator in the
   test suite, against real PHP; `tests/fixtures/long-sources/` holds `.phpt`
   files for behaviours with a fixed small output.
 
@@ -85,7 +85,6 @@ their length.
 - One function has at most 65,534 registers, so at most that many distinct
   variables: `global $g0, ..., $g99999;` or a 100,000-variable `list()` stop
   with "Phera register limit exceeded" where PHP runs them.
-- Attributes are not supported by the compiler yet, at any length.
 - Memory: a 1,000,000-term chain peaks at 594 MB where PHP needs 86 MB, and a
   1,000,000-statement file at 896 MB against 141 MB. A `Statement` is 336
   bytes and an `Expression` 96, each in its own box; boxing the large
