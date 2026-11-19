@@ -178,6 +178,7 @@ impl Vm {
             }
             MethodBody::Native(entry) => {
                 reflected.parameters = native_parameters(entry.params);
+                reflected.deprecated = entry.is_deprecated;
                 reflected.extension = self
                     .reflection_class_module(&method.declaring)
                     .map(str::to_owned);

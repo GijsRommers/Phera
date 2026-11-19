@@ -49,6 +49,12 @@ pub enum PropertyView {
 /// One context belongs to one running request. The VM implements it; tests use
 /// [`crate::testing::TestContext`].
 pub trait Context {
+    /// The PHP behavior used for this project, including diagnostics such as
+    /// the exception from `sprintf("%\0", 1)`.
+    fn language_level(&self) -> crate::LanguageLevel {
+        crate::LanguageLevel::default()
+    }
+
     /// Appends to the request's output, as `echo` does.
     fn write(&mut self, bytes: &[u8]);
 

@@ -195,7 +195,8 @@ impl Registry {
         );
     }
 
-    fn register_constant(
+    /// Registers a native constant with its optional read-time deprecation.
+    pub fn register_constant(
         &mut self,
         name: &str,
         value: ConstantValue,

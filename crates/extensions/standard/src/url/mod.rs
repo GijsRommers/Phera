@@ -4,18 +4,20 @@ mod build;
 mod parse;
 pub mod query;
 
-use phera_extension_api::Registry;
+use phera_extension_api::{Change, Registry};
 
 pub(super) fn register(registry: &mut Registry) {
-    let query = if registry
-        .level()
-        .has(phera_extension_api::Change::ParseStrRejectsNul)
-    {
+    let query = if registry.level().has(Change::ParseStrRejectsNul) {
         query::STRICT_ENTRY
     } else {
         query::ENTRY
     };
-    for entry in [parse::ENTRY, query, build::ENTRY] {
+    let build = if registry.level().has(Change::BuildQueryObjectsDeprecated) {
+        build::DEPRECATED_OBJECTS_ENTRY
+    } else {
+        build::ENTRY
+    };
+    for entry in [parse::ENTRY, query, build] {
         registry.function(entry);
     }
     for (index, (name, _)) in parse::COMPONENTS.iter().enumerate() {

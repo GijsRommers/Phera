@@ -19,8 +19,13 @@ pub(super) const ENTRY: FunctionEntry = FunctionEntry::sync(
             .optional(),
         Param::new("encoding_type", ParamType::Int).optional(),
     ],
-    build,
+    build::<false>,
 );
+
+pub(super) const DEPRECATED_OBJECTS_ENTRY: FunctionEntry = FunctionEntry {
+    handler: phera_extension_api::NativeFn::Sync(build::<true>),
+    ..ENTRY
+};
 
 /// The frames own their arrays so that traversal never borrows through PHP references.
 struct Frame {
@@ -55,10 +60,19 @@ impl Frame {
     }
 }
 
-fn build(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn build<const DEPRECATE_OBJECTS: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
     let Some(root) = Frame::new(args::value(arguments, 0), 0) else {
         return Ok(Value::from(""));
     };
+    if DEPRECATE_OBJECTS && matches!(root.identity, Identity::Object(_)) {
+        context.deprecated(concat!(
+            "http_build_query(): Passing an object for argument #1 $data to http_build_query() ",
+            "is deprecated, call get_object_vars() first instead"
+        ).into());
+    }
     let numeric_prefix = args::bytes(arguments, 1);
     let separator = args::string(arguments, 2).cloned().unwrap_or_else(|| {
         context
@@ -120,6 +134,16 @@ fn build(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         }
 
         if let Some(child) = Frame::new(&value, previous) {
+            if DEPRECATE_OBJECTS && matches!(child.identity, Identity::Object(_)) {
+                context.deprecated(
+                    concat!(
+                        "http_build_query(): object values within argument #1 $data to ",
+                        "http_build_query() being interpreted as arrays is deprecated, instead ",
+                        "the $data argument should be preprocessed with get_object_vars()"
+                    )
+                    .into(),
+                );
+            }
             if active.insert(child.identity) {
                 drop(value);
                 frames.push(child);

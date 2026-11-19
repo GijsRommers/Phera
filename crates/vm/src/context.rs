@@ -23,6 +23,10 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn language_level(&self) -> phera_extension_api::LanguageLevel {
+        self.registry.level()
+    }
+
     fn reflection(
         &mut self,
     ) -> Option<&mut dyn phera_extension_api::reflection::ReflectionContext> {

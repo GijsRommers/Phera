@@ -14,9 +14,10 @@ mod trig;
 
 pub(crate) fn register(registry: &mut Registry) {
     registry.function_at(Availability::Since86, clamp::ENTRY);
+    let base = base::functions(registry.level());
     let modules = [
         aggregate::FUNCTIONS,
-        base::FUNCTIONS,
+        &base,
         basic::FUNCTIONS,
         minmax::FUNCTIONS,
         misc::FUNCTIONS,

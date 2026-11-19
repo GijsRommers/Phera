@@ -123,8 +123,14 @@ pub(crate) fn register(registry: &mut Registry) {
         ("ARRAY_FILTER_USE_BOTH", ARRAY_FILTER_USE_BOTH),
         ("ARRAY_FILTER_USE_KEY", ARRAY_FILTER_USE_KEY),
     ];
+    let locale_deprecated = registry
+        .level()
+        .has(phera_extension_api::Change::SortLocaleStringDeprecated);
     for (name, value) in flags.into_iter().chain(OTHER_FLAGS.iter().copied()) {
-        registry.constant(name, value);
+        let deprecation = (locale_deprecated && name == "SORT_LOCALE_STRING").then_some(
+            "Constant SORT_LOCALE_STRING is deprecated since 8.6, use one of the Collator::*sort*() methods instead",
+        );
+        registry.register_constant(name, value.into(), deprecation);
     }
     for &(name, value) in MATH {
         registry.constant(name, value);

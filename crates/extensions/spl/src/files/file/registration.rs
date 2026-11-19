@@ -179,6 +179,6 @@ fn register_csv_deprecations(registry: &mut Registry) {
         })
         .tentative_return("array"),
     ] {
-        registry.method_at(Availability::Since86, FILE, entry);
+        registry.method_at(Availability::Since86, FILE, entry.deprecated());
     }
 }

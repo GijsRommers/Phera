@@ -15,6 +15,17 @@ pub enum LanguageLevel {
 /// A change to an operation that exists at both language levels.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Change {
+    /// PHP includes the NUL byte in the error for a NUL format specifier.
+    FormatIncludesNulInError,
+    /// Passing an object as the $data argument to http_build_query() is now
+    /// deprecated. The interpretation of object values within $data as arrays
+    /// is also deprecated.
+    BuildQueryObjectsDeprecated,
+    /// base_convert(), bindec(), hexdec() and octdec() now raise a notice when
+    /// they cannot precisely convert the given number.
+    BaseConversionOverflowNotice,
+    /// The SORT_LOCALE_STRING constant for the family of sort functions is now deprecated.
+    SortLocaleStringDeprecated,
     /// ReflectionParameter::getDocComment()
     ReflectionParameterDocComments,
     /// The listed DateTime, DateTimeImmutable, DateTimeZone, DateInterval, and
@@ -26,6 +37,10 @@ pub enum Change {
     /// The following SplFileObject methods are now deprecated: fgetcsv(),
     /// fputcsv(), setCsvControl(), and getCsvControl().
     SplFileObjectCsvMethodsDeprecated,
+    /// The following ArrayIterator methods are now deprecated: getFlags(),
+    /// setFlags(), asort(), ksort(), uasort(), uksort(), natsort(),
+    /// natcasesort(), unserialize(), and serialize().
+    ArrayIteratorMethodsDeprecated,
     /// The spl_classes() function is now deprecated.
     SplClassesDeprecated,
     /// The spl_object_hash() function is now deprecated.
@@ -143,10 +158,15 @@ impl LanguageLevel {
 
     pub const fn has(self, change: Change) -> bool {
         match change {
-            Change::ReflectionParameterDocComments
+            Change::FormatIncludesNulInError
+            | Change::BuildQueryObjectsDeprecated
+            | Change::BaseConversionOverflowNotice
+            | Change::SortLocaleStringDeprecated
+            | Change::ReflectionParameterDocComments
             | Change::DateTentativeStaticReturnTypes
             | Change::DirectoryIteratorReturnTypes
             | Change::SplFileObjectCsvMethodsDeprecated
+            | Change::ArrayIteratorMethodsDeprecated
             | Change::SplClassesDeprecated
             | Change::SplObjectHashDeprecated
             | Change::ReflectionSetValueOtherClassDeprecated

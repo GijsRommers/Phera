@@ -28,6 +28,7 @@ use crate::{
 /// without a VM, so [`Context::call`] fails.
 #[derive(Default)]
 pub struct TestContext {
+    pub language_level: crate::LanguageLevel,
     pub output: Vec<u8>,
     pub diagnostics: CollectDiagnostics,
     pub strict_types: bool,
@@ -36,6 +37,10 @@ pub struct TestContext {
 }
 
 impl Context for TestContext {
+    fn language_level(&self) -> crate::LanguageLevel {
+        self.language_level
+    }
+
     fn write(&mut self, bytes: &[u8]) {
         self.output.extend_from_slice(bytes);
     }

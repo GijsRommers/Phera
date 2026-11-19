@@ -49,4 +49,3 @@ fixtures/serialize/malformed.phpt	unserialize() diagnoses empty input and handle
 fixtures/spl/weak_map_references.phpt	WeakMap reference assignment can create a key
 fixtures/traits/trait-alias-keeps-identity.phpt	class_uses() reports the alias for an aliased trait
 fixtures/types/weak-scalar-conversion.phpt	Calling a function named is
-fixtures/url/build_query_objects.phpt	Object input to http_build_query()

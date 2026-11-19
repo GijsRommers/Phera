@@ -107,6 +107,8 @@ pub struct MethodEntry {
     pub is_static: bool,
     /// Subclasses may not override it.
     pub is_final: bool,
+    /// Reflection reports that this native method is deprecated.
+    pub is_deprecated: bool,
     /// PHP's compatibility contract for an internal method.
     pub return_type: Option<MethodReturn>,
 }
@@ -135,6 +137,7 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
+            is_deprecated: false,
             return_type: None,
         }
     }
@@ -156,6 +159,7 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
+            is_deprecated: false,
             return_type: None,
         }
     }
@@ -174,6 +178,7 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
+            is_deprecated: false,
             return_type: None,
         }
     }
@@ -189,6 +194,7 @@ impl MethodEntry {
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
+            is_deprecated: false,
             return_type: None,
         }
     }
@@ -205,6 +211,12 @@ impl MethodEntry {
 
     pub const fn with_direct(mut self, handler: DirectMethod) -> Self {
         self.direct = Some(handler);
+        self
+    }
+
+    /// Marks methods like `ArrayIterator::getFlags()` as deprecated in reflection.
+    pub const fn deprecated(mut self) -> Self {
+        self.is_deprecated = true;
         self
     }
 

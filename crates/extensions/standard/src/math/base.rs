@@ -2,19 +2,31 @@
 //! relatives, and `fpow`.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
+    Change, Context, FunctionEntry, LanguageLevel, NativeError, NativeFn, NativeResult, Param,
+    ParamType, Value, args,
 };
 
-pub(super) const FUNCTIONS: &[FunctionEntry] = &[
-    DECHEX,
-    DECBIN,
-    DECOCT,
-    HEXDEC,
-    BINDEC,
-    OCTDEC,
-    BASE_CONVERT,
-    FPOW,
-];
+pub(super) fn functions(level: LanguageLevel) -> [FunctionEntry; 8] {
+    let notice = level.has(Change::BaseConversionOverflowNotice);
+    let select = |entry: FunctionEntry, updated| {
+        let handler = if notice {
+            NativeFn::Sync(updated)
+        } else {
+            entry.handler
+        };
+        FunctionEntry { handler, ..entry }
+    };
+    [
+        DECHEX,
+        DECBIN,
+        DECOCT,
+        select(HEXDEC, hexdec::<true>),
+        select(BINDEC, bindec::<true>),
+        select(OCTDEC, octdec::<true>),
+        select(BASE_CONVERT, base_convert::<true>),
+        FPOW,
+    ]
+}
 
 const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -73,11 +85,18 @@ fn decoct(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 const HEXDEC: FunctionEntry = FunctionEntry::sync(
     "hexdec",
     &[Param::new("hex_string", ParamType::String)],
-    hexdec,
+    hexdec::<false>,
 );
 
-fn hexdec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(parse(context, args::bytes(arguments, 0), 16))
+fn hexdec<const OVERFLOW_NOTICE: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
+    Ok(parse::<OVERFLOW_NOTICE>(
+        context,
+        args::bytes(arguments, 0),
+        16,
+    ))
 }
 
 /// `bindec(string $binary_string): int|float`, a float once the number passes
@@ -89,11 +108,18 @@ fn hexdec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 const BINDEC: FunctionEntry = FunctionEntry::sync(
     "bindec",
     &[Param::new("binary_string", ParamType::String)],
-    bindec,
+    bindec::<false>,
 );
 
-fn bindec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(parse(context, args::bytes(arguments, 0), 2))
+fn bindec<const OVERFLOW_NOTICE: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
+    Ok(parse::<OVERFLOW_NOTICE>(
+        context,
+        args::bytes(arguments, 0),
+        2,
+    ))
 }
 
 /// `octdec(string $octal_string): int|float`, a float once the number passes
@@ -105,11 +131,18 @@ fn bindec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 const OCTDEC: FunctionEntry = FunctionEntry::sync(
     "octdec",
     &[Param::new("octal_string", ParamType::String)],
-    octdec,
+    octdec::<false>,
 );
 
-fn octdec(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    Ok(parse(context, args::bytes(arguments, 0), 8))
+fn octdec<const OVERFLOW_NOTICE: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
+    Ok(parse::<OVERFLOW_NOTICE>(
+        context,
+        args::bytes(arguments, 0),
+        8,
+    ))
 }
 
 /// `base_convert(string $num, int $from_base, int $to_base): string`
@@ -126,7 +159,7 @@ const BASE_CONVERT: FunctionEntry = FunctionEntry::sync(
         Param::new("from_base", ParamType::Int),
         Param::new("to_base", ParamType::Int),
     ],
-    base_convert,
+    base_convert::<false>,
 );
 
 /// `fpow(float $num, float $exponent): float`, new in PHP 8.4: IEEE power,
@@ -166,7 +199,11 @@ fn integer_digits(mut number: u64, base: u64) -> String {
 
 /// Invalid characters are skipped but cause one deprecation per conversion.
 /// Overflow intentionally switches to floating arithmetic, matching the runtime.
-fn parse(context: &mut dyn Context, string: &[u8], base: i64) -> Value {
+fn parse<const OVERFLOW_NOTICE: bool>(
+    context: &mut dyn Context,
+    string: &[u8],
+    base: i64,
+) -> Value {
     let string = strip_prefix(string, base);
     let mut number = ParsedNumber::Integer(0);
     let mut invalid = false;
@@ -176,6 +213,11 @@ fn parse(context: &mut dyn Context, string: &[u8], base: i64) -> Value {
             continue;
         };
         number = number.append(i64::from(digit), base);
+    }
+    if OVERFLOW_NOTICE && matches!(number, ParsedNumber::Floating(_)) {
+        context.diagnostics().notice(
+            "Input number is larger than PHP_INT_MAX, precision has been lost in conversion".into(),
+        );
     }
     if invalid {
         context.deprecated(
@@ -189,7 +231,10 @@ fn parse(context: &mut dyn Context, string: &[u8], base: i64) -> Value {
 }
 
 /// Overflow uses floating radix division, intentionally retaining PHP precision loss.
-fn base_convert(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn base_convert<const OVERFLOW_NOTICE: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
     let from = args::int(arguments, 1).unwrap_or_default();
     let to = args::int(arguments, 2).unwrap_or_default();
     for (base, index, name) in [(from, 2, "from_base"), (to, 3, "to_base")] {
@@ -199,7 +244,7 @@ fn base_convert(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
             )));
         }
     }
-    match parse(context, args::bytes(arguments, 0), from) {
+    match parse::<OVERFLOW_NOTICE>(context, args::bytes(arguments, 0), from) {
         Value::Int(number) => Ok(Value::from(integer_digits(number as u64, to as u64))),
         Value::Float(mut number) => {
             if !number.is_finite() {

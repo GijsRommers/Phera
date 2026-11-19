@@ -76,7 +76,17 @@ impl Specifier {
             b'e' | b'E' | b'f' | b'F' | b'g' | b'G' | b'h' | b'H' => {
                 return self.convert_float(context, value, name, result);
             }
-            0 => return Err(NativeError::value_error("Unknown format specifier \"")),
+            0 => {
+                let message = if context
+                    .language_level()
+                    .has(phera_extension_api::Change::FormatIncludesNulInError)
+                {
+                    "Unknown format specifier \"\0\""
+                } else {
+                    "Unknown format specifier \""
+                };
+                return Err(NativeError::value_error(message));
+            }
             _ => {
                 return Err(NativeError::value_error(format!(
                     "Unknown format specifier \"{}\"",

@@ -727,7 +727,10 @@ function invoke($name,$args){global $diag;$diag='';$refs=[];if(in_array($name,['
     let mut failures = Vec::new();
     let mut tolerant_comparisons = std::collections::BTreeMap::new();
     for ((name, a), expected) in cases.iter().zip(lines) {
-        let mut c = TestContext::default();
+        let mut c = TestContext {
+            language_level: registry.level(),
+            ..TestContext::default()
+        };
         let result = call(&registry, &mut c, name, a.clone());
         let mut actual = match result {
             Ok(v) => oracle::encode(&v),

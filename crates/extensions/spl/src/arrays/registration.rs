@@ -5,8 +5,8 @@
 //! ```
 
 use phera_extension_api::{
-    ClassEntry, ClassHooks, ConstantValue, MethodEntry as Method, NativeClone, Param, ParamType,
-    Registry,
+    Availability, Change, ClassEntry, ClassHooks, ConstantValue, Context, MethodEntry as Method,
+    MethodPreparation, NativeClone, Param, ParamType, Registry,
 };
 
 use super::{
@@ -136,6 +136,7 @@ pub(crate) fn register(registry: &mut Registry) {
         },
         ..ClassEntry::class(ITERATOR)
     });
+    register_iterator_deprecations(registry);
     registry.class(ClassEntry {
         interfaces: &[
             "IteratorAggregate",
@@ -188,4 +189,39 @@ pub(crate) fn register(registry: &mut Registry) {
         },
         ..ClassEntry::class(RECURSIVE)
     });
+}
+
+/// Retain the shared ArrayObject implementations, but warn when called through
+/// ArrayIterator, including subclass calls such as `(new RecursiveArrayIterator)->getFlags()`.
+fn register_iterator_deprecations(registry: &mut Registry) {
+    if !registry.level().has(Change::ArrayIteratorMethodsDeprecated) {
+        return;
+    }
+    for method in COMMON {
+        let prepare: phera_extension_api::PrepareMethod = match method.name {
+            "getFlags" => |c, _, _| Ok(deprecated(c, "getFlags")),
+            "setFlags" => |c, _, _| Ok(deprecated(c, "setFlags")),
+            "asort" => |c, _, _| Ok(deprecated(c, "asort")),
+            "ksort" => |c, _, _| Ok(deprecated(c, "ksort")),
+            "uasort" => |c, _, _| Ok(deprecated(c, "uasort")),
+            "uksort" => |c, _, _| Ok(deprecated(c, "uksort")),
+            "natsort" => |c, _, _| Ok(deprecated(c, "natsort")),
+            "natcasesort" => |c, _, _| Ok(deprecated(c, "natcasesort")),
+            "serialize" => |c, _, _| Ok(deprecated(c, "serialize")),
+            "unserialize" => |c, _, _| Ok(deprecated(c, "unserialize")),
+            _ => continue,
+        };
+        registry.method_at(
+            Availability::Since86,
+            ITERATOR,
+            method.with_preparation(prepare).deprecated(),
+        );
+    }
+}
+
+fn deprecated(context: &mut dyn Context, name: &str) -> MethodPreparation {
+    context.deprecated(format!(
+        "Method ArrayIterator::{name}() is deprecated since 8.6"
+    ));
+    MethodPreparation::Default
 }

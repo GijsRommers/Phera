@@ -8,19 +8,23 @@ use phera_extension_api::{Extension, Registry, Value};
 fn every_registered_constant_matches_php() {
     let mut registry = Registry::for_level(phera_extension_api::testing::oracle::test_level());
     Standard.register(&mut registry);
-    let mut entries: Vec<_> = registry.constants().collect();
-    entries.sort_by_key(|(name, _)| *name);
+    let mut entries: Vec<_> = registry.constant_entries().collect();
+    entries.sort_by_key(|(name, _, _)| *name);
     let mut script = format!("<?php\n{}", oracle::PHP_PREAMBLE);
     let mut labels = Vec::new();
     let mut rust = Vec::new();
-    for (name, value) in entries {
+    for (name, value, deprecation) in entries {
         labels.push(name.to_string());
         script.push_str(&format!("run('{name}', fn() => constant('{name}'));\n"));
+        let mut diagnostics = phera_extension_api::value::CollectDiagnostics::default();
+        if let Some(message) = deprecation {
+            phera_extension_api::Diagnostics::deprecated(&mut diagnostics, message.into());
+        }
         rust.push(oracle::encode_case(
             name,
             &Ok(value.to_value()),
             &[],
-            &phera_extension_api::value::CollectDiagnostics::default(),
+            &diagnostics,
         ));
     }
     let php = oracle::run_php("standard_constants", &script).expect("PHP oracle required");
