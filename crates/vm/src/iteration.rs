@@ -270,15 +270,13 @@ pub(crate) fn snapshot_step(
     };
     state.position = position;
     state.started = true;
-    let value = match position {
-        Some(position) => match array.entry_at(position) {
-            Some((_, value)) => Some(crate::fast::duplicate(&value.deref())),
-            None => None,
-        },
+    let entry = match position {
+        Some(position) => array.entry_at(position),
         None => None,
     };
-    match value {
-        Some(value) => {
+    match entry {
+        Some((_, value)) => {
+            let value = crate::fast::duplicate(&value.deref());
             if let Some(slot) = slots.get_mut(destination.index()) {
                 *slot = Some(value);
             }
