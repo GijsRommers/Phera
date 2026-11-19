@@ -111,7 +111,7 @@ async fn unavailable_builtin_names_keep_user_function_binding() {
     assert!(expected.status.success());
 
     let registry = Arc::new(phera_extension_api::Registry::new());
-    let unit = crate::cache::CodeCache::new(registry.clone())
+    let unit = crate::cache::CodeCache::new(registry.clone(), crate::cache::FileMode::Cli)
         .compile(file)
         .await
         .unwrap();
