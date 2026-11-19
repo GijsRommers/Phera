@@ -99,7 +99,8 @@ pub(super) fn mutate(
             let value = stringify(context, value)?;
             let name = Name::new(if name == "id" { "id" } else { "class" });
             let mut state = location.shared.borrow_mut();
-            attributes::set(&mut state.document.arena, location.id, name, value)?;
+            let html = state.document.settings.html;
+            attributes::set(&mut state.document.arena, location.id, name, value, html)?;
         }
         "prefix" => {
             let prefix = stringify(context, value)?;

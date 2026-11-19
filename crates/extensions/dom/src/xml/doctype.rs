@@ -31,7 +31,10 @@ impl Parser<'_> {
             .strip_prefix('[')
             .and_then(|value| value.strip_suffix(']'))
         {
-            doctype.internal_subset = Some(self.read_subset(id, subset, &mut doctype.notations));
+            let declarations = self.read_subset(id, subset, &mut doctype.notations);
+            if !declarations.is_empty() {
+                doctype.internal_subset = Some(declarations);
+            }
         }
         self.document.arena[id].doctype = Some(Box::new(doctype));
         self.doctype = true;

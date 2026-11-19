@@ -23,9 +23,11 @@ use super::{This, factory, mutation, this_node};
 fn has_children(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
     let node = this_node(this)?;
     let state = node.shared.borrow();
-    Ok(Value::Bool(
-        state.document.arena[node.id].first_child().is_some(),
-    ))
+    let arena = &state.document.arena;
+    if arena[node.id].kind == Kind::EntityReference {
+        return Ok(Value::Bool(arena.reference_declaration(node.id).is_some()));
+    }
+    Ok(Value::Bool(arena[node.id].first_child().is_some()))
 }
 
 fn has_attributes(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {

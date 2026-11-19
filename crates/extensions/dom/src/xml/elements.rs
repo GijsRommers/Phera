@@ -56,9 +56,11 @@ impl Parser<'_> {
                     "Unescaped '<' not allowed in attributes values",
                 ));
             }
-            let value = self.entities.attribute(raw)?;
+            let value = self
+                .entities
+                .attribute(raw, self.options.substitute_entities)?;
             if let Some(prefix) = namespace_declaration(name) {
-                let previous = self.scope.insert(prefix.into(), value.clone());
+                let previous = self.scope.insert(prefix.into(), value.text.clone());
                 scope_changes.push((prefix.into(), previous));
             }
             let attribute = (Cow::Borrowed(name), value);
@@ -79,7 +81,8 @@ impl Parser<'_> {
                 {
                     attributes.push((
                         Cow::Owned(rule.name.clone()),
-                        self.entities.attribute(value)?,
+                        self.entities
+                            .attribute(value, self.options.substitute_entities)?,
                     ));
                 }
             }
@@ -122,9 +125,17 @@ impl Parser<'_> {
                     .get(local_tag)
                     .iter()
                     .any(|rule| rule.is_id && rule.name == key);
-            let mut attribute = Node::new(Kind::Attribute, name, value);
+            let parts = value.parts();
+            for part in &parts {
+                if part.kind == Kind::EntityReference {
+                    self.document
+                        .arena
+                        .materialize_entity(&part.name.local, &part.value);
+                }
+            }
+            let mut attribute = Node::new(Kind::Attribute, name, value.text);
             attribute.is_id = is_id;
-            let attribute = self.document.arena.attribute(attribute, true);
+            let attribute = self.document.arena.attribute_parts(attribute, parts);
             self.document
                 .arena
                 .set_attribute(id, attribute, None)

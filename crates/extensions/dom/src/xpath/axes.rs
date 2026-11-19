@@ -33,13 +33,14 @@ impl Eval<'_> {
                 .copied()
                 .filter(|&id| arena[id].name.namespace.as_deref() != Some(XMLNS))
                 .collect(),
-            Axis::Namespace => namespaces(arena, context),
+            Axis::Namespace => arena.xpath_namespaces(context).to_vec(),
             Axis::SelfNode => vec![context],
             Axis::Following => side(arena, context, false),
             Axis::Preceding => side(arena, context, true),
         };
         let principal = match step.axis {
-            Axis::Attribute | Axis::Namespace => Kind::Attribute,
+            Axis::Attribute => Kind::Attribute,
+            Axis::Namespace => Kind::Namespace,
             _ => Kind::Element,
         };
         let qualified = match &step.test {
@@ -57,6 +58,12 @@ impl Eval<'_> {
         };
         candidates.retain(|&id| {
             let node = &arena[id];
+            if node
+                .parent()
+                .is_some_and(|id| arena[id].kind == Kind::Entity)
+            {
+                return false;
+            }
             match &step.test {
                 Test::Node => !matches!(node.kind, Kind::Doctype | Kind::Entity | Kind::Notation),
                 Test::Any => node.kind == principal,
@@ -94,7 +101,7 @@ fn preceding_siblings(arena: &Arena, context: NodeId) -> impl Iterator<Item = No
 fn side(arena: &Arena, context: NodeId, reverse: bool) -> Vec<NodeId> {
     let mut output = Vec::new();
     if !reverse
-        && arena[context].kind == Kind::Attribute
+        && matches!(arena[context].kind, Kind::Attribute | Kind::Namespace)
         && let Some(parent) = arena[context].parent()
     {
         output.extend(arena.descendants(parent));
@@ -117,21 +124,6 @@ fn side(arena: &Arena, context: NodeId, reverse: bool) -> Vec<NodeId> {
     output
 }
 
-fn namespaces(arena: &Arena, context: NodeId) -> Vec<NodeId> {
-    if arena[context].kind != Kind::Element {
-        return Vec::new();
-    }
-    let mut seen = HashSet::new();
-    std::iter::once(context)
-        .chain(arena.ancestors(context))
-        .flat_map(|id| arena[id].attributes().iter().copied())
-        .filter(|&id| {
-            let node = &arena[id];
-            node.name.namespace.as_deref() == Some(XMLNS) && seen.insert(&node.name.local)
-        })
-        .collect()
-}
-
 pub(super) fn document_order(arena: &Arena, mut nodes: Vec<NodeId>) -> Vec<NodeId> {
     if nodes.len() > 1 {
         let mut seen = HashSet::new();
@@ -146,8 +138,10 @@ pub(super) fn document_order(arena: &Arena, mut nodes: Vec<NodeId>) -> Vec<NodeI
                 for child in arena.descendants(root) {
                     found.insert(child);
                     found.extend(arena[child].attributes());
+                    found.extend(arena.xpath_namespaces(child));
                 }
                 found.extend(arena[root].attributes());
+                found.extend(arena.xpath_namespaces(root));
                 roots.push(root);
             }
         }
@@ -159,7 +153,11 @@ pub(super) fn document_order(arena: &Arena, mut nodes: Vec<NodeId>) -> Vec<NodeI
                     indices.insert(node, order);
                     order += 1;
                 }
-                for &attribute in arena[node].attributes() {
+                for &attribute in arena
+                    .xpath_namespaces(node)
+                    .iter()
+                    .chain(arena[node].attributes())
+                {
                     if seen.contains(&attribute) {
                         indices.insert(attribute, order);
                         order += 1;

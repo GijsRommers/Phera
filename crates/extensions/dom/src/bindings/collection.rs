@@ -38,7 +38,7 @@ enum Selection {
 struct Collection {
     root: Location,
     selection: Selection,
-    _pin: Rc<()>,
+    _pins: Vec<Rc<()>>,
 }
 
 impl Collection {
@@ -46,6 +46,14 @@ impl Collection {
         let id = self.root.id;
         match &self.selection {
             Selection::Snapshot(nodes) => nodes.to_vec(),
+            Selection::Children if arena[id].kind == Kind::EntityReference => {
+                std::iter::successors(arena.reference_declaration(id), |&id| {
+                    arena[id]
+                        .next_sibling()
+                        .filter(|&id| arena[id].kind == Kind::Entity)
+                })
+                .collect()
+            }
             Selection::Children => arena
                 .children(id)
                 .filter(|&id| arena[id].kind != Kind::Notation)
@@ -130,11 +138,24 @@ fn wrap(
 ) -> NativeResult {
     let value = context.create_object(class, PhpArray::new())?;
     if let Value::Object(object) = &value {
-        let pin = root.shared.borrow_mut().pin(root.id);
+        let pins = {
+            let mut state = root.shared.borrow_mut();
+            let mut pins = vec![state.pin(root.id)];
+            if let Selection::Snapshot(nodes) = &selection {
+                let arena = &state.document.arena;
+                let owners: std::collections::HashSet<_> = nodes
+                    .iter()
+                    .filter(|&&id| arena[id].kind == Kind::Namespace)
+                    .filter_map(|&id| arena[id].parent())
+                    .collect();
+                pins.extend(owners.into_iter().map(|id| state.pin(id)));
+            }
+            pins
+        };
         *object.native.borrow_mut() = Some(Box::new(Collection {
             root,
             selection,
-            _pin: pin,
+            _pins: pins,
         }));
     }
     Ok(value)

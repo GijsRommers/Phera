@@ -128,7 +128,7 @@ fn node_name(arena: &Arena, id: NodeId, mode: &str) -> String {
     let node = &arena[id];
     if !matches!(
         node.kind,
-        Kind::Element | Kind::Attribute | Kind::ProcessingInstruction
+        Kind::Element | Kind::Attribute | Kind::Namespace | Kind::ProcessingInstruction
     ) {
         return String::new();
     }

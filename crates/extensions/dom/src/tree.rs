@@ -7,7 +7,9 @@
 //! ```
 
 mod attribute;
+mod entities;
 mod links;
+mod namespaces;
 mod walk;
 
 use std::ops::{Index, IndexMut};
@@ -22,6 +24,7 @@ pub struct NodeId(pub(crate) usize);
 pub enum Kind {
     Element,
     Attribute,
+    Namespace,
     Text,
     Cdata,
     EntityReference,
@@ -149,6 +152,7 @@ impl Node {
 pub struct Arena {
     nodes: Vec<Node>,
     revision: u64,
+    xpath_namespaces: Option<Box<namespaces::XPathNamespaces>>,
 }
 
 impl Default for Arena {
@@ -156,6 +160,7 @@ impl Default for Arena {
         Self {
             nodes: vec![Node::new(Kind::Document, Name::new("#document"), "")],
             revision: 0,
+            xpath_namespaces: None,
         }
     }
 }

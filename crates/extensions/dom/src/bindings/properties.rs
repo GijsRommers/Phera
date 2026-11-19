@@ -144,6 +144,7 @@ fn value(context: &mut dyn Context, location: &Location, property: &str) -> Nati
         "nodeType" => Value::Int(match node.kind {
             Kind::Element => 1,
             Kind::Attribute => 2,
+            Kind::Namespace => 18,
             Kind::Text => 3,
             Kind::Cdata => 4,
             Kind::EntityReference => 5,
@@ -242,6 +243,9 @@ fn related(location: &Location, property: &str) -> Option<Option<NodeId>> {
         }
         "ownerDocument" => (!matches!(node.kind, Kind::Document | Kind::Notation) && state.owned)
             .then_some(Arena::DOCUMENT),
+        "firstChild" | "lastChild" if node.kind == Kind::EntityReference => {
+            arena.reference_declaration(id)
+        }
         "firstChild" => node.first_child(),
         "lastChild" => node.last_child(),
         "firstElementChild" | "documentElement" => elements(arena, id).next(),

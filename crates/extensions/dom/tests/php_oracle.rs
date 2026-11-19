@@ -24,6 +24,11 @@ fn legacy_collection_and_mutation_edges() {
     compare("legacy_edges");
 }
 
+#[test]
+fn xpath_namespace_sets_and_callbacks() {
+    compare("xpath_namespaces");
+}
+
 fn compare(name: &str) {
     let Some(oracle) = Comparison::from_environment("dom") else {
         return;

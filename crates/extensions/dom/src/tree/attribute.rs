@@ -17,6 +17,18 @@ impl Arena {
         attribute
     }
 
+    pub(crate) fn attribute_parts(&mut self, node: Node, parts: Vec<Node>) -> NodeId {
+        if parts.is_empty() {
+            return self.attribute(node, true);
+        }
+        let attribute = self.allocate(node);
+        for child in parts {
+            let child = self.allocate(child);
+            self.link(attribute, child, None);
+        }
+        attribute
+    }
+
     pub(crate) fn assign_attribute(&mut self, attribute: NodeId, value: String) {
         while let Some(child) = self[attribute].first_child() {
             self.detach(child);

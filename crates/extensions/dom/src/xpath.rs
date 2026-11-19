@@ -42,11 +42,14 @@ impl Error {
 }
 
 pub fn evaluate(
-    arena: &Arena,
+    arena: &mut Arena,
     context: NodeId,
     namespaces: &HashMap<String, String>,
     expression: &str,
 ) -> Result<Value, Error> {
+    if uses_namespace_axis(expression) {
+        arena.prepare_xpath_namespaces(context);
+    }
     let expression = parser::parse(expression)?;
     Eval {
         arena,
@@ -56,6 +59,14 @@ pub fn evaluate(
         size: 1,
     }
     .run(&expression, 0)
+}
+
+pub(crate) fn uses_namespace_axis(expression: &str) -> bool {
+    expression.match_indices("namespace").any(|(start, token)| {
+        expression[start + token.len()..]
+            .trim_start()
+            .starts_with("::")
+    })
 }
 
 const LIMIT: usize = 64;

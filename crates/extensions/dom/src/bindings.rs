@@ -131,6 +131,7 @@ impl Location {
             match state.document.arena[self.id].kind {
                 Kind::Element => "DOMElement",
                 Kind::Attribute => "DOMAttr",
+                Kind::Namespace => "DOMNameSpaceNode",
                 Kind::Text => "DOMText",
                 Kind::Cdata => "DOMCdataSection",
                 Kind::Comment => "DOMComment",
@@ -197,13 +198,22 @@ fn text(arena: &Arena, id: NodeId) -> String {
             let mut text = String::new();
             for child in arena.descendants(id) {
                 let node = &arena[child];
-                if matches!(node.kind, Kind::Text | Kind::Cdata | Kind::EntityReference) {
-                    text.push_str(&node.value);
+                match node.kind {
+                    Kind::EntityReference => text.push_str(arena.reference_text(child)),
+                    Kind::Text | Kind::Cdata
+                        if node
+                            .parent()
+                            .is_none_or(|id| arena[id].kind != Kind::Entity) =>
+                    {
+                        text.push_str(&node.value);
+                    }
+                    _ => {}
                 }
             }
             text
         }
         Kind::Doctype | Kind::Entity | Kind::Notation => String::new(),
+        Kind::EntityReference => arena.reference_text(id).to_owned(),
         _ => arena[id].value.clone(),
     }
 }

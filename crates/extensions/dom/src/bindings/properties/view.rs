@@ -100,6 +100,7 @@ pub(in crate::bindings) fn view(
         Kind::Document => (DOCUMENT, &[]),
         Kind::Element => (ELEMENT, &[]),
         Kind::Attribute => (ATTRIBUTE, &[]),
+        Kind::Namespace => (&[], &[]),
         Kind::Text | Kind::Cdata => (&["wholeText"], DATA),
         Kind::Comment => (DATA, &[]),
         Kind::Fragment => (

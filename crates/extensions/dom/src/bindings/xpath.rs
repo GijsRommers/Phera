@@ -103,8 +103,8 @@ fn evaluate<'a>(
         let mut namespaces = state.namespaces;
         namespaces.insert("xml".into(), crate::xml::names::XML.into());
         let (result, arena, id) = {
-            let state_data = document.shared.borrow();
-            let original = &state_data.document.arena;
+            let mut state_data = document.shared.borrow_mut();
+            let original = &mut state_data.document.arena;
             let id = context_node.as_ref().map(|node| node.id);
             if state.auto && args::bool(&arguments, 2).unwrap_or(true) {
                 let element = id.or_else(|| {
@@ -122,6 +122,9 @@ fn evaluate<'a>(
             }
             let id = id.unwrap_or(Arena::DOCUMENT);
             if callbacks {
+                if xpath::uses_namespace_axis(&source) {
+                    original.prepare_xpath_namespaces(id);
+                }
                 (None, Some(original.clone()), id)
             } else {
                 (

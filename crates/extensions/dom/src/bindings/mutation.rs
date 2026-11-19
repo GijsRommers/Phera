@@ -114,10 +114,13 @@ pub(super) fn insert_nodes(
         }
         Ok(children.first().copied())
     } else if arena[child].kind == Kind::Attribute && arena[parent].kind == Kind::Element {
+        use super::attributes::namespaces::{AttributeBinding, bind};
+        let mut name = arena[child].name.clone();
+        bind(arena, parent, &mut name, AttributeBinding::Node);
         let existing = arena[parent].attributes().iter().copied().find(|&id| {
-            arena[id].name.local == arena[child].name.local
-                && arena[id].name.namespace == arena[child].name.namespace
+            arena[id].name.local == name.local && arena[id].name.namespace == name.namespace
         });
+        arena[child].name = name;
         arena
             .set_attribute(parent, child, existing)
             .map_err(link_error)?;

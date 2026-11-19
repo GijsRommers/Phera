@@ -205,6 +205,7 @@ impl<'a> Parser<'a> {
     fn reference(&mut self, name: &str, line: usize) -> Result<(), ParseError> {
         match self.entities.resolve(name) {
             Ok((value, true)) if !self.options.substitute_entities => {
+                self.document.arena.materialize_entity(name, &value);
                 self.add(Kind::EntityReference, name, &value, line)?;
             }
             Ok((value, _)) => self.text(&value, Kind::Text)?,

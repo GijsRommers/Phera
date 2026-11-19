@@ -9,9 +9,12 @@ mod reconciliation;
 
 pub(super) use reconciliation::reconcile;
 
+use std::rc::Rc;
+
 use phera_extension_api::{
-    ClassEntry, ClassHooks, Context, NativeError, NativePropertyAccess, NativePropertyMutation,
-    NativePropertyRead, NativeResult, Object, PhpArray, Registry, Value,
+    ArrayKey, ClassEntry, ClassHooks, Context, NativeError, NativePropertyAccess,
+    NativePropertyMutation, NativePropertyRead, NativeResult, Object, PhpArray, PropertyPurpose,
+    Registry, Value,
 };
 
 use crate::tree::{Arena, Kind, Node, NodeId};
@@ -37,6 +40,7 @@ pub(super) fn declare(arena: &mut Arena, element: NodeId, prefix: &str, uri: &st
 struct Declaration {
     node: Location,
     parent: NodeId,
+    _pin: Rc<()>,
 }
 
 pub(super) fn wrap(context: &mut dyn Context, node: Location) -> NativeResult {
@@ -44,7 +48,9 @@ pub(super) fn wrap(context: &mut dyn Context, node: Location) -> NativeResult {
         let state = node.shared.borrow();
         let arena = &state.document.arena;
         let entry = &arena[node.id];
-        if entry.kind == Kind::Attribute && entry.name.namespace.as_deref() == Some(XMLNS) {
+        if entry.kind == Kind::Namespace
+            || (entry.kind == Kind::Attribute && entry.name.namespace.as_deref() == Some(XMLNS))
+        {
             entry.parent()
         } else {
             None
@@ -55,7 +61,12 @@ pub(super) fn wrap(context: &mut dyn Context, node: Location) -> NativeResult {
     };
     let result = context.create_object("DOMNameSpaceNode", PhpArray::new())?;
     if let Value::Object(object) = &result {
-        *object.native.borrow_mut() = Some(Box::new(Declaration { node, parent }));
+        let pin = node.shared.borrow_mut().pin(parent);
+        *object.native.borrow_mut() = Some(Box::new(Declaration {
+            node,
+            parent,
+            _pin: pin,
+        }));
     }
     Ok(result)
 }
@@ -79,16 +90,27 @@ fn read(
             let state = decl.node.shared.borrow();
             let arena = &state.document.arena;
             let node = &arena[decl.node.id];
+            let prefix = if node.kind == Kind::Namespace || node.name.prefix.is_some() {
+                node.name.local.as_str()
+            } else {
+                ""
+            };
             match name {
+                "nodeName" if node.kind == Kind::Namespace && prefix.is_empty() => {
+                    Value::from("xmlns")
+                }
+                "nodeName" if node.kind == Kind::Namespace => {
+                    Value::from(format!("xmlns:{prefix}"))
+                }
                 "nodeName" => Value::from(node.name.qualified()),
+                "nodeValue" | "namespaceURI" if node.value.is_empty() => Value::Null,
                 "nodeValue" | "namespaceURI" => Value::from(node.value.as_str()),
                 "nodeType" => Value::Int(18),
+                "localName" if node.kind == Kind::Namespace && prefix.is_empty() => {
+                    Value::from("xmlns")
+                }
                 "localName" => Value::from(node.name.local.as_str()),
-                "prefix" => Value::from(if node.name.prefix.is_some() {
-                    node.name.local.as_str()
-                } else {
-                    ""
-                }),
+                "prefix" => Value::from(prefix),
                 "isConnected" => {
                     Value::Bool(arena.ancestors(decl.parent).any(|id| id == Arena::DOCUMENT))
                 }
@@ -97,6 +119,36 @@ fn read(
         }
     };
     Ok(Some(value))
+}
+
+fn debug(
+    context: &mut dyn Context,
+    object: &Object,
+    purpose: PropertyPurpose,
+) -> Result<PhpArray, NativeError> {
+    let mut table = object.to_array();
+    if purpose == PropertyPurpose::Debug && native::<Declaration>(object).is_some() {
+        for name in [
+            "nodeName",
+            "nodeValue",
+            "nodeType",
+            "prefix",
+            "localName",
+            "namespaceURI",
+            "isConnected",
+            "ownerDocument",
+            "parentNode",
+            "parentElement",
+        ] {
+            let value = if matches!(name, "ownerDocument" | "parentNode" | "parentElement") {
+                Value::from("(object value omitted)")
+            } else {
+                read(context, object, name, NativePropertyRead::Read)?.unwrap_or_default()
+            };
+            table.insert(ArrayKey::str(name), value);
+        }
+    }
+    Ok(table)
 }
 
 fn mutate(
@@ -128,6 +180,7 @@ fn mutate(
 pub(super) fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
         hooks: Some(&ClassHooks {
+            properties: Some(debug),
             property_access: Some(&NativePropertyAccess { read, mutate }),
             ..ClassHooks::EMPTY
         }),

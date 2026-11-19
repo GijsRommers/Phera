@@ -65,14 +65,22 @@ pub(super) fn string_value(arena: &Arena, id: NodeId) -> String {
     ) {
         let mut value = String::new();
         for child in arena.descendants(id) {
-            if matches!(
-                arena[child].kind,
-                Kind::Text | Kind::Cdata | Kind::EntityReference
-            ) {
-                value.push_str(&arena[child].value);
+            let node = &arena[child];
+            match node.kind {
+                Kind::EntityReference => value.push_str(arena.reference_text(child)),
+                Kind::Text | Kind::Cdata
+                    if node
+                        .parent()
+                        .is_none_or(|id| arena[id].kind != Kind::Entity) =>
+                {
+                    value.push_str(&node.value);
+                }
+                _ => {}
             }
         }
         value
+    } else if arena[id].kind == Kind::EntityReference {
+        arena.reference_text(id).to_owned()
     } else {
         arena[id].value.clone()
     }

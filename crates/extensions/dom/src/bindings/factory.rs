@@ -353,6 +353,11 @@ pub(super) fn insert_new(arena: &mut Arena, mut node: Node) -> NodeId {
     };
     let id = match node.kind {
         Kind::Attribute => arena.attribute(node, false),
+        Kind::EntityReference => {
+            let id = arena.allocate(node);
+            arena.attach_predefined_entity(id);
+            id
+        }
         _ => arena.allocate(node),
     };
     if let Some(declaration) = declaration {

@@ -227,7 +227,7 @@ impl Serializer<'_> {
                 output.push_str(if html { ">" } else { "?>" });
             }
             Kind::Doctype => write_doctype(node, output),
-            Kind::Entity | Kind::Notation => {}
+            Kind::Entity | Kind::Notation | Kind::Namespace => {}
             Kind::EntityReference => {
                 let _ = write!(output, "&{};", node.name.local);
             }
@@ -264,7 +264,23 @@ impl Serializer<'_> {
             return;
         }
         output.push_str("=\"");
-        escape(output, &attribute.value, self.escaping(true));
+        let mode = self.escaping(true);
+        if matches!(self.mode, Mode::Xml)
+            && let Some(first) = attribute.first_child()
+            && (self.arena[first].kind == Kind::EntityReference
+                || self.arena[first].next_sibling().is_some())
+        {
+            for node in std::iter::successors(Some(first), |&id| self.arena[id].next_sibling()) {
+                let node = &self.arena[node];
+                if node.kind == Kind::EntityReference {
+                    let _ = write!(output, "&{};", node.name.local);
+                } else {
+                    escape(output, &node.value, mode);
+                }
+            }
+        } else {
+            escape(output, &attribute.value, mode);
+        }
         output.push('"');
     }
 

@@ -14,7 +14,7 @@ pub(super) use registration::register;
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
 
 use crate::tree::{Arena, Kind, Name, Node, NodeId};
-use crate::xml::names::XMLNS;
+use crate::xml::names::{self, XML, XMLNS};
 
 use super::{This, dom_error, factory, mutation, this_node};
 
@@ -38,6 +38,7 @@ pub(super) fn set(
     id: NodeId,
     name: Name,
     value: String,
+    html: bool,
 ) -> Result<NodeId, NativeError> {
     let mut name = name;
     namespaces::bind(arena, id, &mut name, namespaces::AttributeBinding::Direct);
@@ -51,7 +52,11 @@ pub(super) fn set(
         arena.assign_attribute(existing, value);
         return Ok(existing);
     }
-    let attribute = arena.attribute(Node::new(Kind::Attribute, name, value), true);
+    let mut attribute = Node::new(Kind::Attribute, name, value);
+    attribute.is_id = attribute.name.local == "id"
+        && (attribute.name.namespace.as_deref() == Some(XML)
+            || (html && attribute.name.namespace.is_none()));
+    let attribute = arena.attribute(attribute, true);
     arena
         .set_attribute(id, attribute, None)
         .map_err(mutation::link_error)?;
@@ -92,7 +97,7 @@ fn read(
         (Read::Node, Some(attribute)) => super::namespace::wrap(context, node.at(attribute)),
         (Read::Node, None) => Ok(if ns { Value::Null } else { Value::Bool(false) }),
         (Read::Remove, Some(attribute)) => {
-            node.shared.borrow_mut().document.arena.detach(attribute);
+            node.shared.borrow_mut().remove(attribute);
             Ok(if ns { Value::Null } else { Value::Bool(true) })
         }
         (Read::Remove, None) => Ok(if ns { Value::Null } else { Value::Bool(false) }),
@@ -121,16 +126,33 @@ fn set_attr(
     };
     let name = factory::argument(arguments, usize::from(ns)).unwrap_or_default();
     let value = factory::argument(arguments, usize::from(ns) + 1).unwrap_or_default();
-    let name = match factory::checked_name(name, namespace, ns) {
+    let mut name = match factory::checked_name(name, namespace, ns) {
         Ok(name) => name,
         Err(error) => return mutation::fail(context, &node, error),
     };
-    let id = set(
-        &mut node.shared.borrow_mut().document.arena,
-        node.id,
-        name,
-        value,
-    )?;
+    let id = {
+        let mut state = node.shared.borrow_mut();
+        let document = &mut state.document;
+        if !ns && let Some((prefix, _)) = name.local.split_once(':') {
+            let uri = if prefix == "xml" {
+                Some(XML.to_owned())
+            } else {
+                super::node::namespace_scope(&document.arena, node.id)
+                    .find(|(candidate, _)| candidate == prefix)
+                    .map(|(_, uri)| uri)
+            };
+            if let Some(uri) = uri {
+                name = names::qualified(&name.local, Some(uri));
+            }
+        }
+        set(
+            &mut document.arena,
+            node.id,
+            name,
+            value,
+            document.settings.html,
+        )?
+    };
     if ns {
         Ok(Value::Null)
     } else {
@@ -146,13 +168,14 @@ fn toggle(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nat
         Err(error) => return mutation::fail(context, &node, error),
     };
     let mut state = node.shared.borrow_mut();
+    let html = state.document.settings.html;
     let arena = &mut state.document.arena;
     let previous = find(arena, node.id, None, &name.local);
     let enabled = args::bool(arguments, 1).unwrap_or(previous.is_none());
     match (enabled, previous) {
         (false, Some(id)) => arena.detach(id),
         (true, None) => {
-            set(arena, node.id, name, String::new())?;
+            set(arena, node.id, name, String::new(), html)?;
         }
         _ => {}
     }
