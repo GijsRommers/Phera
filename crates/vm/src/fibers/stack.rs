@@ -182,6 +182,7 @@ impl Vm {
             &mut other.error_handlers.trace_string_limit,
         );
         swap(&mut self.state, &mut other.state);
+        swap(&mut self.reflection_cache, &mut other.reflection_cache);
         swap(
             &mut self.property_references,
             &mut other.property_references,

@@ -29,6 +29,8 @@ mod members;
 mod properties;
 mod property_hooks;
 
+pub(crate) use cache::ReflectionCache;
+
 enum Construction {
     Reflection,
     Attribute(Option<AttributeSite>),

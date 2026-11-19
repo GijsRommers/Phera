@@ -235,6 +235,7 @@ pub struct Vm {
     failed_native: Option<error_traces::NativeTrace>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
+    reflection_cache: Option<Box<reflection::ReflectionCache>>,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
     ini_overrides: ini::IniOverrides,
@@ -306,6 +307,7 @@ impl Vm {
             pending_callbacks: false,
             failed_native: None,
             state: RequestState::default(),
+            reflection_cache: None,
         }
     }
 

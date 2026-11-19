@@ -876,12 +876,11 @@ impl Vm {
         class: std::rc::Rc<crate::classes::Class>,
         properties: phera_value::PhpArray,
     ) -> NativeResult {
-        let object = self.classes.allocate(class.clone());
-        if let Some(template) = &class.property_template {
-            if !template.is_empty() {
-                object.update(|storage| *storage = template.clone());
-            }
+        let object = if let Some(template) = &class.property_template {
+            self.classes
+                .allocate_with_properties(class.clone(), template.clone())
         } else {
+            let object = self.classes.allocate(class.clone());
             for property in &class.defaults {
                 if property.initialized {
                     let value = if let Some(initializer) = &property.initializer {
@@ -892,7 +891,8 @@ impl Vm {
                     object.set(property.key.clone(), value);
                 }
             }
-        }
+            object
+        };
         if !properties.is_empty() {
             object.update(|storage| {
                 if storage.is_empty() {
