@@ -13,6 +13,18 @@ import subprocess
 import tempfile
 
 
+def signal_server(pid_file, reason):
+    try:
+        server_pid = int(pid_file.read_text())
+    except FileNotFoundError:
+        return False
+    try:
+        os.kill(server_pid, reason)
+    except ProcessLookupError:
+        pass
+    return True
+
+
 def measure(binary, directory, count):
     pid_file = directory / "server.pid"
     pid_file.unlink(missing_ok=True)
@@ -42,18 +54,13 @@ def measure(binary, directory, count):
             finally:
                 connection.close()
         finally:
-            if pid_file.exists():
-                server_pid = int(pid_file.read_text())
-                try:
-                    os.kill(server_pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
+            signal_server(pid_file, signal.SIGTERM)
             try:
                 _, metrics = timer.communicate(timeout=10)
             except subprocess.TimeoutExpired:
-                if pid_file.exists():
-                    os.kill(server_pid, signal.SIGKILL)
-                timer.communicate()
+                if not signal_server(pid_file, signal.SIGKILL):
+                    timer.kill()
+                timer.communicate(timeout=10)
                 raise
     instructions = re.search(rb"(\d+)\s+instructions retired", metrics)
     if timer.returncode or not instructions:
