@@ -2,7 +2,9 @@ use phera_source::Span;
 
 use crate::{Attribute, ClassDeclaration, Identifier, Name, Parameter, Statement, Type};
 
-#[derive(Debug, Clone, PartialEq)]
+/// `Clone` and `Drop` are implemented by hand in [`crate::chain`], so that
+/// very long chains such as `1 + 1 + ... + 1` never recurse.
+#[derive(Debug, PartialEq)]
 pub struct Expression {
     pub kind: ExpressionKind,
     pub span: Span,
@@ -13,40 +15,6 @@ impl Expression {
     /// cannot be moved out of it directly.
     pub fn into_kind(mut self) -> ExpressionKind {
         std::mem::replace(&mut self.kind, ExpressionKind::EMPTY)
-    }
-}
-
-impl Drop for Expression {
-    /// Unlinks left-deep chains in a loop instead of by recursion.
-    ///
-    /// The parser builds `a . b . c ...` and `$a->b()->c()...` in loops, so
-    /// such chains can be tens of thousands of nodes deep in generated code.
-    /// The default recursive drop would overflow the stack on them. Everything
-    /// else nests only as deep as the parser's recursion limit allows, and is
-    /// dropped the ordinary way.
-    fn drop(&mut self) {
-        let mut kind = std::mem::replace(&mut self.kind, ExpressionKind::EMPTY);
-
-        loop {
-            let next = match kind {
-                ExpressionKind::Binary { left, .. } => left,
-                ExpressionKind::Index { target, .. }
-                | ExpressionKind::Property { target, .. }
-                | ExpressionKind::MethodCall { target, .. }
-                | ExpressionKind::IncDec { target, .. } => target,
-                ExpressionKind::Call { callee, .. } => callee,
-                ExpressionKind::StaticProperty { class, .. }
-                | ExpressionKind::ClassConstant { class, .. }
-                | ExpressionKind::StaticCall { class, .. } => class,
-                ExpressionKind::InstanceOf { value, .. } => value,
-                _ => return,
-            };
-
-            // The other fields of `kind` were dropped by the match. Take the
-            // child's contents, so the child itself drops as an empty node.
-            let mut next = *next;
-            kind = std::mem::replace(&mut next.kind, ExpressionKind::EMPTY);
-        }
     }
 }
 
@@ -191,7 +159,7 @@ pub enum ExpressionKind {
 
 impl ExpressionKind {
     /// What a node is left holding once its contents have been moved out.
-    const EMPTY: ExpressionKind = ExpressionKind::Literal(Literal::Null);
+    pub(crate) const EMPTY: ExpressionKind = ExpressionKind::Literal(Literal::Null);
 }
 
 #[derive(Debug, Clone, PartialEq)]

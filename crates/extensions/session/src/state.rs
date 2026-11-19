@@ -8,7 +8,6 @@ use crate::files::Files;
 
 #[derive(Default)]
 pub struct SessionState {
-    pub settings: HashMap<&'static str, PhpString>,
     pub numbers: HashMap<&'static str, i64>,
     pub id: Option<PhpString>,
     pub active: bool,

@@ -5,6 +5,7 @@ mod array;
 mod convert;
 mod error;
 mod float_format;
+mod lazy_object;
 mod object;
 mod ops;
 mod string;
@@ -21,15 +22,16 @@ pub use error::{
 pub use float_format::{
     float_repr, float_repr_with_precision, float_to_string_precision14, with_float_repr,
 };
+pub use lazy_object::{LazyObject, LazyStrategy};
 pub use object::{
     ClassHandle, Object, ObjectIds, PropertyScope, Resource, class_display_name, split_property_key,
 };
 pub use ops::{
-    ObjectComparator, ObjectComparison, StringComparison, StringComparisonStep, add, bitwise_and,
-    bitwise_not, bitwise_or, bitwise_xor, compare, compare_after_error, compare_op,
-    compare_with_objects, compare_with_string_objects, concat, decrement, div, increment, less,
-    less_equal, loose_equals, loose_equals_with_objects, modulo, mul, negate, pow, shift_left,
-    shift_right, strict_equals, sub, unary_plus,
+    LazyComparison, ObjectComparator, ObjectComparison, StringComparison, StringComparisonStep,
+    add, bitwise_and, bitwise_not, bitwise_or, bitwise_xor, compare, compare_after_error,
+    compare_op, compare_with_objects, compare_with_string_objects, concat, decrement, div,
+    increment, less, less_equal, loose_equals, loose_equals_with_objects, modulo, mul, negate, pow,
+    shift_left, shift_right, strict_equals, sub, unary_plus,
 };
 pub use string::PhpString;
 pub use value::{Value, ValueRef};

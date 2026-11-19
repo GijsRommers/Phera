@@ -35,7 +35,7 @@ impl Extension for Session {
     }
 
     fn register(&self, registry: &mut Registry) {
-        registry.ini_family(b"session", settings::ini);
+        settings::register(registry);
         registry.constant("PHP_SESSION_DISABLED", 0);
         registry.constant("PHP_SESSION_NONE", 1);
         registry.constant("PHP_SESSION_ACTIVE", 2);

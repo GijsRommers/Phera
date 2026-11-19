@@ -264,6 +264,27 @@ impl Vm {
                 Ok(None)
             }
             CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
+                crate::class_function::ClassFunction::PropertyExists,
+            )) if let (Some(destination), [Value::Object(object), Value::String(name)]) =
+                (destination, arguments.as_slice())
+                && object.lazy().is_some() =>
+            {
+                Box::pin(self.lazy_property_exists(destination, object.clone(), name.clone()))
+                    .await?;
+                self.call_stack.recycle_native_arguments(arguments);
+                Ok(None)
+            }
+            CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
+                crate::class_function::ClassFunction::GetObjectVars,
+            )) if let (Some(destination), [Value::Object(object)]) =
+                (destination, arguments.as_slice())
+                && object.lazy().is_some() =>
+            {
+                Box::pin(self.lazy_object_vars(destination, object.clone())).await?;
+                self.call_stack.recycle_native_arguments(arguments);
+                Ok(None)
+            }
+            CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
                 crate::class_function::ClassFunction::GetObjectVars,
             )) if let (Some(destination), [Value::Object(object)]) =
                 (destination, arguments.as_slice())
@@ -286,7 +307,12 @@ impl Vm {
                     .await;
                 match result {
                     Ok(value) => Ok(Some(value)),
-                    Err(error) => self.finish_reflected_hook(error, method, destination).await,
+                    Err(error) => match crate::lazy_continuation::ReflectInitialize::take(error) {
+                        Ok(request) => {
+                            Box::pin(self.finish_reflected_lazy(request, method, destination)).await
+                        }
+                        Err(error) => self.finish_reflected_hook(error, method, destination).await,
+                    },
                 }
             }
             _ => Err(internal_error!("native target")),

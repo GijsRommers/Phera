@@ -65,6 +65,26 @@ fn body(response: &HttpResponse) -> String {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn a_worker_keeps_inherited_environment_separate_from_request_writes() {
+    let site = Site::new("inherited-env");
+    let script = site.file(
+        "index.php",
+        "<?php if (isset($_GET['change'])) $_ENV['APP_ENV'] = 'request'; echo $_ENV['APP_ENV'];",
+    );
+    let mut environment = phera_dotenv::Environment::default();
+    environment.insert(b"APP_ENV".to_vec(), b"inherited".to_vec());
+    let worker = Runtime::with_environment(environment).web_worker();
+    let first = worker
+        .handle_request(&script, &site.root, request("GET", "/index.php?change=1"))
+        .await;
+    let next = worker
+        .handle_request(&script, &site.root, request("GET", "/index.php"))
+        .await;
+    assert_eq!(body(&first), "request");
+    assert_eq!(body(&next), "inherited");
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn a_script_sees_the_query_and_server_variables() {
     let site = Site::new("query");
     let script = site.file(

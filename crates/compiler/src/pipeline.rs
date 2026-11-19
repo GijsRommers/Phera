@@ -133,6 +133,9 @@ fn compile_program(
     };
     let register = compiler.literal(default, 1)?;
     compiler.emit(Instruction::Return(register), 1);
+    // The tree is not needed for lowering; a generated file's tree can be
+    // hundreds of megabytes, so it goes before the bytecode tables are built.
+    drop(ast);
     finish(compiler, source)
 }
 

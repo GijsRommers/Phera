@@ -299,11 +299,11 @@ ASP tags, `goto`, `declare(ticks)` and `__halt_compiler` data access.
 `AssertionError` with the condition as written. A setting that compiles
 assertions out, as PHP's production configuration does, comes with the
 configuration file.
-Fibers come after everything else works.
+Fiber switching and request-local state are described in section 9.5.
 
 **Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl, posix, the C
-extension ABI, `dl()`, most of `php.ini` (a small fixed set of settings is
-honoured), and functions removed or deprecated before PHP 8.
+extension ABI, `dl()`, startup configuration from an INI file, and functions
+removed or deprecated before PHP 8.
 
 **Extensions, first wave:** standard (strings, arrays, math, output, variables,
 files, `sprintf`, `serialize`), spl, json, pcre (bound to PCRE2), ctype, mbstring,
@@ -312,6 +312,10 @@ drivers. **Later:** openssl, curl, dom and xml, intl, fileinfo, iconv.
 
 Locale names are remembered per request, C/POSIX behavior is implemented,
 and localized data is missing.
+
+**The system log:** `syslog()` writes its message to standard error, one
+line per message, where `error_log()` also writes; PHP hands it to the
+machine's system logger. The facility is accepted and has no effect.
 
 **Session cookie IDs:** Phera rejects an entire ID containing a NUL before it
 touches storage. PHP currently truncates the ID and uses the prefix as a file
@@ -382,8 +386,10 @@ silence:
 - **Legacy package layouts** (PSR-0 autoloading, `target-dir`,
   `include-path`, PEAR-style trees): `phera install` stops and names the
   package and the field. Nothing is installed half.
-- **`php.ini` settings** outside the honoured set: `ini_set()` returns false,
-  as PHP does for an unknown setting.
+- **INI directives.** The runtime recognizes PHP directives from its loaded
+  modules and its INI registry enforces their runtime access modes. The
+  settings with no engine consumer are enumerated in
+  [the generated catalog notes](../crates/extension-api/data/ini-storage-only.md).
 
 Something merely not built yet is different: it keeps PHP's own error
 ("Call to undefined function ...") until it exists.
@@ -671,7 +677,51 @@ each with its own fixtures checked against real PHP.
   release compared with PHP. References kept by closures or reference
   cycles can also outlive the script's last explicit use of the generator.
 
-### 9.5 Order of work
+### 9.5 Fibers
+
+`Fiber::start()` runs a callable on a second heap frame stack.
+`Fiber::suspend($value)` hands that value back to the caller.
+`resume($reply)` returns the reply from the suspended call, and
+`throw($exception)` raises the supplied object in the same place.
+
+The fiber owns an interpreter future and its frames, registers, pending
+calls, and unwind continuations. A native callback can leave the same owned
+future pending, so suspension inside `array_map()` preserves both the native
+callback and the PHP frames above it. The caller polls that future until the
+fiber yields a value, completes, or throws. Ordinary I/O pending keeps
+control with Tokio. Backtraces read parked caller frames only when needed.
+
+Only the active stack owns the request data during a switch. At an explicit
+suspension the fiber lends that data back through a shared slot. The caller
+returns it before polling again. Globals, class and function declarations,
+output, and extension state all retain their identity. The slots are
+borrowed only for the transfer itself. Normal PHP calls and returns use
+the same bytecode and dispatch without consulting fiber state.
+
+The caller's stack and generator state remain live while a fiber runs.
+A fiber started in a generator can suspend back to it, and a generator
+resumed in a fiber can suspend the whole fiber through a native or PHP
+call. PHP recursion within either stack still occupies heap frames.
+Native callback depth is bounded across fiber switches because the Rust
+futures from both sides still occupy native stack space during a poll.
+`getCurrent()` returns the fiber associated with the active stack, including
+inside a native callback. On the request's main stack it returns null.
+
+A switch records the calling method and source location below the fiber's
+root frame. Runtime traces use that boundary. Reflection can inspect a
+suspended stack's trace and current executing location without resuming it.
+Exceptions thrown within the fiber cross back to its caller, and an injected
+exception follows the fiber's own catch and finally tables. A started fiber
+keeps its state through suspension, return, or termination by an exception.
+
+Shutdown closes outstanding suspended stacks with a graceful unwind. Their
+finally blocks run with the closing fiber current, and a new suspension from
+that stack raises `FiberError`. Switching during engine phases that forbid
+it raises the same class. Object destructors and cycle collection follow
+the request's object lifecycle, including its rules for when references
+are released.
+
+### 9.6 Order of work
 
 1. Native classes in the extension API; the object model; classes with
    properties, methods, constants, statics, inheritance, interfaces and

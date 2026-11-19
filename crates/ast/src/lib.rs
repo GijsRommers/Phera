@@ -4,6 +4,7 @@
 //! stays close to the source: names are kept as written and are resolved against
 //! `namespace` and `use` by the compiler, not the parser.
 
+mod chain;
 mod declaration;
 mod expression;
 mod name;
