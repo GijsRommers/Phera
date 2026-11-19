@@ -149,6 +149,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::AsyncNamed(handler),
             preparation: None,
+            direct: None,
             visibility: Visibility::Public,
             is_static: false,
             is_final: false,
