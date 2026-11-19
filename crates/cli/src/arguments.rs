@@ -16,6 +16,10 @@ Usage:
     --workers N                           default: one per CPU core
     --request-timeout SECONDS             stop a request after this long
                                           (default 60; 0: never)
+    --request-read-timeout SECONDS        receive headers and body in this
+                                          many seconds (default 60), plus
+                                          one second per 16 KiB received
+                                          so large uploads can keep going
     --compress                            gzip or brotli for clients that
                                           accept it
     --trusted-proxies LIST                believe X-Forwarded-* from these
@@ -66,6 +70,7 @@ pub(crate) struct ServeOptions {
     /// `--request-timeout`: `None` keeps the server's default, and
     /// `Some(None)` (given as 0) lets a request run without a limit.
     pub request_timeout: Option<Option<Duration>>,
+    pub request_read_timeout: Option<Duration>,
     /// `--trusted-proxies`, not yet parsed into ranges.
     pub trusted_proxies: Option<String>,
     /// `--health`: a path the server answers itself.
@@ -182,6 +187,7 @@ fn parse_serve(
         workers: None,
         compress: false,
         request_timeout: None,
+        request_read_timeout: None,
         trusted_proxies: None,
         health_path: None,
         path: PathBuf::from("."),
@@ -220,6 +226,17 @@ fn parse_serve(
                     .filter(|path| path.starts_with('/'))
                     .ok_or("--health needs a path like /healthz.")?;
                 options.health_path = Some(path);
+            }
+            "--request-read-timeout" => {
+                let value = arguments
+                    .next()
+                    .ok_or("--request-read-timeout needs a number of seconds.")?;
+                let seconds: u64 = value
+                    .parse()
+                    .ok()
+                    .filter(|&seconds| seconds > 0)
+                    .ok_or_else(|| format!("Not a positive number of seconds: {value}"))?;
+                options.request_read_timeout = Some(Duration::from_secs(seconds));
             }
             "--request-timeout" => {
                 let value = arguments
