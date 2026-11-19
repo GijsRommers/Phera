@@ -67,7 +67,7 @@ impl Vm {
             }
             Intrinsic::Gc(function) => {
                 drop(diagnostics);
-                Box::pin(self.gc_intrinsic(function)).await
+                Box::pin(self.gc_intrinsic(function, arguments, origin)).await
             }
             Intrinsic::Class(function) => {
                 drop(diagnostics);

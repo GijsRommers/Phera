@@ -85,6 +85,17 @@ pub(crate) enum GcFunction {
 }
 
 impl GcFunction {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::CollectCycles => "gc_collect_cycles",
+            Self::Enable => "gc_enable",
+            Self::Disable => "gc_disable",
+            Self::Enabled => "gc_enabled",
+            Self::Status => "gc_status",
+            Self::MemCaches => "gc_mem_caches",
+        }
+    }
+
     pub(crate) fn resolve(name: &str) -> Option<Self> {
         Some(match name {
             "gc_collect_cycles" => Self::CollectCycles,
@@ -119,7 +130,17 @@ impl Default for CycleCollector {
 }
 
 impl Vm {
-    pub(crate) async fn gc_intrinsic(&mut self, function: GcFunction) -> NativeResult {
+    pub(crate) async fn gc_intrinsic(
+        &mut self,
+        function: GcFunction,
+        mut arguments: Vec<Value>,
+        origin: crate::calls::callback_binding::ArgumentOrigin,
+    ) -> NativeResult {
+        // None of them takes an argument: "gc_enabled() expects exactly 0
+        // arguments, 1 given".
+        self.with_argument_origin(origin, |vm| {
+            phera_extension_api::prepare_call(function.name(), &[], &mut arguments, vm)
+        })?;
         Ok(match function {
             GcFunction::CollectCycles => Value::Int(self.collect_cycles().await? as i64),
             GcFunction::Enable => {

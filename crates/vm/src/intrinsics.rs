@@ -148,6 +148,8 @@ impl Intrinsic {
     pub(crate) fn parameters(self) -> Option<&'static [phera_extension_api::Param]> {
         match self {
             Self::Class(function) => Some(function.parameters()),
+            // The gc_* functions take no arguments.
+            Self::Gc(_) => Some(&[]),
             Self::SplAutoload(function) => Some(function.parameters()),
             Self::Runtime(function) => Some(function.parameters()),
             Self::Output(function) => Some(function.parameters()),
