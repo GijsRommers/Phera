@@ -7,7 +7,15 @@ pub mod query;
 use phera_extension_api::Registry;
 
 pub(super) fn register(registry: &mut Registry) {
-    for entry in [parse::ENTRY, query::ENTRY, build::ENTRY] {
+    let query = if registry
+        .level()
+        .has(phera_extension_api::Change::ParseStrRejectsNul)
+    {
+        query::STRICT_ENTRY
+    } else {
+        query::ENTRY
+    };
+    for entry in [parse::ENTRY, query, build::ENTRY] {
         registry.function(entry);
     }
     for (index, (name, _)) in parse::COMPONENTS.iter().enumerate() {

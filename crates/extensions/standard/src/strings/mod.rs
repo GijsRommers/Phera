@@ -34,6 +34,8 @@ pub(crate) mod url;
 pub(crate) const MAX_STRING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 pub(crate) fn register(registry: &mut Registry) {
+    let trim = trim::functions(registry.level());
+    let number_format = [number_format::entry(registry.level())];
     let modules = [
         base64::FUNCTIONS,
         case::FUNCTIONS,
@@ -43,7 +45,7 @@ pub(crate) fn register(registry: &mut Registry) {
         format::FUNCTIONS,
         html::FUNCTIONS,
         metaphone::FUNCTIONS,
-        number_format::FUNCTIONS,
+        &number_format,
         padding::FUNCTIONS,
         replace::FUNCTIONS,
         search::FUNCTIONS,
@@ -54,7 +56,7 @@ pub(crate) fn register(registry: &mut Registry) {
         tags::FUNCTIONS,
         text::FUNCTIONS,
         tokens::FUNCTIONS,
-        trim::FUNCTIONS,
+        &trim,
         url::FUNCTIONS,
     ];
     for entry in modules.into_iter().flatten() {

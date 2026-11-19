@@ -5,7 +5,8 @@
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeResult, Param, ParamType, PhpArray, Value, args,
+    ArrayKey, Context, FunctionEntry, NativeError, NativeFn, NativeResult, Param, ParamType,
+    PhpArray, Value, args,
 };
 
 pub(super) const ENTRY: FunctionEntry = FunctionEntry::sync(
@@ -14,11 +15,24 @@ pub(super) const ENTRY: FunctionEntry = FunctionEntry::sync(
         Param::new("string", ParamType::String),
         Param::new("result", ParamType::Mixed).by_ref(),
     ],
-    parse_str,
+    parse_str::<false>,
 );
 
-fn parse_str(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+pub(super) const STRICT_ENTRY: FunctionEntry = FunctionEntry {
+    handler: NativeFn::Sync(parse_str::<true>),
+    ..ENTRY
+};
+
+fn parse_str<const REJECT_NUL: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
     let input = args::bytes(arguments, 0);
+    if REJECT_NUL && input.contains(&0) {
+        return Err(NativeError::value_error(
+            "parse_str(): Argument #1 ($string) must not contain any null bytes",
+        ));
+    }
     let input = input.split(|&byte| byte == 0).next().unwrap_or_default();
     let mut result = PhpArray::new();
     if parse(&mut result, input, b'&', Duplicates::Replace) {

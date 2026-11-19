@@ -38,13 +38,16 @@ mod walk;
 pub(crate) mod zend_sort;
 
 pub(crate) fn register(registry: &mut Registry) {
+    let filter = filter::functions(registry.level());
+    let keys = keys::functions(registry.level());
     let modules = [
         build::FUNCTIONS,
         callback_sets::FUNCTIONS,
         callback_sort::FUNCTIONS,
         combine::FUNCTIONS,
-        filter::FUNCTIONS,
+        &filter,
         find::FUNCTIONS,
+        &keys,
         keys::FUNCTIONS,
         pointer::FUNCTIONS,
         range::FUNCTIONS,
@@ -58,6 +61,11 @@ pub(crate) fn register(registry: &mut Registry) {
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
+    registry.constant_at(
+        phera_extension_api::Availability::Since86,
+        "ARRAY_FILTER_USE_VALUE",
+        0_i64,
+    );
 }
 
 /// What happens to integer keys when entries are copied into a new array;

@@ -10,8 +10,8 @@ use std::sync::Arc;
 use indexmap::IndexMap;
 use phera_dotenv::Environment;
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
-    Registry, Value, args,
+    ArrayKey, Change, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType,
+    PhpArray, Registry, Value, args,
 };
 
 #[derive(Default)]
@@ -90,6 +90,13 @@ pub fn php_array<'a>(entries: impl IntoIterator<Item = (&'a [u8], &'a [u8])>) ->
 }
 
 pub(crate) fn register(registry: &mut Registry) {
+    let reject_nul = registry.level().has(Change::EnvironmentRejectsNul);
+    let (getenv, putenv): (phera_extension_api::SyncFn, phera_extension_api::SyncFn) = if reject_nul
+    {
+        (getenv::<true>, putenv::<true>)
+    } else {
+        (getenv::<false>, putenv::<false>)
+    };
     registry.function(FunctionEntry::sync(
         "getenv",
         const {
@@ -107,11 +114,16 @@ pub(crate) fn register(registry: &mut Registry) {
     ));
 }
 
-fn getenv(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn getenv<const REJECT_NUL: bool>(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let env = context.state().get_or_default::<RequestEnvironment>();
     let Some(name) = args::string(arguments, 0) else {
         return Ok(Value::from(php_array(env.effective_environment())));
     };
+    if REJECT_NUL && name.as_bytes().contains(&0) {
+        return Err(NativeError::value_error(
+            "getenv(): Argument #1 ($name) must not contain any null bytes",
+        ));
+    }
     let name = c_string(name.as_bytes());
     // Darwin libc stops reading a lookup name at '='. glibc compares the
     // requested prefix against the full NAME=value string, including any '='.
@@ -128,8 +140,13 @@ fn getenv(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(value.map_or(Value::Bool(false), Value::from))
 }
 
-fn putenv(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn putenv<const REJECT_NUL: bool>(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let assignment = args::bytes(arguments, 0);
+    if REJECT_NUL && assignment.contains(&0) {
+        return Err(NativeError::value_error(
+            "putenv(): Argument #1 ($assignment) must not contain any null bytes",
+        ));
+    }
     if assignment.is_empty() || assignment.starts_with(b"=") {
         return Err(NativeError::value_error(
             "putenv(): Argument #1 ($assignment) must have a valid syntax",

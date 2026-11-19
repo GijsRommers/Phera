@@ -1,13 +1,23 @@
 //! `number_format(1234567.891, 2)` is `"1,234,567.89"`.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpString, Value, args,
+    Change, Context, FunctionEntry, LanguageLevel, NativeError, NativeFn, NativeResult, Param,
+    ParamType, PhpString, Value, args,
 };
 
 use super::{buffer, decimal};
 use crate::math::rounding::{RoundingMode, round_to_places};
 
-pub(super) const FUNCTIONS: &[FunctionEntry] = &[NUMBER_FORMAT];
+pub(super) fn entry(level: LanguageLevel) -> FunctionEntry {
+    if level.has(Change::NumberFormatDecimals) {
+        FunctionEntry {
+            handler: NativeFn::Sync(number_format::<true>),
+            ..NUMBER_FORMAT
+        }
+    } else {
+        NUMBER_FORMAT
+    }
+}
 
 /// From 2^52 on, every double is a whole number, so it is formatted as an
 /// integer when it also fits in one.
@@ -38,16 +48,20 @@ const NUMBER_FORMAT: FunctionEntry = FunctionEntry::sync(
             .nullable()
             .optional(),
     ],
-    number_format,
+    number_format::<false>,
 );
 
-fn number_format(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn number_format<const VALIDATE_DECIMALS: bool>(
+    _: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
     let places = args::int(arguments, 1).unwrap_or(0);
-    if i32::try_from(places).is_err() {
+    if VALIDATE_DECIMALS && i32::try_from(places).is_err() {
         return Err(NativeError::value_error(
             "number_format(): Argument #2 ($decimals) must be between -2147483648 and 2147483647",
         ));
     }
+    let places = places.clamp(i64::from(i32::MIN), i64::from(i32::MAX));
     let precision = places.max(0) as usize;
     let point = args::string(arguments, 2).map_or(&b"."[..], PhpString::as_bytes);
     let thousands = args::string(arguments, 3).map_or(&b","[..], PhpString::as_bytes);

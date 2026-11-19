@@ -2,14 +2,25 @@
 
 use phera_extension_api::value::cast_to_bool;
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray, Value, args,
+    Change, Context, FunctionEntry, LanguageLevel, LocalFuture, NativeError, NativeFn,
+    NativeResult, Param, ParamType, PhpArray, Value, args,
 };
 
 use super::callback::{check_callback, check_callback_or_null};
 use crate::arguments::required_array;
 use crate::constants::{ARRAY_FILTER_USE_BOTH, ARRAY_FILTER_USE_KEY};
 
-pub(super) const FUNCTIONS: &[FunctionEntry] = &[ARRAY_FILTER, ARRAY_REDUCE];
+pub(super) fn functions(level: LanguageLevel) -> [FunctionEntry; 2] {
+    let filter = if level.has(Change::ArrayFilterMode) {
+        FunctionEntry {
+            handler: NativeFn::Async(array_filter::<true>),
+            ..ARRAY_FILTER
+        }
+    } else {
+        ARRAY_FILTER
+    };
+    [filter, ARRAY_REDUCE]
+}
 
 /// `array_filter(array $array, ?callable $callback = null, int $mode = 0):
 /// array`, the entries the callback accepts, keys kept. Without a callback,
@@ -31,14 +42,23 @@ const ARRAY_FILTER: FunctionEntry = FunctionEntry::asynchronous(
             .optional(),
         Param::new("mode", ParamType::Int).optional(),
     ],
-    array_filter,
+    array_filter::<false>,
 );
 
-fn array_filter(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+fn array_filter<const VALIDATE_MODE: bool>(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let callback = args::value(&arguments, 1);
         check_callback_or_null("array_filter", callback)?;
         let mode = args::int(&arguments, 2).unwrap_or_default();
+        if VALIDATE_MODE && !matches!(mode, 0 | ARRAY_FILTER_USE_KEY | ARRAY_FILTER_USE_BOTH) {
+            return Err(NativeError::value_error(
+                "array_filter(): Argument #3 ($mode) must be one of ARRAY_FILTER_USE_VALUE, \
+                 ARRAY_FILTER_USE_KEY, or ARRAY_FILTER_USE_BOTH",
+            ));
+        }
         let mut result = PhpArray::new();
         for (key, value) in required_array(&arguments, 0).iter() {
             let verdict = if callback.is_null() {

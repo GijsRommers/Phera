@@ -1,17 +1,19 @@
 //! Number functions: rounding, conversions between bases, `min` and
 //! `max`, `array_sum`, and the C library's float functions.
 
-use phera_extension_api::{Registry, Value, args};
+use phera_extension_api::{Availability, Registry, Value, args};
 
 mod aggregate;
 mod base;
 mod basic;
+mod clamp;
 mod minmax;
 mod misc;
 pub(crate) mod rounding;
 mod trig;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.function_at(Availability::Since86, clamp::ENTRY);
     let modules = [
         aggregate::FUNCTIONS,
         base::FUNCTIONS,

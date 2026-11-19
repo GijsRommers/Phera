@@ -3,27 +3,37 @@
 
 use phera_extension_api::value::{loose_equals, strict_equals};
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
-    PhpArray, PhpString, Value, args,
+    ArrayKey, Change, Context, FunctionEntry, LocalFuture, NativeError, NativeFn, NativeResult,
+    Param, ParamType, PhpArray, PhpString, Registry, Value, args,
 };
 
 use super::list;
 use crate::arguments::required_array;
 
-pub(super) const FUNCTIONS: &[FunctionEntry] = &[
-    ARRAY_VALUES,
-    ARRAY_KEYS,
-    ARRAY_KEY_FIRST,
-    ARRAY_KEY_LAST,
-    ARRAY_FIRST,
-    ARRAY_LAST,
-    ARRAY_IS_LIST,
-    IN_ARRAY,
-    ARRAY_SEARCH,
-    ARRAY_KEY_EXISTS,
-    ARRAY_CHANGE_KEY_CASE,
-    KEY_EXISTS,
-];
+pub(super) fn functions(level: LanguageLevel) -> [FunctionEntry; 12] {
+    let change_case = if level.has(Change::ArrayChangeKeyCase) {
+        FunctionEntry {
+            handler: NativeFn::Sync(array_change_key_case::<true>),
+            ..ARRAY_CHANGE_KEY_CASE
+        }
+    } else {
+        ARRAY_CHANGE_KEY_CASE
+    };
+    [
+        ARRAY_VALUES,
+        ARRAY_KEYS,
+        ARRAY_KEY_FIRST,
+        ARRAY_KEY_LAST,
+        ARRAY_FIRST,
+        ARRAY_LAST,
+        ARRAY_IS_LIST,
+        IN_ARRAY,
+        ARRAY_SEARCH,
+        ARRAY_KEY_EXISTS,
+        change_case,
+        KEY_EXISTS,
+    ]
+}
 
 /// `array_values(array $array): array`, the values as a list.
 ///
@@ -310,12 +320,21 @@ const ARRAY_CHANGE_KEY_CASE: FunctionEntry = FunctionEntry::sync(
         Param::new("array", ParamType::Array),
         Param::new("case", ParamType::Int).optional(),
     ],
-    array_change_key_case,
+    array_change_key_case::<false>,
 );
 
-fn array_change_key_case(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    // CASE_LOWER is 0; PHP takes every other number as CASE_UPPER.
-    let upper = args::int(arguments, 1).is_some_and(|case| case != 0);
+fn array_change_key_case<const VALIDATE_CASE: bool>(
+    _: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
+    let case = args::int(arguments, 1).unwrap_or(0);
+    if VALIDATE_CASE && !matches!(case, 0 | 1) {
+        return Err(NativeError::value_error(
+            "array_change_key_case(): Argument #2 ($case) must be either CASE_LOWER or CASE_UPPER",
+        ));
+    }
+    // PHP 8.5 takes every non-zero value as CASE_UPPER.
+    let upper = case != 0;
     let mut result = PhpArray::new();
     for (key, value) in required_array(arguments, 0).iter() {
         let key = match key {

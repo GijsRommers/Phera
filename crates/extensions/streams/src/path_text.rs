@@ -17,7 +17,15 @@ pub fn register(registry: &mut Registry) {
     const DIR_PARAMS: &[Param] = &[PATH, Param::new("levels", ParamType::Int).optional()];
     const INFO_PARAMS: &[Param] = &[PATH, Param::new("flags", ParamType::Int).optional()];
     registry.function(FunctionEntry::sync("dirname", DIR_PARAMS, dirname));
-    registry.function(FunctionEntry::sync("pathinfo", INFO_PARAMS, pathinfo));
+    let info = if registry
+        .level()
+        .has(phera_extension_api::Change::PathInfoFlags)
+    {
+        pathinfo::<true>
+    } else {
+        pathinfo::<false>
+    };
+    registry.function(FunctionEntry::sync("pathinfo", INFO_PARAMS, info));
     for (name, value) in [
         ("PATHINFO_DIRNAME", DIRNAME),
         ("PATHINFO_BASENAME", BASENAME),
@@ -80,9 +88,21 @@ pub fn basename(path: &[u8]) -> &[u8] {
     &path[start..=end]
 }
 
-fn pathinfo(_: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn pathinfo<const VALIDATE_FLAGS: bool>(_: &mut dyn Context, args: &[Value]) -> NativeResult {
     let path = args::bytes(args, 0);
     let flags = args::int(args, 1).unwrap_or(ALL);
+    if VALIDATE_FLAGS {
+        if !(DIRNAME..=ALL).contains(&flags) {
+            return Err(NativeError::value_error(
+                "pathinfo(): Argument #2 ($flags) must be one of the PATHINFO_* constants",
+            ));
+        }
+        if flags != ALL && flags.count_ones() != 1 {
+            return Err(NativeError::value_error(
+                "pathinfo(): Argument #2 ($flags) must be only one of the PATHINFO_* constants",
+            ));
+        }
+    }
     let directory = parent(path)
         .split(|byte| *byte == 0)
         .next()

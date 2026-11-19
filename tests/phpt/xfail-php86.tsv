@@ -48,7 +48,6 @@ fixtures/magic-methods/declaration-debuginfo-nullable-return.phpt	Nullable __deb
 fixtures/magic-methods/tostring-array-intersect-order.phpt	Earlier conversion in array_intersect()
 fixtures/output-buffering/handler-output.phpt	Output from printf() in an output handler is attributed to main()
 fixtures/packing/named-arguments.phpt	Named variadic argument rejection in pack()
-fixtures/process/small-process-and-string-functions.phpt	Invalid array_change_key_case() case rejects with ValueError
 fixtures/property-hooks/reflection-storage.phpt	Access diagnostics for get-only and set-only virtual properties
 fixtures/property-hooks/virtual-access.phpt	Access diagnostics for get-only and set-only virtual properties
 fixtures/serialize/enum-errors.phpt	unserialize() diagnoses empty input and handles invalid enum values differently

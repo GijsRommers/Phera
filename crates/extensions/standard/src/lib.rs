@@ -34,8 +34,9 @@ impl Extension for Standard {
         arrays::register(registry);
         packing::register(registry);
         constants::register(registry);
-        for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
-            registry.function(*entry);
+        let time_functions = time::functions(registry.level());
+        for entry in natural::FUNCTIONS.iter().copied().chain(time_functions) {
+            registry.function(entry);
         }
         environment::register(registry);
         process::register(registry);

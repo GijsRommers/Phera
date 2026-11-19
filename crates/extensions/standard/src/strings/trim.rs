@@ -4,12 +4,31 @@
 //! [`character_mask`] reads such a list, for `addcslashes` and
 //! `str_word_count` as well.
 
-use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value, args};
+use phera_extension_api::{
+    Change, Context, FunctionEntry, LanguageLevel, NativeFn, NativeResult, Param, ParamType,
+    SyncFn, Value, args,
+};
 
-pub(super) const FUNCTIONS: &[FunctionEntry] = &[TRIM, LTRIM, RTRIM, CHOP];
+pub(super) fn functions(level: LanguageLevel) -> [FunctionEntry; 4] {
+    let form_feed = level.has(Change::TrimFormFeed);
+    [
+        (TRIM, trim::<true> as SyncFn),
+        (LTRIM, ltrim::<true> as SyncFn),
+        (RTRIM, rtrim::<true> as SyncFn),
+        (CHOP, chop::<true> as SyncFn),
+    ]
+    .map(|(entry, updated)| {
+        let handler = if form_feed {
+            NativeFn::Sync(updated)
+        } else {
+            entry.handler
+        };
+        FunctionEntry { handler, ..entry }
+    })
+}
 
 /// What the trim functions strip by default: space, `\n`, `\r`, `\t`, `\v`
-/// and NUL. Unlike C's `isspace`, PHP's list has no form feed.
+/// and NUL. PHP 8.6 also strips form feed.
 const DEFAULT_CHARACTERS: &[u8] = b" \n\r\t\x0b\0";
 
 /// The bytes a character list such as `"a..z\n"` names, as `php_charmask`
@@ -63,7 +82,7 @@ enum Side {
 }
 
 /// The string without the listed characters at the start, the end or both.
-fn trim_with(
+fn trim_with<const STRIP_FORM_FEED: bool>(
     context: &mut dyn Context,
     arguments: &[Value],
     function: &str,
@@ -71,6 +90,8 @@ fn trim_with(
 ) -> NativeResult {
     let characters = if args::given(arguments, 1) {
         args::bytes(arguments, 1)
+    } else if STRIP_FORM_FEED {
+        b" \n\r\t\x0b\x0c\0"
     } else {
         DEFAULT_CHARACTERS
     };
@@ -101,11 +122,14 @@ const TRIM: FunctionEntry = FunctionEntry::sync(
         Param::new("string", ParamType::String),
         Param::new("characters", ParamType::String).optional(),
     ],
-    trim,
+    trim::<false>,
 );
 
-fn trim(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    trim_with(context, arguments, "trim", Side::Both)
+fn trim<const STRIP_FORM_FEED: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
+    trim_with::<STRIP_FORM_FEED>(context, arguments, "trim", Side::Both)
 }
 
 /// `ltrim(string $string, string $characters = " \n\r\t\v\0"): string`,
@@ -120,11 +144,14 @@ const LTRIM: FunctionEntry = FunctionEntry::sync(
         Param::new("string", ParamType::String),
         Param::new("characters", ParamType::String).optional(),
     ],
-    ltrim,
+    ltrim::<false>,
 );
 
-fn ltrim(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    trim_with(context, arguments, "ltrim", Side::Left)
+fn ltrim<const STRIP_FORM_FEED: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
+    trim_with::<STRIP_FORM_FEED>(context, arguments, "ltrim", Side::Left)
 }
 
 /// `rtrim(string $string, string $characters = " \n\r\t\v\0"): string`,
@@ -139,11 +166,14 @@ const RTRIM: FunctionEntry = FunctionEntry::sync(
         Param::new("string", ParamType::String),
         Param::new("characters", ParamType::String).optional(),
     ],
-    rtrim,
+    rtrim::<false>,
 );
 
-fn rtrim(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    trim_with(context, arguments, "rtrim", Side::Right)
+fn rtrim<const STRIP_FORM_FEED: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
+    trim_with::<STRIP_FORM_FEED>(context, arguments, "rtrim", Side::Right)
 }
 
 /// `chop()`, another name for `rtrim()`; its warnings name `chop()`.
@@ -153,9 +183,12 @@ const CHOP: FunctionEntry = FunctionEntry::sync(
         Param::new("string", ParamType::String),
         Param::new("characters", ParamType::String).optional(),
     ],
-    chop,
+    chop::<false>,
 );
 
-fn chop(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    trim_with(context, arguments, "chop", Side::Right)
+fn chop<const STRIP_FORM_FEED: bool>(
+    context: &mut dyn Context,
+    arguments: &[Value],
+) -> NativeResult {
+    trim_with::<STRIP_FORM_FEED>(context, arguments, "chop", Side::Right)
 }

@@ -25,10 +25,18 @@ pub fn register(registry: &mut Registry) {
         Param::new("sorting_order", ParamType::Int).with_default(ConstantValue::Int(0)),
         OPTIONAL_CONTEXT,
     ];
+    let scan = if registry
+        .level()
+        .has(phera_extension_api::Change::ScandirOrder)
+    {
+        scandir::<true>
+    } else {
+        scandir::<false>
+    };
     for entry in [
         FunctionEntry::asynchronous("opendir", OPEN, opendir),
         FunctionEntry::asynchronous("dir", OPEN, dir),
-        FunctionEntry::asynchronous("scandir", SCAN, scandir),
+        FunctionEntry::asynchronous("scandir", SCAN, scan),
         FunctionEntry::asynchronous("readdir", &[HANDLE], readdir),
         FunctionEntry::asynchronous("rewinddir", &[HANDLE], rewinddir),
         FunctionEntry::sync("closedir", &[HANDLE], closedir),
@@ -148,7 +156,10 @@ async fn collect_entries(
     Ok(Ok(entries))
 }
 
-fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+fn scandir<const VALIDATE_ORDER: bool>(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let name = args::bytes(&arguments, 0);
         check_path("scandir", "#1 ($directory)", name)?;
@@ -159,6 +170,12 @@ fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
             ));
         }
         let order = args::int(&arguments, 1).unwrap_or(0);
+        if VALIDATE_ORDER && !matches!(order, 0..=2) {
+            return Err(NativeError::value_error(
+                "scandir(): Argument #2 ($sorting_order) must be one of the SCANDIR_SORT_ASCENDING, \
+                 SCANDIR_SORT_DESCENDING, or SCANDIR_SORT_NONE constants",
+            ));
+        }
         let entries = match collect_entries(context, name, order).await? {
             Ok(entries) => entries,
             Err(error) => {

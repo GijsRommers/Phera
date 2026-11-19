@@ -81,7 +81,15 @@ pub(crate) fn register(registry: &mut Registry) {
     ));
     registry.function(FunctionEntry::sync("preg_split", SPLIT, split::split));
     registry.function(FunctionEntry::sync("preg_quote", QUOTE, quote::quote));
-    registry.function(FunctionEntry::asynchronous("preg_grep", GREP, grep::grep));
+    let grep = if registry
+        .level()
+        .has(phera_extension_api::Change::PregGrepReturnsFalse)
+    {
+        grep::grep::<true>
+    } else {
+        grep::grep::<false>
+    };
+    registry.function(FunctionEntry::asynchronous("preg_grep", GREP, grep));
     registry.function(FunctionEntry::sync("preg_last_error", &[], errors::last));
     registry.function(FunctionEntry::sync(
         "preg_last_error_msg",
