@@ -227,7 +227,13 @@ impl Vm {
         }
         self.initialize_throwable(&object, TraceOrigin::Engine);
         object.set(Object::protected_key("message"), Value::from(message));
-        object.set(Object::protected_key("code"), code);
+        let public_code = phera_value::ArrayKey::str("code");
+        let code_key = if object.has(&public_code) {
+            public_code
+        } else {
+            Object::protected_key("code")
+        };
+        object.set(code_key, code);
         for (key, value) in declared_properties {
             object.set(key, value);
         }

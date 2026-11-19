@@ -7,6 +7,7 @@
 //! ```
 
 mod cursor;
+mod dimensions;
 
 use std::rc::Rc;
 
@@ -37,6 +38,7 @@ enum Selection {
 struct Collection {
     root: Location,
     selection: Selection,
+    _pin: Rc<()>,
 }
 
 impl Collection {
@@ -128,7 +130,12 @@ fn wrap(
 ) -> NativeResult {
     let value = context.create_object(class, PhpArray::new())?;
     if let Value::Object(object) = &value {
-        *object.native.borrow_mut() = Some(Box::new(Collection { root, selection }));
+        let pin = root.shared.borrow_mut().pin(root.id);
+        *object.native.borrow_mut() = Some(Box::new(Collection {
+            root,
+            selection,
+            _pin: pin,
+        }));
     }
     Ok(value)
 }
@@ -179,11 +186,15 @@ fn count_hook(_: &mut dyn Context, object: &Object) -> Result<i64, NativeError> 
 }
 
 fn item(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
-    item_at(
-        context,
-        receiver(this)?,
-        args::int(arguments, 0).unwrap_or_default(),
-    )
+    let object = receiver(this)?;
+    let index = args::int(arguments, 0).unwrap_or_default();
+    if !dimensions::valid_index(index) && dimensions::is_map(object) {
+        return Err(NativeError::value_error(format!(
+            "DOMNamedNodeMap::item(): Argument #1 ($index) {}",
+            dimensions::INDEX_BOUNDS,
+        )));
+    }
+    item_at(context, object, index)
 }
 
 fn item_at(context: &mut dyn Context, object: &Object, index: i64) -> NativeResult {
@@ -195,8 +206,12 @@ fn item_at(context: &mut dyn Context, object: &Object, index: i64) -> NativeResu
 }
 
 fn named(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
-    let collection = collection(receiver(this)?)?;
     let name = String::from_utf8_lossy(args::bytes(arguments, 0));
+    named_item(context, receiver(this)?, &name)
+}
+
+fn named_item(context: &mut dyn Context, object: &Object, name: &str) -> NativeResult {
+    let collection = collection(object)?;
     let id = {
         let state = collection.root.shared.borrow();
         let arena = &state.document.arena;
@@ -253,60 +268,6 @@ fn mutate(
     Ok(false)
 }
 
-fn dimension_get(context: &mut dyn Context, object: &Object, index: Value) -> NativeResult {
-    match index {
-        Value::Int(index) => item_at(context, object, index),
-        Value::String(value) if object.class.is_instance_of("DOMNamedNodeMap") => {
-            let collection = collection(object)?;
-            let name = String::from_utf8_lossy(value.as_bytes());
-            let id = {
-                let state = collection.root.shared.borrow();
-                let arena = &state.document.arena;
-                collection
-                    .ids(arena)
-                    .into_iter()
-                    .find(|&id| arena[id].name.local == name)
-            };
-            collection.wrap_node(context, id)
-        }
-        Value::String(value) => {
-            let index = String::from_utf8_lossy(value.as_bytes()).parse::<i64>();
-            match index {
-                Ok(index) => item_at(context, object, index),
-                Err(_) => Ok(Value::Null),
-            }
-        }
-        _ => Ok(Value::Null),
-    }
-}
-
-fn dimension_exists(
-    context: &mut dyn Context,
-    object: &Object,
-    index: Value,
-) -> Result<bool, NativeError> {
-    Ok(!matches!(
-        dimension_get(context, object, index)?,
-        Value::Null
-    ))
-}
-
-fn dimension_set(
-    context: &mut dyn Context,
-    object: &Object,
-    index: Value,
-    _: Value,
-) -> Result<(), NativeError> {
-    dimension_unset(context, object, index)
-}
-
-fn dimension_unset(_: &mut dyn Context, object: &Object, _: Value) -> Result<(), NativeError> {
-    Err(NativeError::error(format!(
-        "Cannot modify readonly object of class {}",
-        object.class.name()
-    )))
-}
-
 fn projection(
     context: &mut dyn Context,
     object: &Object,
@@ -329,10 +290,10 @@ const HOOKS: ClassHooks = ClassHooks {
     count: Some(count_hook),
     dimensions: Some(NativeDimensions {
         fallback_if_overridden: &[],
-        get: dimension_get,
-        exists: dimension_exists,
-        set: dimension_set,
-        unset: dimension_unset,
+        get: dimensions::get,
+        exists: dimensions::exists,
+        set: dimensions::set,
+        unset: dimensions::unset,
         reference: None,
         bind: None,
         direct: None,

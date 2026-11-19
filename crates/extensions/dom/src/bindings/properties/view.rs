@@ -89,7 +89,9 @@ pub(in crate::bindings) fn view(
     if purpose != PropertyPurpose::Debug {
         return Ok(table);
     }
-    let location = location(object)?;
+    let Ok(location) = location(object) else {
+        return Ok(table);
+    };
     let (kind, owned) = {
         let state = location.shared.borrow();
         (state.document.arena[location.id].kind, state.owned)

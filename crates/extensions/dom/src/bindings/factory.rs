@@ -33,6 +33,7 @@ pub(super) fn create_element(
     create(
         context,
         this,
+        "DOMDocument::createElement",
         element(argument(args, 0), argument(args, 1), None, false),
     )
 }
@@ -45,6 +46,7 @@ pub(super) fn create_element_ns(
     create(
         context,
         this,
+        "DOMDocument::createElementNS",
         element(
             argument(args, 1),
             argument(args, 2),
@@ -63,6 +65,7 @@ pub(super) fn create_attribute(
     create(
         context,
         this,
+        "DOMDocument::createAttribute",
         name.map(|name| Node::new(Kind::Attribute, name, "")),
     )
 }
@@ -90,7 +93,12 @@ pub(super) fn create_attribute_ns(
         Ok(name) => name,
         Err(error) => {
             drop(state);
-            return super::mutation::fail(context, &document, error);
+            return super::mutation::fail_at(
+                context,
+                &document,
+                "DOMDocument::createAttributeNS",
+                error,
+            );
         }
     };
     use super::attributes::namespaces::{AttributeBinding, bind};
@@ -105,7 +113,12 @@ pub(super) fn create_text(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    create(context, this, Ok(data(Kind::Text, "#text", args)))
+    create(
+        context,
+        this,
+        "DOMDocument::createTextNode",
+        Ok(data(Kind::Text, "#text", args)),
+    )
 }
 
 pub(super) fn create_comment(
@@ -113,7 +126,12 @@ pub(super) fn create_comment(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    create(context, this, Ok(data(Kind::Comment, "#comment", args)))
+    create(
+        context,
+        this,
+        "DOMDocument::createComment",
+        Ok(data(Kind::Comment, "#comment", args)),
+    )
 }
 
 pub(super) fn create_cdata(
@@ -121,7 +139,12 @@ pub(super) fn create_cdata(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    create(context, this, Ok(data(Kind::Cdata, "#cdata-section", args)))
+    create(
+        context,
+        this,
+        "DOMDocument::createCDATASection",
+        Ok(data(Kind::Cdata, "#cdata-section", args)),
+    )
 }
 
 pub(super) fn create_fragment(
@@ -132,6 +155,7 @@ pub(super) fn create_fragment(
     create(
         context,
         this,
+        "DOMDocument::createDocumentFragment",
         Ok(Node::new(
             Kind::Fragment,
             Name::new("#document-fragment"),
@@ -141,7 +165,12 @@ pub(super) fn create_fragment(
 }
 
 pub(super) fn create_pi(context: &mut dyn Context, this: This<'_>, args: &[Value]) -> NativeResult {
-    create(context, this, processing_instruction(args))
+    create(
+        context,
+        this,
+        "DOMDocument::createProcessingInstruction",
+        processing_instruction(args),
+    )
 }
 
 pub(super) fn create_entity(
@@ -149,7 +178,12 @@ pub(super) fn create_entity(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    create(context, this, entity(args))
+    create(
+        context,
+        this,
+        "DOMDocument::createEntityReference",
+        entity(args),
+    )
 }
 
 pub(super) fn construct_element(
@@ -277,12 +311,13 @@ pub(super) fn checked_name(
 fn create(
     context: &mut dyn Context,
     this: This<'_>,
+    method: &str,
     node: Result<Node, NativeError>,
 ) -> NativeResult {
     let location = this_node(this)?;
     let id = match node {
         Ok(node) => insert_new(&mut location.shared.borrow_mut().document.arena, node),
-        Err(error) => return super::mutation::fail(context, &location, error),
+        Err(error) => return super::mutation::fail_at(context, &location, method, error),
     };
     location.at(id).wrap(context)
 }

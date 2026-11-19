@@ -25,7 +25,7 @@ pub(super) fn append_child(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    insert(context, this, args, false)
+    insert(context, this, args, "DOMNode::appendChild", false)
 }
 
 pub(super) fn insert_before(
@@ -33,7 +33,7 @@ pub(super) fn insert_before(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    insert(context, this, args, false)
+    insert(context, this, args, "DOMNode::insertBefore", false)
 }
 
 pub(super) fn replace_child(
@@ -41,13 +41,14 @@ pub(super) fn replace_child(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    insert(context, this, args, true)
+    insert(context, this, args, "DOMNode::replaceChild", true)
 }
 
 fn insert(
     context: &mut dyn Context,
     this: This<'_>,
     arguments: &[Value],
+    method: &str,
     replace: bool,
 ) -> NativeResult {
     let parent = this_node(this)?;
@@ -57,7 +58,7 @@ fn insert(
         .transpose()?;
     let reference = match reference {
         Some(reference) if !reference.same_document(&parent) => {
-            return fail(context, &parent, dom_error(8, "Not Found Error"));
+            return fail_at(context, &parent, method, dom_error(8, "Not Found Error"));
         }
         Some(reference) => Some(reference.id),
         None => None,
@@ -65,12 +66,12 @@ fn insert(
     if let Some(reference) = reference
         && parent.shared.borrow().document.arena[reference].parent() != Some(parent.id)
     {
-        return fail(context, &parent, dom_error(8, "Not Found Error"));
+        return fail_at(context, &parent, method, dom_error(8, "Not Found Error"));
     }
 
     let child = match adopt_detached(&parent, child) {
         Ok(child) => child,
-        Err(error) => return fail(context, &parent, error),
+        Err(error) => return fail_at(context, &parent, method, error),
     };
     let result = {
         let mut state = parent.shared.borrow_mut();
@@ -79,17 +80,14 @@ fn insert(
     let first = match result {
         Ok(Some(id)) => id,
         Ok(None) => {
-            let function = context
-                .diagnostic_function()
-                .unwrap_or("DOMNode::appendChild");
-            context.warning(format!("{function}(): Document Fragment is empty"));
+            context.warning(format!("{method}(): Document Fragment is empty"));
             return Ok(Value::Bool(false));
         }
-        Err(error) => return fail(context, &parent, error),
+        Err(error) => return fail_at(context, &parent, method, error),
     };
 
     if let Some(reference) = reference.filter(|&id| replace && id != child.id) {
-        parent.shared.borrow_mut().document.arena.detach(reference);
+        parent.shared.borrow_mut().remove(reference);
         parent.at(reference).wrap(context)
     } else {
         parent.at(first).wrap(context)
@@ -141,9 +139,14 @@ pub(super) fn remove_child(
     if !parent.same_document(&child)
         || parent.shared.borrow().document.arena[child.id].parent() != Some(parent.id)
     {
-        return fail(context, &parent, dom_error(8, "Not Found Error"));
+        return fail_at(
+            context,
+            &parent,
+            "DOMNode::removeChild",
+            dom_error(8, "Not Found Error"),
+        );
     }
-    parent.shared.borrow_mut().document.arena.detach(child.id);
+    parent.shared.borrow_mut().remove(child.id);
     child.wrap(context)
 }
 
@@ -255,6 +258,19 @@ pub(super) fn link_error(error: LinkError) -> NativeError {
 }
 
 pub(super) fn fail(context: &mut dyn Context, node: &Location, error: NativeError) -> NativeResult {
+    let function = context
+        .diagnostic_function()
+        .unwrap_or("DOMNode")
+        .to_owned();
+    fail_at(context, node, &function, error)
+}
+
+pub(super) fn fail_at(
+    context: &mut dyn Context,
+    node: &Location,
+    function: &str,
+    error: NativeError,
+) -> NativeResult {
     if !node.shared.borrow().document.settings.strict
         && let NativeError::Throw {
             class: "DOMException",
@@ -262,7 +278,6 @@ pub(super) fn fail(context: &mut dyn Context, node: &Location, error: NativeErro
             ..
         } = error
     {
-        let function = context.diagnostic_function().unwrap_or("DOMNode");
         context.warning(format!("{function}(): {message}"));
         return Ok(Value::Bool(false));
     }

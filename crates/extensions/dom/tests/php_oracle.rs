@@ -19,6 +19,11 @@ fn malformed_xml_recovery() {
     compare("recovery");
 }
 
+#[test]
+fn legacy_collection_and_mutation_edges() {
+    compare("legacy_edges");
+}
+
 fn compare(name: &str) {
     let Some(oracle) = Comparison::from_environment("dom") else {
         return;

@@ -170,7 +170,7 @@ fn wakeup(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> Native
         {
             object.remove(&message);
         }
-        let code = Object::protected_key("code");
+        let code = code_key(object);
         if object
             .get(&code)
             .is_some_and(|value| !matches!(value, Value::Int(_) | Value::Null))
@@ -179,6 +179,15 @@ fn wakeup(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> Native
         }
     }
     Ok(Value::Null)
+}
+
+fn code_key(object: &Object) -> ArrayKey {
+    let public = ArrayKey::str("code");
+    if object.has(&public) {
+        public
+    } else {
+        Object::protected_key("code")
+    }
 }
 
 /// Reads a protected property.
@@ -225,7 +234,7 @@ fn construct(
         );
     }
     if let Some(code) = args::int(arguments, 1) {
-        object.set(Object::protected_key("code"), Value::Int(code));
+        object.set(code_key(object), Value::Int(code));
     }
     if let Some(previous) = args::object(arguments, 2) {
         set_private(object, "previous", Value::Object(previous.clone()));
@@ -251,7 +260,12 @@ fn construct_error_exception(
     for (index, name) in fields {
         let value = args::value(arguments, index);
         if args::given(arguments, index) && !value.is_null() {
-            object.set(Object::protected_key(name), value.clone());
+            let key = if name == "code" {
+                code_key(object)
+            } else {
+                Object::protected_key(name)
+            };
+            object.set(key, value.clone());
         }
     }
     if let Some(previous) = args::object(arguments, 5) {
@@ -270,11 +284,21 @@ fn get_message(
 
 /// PDO can store a SQLSTATE string: `$exception->getCode()` must preserve `"42P01"`.
 fn get_code(
-    _context: &mut dyn Context,
+    context: &mut dyn Context,
     this: Option<&Rc<Object>>,
     _arguments: &[Value],
 ) -> NativeResult {
-    Ok(protected(this, "code"))
+    let Some(object) = this else {
+        return Ok(Value::Null);
+    };
+    if let Some(code) = object.get(&code_key(object)) {
+        return Ok(code);
+    }
+    context.warning(format!(
+        "Undefined property: {}::$code",
+        object.class.name()
+    ));
+    Ok(Value::Null)
 }
 
 fn get_file(

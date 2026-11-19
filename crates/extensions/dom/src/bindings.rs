@@ -8,6 +8,7 @@
 mod attributes;
 mod characters;
 mod collection;
+mod detached;
 mod document;
 mod factory;
 mod libxml;
@@ -22,7 +23,8 @@ use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use phera_extension_api::{
-    ClassEntry, Context, Extension, NativeError, NativeResult, Object, PhpArray, Registry, Value,
+    ClassEntry, ConstantValue, Context, Extension, NativeError, NativeResult, Object, PhpArray,
+    PropertyEntry, Registry, Value, Visibility,
 };
 
 use crate::document::Document;
@@ -44,6 +46,13 @@ impl Extension for Dom {
         registry.class(ClassEntry {
             parent: Some("Exception"),
             kind: phera_extension_api::ClassKind::FinalClass,
+            properties: const {
+                &[PropertyEntry::new(
+                    "code",
+                    ConstantValue::Int(0),
+                    Visibility::Public,
+                )]
+            },
             ..ClassEntry::class("DOMException")
         });
         libxml::register_dom_constants(registry);
@@ -72,6 +81,7 @@ struct DomState {
     document: Document,
     owned: bool,
     wrappers: HashMap<NodeId, Weak<Object>>,
+    detached: detached::Detached,
 }
 
 #[derive(Clone)]
@@ -87,6 +97,7 @@ impl Location {
                 document,
                 owned,
                 wrappers: HashMap::new(),
+                detached: detached::Detached::default(),
             })),
             id,
         }
@@ -157,9 +168,11 @@ fn native<T: Clone + 'static>(object: &Object) -> Option<T> {
 }
 
 fn location(object: &Object) -> Result<Location, NativeError> {
-    native(object).ok_or_else(|| {
-        NativeError::error(format!("{} object is uninitialized", object.class.name()))
-    })
+    let location: Location = native(object).ok_or_else(|| dom_error(11, "Invalid State Error"))?;
+    if let Ok(mut state) = location.shared.try_borrow_mut() {
+        state.release_detached();
+    }
+    Ok(location)
 }
 
 fn receiver(this: This<'_>) -> Result<&Rc<Object>, NativeError> {
