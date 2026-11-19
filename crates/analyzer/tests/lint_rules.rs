@@ -28,7 +28,11 @@ fn rule_fixtures() {
         let bad = root.join("bad.php");
         let good = root.join("good.php");
         let run = |file: &Path| {
-            lint::run(&options(&["--rule", rule.name], file))
+            let mut args = vec!["--rule", rule.name];
+            if rule.name.starts_with("php86-") {
+                args.extend(["--php", "8.6"]);
+            }
+            lint::run(&options(&args, file))
                 .expect("lint diagnostics")
                 .diagnostics
                 .into_iter()

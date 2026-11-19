@@ -1,0 +1,2 @@
+<?php
+$name = $object::class;

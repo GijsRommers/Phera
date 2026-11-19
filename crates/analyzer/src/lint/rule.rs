@@ -51,6 +51,8 @@ pub(super) enum Visit {
     Block,
     Statement,
     Expression,
+    Class,
+    Method,
     Namespace,
 }
 
@@ -80,12 +82,17 @@ impl Rule {
             DefaultStatus::Enabled => "Enabled by default.",
             DefaultStatus::OptIn => "Opt-in.",
         };
+        let fix = if self.fix.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", self.fix)
+        };
         let mut output = format!(
-            "## `{}`\n\nGroup: `{}`. {} {}\n\n{}\n\n",
+            "## `{}`\n\nGroup: `{}`. {}{}\n\n{}\n\n",
             self.name,
             self.group.name(),
             status,
-            self.fix,
+            fix,
             self.description,
         );
         let _ = write!(
@@ -128,6 +135,7 @@ pub fn rules() -> impl Iterator<Item = &'static Rule> {
         .chain(super::imports::RULES)
         .chain(super::locals::RULES)
         .chain(super::members::RULES)
+        .chain(super::modernize::rules())
 }
 
 pub fn find(name: &str) -> Option<&'static Rule> {

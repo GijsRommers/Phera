@@ -3,12 +3,22 @@
 use super::options::FixMode;
 use phera_source::Span;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Safety {
+    Safe,
+    MayChangeBehavior,
+}
+
 pub(super) struct Edit {
     pub span: Span,
     pub replacement: Vec<u8>,
 }
 
 impl Edit {
+    pub(super) fn replace(span: Span, replacement: Vec<u8>) -> Self {
+        Self { span, replacement }
+    }
+
     pub fn remove(span: Span) -> Self {
         Self {
             span,
@@ -18,12 +28,23 @@ impl Edit {
 }
 
 pub(super) struct Fix {
+    safety: Safety,
     pub edits: Vec<Edit>,
 }
 
 impl Fix {
-    pub fn safe(edits: Vec<Edit>) -> Self {
-        Self { edits }
+    pub(super) fn safe(edits: Vec<Edit>) -> Self {
+        Self {
+            safety: Safety::Safe,
+            edits,
+        }
+    }
+
+    pub(super) fn risky(edits: Vec<Edit>) -> Self {
+        Self {
+            safety: Safety::MayChangeBehavior,
+            edits,
+        }
     }
 }
 
@@ -35,7 +56,9 @@ pub(super) fn apply<'a>(
     if mode == FixMode::None {
         return None;
     }
-    let mut fixes: Vec<_> = fixes.filter(|fix| !fix.edits.is_empty()).collect();
+    let mut fixes: Vec<_> = fixes
+        .filter(|fix| !fix.edits.is_empty() && (fix.safety == Safety::Safe || mode == FixMode::All))
+        .collect();
     fixes.sort_by_key(|fix| fix.edits.iter().map(|edit| edit.span.start).min());
     let mut selected = std::collections::BTreeMap::<usize, &Edit>::new();
     for fix in fixes {

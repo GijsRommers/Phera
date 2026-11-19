@@ -1,0 +1,1 @@
+2	php86-deprecated-magic-method	A nullable __debugInfo() return type is deprecated in PHP 8.6. Specify array.

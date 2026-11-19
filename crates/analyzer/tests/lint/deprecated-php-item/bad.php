@@ -1,0 +1,2 @@
+<?php
+$time = strftime('%Y');

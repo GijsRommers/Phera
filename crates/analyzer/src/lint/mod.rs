@@ -16,6 +16,7 @@ mod imports;
 mod index;
 mod locals;
 mod members;
+mod modernize;
 mod options;
 mod rule;
 mod source;
@@ -52,6 +53,8 @@ struct Enabled {
     blocks: Vec<Check>,
     statements: Vec<Check>,
     expressions: Vec<Check>,
+    classes: Vec<Check>,
+    methods: Vec<Check>,
     namespaces: Vec<Check>,
     locals: bool,
     members: bool,
@@ -71,6 +74,8 @@ impl Enabled {
                     Visit::Block => &mut enabled.blocks,
                     Visit::Statement => &mut enabled.statements,
                     Visit::Expression => &mut enabled.expressions,
+                    Visit::Class => &mut enabled.classes,
+                    Visit::Method => &mut enabled.methods,
                     Visit::Namespace => &mut enabled.namespaces,
                     Visit::File => continue,
                 };
@@ -116,6 +121,16 @@ struct Context<'a> {
 impl Context<'_> {
     fn report(&mut self, rule: &'static str, span: Span, message: impl Into<String>) {
         self.record(rule, self.lines.line(span.start), message.into(), None);
+    }
+
+    fn with_fix(
+        &mut self,
+        rule: &'static str,
+        span: Span,
+        message: impl Into<String>,
+        fix: fix::Fix,
+    ) {
+        self.record(rule, self.lines.line(span.start), message.into(), Some(fix));
     }
 
     fn record(&mut self, rule: &'static str, line: usize, message: String, fix: Option<fix::Fix>) {
@@ -262,6 +277,8 @@ fn analyze(
             if !enabled.statements.is_empty()
                 || !enabled.expressions.is_empty()
                 || !enabled.blocks.is_empty()
+                || !enabled.classes.is_empty()
+                || !enabled.methods.is_empty()
                 || !enabled.namespaces.is_empty()
                 || enabled.locals
                 || enabled.members
@@ -327,6 +344,8 @@ fn lint_namespace(context: &mut Context<'_>, namespace: String, statements: &[St
             Node::Block(_) => &enabled.blocks,
             Node::Statement(_) => &enabled.statements,
             Node::Expression(..) => &enabled.expressions,
+            Node::Class(_) => &enabled.classes,
+            Node::Method(_) => &enabled.methods,
             _ => return,
         };
         for check in checks {

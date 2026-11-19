@@ -1,0 +1,1 @@
+2	php86-deprecated-call	The third argument to define() is deprecated in PHP 8.6. Omit it.

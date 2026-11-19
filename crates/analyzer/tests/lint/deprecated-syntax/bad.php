@@ -1,0 +1,2 @@
+<?php
+$n = (integer) $value;
