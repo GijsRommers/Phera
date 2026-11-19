@@ -418,6 +418,14 @@ An item moves from group 2 to group 1 when a later scan no longer finds it.
 
 ### 6.3 PHP versions: 8.5 and 8.6
 
+> **Status, 2026-11-19: parked.** Phera targets PHP 8.5 only for now. What
+> follows is the design for carrying a second version when that is wanted;
+> none of it is on `main`. The first implementation is kept on branch
+> `php86/level-and-library` (pull request #74, draft). Until this changes,
+> PHP 8.6 syntax and functions do not exist in Phera, the tools (`phera
+> check`, `phera lint`) assume PHP 8.5, and "the same output as PHP" means
+> PHP 8.5.
+
 PHP releases a minor version every November and maintains the two newest.
 Phera does the same: it knows the two newest minor versions, and one
 project runs at one of them, its **language level**.
