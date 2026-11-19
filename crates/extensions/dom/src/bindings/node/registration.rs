@@ -13,14 +13,35 @@ use super::super::{characters, mutation, properties};
 use super::*;
 
 pub(in crate::bindings) fn register(registry: &mut Registry) {
-    registry.class(ClassEntry::interface("DOMParentNode"));
-    registry.class(ClassEntry::interface("DOMChildNode"));
+    use super::super::document::VARIADIC;
+    registry.class(ClassEntry {
+        methods: const {
+            &[
+                M::required("append", &[VARIADIC]).returning("void"),
+                M::required("prepend", &[VARIADIC]).returning("void"),
+                M::required("replaceChildren", &[VARIADIC]).returning("void"),
+            ]
+        },
+        ..ClassEntry::interface("DOMParentNode")
+    });
+    registry.class(ClassEntry {
+        methods: const {
+            &[
+                M::required("before", &[VARIADIC]).returning("void"),
+                M::required("after", &[VARIADIC]).returning("void"),
+                M::required("replaceWith", &[VARIADIC]).returning("void"),
+                M::required("remove", &[]).returning("void"),
+            ]
+        },
+        ..ClassEntry::interface("DOMChildNode")
+    });
     const NODE: T = T::Class("DOMNode");
     const FEATURE: &[P] = const { &[P::new("feature", T::String), P::new("version", T::String)] };
     registry.class(ClassEntry {
         hooks: Some(&ClassHooks {
             clone: Some(NativeClone::Copy(clone_object)),
             property_access: Some(&properties::ACCESS),
+            properties: Some(properties::view::view),
             ..ClassHooks::EMPTY
         }),
         constants: &[
@@ -131,9 +152,25 @@ pub(in crate::bindings) fn register(registry: &mut Registry) {
                                     .with_default(C::Null),
                             ]
                         },
-                        c14n,
+                        canonical::c14n,
                     )
                     .tentative_return("string|false"),
+                    M::public_async(
+                        "C14NFile",
+                        const {
+                            &[
+                                P::new("uri", T::String),
+                                P::new("exclusive", T::Bool).with_default(C::Bool(false)),
+                                P::new("withComments", T::Bool).with_default(C::Bool(false)),
+                                P::new("xpath", T::Array).nullable().with_default(C::Null),
+                                P::new("nsPrefixes", T::Array)
+                                    .nullable()
+                                    .with_default(C::Null),
+                            ]
+                        },
+                        canonical::c14n_file,
+                    )
+                    .tentative_return("int|false"),
                     M::public("__sleep", &[], serialization_forbidden).returning("array"),
                     M::public("__wakeup", &[], serialization_forbidden).returning("void"),
                 ]

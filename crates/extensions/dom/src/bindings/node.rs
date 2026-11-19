@@ -5,6 +5,7 @@
 //! var_dump($root->isSameNode($document->documentElement));
 //! ```
 
+mod canonical;
 mod compare;
 mod registration;
 
@@ -14,7 +15,6 @@ use std::fmt::Write;
 
 use phera_extension_api::{Context, NativeError, NativeResult, Object, Value, args};
 
-use crate::serialize;
 use crate::tree::{Arena, Kind, NodeId};
 use crate::xml::names::XMLNS;
 
@@ -242,34 +242,6 @@ fn default_namespace(
     Ok(Value::Bool(
         matches!(&current, Value::String(value) if value.as_bytes() == expected),
     ))
-}
-
-fn c14n(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
-    let node = this_node(this)?;
-    if args::array(arguments, 2).is_some() {
-        return Err(NativeError::throw(
-            "Phera\\NotSupportedException",
-            "C14N XPath filters are not supported by Phera",
-        ));
-    }
-    let exclusive = args::bool(arguments, 0).unwrap_or_default();
-    if !exclusive && args::array(arguments, 3).is_some() {
-        context.notice(
-            "DOMNode::C14N(): Inclusive namespace prefixes only allowed in exclusive mode.".into(),
-        );
-    }
-    let state = node.shared.borrow();
-    if !state.owned {
-        return Ok(Value::Bool(false));
-    }
-    let document = &state.document;
-    let bytes = serialize::canonical(
-        document,
-        node.id,
-        exclusive,
-        args::bool(arguments, 1).unwrap_or_default(),
-    );
-    Ok(Value::from(bytes))
 }
 
 fn serialization_forbidden(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {

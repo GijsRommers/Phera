@@ -7,6 +7,10 @@
 
 mod canonical;
 mod escape;
+mod markup;
+
+pub use canonical::{CanonicalOptions, canonical};
+use markup::{html_boolean, html_void, push_name, write_doctype};
 
 use std::fmt::Write;
 
@@ -27,10 +31,6 @@ pub struct Options {
 enum Mode {
     Xml,
     Html,
-    Canonical {
-        with_comments: bool,
-        exclusive: bool,
-    },
 }
 
 pub fn save(document: &Document, root: NodeId, options: Options) -> Vec<u8> {
@@ -71,29 +71,6 @@ pub fn save(document: &Document, root: NodeId, options: Options) -> Vec<u8> {
         return escape::encode_xml(output, encoding);
     }
     output.into_bytes()
-}
-
-pub fn canonical(
-    document: &Document,
-    root: NodeId,
-    exclusive: bool,
-    with_comments: bool,
-) -> String {
-    let serializer = Serializer {
-        arena: &document.arena,
-        mode: Mode::Canonical {
-            with_comments,
-            exclusive,
-        },
-        pretty: false,
-        expand_empty: true,
-        whole: root == Arena::DOCUMENT,
-        ascii_text: false,
-        ascii_attributes: false,
-    };
-    let mut output = String::new();
-    serializer.write_tree(root, &mut output);
-    output
 }
 
 struct Serializer<'a> {
@@ -149,7 +126,7 @@ impl Serializer<'_> {
                     if indent {
                         padding(output, depth);
                     }
-                    self.visit(root, id, depth, pretty, &mut pending, output);
+                    self.visit(id, depth, pretty, &mut pending, output);
                 }
             }
         }
@@ -157,7 +134,6 @@ impl Serializer<'_> {
 
     fn visit(
         &self,
-        root: NodeId,
         id: NodeId,
         depth: usize,
         pretty: bool,
@@ -165,7 +141,6 @@ impl Serializer<'_> {
         output: &mut String,
     ) {
         let node = &self.arena[id];
-        let canonical = matches!(self.mode, Mode::Canonical { .. });
         let html = matches!(self.mode, Mode::Html);
         match node.kind {
             Kind::Document | Kind::Fragment => {
@@ -186,11 +161,7 @@ impl Serializer<'_> {
             Kind::Element => {
                 output.push('<');
                 push_name(output, node);
-                if let Mode::Canonical { exclusive, .. } = self.mode {
-                    self.canonical_attributes(root, id, exclusive, output);
-                } else {
-                    self.attributes(id, output);
-                }
+                self.attributes(id, output);
                 if html && html_void(&node.name.local) {
                     output.push('>');
                     return;
@@ -235,7 +206,7 @@ impl Serializer<'_> {
                     && node.parent().is_some_and(|parent| {
                         matches!(self.arena[parent].name.local.as_str(), "script" | "style")
                     });
-                if node.kind == Kind::Cdata && !canonical && !html {
+                if node.kind == Kind::Cdata && !html {
                     let _ = write!(output, "<![CDATA[{}]]>", node.value);
                 } else if raw_html {
                     output.push_str(&node.value);
@@ -244,19 +215,9 @@ impl Serializer<'_> {
                 }
             }
             Kind::Comment => {
-                if !matches!(
-                    self.mode,
-                    Mode::Canonical {
-                        with_comments: false,
-                        ..
-                    }
-                ) {
-                    self.canonical_before(id, output);
-                    let _ = write!(output, "<!--{}-->", node.value);
-                }
+                let _ = write!(output, "<!--{}-->", node.value);
             }
             Kind::ProcessingInstruction => {
-                self.canonical_before(id, output);
                 output.push_str("<?");
                 push_name(output, node);
                 if !node.value.is_empty() {
@@ -265,13 +226,11 @@ impl Serializer<'_> {
                 }
                 output.push_str(if html { ">" } else { "?>" });
             }
-            Kind::Doctype if !canonical => write_doctype(node, output),
-            Kind::EntityReference if canonical => escape(output, &node.value, self.escaping(false)),
+            Kind::Doctype => write_doctype(node, output),
             Kind::EntityReference => {
                 let _ = write!(output, "&{};", node.name.local);
             }
             Kind::Attribute => self.attribute(node, output),
-            Kind::Doctype => {}
         }
     }
 
@@ -280,10 +239,6 @@ impl Serializer<'_> {
         match self.mode {
             Mode::Xml => true,
             Mode::Html => node.kind == Kind::Doctype,
-            Mode::Canonical { with_comments, .. } => {
-                matches!(node.kind, Kind::ProcessingInstruction)
-                    || (with_comments && node.kind == Kind::Comment)
-            }
         }
     }
 
@@ -324,83 +279,12 @@ impl Serializer<'_> {
                 attribute,
                 ascii: self.whole,
             },
-            Mode::Canonical { .. } => Escaping::Canonical { attribute },
         }
     }
-}
-
-fn push_name(output: &mut String, node: &Node) {
-    if let Some(prefix) = &node.name.prefix {
-        output.push_str(prefix);
-        output.push(':');
-    }
-    output.push_str(&node.name.local);
 }
 
 fn padding(output: &mut String, depth: usize) {
     for _ in 0..depth {
         output.push_str("  ");
     }
-}
-
-fn write_doctype(node: &Node, output: &mut String) {
-    let _ = write!(output, "<!DOCTYPE {}", node.name.local);
-    if let Some(doctype) = &node.doctype {
-        if !doctype.public_id.is_empty() {
-            let _ = write!(output, " PUBLIC \"{}\"", doctype.public_id);
-        }
-        if !doctype.system_id.is_empty() {
-            if doctype.public_id.is_empty() {
-                output.push_str(" SYSTEM");
-            }
-            let _ = write!(output, " \"{}\"", doctype.system_id);
-        }
-        if let Some(subset) = &doctype.internal_subset {
-            let _ = write!(output, " [\n{subset}]");
-        }
-    }
-    output.push('>');
-}
-
-fn html_void(name: &str) -> bool {
-    matches!(
-        name,
-        "area"
-            | "base"
-            | "basefont"
-            | "br"
-            | "col"
-            | "embed"
-            | "frame"
-            | "hr"
-            | "img"
-            | "input"
-            | "isindex"
-            | "keygen"
-            | "link"
-            | "meta"
-            | "param"
-            | "source"
-            | "track"
-            | "wbr"
-    )
-}
-
-fn html_boolean(name: &str) -> bool {
-    matches!(
-        name,
-        "checked"
-            | "compact"
-            | "declare"
-            | "defer"
-            | "disabled"
-            | "ismap"
-            | "multiple"
-            | "nohref"
-            | "noresize"
-            | "noshade"
-            | "nowrap"
-            | "readonly"
-            | "selected"
-    )
 }

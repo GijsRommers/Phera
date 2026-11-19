@@ -62,6 +62,16 @@ impl Parser<'_> {
             attributes.push((name, value));
         }
 
+        if self.options.default_attributes {
+            for rule in self.attribute_rules.get(name) {
+                if let Some(value) = &rule.default
+                    && !attributes.iter().any(|(name, _)| *name == rule.name)
+                {
+                    attributes.push((rule.name.clone(), self.entities.attribute(value)?));
+                }
+            }
+        }
+        let local_tag = name;
         let parent = self.parent();
         let name = self.resolve_name(name, false);
         let mut element = Node::new(Kind::Element, name, "");
@@ -82,10 +92,15 @@ impl Parser<'_> {
             if !expanded.insert(name.clone()) {
                 return Err(ParseError::fatal(42, format!("Attribute {key} redefined")));
             }
-            let is_id = name.namespace.as_deref() == Some(names::XML) && name.local == "id";
+            let is_id = (name.namespace.as_deref() == Some(names::XML) && name.local == "id")
+                || self
+                    .attribute_rules
+                    .get(local_tag)
+                    .iter()
+                    .any(|rule| rule.is_id && rule.name == key);
             let mut attribute = Node::new(Kind::Attribute, name, value);
             attribute.is_id = is_id;
-            let attribute = self.document.arena.allocate(attribute);
+            let attribute = self.document.arena.attribute(attribute, true);
             self.document
                 .arena
                 .set_attribute(id, attribute, None)

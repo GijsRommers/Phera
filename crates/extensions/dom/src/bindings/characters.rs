@@ -33,9 +33,12 @@ fn change(
 ) -> NativeResult {
     let node = this_node(this)?;
     if matches!(operation, Operation::Append) {
-        node.shared.borrow_mut().document.arena[node.id]
+        let mut state = node.shared.borrow_mut();
+        let arena = &mut state.document.arena;
+        arena[node.id]
             .value
             .push_str(&factory::argument(arguments, 0).unwrap_or_default());
+        arena.refresh_parent_attribute(node.id);
         return Ok(Value::Bool(true));
     }
     let offset = args::int(arguments, 0).unwrap_or_default();
@@ -69,6 +72,7 @@ fn change(
         }
         Operation::Append => {}
     }
+    state.document.arena.refresh_parent_attribute(node.id);
     Ok(Value::Bool(true))
 }
 

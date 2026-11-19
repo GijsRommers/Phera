@@ -53,6 +53,8 @@ impl Parser<'_> {
             let (declaration, rest) = subset.split_at(end);
             if let Some(data) = declaration.strip_prefix("<!ENTITY") {
                 self.entities.declare(data.trim_end_matches('>'));
+            } else if let Some(data) = declaration.strip_prefix("<!ATTLIST") {
+                self.attribute_rules.declare(data.trim_end_matches('>'));
             }
             serialized.push_str(declaration);
             serialized.push('\n');

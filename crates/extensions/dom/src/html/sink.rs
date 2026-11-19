@@ -225,6 +225,6 @@ fn add_attribute(arena: &mut Arena, element: NodeId, attribute: Attribute) {
         attribute.value.to_string(),
     );
     node.is_id = node.name.namespace.is_none() && node.name.local == "id";
-    let id = arena.allocate(node);
+    let id = arena.attribute(node, true);
     let _ = arena.set_attribute(element, id, None);
 }

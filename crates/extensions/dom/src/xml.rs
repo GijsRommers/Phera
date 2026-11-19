@@ -6,6 +6,7 @@
 //! ```
 
 mod doctype;
+mod dtd;
 mod elements;
 mod encoding;
 mod entities;
@@ -29,6 +30,7 @@ pub struct Options {
     pub substitute_entities: bool,
     pub strip_blanks: bool,
     pub merge_cdata: bool,
+    pub default_attributes: bool,
     pub recover: bool,
     pub huge: bool,
 }
@@ -71,7 +73,9 @@ pub fn parse(input: &[u8], options: Options) -> Parsed {
         parser.report(error);
     }
     let fatal = parser.diagnostics.iter().any(|error| error.level == 3);
-    let document = (!fatal || (options.recover && parser.root)).then_some(parser.document);
+    let limit = parser.diagnostics.iter().any(|error| error.code == 89);
+    let document =
+        (!fatal || (options.recover && parser.root && !limit)).then_some(parser.document);
     Parsed {
         document,
         diagnostics: parser.diagnostics,
@@ -86,6 +90,7 @@ struct Parser<'a> {
     open: Vec<(NodeId, ScopeChanges)>,
     scope: HashMap<String, String>,
     entities: Entities,
+    attribute_rules: dtd::AttributeRules,
     diagnostics: Vec<ParseError>,
     position: Position,
     root: bool,
@@ -103,6 +108,7 @@ impl<'a> Parser<'a> {
             open: Vec::new(),
             scope: HashMap::from([("xml".into(), names::XML.into())]),
             entities: Entities::default(),
+            attribute_rules: dtd::AttributeRules::default(),
             diagnostics: Vec::new(),
             position: Position::default(),
             root: false,
@@ -124,7 +130,12 @@ impl<'a> Parser<'a> {
                 _ => false,
             };
             if !at_start {
-                self.position.advance(input, end);
+                let delimiter = match &event {
+                    Ok(Event::Empty(_)) => 2,
+                    Ok(Event::Start(_)) => 1,
+                    _ => 0,
+                };
+                self.position.advance(input, end.saturating_sub(delimiter));
             }
             match event {
                 Ok(Event::Start(tag)) => self.element(tag, line, true)?,
@@ -254,6 +265,9 @@ impl<'a> Parser<'a> {
     }
 
     fn text(&mut self, text: &str, kind: Kind) -> Result<(), ParseError> {
+        if text.is_empty() && kind == Kind::Text {
+            return Ok(());
+        }
         if self.open.is_empty() {
             return if kind == Kind::Text && blank(text) {
                 Ok(())

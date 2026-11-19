@@ -88,7 +88,11 @@ pub(super) fn mutate(
                     }
                 }
                 Kind::Document | Kind::Doctype => {}
-                _ => arena[id].value = value,
+                Kind::Attribute => arena.assign_attribute(id, value),
+                _ => {
+                    arena[id].value = value;
+                    arena.refresh_parent_attribute(id);
+                }
             }
         }
         "className" | "id" => {

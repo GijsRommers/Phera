@@ -5,6 +5,7 @@
 //! echo $document->documentElement->textContent;
 //! ```
 
+pub(super) mod view;
 mod write;
 
 use phera_extension_api::{

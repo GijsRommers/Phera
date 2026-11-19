@@ -7,6 +7,7 @@
 //! ```
 
 mod constants;
+mod loaders;
 pub(super) use constants::register_dom_constants;
 
 use phera_extension_api::value::ArrayKey;
@@ -32,15 +33,12 @@ pub(super) fn publish(
     flags: i64,
 ) {
     for mut error in diagnostics {
-        if ((flags & 32) != 0 && error.level > 1) || ((flags & 64) != 0 && error.level == 1) {
-            continue;
-        }
         error.file = source.into();
         let state = context.state().get_or_default::<Errors>();
         state.last = Some(error.clone());
         if state.internal {
             state.all.push(error);
-        } else {
+        } else if (flags & if error.level == 1 { 64 } else { 32 }) == 0 {
             let file = if source.is_empty() { "Entity" } else { source };
             context.warning(format!(
                 "{function}(): {} in {file}, line: {}",
@@ -69,6 +67,7 @@ pub(super) fn register(registry: &mut Registry) {
         ..ClassEntry::class("LibXMLError")
     });
     constants::register_libxml_constants(registry);
+    loaders::register(registry);
     registry.function(FunctionEntry::sync(
         "libxml_use_internal_errors",
         const {

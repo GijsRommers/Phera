@@ -6,6 +6,7 @@
 //! var_dump($child->parentNode); // NULL, but $child remains usable
 //! ```
 
+mod attribute;
 mod links;
 mod walk;
 
@@ -135,12 +136,14 @@ impl Node {
 #[derive(Clone, Debug)]
 pub struct Arena {
     nodes: Vec<Node>,
+    revision: u64,
 }
 
 impl Default for Arena {
     fn default() -> Self {
         Self {
             nodes: vec![Node::new(Kind::Document, Name::new("#document"), "")],
+            revision: 0,
         }
     }
 }
@@ -158,6 +161,14 @@ impl Arena {
         self.nodes.get(id.0)
     }
 
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn mark_changed(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
     /// Copy with destination indices, preserving attribute order.
     pub fn import(&mut self, source: &Self, node: NodeId, deep: bool) -> NodeId {
         self.import_mapping(source, node, deep).0
@@ -171,7 +182,7 @@ impl Arena {
     ) -> (NodeId, Vec<(NodeId, NodeId)>) {
         let mut mapping = Vec::new();
         let copy = self.copy_one(source, node, &mut mapping);
-        if deep {
+        if deep || source[node].kind == Kind::Attribute {
             let mut pending = vec![(node, copy)];
             while let Some((original, parent)) = pending.pop() {
                 for child in source.children(original) {
@@ -196,6 +207,11 @@ impl Arena {
             let destination = self.allocate(source[attribute].detached_copy());
             self.link_attribute(copy, destination);
             mapping.push((attribute, destination));
+            for text in source.children(attribute) {
+                let destination_text = self.allocate(source[text].detached_copy());
+                self.link(destination, destination_text, None);
+                mapping.push((text, destination_text));
+            }
         }
         copy
     }

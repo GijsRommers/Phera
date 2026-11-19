@@ -126,6 +126,7 @@ fn parse(
                     substitute_entities: previous.substitute_entities || (flags & 2) != 0,
                     strip_blanks,
                     merge_cdata: (flags & 16384) != 0,
+                    default_attributes: (flags & 8) != 0,
                     recover: previous.recover || (flags & 1) != 0,
                     huge: (flags & 524288) != 0,
                 },
@@ -306,7 +307,7 @@ fn save_to_file<'a>(
     })
 }
 
-fn filename(
+pub(in crate::bindings) fn filename(
     context: &mut dyn Context,
     args: &[Value],
     function: &str,

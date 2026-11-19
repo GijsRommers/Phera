@@ -12,6 +12,7 @@ mod document;
 mod factory;
 mod libxml;
 mod mutation;
+mod namespace;
 mod node;
 mod properties;
 mod xpath;
@@ -43,6 +44,7 @@ impl Extension for Dom {
         libxml::register_dom_constants(registry);
         node::register(registry);
         document::register(registry);
+        namespace::register(registry);
         factory::register(registry);
         collection::register(registry);
         xpath::register(registry);

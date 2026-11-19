@@ -6,7 +6,7 @@
 //! echo $document->saveXML();
 //! ```
 
-mod io;
+pub(super) mod io;
 
 use phera_extension_api::{
     ClassEntry, ConstantValue as C, Context, MethodEntry as M, NativeError, NativeResult,

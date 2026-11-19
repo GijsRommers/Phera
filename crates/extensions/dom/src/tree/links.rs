@@ -17,6 +17,7 @@ impl Arena {
         let Some(parent) = self[child].parent.take() else {
             return;
         };
+        self.mark_changed();
         if self[child].kind == Kind::Attribute {
             self[parent].attributes.retain(|&id| id != child);
             return;
@@ -34,6 +35,7 @@ impl Arena {
         } else {
             self[parent].last = previous;
         }
+        self.refresh_attribute(parent);
     }
 
     pub fn insert(
@@ -46,6 +48,7 @@ impl Arena {
         if before != Some(child) {
             self.detach(child);
             self.link(parent, child, before);
+            self.refresh_attribute(parent);
         }
         Ok(())
     }
@@ -75,6 +78,7 @@ impl Arena {
                     | Kind::ProcessingInstruction
                     | Kind::EntityReference
             ),
+            Kind::Attribute => matches!(self[child].kind, Kind::Text | Kind::EntityReference),
             _ => false,
         };
         if !allows_child || parent == child {
@@ -88,6 +92,7 @@ impl Arena {
     }
 
     pub(super) fn link(&mut self, parent: NodeId, child: NodeId, before: Option<NodeId>) {
+        self.mark_changed();
         let previous = match before {
             Some(before) => self[before].previous,
             None => self[parent].last,
@@ -135,6 +140,7 @@ impl Arena {
             else {
                 return Err(LinkError::MissingReference);
             };
+            self.mark_changed();
             self[element].attributes[slot] = attribute;
             self[previous].parent = None;
             self[attribute].parent = Some(element);
@@ -145,6 +151,7 @@ impl Arena {
     }
 
     pub(super) fn link_attribute(&mut self, element: NodeId, attribute: NodeId) {
+        self.mark_changed();
         self[element].attributes.push(attribute);
         self[attribute].parent = Some(element);
     }

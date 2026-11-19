@@ -6,6 +6,7 @@
 //! assert($document->getElementById('target') === $root);
 //! ```
 
+mod namespaces;
 mod registration;
 
 pub(super) use registration::register;
@@ -38,6 +39,8 @@ pub(super) fn set(
     name: Name,
     value: String,
 ) -> Result<NodeId, NativeError> {
+    let mut name = name;
+    namespaces::bind(arena, id, &mut name);
     let existing = if name.namespace.is_none() {
         find(arena, id, None, &name.qualified())
     } else {
@@ -45,10 +48,10 @@ pub(super) fn set(
     };
     if let Some(existing) = existing {
         arena[existing].name = name;
-        arena[existing].value = value;
+        arena.assign_attribute(existing, value);
         return Ok(existing);
     }
-    let attribute = arena.allocate(Node::new(Kind::Attribute, name, value));
+    let attribute = arena.attribute(Node::new(Kind::Attribute, name, value), true);
     arena
         .set_attribute(id, attribute, None)
         .map_err(mutation::link_error)?;
@@ -86,7 +89,7 @@ fn read(
         }
         (Read::Value, None) => Ok(Value::from("")),
         (Read::Has, attribute) => Ok(Value::Bool(attribute.is_some())),
-        (Read::Node, Some(attribute)) => node.at(attribute).wrap(context),
+        (Read::Node, Some(attribute)) => super::namespace::wrap(context, node.at(attribute)),
         (Read::Node, None) => Ok(if ns { Value::Null } else { Value::Bool(false) }),
         (Read::Remove, Some(attribute)) => {
             node.shared.borrow_mut().document.arena.detach(attribute);

@@ -6,12 +6,14 @@
 //! echo $children->length;
 //! ```
 
+mod cursor;
+
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ClassEntry, ClassHooks, Context, MethodEntry, NativeDimensions, NativeError, NativeIterator,
+    ArrayKey, ClassEntry, ClassHooks, Context, MethodEntry, NativeDimensions, NativeError,
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeResult, Object, Param,
-    ParamType, PhpArray, Registry, Value, args,
+    ParamType, PhpArray, PropertyPurpose, Registry, Value, args,
 };
 
 use crate::tree::{Arena, Kind, NodeId};
@@ -54,7 +56,7 @@ impl Collection {
                     let node = &arena[id];
                     node.kind == Kind::Element
                         && match namespace {
-                            None => name == "*" || node.name.qualified() == *name,
+                            None => name == "*" || node.name.local == *name,
                             Some(namespace) => {
                                 (name == "*" || node.name.local == *name)
                                     && (namespace.as_deref() == Some("*")
@@ -63,6 +65,15 @@ impl Collection {
                         }
                 })
                 .collect(),
+        }
+    }
+
+    fn wrap_node(&self, context: &mut dyn Context, id: Option<NodeId>) -> NativeResult {
+        match id {
+            Some(id) if matches!(self.selection, Selection::Snapshot(_)) => {
+                super::namespace::wrap(context, self.root.at(id))
+            }
+            id => self.root.wrap_optional(context, id),
         }
     }
 
@@ -163,7 +174,7 @@ fn item_at(context: &mut dyn Context, object: &Object, index: i64) -> NativeResu
     let id = usize::try_from(index)
         .ok()
         .and_then(|index| collection.snapshot().get(index).copied());
-    collection.root.wrap_optional(context, id)
+    collection.wrap_node(context, id)
 }
 
 fn named(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
@@ -177,7 +188,7 @@ fn named(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nati
             .into_iter()
             .find(|&id| arena[id].name.local == name)
     };
-    collection.root.wrap_optional(context, id)
+    collection.wrap_node(context, id)
 }
 
 fn named_ns(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
@@ -194,64 +205,7 @@ fn named_ns(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> N
                 && arena[id].name.local == name
         })
     };
-    collection.root.wrap_optional(context, id)
-}
-
-fn get_iterator(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
-    let cursor = iterator(context, receiver(this)?.clone())?;
-    context.create_iterator(cursor)
-}
-
-struct Cursor {
-    collection: Collection,
-    ids: Vec<NodeId>,
-    index: usize,
-}
-
-impl NativeIterator for Cursor {
-    fn rewind(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
-        self.ids = self.collection.snapshot();
-        self.index = 0;
-        Ok(())
-    }
-
-    fn advance(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
-        self.index = self.index.saturating_add(1);
-        Ok(())
-    }
-
-    fn valid(&mut self, _: &mut dyn Context) -> Result<bool, NativeError> {
-        Ok(self.index < self.ids.len())
-    }
-
-    fn current(&mut self, context: &mut dyn Context) -> NativeResult {
-        self.collection
-            .root
-            .wrap_optional(context, self.ids.get(self.index).copied())
-    }
-
-    fn key(&mut self, _: &mut dyn Context) -> NativeResult {
-        if matches!(self.collection.selection, Selection::Attributes)
-            && let Some(&id) = self.ids.get(self.index)
-        {
-            let state = self.collection.root.shared.borrow();
-            return Ok(state.document.arena[id].name.local.clone().into());
-        }
-        Ok(Value::Int(self.index as i64))
-    }
-}
-
-fn iterator(
-    _: &mut dyn Context,
-    object: Rc<Object>,
-) -> Result<Box<dyn NativeIterator>, NativeError> {
-    let collection = collection(&object)?;
-    let ids = collection.snapshot();
-    Ok(Box::new(Cursor {
-        collection,
-        ids,
-        index: 0,
-    }))
+    collection.wrap_node(context, id)
 }
 
 fn read(
@@ -296,7 +250,7 @@ fn dimension_get(context: &mut dyn Context, object: &Object, index: Value) -> Na
                     .into_iter()
                     .find(|&id| arena[id].name.local == name)
             };
-            collection.root.wrap_optional(context, id)
+            collection.wrap_node(context, id)
         }
         Value::String(value) => {
             let index = String::from_utf8_lossy(value.as_bytes()).parse::<i64>();
@@ -336,8 +290,24 @@ fn dimension_unset(_: &mut dyn Context, object: &Object, _: Value) -> Result<(),
     )))
 }
 
+fn projection(
+    context: &mut dyn Context,
+    object: &Object,
+    purpose: PropertyPurpose,
+) -> Result<PhpArray, NativeError> {
+    let mut table = object.to_array();
+    if purpose == PropertyPurpose::Debug {
+        table.insert(
+            ArrayKey::str("length"),
+            Value::Int(count_hook(context, object)?),
+        );
+    }
+    Ok(table)
+}
+
 const HOOKS: ClassHooks = ClassHooks {
-    iterator: Some(iterator),
+    iterator: Some(cursor::iterator),
+    properties: Some(projection),
     property_access: Some(&NativePropertyAccess { read, mutate }),
     count: Some(count_hook),
     dimensions: Some(NativeDimensions {
@@ -361,7 +331,7 @@ pub(super) fn register(registry: &mut Registry) {
     );
     const COUNT: MethodEntry = MethodEntry::public("count", &[], count).tentative_return("int");
     const ITERATOR: MethodEntry =
-        MethodEntry::public("getIterator", &[], get_iterator).returning("Iterator");
+        MethodEntry::public("getIterator", &[], cursor::get_iterator).returning("Iterator");
     registry.class(ClassEntry {
         interfaces: &["IteratorAggregate", "Countable"],
         methods: const { &[ITEM, COUNT, ITERATOR] },
