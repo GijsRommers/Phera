@@ -422,6 +422,7 @@ impl Vm {
         }
         self.finish_buffers().await;
         self.finish_request_headers().await;
+        self.finish_resource_finalizers().await;
         self.status
     }
 
