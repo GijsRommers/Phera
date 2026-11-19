@@ -1,10 +1,15 @@
 //! Numeric PHP constants used by the implementation, such as `CURLOPT_URL`.
 
-// System libcurl headers on Linux expose the signed, pre-8.22 auth masks.
+// The Linux PHP oracle uses libcurl's older signed masks.
 pub(crate) const CURLAUTH_ANY: i64 = if cfg!(target_os = "linux") {
     -17
 } else {
     4_294_967_023
+};
+pub(crate) const CURL_ALL_BITS: i64 = if cfg!(target_os = "linux") {
+    -1
+} else {
+    u32::MAX as i64
 };
 pub(crate) const CURLE_OK: i64 = 0;
 pub(crate) const CURLHEADER_SEPARATE: i64 = 1;
