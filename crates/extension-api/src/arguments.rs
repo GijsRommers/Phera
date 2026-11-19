@@ -22,7 +22,7 @@ use phera_value::{
     NumVal, PhpString, Value, cast_to_bool, float_repr, parse_numeric, to_php_string,
 };
 
-use crate::{Context, FunctionArity, FunctionEntry, NativeError, Param, ParamType};
+use crate::{ArgumentCount, Context, FunctionEntry, NativeError, Param, ParamType};
 
 /// Validates `arguments` against the signature of `entry` and converts scalar
 /// arguments in place. On failure the error is the exception PHP would throw
@@ -33,8 +33,8 @@ pub fn prepare_arguments(
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
     match entry.arity {
-        FunctionArity::Parameters => prepare_call(entry.name, entry.params, arguments, context),
-        FunctionArity::Handler => prepare_values(entry.name, entry.params, arguments, context),
+        ArgumentCount::Parameters => prepare_call(entry.name, entry.params, arguments, context),
+        ArgumentCount::Handler => prepare_call_values(entry.name, entry.params, arguments, context),
     }
 }
 
@@ -47,10 +47,11 @@ pub fn prepare_call(
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
     check_count(name, params, arguments.len())?;
-    prepare_values(name, params, arguments, context)
+    prepare_call_values(name, params, arguments, context)
 }
 
-fn prepare_values(
+/// Coerce and dereference arguments for a handler that checks its own count.
+pub fn prepare_call_values(
     name: &str,
     params: &[Param],
     arguments: &mut [Value],
@@ -157,11 +158,11 @@ impl Site<'_> {
     /// `strict_types`.
     fn null_deprecated(&self, context: &mut dyn Context) {
         context.deprecated(format!(
-            "{}(): Passing null to parameter #{}{} of type {} is deprecated",
+            "{}(): Passing null to parameter #{}{} {} is deprecated",
             self.function,
             self.number,
             self.name(),
-            type_text(self.param.ty)
+            expected(self.param)
         ));
     }
 }
@@ -228,7 +229,7 @@ fn convert(
     strict: bool,
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
-    if value.is_null() && site.param.nullable {
+    if value.is_null() && site.param.accepts_null() {
         return Ok(());
     }
     let converted = match site.param.ty {

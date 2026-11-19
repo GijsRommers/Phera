@@ -123,14 +123,17 @@ foreach (explode("\n", git('ls-tree', '-r', '--name-only', $commit)) as $file) {
         continue;
     }
     foreach (signatures(git('show', "$commit:$file")) as [$name, $parameters, $line]) {
-        $records[strtolower($name)] = [$parameters, "$file:$line"];
+        $namespace = str_contains($name, '\\')
+            ? substr($name, 0, strrpos($name, '\\'))
+            : '';
+        $records[strtolower($name)] = [$parameters, "$file:$line", $namespace];
     }
 }
 $records = pdo_methods($records);
 $records += redis_methods();
 ksort($records);
 
-foreach ($records as $name => [$parameters, $location]) {
+foreach ($records as $name => [$parameters, $location, $namespace]) {
     $required = 0;
     foreach ($parameters as $position => [$_, $variadic, $reference, $expression]) {
         if (!$variadic && $expression === null) {
@@ -138,10 +141,11 @@ foreach ($records as $name => [$parameters, $location]) {
         }
     }
     echo $name, "\t", $location;
-    foreach ($parameters as $position => [$parameter, $variadic, $reference, $expression]) {
+    foreach ($parameters as $position => $declaration) {
+        [$parameter, $variadic, $reference, $expression] = $declaration;
         $flags = ($position >= $required ? 'o' : 'r') . ($variadic ? 'v' : '-') . ($reference ? '&' : '-');
         echo "\t", $parameter, "\t", $flags, "\t", $expression ?? '', "\t",
-            default_value($expression, $name);
+            ($declaration[4] ?? default_value($expression, $name, $namespace));
     }
     echo "\n";
 }
@@ -178,9 +182,14 @@ function redis_methods(): array {
                 $value = $parameter['default'];
                 $default = is_array($value) ? '[]' : strtolower(var_export($value, true));
             }
-            $parameters[] = [$parameter['name'], $parameter['variadic'], $parameter['ref'], $default];
+            // The PECL inventory stores evaluated defaults, including Redis::MULTI.
+            if ($name === 'multi' && $parameter['name'] === 'value') {
+                $parameters[] = [$parameter['name'], $parameter['variadic'], $parameter['ref'], 'Redis::MULTI', 'i1'];
+            } else {
+                $parameters[] = [$parameter['name'], $parameter['variadic'], $parameter['ref'], $default];
+            }
         }
-        $records['redis::' . strtolower($name)] = [$parameters, $file];
+        $records['redis::' . strtolower($name)] = [$parameters, $file, ''];
     }
     return $records;
 }
@@ -199,15 +208,15 @@ function is_runtime_stub(string $file): bool {
         ], true));
 }
 
-function default_value(?string $expression, string $function): string {
+function default_value(?string $expression, string $function, string $namespace): string {
     if ($expression === null || $expression === 'UNKNOWN') {
         return '';
     }
     try {
-        $namespace = str_contains($function, '\\')
-            ? 'namespace ' . substr($function, 0, strrpos($function, '\\')) . '; '
-            : '';
-        $value = eval($namespace . "return $expression;");
+        $scope = $namespace === '' ? '' : "namespace $namespace; ";
+        // Deprecated declarations remain in the stub catalog, but their
+        // diagnostics do not belong in the generated records.
+        $value = @eval($scope . "return $expression;");
     } catch (Error $error) {
         // A PHP build can omit constants of an unbuilt function (or an entire
         // extension). Preserve the expression for the inventory checker.

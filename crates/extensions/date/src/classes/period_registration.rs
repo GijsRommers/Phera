@@ -43,7 +43,7 @@ const METHODS: &[MethodEntry] = &[
         ],
         period::construct,
     )
-    .with_preparation(|_, _, _| Ok(phera_extension_api::MethodPreparation::Prepared)),
+    .with_handler_arity(),
     MethodEntry::public(
         "createFromISO8601String",
         &[

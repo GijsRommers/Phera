@@ -16,7 +16,10 @@ use std::rc::Rc;
 
 use phera_value::{Object, PhpString, Value};
 
-use crate::{ClassHooks, ConstantValue, Context, LocalFuture, NativeError, NativeResult, Param};
+use crate::{
+    ArgumentCount, ClassHooks, ConstantValue, Context, LocalFuture, NativeError, NativeResult,
+    Param,
+};
 
 /// An extension can preserve legacy parsing behavior while keeping its reflected signature.
 /// Most methods use Default; Prepared means the hook already checked and coerced arguments.
@@ -100,6 +103,7 @@ pub struct MethodEntry {
     pub name: &'static str,
     pub params: &'static [Param],
     pub handler: NativeMethod,
+    pub arity: ArgumentCount,
     /// Optional argument handling before the ordinary native signature check.
     pub preparation: Option<PrepareMethod>,
     pub direct: Option<DirectMethod>,
@@ -131,6 +135,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Sync(handler),
             preparation: None,
+            arity: ArgumentCount::Parameters,
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
@@ -152,6 +157,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Async(handler),
             preparation: None,
+            arity: ArgumentCount::Parameters,
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
@@ -170,6 +176,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::AsyncNamed(handler),
             preparation: None,
+            arity: ArgumentCount::Parameters,
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
@@ -185,6 +192,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Abstract,
             preparation: None,
+            arity: ArgumentCount::Parameters,
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
@@ -195,6 +203,11 @@ impl MethodEntry {
 
     pub const fn tentative_return(mut self, ty: &'static str) -> Self {
         self.return_type = Some(MethodReturn::Tentative(ty));
+        self
+    }
+
+    pub const fn with_handler_arity(mut self) -> Self {
+        self.arity = ArgumentCount::Handler;
         self
     }
 

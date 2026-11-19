@@ -258,7 +258,8 @@ fn default_value(
         let info = require_default(&parameter)?;
         match info.default.clone() {
             Some(ParameterDefault::Literal(Value::Int(number)))
-                if info.declared_type.as_deref().is_some_and(default_is_float) =>
+                if !info.internal
+                    && info.declared_type.as_deref().is_some_and(default_is_float) =>
             {
                 Ok(Value::Float(number as f64))
             }

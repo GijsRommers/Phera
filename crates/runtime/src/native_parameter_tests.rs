@@ -1,6 +1,8 @@
 //! Compare runtime registration with the declarations generated from PHP's stubs.
 //! For example, `preg_match()` takes its third argument by reference.
 
+mod reflection;
+
 use phera_extension_api::{Param, Registry, native_parameters::signature};
 
 #[test]
@@ -14,10 +16,15 @@ fn native_parameter_tables_match_php_stubs() {
         "Compared {} functions and {} methods",
         audit.functions, audit.methods
     );
-    eprintln!(
-        "Without php-src stubs ({}): {}",
-        audit.missing.len(),
-        audit.missing.join(", ")
+    assert_eq!(
+        audit.missing,
+        [
+            "Directory::__construct",
+            "OpenSSLAsymmetricKey::__construct",
+            "OpenSSLCertificate::__construct",
+            "OpenSSLCertificateSigningRequest::__construct",
+        ],
+        "These private constructors have no declaration in PHP's stubs",
     );
     assert!(audit.messages.is_empty(), "{}", audit.messages.join("\n"));
 }
@@ -49,9 +56,25 @@ impl Audit {
     fn compare(&mut self, name: &str, parameters: &[Param]) -> bool {
         let Some(stub) = signature(name) else {
             self.missing.push(name.to_owned());
+            assert!(
+                parameters.is_empty(),
+                "{name} has parameters without a PHP stub"
+            );
             return false;
         };
         let expected: Vec<_> = stub.parameters().collect();
+        for parameter in &expected {
+            if parameter.optional
+                && !parameter.variadic
+                && parameter.expression != "UNKNOWN"
+                && parameter.default().is_none()
+            {
+                self.messages.push(format!(
+                    "{name} ({}): missing value for ${} = {}",
+                    stub.source, parameter.name, parameter.expression
+                ));
+            }
+        }
         let actual: Vec<_> = parameters
             .iter()
             .map(|parameter| {

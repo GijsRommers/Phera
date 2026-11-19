@@ -7,7 +7,7 @@ use crate::calls::callback_binding::{ArgumentBinding, ArgumentOrigin};
 use crate::calls::prepared_call::PreparedCallee;
 use crate::classes::MethodBody;
 use phera_bytecode::Reg;
-use phera_extension_api::{FunctionArity, NativeError, NativeFn, NativeResult, prepare_arguments};
+use phera_extension_api::{ArgumentCount, NativeError, NativeFn, NativeResult, prepare_arguments};
 use phera_value::Value;
 
 impl Vm {
@@ -66,10 +66,10 @@ impl Vm {
         }
         let previous = std::mem::replace(&mut self.argument_origin, origin);
         let prepared = match entry.arity {
-            FunctionArity::Parameters => {
+            ArgumentCount::Parameters => {
                 self.prepare_call_recording(entry.name, entry.params, &mut arguments, binding)
             }
-            FunctionArity::Handler => prepare_arguments(&entry, &mut arguments, self),
+            ArgumentCount::Handler => prepare_arguments(&entry, &mut arguments, self),
         };
         self.argument_origin = previous;
         if let Err(error) = prepared
@@ -409,7 +409,7 @@ impl Vm {
                     })?;
                 if matches!(preparation, phera_extension_api::MethodPreparation::Default) {
                     let mut prepared = self.with_argument_origin(origin, |vm| {
-                        vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
+                        vm.prepare_native_method_arguments(method, *entry, &mut arguments)
                     });
                     if prepared.is_err()
                         && self.native_strings_needed(entry.params, &arguments, origin)
@@ -419,7 +419,7 @@ impl Vm {
                         self.coerce_native_strings(&name, entry.params, &mut arguments, origin)
                             .await?;
                         prepared = self.with_argument_origin(origin, |vm| {
-                            vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
+                            vm.prepare_native_method_arguments(method, *entry, &mut arguments)
                         });
                     }
                     prepared?;

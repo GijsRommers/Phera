@@ -364,11 +364,11 @@ fn native_parameter(position: usize, param: Param, stub: Option<StubParameter>) 
         ),
     };
     ParameterInfo {
-        name: param.name.into(),
+        name: stub.map_or(param.name, |parameter| parameter.name).into(),
         position,
         declared_type: Some(declared_type),
-        by_reference: param.by_ref,
-        variadic: param.variadic,
+        by_reference: stub.map_or(param.by_ref, |parameter| parameter.by_ref),
+        variadic: stub.map_or(param.variadic, |parameter| parameter.variadic),
         optional: stub.map_or(param.optional, |parameter| parameter.optional),
         promoted: false,
         default,

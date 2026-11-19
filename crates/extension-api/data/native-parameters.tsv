@@ -243,12 +243,8 @@ date_parse	ext/date/php_date.stub.php:158	datetime	r--
 date_parse_from_format	ext/date/php_date.stub.php:164	format	r--			datetime	r--		
 date_sub	ext/date/php_date.stub.php:179	object	r--			interval	r--		
 date_sun_info	ext/date/php_date.stub.php:275	timestamp	r--			latitude	r--			longitude	r--		
-date_sunrise	ext/date/php_date.stub.php:257	timestamp	r--			returnFormat	o--	SUNFUNCS_RET_STRING	
-Deprecated: Constant SUNFUNCS_RET_STRING is deprecated since 8.4, as date_sunrise() and date_sunset() were deprecated in 8.1 in /Users/gijsr/.t3/worktrees/phera/t3-44a1377e-832c2de3718cd402/crates/extension-api/data/generate-native-parameters.php(210) : eval()'d code on line 1
-i1	latitude	o--	null	n	longitude	o--	null	n	zenith	o--	null	n	utcOffset	o--	null	n
-date_sunset	ext/date/php_date.stub.php:266	timestamp	r--			returnFormat	o--	SUNFUNCS_RET_STRING	
-Deprecated: Constant SUNFUNCS_RET_STRING is deprecated since 8.4, as date_sunrise() and date_sunset() were deprecated in 8.1 in /Users/gijsr/.t3/worktrees/phera/t3-44a1377e-832c2de3718cd402/crates/extension-api/data/generate-native-parameters.php(210) : eval()'d code on line 1
-i1	latitude	o--	null	n	longitude	o--	null	n	zenith	o--	null	n	utcOffset	o--	null	n
+date_sunrise	ext/date/php_date.stub.php:257	timestamp	r--			returnFormat	o--	SUNFUNCS_RET_STRING	i1	latitude	o--	null	n	longitude	o--	null	n	zenith	o--	null	n	utcOffset	o--	null	n
+date_sunset	ext/date/php_date.stub.php:266	timestamp	r--			returnFormat	o--	SUNFUNCS_RET_STRING	i1	latitude	o--	null	n	longitude	o--	null	n	zenith	o--	null	n	utcOffset	o--	null	n
 date_time_set	ext/date/php_date.stub.php:192	object	r--			hour	r--			minute	r--			second	o--	0	i0	microsecond	o--	0	i0
 date_timestamp_get	ext/date/php_date.stub.php:201	object	r--		
 date_timestamp_set	ext/date/php_date.stub.php:199	object	r--			timestamp	r--		
@@ -1308,14 +1304,14 @@ pdo\mysql::pgsqlcopyfromarray	ext/pdo_pgsql/pgsql_driver.stub.php:11	tableName	r
 pdo\mysql::pgsqlcopyfromfile	ext/pdo_pgsql/pgsql_driver.stub.php:14	tableName	r--			filename	r--			separator	o--	"\t"	s09	nullAs	o--	"\\\\N"	s5c5c4e	fields	o--	null	n
 pdo\mysql::pgsqlcopytoarray	ext/pdo_pgsql/pgsql_driver.stub.php:17	tableName	r--			separator	o--	"\t"	s09	nullAs	o--	"\\\\N"	s5c5c4e	fields	o--	null	n
 pdo\mysql::pgsqlcopytofile	ext/pdo_pgsql/pgsql_driver.stub.php:20	tableName	r--			filename	r--			separator	o--	"\t"	s09	nullAs	o--	"\\\\N"	s5c5c4e	fields	o--	null	n
-pdo\mysql::pgsqlgetnotify	ext/pdo_pgsql/pgsql_driver.stub.php:32	fetchMode	o--	PDO::FETCH_DEFAULT	?	timeoutMilliseconds	o--	0	i0
+pdo\mysql::pgsqlgetnotify	ext/pdo_pgsql/pgsql_driver.stub.php:32	fetchMode	o--	PDO::FETCH_DEFAULT	i0	timeoutMilliseconds	o--	0	i0
 pdo\mysql::pgsqlgetpid	ext/pdo_pgsql/pgsql_driver.stub.php:35
 pdo\mysql::pgsqllobcreate	ext/pdo_pgsql/pgsql_driver.stub.php:23
 pdo\mysql::pgsqllobopen	ext/pdo_pgsql/pgsql_driver.stub.php:26	oid	r--			mode	o--	"rb"	s7262
 pdo\mysql::pgsqllobunlink	ext/pdo_pgsql/pgsql_driver.stub.php:29	oid	r--		
 pdo\mysql::prepare	ext/pdo/pdo_dbh.stub.php:204	query	r--			options	o--	[]	a
 pdo\mysql::query	ext/pdo/pdo_dbh.stub.php:207	query	r--			fetchMode	o--	null	n	fetchModeArgs	ov-		
-pdo\mysql::quote	ext/pdo/pdo_dbh.stub.php:210	string	r--			type	o--	PDO::PARAM_STR	?
+pdo\mysql::quote	ext/pdo/pdo_dbh.stub.php:210	string	r--			type	o--	PDO::PARAM_STR	i2
 pdo\mysql::rollback	ext/pdo/pdo_dbh.stub.php:213
 pdo\mysql::setattribute	ext/pdo/pdo_dbh.stub.php:216	attribute	r--			value	r--		
 pdo\pgsql::__construct	ext/pdo/pdo_dbh.stub.php:167	dsn	r--			username	o--	null	n	password	o--	null	n	options	o--	null	n
@@ -1343,14 +1339,14 @@ pdo\pgsql::pgsqlcopyfromarray	ext/pdo_pgsql/pgsql_driver.stub.php:11	tableName	r
 pdo\pgsql::pgsqlcopyfromfile	ext/pdo_pgsql/pgsql_driver.stub.php:14	tableName	r--			filename	r--			separator	o--	"\t"	s09	nullAs	o--	"\\\\N"	s5c5c4e	fields	o--	null	n
 pdo\pgsql::pgsqlcopytoarray	ext/pdo_pgsql/pgsql_driver.stub.php:17	tableName	r--			separator	o--	"\t"	s09	nullAs	o--	"\\\\N"	s5c5c4e	fields	o--	null	n
 pdo\pgsql::pgsqlcopytofile	ext/pdo_pgsql/pgsql_driver.stub.php:20	tableName	r--			filename	r--			separator	o--	"\t"	s09	nullAs	o--	"\\\\N"	s5c5c4e	fields	o--	null	n
-pdo\pgsql::pgsqlgetnotify	ext/pdo_pgsql/pgsql_driver.stub.php:32	fetchMode	o--	PDO::FETCH_DEFAULT	?	timeoutMilliseconds	o--	0	i0
+pdo\pgsql::pgsqlgetnotify	ext/pdo_pgsql/pgsql_driver.stub.php:32	fetchMode	o--	PDO::FETCH_DEFAULT	i0	timeoutMilliseconds	o--	0	i0
 pdo\pgsql::pgsqlgetpid	ext/pdo_pgsql/pgsql_driver.stub.php:35
 pdo\pgsql::pgsqllobcreate	ext/pdo_pgsql/pgsql_driver.stub.php:23
 pdo\pgsql::pgsqllobopen	ext/pdo_pgsql/pgsql_driver.stub.php:26	oid	r--			mode	o--	"rb"	s7262
 pdo\pgsql::pgsqllobunlink	ext/pdo_pgsql/pgsql_driver.stub.php:29	oid	r--		
 pdo\pgsql::prepare	ext/pdo/pdo_dbh.stub.php:204	query	r--			options	o--	[]	a
 pdo\pgsql::query	ext/pdo/pdo_dbh.stub.php:207	query	r--			fetchMode	o--	null	n	fetchModeArgs	ov-		
-pdo\pgsql::quote	ext/pdo/pdo_dbh.stub.php:210	string	r--			type	o--	PDO::PARAM_STR	?
+pdo\pgsql::quote	ext/pdo/pdo_dbh.stub.php:210	string	r--			type	o--	PDO::PARAM_STR	i2
 pdo\pgsql::rollback	ext/pdo/pdo_dbh.stub.php:213
 pdo\pgsql::setattribute	ext/pdo/pdo_dbh.stub.php:216	attribute	r--			value	r--		
 pdo\pgsql::setnoticecallback	ext/pdo_pgsql/pdo_pgsql.stub.php:65	callback	r--		
@@ -1372,7 +1368,7 @@ pdo\sqlite::loadextension	ext/pdo_sqlite/pdo_sqlite.stub.php:84	name	r--
 pdo\sqlite::openblob	ext/pdo_sqlite/pdo_sqlite.stub.php:88	table	r--			column	r--			rowid	r--			dbname	o--	"main"	s6d61696e	flags	o--	\Pdo\Sqlite::OPEN_READONLY	i1
 pdo\sqlite::prepare	ext/pdo/pdo_dbh.stub.php:204	query	r--			options	o--	[]	a
 pdo\sqlite::query	ext/pdo/pdo_dbh.stub.php:207	query	r--			fetchMode	o--	null	n	fetchModeArgs	ov-		
-pdo\sqlite::quote	ext/pdo/pdo_dbh.stub.php:210	string	r--			type	o--	PDO::PARAM_STR	?
+pdo\sqlite::quote	ext/pdo/pdo_dbh.stub.php:210	string	r--			type	o--	PDO::PARAM_STR	i2
 pdo\sqlite::rollback	ext/pdo/pdo_dbh.stub.php:213
 pdo\sqlite::setattribute	ext/pdo/pdo_dbh.stub.php:216	attribute	r--			value	r--		
 pdo\sqlite::setauthorizer	ext/pdo_sqlite/pdo_sqlite.stub.php:96	callback	r--		
@@ -1691,7 +1687,7 @@ redis::migrate	phpredis-6.3.0.json	host	r--			port	r--			key	r--			dstdb	r--			t
 redis::move	phpredis-6.3.0.json	key	r--			index	r--		
 redis::mset	phpredis-6.3.0.json	key_values	r--		
 redis::msetnx	phpredis-6.3.0.json	key_values	r--		
-redis::multi	phpredis-6.3.0.json	value	o--	1	i1
+redis::multi	phpredis-6.3.0.json	value	o--	Redis::MULTI	i1
 redis::object	phpredis-6.3.0.json	subcommand	r--			key	r--		
 redis::open	phpredis-6.3.0.json	host	r--			port	o--	6379	i6379	timeout	o--	0	i0	persistent_id	o--	null	n	retry_interval	o--	0	i0	read_timeout	o--	0	i0	context	o--	null	n
 redis::pconnect	phpredis-6.3.0.json	host	r--			port	o--	6379	i6379	timeout	o--	0	i0	persistent_id	o--	null	n	retry_interval	o--	0	i0	read_timeout	o--	0	i0	context	o--	null	n

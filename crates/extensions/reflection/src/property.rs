@@ -149,7 +149,7 @@ pub(crate) fn register(registry: &mut Registry) {
                     },
                     set_value,
                 )
-                .with_preparation(|_, _, _| Ok(phera_extension_api::MethodPreparation::Prepared)),
+                .with_handler_arity(),
                 MethodEntry::public("hasType", &[], |_, o, _| {
                     data(o, |m| Value::Bool(m.declared_type.is_some()))
                 }),
