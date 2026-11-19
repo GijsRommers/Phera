@@ -1,9 +1,12 @@
 //! `sodium_crypto_generichash_update($state, $chunk)` retains only one BLAKE2b block.
 
 use blake2b_simd::Params;
-use revm_precompile::blake2::compress;
+use eth_valkyoth_evm_core::{
+    EVM_BLAKE2F_INPUT_BYTES, EVM_BLAKE2F_OUTPUT_BYTES, EvmBlake2F, EvmFork, EvmGas, EvmGasMeter,
+    EvmPrecompileKind, EvmPrecompileRegistry, EvmPrecompileStatus,
+};
 use subtle::ConstantTimeEq;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 pub(crate) const STATE_LEN: usize = 384;
 const MAGIC: &[u8; 8] = b"PHERAGH1";
@@ -90,7 +93,7 @@ impl BlakeState {
             let (prefix, tail) = input.split_at(space);
             self.pending[self.used..].copy_from_slice(prefix);
             self.compressed = self.compressed.checked_add(BLOCK_LEN as u128)?;
-            compress_block(&mut self.words, &self.pending, self.compressed, false);
+            compress_block(&mut self.words, &self.pending, self.compressed, false)?;
             self.pending.zeroize();
             self.used = 0;
             input = tail;
@@ -98,7 +101,7 @@ impl BlakeState {
             while input.len() > BLOCK_LEN {
                 let (block, tail) = input.split_first_chunk::<BLOCK_LEN>()?;
                 self.compressed = self.compressed.checked_add(BLOCK_LEN as u128)?;
-                compress_block(&mut self.words, block, self.compressed, false);
+                compress_block(&mut self.words, block, self.compressed, false)?;
                 input = tail;
             }
         }
@@ -110,7 +113,7 @@ impl BlakeState {
     pub(crate) fn finish(mut self) -> Option<[u8; 64]> {
         let total = self.compressed.checked_add(self.used as u128)?;
         self.pending[self.used..].fill(0);
-        compress_block(&mut self.words, &self.pending, total, true);
+        compress_block(&mut self.words, &self.pending, total, true)?;
         let mut digest = [0; 64];
         for (dst, word) in digest.as_chunks_mut::<8>().0.iter_mut().zip(self.words) {
             *dst = word.to_le_bytes();
@@ -126,14 +129,48 @@ impl Drop for BlakeState {
     }
 }
 
-fn compress_block(words: &mut [u64; 8], block: &[u8; BLOCK_LEN], length: u128, final_block: bool) {
-    let mut message = [0; 16];
-    for (word, chunk) in message.iter_mut().zip(block.as_chunks::<8>().0) {
-        *word = u64::from_le_bytes(*chunk);
+fn compress_block(
+    words: &mut [u64; 8],
+    block: &[u8; BLOCK_LEN],
+    length: u128,
+    final_block: bool,
+) -> Option<()> {
+    const ROUNDS: u32 = 12;
+    // EIP-152 encodes the round count in big-endian order and the BLAKE2b
+    // chaining words and byte count in little-endian order.
+    let mut input = Zeroizing::new([0; EVM_BLAKE2F_INPUT_BYTES]);
+    input[..4].copy_from_slice(&ROUNDS.to_be_bytes());
+    for (bytes, word) in input[4..68]
+        .as_chunks_mut::<8>()
+        .0
+        .iter_mut()
+        .zip(words.iter())
+    {
+        *bytes = word.to_le_bytes();
     }
-    let count = [length as u64, (length >> 64) as u64];
-    compress(12, words, &message, &count, final_block);
-    message.zeroize();
+    input[68..196].copy_from_slice(block);
+    input[196..212].copy_from_slice(&length.to_le_bytes());
+    input[212] = u8::from(final_block);
+
+    let mut output = Zeroizing::new([0; EVM_BLAKE2F_OUTPUT_BYTES]);
+    let mut gas = EvmGasMeter::try_new(EvmGas::new(u64::from(ROUNDS))).ok()?;
+    let outcome = EvmPrecompileRegistry::try_new(EvmFork::ISTANBUL)
+        .ok()?
+        .descriptor(EvmPrecompileKind::Blake2F)
+        .ok()?
+        .quote::<EvmBlake2F>(input.as_slice())
+        .ok()?
+        .authorize_and_execute_blake2f(&mut gas, output.as_mut_slice())
+        .ok()?;
+    if outcome.status() != EvmPrecompileStatus::Success
+        || outcome.output_len() != EVM_BLAKE2F_OUTPUT_BYTES
+    {
+        return None;
+    }
+    for (word, bytes) in words.iter_mut().zip(output.as_chunks::<8>().0) {
+        *word = u64::from_le_bytes(*bytes);
+    }
+    Some(())
 }
 
 fn checksum(payload: &[u8]) -> blake2b_simd::Hash {

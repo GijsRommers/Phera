@@ -183,13 +183,18 @@ the representation before constructing a native state. PHP exposes no state
 size constant. Preserve PHP's independent digest lengths at initialization
 and finalization by retaining all chaining words through the final compression.
 
-The earlier deferral is superseded. `blake2b_simd` still keeps the state and
-compression internal. Use the public EIP-152 compression API in the MIT-licensed
-`revm-precompile` with default features disabled. It derives its implementation
-from `blake2b_simd` and runs 12 rounds for this API. This brings in additional
-Rust dependencies. The standalone `eip-152` package has a GPL-3.0 license.
-An in-memory handle would break value copies, and retaining the full message
-would give streaming callers unbounded memory use.
+The earlier deferral is superseded. `blake2b_simd` keeps state and compression
+internal. Use the documented EIP-152 BLAKE2F interface in
+`eth-valkyoth-evm-core` with default features disabled. Its fixed-size input
+contains the chaining words, pending block, byte count and final flag. Ask it
+to run exactly 12 rounds. The implementation was covered by the project's
+[external BLAKE2F review](https://github.com/valkyoth/eth/blob/main/security/pentest/v0.51.0.md).
+
+REVM also exposes BLAKE2b compression. Its elliptic-curve dependency tree
+introduces the vulnerable `crypto-bigint` 0.5.5 and the unmaintained `paste`
+macro. The dependency-free BLAKE2F interface removes both. The standalone
+`eip-152` package has a GPL-3.0 license. An in-memory handle would break value
+copies, and retaining the full message would give callers unbounded memory use.
 
 ## 2026-11-19 — Compose secretstream using the libsodium transcript
 
@@ -231,12 +236,3 @@ Secretbox reaches `salsa20` 0.10.2 and `poly1305` 0.8.0 through
 portable backend on Apple silicon and detects AVX2 at runtime on x86.
 Keep portable builds and runtime feature selection. Forcing CPU flags
 would narrow which machines can run the binary.
-
-## 2026-11-19 — Record the BLAKE2b macro dependency in the advisory gate
-
-Keep the public BLAKE2b compressor with default features disabled. Its Alloy
-dependency uses the `paste` compile-time identifier macro. Record the
-RustSec unmaintained notice for that macro in the existing exception file.
-The notice identifies maintenance status. Keep runtime vulnerability checks
-and all other warnings in the gate. Adopting a GPL compressor or maintaining
-a fork of the hash implementation would introduce a larger change.

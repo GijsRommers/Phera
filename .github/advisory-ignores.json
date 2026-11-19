@@ -1,4 +1,3 @@
 {
-  "RUSTSEC-2024-0436": "Unmaintained. Alloy uses paste as a compile-time macro through the REVM BLAKE2b compression dependency.",
   "RUSTSEC-2026-0543": "Unmaintained. Retained for PDO, HTTP and session date formatting."
 }
