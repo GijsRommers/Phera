@@ -221,6 +221,7 @@ impl<'a> Locals<'a> {
             Expr::Call {
                 callee,
                 arguments: Arguments::List(args),
+                ..
             } => {
                 let Expr::Name(name) = &callee.kind else {
                     return;

@@ -61,6 +61,7 @@ impl Analyzer<'_> {
                     file: self.file.path.clone(),
                     line: self.file.lines.line(span.start),
                     identifier: identifier.into(),
+                    severity: crate::diagnostic::Severity::Error,
                     message,
                 },
             ));

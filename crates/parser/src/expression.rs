@@ -531,6 +531,7 @@ impl Parser<'_> {
                                 span: self.span_since(start),
                             };
                         } else {
+                            let name_start = var_expr.span.start;
                             let ExpressionKind::Variable(variable) = var_expr.into_kind() else {
                                 return Err(self.error("expected a variable after '::'"));
                             };
@@ -538,7 +539,7 @@ impl Parser<'_> {
                                 kind: ExpressionKind::StaticProperty {
                                     class: Box::new(expr),
                                     name: variable,
-                                    name_start: var_expr.span.start,
+                                    name_start,
                                 },
                                 span: self.span_since(start),
                             };

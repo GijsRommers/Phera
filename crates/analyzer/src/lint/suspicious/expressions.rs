@@ -234,6 +234,7 @@ fn call<'a>(
     let Expr::Call {
         callee,
         arguments: Arguments::List(arguments),
+        ..
     } = &expression.kind
     else {
         return None;

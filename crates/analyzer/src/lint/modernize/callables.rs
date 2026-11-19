@@ -134,6 +134,7 @@ fn strpos(
     let Expr::Call {
         callee,
         arguments: Arguments::List(arguments),
+        ..
     } = &call.kind
     else {
         return;
@@ -382,6 +383,7 @@ fn args<'a>(context: &Context<'_>, call: &'a Expression, expected: &str) -> Opti
     let Expr::Call {
         callee,
         arguments: Arguments::List(arguments),
+        ..
     } = &call.kind
     else {
         return None;
