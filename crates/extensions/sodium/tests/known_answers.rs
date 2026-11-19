@@ -188,6 +188,47 @@ fn libsodium_known_answers() {
                 "1590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b",
             ),
         ),
+        // generichash.c, keyed empty message
+        (
+            "sodium_crypto_generichash",
+            vec![sequence(0), sequence(64), Value::Int(64)],
+            concat!(
+                "10ebb67700b1868efb4417987acf4690ae9d972fb7a590c2f02871799aaa4786b5e996",
+                "e8f0f4eb981fc214b005f42d2ff4233499391653df7aefcbc13fc51568",
+            ),
+        ),
+        // stream.c / stream.exp, the 63-byte XSalsa20 keystream
+        (
+            "sodium_crypto_stream",
+            vec![
+                Value::Int(63),
+                bytes("69696ee955b62b73cd62bda875fc73d68219e0036b7a0b37"),
+                bytes("1b27556473e985d462cd51197a9a46c76009549eac6474f206c4ee0844f68389"),
+            ],
+            concat!(
+                "eea6a7251c1e72916d11c2cb214d3c252539121d8e234e652d651fa4c8cff880309e64",
+                "5a74e9e0a60d8243acd9177ab51a1beb8d5a2f5d700c093c5e558557",
+            ),
+        ),
+        // xchacha20.c, first keystream
+        (
+            "sodium_crypto_stream_xchacha20",
+            vec![
+                Value::Int(29),
+                bytes("b33ffd3096479bcfbc9aee49417688a0a2554f8d95389419"),
+                bytes("79c99798ac67300bbb2704c95c341e3245f3dcb21761b98e52ff45b24f304fc4"),
+            ],
+            "c6e9758160083ac604ef90e712ce6e75d7797590744e0cf060f013739c",
+        ),
+        // core_ristretto255.c / core_ristretto255.exp, first uniform map
+        (
+            "sodium_crypto_core_ristretto255_from_hash",
+            vec![bytes(concat!(
+                "5d1be09e3d0c82fc538112490e35701979d99e06ca3e2b5b54bffe8b4dc772c14d98b6",
+                "96a1bbfb5ca32c436cc61c16563790306c79eaca7705668b47dffe5bb6",
+            ))],
+            "3066f82a1a747d45120d1740f14358531a8f04bbffe6a819f86dfe50f44a0a46",
+        ),
     ];
     for (name, args, expected) in cases {
         let actual = invoke(&registry, name, args);

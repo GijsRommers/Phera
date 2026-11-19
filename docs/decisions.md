@@ -92,3 +92,15 @@ sensitive parameters would still expose a secret passed through a PHP caller.
 Record Sodium's function order in the extension introspection catalog. The
 runtime filters this catalog against the actual registered functions. This
 preserves PHP's ordering without exposing functions whose backends are pending.
+
+## 2026-11-19 — Keep dalek's Ed25519 key validation and RustCrypto's integer width
+
+Signing uses dalek's expanded secret key operation so that a decodable embedded
+public key takes part in the signature as it does in PHP. Dalek still rejects
+embedded public bytes that cannot be decoded as a point. Reimplementing the
+signature transcript to accept malformed keys would move a primitive into Phera.
+
+Sodium's little-endian integer helpers use the width accepted by RustCrypto's
+fixed-precision constructor. Their input size is therefore below 512 MiB.
+Replacing the constant-time arithmetic with variable-time big integers would
+change the security behavior of those helpers.
