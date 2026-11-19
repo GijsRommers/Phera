@@ -68,6 +68,7 @@ struct Enabled {
     members: bool,
     member_references: bool,
     complexity: bool,
+    foreach_references: bool,
 }
 
 impl Enabled {
@@ -114,6 +115,7 @@ impl Enabled {
         enabled.complexity = complexity::RULES.iter().any(|rule| {
             rule.visit == Visit::Namespace && enabled.severities.contains_key(rule.name)
         });
+        enabled.foreach_references = enabled.severities.contains_key(foreach_reference::NAME);
         enabled
     }
 }
@@ -200,6 +202,7 @@ fn analyze(
                 || enabled.locals
                 || enabled.complexity
                 || enabled.members
+                || enabled.foreach_references
                 || enabled.severities.contains_key("unused-import")
             {
                 lint_namespace(&mut context, String::new(), &program.statements);
@@ -244,8 +247,7 @@ fn lint_namespace(context: &mut Context<'_>, namespace: String, statements: &[St
     );
     let mut locals = enabled.locals.then(locals::Locals::default);
     let mut references = enabled
-        .severities
-        .contains_key(foreach_reference::NAME)
+        .foreach_references
         .then(foreach_reference::References::default);
     let mut members = enabled.members.then(members::Members::default);
     let mut complexity = enabled.complexity.then(complexity::Counts::default);
