@@ -46,6 +46,27 @@ impl Context for Vm {
         Box::pin(self.register_callback(phase, arguments))
     }
 
+    fn ini_get(&self, name: &[u8]) -> Option<phera_value::PhpString> {
+        Vm::ini_get(self, name)
+    }
+
+    fn ini_set(
+        &mut self,
+        function: &str,
+        name: &[u8],
+        value: phera_value::PhpString,
+    ) -> Option<phera_value::PhpString> {
+        Vm::ini_set(self, function, name, value)
+    }
+
+    fn ini_restore(&mut self, name: &[u8]) {
+        Vm::ini_restore(self, name);
+    }
+
+    fn ini_list(&mut self, module: Option<&phera_value::PhpString>, details: bool) -> NativeResult {
+        Vm::ini_list(self, module, details)
+    }
+
     fn include_path(&self) -> phera_value::PhpString {
         Vm::include_path(self)
     }

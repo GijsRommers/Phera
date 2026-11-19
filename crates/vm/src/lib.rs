@@ -87,6 +87,7 @@ mod hooked_property_views;
 mod include_scope;
 mod include_state;
 mod includes;
+mod ini;
 mod initializer_tasks;
 mod initializers;
 mod inline_stack;
@@ -227,7 +228,7 @@ pub struct Vm {
     state: RequestState,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
-    include_path: Option<phera_value::PhpString>,
+    ini_overrides: ini::IniOverrides,
 }
 
 impl Vm {
@@ -249,7 +250,7 @@ impl Vm {
             enum_cases: classes::enums::EnumCases::default(),
             classes: classes::ClassTable::native(&registry),
             autoload: Default::default(),
-            include_path: None,
+            ini_overrides: Default::default(),
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),

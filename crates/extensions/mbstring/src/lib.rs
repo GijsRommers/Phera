@@ -20,6 +20,7 @@ mod cut;
 mod encoding;
 mod entities;
 mod iconv;
+mod ini;
 mod kana;
 mod mime;
 mod names;
@@ -59,6 +60,7 @@ impl Extension for Mbstring {
         conversion::register(registry);
         names::register(registry);
         settings::register(registry);
+        ini::register(registry);
         entities::register(registry);
         kana::register(registry);
         mime::register(registry);

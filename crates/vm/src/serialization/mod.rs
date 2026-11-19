@@ -5,11 +5,10 @@ mod enums;
 pub(crate) mod layout;
 mod properties;
 mod property_index;
-pub(crate) mod settings;
 
 use std::rc::Rc;
 
-use phera_extension_api::serialization::{SerializationClass, SerializationSettings};
+use phera_extension_api::serialization::SerializationClass;
 use phera_extension_api::{LocalFuture, NativeError, NativeResult};
 use phera_value::{Object, Value};
 
@@ -22,9 +21,8 @@ impl Vm {
         name: &str,
     ) -> Result<Option<SerializationClass>, NativeError> {
         let Some(callback) = self
-            .state_mut()
-            .get::<SerializationSettings>()
-            .map(|settings| settings.callback.clone())
+            .ini_get(b"unserialize_callback_func")
+            .map(|setting| setting.to_string_lossy())
             .filter(|callback| !callback.is_empty())
         else {
             return Ok(None);

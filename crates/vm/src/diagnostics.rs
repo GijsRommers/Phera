@@ -66,7 +66,10 @@ impl Vm {
             "Deprecated" => 8192,
             _ => 0,
         };
-        if self.diagnostic_reporter.is_visible() && self.error_handlers.reporting & level != 0 {
+        if self.error_handlers.display_errors
+            && self.diagnostic_reporter.is_visible()
+            && self.error_handlers.reporting & level != 0
+        {
             let SourceLocation { file, line } = self.location();
             if let Some(bytes) = self.diagnostic_reporter.report(kind, message, &file, line) {
                 self.out(&bytes);

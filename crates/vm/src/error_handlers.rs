@@ -45,6 +45,8 @@ pub(crate) struct ErrorHandlers {
     pub(crate) warning_site: Option<crate::exception_traces::WarningSite>,
     pub(crate) pending: Vec<DiagnosticEvent>,
     pub(crate) reporting: i64,
+    pub(crate) display_errors: bool,
+    pub(crate) trace_ignore_args: bool,
     /// PHP formats saved trace strings using the current request limit, not creation-time text.
     pub(crate) trace_string_limit: usize,
 }
@@ -61,6 +63,8 @@ impl Default for ErrorHandlers {
             warning_site: None,
             pending: Vec::new(),
             reporting: 30719,
+            display_errors: true,
+            trace_ignore_args: false,
             trace_string_limit: 15,
         }
     }
@@ -249,7 +253,8 @@ impl Vm {
 
     /// Respect the reporting mask separately from whether a user callback was invoked.
     pub(crate) fn report_event(&mut self, event: &DiagnosticEvent) {
-        if self.error_handlers.reporting & event.level != 0
+        if self.error_handlers.display_errors
+            && self.error_handlers.reporting & event.level != 0
             && let Some(bytes) = self.diagnostic_reporter.report(
                 &event.kind,
                 event.message.clone(),

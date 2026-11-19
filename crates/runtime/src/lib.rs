@@ -11,6 +11,8 @@ mod error;
 #[cfg(test)]
 mod extension_introspection_tests;
 mod http;
+#[cfg(test)]
+mod ini_tests;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -74,8 +76,12 @@ impl Runtime {
         registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_json::Json);
         registry.load(&phera_ext_mbstring::Mbstring);
+        registry.php_module("iconv");
         registry.load(&phera_ext_pcre::Pcre);
         registry.load(&phera_ext_pdo::Pdo);
+        registry.php_module("pdo_mysql");
+        registry.php_module("pdo_pgsql");
+        registry.php_module("pdo_sqlite");
         registry.load(&phera_ext_sqlite3::Sqlite3);
         registry.load(&phera_ext_redis::Redis);
         registry.load(&phera_ext_http::Http);

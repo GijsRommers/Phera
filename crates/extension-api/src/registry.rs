@@ -69,6 +69,7 @@ pub struct Registry {
     function_modules: HashMap<&'static str, &'static str>,
     function_return_types: HashMap<&'static str, &'static str>,
     function_order: Vec<&'static str>,
+    ini: crate::ini::Catalog,
     extensions: Vec<&'static str>,
     /// Modules whose version is not PHP's, by lowercase name.
     module_versions: HashMap<String, &'static str>,
@@ -117,7 +118,35 @@ impl Registry {
 
     /// Engine-provided PHP modules can register without an extension crate.
     pub fn php_module(&mut self, name: &'static str) {
+        if self
+            .extensions
+            .iter()
+            .any(|module| module.eq_ignore_ascii_case(name))
+        {
+            return;
+        }
+        self.ini.register(name);
         self.extensions.push(name);
+    }
+
+    /// Names and defaults for INI settings of modules loaded by this runtime.
+    pub fn ini_entries(
+        &self,
+    ) -> impl Iterator<Item = (usize, &'static crate::ini::IniDefinition)> + '_ {
+        self.ini.entries()
+    }
+
+    pub fn ini_entry(&self, name: &[u8]) -> Option<(usize, &'static crate::ini::IniDefinition)> {
+        self.ini.get(name)
+    }
+
+    /// Register the effect of a setting already described by the PHP catalog.
+    pub fn ini_update(&mut self, name: &'static str, update: crate::ini::IniUpdate) {
+        self.ini.update(name, update);
+    }
+
+    pub fn ini_hook(&self, name: &str) -> Option<crate::ini::IniUpdate> {
+        self.ini.hook(name)
     }
 
     pub fn extensions(&self) -> impl Iterator<Item = &'static str> + '_ {

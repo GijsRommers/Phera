@@ -19,11 +19,26 @@ impl Vm {
 
     /// Frame entries point at the caller's call instruction and omit the main frame.
     pub(crate) fn throwable_trace(&mut self, origin: crate::exceptions::TraceOrigin) -> Value {
-        if self.generator_traces.is_empty() {
+        let trace = if self.generator_traces.is_empty() {
             self.trace_frames::<false>(origin)
         } else {
             self.trace_frames::<true>(origin)
+        };
+        if !self.error_handlers.trace_ignore_args {
+            return trace;
         }
+        let Value::Array(entries) = trace else {
+            return trace;
+        };
+        let mut result = PhpArray::new();
+        for (_, value) in entries.iter() {
+            if let Value::Array(entry) = value {
+                let mut entry = entry.as_ref().clone();
+                entry.remove(&ArrayKey::str("args"));
+                let _ = result.push(Value::from(entry));
+            }
+        }
+        Value::from(result)
     }
 
     fn trace_frames<const INCLUDE_GENERATORS: bool>(

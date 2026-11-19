@@ -5,7 +5,7 @@
 //! has its own cache, without locks, shared by the requests it serves. As
 //! in PHP, it holds 4096 patterns and drops the oldest eighth when full.
 
-use crate::compile::{self, Compiled};
+use crate::compile::{self, Compiled, Settings};
 use crate::errors::{self, Error};
 use phera_extension_api::Context;
 use std::cell::RefCell;
@@ -15,8 +15,8 @@ use std::rc::Rc;
 const CAPACITY: usize = 4096;
 #[derive(Default)]
 struct Cache {
-    patterns: HashMap<Vec<u8>, Rc<Compiled>>,
-    insertion_order: VecDeque<Vec<u8>>,
+    patterns: HashMap<(Vec<u8>, Settings), Rc<Compiled>>,
+    insertion_order: VecDeque<(Vec<u8>, Settings)>,
 }
 
 thread_local! {
@@ -30,7 +30,7 @@ pub(crate) fn get(
     function: &str,
     pattern: &[u8],
 ) -> Option<Rc<Compiled>> {
-    match lookup(pattern) {
+    match lookup(pattern, Settings::read(context)) {
         Ok(compiled) => Some(compiled),
         Err(message) => {
             context.warning(format!("{function}(): {message}"));
@@ -41,12 +41,13 @@ pub(crate) fn get(
 }
 
 /// The compiled pattern, or the text of the warning.
-pub(crate) fn lookup(pattern: &[u8]) -> Result<Rc<Compiled>, String> {
-    let cached = CACHE.with(|cache| cache.borrow().patterns.get(pattern).cloned());
+pub(crate) fn lookup(pattern: &[u8], settings: Settings) -> Result<Rc<Compiled>, String> {
+    let key = (pattern.to_vec(), settings);
+    let cached = CACHE.with(|cache| cache.borrow().patterns.get(&key).cloned());
     if let Some(compiled) = cached {
         return Ok(compiled);
     }
-    let compiled = Rc::new(compile::compile(pattern)?);
+    let compiled = Rc::new(compile::compile(pattern, settings)?);
     CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if cache.patterns.len() == CAPACITY {
@@ -56,26 +57,26 @@ pub(crate) fn lookup(pattern: &[u8]) -> Result<Rc<Compiled>, String> {
                 }
             }
         }
-        cache.insertion_order.push_back(pattern.to_vec());
-        cache.patterns.insert(pattern.to_vec(), compiled.clone());
+        cache.insertion_order.push_back(key.clone());
+        cache.patterns.insert(key, compiled.clone());
     });
     Ok(compiled)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CACHE, CAPACITY, lookup};
+    use super::{CACHE, CAPACITY, Settings, lookup};
 
     #[test]
     fn full_pattern_keys_and_bounded_worker_storage() {
         CACHE.with(|cache| *cache.borrow_mut() = Default::default());
-        let plain = lookup(b"/a/").unwrap();
-        let cached = lookup(b"/a/").unwrap();
-        let insensitive = lookup(b"/a/i").unwrap();
+        let plain = lookup(b"/a/", Settings::default()).unwrap();
+        let cached = lookup(b"/a/", Settings::default()).unwrap();
+        let insensitive = lookup(b"/a/i", Settings::default()).unwrap();
         assert!(std::rc::Rc::ptr_eq(&plain, &cached));
         assert!(!std::rc::Rc::ptr_eq(&plain, &insensitive));
         for index in 0..CAPACITY {
-            lookup(format!("/entry{index}/").as_bytes()).unwrap();
+            lookup(format!("/entry{index}/").as_bytes(), Settings::default()).unwrap();
         }
         CACHE.with(|cache| assert!(cache.borrow().patterns.len() <= CAPACITY));
         assert!(plain.regex.is_match(b"a").unwrap());

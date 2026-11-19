@@ -23,6 +23,7 @@ impl Extension for Date {
     }
 
     fn register(&self, registry: &mut Registry) {
+        registry.ini_update("date.timezone", zone::update_ini);
         registry.deprecated_constant("DATE_RFC7231", classes::RFC7231_FORMAT);
         register::functions(registry);
         classes::register(registry);

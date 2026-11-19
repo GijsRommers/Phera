@@ -1,0 +1,143 @@
+//! `ini_set('include_path', './lib')` changes lookup only in this request.
+//! The immutable registry maps names to slots. The VM holds sparse overrides
+//! and the parsed fields that execution consumes without a hash lookup.
+//!
+//! Display and reporting settings affect diagnostics. Include paths, query
+//! separators, serialization and exception settings affect their consumers.
+//! Extensions can register validation and apply hooks for their own entries.
+//! Every other catalog entry is storage-only unless an extension installs a
+//! hook. In particular, `memory_limit` and `max_execution_time` do not set
+//! engine limits. The server owns request timeout and request body limits.
+//! No PHP configuration file is loaded.
+
+use phera_extension_api::ini::{IniDefinition, boolean, integer, parse_quantity};
+use phera_extension_api::{ArrayKey, NativeResult, PhpArray, PhpString, Value};
+
+use crate::Vm;
+
+mod effects;
+
+#[derive(Default)]
+pub(crate) struct IniOverrides {
+    values: Vec<Option<PhpString>>,
+    reporting_number: Option<i64>,
+}
+
+impl IniOverrides {
+    fn get(&self, slot: usize) -> Option<&PhpString> {
+        self.values.get(slot)?.as_ref()
+    }
+
+    fn set(&mut self, slot: usize, value: PhpString) {
+        if slot >= self.values.len() {
+            self.values.resize(slot + 1, None);
+        }
+        self.values[slot] = Some(value);
+    }
+}
+
+impl Vm {
+    pub(crate) fn ini_get(&self, name: &[u8]) -> Option<PhpString> {
+        let (slot, entry) = self.registry.ini_entry(name)?;
+        Some(self.ini_local(slot, entry).unwrap_or_default())
+    }
+
+    fn ini_local(&self, slot: usize, entry: &IniDefinition) -> Option<PhpString> {
+        if entry.name == "error_reporting"
+            && let Some(level) = self.ini_overrides.reporting_number
+        {
+            return Some(level.to_string().into());
+        }
+        self.ini_overrides
+            .get(slot)
+            .cloned()
+            .or_else(|| entry.default.as_deref().map(PhpString::from))
+    }
+
+    pub(crate) fn ini_set(
+        &mut self,
+        function: &str,
+        name: &[u8],
+        value: PhpString,
+    ) -> Option<PhpString> {
+        let (slot, entry) = self.registry.ini_entry(name)?;
+        if !entry.access.runtime() {
+            return None;
+        }
+        let previous = self.ini_local(slot, entry).unwrap_or_default();
+        if !self.ini_apply(function, entry, Some(value.as_bytes())) {
+            return None;
+        }
+        self.ini_overrides.set(slot, value);
+        Some(previous)
+    }
+
+    pub(crate) fn ini_restore(&mut self, name: &[u8]) {
+        let Some((slot, entry)) = self.registry.ini_entry(name) else {
+            return;
+        };
+        let modified = self.ini_overrides.get(slot).is_some()
+            || entry.name == "error_reporting" && self.ini_overrides.reporting_number.is_some();
+        if !entry.access.runtime() || !modified {
+            return;
+        }
+        if self.ini_apply("ini_restore", entry, entry.default.as_deref())
+            && let Some(value) = self.ini_overrides.values.get_mut(slot)
+        {
+            *value = None;
+        }
+    }
+
+    pub(crate) fn ini_list(&mut self, module: Option<&PhpString>, details: bool) -> NativeResult {
+        let module = module.map(PhpString::as_bytes);
+        if let Some(name) = module
+            && !self.registry.extensions().any(|extension| {
+                extension
+                    .bytes()
+                    .map(|b| b.to_ascii_lowercase())
+                    .eq(name.iter().copied())
+            })
+        {
+            let name = String::from_utf8_lossy(name.split(|byte| *byte == 0).next().unwrap_or(b""));
+            self.warn(format!(
+                "ini_get_all(): Extension \"{name}\" cannot be found"
+            ));
+            return Ok(Value::Bool(false));
+        }
+        let mut entries: Vec<_> = self
+            .registry
+            .ini_entries()
+            .filter(|(_, entry)| {
+                module.is_none_or(|name| name == b"core" || name == entry.module.as_bytes())
+            })
+            .collect();
+        entries.sort_unstable_by_key(|(_, entry)| entry.name.to_ascii_lowercase());
+        let mut list = PhpArray::new();
+        for (slot, entry) in entries {
+            let local = self
+                .ini_local(slot, entry)
+                .map_or(Value::Null, Value::String);
+            let value = if details {
+                let global = entry
+                    .default
+                    .as_deref()
+                    .map_or_else(|| local.clone(), Value::from);
+                let mut fields = PhpArray::new();
+                fields.insert(ArrayKey::str("global_value"), global);
+                fields.insert(ArrayKey::str("local_value"), local);
+                fields.insert(ArrayKey::str("access"), Value::Int(entry.access as i64));
+                Value::from(fields)
+            } else {
+                local
+            };
+            list.insert(ArrayKey::str(entry.name), value);
+        }
+        Ok(Value::from(list))
+    }
+
+    /// error_reporting() keeps its number directly until an INI reader needs text.
+    pub(crate) fn set_error_reporting(&mut self, level: i64) {
+        self.error_handlers.reporting = level;
+        self.ini_overrides.reporting_number = Some(level);
+    }
+}

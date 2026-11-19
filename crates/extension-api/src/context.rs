@@ -73,6 +73,24 @@ pub trait Context {
         ".".into()
     }
 
+    /// Return the current string value of a registered INI directive.
+    fn ini_get(&self, _name: &[u8]) -> Option<PhpString> {
+        None
+    }
+
+    /// Change a user-modifiable setting, returning its previous value.
+    fn ini_set(&mut self, _function: &str, _name: &[u8], _value: PhpString) -> Option<PhpString> {
+        None
+    }
+
+    /// Restore a directive to its startup value.
+    fn ini_restore(&mut self, _name: &[u8]) {}
+
+    /// List the INI settings for a module, or every loaded module.
+    fn ini_list(&mut self, _module: Option<&PhpString>, _details: bool) -> NativeResult {
+        Ok(Value::Bool(false))
+    }
+
     /// Whether the PHP file making this call declared `strict_types=1`, which
     /// turns off scalar coercion of arguments.
     fn strict_types(&self) -> bool;

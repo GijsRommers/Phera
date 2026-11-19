@@ -6,6 +6,7 @@ mod arguments;
 mod arrays;
 mod constants;
 pub mod environment;
+mod ini;
 mod math;
 mod natural;
 mod offsets;
@@ -39,6 +40,7 @@ impl Extension for Standard {
         }
         environment::register(registry);
         process::register(registry);
+        ini::register(registry);
     }
 }
 
