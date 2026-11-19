@@ -451,9 +451,9 @@ The three ways to run an application, side by side:
 | Works for | every application | an application with a boot phase and a snapshot point | an application written for long-running use |
 | Change to the application | none | none with an adapter, one line otherwise | none if it already supports FrankenPHP or Octane |
 
-Order: step 1 first, because it helps every application; then worker mode
-(step 5), which is the smallest change for the largest gain on Symfony and
-Laravel; then the snapshot (steps 2 and 3). They follow the destructors work
+Order: steps 1 to 3 first (shared linked code, the snapshot, the adapters).
+Worker mode (step 5) is built only if a forked application still falls short
+of what long-running applications need; see `docs/decisions/`. They follow the destructors work
 (9.1), which changes the same object lifetime code.
 
 ### 5.5 Child processes
@@ -477,7 +477,7 @@ and returns the child's exit status.
 
 Phera gives each web child its own process group and terminates abandoned
 children at request cleanup while their leader is still tracked. Programs
-that explicitly detach can keep running. [Process decisions](decisions.md)
+that explicitly detach can keep running. [Process decisions](decisions/README.md)
 
 ## 6. Scope
 
