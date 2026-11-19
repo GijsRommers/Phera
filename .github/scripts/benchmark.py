@@ -56,7 +56,8 @@ def main():
                 'echo "\\nPHERA_CI_BENCH_NS:", hrtime(true) - $__phera_ci_started, "\\n";\n'
             )
             try:
-                has_base = args.base_benchmarks is None or (
+                # The native-call script uses APIs already available on the base.
+                has_base = script.name == 'bench-natives.php' or args.base_benchmarks is None or (
                     args.base_benchmarks / script.name
                 ).is_file()
                 labels = ['base', 'head'] if has_base else ['head']

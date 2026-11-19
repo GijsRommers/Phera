@@ -6,6 +6,7 @@
 //! and the same compiled code.
 
 mod cache;
+mod constant_calls;
 mod environment;
 mod error;
 #[cfg(test)]
@@ -16,7 +17,7 @@ mod ini_tests;
 #[cfg(test)]
 mod process_oracle_tests;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -24,9 +25,9 @@ use phera_bytecode::CompiledUnit;
 use phera_dotenv::Environment;
 use phera_ext_http::{RequestHeaders, ResponseHead, Sapi, UploadedFiles};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
-use phera_extension_api::{LocalFuture, Registry};
+use phera_extension_api::Registry;
 use phera_value::{PhpArray, Value};
-use phera_vm::{CodeLoadError, CodeLoader, NativeTables, Vm};
+use phera_vm::{NativeTables, Vm};
 
 use cache::{CodeCache, FileMode};
 
@@ -39,7 +40,7 @@ pub struct Runtime {
     registry: Arc<Registry>,
     web_registry: Arc<Registry>,
     cache: CodeCache,
-    cli_cache: CodeCache,
+    web_cache: CodeCache,
     environment: Arc<Environment>,
     startup_ini: Arc<[(String, String)]>,
 }
@@ -123,11 +124,13 @@ impl Runtime {
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);
         registry.constant("PHP_SAPI", Sapi::Cli.name());
+        let registry = Arc::new(registry);
+        let web_registry = Arc::new(web_registry);
         Runtime {
-            web_registry: Arc::new(web_registry),
-            registry: Arc::new(registry),
-            cache: CodeCache::default(),
-            cli_cache: CodeCache::default(),
+            web_cache: CodeCache::new(web_registry.clone(), FileMode::Web),
+            web_registry,
+            cache: CodeCache::new(registry.clone(), FileMode::Cli),
+            registry,
             environment: Arc::new(environment),
             startup_ini: Arc::new([]),
         }
@@ -144,25 +147,7 @@ impl Runtime {
         &self,
         path: impl AsRef<Path>,
     ) -> Result<Arc<CompiledUnit>, RuntimeError> {
-        self.load_file(path.as_ref(), FileMode::Web).await
-    }
-
-    async fn load_file(
-        &self,
-        path: &Path,
-        mode: FileMode,
-    ) -> Result<Arc<CompiledUnit>, RuntimeError> {
-        let path = path.to_path_buf();
-        let cache = match mode {
-            FileMode::Web => &self.cache,
-            FileMode::Cli => &self.cli_cache,
-        }
-        .clone();
-        // Reading and compiling block, and a worker thread must never block:
-        // every request on it would wait.
-        tokio::task::spawn_blocking(move || cache.load(&path, mode))
-            .await
-            .map_err(|error| RuntimeError::Internal(error.to_string()))?
+        self.web_cache.compile(path.as_ref().to_path_buf()).await
     }
 
     /// Runs a script as the command line does: `arguments` become `$argv`,
@@ -173,7 +158,7 @@ impl Runtime {
         arguments: &[String],
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
-        let unit = self.load_file(path.as_ref(), FileMode::Cli).await?;
+        let unit = self.cache.compile(path.as_ref().to_path_buf()).await?;
         let mut vm = self.new_cli_vm();
         vm.set_args(arguments);
         let server =
@@ -222,7 +207,7 @@ impl Runtime {
         document_root: &Path,
         request: HttpRequest,
     ) -> HttpResponse {
-        let unit = match self.compile_file(script).await {
+        let unit = match self.web_cache.compile(script.to_path_buf()).await {
             Ok(unit) => unit,
             Err(RuntimeError::Read { .. }) => {
                 return HttpResponse::plain(404, "File not found.\n");
@@ -312,8 +297,8 @@ impl Runtime {
 
     /// The bytecode listing of a file, for `phera --dump`.
     pub fn dump_file_blocking(&self, path: impl AsRef<Path>) -> Result<String, RuntimeError> {
-        let unit =
-            single_threaded_executor()?.block_on(self.load_file(path.as_ref(), FileMode::Cli))?;
+        let unit = single_threaded_executor()?
+            .block_on(self.cache.compile(path.as_ref().to_path_buf()))?;
         Ok(unit.to_string())
     }
 
@@ -349,14 +334,11 @@ impl Runtime {
         vm.set_global("_ENV", Value::Array(environment));
         *vm.state_mut().get_or_default::<RequestEnvironment>() =
             RequestEnvironment::new(self.environment.clone());
-        let mode = match sapi {
-            Sapi::Web => FileMode::Web,
-            Sapi::Cli => FileMode::Cli,
+        let cache = match sapi {
+            Sapi::Cli => &self.cache,
+            Sapi::Web => &self.web_cache,
         };
-        vm.set_loader(Arc::new(FileLoader {
-            runtime: self.clone(),
-            mode,
-        }));
+        vm.set_loader(Arc::new(cache.clone()));
         vm
     }
 }
@@ -366,24 +348,4 @@ fn single_threaded_executor() -> Result<tokio::runtime::Runtime, RuntimeError> {
         .enable_all()
         .build()
         .map_err(|error| RuntimeError::Internal(error.to_string()))
-}
-
-/// `include` and `require` load code through the same cache.
-struct FileLoader {
-    runtime: Runtime,
-    mode: FileMode,
-}
-
-impl CodeLoader for FileLoader {
-    fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
-        Box::pin(async move {
-            self.runtime
-                .load_file(&path, self.mode)
-                .await
-                .map_err(|error| match error {
-                    RuntimeError::Compile(error) => CodeLoadError::Compile(error),
-                    error => CodeLoadError::Unavailable(error.to_string()),
-                })
-        })
-    }
 }

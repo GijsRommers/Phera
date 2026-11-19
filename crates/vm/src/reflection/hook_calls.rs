@@ -85,6 +85,10 @@ impl ReflectedHookCall {
 }
 
 impl Vm {
+    pub(crate) fn is_reflected_hook(error: &NativeError) -> bool {
+        matches!(error, NativeError::Unwind(unwind) if unwind.0.is::<ReflectedHookCall>())
+    }
+
     #[cold]
     pub(crate) fn finish_reflected_hook(
         &mut self,

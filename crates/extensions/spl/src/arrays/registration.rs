@@ -48,7 +48,9 @@ const COMMON: [Method; 20] = const {
         Method::public("offsetUnset", &[KEY], dimensions::offset_unset).tentative_return("void"),
         Method::public_async("append", &[VALUE], methods::append).tentative_return("void"),
         Method::public("getArrayCopy", &[], methods::get_array_copy).tentative_return("array"),
-        Method::public("count", &[], methods::count).tentative_return("int"),
+        Method::public("count", &[], methods::count)
+            .with_direct(methods::direct_count)
+            .tentative_return("int"),
         Method::public("getFlags", &[], methods::get_flags).tentative_return("int"),
         Method::public("setFlags", &[FLAGS], methods::set_flags).tentative_return("void"),
         Method::public_async(

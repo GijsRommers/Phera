@@ -60,6 +60,7 @@ pub(crate) fn register(registry: &mut Registry) {
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
+    replace::register_sync_selectors(registry);
 }
 
 /// PHP's error for a string that would pass [`MAX_STRING_BYTES`].
@@ -114,8 +115,12 @@ impl CaseSensitivity {
     /// The first position of `needle` in `haystack`; an empty needle is
     /// found at 0.
     pub(super) fn find(self, haystack: &[u8], needle: &[u8]) -> Option<usize> {
-        if needle.is_empty() {
-            return Some(0);
+        match (self, needle) {
+            (_, []) => return Some(0),
+            (Self::Sensitive, [byte]) => {
+                return haystack.iter().position(|candidate| candidate == byte);
+            }
+            _ => {}
         }
         // One loop per case, so the sensitive search compares plain slices.
         let mut candidates = haystack.windows(needle.len());

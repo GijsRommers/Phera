@@ -63,15 +63,10 @@ impl Vm {
             let mut entry = PhpArray::new();
             entry.insert(ArrayKey::str("file"), file);
             entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
-            if let Some((class, method)) = native.name.split_once("::") {
+            if let Some((class, method, operator)) = native_method(&native.name) {
                 entry.insert(ArrayKey::str("function"), Value::from(method));
                 entry.insert(ArrayKey::str("class"), Value::from(class));
-                let access = if native.name == "Fiber::suspend" {
-                    "::"
-                } else {
-                    "->"
-                };
-                entry.insert(ArrayKey::str("type"), Value::from(access));
+                entry.insert(ArrayKey::str("type"), Value::from(operator));
             } else {
                 entry.insert(ArrayKey::str("function"), Value::from(native.name));
             }
@@ -408,13 +403,13 @@ fn append_native(
     if let Some((file, line)) = location {
         add_source_location(&mut entry, file, line);
     }
-    if let Some((class, method)) = name.split_once("->") {
+    if let Some((class, method, operator)) = native_method(name) {
         entry.insert(ArrayKey::str("function"), Value::from(method));
         entry.insert(ArrayKey::str("class"), Value::from(class));
         if let Some(object) = object {
             entry.insert(ArrayKey::str("object"), Value::Object(object.clone()));
         }
-        entry.insert(ArrayKey::str("type"), Value::from("->"));
+        entry.insert(ArrayKey::str("type"), Value::from(operator));
     } else {
         entry.insert(ArrayKey::str("function"), Value::from(name));
     }
@@ -422,6 +417,15 @@ fn append_native(
         entry.insert(ArrayKey::str("args"), arguments);
     }
     let _ = trace.push(Value::from(entry));
+}
+
+fn native_method(name: &str) -> Option<(&str, &str, &str)> {
+    if let Some((class, method)) = name.split_once("->") {
+        Some((class, method, "->"))
+    } else {
+        name.split_once("::")
+            .map(|(class, method)| (class, method, "::"))
+    }
 }
 
 fn add_source_location(entry: &mut PhpArray, file: &str, line: usize) {

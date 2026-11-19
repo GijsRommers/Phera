@@ -57,6 +57,10 @@ pub(crate) struct ReflectInitialize {
 }
 
 impl ReflectInitialize {
+    pub(crate) fn is_pending(error: &NativeError) -> bool {
+        matches!(error, NativeError::Unwind(payload) if payload.0.is::<Self>())
+    }
+
     pub(crate) fn suspend(self) -> NativeError {
         NativeError::Unwind(Unwind(Box::new(self)))
     }

@@ -42,6 +42,10 @@ pub(crate) enum BatchExit {
     Instruction(Instruction),
     /// A prepared call to a native function, whose result goes to this register.
     NativeCall(Reg),
+    /// A synchronous native call needs a PHP property getter to finish.
+    NativeView(Reg, Box<NativeError>),
+    /// A synchronous reflection method needs a PHP hook or lazy initializer to finish.
+    NativeMethodHook(Reg, Box<(NativeError, std::rc::Rc<crate::classes::Method>)>),
     /// A prepared PHP call whose weak string argument may invoke __toString.
     BindCall(Reg),
     /// A comparison reached an object whose __toString must run.
@@ -195,14 +199,14 @@ impl Machine<'_> {
         let mut executed = 0;
         let mut work = self.work;
         let result = loop {
-            let Some(&instruction) = instructions.get(ip) else {
+            let Some(instruction) = instructions.get(ip) else {
                 break Err(LoopExit::Invalid);
             };
             let previous = ip;
             ip += 1;
             executed += 1;
             let step = match scalar_step(instruction, slots, &mut ip) {
-                ScalarStep::Fallback => match instruction {
+                ScalarStep::Fallback => match *instruction {
                     Instruction::FetchIndex {
                         dst, base, index, ..
                     } => array_index_step(dst, base, index, slots),
@@ -211,7 +215,7 @@ impl Machine<'_> {
                 complete => complete,
             };
             if step == ScalarStep::Fallback {
-                break Ok(instruction);
+                break Ok(*instruction);
             }
             // Only backward jumps count as work; comparing positions also
             // covers fused compare-and-branch instructions.

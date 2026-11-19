@@ -89,6 +89,11 @@ impl Vm {
                 Box::pin(self.callable_introspection(arguments, origin)).await
             }
             Intrinsic::CallUserFunc => {
+                if arguments.is_empty() {
+                    return Err(NativeError::argument_count_error(
+                        "call_user_func() expects at least 1 argument, 0 given",
+                    ));
+                }
                 diagnostics.vm.autoload_callable(&argument).await?;
                 let callee = diagnostics
                     .vm
@@ -105,13 +110,17 @@ impl Vm {
                     })?;
                 return diagnostics
                     .vm
-                    .invoke_callable_origin(callee, arguments.into_iter().skip(1), origin)
+                    .invoke_callable_origin(
+                        callee,
+                        arguments.into_iter().skip(1),
+                        ArgumentOrigin::Callback,
+                    )
                     .await;
             }
             Intrinsic::CallUserFuncArray => {
                 diagnostics
                     .vm
-                    .call_user_func_array(argument, arguments, origin)
+                    .call_user_func_array(argument, arguments)
                     .await
             }
             Intrinsic::GetDefinedVars => diagnostics.vm.defined_variables(),
@@ -149,13 +158,16 @@ impl Vm {
         &mut self,
         argument: Value,
         arguments: Vec<Value>,
-        origin: ArgumentOrigin,
     ) -> NativeResult {
+        if arguments.len() != 2 {
+            return Err(NativeError::argument_count_error(format!(
+                "call_user_func_array() expects exactly 2 arguments, {} given",
+                arguments.len(),
+            )));
+        }
         let array = arguments.get(1).cloned().unwrap_or_default();
         let Value::Array(array) = array else {
-            return Err(NativeError::type_error(
-                "call_user_func_array(): Argument #2 ($args) must be of type array",
-            ));
+            return Err(Self::callback_array_type_error(array));
         };
         self.autoload_callable(&argument).await?;
         let callee = self.resolve_callable(&argument).map_err(|error| {
@@ -168,7 +180,7 @@ impl Vm {
                 false,
             )
         })?;
-        self.invoke_array_callback_origin(callee, &array, origin)
+        self.invoke_array_callback_origin(callee, &array, ArgumentOrigin::Callback)
             .await
     }
 }

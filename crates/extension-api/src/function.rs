@@ -8,6 +8,10 @@ use crate::{ConstantValue, Context, LocalFuture, NativeResult};
 /// through the reference to change the caller's variable.
 pub type SyncFn = fn(&mut dyn Context, &[Value]) -> NativeResult;
 
+/// Select a synchronous body for already typed arguments. For example,
+/// `str_replace('a', 'b', $text)` cannot call PHP when all three are strings.
+pub type SyncSelector = fn(&[Option<Value>]) -> Option<SyncFn>;
+
 /// A native function that may wait: for I/O, a timer, or a PHP callback. The
 /// interpreter awaits it, which lets other requests run on the same thread
 /// meanwhile. It must never block the thread instead.

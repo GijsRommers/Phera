@@ -10,7 +10,7 @@ use crate::Vm;
 use crate::calls::execution_loop::BatchExit;
 use crate::calls::frame::Frame;
 
-/// A native checkpoint stops the interpreter without introducing another PHP frame.
+/// An asynchronous native checkpoint stops the batch without another PHP frame.
 fn test_vm(source: &str) -> (Vm, Arc<CompiledUnit>) {
     let mut registry = Registry::new();
     registry.class(ClassEntry::interface("Throwable"));
@@ -22,8 +22,11 @@ fn test_vm(source: &str) -> (Vm, Arc<CompiledUnit>) {
         interfaces: &["Throwable"],
         ..ClassEntry::class("Error")
     });
-    registry.function(FunctionEntry::sync("checkpoint", &[], |_, _| {
-        Ok(Value::Null)
+    registry.function(FunctionEntry::asynchronous("checkpoint", &[], |_, _| {
+        Box::pin(async {
+            tokio::task::yield_now().await;
+            Ok(Value::Null)
+        })
     }));
     let mut vm = Vm::new(Arc::new(registry));
     let unit = Arc::new(phera_compiler::compile(source, "windows.php").unwrap());

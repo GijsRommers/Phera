@@ -25,6 +25,7 @@ mod array_slots;
 mod arrays;
 mod attribute_diagnostics;
 mod autoload;
+mod builtin_calls;
 mod callable_classes;
 mod callable_introspection;
 mod callables;
@@ -102,6 +103,11 @@ mod internal_iterator;
 mod interpreter;
 mod intrinsic_calls;
 mod intrinsics;
+
+/// Whether the engine supplies a function independently of extension registration.
+pub fn is_intrinsic_function(name: &str) -> bool {
+    intrinsics::Intrinsic::resolve(name).is_some()
+}
 mod iteration;
 mod iterator_instructions;
 mod iterators;

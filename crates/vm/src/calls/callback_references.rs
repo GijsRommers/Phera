@@ -26,30 +26,51 @@ impl Vm {
         let Ok(view) = CallView::top(&self.code, &self.call_stack) else {
             return;
         };
-        let (parameters, slots) = (view.parameters(), view.slots());
-        let mut warnings = Vec::new();
-        for index in 0..view.call.sent as usize {
-            let Some(parameter) = parameters.receiving(index) else {
-                continue;
-            };
-            let slot = slots.slot(index);
-            let Some(Some(value)) = self.registers.window(slot, 1).first() else {
-                continue;
-            };
-            if parameters.by_reference(parameter) && !value.is_reference() {
-                let warning = format!(
+        let warnings: Vec<_> = (0..view.call.sent as usize)
+            .filter_map(|index| self.callback_reference_warning(view, index))
+            .collect();
+        for (slot, warning) in warnings {
+            self.make_callback_reference(slot, warning);
+        }
+    }
+
+    /// A direct callback send warns before evaluating the next argument.
+    pub(crate) fn warn_callback_reference_at(&mut self, index: usize) {
+        let Ok(view) = CallView::top(&self.code, &self.call_stack) else {
+            return;
+        };
+        if let Some((slot, warning)) = self.callback_reference_warning(view, index) {
+            self.make_callback_reference(slot, warning);
+        }
+    }
+
+    fn callback_reference_warning(
+        &self,
+        view: CallView<'_>,
+        index: usize,
+    ) -> Option<(usize, String)> {
+        let parameters = view.parameters();
+        let parameter = parameters.receiving(index)?;
+        let slot = view.slots().slot(index);
+        let [Some(value)] = self.registers.window(slot, 1) else {
+            return None;
+        };
+        (parameters.by_reference(parameter) && !value.is_reference()).then(|| {
+            (
+                slot,
+                format!(
                     "{}(): Argument #{} (${}) must be passed by reference, value given",
                     view.name(),
                     index + 1,
                     parameters.name(parameter),
-                );
-                warnings.push((slot, warning));
-            }
-        }
-        for (slot, warning) in warnings {
-            self.diagnostic("Warning", warning);
-            let temporary = Rc::new(RefCell::new(self.registers.take(slot)));
-            self.registers.put(slot, Value::Reference(temporary));
-        }
+                ),
+            )
+        })
+    }
+
+    fn make_callback_reference(&mut self, slot: usize, warning: String) {
+        self.diagnostic("Warning", warning);
+        let temporary = Rc::new(RefCell::new(self.registers.take(slot)));
+        self.registers.put(slot, Value::Reference(temporary));
     }
 }

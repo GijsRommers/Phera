@@ -8,7 +8,7 @@ use crate::{
     passes::lowering_tables::{binary, path},
 };
 
-impl Tables {
+impl Tables<'_> {
     /// Send a place when the callee may require a reference.
     pub(crate) fn send_argument(
         &mut self,

@@ -6,8 +6,22 @@ use super::{This, datetime_factory, instant::Instant, make, receiver, state, zon
 use crate::{calendar::Civil, parse, parse_format::result::ParsedZone};
 
 pub fn format(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
-    let date = Instant::read(receiver(this)?)?;
-    Ok(date.format().render(args::bytes(arguments, 0)).into())
+    format_object(receiver(this)?, args::bytes(arguments, 0))
+}
+
+pub(super) fn direct_format(
+    object: &phera_extension_api::Object,
+    arguments: &[Option<Value>],
+) -> Option<Value> {
+    let [Some(Value::String(format))] = arguments else {
+        return None;
+    };
+    format_object(object, format.as_bytes()).ok()
+}
+
+fn format_object(object: &phera_extension_api::Object, format: &[u8]) -> NativeResult {
+    let date = Instant::read(object)?;
+    Ok(date.format().render(format).into())
 }
 
 pub fn timestamp(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {

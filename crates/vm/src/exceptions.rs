@@ -113,7 +113,7 @@ impl Vm {
             self.error_handlers.native_site = previous;
         }
         if prepared.is_err() {
-            self.failed_native = Some(crate::error_traces::NativeTrace::new(&call_name, arguments));
+            self.failed_native = Some(crate::error_traces::NativeTrace::method(method, arguments));
         }
         prepared
     }
