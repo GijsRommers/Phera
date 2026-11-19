@@ -221,8 +221,16 @@ fn project_name(directory: &Path) -> Result<String, String> {
 }
 
 /// A new project never overwrites anything: the directory must be missing
-/// or empty.
+/// or empty. A symbolic link is refused even when it points at an empty
+/// directory: the project would be written somewhere else than the path says.
 fn refuse_existing_files(directory: &Path) -> Result<(), String> {
+    let is_link = fs::symlink_metadata(directory).is_ok_and(|entry| entry.file_type().is_symlink());
+    if is_link {
+        return Err(format!(
+            "{} is a symbolic link; give the directory it points to, or another name",
+            directory.display()
+        ));
+    }
     match fs::read_dir(directory) {
         Ok(mut entries) => match entries.next() {
             None => Ok(()),
@@ -276,6 +284,26 @@ mod tests {
             error.contains("--template <plain|symfony|symfony-webapp|laravel>"),
             "{error}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_is_refused_even_to_an_empty_directory() {
+        let scratch = std::env::temp_dir().join(format!("phera-new-link-{}", std::process::id()));
+        let target = scratch.join("elsewhere");
+        let link = scratch.join("shop");
+        fs::create_dir_all(&target).expect("scratch directory");
+        std::os::unix::fs::symlink(&target, &link).expect("symbolic link");
+
+        let refusal = refuse_existing_files(&link);
+        let dangling = scratch.join("dangling");
+        std::os::unix::fs::symlink(scratch.join("missing"), &dangling).expect("dangling link");
+        let dangling_refusal = refuse_existing_files(&dangling);
+        fs::remove_dir_all(&scratch).expect("clean up");
+
+        assert!(refusal.is_err_and(|message| message.contains("symbolic link")));
+        assert!(dangling_refusal.is_err_and(|message| message.contains("symbolic link")));
+        assert_eq!(refuse_existing_files(&scratch.join("new")), Ok(()));
     }
 
     #[test]
