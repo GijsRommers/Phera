@@ -60,7 +60,7 @@ impl<'ast> Compiler<'ast> {
         line: usize,
         captures: &[String],
     ) -> Result<(), CompileError> {
-        self.validate_parameter_features(declaration, line)?;
+        self.validate_parameter_features(declaration)?;
         let name = if self.namespace.is_empty()
             || declaration.name.contains("::")
             || declaration.name.starts_with("{closure:")
@@ -197,6 +197,11 @@ impl<'ast> Compiler<'ast> {
                 constant.initializer += id + 1;
             }
             for property in &mut class.properties {
+                if let Some(hooks) = &mut property.hooks {
+                    for hook in hooks.get.iter_mut().chain(hooks.set.iter_mut()) {
+                        hook.function += id + 1;
+                    }
+                }
                 if let Some(default) = &mut property.default {
                     *default += id + 1;
                 }
@@ -216,7 +221,7 @@ impl<'ast> Compiler<'ast> {
     }
 
     /// Independent builders keep captured locals ahead of ordinary body temporaries.
-    fn function_builder(
+    pub(super) fn function_builder(
         &self,
         declaration: &FunctionSource<'_>,
         name: &str,

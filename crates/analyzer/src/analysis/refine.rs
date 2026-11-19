@@ -41,7 +41,7 @@ impl Analyzer<'_> {
                 ExpressionKind::Call {
                     callee,
                     arguments: Arguments::List(arguments),
-                } if truth => self.refine_existence(callee, arguments, scope),
+                } => self.refine_predicate(callee, arguments, scope, truth),
                 ExpressionKind::InstanceOf { value, class } if truth => {
                     if let ExpressionKind::Variable(Variable::Named(name)) = &value.kind
                         && let ExpressionKind::Name(class) = &class.kind
@@ -56,39 +56,95 @@ impl Analyzer<'_> {
     }
 
     pub fn refine_defined(&self, expression: &Expression, scope: &mut Scope) {
-        if let ExpressionKind::Variable(Variable::Named(name)) = &expression.kind {
+        let mut root = expression;
+        while let ExpressionKind::Index { target, .. } | ExpressionKind::Property { target, .. } =
+            &root.kind
+        {
+            root = target;
+        }
+        if let ExpressionKind::Variable(Variable::Named(name)) = &root.kind {
             let ty = scope.get(name).ty.without_null();
             scope.define(name, ty);
         }
     }
 
-    fn refine_existence(&self, callee: &Expression, arguments: &[Argument], scope: &mut Scope) {
-        if let ExpressionKind::Name(name) = &callee.kind
-            && let Some(function) = self.existence_function(name)
-            && let Some(argument) = arguments.first()
-            && let ExpressionKind::Literal(Literal::String(bytes)) = &argument.value.kind
-            && let Ok(value) = std::str::from_utf8(bytes)
-        {
-            let value = value.trim_start_matches('\\');
-            let symbol = match function {
-                "function_exists" => Some(Symbol::Function(value.to_ascii_lowercase())),
-                "class_exists" | "interface_exists" | "trait_exists" | "enum_exists" => {
-                    Some(Symbol::Class(value.to_ascii_lowercase()))
-                }
-                "defined" => Some(Symbol::Constant(Symbol::constant_name(value))),
-                _ => None,
-            };
-            if function == "defined"
-                && let Some((class, _)) = value.split_once("::")
-            {
-                scope
-                    .known
-                    .insert(Symbol::Class(class.to_ascii_lowercase()));
-            }
-            if let Some(symbol) = symbol {
-                scope.known.insert(symbol);
+    fn refine_predicate(
+        &mut self,
+        callee: &Expression,
+        arguments: &[Argument],
+        scope: &mut Scope,
+        truth: bool,
+    ) {
+        let (ExpressionKind::Name(name), Some(argument)) = (&callee.kind, arguments.first()) else {
+            return;
+        };
+        let Some(function) = self.existence_function(name) else {
+            return;
+        };
+        if function == "is_null" && !truth {
+            if let ExpressionKind::Assign { target, .. } = &argument.value.kind {
+                self.refine_defined(target, scope);
+            } else if matches!(
+                argument.value.kind,
+                ExpressionKind::Variable(Variable::Named(_))
+            ) {
+                self.refine_defined(&argument.value, scope);
             }
         }
+        if !truth {
+            return;
+        }
+        let symbol = match function {
+            "class_exists" | "interface_exists" | "trait_exists" | "enum_exists" => {
+                self.class_probe(&argument.value)
+            }
+            "property_exists" | "method_exists" => {
+                let member = arguments
+                    .get(1)
+                    .and_then(|argument| literal_name(&argument.value));
+                match (&argument.value.kind, member) {
+                    (ExpressionKind::Variable(Variable::Named(receiver)), Some(member)) => {
+                        Some(if function == "property_exists" {
+                            Symbol::Property(receiver.clone(), member.into())
+                        } else {
+                            Symbol::Method(receiver.clone(), member.to_ascii_lowercase())
+                        })
+                    }
+                    _ => None,
+                }
+            }
+            _ => literal_name(&argument.value).and_then(|value| match function {
+                "function_exists" => Some(Symbol::Function(value.to_ascii_lowercase())),
+                "defined" => {
+                    if let Some((class, _)) = value.split_once("::") {
+                        scope
+                            .known
+                            .insert(Symbol::Class(class.to_ascii_lowercase()));
+                    }
+                    Some(Symbol::Constant(Symbol::constant_name(value)))
+                }
+                _ => None,
+            }),
+        };
+        scope.known.extend(symbol);
+    }
+
+    pub fn class_probe(&mut self, expression: &Expression) -> Option<Symbol> {
+        if let Some(name) = literal_name(expression) {
+            return Some(Symbol::Class(name.to_ascii_lowercase()));
+        }
+        if let ExpressionKind::ClassConstant {
+            class,
+            name: MemberName::Identifier(member),
+        } = &expression.kind
+            && member.name.eq_ignore_ascii_case("class")
+            && let ExpressionKind::Name(name) = &class.kind
+        {
+            return self
+                .class_name(name, false)
+                .map(|class| Symbol::Class(class.to_ascii_lowercase()));
+        }
+        None
     }
 
     pub fn condition_truth(&self, expression: &Expression, scope: &Scope) -> Option<bool> {
@@ -124,6 +180,19 @@ impl Analyzer<'_> {
             && let ExpressionKind::Name(name) = &callee.kind
             && let Some(function) = self.existence_function(name)
             && let Some(argument) = arguments.first()
+            && function == "is_null"
+        {
+            return self
+                .nullish(&argument.value, scope)
+                .map(|null| null != inverted);
+        }
+        if let ExpressionKind::Call {
+            callee,
+            arguments: Arguments::List(arguments),
+        } = &expression.kind
+            && let ExpressionKind::Name(name) = &callee.kind
+            && let Some(function) = self.existence_function(name)
+            && let Some(argument) = arguments.first()
             && let ExpressionKind::Literal(Literal::String(bytes)) = &argument.value.kind
             && let Ok(value) = std::str::from_utf8(bytes)
         {
@@ -132,11 +201,14 @@ impl Analyzer<'_> {
                 "function_exists" => self.index.builtin_functions.contains(&value),
                 "class_exists" | "interface_exists" | "trait_exists" | "enum_exists" => {
                     self.index.builtin_classes.contains(&value)
-                        && self.index.class(&value).is_some_and(|c| match function {
-                            "interface_exists" => c.kind == ClassKind::Interface,
-                            "trait_exists" => c.kind == ClassKind::Trait,
-                            "enum_exists" => c.kind == ClassKind::Enum,
-                            _ => matches!(c.kind, ClassKind::Class | ClassKind::Enum),
+                        && self.index.class(&value).is_some_and(|c| {
+                            !c.location.file.starts_with("phpstorm-stubs/")
+                                && match function {
+                                    "interface_exists" => c.kind == ClassKind::Interface,
+                                    "trait_exists" => c.kind == ClassKind::Trait,
+                                    "enum_exists" => c.kind == ClassKind::Enum,
+                                    _ => matches!(c.kind, ClassKind::Class | ClassKind::Enum),
+                                }
                         })
                 }
                 _ => false,
@@ -186,7 +258,19 @@ impl Analyzer<'_> {
             "interface_exists" => Some("interface_exists"),
             "trait_exists" => Some("trait_exists"),
             "enum_exists" => Some("enum_exists"),
+            "is_null" => Some("is_null"),
+            "method_exists" => Some("method_exists"),
+            "property_exists" => Some("property_exists"),
             _ => None,
         }
     }
+}
+
+fn literal_name(expression: &Expression) -> Option<&str> {
+    if let ExpressionKind::Literal(Literal::String(bytes)) = &expression.kind {
+        return std::str::from_utf8(bytes)
+            .ok()
+            .map(|name| name.trim_start_matches('\\'));
+    }
+    None
 }

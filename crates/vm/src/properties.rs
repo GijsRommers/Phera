@@ -325,10 +325,9 @@ impl Vm {
                     .find(|property| property.name == name)
             });
         let property = property.filter(|property| {
-            !(property.visibility == Visibility::Private
-                && scope.is_some_and(|scope| {
-                    scope.name != property.declaring && scope.is_a(&property.declaring)
-                }))
+            property.visibility != Visibility::Private
+                || property.declaring == class.name
+                || scope.is_some_and(|scope| scope.name == property.declaring)
         });
         let Some(property) = property else {
             return Ok(ArrayKey::str(name));
@@ -337,10 +336,14 @@ impl Vm {
             Visibility::Public => true,
             Visibility::Private => scope.is_some_and(|scope| scope.name == property.declaring),
             Visibility::Protected => scope.is_some_and(|scope| {
-                scope.is_a(&property.declaring)
+                let owner = property
+                    .hooks
+                    .as_ref()
+                    .map_or(property.declaring.as_str(), |hooks| &hooks.prototype);
+                scope.is_a(owner)
                     || self
                         .classes
-                        .get(&property.declaring)
+                        .get(owner)
                         .is_some_and(|declaring| declaring.is_a(&scope.name))
             }),
         };

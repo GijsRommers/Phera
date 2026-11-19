@@ -20,24 +20,47 @@ impl Analyzer<'_> {
                 arguments,
                 ..
             } => {
-                let ty = self.expression(target, scope, quiet);
+                let binding = self.pending_binding.take();
+                self.prepare_inline_receiver(target, name, arguments, scope);
+                let mut ty = self.expression(target, scope, quiet);
+                self.pending_binding = binding;
                 if ty == ValueType::Never {
                     return ty;
                 }
-                self.method_call(
-                    &ty,
-                    name,
-                    arguments,
-                    scope,
-                    expression.span,
-                    Access::object(target),
-                )
+                if matches!(&target.kind, ExpressionKind::Variable(Variable::Named(receiver)) if receiver == "this")
+                    && let MemberName::Identifier(method) = name
+                    && let ValueType::Class(narrowed) = scope.get("this").ty
+                    && self.index.method(&narrowed, &method.name).is_some()
+                {
+                    // A guarded interface adds its members to $this; the
+                    // original class still supplies its other members.
+                    ty = ValueType::Class(narrowed);
+                }
+                let access = match (&target.kind, name) {
+                    (
+                        ExpressionKind::Variable(Variable::Named(receiver)),
+                        MemberName::Identifier(name),
+                    ) if scope.known.contains(&Symbol::Method(
+                        receiver.clone(),
+                        name.name.to_ascii_lowercase(),
+                    )) =>
+                    {
+                        Access::Inferred
+                    }
+                    _ => Access::object(target),
+                };
+                self.method_call(&ty, name, arguments, scope, expression.span, access)
             }
             ExpressionKind::StaticCall {
                 class,
                 name,
                 arguments,
             } => {
+                if let Some(result) =
+                    self.parent_hook_call(class, name, arguments, scope, expression.span)
+                {
+                    return result;
+                }
                 let class_name = self.class_expression(class, scope);
                 if class_name.is_never() {
                     return ValueType::Never;

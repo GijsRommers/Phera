@@ -1,7 +1,7 @@
 //! `clone($original, ['name' => $name])` copies the object, invokes __clone,
 //! then applies the supplied property updates in order.
 
-use std::rc::Rc;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use phera_bytecode::Reg;
 use phera_extension_api::{NativeClone, NativeError, NativeResult};
@@ -9,11 +9,28 @@ use phera_value::{ArrayKey, Object, PhpArray, Value};
 
 use super::class::ClassOrigin;
 use crate::Vm;
+use crate::property_hook_continuation::HookContinuation;
 
 /// PHP unlocks each readonly slot once for the hook, and again for clone-with.
+#[derive(Default)]
+pub(crate) struct CloneScopes(Rc<RefCell<HashMap<u32, Vec<ArrayKey>>>>);
+
 pub(crate) struct CloneScope {
     object: u32,
-    changed: Vec<ArrayKey>,
+    registry: Rc<RefCell<HashMap<u32, Vec<ArrayKey>>>>,
+}
+
+impl Drop for CloneScope {
+    fn drop(&mut self) {
+        self.registry.borrow_mut().remove(&self.object);
+    }
+}
+
+pub(crate) struct CloneUpdates {
+    object: Rc<Object>,
+    properties: Rc<PhpArray>,
+    next: Option<usize>,
+    _scope: Option<CloneScope>,
 }
 
 impl Vm {
@@ -25,30 +42,43 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let value = self.read_local(source);
         let properties = with.map(|with| self.read_local(with));
-        let cloned = self.clone_value(value, properties).await?;
-        self.set(destination, cloned);
-        Ok(())
+        let (object, properties) = self.copy_clone(value, properties).await?;
+        self.continue_clone_updates(destination, self.clone_updates(object, properties))
+            .await
     }
 
     pub(crate) async fn clone_intrinsic(&mut self, arguments: Vec<Value>) -> NativeResult {
-        if !(1..=2).contains(&arguments.len()) {
-            let bound = if arguments.is_empty() {
-                "at least 1"
-            } else {
-                "at most 2"
-            };
-            return Err(NativeError::argument_count_error(format!(
-                "clone() expects {bound} argument{}, {} given",
-                if arguments.is_empty() { "" } else { "s" },
-                arguments.len()
-            )));
+        let (value, properties) = clone_arguments(arguments)?;
+        let (object, properties) = self.copy_clone(value, properties).await?;
+        let mut updates = self.clone_updates(object, properties);
+        while let Some((name, value)) = updates.next()? {
+            if let Some(setter) = self
+                .plan_selected_property_write(updates.object.clone(), name, value)
+                .await?
+            {
+                self.invoke_declared_hook(setter.function, setter.object, Some(setter.argument))
+                    .await?;
+            }
         }
-        let mut arguments = arguments.into_iter();
-        let value = arguments.next().unwrap_or_default();
-        self.clone_value(value, arguments.next()).await
+        Ok(Value::Object(updates.object))
     }
 
-    async fn clone_value(&mut self, value: Value, with: Option<Value>) -> NativeResult {
+    pub(crate) async fn suspend_clone_intrinsic(
+        &mut self,
+        destination: Reg,
+        arguments: Vec<Value>,
+    ) -> Result<(), NativeError> {
+        let (value, properties) = clone_arguments(arguments)?;
+        let (object, properties) = self.copy_clone(value, properties).await?;
+        self.continue_clone_updates(destination, self.clone_updates(object, properties))
+            .await
+    }
+
+    async fn copy_clone(
+        &mut self,
+        value: Value,
+        with: Option<Value>,
+    ) -> Result<(Rc<Object>, Rc<PhpArray>), NativeError> {
         let Value::Object(original) = value.deref().clone() else {
             return Err(NativeError::type_error(format!(
                 "clone(): Argument #1 ($object) must be of type object, {} given",
@@ -88,8 +118,7 @@ impl Vm {
                 .map(|state| state.duplicate())
                 .ok_or_else(|| internal_error!("clone closure"))?;
             let cloned = self.allocate_closure(state)?;
-            self.update_clone_properties(&cloned, &with).await?;
-            return Ok(Value::Object(cloned));
+            return Ok((cloned, with));
         }
         let hook = class.magic.as_ref().and_then(|magic| magic.clone.clone());
         if let Some(method) = &hook {
@@ -125,20 +154,11 @@ impl Vm {
         self.copy_unset_properties(&original, &cloned);
         self.track_object_property_references(&cloned)?;
         if let Some(method) = hook {
-            self.begin_clone_updates(&cloned);
-            let result = self
-                .invoke_magic_method(method, class.clone(), cloned.clone(), [])
-                .await;
-            self.clone_scopes.pop();
-            result?;
+            let _scope = self.begin_clone_updates(&cloned);
+            self.invoke_magic_method(method, class.clone(), cloned.clone(), [])
+                .await?;
         }
-        if !with.is_empty() {
-            self.begin_clone_updates(&cloned);
-            let result = self.update_clone_properties(&cloned, &with).await;
-            self.clone_scopes.pop();
-            result?;
-        }
-        Ok(Value::Object(cloned))
+        Ok((cloned, with))
     }
 
     fn check_clone_visibility(&self, method: &super::Method) -> Result<(), NativeError> {
@@ -170,61 +190,109 @@ impl Vm {
         result
     }
 
-    fn begin_clone_updates(&mut self, object: &Object) {
-        self.clone_scopes.push(CloneScope {
+    fn begin_clone_updates(&self, object: &Object) -> CloneScope {
+        self.clone_scopes
+            .0
+            .borrow_mut()
+            .insert(object.id, Vec::new());
+        CloneScope {
             object: object.id,
-            changed: Vec::new(),
-        });
+            registry: self.clone_scopes.0.clone(),
+        }
     }
 
     pub(crate) fn clone_can_update(&self, object: &Object, key: &ArrayKey) -> bool {
         self.clone_scopes
-            .iter()
-            .rev()
-            .find(|scope| scope.object == object.id)
-            .is_some_and(|scope| !scope.changed.contains(key))
+            .0
+            .borrow()
+            .get(&object.id)
+            .is_some_and(|changed| !changed.contains(key))
     }
 
     pub(crate) fn clone_updated(&mut self, object: &Object, key: &ArrayKey) {
-        if let Some(scope) = self
-            .clone_scopes
-            .iter_mut()
-            .rev()
-            .find(|scope| scope.object == object.id)
-        {
-            scope.changed.push(key.clone());
+        if let Some(changed) = self.clone_scopes.0.borrow_mut().get_mut(&object.id) {
+            changed.push(key.clone());
         }
     }
 
-    async fn update_clone_properties(
-        &mut self,
-        object: &Rc<Object>,
-        properties: &PhpArray,
-    ) -> Result<(), NativeError> {
-        for (name, value) in properties.iter() {
-            if let Value::Reference(cell) = value
-                && Rc::strong_count(cell) > 1
-            {
-                return Err(NativeError::error(
-                    "Cannot assign by reference when cloning with updated properties",
-                ));
-            }
-            let name = match name {
-                ArrayKey::Int(index) => index.to_string(),
-                ArrayKey::String(name) => name.to_string_lossy(),
-            };
-            if name.starts_with('\0') {
-                return Err(NativeError::error(
-                    "Cannot access property starting with \"\\0\"",
-                ));
-            }
-            self.assign_selected_property(
-                object.clone(),
-                ArrayKey::str(name),
-                value.deref().clone(),
-            )
-            .await?;
+    fn clone_updates(&self, object: Rc<Object>, properties: Rc<PhpArray>) -> CloneUpdates {
+        CloneUpdates {
+            next: properties.first_position(),
+            _scope: (!properties.is_empty()).then(|| self.begin_clone_updates(&object)),
+            object,
+            properties,
         }
+    }
+
+    pub(crate) async fn continue_clone_updates(
+        &mut self,
+        destination: Reg,
+        mut updates: CloneUpdates,
+    ) -> Result<(), NativeError> {
+        while let Some((name, value)) = updates.next()? {
+            if let Some(setter) = self
+                .plan_selected_property_write(updates.object.clone(), name, value)
+                .await?
+            {
+                return self
+                    .suspend_for_hook(
+                        setter.function,
+                        setter.object,
+                        Some(setter.argument),
+                        HookContinuation::Clone(destination, updates),
+                    )
+                    .await;
+            }
+        }
+        self.set(destination, Value::Object(updates.object));
         Ok(())
     }
+}
+
+impl CloneUpdates {
+    fn next(&mut self) -> Result<Option<(ArrayKey, Value)>, NativeError> {
+        let Some(position) = self.next else {
+            return Ok(None);
+        };
+        let (name, value) = self
+            .properties
+            .entry_at(position)
+            .ok_or_else(|| internal_error!("clone property cursor"))?;
+        self.next = self.properties.next_position(position);
+        if let Value::Reference(cell) = value
+            && Rc::strong_count(cell) > 1
+        {
+            return Err(NativeError::error(
+                "Cannot assign by reference when cloning with updated properties",
+            ));
+        }
+        let name = match name {
+            ArrayKey::Int(index) => index.to_string(),
+            ArrayKey::String(name) => name.to_string_lossy(),
+        };
+        if name.starts_with('\0') {
+            return Err(NativeError::error(
+                "Cannot access property starting with \"\\0\"",
+            ));
+        }
+        Ok(Some((ArrayKey::str(name), value.deref().clone())))
+    }
+}
+
+fn clone_arguments(arguments: Vec<Value>) -> Result<(Value, Option<Value>), NativeError> {
+    if !(1..=2).contains(&arguments.len()) {
+        let bound = if arguments.is_empty() {
+            "at least 1"
+        } else {
+            "at most 2"
+        };
+        return Err(NativeError::argument_count_error(format!(
+            "clone() expects {bound} argument{}, {} given",
+            if arguments.is_empty() { "" } else { "s" },
+            arguments.len()
+        )));
+    }
+    let mut arguments = arguments.into_iter();
+    let value = arguments.next().unwrap_or_default();
+    Ok((value, arguments.next()))
 }

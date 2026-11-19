@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::reflection::{MemberInfo, PropertyRead, PropertySlot};
+use phera_extension_api::reflection::{MemberInfo, PropertyRead, PropertySlot, PropertyWrite};
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{Object, Value};
 
@@ -11,7 +11,7 @@ use crate::{
     classes::{Class, class::PropertyDefault},
 };
 
-use super::exception;
+use super::{exception, hook_calls::ReflectedHookCall};
 
 impl Vm {
     pub(super) fn reflection_property_read(
@@ -38,14 +38,69 @@ impl Vm {
                     .then(|| storage.reference.borrow().borrow().clone())
             }
             None => {
-                let object = property_object(property, object)?;
-                crate::property_storage::read(&object, &property.key)
+                let object = required_object(object)?;
+                let (property, slot) = if same_class(&class, &object) {
+                    (property, instance_slot(slot))
+                } else {
+                    if !object.class.is_instance_of(&property.declaring) {
+                        return Err(exception(
+                            "Given object is not an instance of the class this property was declared in",
+                        ));
+                    }
+                    Self::effective_property(property, slot, &object)
+                };
+                if let Some(linked) = &property.hooks {
+                    let hooks = &linked.hooks;
+                    if matches!(mode, PropertyRead::Value)
+                        && let Some(getter) = &hooks.get
+                    {
+                        return Err(ReflectedHookCall::Property {
+                            function: getter.function,
+                            object,
+                            value: None,
+                        }
+                        .suspend());
+                    }
+                    if hooks.is_virtual {
+                        if matches!(mode, PropertyRead::Initialized) {
+                            return Ok(Value::Bool(true));
+                        }
+                        return Err(crate::classes::property_hooks::property_error(
+                            &object,
+                            &property.name,
+                            if hooks.get.is_some() {
+                                "Must not read from virtual property "
+                            } else {
+                                "Property "
+                            },
+                            if hooks.get.is_some() {
+                                ""
+                            } else {
+                                " is write-only"
+                            },
+                        ));
+                    }
+                }
+                return self.reflected_backing_value(
+                    property,
+                    crate::property_storage::read_at(&object, &property.key, slot),
+                    mode,
+                );
             }
         };
+        self.reflected_backing_value(property, value, mode)
+    }
+
+    fn reflected_backing_value(
+        &self,
+        property: &PropertyDefault,
+        value: Option<Value>,
+        mode: PropertyRead,
+    ) -> NativeResult {
         if matches!(mode, PropertyRead::Initialized) {
             return Ok(Value::Bool(value.is_some()));
         }
-        value.map(|value| value.deref().clone()).map_or_else(
+        value.map(value_without_reference).map_or_else(
             || {
                 if property.ty.is_some() {
                     Err(NativeError::error(format!(
@@ -65,18 +120,51 @@ impl Vm {
         member: &MemberInfo,
         object: Option<Rc<Object>>,
         value: Value,
+        mode: PropertyWrite,
     ) -> NativeResult {
-        if let Some(object) = &object
-            && !object.class.is_instance_of(&member.class)
-            && member.modifiers & 16 == 0
-        {
-            return phera_extension_api::reflection::ReflectionContext::reflect_dynamic_property_write(
-                self, object.clone(), &member.name, value,
-            );
-        }
         let (class, slot) = self.reflected_property_slot(member)?;
         let property = property_at(&class, slot).ok_or_else(|| missing_property(member))?;
-        let value = value.deref().clone();
+        let (property, slot) = match object.as_ref() {
+            Some(object) if property.static_storage.is_none() && !same_class(&class, object) => {
+                if !object.class.is_instance_of(&member.class) {
+                    return phera_extension_api::reflection::ReflectionContext::reflect_dynamic_property_write(
+                        self, object.clone(), &member.name, value,
+                    );
+                }
+                Self::effective_property(property, slot, object)
+            }
+            _ => (property, instance_slot(slot)),
+        };
+        if let (Some(object), Some(linked)) = (&object, &property.hooks) {
+            let hooks = &linked.hooks;
+            if matches!(mode, PropertyWrite::Value)
+                && let Some(setter) = &hooks.set
+            {
+                return Err(ReflectedHookCall::Property {
+                    function: setter.function,
+                    object: object.clone(),
+                    value: Some(value),
+                }
+                .suspend());
+            }
+            if hooks.is_virtual {
+                return Err(crate::classes::property_hooks::property_error(
+                    object,
+                    &property.name,
+                    if hooks.set.is_some() {
+                        "Must not write to virtual property "
+                    } else {
+                        "Property "
+                    },
+                    if hooks.set.is_some() {
+                        ""
+                    } else {
+                        " is read-only"
+                    },
+                ));
+            }
+        }
+        let value = value_without_reference(value);
         let value = match &property.ty {
             Some(ty) => self.coerce_property_in_mode(value, property, ty, Some(false))?,
             None => value,
@@ -90,28 +178,51 @@ impl Vm {
             property.static_initialized.set(true);
             property.value_initialized.set(true);
         } else {
-            let object = property_object(property, object)?;
+            let object = required_object(object.as_ref())?;
             if property.is_readonly && object.has(&property.key) {
                 return Err(NativeError::error(format!(
                     "Cannot modify readonly property {}::${}",
                     property.declaring, property.name
                 )));
             }
+            if crate::property_storage::write_direct_at(object, &property.key, slot, &value, || {
+                true
+            }) {
+                return Ok(Value::Null);
+            }
             if let Some(Value::Reference(reference)) =
-                crate::property_storage::read(&object, &property.key)
+                crate::property_storage::read_at(object, &property.key, slot)
             {
                 let converted = self.check_reference_assignment(&reference, value)?;
                 *reference
                     .try_borrow_mut()
                     .map_err(|_| exception("Property value is already in use"))? = converted;
             } else {
-                crate::property_storage::write(&object, property.key.clone(), value);
+                crate::property_storage::write_at(object, property.key.clone(), slot, value);
             }
         }
         Ok(Value::Null)
     }
 
-    fn reflected_property_slot(
+    fn effective_property<'a>(
+        property: &'a PropertyDefault,
+        slot: PropertySlot,
+        object: &'a Object,
+    ) -> (&'a PropertyDefault, Option<usize>) {
+        if property.visibility != phera_bytecode::Visibility::Private
+            && let Some(actual) = object.class.as_any().downcast_ref::<Class>()
+            && let Some((index, actual_property)) =
+                actual.defaults.iter().enumerate().find(|(_, candidate)| {
+                    candidate.name == property.name
+                        && candidate.visibility != phera_bytecode::Visibility::Private
+                })
+        {
+            return (actual_property, Some(index));
+        }
+        (property, instance_slot(slot))
+    }
+
+    pub(super) fn reflected_property_slot(
         &self,
         member: &MemberInfo,
     ) -> Result<(Rc<Class>, PropertySlot), NativeError> {
@@ -153,7 +264,7 @@ impl Vm {
     }
 }
 
-fn property_at(class: &Class, slot: PropertySlot) -> Option<&PropertyDefault> {
+pub(super) fn property_at(class: &Class, slot: PropertySlot) -> Option<&PropertyDefault> {
     match slot {
         PropertySlot::Instance(slot) => class.defaults.get(slot),
         PropertySlot::Static(slot) => class.static_properties.get(slot),
@@ -167,17 +278,26 @@ fn missing_property(member: &MemberInfo) -> NativeError {
     ))
 }
 
-fn property_object(
-    property: &PropertyDefault,
-    object: Option<Rc<Object>>,
-) -> Result<Rc<Object>, NativeError> {
-    let object = object.ok_or_else(|| NativeError::type_error(
+fn required_object<T>(object: Option<T>) -> Result<T, NativeError> {
+    object.ok_or_else(|| NativeError::type_error(
         "ReflectionProperty::getValue(): Argument #1 ($object) must be provided for instance properties"
-    ))?;
-    if !object.class.is_instance_of(&property.declaring) {
-        return Err(exception(
-            "Given object is not an instance of the class this property was declared in",
-        ));
+    ))
+}
+
+fn same_class(class: &Rc<Class>, object: &Object) -> bool {
+    std::ptr::addr_eq(Rc::as_ptr(class), Rc::as_ptr(&object.class))
+}
+
+fn instance_slot(slot: PropertySlot) -> Option<usize> {
+    match slot {
+        PropertySlot::Instance(slot) => Some(slot),
+        PropertySlot::Static(_) => None,
     }
-    Ok(object)
+}
+
+fn value_without_reference(value: Value) -> Value {
+    match value {
+        Value::Reference(_) => value.deref().clone(),
+        value => value,
+    }
 }

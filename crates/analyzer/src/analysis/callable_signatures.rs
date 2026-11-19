@@ -5,12 +5,13 @@ use super::*;
 use crate::index::Signature;
 
 impl Analyzer<'_> {
-    pub fn callable_signature(&self, ty: ValueType) -> Option<Signature> {
+    pub fn callable_signature(&mut self, ty: ValueType) -> Option<Signature> {
         match ty {
             ValueType::Callable(signature) => Some(*signature),
             // A generic Closure type has no known engine-generated parameter list.
             ValueType::Class(class) if class.eq_ignore_ascii_case("Closure") => None,
             ValueType::Class(class) => {
+                self.dependencies.resolve(self.index, &class);
                 let mut signature = self.index.method(&class, "__invoke")?.clone();
                 signature.returns = self.relative_type(signature.returns, &class);
                 Some(signature)
