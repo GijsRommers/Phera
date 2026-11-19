@@ -11,6 +11,7 @@ use std::fmt::Write;
 pub(super) enum Escaping {
     Xml { attribute: bool, ascii: bool },
     Html { attribute: bool, ascii: bool },
+    Html5 { attribute: bool },
     Canonical { attribute: bool },
 }
 
@@ -18,6 +19,7 @@ pub(super) fn escape(output: &mut String, input: &str, mode: Escaping) {
     let attribute = match mode {
         Escaping::Xml { attribute, .. }
         | Escaping::Html { attribute, .. }
+        | Escaping::Html5 { attribute }
         | Escaping::Canonical { attribute } => attribute,
     };
     let prefix = input
@@ -38,6 +40,7 @@ pub(super) fn escape(output: &mut String, input: &str, mode: Escaping) {
             '>' if !attribute || !matches!(mode, Escaping::Canonical { .. }) => {
                 output.push_str("&gt;")
             }
+            '\u{a0}' if matches!(mode, Escaping::Html5 { .. }) => output.push_str("&nbsp;"),
             '"' if attribute => output.push_str("&quot;"),
             '\t' | '\n' | '\r' if attribute && matches!(mode, Escaping::Canonical { .. }) => {
                 let _ = write!(output, "&#x{:X};", character as u32);

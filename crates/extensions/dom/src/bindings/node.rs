@@ -9,7 +9,7 @@ mod canonical;
 mod compare;
 mod registration;
 
-pub(super) use registration::register;
+pub(super) use registration::{register, register_modern};
 
 use std::fmt::Write;
 
@@ -78,7 +78,7 @@ fn clone_node(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) ->
     .wrap(context)
 }
 
-fn clone_object(
+pub(super) fn clone_object(
     source: &std::rc::Rc<Object>,
     destination: &std::rc::Rc<Object>,
 ) -> Result<(), NativeError> {

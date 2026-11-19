@@ -13,6 +13,10 @@ pub(super) const INDEX_BOUNDS: &str = "must be between 0 and 2147483647";
 
 pub(super) fn is_map(object: &Object) -> bool {
     object.class.is_instance_of("DOMNamedNodeMap")
+        || matches!(
+            object.class.name(),
+            "Dom\\NamedNodeMap" | "Dom\\DtdNamedNodeMap" | "Dom\\HTMLCollection"
+        )
 }
 
 pub(super) fn valid_index(index: i64) -> bool {

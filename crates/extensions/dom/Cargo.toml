@@ -9,6 +9,10 @@ license.workspace = true
 phera-extension-api.workspace = true
 quick-xml.workspace = true
 html5ever.workspace = true
+encoding_rs.workspace = true
+cssparser.workspace = true
+precomputed-hash.workspace = true
+selectors.workspace = true
 tokio.workspace = true
 
 [lints]

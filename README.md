@@ -56,6 +56,17 @@ hash, json, mbstring, openssl, pcre, PDO
 (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, SPL, sqlite3, streams, tokenizer.
 
+Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
+
+- Documents and elements include `Dom\Document`, `Dom\HTMLDocument`,
+  `Dom\XMLDocument`, `Dom\Element`, `Dom\HTMLElement`, `Dom\Attr`.
+- Other nodes include `Dom\Node`, `Dom\CharacterData`, `Dom\Text`,
+  `Dom\CDATASection`, `Dom\Comment`, `Dom\ProcessingInstruction`,
+  `Dom\DocumentType`, `Dom\DocumentFragment`, `Dom\Entity`,
+  `Dom\EntityReference`, `Dom\Notation`.
+- Collections and queries include `Dom\NodeList`, `Dom\NamedNodeMap`,
+  `Dom\DtdNamedNodeMap`, `Dom\HTMLCollection`, `Dom\TokenList`, `Dom\XPath`.
+
 In progress: bcmath, curl, gmp, intl, mysqli, pgsql, process functions, sodium,
 zlib. Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
 

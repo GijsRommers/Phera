@@ -6,8 +6,11 @@
 //! $titles = $xpath->query('//book:title');
 //! ```
 
+mod modern;
 mod php;
 mod results;
+
+pub(super) use modern::register_modern;
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -70,7 +73,15 @@ fn query<'a>(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'a, NativeResult> {
-    evaluate(context, this, args, true, "DOMXPath::query")
+    let method = if this
+        .as_ref()
+        .is_some_and(|object| object.class.name() == "Dom\\XPath")
+    {
+        "Dom\\XPath::query"
+    } else {
+        "DOMXPath::query"
+    };
+    evaluate(context, this, args, true, method)
 }
 
 fn expression<'a>(
@@ -78,7 +89,15 @@ fn expression<'a>(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'a, NativeResult> {
-    evaluate(context, this, args, false, "DOMXPath::evaluate")
+    let method = if this
+        .as_ref()
+        .is_some_and(|object| object.class.name() == "Dom\\XPath")
+    {
+        "Dom\\XPath::evaluate"
+    } else {
+        "DOMXPath::evaluate"
+    };
+    evaluate(context, this, args, false, method)
 }
 
 fn evaluate<'a>(
@@ -175,7 +194,11 @@ fn evaluate<'a>(
             Ok(xpath::Value::Boolean(value)) => Ok(Value::Bool(value)),
             Err(Failure::XPath(error)) => {
                 context.warning(format!("{method}(): {}", error.message()));
-                Ok(Value::Bool(false))
+                if method.starts_with("Dom\\") {
+                    Err(NativeError::error("Could not evaluate XPath expression"))
+                } else {
+                    Ok(Value::Bool(false))
+                }
             }
             Err(Failure::Php(error)) => Err(error),
         }

@@ -179,7 +179,11 @@ fn construct(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Native
     Ok(Value::Null)
 }
 
-fn by_id(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
+pub(super) fn by_id(
+    context: &mut dyn Context,
+    this: This<'_>,
+    arguments: &[Value],
+) -> NativeResult {
     let location = this_node(this)?;
     let id = String::from_utf8_lossy(args::bytes(arguments, 0));
     let found = {

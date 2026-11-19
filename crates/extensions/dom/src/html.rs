@@ -4,7 +4,11 @@
 //! $document->loadHTML('<p>hi</p>', LIBXML_HTML_NOIMPLIED | LIBXML_HTML_NODEFDTD);
 //! ```
 
+mod modern;
 mod sink;
+
+pub use modern::{fragment, parse_modern};
+pub(crate) use sink::XHTML;
 
 use std::borrow::Cow;
 

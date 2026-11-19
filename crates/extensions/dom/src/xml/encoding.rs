@@ -27,7 +27,10 @@ pub(crate) fn supported_encoding(name: &str) -> bool {
     )
 }
 
-pub(super) fn decode(input: &[u8]) -> Result<Cow<'_, str>, ParseError> {
+pub(super) fn decode<'a>(
+    input: &'a [u8],
+    override_encoding: Option<&str>,
+) -> Result<Cow<'a, str>, ParseError> {
     let utf16 = match input {
         [0xff, 0xfe, rest @ ..] => Some((rest, true)),
         [0xfe, 0xff, rest @ ..] => Some((rest, false)),
@@ -54,13 +57,15 @@ pub(super) fn decode(input: &[u8]) -> Result<Cow<'_, str>, ParseError> {
     }
 
     let bytes = input.strip_prefix(b"\xef\xbb\xbf").unwrap_or(input);
-    let encoding = match Reader::from_reader(bytes).read_event() {
-        Ok(Event::Decl(declaration)) => declaration
-            .encoding()
-            .and_then(Result::ok)
-            .map(|name| name.to_ascii_uppercase()),
-        _ => None,
-    };
+    let encoding = override_encoding.map(str::to_ascii_uppercase).or_else(|| {
+        match Reader::from_reader(bytes).read_event() {
+            Ok(Event::Decl(declaration)) => declaration
+                .encoding()
+                .and_then(Result::ok)
+                .map(|name| name.to_ascii_uppercase()),
+            _ => None,
+        }
+    });
     match encoding.as_deref() {
         Some("ISO-8859-1" | "ISO8859-1" | "LATIN1") => {
             if bytes.is_ascii() {

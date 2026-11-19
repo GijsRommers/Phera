@@ -27,6 +27,7 @@ use super::{Location, NodeHandle, This, location, native, receiver};
 #[derive(Clone)]
 enum Selection {
     Children,
+    Elements,
     Attributes,
     Declarations(Kind),
     Snapshot(Rc<[NodeId]>),
@@ -42,6 +43,7 @@ struct Collection {
     root: Location,
     document_handle: Option<NodeHandle>,
     selection: Selection,
+    modern: bool,
     _pins: Vec<Rc<()>>,
 }
 
@@ -69,6 +71,10 @@ impl Collection {
                 .children(id)
                 .filter(|&id| arena[id].kind != Kind::Notation)
                 .collect(),
+            Selection::Elements => arena
+                .children(id)
+                .filter(|&id| arena[id].kind == Kind::Element)
+                .collect(),
             Selection::Declarations(kind) => arena
                 .children(id)
                 .filter(|&id| arena[id].kind == *kind)
@@ -77,7 +83,7 @@ impl Collection {
                 .attributes()
                 .iter()
                 .copied()
-                .filter(|&id| arena[id].name.namespace.as_deref() != Some(XMLNS))
+                .filter(|&id| self.modern || arena[id].name.namespace.as_deref() != Some(XMLNS))
                 .collect(),
             Selection::Tags { namespace, name } => arena
                 .content_descendants(id)
@@ -106,7 +112,10 @@ impl Collection {
             };
         }
         match id {
-            Some(id) if matches!(self.selection, Selection::Snapshot(_)) => {
+            Some(id)
+                if matches!(self.selection, Selection::Snapshot(_))
+                    && !root.shared.borrow().document.settings.modern =>
+            {
                 super::namespace::wrap(context, root.at(id))
             }
             id => root.wrap_optional(context, id),
@@ -148,6 +157,10 @@ pub(super) fn children(context: &mut dyn Context, root: Location) -> NativeResul
     wrap(context, root, Selection::Children, "DOMNodeList")
 }
 
+pub(super) fn elements(context: &mut dyn Context, root: Location) -> NativeResult {
+    wrap(context, root, Selection::Elements, "Dom\\HTMLCollection")
+}
+
 pub(super) fn attributes(context: &mut dyn Context, root: Location) -> NativeResult {
     wrap(context, root, Selection::Attributes, "DOMNamedNodeMap")
 }
@@ -167,6 +180,17 @@ fn wrap(
     selection: Selection,
     class: &str,
 ) -> NativeResult {
+    let modern = root.shared.borrow().document.settings.modern;
+    let class = if modern {
+        match &selection {
+            Selection::Attributes => "Dom\\NamedNodeMap",
+            Selection::Declarations(_) => "Dom\\DtdNamedNodeMap",
+            Selection::Tags { .. } | Selection::Elements => "Dom\\HTMLCollection",
+            _ => "Dom\\NodeList",
+        }
+    } else {
+        class
+    };
     let value = context.create_object(class, PhpArray::new())?;
     if let Value::Object(object) = &value {
         let document_handle = if root.id == Arena::DOCUMENT
@@ -199,6 +223,7 @@ fn wrap(
             root,
             document_handle,
             selection,
+            modern,
             _pins: pins,
         }));
     }
@@ -312,10 +337,21 @@ fn named_item(context: &mut dyn Context, object: &Object, name: &str) -> NativeR
         let root = collection.root();
         let state = root.shared.borrow();
         let arena = &state.document.arena;
-        collection
-            .ids(arena)
-            .into_iter()
-            .find(|&id| arena[id].name.local == name)
+        collection.ids(arena).into_iter().find(|&id| {
+            if matches!(
+                collection.selection,
+                Selection::Elements | Selection::Tags { .. }
+            ) {
+                ["id", "name"].into_iter().any(|key| {
+                    super::attributes::find(arena, id, Some(None), key)
+                        .is_some_and(|attribute| arena[attribute].value == name)
+                })
+            } else if collection.modern {
+                arena[id].name.qualified() == name
+            } else {
+                arena[id].name.local == name
+            }
+        })
     };
     collection.wrap_node(context, id)
 }

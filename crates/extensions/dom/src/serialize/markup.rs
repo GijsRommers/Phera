@@ -59,6 +59,26 @@ pub(super) fn html_void(name: &str) -> bool {
     )
 }
 
+pub(super) fn html5_void(name: &str) -> bool {
+    matches!(
+        name,
+        "area"
+            | "base"
+            | "br"
+            | "col"
+            | "embed"
+            | "hr"
+            | "img"
+            | "input"
+            | "link"
+            | "meta"
+            | "param"
+            | "source"
+            | "track"
+            | "wbr"
+    )
+}
+
 pub(super) fn html_block(name: &str) -> bool {
     matches!(
         name,
