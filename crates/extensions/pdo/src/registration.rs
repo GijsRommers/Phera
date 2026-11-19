@@ -38,7 +38,6 @@ pub fn register(registry: &mut Registry) {
         registry.class(ClassEntry {
             parent: Some("PDO"),
             constants,
-            methods: PDO_METHODS,
             ..ClassEntry::class(name)
         });
     }

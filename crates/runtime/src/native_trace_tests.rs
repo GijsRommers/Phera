@@ -40,6 +40,14 @@ const BODY_ERRORS: &[(&str, &str)] = &[
         "(new PDO('sqlite::memory:'))->query('select nope from nowhere')",
     ),
     (
+        "inherited mysql connect",
+        r"class_exists(Pdo\Mysql::class) ? Pdo\Mysql::connect() : null",
+    ),
+    (
+        "inherited pgsql connect",
+        r"class_exists(Pdo\Pgsql::class) ? Pdo\Pgsql::connect() : null",
+    ),
+    (
         "spl storage access",
         "(new SplObjectStorage())->offsetGet(new stdClass)",
     ),
