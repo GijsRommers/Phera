@@ -127,7 +127,7 @@ impl Registers {
 
     /// Empty every slot from `base` up, releasing what they held: a frame
     /// or a prepared call leaves the stack.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn truncate(&mut self, base: usize) {
         if base < self.top {
             for slot in &mut self.slots[base..self.top] {
@@ -175,31 +175,31 @@ impl Registers {
     }
 
     /// Take the value out of a slot, leaving it empty.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn take(&mut self, index: usize) -> Value {
         self.slots[index].take().unwrap_or_default()
     }
 
     /// Store a value in a slot, dropping what it held.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn put(&mut self, index: usize, value: Value) {
         self.slots[index] = Some(value);
     }
 
     /// Bounded slices keep callers separate from unfinished callees.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn window(&self, base: usize, count: usize) -> &[Option<Value>] {
         self.slots.get(base..base + count).unwrap_or(&[])
     }
 
     /// Mutations are restricted to a single reserved region.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn window_mut(&mut self, base: usize, count: usize) -> &mut [Option<Value>] {
         self.slots.get_mut(base..base + count).unwrap_or(&mut [])
     }
 
     /// The scalar loop keeps the current frame's tail borrowed between slow instructions.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn tail_mut(&mut self, base: usize) -> &mut [Option<Value>] {
         &mut self.slots[base..]
     }

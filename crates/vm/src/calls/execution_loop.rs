@@ -101,7 +101,6 @@ impl Vm {
         work: &mut usize,
     ) -> Result<BatchExit, NativeError> {
         loop {
-            let ids = self.classes.ids_handle();
             let mut machine = Machine {
                 code: &self.code,
                 classes: &mut self.classes,
@@ -111,14 +110,14 @@ impl Vm {
                 executed: 0,
                 stop,
                 frame_limit: self.frame_limit,
-                ids: &ids,
+                ids: &self.object_ids,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
             // `crate::destructors`). Making such an object leaves the loop,
             // so the next batch is guarded.
-            let exit = if ids.has_due() {
-                machine.run::<true>()
+            let exit = if self.object_ids.has_due() {
+                machine.run_guarded()
             } else {
                 machine.run::<false>()
             };
@@ -148,6 +147,14 @@ impl Vm {
 }
 
 impl Machine<'_> {
+    /// The loop while some object has a destructor due. Kept out of line,
+    /// so that it does not change how the plain loop compiles.
+    #[cold]
+    #[inline(never)]
+    fn run_guarded(&mut self) -> LoopExit {
+        self.run::<true>()
+    }
+
     /// The loop itself. Simple instructions run in [`Machine::run_simple`];
     /// this loop takes the others and switches frames on calls and returns.
     fn run<const GUARDED: bool>(&mut self) -> LoopExit {

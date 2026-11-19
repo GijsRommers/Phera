@@ -259,6 +259,7 @@ impl Machine<'_> {
     /// Whether parameter `index` of `function` takes `value` as it is, by
     /// value: no declared type, a built-in type the value has, or a class
     /// type the unit's cache knows the value's class satisfies.
+    #[inline(always)]
     fn accepts_argument(&self, function: FunctionIndex, index: usize, value: &Value) -> bool {
         let facts = self.code.facts(function);
         if !facts.takes_value(index) {
@@ -278,6 +279,7 @@ impl Machine<'_> {
     /// The same for a general callee, which is native code: any value, for
     /// an untyped by-value parameter. A pending named argument takes the
     /// general path.
+    #[inline(always)]
     fn general_accepts(&self, index: usize) -> bool {
         let Some(details) = self.stack.top_details() else {
             return false;

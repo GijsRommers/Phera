@@ -151,7 +151,7 @@ impl Vm {
 }
 
 /// The common scalar cases do not need PHP's general coercion machinery.
-#[inline]
+#[inline(always)]
 pub(crate) fn fast_binary(operator: BinaryOp, left: &Value, right: &Value) -> Option<Value> {
     use BinaryOp::{
         Add, Equal, Greater, GreaterEqual, Identical, Less, LessEqual, Modulo, Multiply, NotEqual,

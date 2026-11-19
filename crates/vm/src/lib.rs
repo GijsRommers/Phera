@@ -171,6 +171,9 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    /// The class table's id pool, held here as well so that the
+    /// interpreter loop can read it while it borrows the class table.
+    object_ids: Rc<phera_value::ObjectIds>,
     enum_cases: classes::enums::EnumCases,
     native_callback_sites: Vec<error_traces::NativeCallbackSite>,
     debug_objects: Vec<u32>,
@@ -236,9 +239,12 @@ impl Vm {
                 )
             })
             .collect();
+        let classes = classes::ClassTable::native(&registry);
+        let object_ids = classes.ids_handle();
         Self {
             enum_cases: classes::enums::EnumCases::default(),
-            classes: classes::ClassTable::native(&registry),
+            object_ids,
+            classes,
             autoload: Default::default(),
             include_path: None,
             request_end: Default::default(),

@@ -32,6 +32,25 @@ fn integer_at(slots: &[Option<Value>], register: Reg) -> Option<i64> {
     }
 }
 
+/// A copy of a value read by a simple instruction. The same as
+/// `Value::clone`, written out so that it is always inlined into the loop:
+/// with two copies of the loop (see `execution_loop`), the derived `clone`
+/// has enough callers that the compiler stops inlining it.
+#[inline(always)]
+pub(crate) fn duplicate(value: &Value) -> Value {
+    match value {
+        Value::Null => Value::Null,
+        Value::Bool(boolean) => Value::Bool(*boolean),
+        Value::Int(integer) => Value::Int(*integer),
+        Value::Float(float) => Value::Float(*float),
+        Value::String(string) => Value::String(string.clone()),
+        Value::Array(array) => Value::Array(array.clone()),
+        Value::Object(object) => Value::Object(object.clone()),
+        Value::Resource(resource) => Value::Resource(resource.clone()),
+        Value::Reference(cell) => Value::Reference(cell.clone()),
+    }
+}
+
 /// Stores an integer result.
 ///
 /// When the register already holds an integer, only the number is replaced.
@@ -226,7 +245,7 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             let Some(Some(value)) = slots.get(src.index()) else {
                 return ScalarStep::Fallback;
             };
-            let value = value.deref().clone();
+            let value = duplicate(&value.deref());
             store::<GUARDED>(slots, dst, value)
         }
         Instruction::Assign { local, src } => {
@@ -240,14 +259,14 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             let Some(Some(value)) = slots.get(src.index()) else {
                 return ScalarStep::Fallback;
             };
-            let value = value.deref().clone();
+            let value = duplicate(&value.deref());
             store::<GUARDED>(slots, local, value)
         }
         Instruction::AppendLocal { local, src } => {
             let Some(Some(value)) = slots.get(src.index()) else {
                 return ScalarStep::Fallback;
             };
-            let value = value.deref().clone();
+            let value = duplicate(&value.deref());
             let Some(Some(Value::Array(array))) = slots.get_mut(local.index()) else {
                 return ScalarStep::Fallback;
             };
@@ -395,7 +414,7 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
 
 /// Only integer comparisons have a direct boolean result; other operations use
 /// fast_binary so overflow, float results and PHP coercion keep their old paths.
-#[inline]
+#[inline(always)]
 fn integer_condition(operator: BinaryOp, left: i64, right: i64) -> Option<bool> {
     Some(match operator {
         BinaryOp::Less => left < right,
@@ -427,7 +446,7 @@ pub(crate) fn array_index_step<const GUARDED: bool>(
     let Some(value) = crate::array_slots::read_integer(array, *index) else {
         return ScalarStep::Fallback;
     };
-    let value = value.deref().clone();
+    let value = duplicate(&value.deref());
     let Some(target) = slots.get_mut(destination.index()) else {
         return ScalarStep::Fallback;
     };
