@@ -102,6 +102,7 @@ impl Compiler<'_> {
             attributes: &method.attributes,
             name: &name,
             by_reference: method.by_reference,
+            is_generator: method.is_generator,
             parameters: &method.parameters,
             return_type: method.return_type.as_ref().or(implicit_return.as_ref()),
             body: FunctionBody::Statements(method.body.as_deref().unwrap_or_default()),

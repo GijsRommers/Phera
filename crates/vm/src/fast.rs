@@ -391,28 +391,31 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             }
             ScalarStep::Complete
         }
-        // Guarded, unsetting a variable bound to a PHP reference goes to the
-        // general handler, which also forgets a global bound to it, so that
-        // the object it holds can be destroyed then. Unguarded no object
-        // has a destructor, and this is main's plain clear.
-        Instruction::UnsetLocal { local } if GUARDED => match slots.get_mut(local.index()) {
-            Some(Some(Value::Reference(_))) | None => ScalarStep::Fallback,
-            Some(slot) if owns_heap_values(slot) => clear(slot),
+        // Unsetting a variable that holds an array, object or reference
+        // goes to the general handler: it forgets a global bound to it, and
+        // a generator released there closes at once.
+        Instruction::UnsetLocal { local } => match slots.get_mut(local.index()) {
+            Some(slot)
+                if slot.as_ref().is_none_or(|value| {
+                    !matches!(
+                        value,
+                        Value::Object(_) | Value::Array(_) | Value::Reference(_)
+                    )
+                }) =>
+            {
+                *slot = None;
+                ScalarStep::Complete
+            }
+            _ => ScalarStep::Fallback,
+        },
+        Instruction::Clear { reg: register } => match slots.get_mut(register.index()) {
+            Some(slot) if GUARDED && owns_heap_values(slot) => clear(slot),
             Some(slot) => {
                 *slot = None;
                 ScalarStep::Complete
             }
+            None => ScalarStep::Fallback,
         },
-        Instruction::Clear { reg: register } | Instruction::UnsetLocal { local: register } => {
-            match slots.get_mut(register.index()) {
-                Some(slot) if GUARDED && owns_heap_values(slot) => clear(slot),
-                Some(slot) => {
-                    *slot = None;
-                    ScalarStep::Complete
-                }
-                None => ScalarStep::Fallback,
-            }
-        }
         _ => ScalarStep::Fallback,
     }
 }

@@ -19,7 +19,7 @@ use crate::calls::sends::SentArgument;
 impl Vm {
     /// Runs one instruction. `Some` hands control back to the async shell:
     /// a native call to run, a finished callback, or an instruction to await.
-    pub(crate) fn execute(
+    pub(crate) fn execute<const TRACK_GENERATORS: bool>(
         &mut self,
         instruction: Instruction,
         stop: usize,
@@ -43,7 +43,7 @@ impl Vm {
             {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
-            I::Call { dst, .. } => return self.call(dst, work),
+            I::Call { dst, .. } => return self.call::<TRACK_GENERATORS>(dst, work),
             I::CallDirect {
                 function,
                 args,
@@ -51,6 +51,12 @@ impl Vm {
                 dst,
                 ..
             } => return self.call_direct_general(function, args, count, dst, work),
+            I::GeneratorStart
+            | I::Yield { .. }
+            | I::YieldFrom { .. }
+            | I::GeneratorReturn { .. } => {
+                return self.execute_generator(instruction, stop);
+            }
             I::Return { src } => return self.return_local(src, instruction, stop),
             I::ReturnNull => return self.return_null(stop),
             I::ReturnMissing => return Err(self.missing_magic_return()),
@@ -62,7 +68,11 @@ impl Vm {
             }
             I::InitCall { function } => self.init_call(function)?,
             I::InitDynamicCall { callee } => self.init_dynamic_call(callee)?,
-            I::InitMethodCall { receiver, method } => self.init_method_call(receiver, method)?,
+            I::InitMethodCall { receiver, method }
+                if TRACK_GENERATORS && self.prepare_ready_native_method(receiver, method) => {}
+            I::InitMethodCall { receiver, method } => {
+                self.init_method_call::<TRACK_GENERATORS>(receiver, method)?
+            }
             I::InitStaticCall {
                 class,
                 method,
@@ -78,6 +88,8 @@ impl Vm {
             } => self.static_style_call(class, method, binding)?,
             I::New { class } => self.new_object(class)?,
             I::NewDynamic { class } => self.new_dynamic_object(class)?,
+            I::SendValue { src } if TRACK_GENERATORS && self.send_window_argument(src)? => {}
+            I::SendLocal { local } if TRACK_GENERATORS && self.send_window_argument(local)? => {}
             I::SendValue { src } => self.send(SentArgument::Value(src))?,
             I::SendLocal { local } => self.send(SentArgument::Local(local))?,
             I::SendPath { path } => {
@@ -272,12 +284,12 @@ impl Vm {
                 value,
                 end,
             } => {
-                if !self.iter_next(iter, Some(key), value, end)? {
+                if !self.iter_next::<TRACK_GENERATORS>(iter, Some(key), value, end)? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
             }
             I::IterNext { iter, value, end } => {
-                if !self.iter_next(iter, None, value, end)? {
+                if !self.iter_next::<TRACK_GENERATORS>(iter, None, value, end)? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
             }
@@ -290,7 +302,7 @@ impl Vm {
     }
 
     /// `Call`: enter the prepared PHP function, or let the shell run a native one.
-    fn call(
+    fn call<const TRACK_GENERATORS: bool>(
         &mut self,
         destination: Reg,
         work: &mut usize,
@@ -299,6 +311,14 @@ impl Vm {
         use crate::calls::call_execution::CallEntry;
         Ok(match self.enter_prepared_call(Some(destination))? {
             CallEntry::Php => None,
+            CallEntry::Native if TRACK_GENERATORS => {
+                if let Some(value) = self.finish_ready_native_window()? {
+                    self.set(destination, value);
+                    None
+                } else {
+                    Some(BatchExit::NativeCall(destination))
+                }
+            }
             CallEntry::Native => Some(BatchExit::NativeCall(destination)),
             CallEntry::ConvertStrings => Some(BatchExit::BindCall(destination)),
         })

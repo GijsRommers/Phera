@@ -114,6 +114,11 @@ impl Vm {
                 "Instantiation of class Closure is not allowed",
             ));
         }
+        if class.name == "Generator" {
+            return Err(NativeError::error(
+                crate::generators::class::INSTANTIATION_ERROR,
+            ));
+        }
         if matches!(class.kind, ClassKind::Interface | ClassKind::Trait) {
             let kind = if class.kind == ClassKind::Trait {
                 "trait"

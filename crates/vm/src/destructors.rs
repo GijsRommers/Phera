@@ -57,6 +57,11 @@ impl Vm {
         Box::pin(self.collect_cycles_if_due()).await?;
         let mut failure: Option<NativeError> = None;
         loop {
+            // Released generators close (run their `finally` blocks) with
+            // the destructors, in particular at the end of the request.
+            if self.generator_releases_pending() {
+                self.drain_generator_releases().await?;
+            }
             let doomed = self.classes.ids().take_doomed();
             if doomed.is_empty() {
                 break;

@@ -41,6 +41,12 @@ pub type AsyncMethod = for<'a> fn(
     Vec<Value>,
 ) -> LocalFuture<'a, NativeResult>;
 
+/// A native instance method that can finish on its prepared register window
+/// when no PHP callback or asynchronous work is needed.
+pub struct WindowMethod {
+    pub try_ready: fn(&mut dyn Context, &Object, Option<&Value>) -> Option<NativeResult>,
+    pub run: AsyncMethod,
+}
 /// An async method that forwards names from its variadic arguments into a PHP call.
 pub type AsyncNamedMethod = for<'a> fn(
     &'a mut dyn Context,
@@ -53,6 +59,7 @@ pub type AsyncNamedMethod = for<'a> fn(
 pub enum NativeMethod {
     Sync(SyncMethod),
     Async(AsyncMethod),
+    Window(&'static WindowMethod),
     AsyncNamed(AsyncNamedMethod),
     /// Declared but without a body: an interface method, or an abstract one.
     Abstract,
@@ -98,6 +105,18 @@ pub struct MethodEntry {
 }
 
 impl MethodEntry {
+    /// A public method with an optional register-window entry.
+    pub const fn public_window(
+        name: &'static str,
+        params: &'static [Param],
+        handler: &'static WindowMethod,
+    ) -> Self {
+        Self {
+            handler: NativeMethod::Window(handler),
+            ..Self::public_async(name, params, handler.run)
+        }
+    }
+
     /// A public instance method, by far the most common kind.
     pub const fn public(name: &'static str, params: &'static [Param], handler: SyncMethod) -> Self {
         MethodEntry {

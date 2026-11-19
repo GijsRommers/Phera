@@ -344,4 +344,14 @@ pub enum Instruction {
     MatchError {
         subject: Reg,
     },
+    GeneratorStart,
+    Yield {
+        destination: Reg,
+        key: Option<Reg>,
+        value: Option<Reg>,
+    },
+    YieldFrom {
+        destination: Reg,
+        source: Reg,
+    },
 }
