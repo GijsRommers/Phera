@@ -243,11 +243,8 @@ impl Machine<'_> {
                 ScalarStep::Fallback => match *instruction {
                     Instruction::FetchIndex {
                         dst, base, index, ..
-                    } => match array_index_step::<GUARDED>(dst, base, index, slots) {
-                        ScalarStep::Fallback => value_step::<GUARDED>(instruction, slots, &mut ip),
-                        complete => complete,
-                    },
-                    _ => value_step::<GUARDED>(instruction, slots, &mut ip),
+                    } => array_index_step::<GUARDED>(dst, base, index, slots),
+                    _ => ScalarStep::Fallback,
                 },
                 complete => complete,
             };
@@ -308,7 +305,16 @@ impl Machine<'_> {
                 index,
                 mode: phera_bytecode::FetchMode::Read,
                 ..
-            } => self.fetch_native_dimension(position, dst, base, index),
+            } => match self.fetch_native_dimension(position, dst, base, index) {
+                Step::Slow => self.value_step::<GUARDED>(&instruction, position),
+                done => done,
+            },
+            Instruction::Binary { .. }
+            | Instruction::Unary { .. }
+            | Instruction::JumpIfNull { .. }
+            | Instruction::JumpIfNotNull { .. }
+            | Instruction::NewArray { .. }
+            | Instruction::FetchIndex { .. } => self.value_step::<GUARDED>(&instruction, position),
             Instruction::Fetch {
                 dst,
                 path,
@@ -354,6 +360,29 @@ impl Machine<'_> {
             Instruction::Return { src } => self.leave_plain::<GUARDED>(Some(src)),
             Instruction::ReturnNull => self.leave_plain::<GUARDED>(None),
             _ => Step::Slow,
+        }
+    }
+
+    /// A simple instruction on values other than integers (see
+    /// `crate::fast_values`). It runs here, after the inner loop has
+    /// stopped at it, rather than inside that loop, whose code a call to
+    /// it would slow down.
+    #[inline(always)]
+    fn value_step<const GUARDED: bool>(
+        &mut self,
+        instruction: &Instruction,
+        position: Position,
+    ) -> Step {
+        let slots = self.registers.tail_mut(position.frame.base());
+        let mut ip = position.ip;
+        match value_step::<GUARDED>(instruction, slots, &mut ip) {
+            ScalarStep::Fallback => Step::Slow,
+            // A jump back is a loop round, like one in the inner loop.
+            ScalarStep::Complete if ip < position.ip && self.spend_work() => {
+                self.publish(ip);
+                Step::Yield
+            }
+            ScalarStep::Complete => Step::Done(ip),
         }
     }
 
