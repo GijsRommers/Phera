@@ -86,11 +86,11 @@ async fn write(
     )))
 }
 
-async fn progress(
+pub(super) async fn progress(
     transfer: &Transfer,
     context: &mut dyn Context,
 ) -> Result<Result<(), TransferError>, NativeError> {
-    let Some((callback, as_integer)) = transfer
+    let Some(callback) = transfer
         .settings
         .progress
         .as_ref()
@@ -108,13 +108,7 @@ async fn progress(
         ]
     };
     let args = std::iter::once(Value::Object(transfer.object.clone()))
-        .chain(numbers.map(|number| {
-            if *as_integer {
-                Value::Int(number)
-            } else {
-                Value::Float(number as f64)
-            }
-        }))
+        .chain(numbers.map(Value::Int))
         .collect();
     let value = context.call(callback, args).await?;
     if phera_extension_api::value::to_int(&value, context.diagnostics())? != 0 {

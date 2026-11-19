@@ -93,7 +93,7 @@ pub(crate) struct Settings {
     pub(crate) output: Output,
     pub(crate) include_header: bool,
     pub(crate) header: Option<Output>,
-    pub(crate) progress: Option<(Value, bool)>,
+    pub(crate) progress: Option<Value>,
     pub(crate) no_progress: bool,
     pub(crate) follow: bool,
     pub(crate) max_redirects: i64,

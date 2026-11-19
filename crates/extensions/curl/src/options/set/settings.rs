@@ -71,8 +71,7 @@ pub(super) fn change(
             settings.header = callback(context, function, option, value)?.map(Output::Callback);
         }
         CURLOPT_PROGRESSFUNCTION | CURLOPT_XFERINFOFUNCTION => {
-            settings.progress = callback(context, function, option, value)?
-                .map(|callback| (callback, option == CURLOPT_XFERINFOFUNCTION));
+            settings.progress = callback(context, function, option, value)?;
         }
         CURLOPT_FILE => {
             settings.output =

@@ -166,3 +166,25 @@ run('keep-alive', function () use ($base) {
     $two = curl_exec($handle);
     return [$one, $two, $port > 0 && $port === curl_getinfo($handle, CURLINFO_LOCAL_PORT)];
 });
+
+run('progress-abort', function () use ($base) {
+    $calls = [];
+    $handle = load_url($base . '/echo', [
+        CURLOPT_NOPROGRESS => false,
+        CURLOPT_PROGRESSFUNCTION => function ($h, ...$counts) use (&$calls) {
+            $calls[] = $counts;
+            return 1;
+        },
+    ]);
+    return [curl_exec($handle), curl_errno($handle), curl_error($handle), $calls];
+});
+run('suspending-write-callback', function () use ($base) {
+    $handle = load_url($base . '/echo', [
+        CURLOPT_WRITEFUNCTION => static function ($h, $data) {
+            Fiber::suspend($data);
+            return strlen($data);
+        },
+    ]);
+    $fiber = new Fiber(static fn() => curl_exec($handle));
+    return [$fiber->start(), $fiber->resume(), $fiber->getReturn()];
+});

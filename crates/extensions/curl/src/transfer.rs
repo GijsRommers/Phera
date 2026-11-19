@@ -120,14 +120,29 @@ impl Transfer {
             started,
         };
         let settings = &transfer.settings;
-        cookies::load(
-            context,
-            &transfer.cookies,
-            &settings.cookie_files,
-            settings.cookie_session,
-        )
-        .await;
-        let result = upload::build(context, &transfer.object, settings).await?;
+        let initial_progress = if !settings.no_progress
+            && settings.progress.is_some()
+            && settings
+                .normalized_url()
+                .is_some_and(|url| settings.protocols.permits(url.scheme()))
+        {
+            output::progress(&transfer, context).await?
+        } else {
+            Ok(())
+        };
+        let result = match initial_progress {
+            Err(error) => Err(error),
+            Ok(()) => {
+                cookies::load(
+                    context,
+                    &transfer.cookies,
+                    &settings.cookie_files,
+                    settings.cookie_session,
+                )
+                .await;
+                upload::build(context, &transfer.object, settings).await?
+            }
+        };
         transfer.network = Some(match result {
             Ok(payload) => {
                 let network = network::Network {
