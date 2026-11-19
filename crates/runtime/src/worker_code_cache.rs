@@ -1,6 +1,7 @@
 //! For a repeated `require __DIR__ . '/autoload.php'`, a worker can return
 //! its resolved compiled file without entering the blocking pool.
 
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -89,11 +90,29 @@ impl RequestCodeCache {
         if policy.revalidate_path {
             return None;
         }
-        let get = |entry: &ResolvedFile| self.fresh(entry, policy).then(|| entry.unit.clone());
         match lookup {
-            IncludeLookup::Absolute(path) => self.worker.absolute.borrow().get(*path).and_then(get),
-            IncludeLookup::Relative(key) => self.worker.relative.borrow().get(key).and_then(get),
+            IncludeLookup::Absolute(path) => self.lookup(&self.worker.absolute, *path, policy),
+            IncludeLookup::Relative(key) => self.lookup(&self.worker.relative, key, policy),
         }
+    }
+
+    fn lookup<Key: Borrow<Query> + Eq + Hash, Query: Eq + Hash + ?Sized>(
+        &self,
+        entries: &RefCell<HashMap<Key, ResolvedFile>>,
+        key: &Query,
+        policy: IncludeCachePolicy,
+    ) -> Option<Arc<CompiledUnit>> {
+        {
+            let entries = entries.borrow();
+            let entry = entries.get(key)?;
+            if self.fresh(entry, policy) {
+                return Some(entry.unit.clone());
+            }
+        }
+        // A failed recheck must not leave an old answer to resurrect if
+        // a later request changes or disables timestamp validation.
+        entries.borrow_mut().remove(key);
+        None
     }
 
     fn remember_include(
