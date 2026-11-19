@@ -15,6 +15,8 @@ pub mod zone;
 
 use phera_extension_api::{Extension, FunctionEntry, Param, ParamType, Registry};
 
+pub use classes::{Instant as DateTimeValue, ZoneKind, parse_timezone, read_timezone};
+
 pub struct Date;
 
 impl Extension for Date {

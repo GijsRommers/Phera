@@ -34,6 +34,17 @@ use std::rc::Rc;
 use phera_extension_api::{ArrayKey, ClassEntry, Context, NativeError, NativeResult, Object};
 use phera_extension_api::{PhpArray, Registry, Value};
 
+pub use instant::Instant;
+pub use zone_kind::ZoneKind;
+
+pub fn read_timezone(object: &Object) -> Result<ZoneKind, NativeError> {
+    state(object, "DateTimeZone")
+}
+
+pub fn parse_timezone(input: &[u8]) -> Option<ZoneKind> {
+    timezone::parse(input).ok()
+}
+
 type This<'a> = Option<&'a Rc<Object>>;
 
 pub fn register(registry: &mut Registry) {

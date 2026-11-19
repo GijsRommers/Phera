@@ -39,3 +39,23 @@ Store the last intl error in the extension API's request store and the INI
 settings in the runtime's INI catalog. That keeps concurrent requests isolated
 and gives PHP INI reads and updates the same setting source. Rejected
 process-global error and locale state or a second copy of the INI values.
+
+## 2026-11-19 — Intl style patterns and format objects
+
+Retain the CLDR pattern strings alongside the ICU4X formatters. PHP exposes
+the pattern as mutable object state, and ICU4X's semantic skeletons alone do
+not preserve PHP's date and time style joins or number symbol settings.
+Reject a table of outputs copied from one oracle machine. Keep decimal
+arithmetic in fixed_decimal and cache a bounded number of ICU4X currency
+formatters per NumberFormatter. The currency options exposed by ICU4X are
+narrower than PHP's, so PHP owns the mutable overrides.
+
+Read DateTimeInterface and DateTimeZone from Phera's existing date state.
+Use the same bundled timezone data to resolve Unix timestamps and local
+arrays before passing civil fields to ICU4X. Reject a second timezone
+implementation or a call through a PHP callback for every formatted date.
+
+Apply ICU4X's UTS #46 mapper and the idna crate's Punycode. PHP reports
+per-condition bits and permits callers to turn bidi and joiner checks on
+independently. Reject an all-or-nothing IDNA error and mandatory WHATWG URL
+restrictions, which would reject domains PHP accepts.

@@ -1,0 +1,107 @@
+//! Formatting keeps the Unix instant and resolves the requested timezone first.
+//!
+//! ```php
+//! $f = new IntlDateFormatter("en_US", -1, -1, "Europe/Brussels", 1, "HH:mm");
+//! $f->format(0); // "01:00"
+//! ```
+
+use std::rc::Rc;
+
+use icu_calendar::{Date, Gregorian};
+use icu_datetime::pattern::{DateTimePattern, FixedCalendarDateTimeNames};
+use icu_datetime::{DateTimeFormatter, fieldsets::YMDT};
+use icu_locale::Locale;
+use icu_time::zone::{TimeZone, UtcOffset};
+use icu_time::{DateTime, Time, ZonedDateTime};
+use phera_ext_date::{ZoneKind, calendar::Civil};
+use writeable::{TryWriteable, Writeable};
+
+#[derive(Clone)]
+pub enum Renderer {
+    Pattern {
+        pattern: Rc<DateTimePattern>,
+        names: Rc<FixedCalendarDateTimeNames<Gregorian>>,
+    },
+    Traditional(Rc<DateTimeFormatter<YMDT>>),
+}
+
+impl Renderer {
+    pub fn new(locale: &Locale, pattern: &str, calendar: i64) -> Option<Self> {
+        let mut locale = locale.clone();
+        if calendar == 0 && is_non_gregorian(&locale) {
+            let formatter = DateTimeFormatter::try_new(locale.into(), YMDT::medium()).ok()?;
+            return Some(Self::Traditional(Rc::new(formatter)));
+        }
+        locale
+            .extensions
+            .unicode
+            .keywords
+            .remove(&icu_locale::extensions::unicode::key!("ca"));
+        let pattern = pattern.parse::<DateTimePattern>().ok()?;
+        let mut names = FixedCalendarDateTimeNames::<Gregorian>::try_new(locale.into()).ok()?;
+        names.include_for_pattern(&pattern).ok()?;
+        Some(Self::Pattern {
+            pattern: Rc::new(pattern),
+            names: Rc::new(names),
+        })
+    }
+
+    pub fn format(&self, seconds: i64, micros: i64, zone: &ZoneKind) -> Option<String> {
+        let offset = zone.offset(seconds);
+        let civil = Civil::from_timestamp(seconds.checked_add(i64::from(offset.seconds))?);
+        let date = Date::try_new_gregorian(
+            i32::try_from(civil.year).ok()?,
+            civil.month as u8,
+            civil.day as u8,
+        )
+        .ok()?;
+        let time = Time::try_new(
+            civil.hour as u8,
+            civil.minute as u8,
+            civil.second as u8,
+            u32::try_from(micros * 1000).ok()?,
+        )
+        .ok()?;
+        match self {
+            Self::Pattern { pattern, names } => {
+                let name = zone.name();
+                let timezone = TimeZone::from_iana_id(&name)
+                    .with_offset(UtcOffset::try_from_seconds(offset.seconds).ok())
+                    .at_date_time(DateTime { date, time });
+                let value = ZonedDateTime {
+                    date,
+                    time,
+                    zone: timezone,
+                };
+                let formatter = names.with_pattern_unchecked(pattern);
+                formatter
+                    .format(&value)
+                    .try_write_to_string()
+                    .ok()
+                    .map(|text| text.into_owned())
+            }
+            Self::Traditional(formatter) => Some(
+                formatter
+                    .format(&DateTime { date, time })
+                    .write_to_string()
+                    .into_owned(),
+            ),
+        }
+    }
+}
+
+fn is_non_gregorian(locale: &Locale) -> bool {
+    if let Some(calendar) = locale
+        .extensions
+        .unicode
+        .keywords
+        .get(&icu_locale::extensions::unicode::key!("ca"))
+    {
+        return calendar.to_string() != "gregory";
+    }
+    matches!(locale.id.language.as_str(), "th" | "fa")
+        || locale
+            .id
+            .region
+            .is_some_and(|region| region.as_str() == "SA")
+}

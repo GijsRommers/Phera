@@ -65,7 +65,7 @@ pub fn fail(
     Ok(result)
 }
 
-fn name(code: i32) -> &'static str {
+pub fn name(code: i32) -> &'static str {
     static NAMES: OnceLock<HashMap<i32, &str>> = OnceLock::new();
     NAMES
         .get_or_init(|| {

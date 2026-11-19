@@ -80,8 +80,8 @@ The `phera` binary ends up in `target/debug/phera`.
 
 ## Internationalization
 
-Phera includes PHP's Normalizer, grapheme functions and intl error helpers
-using ICU4X compiled data. See the [intl documentation](crates/extensions/intl/README.md)
+Phera's intl work includes Normalizer, grapheme functions, IDNA, Locale,
+NumberFormatter and IntlDateFormatter using ICU4X compiled data. See the [intl documentation](crates/extensions/intl/README.md)
 for coverage and PHP oracle comparisons.
 
 ## 🧪 Testing
