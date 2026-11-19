@@ -100,6 +100,7 @@ impl Runtime {
         registry.load(&phera_ext_date::Date);
         registry.load(&phera_ext_dom::Libxml);
         registry.load(&phera_ext_dom::Dom);
+        registry.load(&phera_ext_xmlreader::XmlReader);
         registry.load(&phera_ext_xmlwriter::XmlWriter);
         registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_json::Json);

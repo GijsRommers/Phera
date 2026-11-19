@@ -14,7 +14,7 @@ mod encoding;
 mod entities;
 pub(crate) mod names;
 mod replacement;
-pub(crate) use encoding::supported_encoding;
+pub use encoding::supported_encoding;
 pub use names::valid as valid_name;
 
 use std::borrow::Cow;
@@ -47,7 +47,12 @@ pub struct Parsed {
 }
 
 pub fn parse(input: &[u8], options: Options) -> Parsed {
-    let decoded = match decode(input) {
+    parse_with_encoding(input, options, None)
+}
+
+/// Parse with an explicit encoding when a reader's factory supplies one.
+pub fn parse_with_encoding(input: &[u8], options: Options, encoding: Option<&str>) -> Parsed {
+    let decoded = match decode(input, encoding) {
         Ok(decoded) => decoded,
         Err(error) => {
             return Parsed {

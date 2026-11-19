@@ -11,7 +11,7 @@ use quick_xml::events::Event;
 
 use crate::document::ParseError;
 
-pub(crate) fn supported_encoding(name: &str) -> bool {
+pub fn supported_encoding(name: &str) -> bool {
     matches!(
         name.to_ascii_uppercase().as_str(),
         "UTF-8"
@@ -27,13 +27,21 @@ pub(crate) fn supported_encoding(name: &str) -> bool {
     )
 }
 
-pub(super) fn decode(input: &[u8]) -> Result<Cow<'_, str>, ParseError> {
+pub(super) fn decode<'a>(
+    input: &'a [u8],
+    encoding: Option<&str>,
+) -> Result<Cow<'a, str>, ParseError> {
+    let encoding = encoding.map(str::to_ascii_uppercase);
     let utf16 = match input {
         [0xff, 0xfe, rest @ ..] => Some((rest, true)),
         [0xfe, 0xff, rest @ ..] => Some((rest, false)),
         [b'<', 0, ..] => Some((input, true)),
         [0, b'<', ..] => Some((input, false)),
-        _ => None,
+        _ => match encoding.as_deref() {
+            Some("UTF-16" | "UTF-16LE") => Some((input, true)),
+            Some("UTF-16BE") => Some((input, false)),
+            _ => None,
+        },
     };
     if let Some((bytes, little_endian)) = utf16 {
         if !bytes.len().is_multiple_of(2) {
@@ -54,13 +62,13 @@ pub(super) fn decode(input: &[u8]) -> Result<Cow<'_, str>, ParseError> {
     }
 
     let bytes = input.strip_prefix(b"\xef\xbb\xbf").unwrap_or(input);
-    let encoding = match Reader::from_reader(bytes).read_event() {
+    let encoding = encoding.or_else(|| match Reader::from_reader(bytes).read_event() {
         Ok(Event::Decl(declaration)) => declaration
             .encoding()
             .and_then(Result::ok)
             .map(|name| name.to_ascii_uppercase()),
         _ => None,
-    };
+    });
     match encoding.as_deref() {
         Some("ISO-8859-1" | "ISO8859-1" | "LATIN1") => {
             if bytes.is_ascii() {

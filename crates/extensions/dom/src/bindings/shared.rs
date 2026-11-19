@@ -75,6 +75,25 @@ impl SharedNode {
         self.location.clone().wrap(context)
     }
 
+    /// Copy a subtree as a detached node in a supplied or fresh document.
+    pub fn copy_to(&self, destination: Option<&Self>) -> Option<Self> {
+        if let Some(destination) = destination {
+            let index = if self.location.same_document(&destination.location) {
+                let snapshot = self.document(|doc| doc.arena.clone());
+                destination.document_mut(|doc| doc.arena.import(&snapshot, self.id(), true))
+            } else {
+                self.document(|source| {
+                    destination.document_mut(|doc| doc.arena.import(&source.arena, self.id(), true))
+                })
+            };
+            destination.select(index)
+        } else {
+            let mut copy = Document::default();
+            let index = self.document(|source| copy.arena.import(&source.arena, self.id(), true));
+            Some(Self::new(Location::new(copy, false, index)))
+        }
+    }
+
     pub fn remove(&self, node: NodeId) {
         let mut state = self.location.shared.borrow_mut();
         if state.document.arena.get(node).is_some() {

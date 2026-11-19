@@ -57,9 +57,10 @@ session, SPL, sqlite3, streams, tokenizer, and `XMLWriter` (`xmlwriter_*` and
 memory, local file URI, and PHP stream output).
 
 `SimpleXMLElement` and `SimpleXMLIterator` share XML documents with DOM.
+`XMLReader` reads XML from strings, local files and PHP streams.
 
 In progress: bcmath, curl, gmp, intl, mysqli, pgsql, process functions, sodium,
-zlib. Not started: gd, fileinfo, XMLReader, zip, sockets.
+zlib. Not started: gd, fileinfo, zip, sockets.
 
 ## ✨ Goals
 

@@ -63,7 +63,7 @@ impl Parser<'_> {
                 let previous = self.scope.insert(prefix.into(), value.text.clone());
                 scope_changes.push((prefix.into(), previous));
             }
-            let attribute = (Cow::Borrowed(name), value);
+            let attribute = (Cow::Borrowed(name), value, false);
             if first_attribute.is_none() {
                 first_attribute = Some(attribute);
             } else {
@@ -77,12 +77,13 @@ impl Parser<'_> {
                     && !first_attribute
                         .iter()
                         .chain(&attributes)
-                        .any(|(name, _)| *name == rule.name)
+                        .any(|(name, _, _)| *name == rule.name)
                 {
                     attributes.push((
                         Cow::Owned(rule.name.clone()),
                         self.entities
                             .attribute(value, self.options.substitute_entities)?,
+                        true,
                     ));
                 }
             }
@@ -92,6 +93,8 @@ impl Parser<'_> {
         let name = self.resolve_name(name, false);
         let mut element = Node::new(Kind::Element, name, "");
         element.line = line;
+        element.empty_element = !push;
+        element.closed_element = !push;
         let id = self.document.arena.allocate(element);
         self.document
             .arena
@@ -100,7 +103,7 @@ impl Parser<'_> {
 
         let mut expanded = HashSet::new();
         let mut preserve_space = self.open.last().is_some_and(|frame| frame.preserve_space);
-        for (key, value) in first_attribute.into_iter().chain(attributes) {
+        for (key, value, defaulted) in first_attribute.into_iter().chain(attributes) {
             let name = if namespace_declaration(&key).is_some() {
                 names::qualified(&key, Some(names::XMLNS.into()))
             } else {
@@ -143,6 +146,7 @@ impl Parser<'_> {
             }
             let mut attribute = Node::new(Kind::Attribute, name, value.text);
             attribute.is_id = is_id;
+            attribute.default_attribute = defaulted;
             let attribute = self.document.arena.attribute_parts(attribute, parts);
             self.document
                 .arena
@@ -163,6 +167,7 @@ impl Parser<'_> {
 
     pub(super) fn close(&mut self) {
         if let Some(frame) = self.open.pop() {
+            self.document.arena[frame.id].closed_element = true;
             self.restore(frame.namespaces);
         }
     }
