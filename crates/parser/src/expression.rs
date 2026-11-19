@@ -5,6 +5,8 @@
 //! levels bind tighter. Left-associative chains and postfix operators run in
 //! loops, so `1 + 2 + 3 + ...` never recurses per operator.
 
+mod assignment;
+
 use phera_ast::{
     Argument, Arguments, ArrayItem, ArrowFunction, Attribute, BinaryOperator, CastKind, Closure,
     ClosureUse, Expression, ExpressionKind, IncludeKind, Literal, MagicConstant, Match, MatchArm,
@@ -165,11 +167,11 @@ impl Parser<'_> {
                 let compound = compound_assign_op(kind);
                 let rhs = if kind == TokenKind::Assign && self.at(TokenKind::Ampersand) {
                     self.bump()?;
-                    Rhs::Ref(self.parse_assign_ref_rhs()?)
+                    assignment::Assignment::Reference(self.parse_assign_ref_rhs()?)
                 } else {
-                    Rhs::Value(self.parse_expr(prec::ASSIGN)?)
+                    assignment::Assignment::Value(self.parse_expr(prec::ASSIGN)?, compound)
                 };
-                left = reassociate_assign(left, &rhs, compound, assign_token.span, self)?;
+                left = assignment::attach(left, rhs, assign_token.span, self)?;
                 banned = None;
                 continue;
             }
@@ -511,10 +513,6 @@ impl Parser<'_> {
                     self.bump()?;
                     if self.kind() == TokenKind::Variable || self.kind() == TokenKind::Dollar {
                         let var_expr = self.parse_simple_variable()?;
-                        let ExpressionKind::Variable(variable) = &var_expr.kind else {
-                            return Err(self.error("expected a variable after '::'"));
-                        };
-                        let variable = variable.clone();
                         if self.at(TokenKind::LeftParen) {
                             let arguments = self.parse_argument_list()?;
                             expr = Expression {
@@ -526,6 +524,9 @@ impl Parser<'_> {
                                 span: self.span_since(start),
                             };
                         } else {
+                            let ExpressionKind::Variable(variable) = var_expr.into_kind() else {
+                                return Err(self.error("expected a variable after '::'"));
+                            };
                             expr = Expression {
                                 kind: ExpressionKind::StaticProperty {
                                     class: Box::new(expr),
@@ -979,36 +980,23 @@ impl Parser<'_> {
         }
 
         let arguments = self.parse_argument_list()?;
-        if matches!(arguments, Arguments::FirstClassCallable) {
-            // `clone(...)` parses in PHP as a call to `\clone`.
-            return Ok(Expression {
-                kind: ExpressionKind::Call {
-                    callee: Box::new(clone_callee()),
-                    arguments,
-                },
-                span: self.span_since(start),
-            });
-        }
-        let Arguments::List(items) = &arguments else {
-            unreachable!()
-        };
-
-        let unnamed = |argument: &Argument| argument.name.is_none() && !argument.spread;
-
-        let kind = match items.as_slice() {
-            [] => ExpressionKind::Call {
-                callee: Box::new(clone_callee()),
-                arguments: Arguments::List(vec![]),
-            },
-            [first] if unnamed(first) => ExpressionKind::Clone {
-                object: Box::new(first.value.clone()),
-                with: None,
-            },
-            [first, second] if unnamed(first) && unnamed(second) => ExpressionKind::Clone {
-                object: Box::new(first.value.clone()),
-                with: Some(Box::new(second.value.clone())),
-            },
-            _ => ExpressionKind::Call {
+        let kind = match arguments {
+            Arguments::List(items)
+                if (1..=2).contains(&items.len())
+                    && items
+                        .iter()
+                        .all(|argument| argument.name.is_none() && !argument.spread) =>
+            {
+                let mut items = items.into_iter();
+                let Some(first) = items.next() else {
+                    return Err(self.error("clone expects an object"));
+                };
+                ExpressionKind::Clone {
+                    object: Box::new(first.value),
+                    with: items.next().map(|item| Box::new(item.value)),
+                }
+            }
+            arguments => ExpressionKind::Call {
                 callee: Box::new(clone_callee()),
                 arguments,
             },
@@ -1200,12 +1188,12 @@ impl Parser<'_> {
 
         let value = if self.at(TokenKind::LeftParen) {
             match self.parse_argument_list()? {
-                Arguments::List(items) => match items.as_slice() {
+                Arguments::List(mut items) => match items.as_slice() {
                     [] => None,
-                    [one] if one.name.is_none() && !one.spread => Some(Box::new(one.value.clone())),
-                    _ => {
-                        return Err(self.error_at(start, "exit() accepts at most one argument"));
+                    [one] if one.name.is_none() && !one.spread => {
+                        items.pop().map(|item| Box::new(item.value))
                     }
+                    _ => return Err(self.error_at(start, "exit() accepts at most one argument")),
                 },
                 // `exit(...)` / `die(...)` parse in PHP as a call; the AST has
                 // no exit-callable, so it becomes a bare `exit`.
@@ -1507,131 +1495,6 @@ impl Parser<'_> {
                 | Decrement
                 | AttributeStart
         )
-    }
-}
-
-/// The right side of an assignment.
-enum Rhs {
-    Value(Expression),
-    Ref(Expression),
-}
-
-/// PHP's grammar only allows a `variable` on the left of `=`, but its parser
-/// reduces the rightmost operand to a variable when an assignment operator
-/// follows, so `$a + $b = 1` parses as `$a + ($b = 1)` and `(bool) $a = 1` as
-/// `(bool) ($a = 1)`. This re-associates
-/// `left` accordingly: the assignment attaches to the rightmost assignable
-/// operand along the right spine.
-fn reassociate_assign(
-    left: Expression,
-    rhs: &Rhs,
-    compound: Option<BinaryOperator>,
-    err_span: Span,
-    parser: &Parser,
-) -> Result<Expression, ParseError> {
-    let compound_target_ok =
-        |kind: &ExpressionKind| is_assignable(kind) && !matches!(kind, ExpressionKind::List(_));
-    let attach = |target: Expression| -> Expression {
-        let span = target.span;
-        let kind = match (compound, rhs) {
-            (None, Rhs::Value(value)) => ExpressionKind::Assign {
-                target: Box::new(target),
-                value: Box::new(value.clone()),
-            },
-            (None, Rhs::Ref(value)) => ExpressionKind::AssignReference {
-                target: Box::new(target),
-                value: Box::new(value.clone()),
-            },
-            (Some(operator), Rhs::Value(value)) => ExpressionKind::CompoundAssign {
-                operator,
-                target: Box::new(target),
-                value: Box::new(value.clone()),
-            },
-            (Some(_), Rhs::Ref(_)) => ExpressionKind::Assign {
-                target: Box::new(target),
-                value: Box::new(Expression {
-                    kind: ExpressionKind::Literal(Literal::Null),
-                    span,
-                }),
-            },
-        };
-        Expression { kind, span }
-    };
-
-    if compound.is_some() {
-        if compound_target_ok(&left.kind) {
-            return Ok(attach(left));
-        }
-    } else if is_assignable(&left.kind) {
-        return Ok(attach(left));
-    }
-
-    let left_span = left.span;
-    match left.into_kind() {
-        ExpressionKind::Binary {
-            operator,
-            left: l,
-            right,
-        } => {
-            let right = reassociate_assign(*right, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Binary {
-                    operator,
-                    left: l,
-                    right: Box::new(right),
-                },
-                span: left_span,
-            })
-        }
-        ExpressionKind::Ternary {
-            condition,
-            then,
-            otherwise,
-        } => {
-            let otherwise = reassociate_assign(*otherwise, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Ternary {
-                    condition,
-                    then,
-                    otherwise: Box::new(otherwise),
-                },
-                span: left_span,
-            })
-        }
-        ExpressionKind::Unary { operator, operand } => {
-            let operand = reassociate_assign(*operand, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Unary {
-                    operator,
-                    operand: Box::new(operand),
-                },
-                span: left_span,
-            })
-        }
-        ExpressionKind::Cast { kind, operand } => {
-            let operand = reassociate_assign(*operand, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Cast {
-                    kind,
-                    operand: Box::new(operand),
-                },
-                span: left_span,
-            })
-        }
-        ExpressionKind::Clone { object, with } => {
-            let object = reassociate_assign(*object, rhs, compound, err_span, parser)?;
-            Ok(Expression {
-                kind: ExpressionKind::Clone {
-                    object: Box::new(object),
-                    with,
-                },
-                span: left_span,
-            })
-        }
-        _ => Err(parser.error_at(
-            err_span,
-            "syntax error: unexpected assignment operator, cannot assign to this expression",
-        )),
     }
 }
 
