@@ -27,6 +27,7 @@ use tokio::{
 use tokio_rustls::TlsAcceptor;
 
 mod tls;
+mod upload;
 
 type Body = UnsyncBoxBody<Bytes, std::io::Error>;
 
@@ -196,6 +197,7 @@ async fn respond(request: Request<Incoming>) -> Result<Response<Body>, Infallibl
             chunks(true)
         }
         "/large" => full(Bytes::from(vec![b'x'; 2 * 1024 * 1024])),
+        "/upload-size" | "/upload-redirect" => return Ok(upload::receive(request).await),
         "/multipart" => {
             let (parts, body) = request.into_parts();
             let media = parts.headers.get("content-type").unwrap().to_str().unwrap();

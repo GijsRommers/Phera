@@ -1,10 +1,13 @@
 //! `curl_exec` and `curl_multi_exec` share the response and callback path.
 
+mod body;
 mod download;
 mod network;
 mod output;
 mod request;
 mod upload;
+
+pub(crate) use body::RequestBody;
 
 use std::{
     future::{Future, poll_fn},
@@ -35,6 +38,7 @@ enum Event {
     Head(Box<Info>, Vec<Vec<u8>>, oneshot::Sender<()>),
     Body(Bytes, i64),
     Trace(String),
+    Upload(upload::ReadRequest),
     Done(Box<Info>, Option<TransferError>),
 }
 
@@ -140,7 +144,7 @@ impl Transfer {
                     settings.cookie_session,
                 )
                 .await;
-                upload::build(context, &transfer.object, settings).await?
+                upload::build(context, settings).await?
             }
         };
         transfer.network = Some(match result {
@@ -203,6 +207,19 @@ impl Transfer {
             Some(Event::Trace(line)) => {
                 output::trace(context, &self.settings, &line).await?;
                 Ok(())
+            }
+            Some(Event::Upload(request)) => {
+                {
+                    let mut easy = self.handle.borrow_mut();
+                    easy.info.uploaded = request.sent;
+                    easy.info.upload_length = request.length;
+                }
+                if let Err(error) = output::progress(self, context).await? {
+                    Err(error)
+                } else {
+                    upload::respond(context, self, request).await?;
+                    Ok(())
+                }
             }
             Some(Event::Done(info, error)) => {
                 self.handle.borrow_mut().info = *info;

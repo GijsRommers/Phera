@@ -34,9 +34,9 @@ an unavailable option emits a warning, returns `false`, and leaves the transfer
 configuration unchanged. TLS verifies the certificate chain and hostname by
 default. An explicit `CURLOPT_SSL_VERIFYPEER => false` or
 `CURLOPT_SSL_VERIFYHOST => 0` disables that check on the handle. The verbose
-trace identifies the disabled checks, and configured pins still apply. Proxy support covers HTTP
-forwarding and CONNECT. Other proxy types and explicit proxies over a Unix
-socket are refused.
+trace identifies the disabled checks, and configured pins still apply.
+Proxy support covers HTTP forwarding and CONNECT. Other proxy types and
+explicit proxies over a Unix socket are refused.
 
 The client permits only HTTP and HTTPS, including on redirects. Other schemes
 fail with `CURLE_UNSUPPORTED_PROTOCOL` before opening a file or a connection.
@@ -61,9 +61,12 @@ routing rules of the host.
   libcurl. Verification failures report a nonzero result. Certificate lists,
   proxy error details, native TLS engine lists, and default CA path selectors
   have empty or default results.
-- The response is streamed in bounded chunks. Multipart and PHP stream uploads
-  are assembled before the request is dispatched. The callback chunk sizes
-  and progress notification cadence can differ from libcurl.
+- Responses and uploads use bounded chunks. Hyper pulls from PHP streams and
+  read callbacks as the network allows, and each disk-backed `CURLFile` part
+  is read as it is sent. Multipart headers, string fields, and `CURLStringFile`
+  values remain in memory. As in PHP, a consumed PHP upload stream cannot be
+  rewound when a redirect requires retransmission. Callback chunk sizes and
+  progress notification cadence can differ from libcurl.
 - `curl_multi_select()` waits for progress or its deadline. Host and total
   multi limits cap active transfers. They are conservative for multiplexed
   HTTP/2, where several transfers can use one socket. The multi idle limit is

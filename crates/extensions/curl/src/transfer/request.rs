@@ -3,8 +3,6 @@
 use std::collections::HashSet;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use bytes::Bytes;
-use http_body_util::Full;
 use hyper::{
     HeaderMap, Request, Version,
     header::{HeaderName, HeaderValue},
@@ -16,7 +14,7 @@ use crate::{
     options::{Auth, HttpVersion, Settings},
 };
 
-use super::upload::Payload;
+use super::{RequestBody, upload::Payload};
 
 pub(super) fn trace(url: &Url, method: &str, settings: &Settings) -> String {
     let mut message = format!(
@@ -39,9 +37,10 @@ pub(super) fn build(
     url: &Url,
     method: &str,
     payload: &Payload,
+    body: RequestBody,
     settings: &Settings,
     privacy: Privacy<'_>,
-) -> Result<(Request<Full<Bytes>>, i64), TransferError> {
+) -> Result<(Request<RequestBody>, i64), TransferError> {
     let mut clean = url.clone();
     let _ = clean.set_password(None);
     let _ = clean.set_username("");
@@ -54,7 +53,7 @@ pub(super) fn build(
             HttpVersion::TwoPrior => Version::HTTP_2,
             _ => Version::HTTP_11,
         })
-        .body(Full::new(payload.bytes.clone()))
+        .body(body)
         .map_err(invalid)?;
     let headers = request.headers_mut();
     let mut overridden = HashSet::new();
@@ -105,8 +104,8 @@ pub(super) fn build(
         if let Some(media) = &payload.content_type {
             add("content-type", media.as_bytes())?;
         }
-        if !chunked {
-            add("content-length", payload.bytes.len().to_string().as_bytes())?;
+        if !chunked && let Some(length) = payload.length {
+            add("content-length", length.to_string().as_bytes())?;
         }
     }
     let mut cookies = privacy.cookies.to_owned().into_bytes();
@@ -210,7 +209,7 @@ pub(super) fn http_authority(url: &Url) -> String {
     }
 }
 
-pub(super) fn capture(request: &Request<Full<Bytes>>) -> Vec<u8> {
+pub(super) fn capture(request: &Request<RequestBody>) -> Vec<u8> {
     let target = request
         .uri()
         .path_and_query()

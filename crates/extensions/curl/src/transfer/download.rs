@@ -146,11 +146,13 @@ impl LowSpeed {
         }
     }
 
-    fn advance(&mut self, bytes: u64) {
+    pub(super) fn advance(&mut self, bytes: u64) -> bool {
         if self.deadline.is_some() && bytes.saturating_sub(self.initial) >= self.threshold {
             self.initial = bytes;
             self.deadline = Instant::now().checked_add(self.interval);
+            return true;
         }
+        false
     }
 
     pub(super) fn deadline(&self) -> Option<Instant> {

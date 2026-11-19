@@ -93,9 +93,9 @@ one call stops at the first failed option.
 | `CURLOPT_HTTP_TRANSFER_DECODING` | Accepted and ignored | True keeps Hyper transfer framing. Disabling it is refused. |
 | `CURLOPT_HTTP_VERSION` | Implemented | HTTP/1.0, HTTP/1.1, HTTP/2 with ALPN or prior knowledge. HTTP/3 is refused. |
 | `CURLOPT_IGNORE_CONTENT_LENGTH` | Refused | Unavailable in the HTTP client. |
-| `CURLOPT_INFILE` | Implemented | Read PHP stream or callback before network dispatch. |
-| `CURLOPT_INFILESIZE` | Implemented | Read PHP stream or callback before network dispatch. |
-| `CURLOPT_INFILESIZE_LARGE` | Implemented | Read PHP stream or callback before network dispatch. |
+| `CURLOPT_INFILE` | Implemented | Stream upload data from a PHP stream. |
+| `CURLOPT_INFILESIZE` | Implemented | Declare the expected upload size. |
+| `CURLOPT_INFILESIZE_LARGE` | Implemented | Declare the expected upload size. |
 | `CURLOPT_INTERFACE` | Refused | Explicit interface binding is unavailable. |
 | `CURLOPT_IPRESOLVE` | Implemented | Override socket routing. |
 | `CURLOPT_ISSUERCERT` | Refused | Unavailable in the HTTP client. |
@@ -185,7 +185,7 @@ one call stops at the first failed option.
 | `CURLOPT_RANDOM_FILE` | Refused | Unavailable in the HTTP client. |
 | `CURLOPT_RANGE` | Refused | Unavailable in the HTTP client. |
 | `CURLOPT_READDATA` | Implemented | Read PHP stream or callback before network dispatch. |
-| `CURLOPT_READFUNCTION` | Implemented | Read PHP stream or callback before network dispatch. |
+| `CURLOPT_READFUNCTION` | Implemented | Request bounded chunks from a PHP callback while sending. |
 | `CURLOPT_REDIR_PROTOCOLS` | Implemented | Limit HTTP and HTTPS. No setting enables another scheme. |
 | `CURLOPT_REDIR_PROTOCOLS_STR` | Implemented | Limit HTTP and HTTPS. No setting enables another scheme. |
 | `CURLOPT_REFERER` | Implemented | Outbound headers. |

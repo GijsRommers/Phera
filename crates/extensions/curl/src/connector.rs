@@ -16,8 +16,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use bytes::Bytes;
-use http_body_util::Full;
 use hyper::Uri;
 use hyper_util::{
     client::legacy::{
@@ -34,12 +32,13 @@ use crate::{
     error::TransferError,
     options::{HttpVersion, Settings, Transport},
     share::SharedDns,
+    transfer::RequestBody,
 };
 
 trait Socket: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Socket for T {}
 type Stream = Box<dyn Socket>;
-pub(crate) type HttpClient = Client<Connector, Full<Bytes>>;
+pub(crate) type HttpClient = Client<Connector, RequestBody>;
 
 #[derive(Clone)]
 pub(crate) struct ConnectionInfo {

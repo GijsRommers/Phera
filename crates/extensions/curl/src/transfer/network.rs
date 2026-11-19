@@ -111,10 +111,12 @@ impl Network {
                 String::new()
             };
             let (client, proxy_auth) = connector::client(settings, &url, self.dns.clone()).await?;
+            let (body, sent) = payload.request_body(sender, info.uploaded)?;
             let (request, auth) = request::build(
                 &url,
                 actual_method,
                 payload,
+                body,
                 settings,
                 request::Privacy {
                     accept_credentials: origin_credentials,
@@ -130,21 +132,28 @@ impl Network {
             }
             info.auth = auth;
             info.referer = referer.clone();
+            info.upload_length = payload.length.and_then(|length| i64::try_from(length).ok());
             wire.set(0);
             info.timing.queue = started.elapsed();
-            let response = client.request(request);
-            let speed = download::LowSpeed::new(settings);
-            let response = if let Some(deadline) = speed.deadline() {
-                tokio::time::timeout_at(deadline, response)
-                    .await
-                    .map_err(|_| speed.error())?
-            } else {
-                response.await
-            }
-            .map_err(client_error)?;
+            let mut response = std::pin::pin!(client.request(request));
+            let mut speed = download::LowSpeed::new(settings);
+            let result = loop {
+                if let Some(deadline) = speed.deadline() {
+                    if let Ok(result) = tokio::time::timeout_at(deadline, response.as_mut()).await {
+                        break result.map_err(client_error);
+                    }
+                    if !speed.advance(payload.sent(sent.as_ref(), false) as u64) {
+                        break Err(speed.error());
+                    }
+                } else {
+                    break response.as_mut().await.map_err(client_error);
+                }
+            };
+            info.uploaded = info
+                .uploaded
+                .saturating_add(payload.sent(sent.as_ref(), result.is_ok()));
+            let response = result?;
             response::info(info, &response, started);
-            info.upload_length = payload.has_body.then_some(payload.bytes.len() as i64);
-            info.uploaded += payload.bytes.len() as i64;
             info.timing.sent = info.timing.pretransfer.max(info.timing.queue);
             if self.cookie_engine {
                 let mut jar = self.jar.borrow_mut();

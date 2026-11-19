@@ -105,9 +105,10 @@ fn local_http() {
         ""
     };
     let script = format!(
-        "{prefix}{setup}{}\n{}\n{extra}",
+        "{prefix}{setup}{}\n{}\n{}\n{extra}",
         include_str!("local_http.php"),
-        include_str!("tls.php")
+        include_str!("tls.php"),
+        include_str!("upload.php")
     );
     compare("curl-local-http", &script);
 }
