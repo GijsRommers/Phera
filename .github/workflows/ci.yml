@@ -244,4 +244,24 @@ jobs:
         with:
           toolchain: '1.99.1'
       - run: cargo install cargo-audit --version 0.23.0 --locked
-      - run: python3 .github/scripts/check-advisories.py
+      - name: Audit the lockfile
+        run: |
+          python3 - <<'PY'
+          import json
+          import re
+          import subprocess
+          import sys
+
+          with open(".github/advisory-ignores.json", encoding="utf-8") as ignore_file:
+              ignored = json.load(ignore_file)
+
+          audit = ["cargo", "audit", "--deny", "warnings", "--no-yanked"]
+          for advisory, reason in ignored.items():
+              if not re.fullmatch(r"RUSTSEC-\d{4}-\d+", advisory):
+                  sys.exit(f"Invalid RustSec advisory ID: {advisory}")
+              if not isinstance(reason, str) or not reason.strip():
+                  sys.exit(f"Missing reason for ignoring {advisory}")
+              audit.extend(["--ignore", advisory])
+
+          subprocess.run(audit, check=True)
+          PY
