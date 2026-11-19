@@ -33,15 +33,15 @@ pub const FUNCTIONS: &[(FunctionEntry, &str)] = &[
     ),
 ];
 
-pub const CONSTANTS: &[(&str, i64)] = &[
-    ("SODIUM_BASE64_VARIANT_ORIGINAL", 1),
-    ("SODIUM_BASE64_VARIANT_ORIGINAL_NO_PADDING", 3),
-    ("SODIUM_BASE64_VARIANT_URLSAFE", 5),
-    ("SODIUM_BASE64_VARIANT_URLSAFE_NO_PADDING", 7),
-];
-
-fn ignore_set(bytes: &[u8]) -> &[u8] {
-    bytes.split(|&byte| byte == 0).next().unwrap_or_default()
+fn ignored(ignore: Option<&[u8]>, byte: u8) -> bool {
+    ignore.is_some_and(|bytes| {
+        byte == 0
+            || bytes
+                .split(|&byte| byte == 0)
+                .next()
+                .unwrap_or_default()
+                .contains(&byte)
+    })
 }
 
 fn bin2hex(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -50,10 +50,10 @@ fn bin2hex(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 
 fn hex2bin(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let input = args::bytes(arguments, 0);
-    let ignore = ignore_set(args::bytes(arguments, 1));
+    let ignore = args::string(arguments, 1).map(|s| s.as_bytes());
     let mut digits = Vec::with_capacity(input.len());
     for &byte in input {
-        if byte.is_ascii_hexdigit() || digits.len() % 2 != 0 || !ignore.contains(&byte) {
+        if byte.is_ascii_hexdigit() || digits.len() % 2 != 0 || !ignored(ignore, byte) {
             digits.push(byte);
         }
     }
@@ -87,25 +87,43 @@ fn bin2base64(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 
 fn base642bin(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let codec = variant(arguments, BASE642BIN)?;
-    let ignore = ignore_set(args::bytes(arguments, 2));
-    let url_safe = matches!(args::int(arguments, 1).unwrap_or_default() as u32, 5 | 7);
+    let ignore = args::string(arguments, 2).map(|s| s.as_bytes());
+    let variant_id = args::int(arguments, 1).unwrap_or_default() as u32;
+    let url_safe = matches!(variant_id, 5 | 7);
+    let padded = matches!(variant_id, 1 | 5);
     let input = args::bytes(arguments, 0);
-    let filtered: Vec<u8> = input
-        .iter()
-        .copied()
-        .filter(|&byte| {
-            byte.is_ascii_alphanumeric()
-                || byte == b'='
-                || if url_safe {
-                    matches!(byte, b'-' | b'_')
-                } else {
-                    matches!(byte, b'+' | b'/')
-                }
-                || !ignore.contains(&byte)
-        })
-        .collect();
-    codec
-        .decode(filtered)
-        .map(Value::from)
-        .map_err(|_| argument(BASE642BIN, 1, "string", "must be a valid base64 string"))
+    let rejected = || argument(BASE642BIN, 1, "string", "must be a valid base64 string");
+    let mut body = Vec::with_capacity(input.len());
+    let mut tail = input;
+    while let Some((&byte, rest)) = tail.split_first() {
+        let alphabet = byte.is_ascii_alphanumeric()
+            || if url_safe {
+                matches!(byte, b'-' | b'_')
+            } else {
+                matches!(byte, b'+' | b'/')
+            };
+        if alphabet {
+            body.push(byte);
+        } else if !ignored(ignore, byte) {
+            break;
+        }
+        tail = rest;
+    }
+    if padded {
+        let padding = (4 - body.len() % 4) % 4;
+        for _ in 0..padding {
+            let next = tail
+                .iter()
+                .position(|&byte| byte == b'=' || !ignored(ignore, byte));
+            let Some(position) = next.filter(|&position| tail[position] == b'=') else {
+                return Err(rejected());
+            };
+            tail = &tail[position + 1..];
+            body.push(b'=');
+        }
+    }
+    if tail.iter().any(|&byte| !ignored(ignore, byte)) {
+        return Err(rejected());
+    }
+    codec.decode(body).map(Value::from).map_err(|_| rejected())
 }

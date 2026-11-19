@@ -93,6 +93,19 @@ phera-ext-spl = { path = "crates/extensions/spl" }
 phera-ext-standard = { path = "crates/extensions/standard" }
 phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
+crypto_box = { version = "0.9.1", default-features = false, features = ["alloc", "salsa20"] }
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+blake2b_simd = "1"
+curve25519-dalek = "5"
+hmac = "0.12"
+siphasher = "1"
+poly1305 = { version = "0.9", features = ["zeroize"] }
+crypto-bigint = { version = "0.7", features = ["alloc", "zeroize"] }
+zeroize = "1.9"
+salsa20 = "0.11"
+chacha20 = { version = "0.10", features = ["legacy", "xchacha", "zeroize"] }
+scrypt = "0.12"
+block-padding = "0.4"
 aes = "0.9"
 aes-gcm = { version = "0.11", features = ["hazmat"] }
 cbc = "0.2"

@@ -21,7 +21,13 @@ to work.
 > place and the lexer is complete, but the parser is just getting started. It
 > can't run PHP yet.
 
-PHP’s `sodium` module provides binary encodings with Sodium’s base64 variants and `SodiumException`.
+### Sodium
+
+Phera implements PHP's `sodium` module in Rust. It supports NaCl secret boxes
+and sealed boxes, Ed25519 signatures, X25519 and Ristretto255, ChaCha20-Poly1305
+and AES-256-GCM, BLAKE2b and SipHash, key derivation and exchange, Argon2 and
+scrypt passwords, and binary encodings. Streaming BLAKE2b, secretstream, AEGIS,
+and `sodium_unpad()` are pending.
 
 ## ✨ Goals
 
