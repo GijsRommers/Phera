@@ -51,8 +51,14 @@ pub fn compile_bytes_with_natives(
     )
 }
 
-/// A read-only inventory shared with the compiler thread.
-pub type NativeFunctions<'a> = dyn Fn(&str) -> Option<NativeFunction> + Sync + 'a;
+/// Registry facts shared with the compiler thread for calls such as
+/// `strlen($text)` and `extension_loaded('Core')`.
+pub struct NativeFunctions<'a> {
+    pub lookup: &'a (dyn Fn(&str) -> Option<NativeFunction> + Sync),
+    pub fold_string_call: &'a StringCallEvaluator<'a>,
+}
+
+type StringCallEvaluator<'a> = dyn Fn(&str, &[u8]) -> Option<phera_bytecode::Constant> + Sync + 'a;
 
 /// Which call shape can bypass argument routing for an enabled function.
 #[derive(Clone, Copy)]

@@ -41,6 +41,7 @@ mod whole_file;
 mod whole_write;
 mod wrapper;
 
+pub use path_text::parent as dirname_parent;
 pub use request::{set_request, track_standard};
 pub use whole_write::append_log;
 pub use wrapper::standard_constants;

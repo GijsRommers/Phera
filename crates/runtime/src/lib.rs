@@ -6,6 +6,7 @@
 //! and the same compiled code.
 
 mod cache;
+mod constant_calls;
 mod environment;
 mod error;
 #[cfg(test)]

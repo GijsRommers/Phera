@@ -222,7 +222,7 @@ fn find_direct_calls(
                     if symbol.fallback.is_some() {
                         return None;
                     }
-                    match native_functions?(&symbol.name)? {
+                    match (native_functions?.lookup)(&symbol.name)? {
                         crate::NativeFunction::Direct {
                             positional_by_value,
                         } => Some(DirectTarget::Native {

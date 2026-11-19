@@ -46,25 +46,30 @@ impl CodeCache {
         let unit = Arc::new(phera_compiler::compile_bytes_with_natives(
             &source,
             &canonical.to_string_lossy(),
-            &|name| {
-                let Some(entry) = self.registry.get_function(name) else {
-                    return phera_vm::is_intrinsic_function(name)
-                        .then_some(phera_compiler::NativeFunction::General);
-                };
-                Some(match entry.handler {
-                    phera_extension_api::NativeFn::Async(_)
-                        if self.registry.sync_selector(entry.name).is_none() =>
-                    {
-                        phera_compiler::NativeFunction::General
-                    }
-                    _ => phera_compiler::NativeFunction::Direct {
-                        positional_by_value: entry
-                            .params
-                            .iter()
-                            .take_while(|parameter| !parameter.by_ref)
-                            .count(),
-                    },
-                })
+            &phera_compiler::NativeFunctions {
+                lookup: &|name| {
+                    let Some(entry) = self.registry.get_function(name) else {
+                        return phera_vm::is_intrinsic_function(name)
+                            .then_some(phera_compiler::NativeFunction::General);
+                    };
+                    Some(match entry.handler {
+                        phera_extension_api::NativeFn::Async(_)
+                            if self.registry.sync_selector(entry.name).is_none() =>
+                        {
+                            phera_compiler::NativeFunction::General
+                        }
+                        _ => phera_compiler::NativeFunction::Direct {
+                            positional_by_value: entry
+                                .params
+                                .iter()
+                                .take_while(|parameter| !parameter.by_ref)
+                                .count(),
+                        },
+                    })
+                },
+                fold_string_call: &|name, argument| {
+                    crate::constant_calls::fold(&self.registry, name, argument)
+                },
             },
         )?);
         self.lock().insert(canonical, unit.clone());

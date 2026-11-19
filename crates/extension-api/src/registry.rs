@@ -269,6 +269,13 @@ impl Registry {
         self.constants.get(name).map(|constant| &constant.value)
     }
 
+    /// `constant('PHP_VERSION')` may be folded. A deprecated constant still
+    /// needs a runtime access so it can raise its diagnostic.
+    pub fn persistent_constant(&self, name: &str) -> Option<ConstantValue> {
+        let constant = self.constants.get(name)?;
+        constant.deprecated.is_none().then_some(constant.value)
+    }
+
     /// Keep a synchronous implementation for other arguments, such as count($array).
     pub fn function_with_object_handler(&mut self, entry: FunctionEntry, callback: crate::AsyncFn) {
         self.function(entry);

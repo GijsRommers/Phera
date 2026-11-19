@@ -9,6 +9,7 @@ use phera_bytecode::{BuiltinFrame, BuiltinUnary, CallbackArguments, FetchMode, R
 use crate::ir::{Constant, Instruction, PlaceScope};
 use crate::{CompileError, Compiler};
 
+use super::builtin_literals::{defined_literal, fold_builtin, folded_scalar};
 use super::builtin_search::literal_search;
 use crate::policies::NameKind;
 
@@ -33,7 +34,7 @@ impl Compiler<'_> {
             return Ok(None);
         };
         let name = name.to_ascii_lowercase();
-        if enabled(&name).is_none() {
+        if (enabled.lookup)(&name).is_none() {
             return Ok(None);
         }
         if name == "sprintf" {
@@ -122,12 +123,11 @@ impl Compiler<'_> {
             return Ok(None);
         };
         let argument = &argument.value;
-        if matches!(name.as_str(), "function_exists" | "is_callable")
-            && let ExpressionKind::Literal(Literal::String(candidate)) = &argument.kind
-            && let Ok(candidate) = std::str::from_utf8(candidate)
-            && enabled(&candidate.to_ascii_lowercase()).is_some()
+        if let ExpressionKind::Literal(Literal::String(bytes)) = &argument.kind
+            && let Some(value) = (enabled.fold_string_call)(&name, bytes)
+            && let Some(value) = folded_scalar(value)
         {
-            return self.literal(Constant::Bool(true), line).map(Some);
+            return self.literal(value, line).map(Some);
         }
         if let Some(value) = fold_builtin(&name, argument) {
             return self.literal(value, line).map(Some);
@@ -145,13 +145,14 @@ impl Compiler<'_> {
         let Some(operator) = builtin_unary(&name) else {
             return Ok(None);
         };
-        if operator == BuiltinUnary::Defined
-            && !matches!(&argument.kind, ExpressionKind::Literal(Literal::String(name))
-                if !name.iter().any(|byte| matches!(byte, b'\\' | b':')))
-        {
-            return Ok(None);
-        }
-        let source = self.builtin_operand(argument, line)?;
+        let source = if operator == BuiltinUnary::Defined {
+            let Some(name) = defined_literal(argument) else {
+                return Ok(None);
+            };
+            self.literal(Constant::Bytes(name), line)?
+        } else {
+            self.builtin_operand(argument, line)?
+        };
         let destination = self.allocate_register()?;
         self.emit(
             Instruction::BuiltinUnary {
@@ -195,7 +196,7 @@ impl Compiler<'_> {
                     || !arguments.is_empty()
                     || fallback.is_some()
                     || !resolved.eq_ignore_ascii_case("func_get_args")
-                    || enabled("func_get_args").is_none()
+                    || (enabled.lookup)("func_get_args").is_none()
                 {
                     return None;
                 }
@@ -254,34 +255,4 @@ fn builtin_unary(name: &str) -> Option<BuiltinUnary> {
         "is_scalar" => B::TypeCheck(T::BOOL.union(T::INT).union(T::FLOAT).union(T::STRING)),
         _ => return None,
     })
-}
-
-/// Zend folds strlen on strings, ord on single bytes, and chr on byte values.
-/// Values that can raise a runtime diagnostic retain the original instruction.
-fn fold_builtin(name: &str, argument: &Expression) -> Option<Constant> {
-    match (name, &argument.kind) {
-        ("strlen", ExpressionKind::Literal(Literal::String(bytes))) => {
-            Some(Constant::Int(bytes.len() as i64))
-        }
-        ("ord", ExpressionKind::Literal(Literal::String(bytes))) => {
-            let [byte] = bytes.as_slice() else {
-                return None;
-            };
-            Some(Constant::Int(i64::from(*byte)))
-        }
-        ("chr", ExpressionKind::Literal(Literal::Int(byte))) => {
-            Some(Constant::Bytes(vec![u8::try_from(*byte).ok()?]))
-        }
-        ("count" | "sizeof", ExpressionKind::Array(items))
-            if items.iter().all(|item| {
-                item.key.is_none()
-                    && !item.spread
-                    && !item.by_reference
-                    && matches!(item.value.kind, ExpressionKind::Literal(_))
-            }) =>
-        {
-            Some(Constant::Int(items.len() as i64))
-        }
-        _ => None,
-    }
 }
