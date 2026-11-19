@@ -72,7 +72,6 @@ impl Runtime {
         registry.load(&phera_ext_date::Date);
         registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_json::Json);
-        registry.load(&phera_ext_spl::Spl);
         registry.load(&phera_ext_mbstring::Mbstring);
         registry.load(&phera_ext_pcre::Pcre);
         registry.load(&phera_ext_pdo::Pdo);
@@ -81,6 +80,8 @@ impl Runtime {
         registry.load(&phera_ext_http::Http);
         registry.load(&phera_ext_hash::Hash);
         registry.load(&phera_ext_random::Random);
+        registry.load(&phera_ext_serialize::Serialize);
+        registry.load(&phera_ext_spl::Spl);
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);
         registry.constant("PHP_SAPI", Sapi::Cli.name());

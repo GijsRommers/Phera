@@ -55,16 +55,4 @@ pub(crate) fn register(registry: &mut Registry) {
         },
         ..ClassEntry::interface("SplSubject")
     });
-    registry.class(ClassEntry {
-        methods: const {
-            &[
-                MethodEntry::required("serialize", &[]),
-                MethodEntry::required(
-                    "unserialize",
-                    const { &[Param::new("data", ParamType::String)] },
-                ),
-            ]
-        },
-        ..ClassEntry::interface("Serializable")
-    });
 }

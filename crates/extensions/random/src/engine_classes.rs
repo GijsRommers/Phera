@@ -94,6 +94,8 @@ const MT19937: ClassEntry = ClassEntry {
             mt19937_construct,
         ),
         GENERATE,
+        crate::serialization::SERIALIZE,
+        crate::serialization::UNSERIALIZE,
     ],
     ..ClassEntry::class("Random\\Engine\\Mt19937")
 };
@@ -134,6 +136,8 @@ const PCG_ONESEQ_128_XSL_RR_64: ClassEntry = ClassEntry {
             pcg_construct,
         ),
         GENERATE,
+        crate::serialization::SERIALIZE,
+        crate::serialization::UNSERIALIZE,
         MethodEntry::public("jump", &[Param::new("advance", ParamType::Int)], pcg_jump),
     ],
     ..ClassEntry::class("Random\\Engine\\PcgOneseq128XslRr64")
@@ -197,6 +201,8 @@ const XOSHIRO_256_STAR_STAR: ClassEntry = ClassEntry {
             xoshiro_construct,
         ),
         GENERATE,
+        crate::serialization::SERIALIZE,
+        crate::serialization::UNSERIALIZE,
         MethodEntry::public("jump", &[], xoshiro_jump),
         MethodEntry::public("jumpLong", &[], xoshiro_jump_long),
     ],

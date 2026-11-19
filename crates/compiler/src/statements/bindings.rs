@@ -118,6 +118,12 @@ impl Compiler<'_> {
             );
         }
         self.loops.push(Loop {
+            start: self.position(),
+            cleanup: Some(super::exits::LoopCleanup::Foreach {
+                iterator: id,
+                subject: src,
+                value: value_register,
+            }),
             breaks: vec![],
             continues: vec![],
         });

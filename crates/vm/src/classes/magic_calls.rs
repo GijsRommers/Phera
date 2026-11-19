@@ -59,6 +59,16 @@ impl Vm {
             Ok(None) => None,
             Err(error) => Some(error),
         };
+        if let Some(object) = &receiver
+            && class.name == phera_extension_api::serialization::INCOMPLETE_CLASS
+        {
+            return Err(NativeError::error(
+                phera_extension_api::serialization::incomplete_object_message(
+                    object,
+                    "call a method on",
+                ),
+            ));
+        }
         if syntax == MethodSyntax::Static && name.eq_ignore_ascii_case("__construct") {
             return Err(error.unwrap_or_else(|| NativeError::error("Cannot call constructor")));
         }
