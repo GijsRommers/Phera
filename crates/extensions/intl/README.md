@@ -46,6 +46,12 @@ extension. Their source is the
 The [IANA Language Subtag Registry](https://www.iana.org/assignments/language-subtag-registry/)
 supplies grandfathered tags.
 
+Standalone resource directories use the native-endian ResB format. The
+loader supports strings, binary entries, integers, integer vectors, arrays and
+tables. It resolves directories against PHP's request working directory and
+reads files asynchronously. The implementation follows the
+[ICU resource data layout](https://github.com/unicode-org/icu/blob/main/icu4c/source/common/uresdata.h).
+
 ## Locale data differences
 
 | Call | PHP / ICU4C CLDR | Phera / ICU4X CLDR | Difference and disposition |
@@ -55,14 +61,40 @@ supplies grandfathered tags.
 | Long date-time style in `ar_EG`, Brussels GMT offsets at Unix timestamps 0 and 1724727600 | 49 | 49 | Fixed. Match ICU4C's unmarked sign in the rendered Arabic time-zone field. |
 | Generic `Any-Latin/BGN` transform | 49 | 49 | Fixed. ICU4C registers language-specific BGN identifiers and rejects this generic ID. Symfony falls back to `Any-Latin`. |
 | Explicit date patterns using `ss.SSS` in `fr_FR`, `nl_BE` and `ar_EG` | 49 | 49 | Fixed. PHP keeps the literal dot between seconds and milliseconds. |
+| `INTL_ICU_VERSION` and `INTL_ICU_DATA_VERSION` | 49 (`79.1` for both PHP constants) | 49 (`2.4.0` and `49`) | Accepted. Phera reports the ICU4X backend and compiled CLDR release. The PHP eligibility sweep covers ICU-version-gated fixtures on this host. |
 
-On macOS, all 8,646 Stage 1 differential cases pass with PHP 8.5.12 and
-ICU4C 79.1. That includes 675 display-name comparisons and 750 number and date
-format comparisons across the 15 core locales. The wider PHP intl suite
-covers additional patterns and API combinations.
+## Validation on macOS
+
+PHP 8.5.12 with ICU4C 79.1 matched all 8,860 focused comparisons. The 8,646
+Stage 1 calls include 675 display names and 750 number and date formats over
+the 15 core locales. The 214 Stage 2 calls cover collation, transliteration,
+MessageFormat, time-zone identifiers and character operations.
+The three comparisons for negative offsets below `INT32_MIN` are tagged with
+PHP 8.5.13. PHP 8.5.12 truncated those offsets before parsing.
+
+The scratch Composer application matched 126 outputs byte for byte.
+It exercised five Twig filters and three Symfony validators over
+`en_US`, `en_GB`, `nl_BE`, `nl_NL`, `fr_BE`, `fr_FR`, `de_DE`, `es_ES`,
+`it_IT`, `pt_BR`, `ja_JP`, `ar_EG`, `ru_RU`, `zh_CN` and `hi_IN`. The six
+AsciiSlugger inputs used Latin, Greek, Cyrillic, Arabic, Devanagari and Han.
+A 195-output supplemental probe matched list types and widths, sample
+collation bytes and sorting, calendar fields, break boundaries and time zones.
+The Composer application used Symfony Intl and String 8.1.10, Symfony
+Validator 8.1.11, Twig and Twig Intl Extra 3.30.0.
+
+## Release measurements
 
 The default uses the full compiled locale data of the linked ICU4X
-components. The Stage 1 CLI measured 45,670,080 bytes in the macOS arm64
-release profile. The same profile before intl measured 33,940,832 bytes,
-an increase of 11,729,248 bytes (34.6%). A 15-locale build would require
-exporting and maintaining a separate data bundle and was not measured.
+components. The macOS arm64 CLI measured 33,940,832 bytes before intl,
+45,670,080 bytes after Stage 1 and 51,652,480 bytes at the Stage 2 checkpoint
+`1f0b20e3`. The Stage 2 increase was 17,711,648 bytes (52.2%). A 15-locale
+build would require exporting and maintaining a separate data bundle. Its
+size remains unmeasured.
+
+Each loop timed 100,000 calls with the formatter reused. These are median
+wall times from three runs on this Mac for the Stage 2 release checkpoint.
+
+| Operation | PHP 8.5.12 | Phera release | Output bytes per run |
+| --- | ---: | ---: | ---: |
+| `NumberFormatter::formatCurrency` | 0.923 s | 2.775 s | 1,300,000 |
+| `IntlDateFormatter::format` | 2.778 s | 1.064 s | 2,100,000 |

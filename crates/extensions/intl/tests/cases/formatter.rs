@@ -2,6 +2,7 @@
 
 use crate::matrix::Matrix;
 use phera_extension_api::Value;
+use phera_extension_api::testing::oracle;
 
 const LOCALES: &[(&str, &str)] = &[
     ("en_US", "USD"),
@@ -130,4 +131,31 @@ fn parsing_offsets() {
         }
     }
     matrix.compare("intl-formatters-parse");
+}
+
+#[test]
+fn date_parse_offset_below_i32() {
+    let case = "IntlDateFormatter rejects parse offsets below INT32_MIN";
+    if !oracle::supports_php_since(case, 80_513) {
+        return;
+    }
+    let date = [
+        Value::from("en_US"),
+        Value::Int(0),
+        Value::Int(0),
+        Value::from("UTC"),
+        Value::Null,
+        Value::from("yyyy"),
+    ];
+    let mut matrix = Matrix::new();
+    for method in ["parse", "parseToCalendar", "localtime"] {
+        matrix.instance(
+            "IntlDateFormatter",
+            &date,
+            method,
+            &[Value::from("12026")],
+            Some(Value::Int(-4_294_967_295)),
+        );
+    }
+    matrix.compare("intl-date-parse-offset-below-i32");
 }
