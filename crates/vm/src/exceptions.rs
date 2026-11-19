@@ -99,16 +99,16 @@ impl Vm {
         parameters: &[phera_extension_api::Param],
         arguments: &mut [Value],
     ) -> Result<(), NativeError> {
-        let call_name = format!("{}::{}", method.declaring, method.name);
+        let call_name = method.signature(&self.code).name.as_ref();
         let tracking = self.error_handlers.error.is_some() && !self.error_handlers.active;
         let previous = if tracking {
             self.error_handlers
                 .native_site
-                .replace(crate::error_traces::NativeTrace::new(&call_name, arguments))
+                .replace(crate::error_traces::NativeTrace::new(call_name, arguments))
         } else {
             None
         };
-        let prepared = self.prepare_throwable_constructor(&call_name, parameters, arguments);
+        let prepared = self.prepare_throwable_constructor(call_name, parameters, arguments);
         if tracking {
             self.error_handlers.native_site = previous;
         }
