@@ -119,8 +119,8 @@ fn base642bin(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
                 return Err(rejected());
             };
             tail = &tail[position + 1..];
-            body.push(b'=');
         }
+        body.resize(body.len() + padding, b'=');
     }
     if tail.iter().any(|&byte| !ignored(ignore, byte)) {
         return Err(rejected());

@@ -89,6 +89,9 @@ fn prepare_argument(
         param,
     };
     if param.by_ref {
+        if param.raw_reference {
+            return Ok(());
+        }
         // The function sees the caller's variable, so the conversion has
         // to happen inside the reference.
         if let Value::Reference(cell) = argument {

@@ -36,9 +36,12 @@ impl Algorithm {
         }
     }
 
-    fn max_message(self) -> u64 {
+    fn max_message(self, operation: Operation) -> u64 {
         match self {
-            Self::Aes => (1 << 36) - 32,
+            Self::Aes => match operation {
+                Operation::Encrypt => (1 << 36) - 48,
+                Operation::Decrypt => (1 << 36) - 32,
+            },
             Self::ChaChaIetf => u64::from(u32::MAX) * 64,
             Self::ChaCha | Self::XChaCha => u64::MAX - 16,
         }
@@ -85,7 +88,7 @@ fn apply(algorithm: Algorithm, operation: Operation, args: &[Value]) -> NativeRe
             length
         }
     };
-    if message_len as u64 > algorithm.max_message() {
+    if message_len as u64 > algorithm.max_message(operation) {
         if matches!((operation, algorithm), (Operation::Decrypt, Algorithm::Aes)) {
             return Err(argument(
                 "sodium_crypto_aead_aes256gcm_decrypt",
@@ -97,7 +100,10 @@ fn apply(algorithm: Algorithm, operation: Operation, args: &[Value]) -> NativeRe
         return Err(exception("message too long for a single key"));
     }
     let output = match algorithm {
-        Algorithm::Aes => crypt::<Aes256Gcm>(operation, key, nonce, input, aad),
+        Algorithm::Aes if aes_gcm_available() => {
+            crypt::<Aes256Gcm>(operation, key, nonce, input, aad)
+        }
+        Algorithm::Aes => None,
         Algorithm::ChaChaIetf => crypt::<ChaCha20Poly1305>(operation, key, nonce, input, aad),
         Algorithm::XChaCha => crypt::<XChaCha20Poly1305>(operation, key, nonce, input, aad),
         Algorithm::ChaCha => legacy_aead::crypt(operation, key, nonce, input, aad),
@@ -126,8 +132,23 @@ fn crypt<A: Aead + KeyInit>(
 }
 
 fn available(_: &mut dyn Context, _: &[Value]) -> NativeResult {
-    // RustCrypto supplies software backends as well as accelerated AES and GHASH.
-    Ok(Value::Bool(true))
+    Ok(Value::Bool(aes_gcm_available()))
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+fn aes_gcm_available() -> bool {
+    std::is_x86_feature_detected!("aes") && std::is_x86_feature_detected!("pclmulqdq")
+}
+
+#[cfg(target_arch = "aarch64")]
+fn aes_gcm_available() -> bool {
+    std::arch::is_aarch64_feature_detected!("aes")
+        && std::arch::is_aarch64_feature_detected!("pmull")
+}
+
+#[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
+fn aes_gcm_available() -> bool {
+    false
 }
 
 pub const FUNCTIONS: &[(FunctionEntry, &str)] = &[

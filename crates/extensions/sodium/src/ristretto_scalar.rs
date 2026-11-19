@@ -1,5 +1,6 @@
 //! `sodium_crypto_core_ristretto255_scalar_reduce($bytes)` reduces a 64-byte integer.
 
+use crypto_bigint::U256;
 use curve25519_dalek::scalar::Scalar;
 use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value, args};
 use zeroize::Zeroizing;
@@ -11,26 +12,46 @@ fn output(value: Scalar) -> Value {
 }
 
 fn add(_: &mut dyn Context, args: &[Value]) -> NativeResult {
-    binary(
-        args,
-        "sodium_crypto_core_ristretto255_scalar_add",
-        |x, y| x + y,
-    )
+    let function = "sodium_crypto_core_ristretto255_scalar_add";
+    let x = raw(args, function, 1, "x")?;
+    let y = raw(args, function, 2, "y")?;
+    Ok(output(wrapping_add(x, y)))
 }
 
 fn sub(_: &mut dyn Context, args: &[Value]) -> NativeResult {
-    binary(
-        args,
-        "sodium_crypto_core_ristretto255_scalar_sub",
-        |x, y| x - y,
-    )
+    let function = "sodium_crypto_core_ristretto255_scalar_sub";
+    let x = raw(args, function, 1, "x")?;
+    let y = -(*read(args, function, 2, "y")?);
+    Ok(output(wrapping_add(x, y.as_bytes())))
+}
+
+fn wrapping_add(x: &[u8; 32], y: &[u8; 32]) -> Scalar {
+    // Sodium wraps on 256 bits before reducing, even for non-canonical inputs.
+    let x = Zeroizing::new(U256::from_le_slice(x));
+    let y = Zeroizing::new(U256::from_le_slice(y));
+    let sum = Zeroizing::new(x.wrapping_add(&y));
+    Scalar::from_bytes_mod_order(sum.to_le_bytes().into())
 }
 
 fn mul(_: &mut dyn Context, args: &[Value]) -> NativeResult {
-    binary(
-        args,
-        "sodium_crypto_core_ristretto255_scalar_mul",
-        |x, y| x * y,
+    let function = "sodium_crypto_core_ristretto255_scalar_mul";
+    let x = read(args, function, 1, "x")?;
+    let y = read(args, function, 2, "y")?;
+    Ok(output(*x * *y))
+}
+
+fn raw<'a>(
+    args: &'a [Value],
+    function: &str,
+    position: usize,
+    name: &str,
+) -> Result<&'a [u8; 32], phera_extension_api::NativeError> {
+    fixed(
+        args::bytes(args, position - 1),
+        function,
+        position,
+        name,
+        "SODIUM_CRYPTO_CORE_RISTRETTO255_SCALARBYTES",
     )
 }
 
@@ -40,24 +61,9 @@ fn read(
     position: usize,
     name: &str,
 ) -> Result<Zeroizing<Scalar>, phera_extension_api::NativeError> {
-    let bytes = fixed::<32>(
-        args::bytes(args, position - 1),
-        function,
-        position,
-        name,
-        "SODIUM_CRYPTO_CORE_RISTRETTO255_SCALARBYTES",
-    )?;
-    Ok(Zeroizing::new(Scalar::from_bytes_mod_order(*bytes)))
-}
-
-fn binary(
-    args: &[Value],
-    function: &str,
-    operation: fn(&Scalar, &Scalar) -> Scalar,
-) -> NativeResult {
-    let x = read(args, function, 1, "x")?;
-    let y = read(args, function, 2, "y")?;
-    Ok(output(operation(&x, &y)))
+    Ok(Zeroizing::new(Scalar::from_bytes_mod_order(*raw(
+        args, function, position, name,
+    )?)))
 }
 
 fn complement(_: &mut dyn Context, args: &[Value]) -> NativeResult {

@@ -16,7 +16,6 @@ block-padding.workspace = true
 chacha20.workspace = true
 chacha20poly1305.workspace = true
 crypto-bigint.workspace = true
-crypto_box.workspace = true
 crypto_secretbox.workspace = true
 curve25519-dalek.workspace = true
 ed25519-dalek = { workspace = true, features = ["digest", "hazmat"] }

@@ -1,10 +1,14 @@
 //! `sodium_crypto_box_seal($message, $public_key)` prepends an ephemeral public key.
 
 use blake2b_simd::Params;
-use crypto_box::{PublicKey, SalsaBox, SecretKey, aead::Aead};
+use crypto_secretbox::{
+    Nonce, XSalsa20Poly1305,
+    aead::{Aead, KeyInit},
+};
 use phera_extension_api::{
     Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
+use salsa20::{cipher::consts::U10, hsalsa};
 use sha2::{Digest, Sha512};
 use zeroize::Zeroizing;
 
@@ -88,14 +92,13 @@ fn read_pair<'a>(
     crate::split_pair(pair)
 }
 
-fn cipher(secret: &[u8; 32], public: &[u8; 32]) -> Option<SalsaBox> {
-    // RustCrypto's constructor accepts all Montgomery encodings. Sodium rejects
-    // a non-contributory peer key before it reaches the NaCl construction.
-    x25519::shared_secret(secret, public)?;
-    Some(SalsaBox::new(
-        &PublicKey::from(*public),
-        &SecretKey::from(*secret),
-    ))
+fn cipher(secret: &[u8; 32], public: &[u8; 32]) -> Option<XSalsa20Poly1305> {
+    // NaCl derives the secretbox key using HSalsa20 with an all-zero input.
+    // The X25519 ladder must use the unreduced clamped scalar.
+    let shared = x25519::shared_secret(secret, public)?;
+    let key = hsalsa::<U10>(shared.as_bytes().into(), &Default::default());
+    let key = Zeroizing::new(<[u8; 32]>::from(key));
+    Some(XSalsa20Poly1305::new((&*key).into()))
 }
 
 fn encrypt(_: &mut dyn Context, args: &[Value]) -> NativeResult {
@@ -127,14 +130,14 @@ fn nonce<'a>(args: &'a [Value], function: &str) -> Result<&'a [u8; 24], NativeEr
     )
 }
 
-fn seal_nonce(ephemeral: &[u8; 32], recipient: &[u8; 32]) -> crypto_box::Nonce {
+fn seal_nonce(ephemeral: &[u8; 32], recipient: &[u8; 32]) -> Nonce {
     let hash = Params::new()
         .hash_length(24)
         .to_state()
         .update(ephemeral)
         .update(recipient)
         .finalize();
-    *crypto_box::Nonce::from_slice(hash.as_bytes())
+    *Nonce::from_slice(hash.as_bytes())
 }
 
 fn seal(_: &mut dyn Context, args: &[Value]) -> NativeResult {

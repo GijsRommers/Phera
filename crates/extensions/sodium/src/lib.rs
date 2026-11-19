@@ -45,6 +45,17 @@ impl Extension for Sodium {
         register(registry, sign::FUNCTIONS);
         register(registry, secretbox::FUNCTIONS);
         register(registry, box_crypto::FUNCTIONS);
+        register(
+            registry,
+            &[(
+                FunctionEntry::sync(
+                    "sodium_crypto_secretstream_xchacha20poly1305_keygen",
+                    &[],
+                    keygen::<32>,
+                ),
+                "string",
+            )],
+        );
         constants::register(registry);
     }
 }

@@ -158,7 +158,9 @@ pub const FUNCTIONS: &[(FunctionEntry, &str)] = &[
     (
         FunctionEntry::sync(
             "sodium_memzero",
-            &[Param::new("string", ParamType::Mixed).by_ref().sensitive()],
+            &[Param::new("string", ParamType::String)
+                .raw_by_ref()
+                .sensitive()],
             memzero,
         ),
         "void",
@@ -166,7 +168,7 @@ pub const FUNCTIONS: &[(FunctionEntry, &str)] = &[
     (
         FunctionEntry::sync(
             "sodium_increment",
-            &[Param::new("string", ParamType::Mixed).by_ref()],
+            &[Param::new("string", ParamType::String).raw_by_ref()],
             increment,
         ),
         "void",
@@ -175,7 +177,7 @@ pub const FUNCTIONS: &[(FunctionEntry, &str)] = &[
         FunctionEntry::sync(
             "sodium_add",
             &[
-                Param::new("string1", ParamType::Mixed).by_ref(),
+                Param::new("string1", ParamType::String).raw_by_ref(),
                 Param::new("string2", ParamType::String),
             ],
             add,
