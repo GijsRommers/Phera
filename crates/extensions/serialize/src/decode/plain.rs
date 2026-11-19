@@ -2,9 +2,10 @@
 
 use std::rc::Rc;
 
+use phera_extension_api::serialization::UnserializePolicy;
 use phera_extension_api::{ArrayKey, Context, NativeResult, PhpArray, Value};
 
-use super::{emit_diagnostic, php_string, report_depth};
+use super::{emit_diagnostic, php_string};
 use crate::wire::{ParseError, Reader, Token};
 
 /// Without object or reference syntax, no later value can change an earlier
@@ -23,9 +24,13 @@ struct Frame {
     key: Option<ArrayKey>,
 }
 
-pub(super) fn read(context: &mut dyn Context, bytes: &[u8], max_depth: usize) -> NativeResult {
+pub(super) fn read(
+    context: &mut dyn Context,
+    bytes: &[u8],
+    policy: &UnserializePolicy,
+) -> NativeResult {
     let mut reader = Reader::new(bytes);
-    match build(context, &mut reader, max_depth) {
+    match build(context, &mut reader, policy) {
         Ok(value) => {
             super::report_extra(context, reader.offset(), bytes.len());
             Ok(value)
@@ -40,7 +45,7 @@ pub(super) fn read(context: &mut dyn Context, bytes: &[u8], max_depth: usize) ->
 fn build(
     context: &mut dyn Context,
     reader: &mut Reader<'_>,
-    max_depth: usize,
+    policy: &UnserializePolicy,
 ) -> Result<Value, ParseError> {
     let mut frames: Vec<Frame> = Vec::new();
     loop {
@@ -65,8 +70,8 @@ fn build(
                 Value::Array(Rc::default())
             }
             Token::Array(remaining) => {
-                if max_depth != 0 && frames.len() >= max_depth {
-                    report_depth(context, max_depth);
+                if policy.depth_exceeded(frames.len()) {
+                    context.warning(policy.depth_warning("unserialize"));
                     return Err(ParseError);
                 }
                 frames.push(Frame {

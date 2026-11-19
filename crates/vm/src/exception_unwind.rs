@@ -145,12 +145,23 @@ impl Vm {
                 extras.iterators.remove(&iterator.0);
             }
         }
+        self.restore_lexical_silence(Some(target));
+    }
+
+    fn restore_lexical_silence(&mut self, target: Option<usize>) {
+        if self.diagnostic_reporter.silence() == 0 {
+            return;
+        }
         let depth =
             self.frames()
                 .rev()
                 .enumerate()
                 .map(|(index, frame)| {
-                    let end = if index == 0 { target } else { frame.ip() };
+                    let end = if index == 0 {
+                        target.unwrap_or_else(|| frame.ip())
+                    } else {
+                        frame.ip()
+                    };
                     frame.function().instructions.iter().take(end).fold(
                         0usize,
                         |depth, instruction| match instruction {
@@ -161,7 +172,7 @@ impl Vm {
                     )
                 })
                 .sum();
-        self.diagnostic_reporter.restore_silence(depth);
+        self.restore_silence(depth);
     }
 
     /// Include symbol-table changes survive exceptional exit just as normal return.
@@ -174,6 +185,7 @@ impl Vm {
             self.registers.truncate(frame.start());
             self.call_stack.abandon_calls_from(frame.start());
         }
+        self.restore_lexical_silence(None);
         Ok(())
     }
 

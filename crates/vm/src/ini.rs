@@ -16,8 +16,8 @@
 //!
 //! Some recorded options have partial effects. The assertion guard is checked
 //! after argument evaluation; bail and callback are only remembered.
-//! `display_errors=stderr` uses the normal diagnostic sink. The mbstring
-//! settings apply only to encodings and operations implemented by Phera.
+//! The mbstring settings apply only to encodings and operations implemented
+//! by Phera.
 //! The fiber stack size validates PHP's lower bound without allocating a
 //! native stack. PCRE settings use a separately compiled cache entry.
 
@@ -36,6 +36,7 @@ pub(crate) struct IniOverrides {
     values: Vec<Option<PhpString>>,
     web_execution_time: bool,
     reporting_number: Option<i64>,
+    reporting_ini_modified: bool,
     precision: Option<i32>,
     serialization_precision: Option<i32>,
 }
@@ -122,7 +123,9 @@ impl Vm {
                 if self.ini_overrides.web_execution_time && entry.name == "max_execution_time" {
                     Some("30".into())
                 } else {
-                    entry.default.as_deref().map(PhpString::from)
+                    self.web_diagnostic_default(entry.name)
+                        .or(entry.default.as_deref())
+                        .map(PhpString::from)
                 }
             })
     }
@@ -152,7 +155,9 @@ impl Vm {
             return Ok(());
         };
         let modified = self.ini_overrides.get(slot).is_some()
-            || entry.name == "error_reporting" && self.ini_overrides.reporting_number.is_some();
+            || entry.name == "error_reporting"
+                && (self.ini_overrides.reporting_number.is_some()
+                    || self.ini_overrides.reporting_ini_modified);
         if !entry.access.runtime() || !modified {
             return Ok(());
         }
@@ -214,9 +219,13 @@ impl Vm {
         Ok(Value::from(list))
     }
 
+    pub(crate) fn mark_reporting_ini_modified(&mut self) {
+        self.ini_overrides.reporting_ini_modified = true;
+    }
+
     /// error_reporting() keeps its number directly until an INI reader needs text.
     pub(crate) fn set_error_reporting(&mut self, level: i64) {
-        self.error_handlers.reporting = level;
+        self.error_handlers.reporting = i64::from(level as i32);
         self.ini_overrides.reporting_number = Some(level);
     }
 }

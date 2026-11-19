@@ -12,6 +12,93 @@ use phera_extension_api::{
 use super::super::{characters, mutation, properties};
 use super::*;
 
+pub(in crate::bindings) fn register_modern(registry: &mut Registry) {
+    use super::super::modern;
+    use phera_extension_api::Visibility;
+    const NODE: T = T::Class("Dom\\Node");
+    const CHILD: P = P::new("child", NODE);
+    const OTHER: P = P::new("otherNode", NODE).nullable();
+    const NEW: P = P::new("node", NODE);
+    const DEEP: P = P::new("deep", T::Bool).with_default(C::Bool(false));
+    let entry = ClassEntry {
+        hooks: Some(&modern::HOOKS),
+        constants: registry
+            .get_class("DOMNode")
+            .map_or(&[], |legacy| legacy.constants),
+        methods: const {
+            &[
+                M::public("__construct", &[], modern::construct)
+                    .with_visibility(Visibility::Private),
+                M::public("hasChildNodes", &[], has_children).returning("bool"),
+                M::public("getLineNo", &[], line).returning("int"),
+                M::public("getNodePath", &[], node_path).returning("?string"),
+                M::public("getRootNode", &[], root).returning("Dom\\Node"),
+                M::public("appendChild", &[NEW], mutation::append_child).returning("Dom\\Node"),
+                M::public("removeChild", &[CHILD], mutation::remove_child).returning("Dom\\Node"),
+                M::public(
+                    "insertBefore",
+                    const { &[NEW, CHILD.nullable().with_default(C::Null)] },
+                    mutation::insert_before,
+                )
+                .returning("Dom\\Node"),
+                M::public("replaceChild", &[NEW, CHILD], mutation::replace_child)
+                    .returning("Dom\\Node"),
+                M::public("cloneNode", &[DEEP], clone_node).returning("Dom\\Node"),
+                M::public("normalize", &[], normalize).returning("void"),
+                M::public("isSameNode", &[OTHER], compare::same).returning("bool"),
+                M::public("isEqualNode", &[OTHER], compare::equal).returning("bool"),
+                M::public(
+                    "contains",
+                    const { &[P::new("other", NODE).nullable()] },
+                    compare::contains,
+                )
+                .returning("bool"),
+                M::public(
+                    "compareDocumentPosition",
+                    const { &[P::new("other", NODE)] },
+                    compare::position,
+                )
+                .returning("int"),
+                M::public(
+                    "lookupNamespaceURI",
+                    const { &[P::new("prefix", T::String).nullable()] },
+                    lookup_namespace,
+                )
+                .returning("?string"),
+                M::public(
+                    "lookupPrefix",
+                    const { &[P::new("namespace", T::String).nullable()] },
+                    lookup_prefix,
+                )
+                .returning("?string"),
+                M::public(
+                    "isDefaultNamespace",
+                    const { &[P::new("namespace", T::String).nullable()] },
+                    default_namespace,
+                )
+                .returning("bool"),
+                M::public(
+                    "C14N",
+                    const {
+                        &[
+                            P::new("exclusive", T::Bool).with_default(C::Bool(false)),
+                            P::new("withComments", T::Bool).with_default(C::Bool(false)),
+                            P::new("xpath", T::Array).nullable().with_default(C::Null),
+                            P::new("nsPrefixes", T::Array)
+                                .nullable()
+                                .with_default(C::Null),
+                        ]
+                    },
+                    canonical::c14n,
+                )
+                .returning("string|false"),
+            ]
+        },
+        ..ClassEntry::class("Dom\\Node")
+    };
+    registry.class(entry);
+}
+
 pub(in crate::bindings) fn register(registry: &mut Registry) {
     use super::super::document::VARIADIC;
     registry.class(ClassEntry {
@@ -39,7 +126,7 @@ pub(in crate::bindings) fn register(registry: &mut Registry) {
     const FEATURE: &[P] = const { &[P::new("feature", T::String), P::new("version", T::String)] };
     registry.class(ClassEntry {
         hooks: Some(&ClassHooks {
-            clone: Some(NativeClone::Copy(clone_object)),
+            clone: Some(NativeClone::CopyWithHandle(clone_object)),
             property_access: Some(&properties::ACCESS),
             properties: Some(properties::view::view),
             ..ClassHooks::EMPTY
@@ -97,7 +184,7 @@ pub(in crate::bindings) fn register(registry: &mut Registry) {
                     ),
                     M::public(
                         "contains",
-                        const { &[P::new("other", NODE).nullable()] },
+                        const { &[P::new("other", T::Mixed)] },
                         compare::contains,
                     )
                     .returning("bool"),
@@ -184,4 +271,10 @@ pub(in crate::bindings) fn register(registry: &mut Registry) {
         parent: Some("DOMNode"),
         ..ClassEntry::class("DOMDocumentType")
     });
+    for class in ["DOMEntity", "DOMNotation"] {
+        registry.class(ClassEntry {
+            parent: Some("DOMNode"),
+            ..ClassEntry::class(class)
+        });
+    }
 }

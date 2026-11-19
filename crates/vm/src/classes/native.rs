@@ -140,7 +140,12 @@ impl ClassDefinitions {
                     Visibility::Protected => Object::protected_key(property.name),
                     Visibility::Public => ArrayKey::str(property.name),
                 };
-                defaults.push(PropertyDefault {
+                let inherited = defaults.iter().position(|candidate| {
+                    candidate.name == property.name
+                        && candidate.visibility != Visibility::Private
+                        && property.visibility != phera_extension_api::Visibility::Private
+                });
+                let declaration = PropertyDefault {
                     set_visibility: None,
                     is_final: false,
                     static_storage: None,
@@ -159,7 +164,12 @@ impl ClassDefinitions {
                     static_initialized: Rc::new(std::cell::Cell::new(true)),
                     value_initialized: Rc::new(std::cell::Cell::new(property.default.is_some())),
                     hooks: None,
-                });
+                };
+                if let Some(slot) = inherited {
+                    defaults[slot] = declaration;
+                } else {
+                    defaults.push(declaration);
+                }
             }
             if table.get(entry.name).is_none() {
                 table.order.push(entry.name.into());

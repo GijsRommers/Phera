@@ -33,6 +33,7 @@ pub(super) fn create_element(
     create(
         context,
         this,
+        "DOMDocument::createElement",
         element(argument(args, 0), argument(args, 1), None, false),
     )
 }
@@ -45,6 +46,7 @@ pub(super) fn create_element_ns(
     create(
         context,
         this,
+        "DOMDocument::createElementNS",
         element(
             argument(args, 1),
             argument(args, 2),
@@ -63,6 +65,7 @@ pub(super) fn create_attribute(
     create(
         context,
         this,
+        "DOMDocument::createAttribute",
         name.map(|name| Node::new(Kind::Attribute, name, "")),
     )
 }
@@ -72,16 +75,37 @@ pub(super) fn create_attribute_ns(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    let name = checked_name(
+    let document = this_node(this)?;
+    let mut state = document.shared.borrow_mut();
+    let arena = &mut state.document.arena;
+    let root = arena
+        .children(Arena::DOCUMENT)
+        .find(|&id| arena[id].kind == Kind::Element);
+    let Some(root) = root else {
+        context.warning("DOMDocument::createAttributeNS(): Document Missing Root Element".into());
+        return Ok(Value::Bool(false));
+    };
+    let mut name = match checked_name(
         argument(args, 1).unwrap_or_default(),
         namespace(args, 0),
         true,
-    );
-    create(
-        context,
-        this,
-        name.map(|name| Node::new(Kind::Attribute, name, "")),
-    )
+    ) {
+        Ok(name) => name,
+        Err(error) => {
+            drop(state);
+            return super::mutation::fail_at(
+                context,
+                &document,
+                "DOMDocument::createAttributeNS",
+                error,
+            );
+        }
+    };
+    use super::attributes::namespaces::{AttributeBinding, bind};
+    bind(arena, root, &mut name, AttributeBinding::Node);
+    let id = insert_new(arena, Node::new(Kind::Attribute, name, ""));
+    drop(state);
+    document.at(id).wrap(context)
 }
 
 pub(super) fn create_text(
@@ -89,7 +113,12 @@ pub(super) fn create_text(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    create(context, this, Ok(data(Kind::Text, "#text", args)))
+    create(
+        context,
+        this,
+        "DOMDocument::createTextNode",
+        Ok(data(Kind::Text, "#text", args)),
+    )
 }
 
 pub(super) fn create_comment(
@@ -97,7 +126,12 @@ pub(super) fn create_comment(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    create(context, this, Ok(data(Kind::Comment, "#comment", args)))
+    create(
+        context,
+        this,
+        "DOMDocument::createComment",
+        Ok(data(Kind::Comment, "#comment", args)),
+    )
 }
 
 pub(super) fn create_cdata(
@@ -105,7 +139,12 @@ pub(super) fn create_cdata(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    create(context, this, Ok(data(Kind::Cdata, "#cdata-section", args)))
+    create(
+        context,
+        this,
+        "DOMDocument::createCDATASection",
+        Ok(data(Kind::Cdata, "#cdata-section", args)),
+    )
 }
 
 pub(super) fn create_fragment(
@@ -116,6 +155,7 @@ pub(super) fn create_fragment(
     create(
         context,
         this,
+        "DOMDocument::createDocumentFragment",
         Ok(Node::new(
             Kind::Fragment,
             Name::new("#document-fragment"),
@@ -125,7 +165,12 @@ pub(super) fn create_fragment(
 }
 
 pub(super) fn create_pi(context: &mut dyn Context, this: This<'_>, args: &[Value]) -> NativeResult {
-    create(context, this, processing_instruction(args))
+    create(
+        context,
+        this,
+        "DOMDocument::createProcessingInstruction",
+        processing_instruction(args),
+    )
 }
 
 pub(super) fn create_entity(
@@ -133,7 +178,12 @@ pub(super) fn create_entity(
     this: This<'_>,
     args: &[Value],
 ) -> NativeResult {
-    create(context, this, entity(args))
+    create(
+        context,
+        this,
+        "DOMDocument::createEntityReference",
+        entity(args),
+    )
 }
 
 pub(super) fn construct_element(
@@ -142,15 +192,11 @@ pub(super) fn construct_element(
     args: &[Value],
 ) -> NativeResult {
     let uri = namespace(args, 2);
-    construct(
-        this,
-        element(
-            argument(args, 0),
-            argument(args, 1),
-            uri.clone(),
-            uri.is_some(),
-        )?,
-    )
+    let name = argument(args, 0).unwrap_or_default();
+    if !names::valid(&name) {
+        return Err(dom_error(5, "Invalid Character Error"));
+    }
+    construct(this, element(Some(name), argument(args, 1), uri, true)?)
 }
 
 pub(super) fn construct_attribute(
@@ -238,6 +284,9 @@ pub(super) fn checked_name(
     ns: bool,
 ) -> Result<Name, NativeError> {
     if !names::valid(&name) {
+        if ns && (namespace.is_some() || name.contains(':')) {
+            return Err(dom_error(14, "Namespace Error"));
+        }
         return Err(dom_error(5, "Invalid Character Error"));
     }
     if !ns {
@@ -261,12 +310,13 @@ pub(super) fn checked_name(
 fn create(
     context: &mut dyn Context,
     this: This<'_>,
+    method: &str,
     node: Result<Node, NativeError>,
 ) -> NativeResult {
     let location = this_node(this)?;
     let id = match node {
         Ok(node) => insert_new(&mut location.shared.borrow_mut().document.arena, node),
-        Err(error) => return super::mutation::fail(context, &location, error),
+        Err(error) => return super::mutation::fail_at(context, &location, method, error),
     };
     location.at(id).wrap(context)
 }
@@ -302,6 +352,11 @@ pub(super) fn insert_new(arena: &mut Arena, mut node: Node) -> NodeId {
     };
     let id = match node.kind {
         Kind::Attribute => arena.attribute(node, false),
+        Kind::EntityReference => {
+            let id = arena.allocate(node);
+            arena.attach_predefined_entity(id);
+            id
+        }
         _ => arena.allocate(node),
     };
     if let Some(declaration) = declaration {

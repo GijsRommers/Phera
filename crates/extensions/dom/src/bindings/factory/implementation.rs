@@ -4,14 +4,12 @@
 //! $document = (new DOMImplementation)->createDocument(null, 'root');
 //! ```
 
-use super::{
-    Location, This, argument, checked_name, dom_error, element, insert_new, location, namespace,
-};
+use super::{Location, This, argument, dom_error, element, insert_new, location, namespace};
 use crate::document::Document;
-use crate::tree::{Arena, Doctype, Kind, Node};
+use crate::tree::{Arena, Doctype, Kind, Name, Node};
 use phera_extension_api::{
-    ClassEntry, ConstantValue as C, Context, MethodEntry as M, NativeResult, Param as P,
-    ParamType as T, Registry, Value, args,
+    ClassEntry, ConstantValue as C, Context, MethodEntry as M, NativeError, NativeResult,
+    Param as P, ParamType as T, Registry, Value, args,
 };
 
 pub(in crate::bindings) fn has_feature(
@@ -29,14 +27,26 @@ pub(in crate::bindings) fn has_feature(
 
 fn create_doctype(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> NativeResult {
     let name = argument(arguments, 0).unwrap_or_default();
-    let name = checked_name(name, None, false)?;
+    const METHOD: &str = "DOMImplementation::createDocumentType()";
+    if name.is_empty() {
+        return Err(NativeError::value_error(format!(
+            "{METHOD}: Argument #1 ($qualifiedName) must not be empty",
+        )));
+    }
+    let name = name.split('\0').next().unwrap_or_default();
+    if name.contains("%00") {
+        context.warning(format!(
+            "{METHOD}: URI must not contain percent-encoded NUL bytes"
+        ));
+        return Ok(Value::Bool(false));
+    }
     let mut document = Document::default();
-    let mut node = Node::new(Kind::Doctype, name, "");
-    node.doctype = Some(Doctype {
+    let mut node = Node::new(Kind::Doctype, Name::new(name), "");
+    node.doctype = Some(Box::new(Doctype {
         public_id: argument(arguments, 1).unwrap_or_default(),
         system_id: argument(arguments, 2).unwrap_or_default(),
-        internal_subset: None,
-    });
+        ..Doctype::default()
+    }));
     let id = document.arena.allocate(node);
     Location::new(document, false, id).wrap(context)
 }

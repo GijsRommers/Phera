@@ -6,15 +6,17 @@
 //! assert($document->getElementById('target') === $root);
 //! ```
 
-mod namespaces;
+mod dtd;
+pub(super) mod namespaces;
 mod registration;
 
+use dtd::default_value;
 pub(super) use registration::register;
 
 use phera_extension_api::{Context, NativeError, NativeResult, PhpArray, Value, args};
 
 use crate::tree::{Arena, Kind, Name, Node, NodeId};
-use crate::xml::names::XMLNS;
+use crate::xml::names::{self, XML, XMLNS};
 
 use super::{This, dom_error, factory, mutation, this_node};
 
@@ -38,9 +40,10 @@ pub(super) fn set(
     id: NodeId,
     name: Name,
     value: String,
+    html: bool,
 ) -> Result<NodeId, NativeError> {
     let mut name = name;
-    namespaces::bind(arena, id, &mut name);
+    namespaces::bind(arena, id, &mut name, namespaces::AttributeBinding::Direct);
     let existing = if name.namespace.is_none() {
         find(arena, id, None, &name.qualified())
     } else {
@@ -51,7 +54,11 @@ pub(super) fn set(
         arena.assign_attribute(existing, value);
         return Ok(existing);
     }
-    let attribute = arena.attribute(Node::new(Kind::Attribute, name, value), true);
+    let mut attribute = Node::new(Kind::Attribute, name, value);
+    attribute.is_id = attribute.name.local == "id"
+        && (attribute.name.namespace.as_deref() == Some(XML)
+            || (html && attribute.name.namespace.is_none()));
+    let attribute = arena.attribute(attribute, true);
     arena
         .set_attribute(id, attribute, None)
         .map_err(mutation::link_error)?;
@@ -59,7 +66,7 @@ pub(super) fn set(
 }
 
 #[derive(Clone, Copy)]
-enum Read {
+pub(super) enum Read {
     Value,
     Has,
     Node,
@@ -67,7 +74,7 @@ enum Read {
     MarkId,
 }
 
-fn read(
+pub(super) fn read(
     context: &mut dyn Context,
     this: This<'_>,
     arguments: &[Value],
@@ -76,26 +83,73 @@ fn read(
 ) -> NativeResult {
     let node = this_node(this)?;
     let namespace = ns.then(|| factory::namespace(arguments, 0));
-    let name = factory::argument(arguments, usize::from(ns)).unwrap_or_default();
+    let mut name = factory::argument(arguments, usize::from(ns)).unwrap_or_default();
+    let modern = node.shared.borrow().document.settings.modern;
+    if modern && !ns && super::modern::html_element(&node) {
+        name.make_ascii_lowercase();
+    }
+    if matches!(operation, Read::Remove)
+        && !modern
+        && let Some(Some(uri)) = &namespace
+    {
+        super::namespace::remove_by_uri(
+            &mut node.shared.borrow_mut().document.arena,
+            node.id,
+            &name,
+            uri,
+        );
+    }
     let attribute = {
         let state = node.shared.borrow();
         let namespace = namespace.as_ref().map(|uri| uri.as_deref());
-        find(&state.document.arena, node.id, namespace, &name)
+        let arena = &state.document.arena;
+        let attribute = find(arena, node.id, namespace, &name);
+        if attribute.is_none()
+            && let Some(value) = default_value(arena, node.id, namespace, &name)
+        {
+            match operation {
+                Read::Value => return Ok(Value::from(value)),
+                Read::Has => return Ok(Value::Bool(true)),
+                Read::Node => return Err(NativeError::error("Unsupported node type: 16")),
+                _ => {}
+            }
+        }
+        attribute
     };
     match (operation, attribute) {
         (Read::Value, Some(attribute)) => {
             let state = node.shared.borrow();
             Ok(Value::from(state.document.arena[attribute].value.as_str()))
         }
+        (Read::Value, None) if modern => Ok(Value::Null),
         (Read::Value, None) => Ok(Value::from("")),
         (Read::Has, attribute) => Ok(Value::Bool(attribute.is_some())),
+        (Read::Node, Some(attribute)) if modern => node.at(attribute).wrap(context),
         (Read::Node, Some(attribute)) => super::namespace::wrap(context, node.at(attribute)),
-        (Read::Node, None) => Ok(if ns { Value::Null } else { Value::Bool(false) }),
+        (Read::Node, None) => Ok(if ns || modern {
+            Value::Null
+        } else {
+            Value::Bool(false)
+        }),
         (Read::Remove, Some(attribute)) => {
-            node.shared.borrow_mut().document.arena.detach(attribute);
-            Ok(if ns { Value::Null } else { Value::Bool(true) })
+            let mut state = node.shared.borrow_mut();
+            if modern || state.document.arena[attribute].name.namespace.as_deref() != Some(XMLNS) {
+                state.remove(attribute);
+            } else if !ns {
+                state.remove(attribute);
+                super::namespace::restore_used(&mut state.document.arena, node.id, attribute);
+            }
+            Ok(if ns || modern {
+                Value::Null
+            } else {
+                Value::Bool(true)
+            })
         }
-        (Read::Remove, None) => Ok(if ns { Value::Null } else { Value::Bool(false) }),
+        (Read::Remove, None) => Ok(if ns || modern {
+            Value::Null
+        } else {
+            Value::Bool(false)
+        }),
         (Read::MarkId, Some(attribute)) => {
             node.shared.borrow_mut().document.arena[attribute].is_id =
                 args::bool(arguments, if ns { 2 } else { 1 }).unwrap_or_default();
@@ -107,7 +161,7 @@ fn read(
     }
 }
 
-fn set_attr(
+pub(super) fn set_attr(
     context: &mut dyn Context,
     this: This<'_>,
     arguments: &[Value],
@@ -119,26 +173,54 @@ fn set_attr(
     } else {
         None
     };
-    let name = factory::argument(arguments, usize::from(ns)).unwrap_or_default();
+    let mut name = factory::argument(arguments, usize::from(ns)).unwrap_or_default();
+    let modern = node.shared.borrow().document.settings.modern;
+    if modern && !ns && super::modern::html_element(&node) {
+        name.make_ascii_lowercase();
+    }
     let value = factory::argument(arguments, usize::from(ns) + 1).unwrap_or_default();
-    let name = match factory::checked_name(name, namespace, ns) {
+    let mut name = match factory::checked_name(name, namespace, ns) {
         Ok(name) => name,
         Err(error) => return mutation::fail(context, &node, error),
     };
-    let id = set(
-        &mut node.shared.borrow_mut().document.arena,
-        node.id,
-        name,
-        value,
-    )?;
-    if ns {
+    let id = {
+        let mut state = node.shared.borrow_mut();
+        let document = &mut state.document;
+        if !modern
+            && !ns
+            && let Some((prefix, _)) = name.local.split_once(':')
+        {
+            let uri = if prefix == "xml" {
+                Some(XML.to_owned())
+            } else {
+                super::node::namespace_scope(&document.arena, node.id)
+                    .find(|(candidate, _)| candidate == prefix)
+                    .map(|(_, uri)| uri)
+            };
+            if let Some(uri) = uri {
+                name = names::qualified(&name.local, Some(uri));
+            }
+        }
+        set(
+            &mut document.arena,
+            node.id,
+            name,
+            value,
+            document.settings.html,
+        )?
+    };
+    if ns || modern {
         Ok(Value::Null)
     } else {
         node.at(id).wrap(context)
     }
 }
 
-fn toggle(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
+pub(super) fn toggle(
+    context: &mut dyn Context,
+    this: This<'_>,
+    arguments: &[Value],
+) -> NativeResult {
     let node = this_node(this)?;
     let name = factory::argument(arguments, 0).unwrap_or_default();
     let name = match factory::checked_name(name, None, false) {
@@ -146,44 +228,52 @@ fn toggle(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nat
         Err(error) => return mutation::fail(context, &node, error),
     };
     let mut state = node.shared.borrow_mut();
+    let html = state.document.settings.html;
     let arena = &mut state.document.arena;
     let previous = find(arena, node.id, None, &name.local);
+    if previous.is_none() && default_value(arena, node.id, None, &name.local).is_some() {
+        return Ok(Value::Bool(true));
+    }
     let enabled = args::bool(arguments, 1).unwrap_or(previous.is_none());
     match (enabled, previous) {
         (false, Some(id)) => arena.detach(id),
         (true, None) => {
-            set(arena, node.id, name, String::new())?;
+            set(arena, node.id, name, String::new(), html)?;
         }
         _ => {}
     }
     Ok(Value::Bool(enabled))
 }
 
-fn names(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn names(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
     let node = this_node(this)?;
     let state = node.shared.borrow();
     let arena = &state.document.arena;
     let mut values = PhpArray::new();
-    for &attribute in arena[node.id].attributes() {
-        let attr = &arena[attribute];
-        if attr.name.namespace.as_deref() != Some(XMLNS) {
-            let _ = values.push(Value::from(attr.name.qualified()));
-        }
+    let attributes = arena[node.id].attributes().iter().map(|&id| &arena[id]);
+    let declaration = |attribute: &&Node| attribute.name.namespace.as_deref() == Some(XMLNS);
+    for attr in attributes
+        .clone()
+        .filter(declaration)
+        .chain(attributes.filter(|attr| !declaration(attr)))
+    {
+        let _ = values.push(Value::from(attr.name.qualified()));
     }
     Ok(Value::from(values))
 }
 
-fn is_id(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn is_id(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
     let node = this_node(this)?;
     Ok(Value::Bool(
         node.shared.borrow().document.arena[node.id].is_id,
     ))
 }
 
-fn set_attribute_node(
+pub(super) fn set_attribute_node(
     context: &mut dyn Context,
     this: This<'_>,
     arguments: &[Value],
+    by_namespace: bool,
 ) -> NativeResult {
     let element = this_node(this)?;
     let attr = mutation::argument_node(arguments, 0)?;
@@ -191,35 +281,60 @@ fn set_attribute_node(
         Ok(attr) => attr,
         Err(error) => return mutation::fail(context, &element, error),
     };
-    let result = {
+    let previous = {
         let mut state = element.shared.borrow_mut();
+        let modern = state.document.settings.modern;
+        let html = state.document.settings.html;
         let arena = &mut state.document.arena;
-        if arena[attr.id]
-            .parent()
-            .is_some_and(|parent| parent != element.id)
+        if modern
+            && arena[attr.id]
+                .parent()
+                .is_some_and(|owner| owner != element.id)
         {
-            Err(dom_error(10, "Inuse Attribute Error"))
-        } else {
-            let name = &arena[attr.id].name;
-            let old = find(
+            return Err(dom_error(10, "Inuse Attribute Error"));
+        }
+        let mut name = arena[attr.id].name.clone();
+        let old = if by_namespace {
+            find(
                 arena,
                 element.id,
                 Some(name.namespace.as_deref()),
                 &name.local,
-            );
-            arena
-                .set_attribute(element.id, attr.id, old)
-                .map_err(mutation::link_error)?;
-            Ok(old.filter(|&id| id != attr.id))
+            )
+        } else {
+            arena[element.id].attributes().iter().copied().find(|&id| {
+                arena[id].name.local == name.local
+                    && arena[id].name.namespace.as_deref() != Some(XMLNS)
+            })
+        };
+        namespaces::bind(
+            arena,
+            element.id,
+            &mut name,
+            namespaces::AttributeBinding::Attach,
+        );
+        if modern
+            && html
+            && arena[element.id].name.namespace.as_deref() == Some(crate::html::XHTML)
+            && name.namespace.is_none()
+            && name.local == "id"
+        {
+            arena[attr.id].is_id = true;
         }
+        arena[attr.id].name = name;
+        arena
+            .set_attribute(element.id, attr.id, old)
+            .map_err(mutation::link_error)?;
+        old.filter(|&id| id != attr.id)
     };
-    match result {
-        Ok(value) => element.wrap_optional(context, value),
-        Err(error) => mutation::fail(context, &element, error),
-    }
+    element.wrap_optional(context, previous)
 }
 
-fn mark_node(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
+pub(super) fn mark_node(
+    context: &mut dyn Context,
+    this: This<'_>,
+    arguments: &[Value],
+) -> NativeResult {
     let element = this_node(this)?;
     let attr = mutation::argument_node(arguments, 0)?;
     if !element.same_document(&attr)

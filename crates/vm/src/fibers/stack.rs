@@ -163,14 +163,6 @@ impl Vm {
             &mut other.error_handlers.error_history,
         );
         swap(
-            &mut self.error_handlers.display_errors,
-            &mut other.error_handlers.display_errors,
-        );
-        swap(
-            &mut self.error_handlers.log_errors,
-            &mut other.error_handlers.log_errors,
-        );
-        swap(
             &mut self.error_handlers.last_error,
             &mut other.error_handlers.last_error,
         );
