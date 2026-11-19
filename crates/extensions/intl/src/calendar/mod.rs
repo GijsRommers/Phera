@@ -111,6 +111,13 @@ pub fn timestamp(object: &Object) -> Result<(i64, i64), NativeError> {
     })
 }
 
+pub fn format_input(object: &Object) -> Result<(DateTimeValue, Option<&'static str>), NativeError> {
+    update(object, |state| {
+        let calendar = (state.date_type() == 0).then(|| methods::kind(state.kind));
+        (state.as_datetime(), calendar)
+    })
+}
+
 pub fn calendar_type(object: &Object) -> Result<i64, NativeError> {
     update(object, |state| state.date_type())
 }

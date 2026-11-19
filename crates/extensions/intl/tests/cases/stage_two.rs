@@ -196,6 +196,13 @@ fn zone_metadata_and_character_operations() {
             Some(Value::Null),
         );
     }
+    for (name, region) in [
+        ("India Standard Time", Value::Null),
+        ("Romance Standard Time", Value::from("BE")),
+        ("Pacific Standard Time", Value::from("ZZ")),
+    ] {
+        matrix.case("intltz_get_id_for_windows_id", &[Value::from(name), region]);
+    }
     for chr in [
         Value::from("é"),
         Value::from("Ω"),

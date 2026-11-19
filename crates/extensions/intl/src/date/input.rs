@@ -181,10 +181,11 @@ pub fn format_object(context: &mut dyn Context, arguments: &[Value], site: &str)
             args::value(arguments, 0),
         ));
     };
-    if object.class.is_instance_of("IntlCalendar") {
-        return Err(crate::unsupported::item("IntlCalendar"));
-    }
-    if !object.class.is_instance_of("DateTimeInterface") {
+    let (instant, calendar) = if object.class.is_instance_of("IntlCalendar") {
+        crate::calendar::format_input(object)?
+    } else if object.class.is_instance_of("DateTimeInterface") {
+        (DateTimeValue::read(object)?, None)
+    } else {
         return Err(type_error(
             site,
             1,
@@ -192,10 +193,18 @@ pub fn format_object(context: &mut dyn Context, arguments: &[Value], site: &str)
             "IntlCalendar|DateTimeInterface",
             &Value::Object(object.clone()),
         ));
-    }
-    let object = DateTimeValue::read(object)?;
+    };
     let requested = locale::effective(context, args::bytes(arguments, 2));
-    let locale = locale_id::cldr(&requested);
+    let mut locale = locale_id::cldr(&requested);
+    if let Some(calendar) = calendar
+        && let Ok(calendar) = icu_locale::extensions::unicode::Value::try_from_str(calendar)
+    {
+        locale
+            .extensions
+            .unicode
+            .keywords
+            .set(icu_locale::extensions::unicode::key!("ca"), calendar);
+    }
     let style = |date, time| {
         Style::parse(date)
             .zip(Style::parse(time))
@@ -216,9 +225,11 @@ pub fn format_object(context: &mut dyn Context, arguments: &[Value], site: &str)
         }
         _ => None,
     };
-    let Some(formatter) = text.and_then(|pattern| Renderer::new(&locale, &pattern, 1)) else {
+    let calendar = i64::from(calendar.is_none());
+    let Some(formatter) = text.and_then(|pattern| Renderer::new(&locale, &pattern, calendar))
+    else {
         return error::fail(context, site, 1, "invalid format", Value::Bool(false));
     };
-    let output = formatter.format(object.timestamp, object.micros, &object.zone);
+    let output = formatter.format(instant.timestamp, instant.micros, &instant.zone);
     Ok(output.map_or(Value::Bool(false), Value::from))
 }

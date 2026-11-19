@@ -119,14 +119,7 @@ pub fn invoke(context: &mut dyn Context, values: &[Value], site: &str, op: Op) -
         }
         Op::Canonical if valid => {
             write_system(values, true)?;
-            let canonical = match parsed.canonical {
-                "Asia/Kolkata" => "Asia/Calcutta",
-                "Asia/Kathmandu" => "Asia/Katmandu",
-                "Europe/Kyiv" => "Europe/Kiev",
-                "Asia/Ho_Chi_Minh" => "Asia/Saigon",
-                other => other,
-            };
-            Value::from(canonical)
+            Value::from(legacy_canonical(parsed.canonical))
         }
         Op::Canonical => {
             if let Some((fixed, _)) = find(id) {
@@ -169,14 +162,28 @@ pub fn invoke(context: &mut dyn Context, values: &[Value], site: &str, op: Op) -
             let region = std::str::from_utf8(args::bytes(values, 1))
                 .ok()
                 .and_then(|text| text.parse().ok());
-            WindowsParser::new()
+            let windows = WindowsParser::new();
+            windows
                 .parse_from_utf8(id, region)
+                .or_else(|| windows.parse_from_utf8(id, None))
                 .and_then(|timezone| parser.iter().find(|id| id.time_zone == timezone))
-                .map_or(Value::Bool(false), |id| Value::from(id.canonical))
+                .map_or(Value::Bool(false), |id| {
+                    Value::from(legacy_canonical(id.canonical))
+                })
         }
         _ => return error::fail(context, site, 1, "Unknown time zone", Value::Bool(false)),
     };
     Ok(result)
+}
+
+fn legacy_canonical(identifier: &str) -> &str {
+    match identifier {
+        "Asia/Kolkata" => "Asia/Calcutta",
+        "Asia/Kathmandu" => "Asia/Katmandu",
+        "Europe/Kyiv" => "Europe/Kiev",
+        "Asia/Ho_Chi_Minh" => "Asia/Saigon",
+        other => other,
+    }
 }
 
 fn write_system(values: &[Value], value: bool) -> Result<(), phera_extension_api::NativeError> {
