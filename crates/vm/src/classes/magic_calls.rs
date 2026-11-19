@@ -15,7 +15,7 @@ use crate::calls::callback_binding::ArgumentBinding;
 use crate::calls::magic_dispatch::MagicCall;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum MethodSyntax {
+pub(crate) enum MethodSyntax {
     Instance,
     Static,
 }
@@ -34,13 +34,40 @@ impl Vm {
         name: &str,
     ) -> Result<(), NativeError> {
         let resolved = self.find_method(&class, name, Invocation::Method);
-        if matches!(resolved, Ok(None)) && name.eq_ignore_ascii_case("__construct") {
+        self.prepare_callable_method(class, receiver, name, MethodSyntax::Static, resolved)
+    }
+
+    /// Type checks supply their declaration scope explicitly, including global scope.
+    pub(crate) fn prepare_typed_callback(
+        &mut self,
+        class: Rc<Class>,
+        receiver: Option<Rc<Object>>,
+        name: &str,
+        syntax: MethodSyntax,
+        scope: Option<&Rc<Class>>,
+    ) -> Result<(), NativeError> {
+        let resolved = self.find_method_in_scope(&class, name, scope);
+        self.prepare_callable_method(class, receiver, name, syntax, resolved)
+    }
+
+    fn prepare_callable_method(
+        &mut self,
+        class: Rc<Class>,
+        receiver: Option<Rc<Object>>,
+        name: &str,
+        syntax: MethodSyntax,
+        resolved: Result<Option<ResolvedMethod>, NativeError>,
+    ) -> Result<(), NativeError> {
+        if syntax == MethodSyntax::Static
+            && matches!(resolved, Ok(None))
+            && name.eq_ignore_ascii_case("__construct")
+        {
             return Err(NativeError::error(format!(
                 "Call to undefined method {}::{name}()",
                 class.name
             )));
         }
-        self.prepare_method_lookup(class, receiver, name, MethodSyntax::Static, resolved)
+        self.prepare_method_lookup(class, receiver, name, syntax, resolved)
     }
 
     /// Normal resolution gets the first chance, including its lexical private lookup.
