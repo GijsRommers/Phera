@@ -70,25 +70,32 @@ impl Vm {
             if trace.len() >= limit {
                 break;
             }
-            let warning = self
-                .error_handlers
-                .warning_site
-                .as_ref()
-                .filter(|site| site.boundary == depth);
-            let callback = callbacks
-                .checked_sub(1)
-                .and_then(|index| self.native_callback_sites.get(index))
-                .filter(|site| site.boundary == depth);
-            let internal = warning.is_some() || callback.is_some();
             let Some(callee) = self.frame_at(depth) else {
                 break;
             };
             let caller = depth.checked_sub(1).and_then(|index| self.frame_at(index));
+            let function = callee.function_id().is_some();
+            if !function && caller.is_none() {
+                break;
+            }
+            let warning = self
+                .error_handlers
+                .warning_site
+                .as_ref()
+                .is_some_and(|site| site.boundary == depth);
+            let callback = callbacks != 0
+                && self
+                    .native_callback_sites
+                    .get(callbacks - 1)
+                    .is_some_and(|site| site.boundary == depth);
+            let internal = warning || callback;
+            let include_parent =
+                depth > 1 && caller.is_some_and(|caller| caller.function_id().is_none());
             let mut entry = PhpArray::new();
             if let Some(caller) = caller.filter(|_| !internal) {
                 add_location(&mut entry, caller);
             }
-            if callee.function_id().is_some() {
+            if function {
                 add_function(&mut entry, callee, objects);
                 if arguments {
                     entry.insert(ArrayKey::str("args"), self.trace_arguments(depth));
@@ -107,22 +114,24 @@ impl Vm {
             } else {
                 break;
             }
-            child_file = entry.get(&ArrayKey::str("file")).cloned();
+            child_file = if include_parent {
+                entry.get(&ArrayKey::str("file")).cloned()
+            } else {
+                None
+            };
             let _ = trace.push(Value::from(entry));
+            if !internal {
+                continue;
+            }
             if trace.len() >= limit {
                 break;
             }
-            if let Some(site) = self
-                .error_handlers
-                .warning_site
-                .as_ref()
-                .filter(|site| site.boundary == depth)
-            {
+            if warning && let Some(site) = self.error_handlers.warning_site.as_ref() {
                 append_native(
                     &mut trace,
-                    &site.native,
+                    &site.native.name,
                     Some((&site.location.file, site.location.line)),
-                    arguments,
+                    arguments.then(|| site.native.arguments.clone()),
                 );
             }
             if callbacks != 0
@@ -169,7 +178,12 @@ impl Vm {
                     .and_then(|parent| self.frame_at(parent))
             };
             let location = caller.map(|caller| (caller.unit().file.as_str(), caller.line()));
-            append_native(trace, &site.native, location, arguments);
+            append_native(
+                trace,
+                site.native.name(),
+                location,
+                arguments.then(|| site.native.arguments()),
+            );
             if let Some(caller) = caller {
                 last_file = Some(caller.cache().trace_file(caller.unit()));
                 break;
@@ -195,7 +209,11 @@ impl Vm {
             frame.supplied_arguments()
         };
         for index in 0..fixed.min(count) {
-            let value = frame.argument(&self.registers, index);
+            let value = frame
+                .slots(&self.registers)
+                .get(index)
+                .and_then(Option::as_ref)
+                .map_or(Value::Null, |value| value.deref().clone());
             let sensitive = crate::sensitive_parameters::is_sensitive(frame, index);
             snapshot.push((None, value, sensitive));
         }
@@ -272,25 +290,20 @@ fn add_location(entry: &mut PhpArray, caller: FrameView<'_>) {
 
 fn add_function(entry: &mut PhpArray, callee: FrameView<'_>, objects: bool) {
     let function = callee.code.function_name(callee.frame.function);
-    let closure = function.starts_with("{closure:");
-    let name = if closure {
-        function
+    let (name, class) = if function.starts_with("{closure:") {
+        let class = callee.scope().map(|scope| scope.name.as_str());
+        (
+            function,
+            class.or_else(|| callee.this().map(|object| object.class.name())),
+        )
+    } else if let Some((class, name)) = function.split_once("::") {
+        (name, Some(class))
     } else {
-        function.rsplit("::").next().unwrap_or(function)
+        (function, None)
     };
     entry.insert(ArrayKey::str("function"), Value::from(name));
-    let object = callee.this();
-    let class = callee
-        .scope()
-        .map(|scope| scope.name.as_str())
-        .or_else(|| {
-            function
-                .split_once("::")
-                .filter(|_| !closure)
-                .map(|(class, _)| class)
-        })
-        .or_else(|| object.map(|object| object.class.name()));
     if let Some(class) = class {
+        let object = callee.this();
         entry.insert(ArrayKey::str("class"), Value::from(class));
         if objects && let Some(object) = object {
             entry.insert(ArrayKey::str("object"), Value::Object(Rc::clone(object)));
@@ -302,18 +315,18 @@ fn add_function(entry: &mut PhpArray, callee: FrameView<'_>, objects: bool) {
 
 fn append_native(
     trace: &mut PhpArray,
-    native: &crate::error_traces::NativeTrace,
+    name: &str,
     location: Option<(&str, usize)>,
-    arguments: bool,
+    arguments: Option<Value>,
 ) {
     let mut entry = PhpArray::new();
     if let Some((file, line)) = location {
         entry.insert(ArrayKey::str("file"), Value::from(file));
         entry.insert(ArrayKey::str("line"), Value::Int(line as i64));
     }
-    entry.insert(ArrayKey::str("function"), Value::from(native.name.clone()));
-    if arguments {
-        entry.insert(ArrayKey::str("args"), native.arguments.clone());
+    entry.insert(ArrayKey::str("function"), Value::from(name));
+    if let Some(arguments) = arguments {
+        entry.insert(ArrayKey::str("args"), arguments);
     }
     let _ = trace.push(Value::from(entry));
 }

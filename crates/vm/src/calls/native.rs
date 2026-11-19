@@ -138,7 +138,7 @@ impl Vm {
             self.native_callback_sites
                 .push(crate::error_traces::NativeCallbackSite {
                     boundary: self.call_stack.frames().len(),
-                    native,
+                    native: crate::error_traces::NativeCaller::Saved(native),
                 });
             let result = handler(self, arguments).await;
             let site = self.native_callback_sites.pop();
@@ -146,7 +146,10 @@ impl Vm {
                 && !matches!(error, NativeError::Unwind(_))
                 && self.failed_native.is_none()
             {
-                self.failed_native = site.map(|site| site.native);
+                self.failed_native = site.and_then(|site| match site.native {
+                    crate::error_traces::NativeCaller::Saved(trace) => Some(trace),
+                    crate::error_traces::NativeCaller::ArrayMap(_) => None,
+                });
             }
             result
         })

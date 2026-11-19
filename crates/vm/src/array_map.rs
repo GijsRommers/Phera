@@ -28,16 +28,21 @@ impl Vm {
             })?)
         };
         let arrays = map_arguments(&arguments)?;
-        if callee.is_some() {
-            self.native_callback_sites
-                .push(crate::error_traces::NativeCallbackSite {
-                    boundary: self.call_stack.depth(),
-                    native: crate::error_traces::NativeTrace::new("array_map", &arguments),
-                });
-        }
-        let result = self.map_rows(callee.as_ref(), &arrays).await;
-        if callee.is_some() {
-            self.native_callback_sites.pop();
+        let Some(callee) = callee.as_ref() else {
+            return self.map_rows(None, &arrays).await;
+        };
+        self.native_callback_sites
+            .push(crate::error_traces::NativeCallbackSite {
+                boundary: self.call_stack.depth(),
+                native: crate::error_traces::NativeCaller::ArrayMap(arguments),
+            });
+        let result = self.map_rows(Some(callee), &arrays).await;
+        if let Some(crate::error_traces::NativeCallbackSite {
+            native: crate::error_traces::NativeCaller::ArrayMap(arguments),
+            ..
+        }) = self.native_callback_sites.pop()
+        {
+            self.call_stack.recycle_native_arguments(arguments);
         }
         result
     }

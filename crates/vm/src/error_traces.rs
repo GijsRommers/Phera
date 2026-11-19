@@ -15,14 +15,16 @@ impl NativeTrace {
     pub(crate) fn new(name: &str, arguments: &[Value]) -> Self {
         Self {
             name: name.into(),
-            arguments: {
-                let mut array = phera_value::PhpArray::new();
-                for value in arguments {
-                    let _ = array.push(value.deref().clone());
-                }
-                Value::Array(std::rc::Rc::new(array))
-            },
+            arguments: Self::snapshot_arguments(arguments),
         }
+    }
+
+    fn snapshot_arguments(arguments: &[Value]) -> Value {
+        let mut array = phera_value::PhpArray::new();
+        for value in arguments {
+            let _ = array.push(value.deref().clone());
+        }
+        Value::from(array)
     }
 }
 
@@ -131,5 +133,27 @@ pub(crate) struct DeclarationFailure {
 /// Native operations that enter PHP record the caller without allocating a PHP frame.
 pub(crate) struct NativeCallbackSite {
     pub(crate) boundary: usize,
-    pub(crate) native: NativeTrace,
+    pub(crate) native: NativeCaller,
+}
+
+/// `array_map($callback, $values)` already owns its arguments for the duration of the call.
+pub(crate) enum NativeCaller {
+    Saved(NativeTrace),
+    ArrayMap(Vec<Value>),
+}
+
+impl NativeCaller {
+    pub(crate) fn name(&self) -> &str {
+        match self {
+            Self::Saved(trace) => &trace.name,
+            Self::ArrayMap(_) => "array_map",
+        }
+    }
+
+    pub(crate) fn arguments(&self) -> Value {
+        match self {
+            Self::Saved(trace) => trace.arguments.clone(),
+            Self::ArrayMap(arguments) => NativeTrace::snapshot_arguments(arguments),
+        }
+    }
 }

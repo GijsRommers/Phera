@@ -148,7 +148,9 @@ impl Vm {
             self.native_callback_sites
                 .push(crate::error_traces::NativeCallbackSite {
                     boundary: self.call_stack.depth(),
-                    native: NativeTrace::new(function, arguments),
+                    native: crate::error_traces::NativeCaller::Saved(NativeTrace::new(
+                        function, arguments,
+                    )),
                 });
         }
         let result = self.call_autoloaders_in_order(name).await;
