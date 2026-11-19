@@ -104,11 +104,11 @@ pub fn boolean(context: &mut dyn Context, setting: &str) -> bool {
 }
 
 fn ini_bool(value: &PhpString) -> bool {
-    let bytes = c_string(value.as_bytes());
+    let bytes = value.as_bytes();
     [b"on".as_slice(), b"yes", b"true"]
         .iter()
         .any(|word| bytes.eq_ignore_ascii_case(word))
-        || number(value) != 0
+        || number(value) as i32 != 0
 }
 
 fn number(value: &PhpString) -> i64 {

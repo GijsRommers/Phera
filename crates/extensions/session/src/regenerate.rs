@@ -83,22 +83,30 @@ async fn replace_id(context: &mut dyn Context, function: &str) -> Result<(), Nat
             backend(context)
         )));
     }
-    let mut id = user_handler::create(context, function).await?;
+    create_and_store(context, function).await?;
     if settings::boolean(context, "use_strict_mode") && storage::validates(context) {
         for _ in 0..3 {
+            let id = require_id(context)?;
             if !storage::validate(context, &id, function).await? {
                 break;
             }
-            id = user_handler::create(context, function).await?;
+            create_and_store(context, function).await?;
         }
     }
-    state(context).id = Some(id.clone());
+    let id = require_id(context)?;
     if storage::read(context, &id, function).await?.is_none() {
         return Err(NativeError::error(format!(
             "Failed to create(read) session ID: {}",
             backend(context)
         )));
     }
+    Ok(())
+}
+
+async fn create_and_store(context: &mut dyn Context, function: &str) -> Result<(), NativeError> {
+    state(context).id = None;
+    let id = user_handler::create(context, function).await?;
+    state(context).id = Some(id);
     Ok(())
 }
 

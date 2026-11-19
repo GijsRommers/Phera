@@ -31,7 +31,7 @@ function probe(string $function, array $arguments): void {
 
 $inputs = [null, true, false, 0, 1, -1, 2, 1440, PHP_INT_MAX, PHP_INT_MIN,
     2.5, '', 'yes', '0', 'php', 'php_binary', 'php_serialize', '-2K',
-    '0x20', '16K', ' 12 ', '00', 'some', "bad\0tail", 'bad.path', '/path',
+    '0x20', '16K', ' 12 ', '00', 'some', "bad\0tail", "true\0tail", 4294967296, 'bad.path', '/path',
     'a,b', '31X', []];
 
 foreach (['session_name', 'session_save_path', 'session_module_name', 'session_id',

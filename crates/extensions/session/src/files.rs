@@ -75,7 +75,12 @@ pub async fn destroy(context: &mut dyn Context, id: &PhpString) -> Result<bool, 
     };
     match files.locked.take() {
         Some((old, file)) if old == *id => file.destroy().await,
-        _ => Ok(true),
+        Some((_, file)) => {
+            let directory = files.directory.clone();
+            blocking(move || drop(file)).await?;
+            directory.destroy_existing(id).await
+        }
+        None => Ok(true),
     }
 }
 

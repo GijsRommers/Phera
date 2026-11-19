@@ -94,6 +94,22 @@ impl Directory {
     }
 
     pub async fn lock(&self, id: &PhpString) -> Result<Result<LockedFile, FileError>, NativeError> {
+        self.acquire(id, true).await
+    }
+
+    pub async fn destroy_existing(&self, id: &PhpString) -> Result<bool, NativeError> {
+        match self.acquire(id, false).await? {
+            Ok(file) => file.destroy().await,
+            Err(FileError::Open(_, error)) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+            Err(_) => Ok(false),
+        }
+    }
+
+    async fn acquire(
+        &self,
+        id: &PhpString,
+        create: bool,
+    ) -> Result<Result<LockedFile, FileError>, NativeError> {
         let path = match self.path(id) {
             Ok(path) => path,
             Err(error) => return Ok(Err(error)),
@@ -110,7 +126,7 @@ impl Directory {
         let guard = gate(&path).lock_owned().await;
         let mode = self.mode;
         loop {
-            let opened = try_open_locked(path.clone(), mode).await?;
+            let opened = try_open_locked(path.clone(), mode, create).await?;
             match opened {
                 Ok(Some(file)) => {
                     return Ok(Ok(LockedFile {
@@ -165,9 +181,10 @@ impl Directory {
 async fn try_open_locked(
     path: PathBuf,
     mode: u32,
+    create: bool,
 ) -> Result<Result<Option<File>, FileError>, NativeError> {
     blocking(move || {
-        let file = open_private_file(&path, mode, true)
+        let file = open_private_file(&path, mode, create)
             .map_err(|error| FileError::Open(path.clone(), error))?;
         if !file_is_owned(&file).map_err(FileError::Io)? {
             return Err(FileError::Owner);

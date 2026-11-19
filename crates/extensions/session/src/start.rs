@@ -41,6 +41,13 @@ fn start(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         }
         let read_and_close = options(context, &arguments)?;
         let cookie = incoming_cookie(context)?;
+        if state(context).id.as_ref().is_some_and(|id| {
+            c_string(id.as_bytes())
+                .iter()
+                .any(|byte| b"\r\n\t <>'\"\\".contains(byte))
+        }) {
+            state(context).id = None;
+        }
         let started = initialize(context, function, cookie, false).await;
         let started = match started {
             Ok(true) if active(context) => headers::cache(context, function).await?,
@@ -208,19 +215,19 @@ async fn load(
         return Ok(Decoded::Invalid);
     }
     let proposed = state(context).id.clone();
-    let proposed = proposed.filter(|id| {
-        let bytes = c_string(id.as_bytes());
-        !bytes.is_empty() && !bytes.iter().any(|byte| b"\r\n\t <>'\"\\".contains(byte))
-    });
+    let proposed = proposed.filter(|id| !c_string(id.as_bytes()).is_empty());
     let strict = settings::boolean(context, "use_strict_mode");
     let id = match proposed {
         Some(id) if !strict || storage::validate(context, &id, function).await? => Some(id),
         _ => None,
     };
-    let send_cookie = !reset && (!from_cookie || id.is_none());
+    let send_cookie = (!reset && !from_cookie) || id.is_none();
     let id = match id {
         Some(id) => id,
-        None => user_handler::create(context, function).await?,
+        None => {
+            state(context).id = None;
+            user_handler::create(context, function).await?
+        }
     };
     state(context).id = Some(id.clone());
     if send_cookie

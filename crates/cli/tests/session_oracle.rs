@@ -38,7 +38,7 @@ fn session_calls_match_php() {
         .unwrap_or_else(|error| panic!("{error} in {}", comparison.artifacts.display()));
     assert_eq!(
         String::from_utf8_lossy(&matched.stdout).lines().count(),
-        2706
+        2876
     );
 }
 
