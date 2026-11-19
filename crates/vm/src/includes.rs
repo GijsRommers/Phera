@@ -6,7 +6,7 @@ use phera_bytecode::{IncludeKind, Reg};
 use phera_extension_api::{NativeError, WorkingDirectory};
 use phera_value::Value;
 
-use crate::include_lookup::{IncludeLookup, RelativeInclude, path_spelling};
+use crate::include_lookup::{IncludeDirectory, IncludeLookup, RelativeInclude, path_spelling};
 use crate::{CodeLoadError, Vm, diagnostics::SourceLocation};
 
 impl Vm {
@@ -86,10 +86,12 @@ impl Vm {
         let lookup = if Path::new(&spelling).is_absolute() {
             IncludeLookup::Absolute(&spelling)
         } else {
-            let cwd = self.state.get::<WorkingDirectory>();
-            if cwd.is_some_and(|cwd| cwd.path().is_none()) {
-                return Ok(Err("No such file or directory".into()));
-            }
+            let cwd = match self.state.get::<WorkingDirectory>() {
+                Some(cwd) => cwd.path().map_or(IncludeDirectory::Missing, |cwd| {
+                    IncludeDirectory::Known(cwd.to_path_buf())
+                }),
+                None => IncludeDirectory::Process,
+            };
             let (caller, include_path) = if name.starts_with(b"./") || name.starts_with(b"../") {
                 (None, None)
             } else {
@@ -102,7 +104,7 @@ impl Vm {
             };
             IncludeLookup::Relative(RelativeInclude {
                 name: spelling.into_owned(),
-                cwd: cwd.and_then(WorkingDirectory::path).map(Path::to_path_buf),
+                cwd,
                 caller,
                 include_path,
             })

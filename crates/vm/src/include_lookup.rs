@@ -21,9 +21,16 @@ pub enum IncludeLookup<'a> {
 #[derive(Hash, PartialEq, Eq)]
 pub struct RelativeInclude {
     pub(crate) name: OsString,
-    pub(crate) cwd: Option<PathBuf>,
+    pub(crate) cwd: IncludeDirectory,
     pub(crate) caller: Option<PathBuf>,
     pub(crate) include_path: Option<OsString>,
+}
+
+#[derive(Hash, PartialEq, Eq)]
+pub(crate) enum IncludeDirectory {
+    Process,
+    Known(PathBuf),
+    Missing,
 }
 
 impl IncludeLookup<'_> {
@@ -39,7 +46,7 @@ impl RelativeInclude {
     fn candidates(&self) -> Vec<PathBuf> {
         let path = Path::new(&self.name);
         let Some(include_path) = &self.include_path else {
-            return vec![self.resolve(path)];
+            return self.resolve(path.to_path_buf()).into_iter().collect();
         };
         let mut candidates = Vec::new();
         for directory in std::env::split_paths(include_path) {
@@ -61,15 +68,41 @@ impl RelativeInclude {
         }
         candidates
             .into_iter()
-            .map(|path| self.resolve(&path))
+            .filter_map(|path| self.resolve(path))
             .collect()
     }
 
-    fn resolve(&self, path: &Path) -> PathBuf {
-        match &self.cwd {
-            Some(cwd) if path.is_relative() => cwd.join(path),
-            _ => path.to_path_buf(),
+    fn resolve(&self, path: PathBuf) -> Option<PathBuf> {
+        if path.is_absolute() {
+            return Some(path);
         }
+        match &self.cwd {
+            IncludeDirectory::Process => Some(path),
+            IncludeDirectory::Known(cwd) => Some(cwd.join(path)),
+            IncludeDirectory::Missing => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_working_directory_still_allows_absolute_candidates() {
+        let root = std::env::current_dir().unwrap();
+        let caller = root.join("caller");
+        let include = root.join("include");
+        let lookup = RelativeInclude {
+            name: "helper.php".into(),
+            cwd: IncludeDirectory::Missing,
+            caller: Some(caller.clone()),
+            include_path: Some(std::env::join_paths([Path::new("."), &include]).unwrap()),
+        };
+        assert_eq!(
+            lookup.candidates(),
+            [include.join("helper.php"), caller.join("helper.php")]
+        );
     }
 }
 
