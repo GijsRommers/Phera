@@ -40,7 +40,6 @@ pub(crate) fn register(registry: &mut Registry) {
         compare::FUNCTIONS,
         encode::FUNCTIONS,
         escaping::FUNCTIONS,
-        format::FUNCTIONS,
         html::FUNCTIONS,
         metaphone::FUNCTIONS,
         number_format::FUNCTIONS,
@@ -60,6 +59,7 @@ pub(crate) fn register(registry: &mut Registry) {
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
+    format::register(registry);
     replace::register_sync_selectors(registry);
 }
 
