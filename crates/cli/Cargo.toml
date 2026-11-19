@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 phera-dotenv.workspace = true
+phera-source.workspace = true
+serde_json = "1"
 phera-analyzer.workspace = true
 phera-runtime.workspace = true
 phera-server.workspace = true

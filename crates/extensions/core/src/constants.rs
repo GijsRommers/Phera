@@ -41,18 +41,14 @@ const ERROR_LEVELS: &[(&str, i64)] = &[
 ];
 
 pub(crate) fn register(registry: &mut Registry) {
-    let mut version = phera_extension_api::PHP_VERSION
-        .split('.')
-        .map(|part| part.parse::<i64>().unwrap_or_default());
-    let major = version.next().unwrap_or_default();
-    let minor = version.next().unwrap_or_default();
-    let release = version.next().unwrap_or_default();
-    registry.constant("PHP_VERSION", phera_extension_api::PHP_VERSION);
+    let level = registry.level();
+    let (major, minor, release) = level.components();
+    registry.constant("PHP_VERSION", level.version());
     registry.constant("PHP_MAJOR_VERSION", major);
     registry.constant("PHP_MINOR_VERSION", minor);
     registry.constant("PHP_RELEASE_VERSION", release);
     registry.constant("PHP_VERSION_ID", major * 10_000 + minor * 100 + release);
-    registry.constant("PHP_EXTRA_VERSION", "");
+    registry.constant("PHP_EXTRA_VERSION", level.extra());
     registry.constant("PHP_DEBUG", false);
     registry.constant("PHP_ZTS", false);
 

@@ -10,7 +10,7 @@ use phera_extension_api::testing::oracle;
 use support::Project;
 
 fn compare(php: &Path, file: &Path, case: usize) {
-    let run = |program: &OsStr, flag: &str| {
+    let run = |program: &OsStr, options: &[&str]| {
         let mut cmd = Command::new(program);
         cmd.env_clear().envs([
             ("__CF_USER_TEXT_ENCODING", "controlled"),
@@ -32,10 +32,17 @@ fn compare(php: &Path, file: &Path, case: usize) {
                 OsStr::from_bytes(b"\xfe=data"),
             );
         }
-        cmd.arg(flag).arg(file).arg("argument").output().unwrap()
+        cmd.args(options)
+            .arg(file)
+            .arg("argument")
+            .output()
+            .unwrap()
     };
-    let oracle = run(php.as_os_str(), "-n");
-    let phera = run(OsStr::new(env!("CARGO_BIN_EXE_phera")), "--no-env-file");
+    let oracle = run(php.as_os_str(), &["-n"]);
+    let phera = run(
+        OsStr::new(env!("CARGO_BIN_EXE_phera")),
+        &["--php", oracle::test_level().name(), "--no-env-file"],
+    );
     assert!(oracle.status.success(), "PHP failed in group {case}");
     assert_eq!(
         phera.status.code(),
@@ -71,7 +78,7 @@ fn observe(call: &str) -> String {
 
 #[test]
 fn cli_environment_matches_php() {
-    let oracle = oracle::find_php().expect("PHP 8.5 required");
+    let oracle = oracle::find_php().expect("the selected PHP oracle is required");
     // Resolve PHP_BINARY before clearing the environment. CI's oracle wrapper
     // needs its own configuration and Bash adds variables when it starts.
     let real = Command::new(oracle)

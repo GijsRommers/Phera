@@ -1,7 +1,8 @@
 <?php
 // Missing prerequisites must fail CI, rather than turn oracle tests into skips.
-if (PHP_MAJOR_VERSION !== 8 || PHP_MINOR_VERSION !== 5) {
-    throw new RuntimeException('The oracle must be PHP 8.5; found ' . PHP_VERSION);
+$level = $argv[1] ?? '8.5';
+if (PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION !== $level) {
+    throw new RuntimeException("The oracle must be PHP $level; found " . PHP_VERSION);
 }
 foreach (['json', 'pcre', 'ctype', 'pdo_pgsql', 'pdo_mysql', 'pdo_sqlite', 'sqlite3', 'mbstring', 'iconv', 'tokenizer', 'redis'] as $extension) {
     if (!extension_loaded($extension)) {
@@ -9,10 +10,11 @@ foreach (['json', 'pcre', 'ctype', 'pdo_pgsql', 'pdo_mysql', 'pdo_sqlite', 'sqli
     }
 }
 // The date oracle must use PHP's embedded data, not a distribution's zoneinfo.
-// CI supplies timezonedb-2026.5; PHP builds embedding the same version need no module.
-if (timezone_version_get() !== '2026.5') {
+// PHP builds embedding the matching database need no shared module.
+$tzdb = $level === '8.6' ? '2026.6' : '2026.5';
+if (timezone_version_get() !== $tzdb) {
     throw new RuntimeException(
-        'The date oracle requires timezonedb 2026.5; found ' . timezone_version_get()
+        "The date oracle requires timezonedb $tzdb; found " . timezone_version_get()
     );
 }
 foreach (['pgsql' => 54329, 'mysql' => 33069] as $driver => $port) {

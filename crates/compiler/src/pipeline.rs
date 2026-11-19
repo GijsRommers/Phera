@@ -7,7 +7,7 @@
 
 use std::cell::RefCell;
 
-use phera_source::{CompileDiagnostic, LineTable};
+use phera_source::{CompileDiagnostic, LanguageLevel, LineTable};
 
 use crate::context::Compiler;
 use crate::ir::{CompiledUnit, Constant, Instruction};
@@ -26,11 +26,21 @@ pub(super) fn compile_on_stack(
     source: &[u8],
     file: &str,
     kind: SourceKind,
+    level: LanguageLevel,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let lines = LineTable::from_bytes(source);
-    let (parsed, mut scanner_diagnostics) = phera_parser::parse_file_on_current_stack(source);
+    let (parsed, mut scanner_diagnostics) =
+        phera_parser::parse_file_at_on_current_stack(source, level);
     let compile_diagnostics = RefCell::new(Vec::new());
-    let result = compile_program(parsed, source, file, &lines, kind, &compile_diagnostics);
+    let result = compile_program(
+        parsed,
+        source,
+        file,
+        &lines,
+        kind,
+        &compile_diagnostics,
+        level,
+    );
     scanner_diagnostics.extend(compile_diagnostics.into_inner());
     match result {
         Ok(mut unit) => {
@@ -59,6 +69,7 @@ fn compile_program(
     lines: &LineTable,
     kind: SourceKind,
     compile_diagnostics: &RefCell<Vec<CompileDiagnostic>>,
+    level: LanguageLevel,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let ast = parsed.map_err(|error| {
         if error.is_compile_error() || error.is_backtick_operator() {
@@ -105,7 +116,8 @@ fn compile_program(
         "",
         compile_diagnostics,
         &reflection,
-    );
+    )
+    .with_level(level);
     if let SourceKind::Eval { anonymous_seed } = kind {
         compiler.anonymous_classes.set(anonymous_seed);
     }

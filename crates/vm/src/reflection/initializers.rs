@@ -64,6 +64,7 @@ impl Vm {
             .and_then(|source| source.scope.as_deref())
             .and_then(|scope| self.classes.get(scope))
             .is_some_and(|class| class.kind == phera_bytecode::ClassKind::Trait);
+        let level = self.registry.level();
         let compile = move || match (
             unit.reflection_source.as_deref(),
             unit.reflection_initializers.get(index),
@@ -73,6 +74,7 @@ impl Vm {
                 &unit.file,
                 initializer,
                 in_trait,
+                level,
             )
             .map_err(|error| error.message),
             _ => Err("Reflection initializer has no source".into()),

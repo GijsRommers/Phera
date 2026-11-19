@@ -24,6 +24,7 @@ use phera_value::Value;
 use phera_vm::{CodeLoader, Vm};
 
 use cache::CodeCache;
+pub use phera_extension_api::LanguageLevel;
 
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse};
@@ -59,7 +60,15 @@ impl Runtime {
     }
 
     pub fn with_environment(environment: Environment) -> Self {
-        let mut registry = Registry::new();
+        Self::with_level_and_environment(LanguageLevel::default(), environment)
+    }
+
+    pub fn for_level(level: LanguageLevel) -> Self {
+        Self::with_level_and_environment(level, Environment::process())
+    }
+
+    pub fn with_level_and_environment(level: LanguageLevel, environment: Environment) -> Self {
+        let mut registry = Registry::for_level(level);
         registry.load(&phera_ext_core::Core);
         registry.class(phera_extension_api::ClassEntry {
             parent: Some("LogicException"),
@@ -89,7 +98,7 @@ impl Runtime {
         Runtime {
             web_registry: Arc::new(web_registry),
             registry: Arc::new(registry),
-            cache: CodeCache::default(),
+            cache: CodeCache::for_level(level),
             environment: Arc::new(environment),
         }
     }

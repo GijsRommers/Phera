@@ -9,6 +9,9 @@
 //! PHERA_PHPT_BIN="php -n -d fatal_error_backtraces=0 -d display_errors=1" make phpt
 //! ```
 
+mod phpt_support;
+
+use phpt_support::expected_outcome;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -16,6 +19,7 @@ use std::process::{Command, ExitCode, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use phera_extension_api::{LanguageLevel, testing::oracle::test_level};
 use phera_phpt::{Phpt, display_path, expectf_matches, filters_from_args, matches_filters};
 
 const TIMEOUT: Duration = Duration::from_secs(10);
@@ -52,9 +56,10 @@ enum Outcome {
 
 fn main() -> ExitCode {
     let filters = filters_from_args();
-    let binary = binary();
+    let level = test_level();
+    let binary = binary(level);
 
-    let tests = match phera_phpt::selected_tests() {
+    let tests = match phera_phpt::selected_tests_for(level) {
         Ok(tests) => tests,
         Err(error) => {
             eprintln!("error: {error}");
@@ -68,8 +73,9 @@ fn main() -> ExitCode {
         .collect();
 
     println!(
-        "running {} phpt tests with `{}`\n",
+        "running {} phpt tests at PHP {} with `{}`\n",
         tests.len(),
+        level.name(),
         binary.join(" ")
     );
 
@@ -79,7 +85,7 @@ fn main() -> ExitCode {
     for path in &tests {
         let name = display_path(path);
 
-        match run_test(&binary, path) {
+        match expected_outcome(run_test(&binary, path), &name, level) {
             Outcome::Pass => {
                 passed += 1;
                 println!("PASS  {name}");
@@ -116,12 +122,14 @@ fn main() -> ExitCode {
 }
 
 /// The command used to run PHP files, split into program and leading arguments.
-fn binary() -> Vec<String> {
+fn binary(level: LanguageLevel) -> Vec<String> {
     match std::env::var("PHERA_PHPT_BIN") {
         Ok(value) if !value.trim().is_empty() => {
             value.split_whitespace().map(String::from).collect()
         }
-        _ => vec![env!("CARGO_BIN_EXE_phera").to_string()],
+        _ => [env!("CARGO_BIN_EXE_phera"), "--php", level.name()]
+            .map(str::to_owned)
+            .to_vec(),
     }
 }
 

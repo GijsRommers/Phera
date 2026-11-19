@@ -236,7 +236,8 @@ impl<'ast> Compiler<'ast> {
             &self.namespace,
             self.compile_diagnostics,
             self.reflection,
-        );
+        )
+        .with_level(self.level);
         builder.anonymous_classes = self.anonymous_classes.clone();
         if name.starts_with("{closure:") || name.contains("::") {
             builder.trait_scope = self.trait_scope.clone();

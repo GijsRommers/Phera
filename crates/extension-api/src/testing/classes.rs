@@ -76,9 +76,8 @@ pub fn call_method(
     let class = object.class.name();
     let found: Option<(&ClassEntry, &MethodEntry)> =
         lineage(registry, class).into_iter().find_map(|entry| {
-            entry
-                .methods
-                .iter()
+            registry
+                .methods(entry)
                 .find(|candidate| candidate.name.eq_ignore_ascii_case(method))
                 .map(|candidate| (entry, candidate))
         });

@@ -34,6 +34,7 @@ pub(crate) struct ReflectionInputs {
 
 /// Mutable AST-to-IR state for one PHP function, sharing source locations.
 pub(super) struct Compiler<'ast> {
+    pub(super) level: phera_source::LanguageLevel,
     pub(super) file: &'ast str,
     /// Source bytes for quoted assertions, declaration metadata and deferred expressions.
     pub(super) source: &'ast [u8],
@@ -75,6 +76,7 @@ impl<'ast> Compiler<'ast> {
         reflection: &'ast ReflectionInputs,
     ) -> Self {
         Self {
+            level: phera_source::LanguageLevel::default(),
             file,
             source,
             declaration_warnings: Vec::new(),
@@ -104,6 +106,11 @@ impl<'ast> Compiler<'ast> {
             imports: None,
             reflection,
         }
+    }
+
+    pub(super) fn with_level(mut self, level: phera_source::LanguageLevel) -> Self {
+        self.level = level;
+        self
     }
 
     /// Attach the current file to a compiler diagnostic without changing PHP wording.

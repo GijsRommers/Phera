@@ -1631,6 +1631,7 @@ name = "phera-analyzer"
 version = "0.1.0"
 dependencies = [
  "phera-ast",
+ "phera-extension-api",
  "phera-lexer",
  "phera-parser",
  "phera-source",
@@ -1664,6 +1665,8 @@ dependencies = [
  "phera-phpt",
  "phera-runtime",
  "phera-server",
+ "phera-source",
+ "serde_json",
  "tokio",
 ]
 
@@ -1934,6 +1937,7 @@ version = "0.1.0"
 dependencies = [
  "phera-extension-api",
  "phera-lexer",
+ "phera-source",
 ]
 
 [[package]]

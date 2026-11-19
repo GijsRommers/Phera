@@ -46,6 +46,7 @@ mod scope;
 pub(crate) mod sends;
 #[cfg(test)]
 mod tests;
+mod versioned_ini;
 pub(crate) mod window_context;
 
 mod string_arguments;

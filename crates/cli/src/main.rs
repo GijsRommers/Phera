@@ -3,7 +3,9 @@
 
 mod arguments;
 mod check;
+mod composer_level;
 mod new;
+mod project_level;
 mod run;
 mod serve;
 
@@ -25,13 +27,20 @@ fn main() -> ExitCode {
             script,
             arguments,
             files,
-        }) => run::script(&script, &arguments, files),
-        Ok(Command::Dump { script }) => run::dump(&script),
+            php,
+        }) => run::script(&script, &arguments, files, php),
+        Ok(Command::Dump { script, php }) => run::dump(&script, php),
         Ok(Command::Serve(options)) => serve::serve(options),
         Ok(Command::Check(options)) => check::check(options),
         Ok(Command::New(options)) => new::project(&options),
         Ok(Command::Version) => {
-            println!("Phera {}", env!("CARGO_PKG_VERSION"));
+            let [older, newer] = phera_source::LanguageLevel::ALL;
+            println!(
+                "Phera {}, PHP {} and {}",
+                env!("CARGO_PKG_VERSION"),
+                older.release(),
+                newer.release(),
+            );
             ExitCode::SUCCESS
         }
         Err(message) => {

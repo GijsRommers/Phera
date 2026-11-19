@@ -30,7 +30,8 @@ impl Server {
     /// extra `environment` variables set.
     pub fn start(phera: &Path, root: &Path, workers: usize, environment: &[(&str, &str)]) -> Self {
         let mut process = Command::new(phera)
-            .args(["serve", "--listen", "127.0.0.1:0", "--workers"])
+            .args(["--php", super::oracle::test_level().name(), "serve"])
+            .args(["--listen", "127.0.0.1:0", "--workers"])
             .arg(workers.to_string())
             .arg(root)
             .envs(environment.iter().copied())

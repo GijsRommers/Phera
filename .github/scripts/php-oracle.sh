@@ -7,8 +7,12 @@ shared=${PHERA_PHP_SHARED_EXTENSIONS-$("$real_php" -n -r 'foreach (["json", "pcr
 read -ra modules <<< "$shared"
 # Distribution PHP can use the host tzdata even with -n. Load PHP's pinned
 # embedded database when its built-in data differs from the date oracle.
+tzdb=2026.5
+if [[ "${PHERA_TEST_PHP:-8.5}" == 8.6 ]]; then
+    tzdb=2026.6
+fi
 if [[ " $shared " != *" timezonedb "* ]] &&
-    [[ $("$real_php" -n -r 'echo timezone_version_get();') != "2026.5" ]]; then
+    [[ $("$real_php" -n -r 'echo timezone_version_get();') != "$tzdb" ]]; then
     modules+=(timezonedb)
 fi
 options=()
@@ -18,6 +22,8 @@ options=(-d "extension_dir=$extension_dir")
 for module in "${modules[@]}"; do
     if [[ "$module" == timezonedb && -n "${PHERA_PHP_TIMEZONEDB:-}" ]]; then
         module=$PHERA_PHP_TIMEZONEDB
+    elif [[ "$module" == redis && -n "${PHERA_PHP_REDIS:-}" ]]; then
+        module=$PHERA_PHP_REDIS
     fi
     options+=(-d "extension=$module")
 done

@@ -23,6 +23,7 @@ pub use reflection_initializer::{CompiledInitializer, compile_reflection_initial
 
 use context::{Compiler, Loop};
 use helpers::{binary, constant, type_name, writable};
+use phera_source::LanguageLevel;
 
 /// Compile PHP source on a bounded dedicated stack, keeping tiny callers safe.
 pub fn compile(source: &str, file: &str) -> Result<phera_bytecode::CompiledUnit, CompileError> {
@@ -34,7 +35,15 @@ pub fn compile_bytes(
     source: &[u8],
     file: &str,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
-    compile_source(source, file, pipeline::SourceKind::File)
+    compile_bytes_at(source, file, LanguageLevel::default())
+}
+
+pub fn compile_bytes_at(
+    source: &[u8],
+    file: &str,
+    level: LanguageLevel,
+) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    compile_source(source, file, pipeline::SourceKind::File, level)
 }
 
 /// Compile the code passed to `eval()` without requiring an opening tag.
@@ -51,16 +60,34 @@ pub fn compile_eval_with_seed(
     file: &str,
     anonymous_seed: u64,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    compile_eval_at(source, file, anonymous_seed, LanguageLevel::default())
+}
+
+/// Compiles an eval with the same language level as the running file.
+pub fn compile_eval_at(
+    source: &[u8],
+    file: &str,
+    anonymous_seed: u64,
+    level: LanguageLevel,
+) -> Result<phera_bytecode::CompiledUnit, CompileError> {
     let code = [b"<?php ".as_slice(), source].concat();
-    compile_source(&code, file, pipeline::SourceKind::Eval { anonymous_seed })
+    compile_source(
+        &code,
+        file,
+        pipeline::SourceKind::Eval { anonymous_seed },
+        level,
+    )
 }
 
 fn compile_source(
     source: &[u8],
     file: &str,
     kind: pipeline::SourceKind,
+    level: LanguageLevel,
 ) -> Result<phera_bytecode::CompiledUnit, CompileError> {
-    on_compile_stack(file, || pipeline::compile_on_stack(source, file, kind))
+    on_compile_stack(file, || {
+        pipeline::compile_on_stack(source, file, kind, level)
+    })
 }
 
 fn on_compile_stack<T: Send>(

@@ -1,0 +1,11 @@
+PHP 8.6 stubs; php-src: release source 8.6.0RC7
+Reference: --release-source
+Zend/zend_builtin_functions.stub.php:11: expected an identifier, found token "clone"; rename stub-only clone declaration
+Zend/zend_builtin_functions.stub.php:13: expected an identifier, found token "exit"; rename stub-only exit declaration
+Zend/zend_builtin_functions.stub.php:16: expected an identifier, found token "die"; rename stub-only die declaration
+ext/openssl/openssl.stub.php:7: qualify OpensslException's global parent
+Parsed files: 125; skipped files: 0
+Declarations: 10570; functions: 2295; classes: 381; globals: 3411; members: 4483
+Supplemental constants: 44; class aliases: 1
+Excluded development-only ext/zend_test and ext/dl_test.
+Skipped declarations: 0. Parser changes: none.

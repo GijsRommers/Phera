@@ -10,6 +10,9 @@ publish = false
 name = "lexer"
 harness = false
 
+[dependencies]
+phera-source.workspace = true
+
 [dev-dependencies]
 phera-extension-api.workspace = true
 phera-lexer.workspace = true

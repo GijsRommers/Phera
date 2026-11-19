@@ -25,8 +25,9 @@ impl Vm {
         // Ordinary files count occurrences from zero. Give each evaluated
         // unit its own range even when two executions share the source line.
         let anonymous_seed = u64::from(self.code.next_unit_index().0) << 32;
+        let level = self.registry.level();
         let compiled = tokio::task::spawn_blocking(move || {
-            phera_compiler::compile_eval_with_seed(&source, &file, anonymous_seed)
+            phera_compiler::compile_eval_at(&source, &file, anonymous_seed, level)
         })
         .await
         .map_err(|error| NativeError::error(format!("Eval compiler failed: {error}")))?;

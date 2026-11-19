@@ -1,23 +1,18 @@
-//! Verify the generated table against the real PHP 8.5 oracle's default build.
+//! Verify the generated table against the selected PHP oracle's default build.
 //! Runtime functions, classes and constants must all be known to static analysis.
 
 use phera_analyzer::{builtins, index::Signature};
+use phera_extension_api::testing::oracle::{find_php, test_level};
 use std::process::Command;
 
 fn native_inventory() -> String {
-    let php = std::env::var("PHERA_PHP").unwrap_or_else(|_| {
-        if std::path::Path::new("/opt/homebrew/bin/php").exists() {
-            "/opt/homebrew/bin/php".into()
-        } else {
-            "php".into()
-        }
-    });
+    let php = find_php().expect("The selected PHP oracle is required");
     let output = Command::new(php)
         .args([
             "-n",
             "-r",
             r#"
-        if (PHP_MAJOR_VERSION !== 8 || PHP_MINOR_VERSION !== 5) { exit(2); }
+        if (PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION !== $argv[1]) { exit(2); }
         foreach (get_defined_functions()['internal'] as $name) {
             $f = new ReflectionFunction($name);
             $parameters = array_map(fn($p) => $p->name, $f->getParameters());
@@ -37,12 +32,13 @@ fn native_inventory() -> String {
         }
         foreach (array_keys(get_defined_constants()) as $name) { echo "K\t$name\n"; }
     "#,
+            test_level().name(),
         ])
         .output()
         .unwrap();
     assert!(
         output.status.success(),
-        "PHP 8.5 is required: {:?}",
+        "The selected PHP oracle failed: {:?}",
         output.status
     );
     String::from_utf8(output.stdout).unwrap()
@@ -50,7 +46,7 @@ fn native_inventory() -> String {
 
 #[test]
 fn default_php_symbols_and_parameter_names_are_present() {
-    let index = builtins::load();
+    let index = builtins::load_at(test_level());
     let mut missing = Vec::new();
     for line in native_inventory().lines() {
         let fields: Vec<_> = line.split('\t').collect();

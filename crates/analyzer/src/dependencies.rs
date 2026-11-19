@@ -2,11 +2,13 @@
 //! A dependency's body never enters the analyzer's reporting queue.
 
 use crate::{collect, composer::Autoload, index::Index, project, traits};
+use phera_source::LanguageLevel;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 #[derive(Default)]
 pub struct Dependencies {
+    level: LanguageLevel,
     autoload: Option<Autoload>,
     seen_files: BTreeSet<PathBuf>,
     unlocated_classes: BTreeSet<String>,
@@ -15,10 +17,16 @@ pub struct Dependencies {
 }
 
 impl Dependencies {
-    pub fn load(index: &mut Index, paths: &[String], checked: &[PathBuf]) -> Result<Self, String> {
+    pub fn load(
+        index: &mut Index,
+        paths: &[String],
+        checked: &[PathBuf],
+        level: LanguageLevel,
+    ) -> Result<Self, String> {
         let autoload = Autoload::discover(paths)?;
         let mut dependencies = Self {
             autoload,
+            level,
             seen_files: checked
                 .iter()
                 .filter_map(|p| p.canonicalize().ok())
@@ -44,7 +52,7 @@ impl Dependencies {
         if !self.seen_files.insert(canonical.clone()) {
             return Ok(());
         }
-        let parsed = project::parse_file(path)?;
+        let parsed = project::parse_file_at(path, self.level)?;
         if self
             .autoload
             .as_ref()

@@ -22,13 +22,14 @@ impl Project {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
     }
+    pub fn command(&self) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_phera"));
+        command.current_dir(&self.0);
+        command
+    }
+
     pub fn run(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_phera"))
-            .current_dir(&self.0)
-            .arg("check")
-            .args(args)
-            .output()
-            .unwrap()
+        self.command().arg("check").args(args).output().unwrap()
     }
 }
 impl Drop for Project {

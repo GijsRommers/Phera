@@ -168,6 +168,9 @@ impl Vm {
         {
             return result;
         }
+        if let Some(result) = self.versioned_ini(intrinsic, name, arguments) {
+            return result;
+        }
         if name.as_bytes() != b"zend.exception_string_param_max_len" {
             return Ok(Value::from("1"));
         }

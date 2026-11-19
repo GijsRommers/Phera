@@ -6,6 +6,7 @@
 
 mod expectf;
 
+use phera_source::LanguageLevel;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -91,6 +92,10 @@ pub fn tests_dir() -> PathBuf {
 ///
 /// Fails if `selected.txt` names a file that doesn't exist in `tests/upstream/`.
 pub fn selected_tests() -> Result<Vec<PathBuf>, String> {
+    selected_tests_for(LanguageLevel::default())
+}
+
+pub fn selected_tests_for(level: LanguageLevel) -> Result<Vec<PathBuf>, String> {
     let tests = tests_dir();
     let list = tests.join("phpt/selected.txt");
     let contents =
@@ -118,7 +123,18 @@ pub fn selected_tests() -> Result<Vec<PathBuf>, String> {
         paths.push(path);
     }
 
-    paths.extend(find_phpt_files(&tests.join("fixtures")));
+    let fixtures = tests.join("fixtures");
+    paths.extend(find_phpt_files(&fixtures).into_iter().filter(|path| {
+        let first = path
+            .strip_prefix(&fixtures)
+            .ok()
+            .and_then(|path| path.iter().next());
+        match first.and_then(std::ffi::OsStr::to_str) {
+            Some("php85") => level == LanguageLevel::Php85,
+            Some("php86") => level == LanguageLevel::Php86,
+            _ => true,
+        }
+    }));
     Ok(paths)
 }
 

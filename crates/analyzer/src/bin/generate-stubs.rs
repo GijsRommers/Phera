@@ -1,4 +1,5 @@
-//! `generate-stubs /path/to/php-src [git-ref]` reads PHP 8.5 without changing its checkout.
+//! `generate-stubs /path/to/php-src [git-ref]` reads PHP without changing its checkout.
+//! Pass `--release-source` in place of the ref for an extracted PHP release.
 //! Use `generate-stubs --extensions /path/to/phpstorm-stubs REF` for optional extensions.
 //! PHP signatures such as `strlen(string $string): int` become committed records.
 
