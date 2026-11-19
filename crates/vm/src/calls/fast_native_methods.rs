@@ -90,7 +90,10 @@ impl Machine<'_> {
         self.registers.truncate(call.start());
         self.registers
             .put(position.frame.base() + destination.index(), value);
-        self.spend_work();
+        if self.spend_work() {
+            self.publish(position.ip);
+            return Step::Yield;
+        }
         Step::Done(position.ip)
     }
 }

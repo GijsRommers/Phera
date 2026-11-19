@@ -44,13 +44,12 @@ impl Vm {
                 arguments,
             )),
         };
-        let use_handler = !self.error_handlers.active
-            && self
-                .error_handlers
-                .error
-                .as_ref()
-                .is_some_and(|handler| handler.levels & level != 0);
-        if use_handler {
+        if level == 256 {
+            self.capture_fatal_trace(event.native.as_ref(), &event.location);
+        } else {
+            self.error_handlers.fatal_trace = None;
+        }
+        if self.handles_diagnostic(level) {
             self.enqueue_diagnostic(event);
             self.drain_error_handlers().await?;
         } else {

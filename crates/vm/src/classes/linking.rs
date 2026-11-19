@@ -63,7 +63,7 @@ impl Vm {
             return Err(super::declaration_errors::link_failure(
                 &unit,
                 index,
-                NativeError::error(format!("Cannot redeclare class {}", existing.name)),
+                NativeError::error(self.class_redeclaration_message(existing, &existing.name)),
             ));
         }
         self.link_new_class(&unit, unit_first, index, key)

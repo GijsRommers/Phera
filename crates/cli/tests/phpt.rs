@@ -39,6 +39,7 @@ const SUPPORTED_SECTIONS: &[&str] = &[
     "ARGS",
     "SKIPIF",
     "EXTENSIONS",
+    "INI",
     "XFAIL",
 ];
 
@@ -121,7 +122,11 @@ fn binary() -> Vec<String> {
         Ok(value) if !value.trim().is_empty() => {
             value.split_whitespace().map(String::from).collect()
         }
-        _ => vec![env!("CARGO_BIN_EXE_phera").to_string()],
+        _ => vec![
+            env!("CARGO_BIN_EXE_phera").to_string(),
+            "-d".into(),
+            "fatal_error_backtraces=0".into(),
+        ],
     }
 }
 
@@ -146,20 +151,21 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
         .section("ARGS")
         .map(|a| a.split_whitespace().collect())
         .unwrap_or_default();
+    let ini = phpt.section("INI").unwrap_or_default();
 
     let probes = [
         phpt.section("EXTENSIONS").map(extension_probe),
         phpt.section("SKIPIF").map(str::to_owned),
     ];
     for probe in probes.into_iter().flatten() {
-        match skip_reason(binary, path, &probe) {
+        match skip_reason(binary, path, &probe, ini) {
             Ok(Some(reason)) => return Outcome::Skip(reason),
             Ok(None) => {}
             Err(error) => return Outcome::Fail(format!("skip check failed: {error}")),
         }
     }
 
-    let outcome = match run_php(binary, path, "php", file, &args) {
+    let outcome = match run_php(binary, path, "php", file, &args, ini) {
         Ok(run) => check_output(&phpt, &run),
         Err(error) => Outcome::Fail(error),
     };
@@ -174,8 +180,13 @@ fn run_test(binary: &[String], path: &Path) -> Outcome {
 
 /// Runs a script that decides whether the test applies. It says no by
 /// printing a line that starts with "skip", as in php-src's `run-tests.php`.
-fn skip_reason(binary: &[String], test: &Path, code: &str) -> Result<Option<String>, String> {
-    let run = run_php(binary, test, "skip.php", code.as_bytes(), &[])?;
+fn skip_reason(
+    binary: &[String],
+    test: &Path,
+    code: &str,
+    ini: &str,
+) -> Result<Option<String>, String> {
+    let run = run_php(binary, test, "skip.php", code.as_bytes(), &[], ini)?;
     let text = String::from_utf8_lossy(&run.stdout);
     let output = text.trim();
     let skips = output.to_ascii_lowercase().starts_with("skip");
@@ -282,6 +293,7 @@ fn run_php(
     extension: &str,
     code: &[u8],
     args: &[&str],
+    ini: &str,
 ) -> Result<Run, String> {
     let source_root = phera_phpt::tests_dir()
         .canonicalize()
@@ -296,9 +308,21 @@ fn run_php(
 
     let dir = script.0.parent().unwrap_or(Path::new("."));
     let executable = resolve_executable(&binary[0]);
+    let directives = ini.lines().map(str::trim).filter_map(|line| {
+        let (name, value) = line.split_once('=')?;
+        if name.starts_with(';') {
+            return None;
+        }
+        Some(format!(
+            "{}={}",
+            name.trim(),
+            value.trim().replace("{PWD}", &dir.to_string_lossy())
+        ))
+    });
 
     let mut child = Command::new(&binary[0])
         .args(&binary[1..])
+        .args(directives.flat_map(|setting| ["-d".into(), setting]))
         .arg(&script.0)
         .args(args)
         .current_dir(dir)

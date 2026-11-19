@@ -92,26 +92,13 @@ impl Vm {
                 self.status = 255;
             }
             NativeError::Unwind(state) => {
-                if state.0.is::<crate::exceptions::Thrown>() {
-                    if let Ok(thrown) = state.0.downcast::<crate::exceptions::Thrown>() {
-                        self.report_throwable(&thrown.object);
-                    }
-                } else if let Ok(failure) = state
-                    .0
-                    .downcast::<crate::error_traces::DeclarationFailure>()
-                {
-                    self.report_diagnostic(
-                        64,
-                        "Fatal error",
-                        failure.message.into(),
-                        SourceLocation {
-                            file: failure.file,
-                            line: failure.line,
-                        },
-                    );
-                    self.status = 255;
+                if let Ok(thrown) = state.0.downcast::<crate::exceptions::Thrown>() {
+                    self.report_throwable(&thrown.object);
                 }
             }
+        }
+        if self.timed_out_objects.is_some() {
+            self.retain_timeout_globals();
         }
         self.call_stack.clear();
         self.finally_stack.clear();

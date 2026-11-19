@@ -46,6 +46,8 @@ pub(crate) struct ErrorHandlers {
     pub(crate) pending: Vec<DiagnosticEvent>,
     pub(crate) reporting: i64,
     pub(crate) last_error: Option<crate::last_error::LastError>,
+    pub(crate) fatal_trace: Option<Value>,
+    pub(crate) fatal_error_backtraces: bool,
     pub(crate) display_errors: bool,
     pub(crate) log_errors: bool,
     pub(crate) trace_ignore_args: bool,
@@ -66,6 +68,8 @@ impl Default for ErrorHandlers {
             pending: Vec::new(),
             reporting: 30719,
             last_error: None,
+            fatal_trace: None,
+            fatal_error_backtraces: true,
             display_errors: true,
             log_errors: false,
             trace_ignore_args: false,
@@ -220,6 +224,9 @@ impl Vm {
     }
 
     pub(crate) fn enqueue_diagnostic(&mut self, event: DiagnosticEvent) {
+        if event.level != 256 {
+            self.error_handlers.fatal_trace = None;
+        }
         self.error_handlers.pending.push(event);
         self.pending_callbacks = true;
     }
@@ -258,7 +265,7 @@ impl Vm {
 
     /// Respect the reporting mask separately from whether a user callback was invoked.
     pub(crate) fn report_event(&mut self, event: DiagnosticEvent) {
-        self.report_diagnostic(event.level, &event.kind, event.message, event.location);
+        self.report_current_diagnostic(event.level, &event.kind, event.message, event.location);
     }
 }
 
