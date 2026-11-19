@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use phera_extension_api::NativeResult;
 use phera_extension_api::reflection::lazy::{LazyClassQuery, LazyPropertyOperation};
-use phera_extension_api::reflection::{MemberInfo, PropertyWrite};
+use phera_extension_api::reflection::{LazyReflectionRead, MemberInfo, PropertyWrite};
 use phera_value::{LazyObject, LazyStrategy, Object, Value};
 
 use crate::Vm;
@@ -15,6 +15,39 @@ use crate::lazy_objects::resolved_lazy_instance;
 use super::{exception, properties::property_at};
 
 impl Vm {
+    pub(super) fn reflection_after_initialization(
+        &mut self,
+        object: Rc<Object>,
+        read: LazyReflectionRead,
+    ) -> NativeResult {
+        let object = resolved_lazy_instance(object);
+        if object.is_uninitialized_lazy() {
+            return Err(ReflectInitialize {
+                object,
+                operation: ReflectedOperation::Inspect(read),
+            }
+            .suspend());
+        }
+        read(self, object)
+    }
+
+    pub(super) fn reflection_instance_has_property(
+        &mut self,
+        object: Rc<Object>,
+        name: String,
+    ) -> NativeResult {
+        let object = resolved_lazy_instance(object);
+        let (exists, requires_init) = self.lazy_property_exists_status(&object, &name)?;
+        if requires_init {
+            return Err(ReflectInitialize {
+                object,
+                operation: ReflectedOperation::HasProperty(name),
+            }
+            .suspend());
+        }
+        Ok(Value::Bool(exists))
+    }
+
     pub(super) fn reflection_lazy_object(
         &mut self,
         object: Rc<Object>,
