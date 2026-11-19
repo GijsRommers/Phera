@@ -24,7 +24,24 @@ fn object_handler_failures_match_php() {
     let (comparison, script) = oracle("session-callbacks", CALLBACKS);
     let matched = comparison
         .compare(&script, |_, _| {})
-        .unwrap_or_else(|error| panic!("{error} in {}", comparison.artifacts.display()));
+        .unwrap_or_else(|error| {
+            let php = std::fs::read_to_string(comparison.artifacts.join("script.php.out"))
+                .unwrap_or_default();
+            let phera = std::fs::read_to_string(comparison.artifacts.join("script.phera.out"))
+                .unwrap_or_default();
+            let difference = php
+                .lines()
+                .zip(phera.lines())
+                .enumerate()
+                .find(|(_, (expected, actual))| expected != actual);
+            if let Some((case, (expected, actual))) = difference {
+                panic!(
+                    "{error} at case {}:\n  PHP: {expected}\n  Phera: {actual}",
+                    case + 1
+                );
+            }
+            panic!("{error} in {}", comparison.artifacts.display());
+        });
     assert_eq!(String::from_utf8_lossy(&matched.stdout).lines().count(), 63);
 }
 

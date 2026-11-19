@@ -26,6 +26,9 @@ class V implements SessionHandlerInterface, SessionIdInterface, SessionUpdateTim
     #[ReturnTypeWillChange] public function validateId($id) {return $this->run('validate', true);}
     #[ReturnTypeWillChange] public function updateTimestamp($id,$data) {return $this->run('touch', true);}
 }
+session_save_path('');
+ini_set('session.serialize_handler', 'php');
+ini_set('session.lazy_write', 1);
 ini_set('session.gc_probability', 0);
 ini_set('session.use_cookies', 0);
 session_cache_limiter('');
