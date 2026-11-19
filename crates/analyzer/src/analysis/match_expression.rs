@@ -22,6 +22,24 @@ impl Analyzer<'_> {
                     break;
                 };
                 let value = crate::constants::value(condition, &branch);
+                if let Some(crate::constants::ConstantValue::Bool(subject)) = subject
+                    && value.is_none()
+                {
+                    let branches = self.condition(condition, branch, false);
+                    let (hits, misses) = if subject {
+                        (branches.yes, branches.no)
+                    } else {
+                        (branches.no, branches.yes)
+                    };
+                    // A truthy non-boolean value can still fail strict matching.
+                    remaining = if branches.ty == ValueType::Bool {
+                        misses
+                    } else {
+                        condition::Condition::merge(hits.clone(), misses)
+                    };
+                    selected.extend(hits);
+                    continue;
+                }
                 if self.expression(condition, &mut branch, false) == ValueType::Never {
                     break;
                 }

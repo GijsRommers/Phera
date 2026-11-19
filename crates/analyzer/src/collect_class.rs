@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 pub fn class_info(
     class: &ClassDeclaration,
     names: &Names,
+    source: &str,
     location: &impl Fn(usize) -> Location,
 ) -> ClassInfo {
     let resolve = |n: &Name| names.resolve(n, UseKind::Class)[0].clone();
@@ -25,9 +26,11 @@ pub fn class_info(
         constants: BTreeMap::new(),
         location: location(class.span.start),
         open_properties: false,
+        documented: crate::phpdoc::preceding(source, class.span.start)
+            .map_or_else(Default::default, |doc| crate::phpdoc::members(doc, names)),
     };
     for member in &class.members {
-        add_member(&mut info, member, names, location);
+        add_member(&mut info, member, names, source, location);
     }
     crate::enums::add_members(&mut info, class, names);
     info.open_properties = class
@@ -41,11 +44,12 @@ fn add_member(
     info: &mut ClassInfo,
     member: &ClassMember,
     names: &Names,
+    source: &str,
     location: &impl Fn(usize) -> Location,
 ) {
     match &member.kind {
         ClassMemberKind::Method(method) => {
-            add_method(info, method, names, member.span.start, location)
+            add_method(info, method, names, source, member.span.start, location)
         }
         ClassMemberKind::Property {
             modifiers,
@@ -91,6 +95,7 @@ fn add_method(
     info: &mut ClassInfo,
     method: &Method,
     names: &Names,
+    source: &str,
     offset: usize,
     location: &impl Fn(usize) -> Location,
 ) {
@@ -100,6 +105,7 @@ fn add_method(
         names,
         location(offset),
     );
+    signature.apply_phpdoc(crate::phpdoc::preceding(source, offset), names);
     signature.modifiers = method.modifiers;
     signature.global_effects = method
         .body

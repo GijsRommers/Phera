@@ -31,17 +31,24 @@ pub fn link_classes(index: &mut Index, names: &[String]) {
                         method,
                         alias,
                         visibility,
-                    } => (
-                        source.unwrap_or_else(|| (*class_name).clone()),
-                        method,
-                        alias,
-                        visibility,
-                    ),
+                    } => (source, method, alias, visibility),
                     MemberAdaptation::Precedence { source, method } => {
-                        (source, method.clone(), method, None)
+                        (Some(source), method.clone(), method, None)
                     }
                 };
-                let Some(mut signature) = index.method(&source, &method).cloned() else {
+                let signature = if let Some(source) = source {
+                    index.method(&source, &method)
+                } else {
+                    // An unqualified alias names an imported method, even if
+                    // the consuming class declares an override with its old name.
+                    index.class(class_name).and_then(|class| {
+                        class
+                            .traits
+                            .iter()
+                            .find_map(|source| index.method(source, &method))
+                    })
+                };
+                let Some(mut signature) = signature.cloned() else {
                     continue;
                 };
                 if let Some(visibility) = visibility {

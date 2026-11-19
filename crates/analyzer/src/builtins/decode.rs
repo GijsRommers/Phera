@@ -77,6 +77,7 @@ fn class(f: &[&str]) -> ClassInfo {
         constants: BTreeMap::new(),
         location: location(f[9]),
         open_properties: f[8] == "true",
+        documented: Default::default(),
     }
 }
 
@@ -92,6 +93,7 @@ fn signature(f: &[&str]) -> Signature {
                 optional: p[2] == "true",
                 variadic: p[3] == "true",
                 by_reference: p[4] == "true",
+                closure_receiver: None,
             })
         })
         .collect();

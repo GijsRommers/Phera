@@ -60,6 +60,14 @@ pub fn load(root: &Path) -> Result<Autoload, String> {
         }
         Ok(())
     })?;
+    // Composer requires its loader before registering the generated maps.
+    let loader = composer.join("ClassLoader.php");
+    if loader.is_file() {
+        autoload
+            .classmap
+            .entry("composer\\autoload\\classloader".into())
+            .or_insert(loader);
+    }
     Ok(autoload)
 }
 

@@ -20,14 +20,19 @@ impl Analyzer<'_> {
         }
         self.depth += 1;
         let mut flow = Flow::Next;
-        for statement in statements {
+        for (position, statement) in statements.iter().enumerate() {
             if flow != Flow::Next {
                 if !contains_label(statement) {
                     continue;
                 }
                 scope.unknown_writes();
             }
+            let binding = self.pending_binding.clone();
+            if let Some(next) = statements.get(position + 1) {
+                self.prepare_local_rebinding(statement, next, scope);
+            }
             flow = self.statement(statement, scope);
+            self.pending_binding = binding;
         }
         self.depth -= 1;
         flow
@@ -50,6 +55,20 @@ impl Analyzer<'_> {
             | StatementKind::DoWhile { .. }
             | StatementKind::For { .. }
             | StatementKind::Foreach { .. } => return self.iteration(statement, scope),
+            StatementKind::Const { attributes, items } => {
+                self.check_attributes(attributes, scope);
+                for constant in items {
+                    self.expression(&constant.value, scope, false);
+                }
+            }
+            StatementKind::Echo(expressions) => {
+                if expressions
+                    .iter()
+                    .any(|expr| self.expression(expr, scope, false) == ValueType::Never)
+                {
+                    return Flow::Terminal;
+                }
+            }
             StatementKind::Global(_) | StatementKind::Static(_) | StatementKind::Unset(_) => {
                 self.binding_statement(statement, scope)
             }
@@ -134,7 +153,11 @@ impl Analyzer<'_> {
             if self.context.returns == ValueType::Void {
                 self.report(Finding::VoidReturn, span);
             }
-        } else if self.context.declared_return && self.context.returns != ValueType::Void {
+        } else if self.level == 1
+            && self.context.declared_return
+            && !self.context.generator
+            && self.context.returns != ValueType::Void
+        {
             self.report(Finding::MissingReturn(self.context.function.clone()), span);
         }
         self.record_return(scope);
@@ -148,38 +171,11 @@ impl Analyzer<'_> {
         otherwise: Option<&[Statement]>,
         scope: &mut Scope,
     ) -> Flow {
-        let truth = self.condition_truth(condition, scope);
-        if self.expression(condition, scope, false) == ValueType::Never {
-            return Flow::Terminal;
-        }
-        if let Some(truth) = truth
-            && !(if truth {
-                otherwise.is_some_and(|body| body.iter().any(contains_label))
-            } else {
-                then.iter().any(contains_label)
-            })
-        {
-            return if truth {
-                self.block(then, scope)
-            } else {
-                otherwise.map_or(Flow::Next, |body| self.block(body, scope))
-            };
-        }
-        let mut left = scope.clone();
-        let mut right = scope.clone();
-        self.refine(condition, &mut left, true);
-        self.refine(condition, &mut right, false);
-        let a = self.block(then, &mut left);
-        let b = otherwise.map_or(Flow::Next, |body| self.block(body, &mut right));
-        let mut paths = Vec::new();
-        if a == Flow::Next {
-            paths.push(left);
-        }
-        if b == Flow::Next {
-            paths.push(right);
-        }
-        if !paths.is_empty() {
-            *scope = Scope::join(&paths);
+        let branches = self.condition(condition, scope.clone(), false);
+        let (a, left) = self.statement_branch(then, branches.yes, scope);
+        let (b, right) = self.statement_branch(otherwise.unwrap_or_default(), branches.no, scope);
+        if let Some(after) = condition::Condition::merge(left, right) {
+            *scope = after;
             return Flow::Next;
         }
         if a == Flow::Terminal && b == Flow::Terminal {
@@ -189,6 +185,24 @@ impl Analyzer<'_> {
         } else {
             Flow::Continue
         }
+    }
+    fn statement_branch(
+        &mut self,
+        body: &[Statement],
+        branch: Option<Scope>,
+        entry: &Scope,
+    ) -> (Flow, Option<Scope>) {
+        let mut scope = match branch {
+            Some(scope) => scope,
+            None if body.iter().any(contains_label) => {
+                let mut scope = entry.clone();
+                scope.unknown_writes();
+                scope
+            }
+            None => return (Flow::Terminal, None),
+        };
+        let flow = self.block(body, &mut scope);
+        (flow, (flow == Flow::Next).then_some(scope))
     }
 }
 

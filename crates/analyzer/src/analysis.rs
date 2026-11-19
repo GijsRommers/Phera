@@ -17,6 +17,7 @@ use phera_source::Span;
 mod arguments;
 mod assignments;
 mod atoms;
+mod attributes;
 mod binding_statements;
 mod bindings;
 mod callable_signatures;
@@ -24,12 +25,15 @@ mod calls;
 mod closure_binding;
 mod coalesce_assignment;
 mod composite;
+mod condition;
 mod control;
 mod declarations;
 mod deferred_declarations;
 mod exceptions;
 mod expressions;
 mod finally;
+mod function_calls;
+mod generators;
 mod intrinsics;
 mod invocations;
 mod logical;
@@ -57,6 +61,7 @@ pub struct Context {
     pub unbound_this: Option<Vec<crate::index::Location>>,
     pub returns: ValueType,
     pub declared_return: bool,
+    pub generator: bool,
     pub by_reference: bool,
     pub function: String,
     pub scope_kind: ScopeKind,
@@ -106,6 +111,7 @@ impl<'a> Analyzer<'a> {
                 unbound_this: None,
                 returns: ValueType::Mixed,
                 declared_return: false,
+                generator: false,
                 by_reference: false,
                 function: "top level".into(),
                 scope_kind: ScopeKind::Global,
@@ -135,6 +141,11 @@ impl<'a> Analyzer<'a> {
                 } else {
                     self.report(Finding::ThisContext, span);
                 }
+            }
+            if let Some(narrowed) = scope.variables.get("this")
+                && matches!(narrowed.ty, ValueType::Class(_))
+            {
+                return narrowed.ty.clone();
             }
             return self
                 .context

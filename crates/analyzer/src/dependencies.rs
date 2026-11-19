@@ -58,7 +58,11 @@ impl Dependencies {
             // A dependency may contain a polyfill or declarations already found
             // in the requested paths. Keep those callers' original signatures.
             for (name, class) in declarations.classes {
-                index.classes.entry(name).or_insert(class);
+                if let std::collections::btree_map::Entry::Vacant(entry) = index.classes.entry(name)
+                {
+                    index.trait_users.record(&class);
+                    entry.insert(class);
+                }
             }
             for (name, function) in declarations.functions {
                 index.functions.entry(name).or_insert(function);
@@ -105,6 +109,7 @@ impl Dependencies {
                         .iter()
                         .chain(&class.interfaces)
                         .chain(&class.traits)
+                        .chain(&class.documented.mixins)
                         .cloned(),
                 );
                 if !class.adaptations.is_empty() {

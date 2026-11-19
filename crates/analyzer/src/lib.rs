@@ -16,11 +16,13 @@ mod enums;
 pub mod global_effects;
 pub mod index;
 pub mod names;
+mod phpdoc;
 pub mod project;
 pub mod rules;
 pub mod scope;
 pub mod stubs;
 mod suppress;
+mod trait_users;
 mod traits;
 pub mod types;
 mod walk;
@@ -55,6 +57,9 @@ fn check_project(options: &Options) -> Result<Report, String> {
     let mut index = builtins::load_supported();
     for file in &files {
         collect::collect(&mut index, &file.path, &file.source, &file.program);
+    }
+    for class in index.classes.values() {
+        index.trait_users.record(class);
     }
     let scan = project::discover(&options.scan, &options.exclude)?;
     let mut dependencies = dependencies::Dependencies::load(&mut index, &options.paths, &paths)?;

@@ -54,7 +54,9 @@ impl Analyzer<'_> {
                     .index
                     .class(class)
                     .is_some_and(|c| c.kind != ClassKind::Trait)
-                && !self.index.open_properties(class)
+                && (matches!(access, PropertyAccess::Static)
+                    || !self.index.open_properties(class)
+                        && !self.index.documented_property(class, name))
             {
                 let finding = match access {
                     PropertyAccess::Instance => Finding::UnknownProperty(class.into(), name.into()),

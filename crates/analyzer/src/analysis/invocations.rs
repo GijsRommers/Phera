@@ -20,18 +20,27 @@ impl Analyzer<'_> {
                 arguments,
                 ..
             } => {
+                let binding = self.pending_binding.take();
+                self.prepare_inline_receiver(target, name, arguments, scope);
                 let ty = self.expression(target, scope, quiet);
+                self.pending_binding = binding;
                 if ty == ValueType::Never {
                     return ty;
                 }
-                self.method_call(
-                    &ty,
-                    name,
-                    arguments,
-                    scope,
-                    expression.span,
-                    Access::object(target),
-                )
+                let access = match (&target.kind, name) {
+                    (
+                        ExpressionKind::Variable(Variable::Named(receiver)),
+                        MemberName::Identifier(name),
+                    ) if scope.known.contains(&Symbol::Method(
+                        receiver.clone(),
+                        name.name.to_ascii_lowercase(),
+                    )) =>
+                    {
+                        Access::Inferred
+                    }
+                    _ => Access::object(target),
+                };
+                self.method_call(&ty, name, arguments, scope, expression.span, access)
             }
             ExpressionKind::StaticCall {
                 class,
