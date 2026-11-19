@@ -5,6 +5,7 @@
 //! worker thread holds a clone; all clones use the same extension registry
 //! and the same compiled code.
 
+mod boot;
 mod cache;
 mod constant_calls;
 mod environment;
@@ -16,6 +17,7 @@ mod http;
 mod ini_tests;
 #[cfg(test)]
 mod process_oracle_tests;
+mod snapshots;
 
 use std::path::Path;
 use std::rc::Rc;
@@ -31,9 +33,11 @@ use phera_vm::{NativeTables, Vm};
 
 use cache::{CodeCache, FileMode};
 
+pub use boot::BootReport;
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse};
 pub use phera_vm::OutputSink;
+pub use snapshots::remembered as snapshot_remembered;
 
 #[derive(Clone)]
 pub struct Runtime {
@@ -43,16 +47,29 @@ pub struct Runtime {
     web_cache: CodeCache,
     environment: Arc<Environment>,
     startup_ini: Arc<[(String, String)]>,
+    /// When a worker looks for changed files of its snapshots.
+    revalidation: snapshots::Revalidation,
 }
 
-/// A web worker links the process's native definitions once on its own thread.
+/// A web worker links the process's native definitions once on its own
+/// thread, and keeps the snapshots of the scripts it booted. Cheap to clone:
+/// the clones share everything, on the same thread.
+#[derive(Clone)]
 pub struct WebWorker {
     runtime: Runtime,
-    native: NativeTables,
+    /// The worker's number, for its log lines.
+    index: usize,
+    native: Rc<NativeTables>,
     environment: Rc<PhpArray>,
+    snapshots: Rc<snapshots::WorkerSnapshots>,
 }
 
 impl WebWorker {
+    /// The worker's number.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
     pub async fn handle_request(
         &self,
         script: &Path,
@@ -92,6 +109,11 @@ impl Runtime {
         registry.class(phera_extension_api::ClassEntry {
             parent: Some("LogicException"),
             ..phera_extension_api::ClassEntry::class("Phera\\NotSupportedException")
+        });
+        // Thrown by `Phera\snapshot()` when the state cannot be kept.
+        registry.class(phera_extension_api::ClassEntry {
+            parent: Some("RuntimeException"),
+            ..phera_extension_api::ClassEntry::class("Phera\\SnapshotException")
         });
         registry.load(&phera_ext_standard::Standard);
         registry.load(&phera_ext_tokenizer::Tokenizer);
@@ -133,11 +155,13 @@ impl Runtime {
             registry,
             environment: Arc::new(environment),
             startup_ini: Arc::new([]),
+            revalidation: snapshots::Revalidation::from_ini(&[]),
         }
     }
 
     /// Settings supplied by the host before each request begins.
     pub fn with_startup_ini(mut self, settings: Vec<(String, String)>) -> Self {
+        self.revalidation = snapshots::Revalidation::from_ini(&settings);
         self.startup_ini = settings.into();
         self
     }
@@ -179,12 +203,15 @@ impl Runtime {
         })
     }
 
-    /// Create this on the thread that will run the web requests.
-    pub fn web_worker(&self) -> WebWorker {
+    /// Create this on the thread that will run the web requests; `index`
+    /// is the worker's number.
+    pub fn web_worker(&self, index: usize) -> WebWorker {
         WebWorker {
             runtime: self.clone(),
-            native: NativeTables::new(self.web_registry.clone()),
+            index,
+            native: Rc::new(NativeTables::new(self.web_registry.clone())),
             environment: self.inherited_environment(),
+            snapshots: Default::default(),
         }
     }
 
@@ -195,7 +222,7 @@ impl Runtime {
         document_root: &Path,
         request: HttpRequest,
     ) -> HttpResponse {
-        self.web_worker()
+        self.web_worker(0)
             .handle_request(script, document_root, request)
             .await
     }
@@ -236,7 +263,25 @@ impl Runtime {
             None => None,
         };
 
-        let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
+        let (plan, reboot) = worker.snapshots.plan(script, self.revalidation);
+        if reboot {
+            worker.boot_in_background(script, document_root);
+        }
+        let mut vm = match plan {
+            snapshots::Plan::Fork(snapshot) => match snapshot.fork() {
+                Ok(vm) => vm,
+                Err(error) => {
+                    eprintln!(
+                        "phera: worker {}: forking the snapshot of {} failed: {error}",
+                        worker.index,
+                        script.display()
+                    );
+                    self.new_classic_vm(worker)
+                }
+            },
+            snapshots::Plan::Classic => self.new_classic_vm(worker),
+        };
+        let forked = vm.is_fork();
         let uploads = http::define_superglobals(
             &mut vm,
             &request,
@@ -260,7 +305,17 @@ impl Runtime {
         if buffered_post && let Some(input) = phera_ext_streams::request_input(vm.state_mut()) {
             input.mark_post_read();
         }
-        let exit_status = vm.run(unit).await;
+        let exit_status = if forked {
+            vm.resume().await
+        } else {
+            vm.run(unit).await
+        };
+        // The first start of a script that snapshots cannot know it does:
+        // the request that first reaches the call has the worker boot it.
+        if !forked && vm.snapshot_called() && !worker.snapshots.knows(script) {
+            snapshots::remember(script);
+            worker.boot_in_background(script, document_root);
+        }
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
 
         // What the script did not move is deleted, as PHP does.
@@ -319,6 +374,13 @@ impl Runtime {
 
     fn inherited_environment(&self) -> Rc<PhpArray> {
         Rc::new(php_array(self.environment.iter()))
+    }
+
+    /// A request VM that runs its script from the top.
+    fn new_classic_vm(&self, worker: &WebWorker) -> Vm {
+        let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
+        vm.set_snapshot_mode(phera_vm::SnapshotMode::Classic);
+        vm
     }
 
     fn new_vm(&self, native: &NativeTables, sapi: Sapi, environment: Rc<PhpArray>) -> Vm {

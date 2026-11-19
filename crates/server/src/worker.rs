@@ -83,6 +83,7 @@ pub(super) fn run(
         // Built here, inside this worker's runtime, so its non-Send state
         // (Rc fields) never leaves this thread.
         let handler = factory.create(index);
+        handler.start().await;
         let listener = {
             // Tokio refuses to register a blocking socket.
             let listener = listener;

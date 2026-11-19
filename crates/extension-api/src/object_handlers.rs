@@ -129,6 +129,22 @@ pub type PropertyProjection =
 pub type NativeCount = fn(&mut dyn Context, &Object) -> Result<i64, NativeError>;
 pub type MethodForwarder = fn(&Object) -> Result<Option<Rc<Object>>, NativeError>;
 
+/// Copies an object's native state for a fork of a snapshot: every PHP value
+/// inside goes through the [`phera_value::Fork`] (`fork.value(...)`), so that
+/// objects inside are replaced by their copies. Returns why the object
+/// cannot be copied instead (an open connection, a running query).
+///
+/// ```php
+/// $stack = new SplStack;
+/// $stack->push(new Job);
+/// Phera\snapshot();   // each request gets its own stack with its own Job
+/// ```
+pub type NativeForkHook = fn(
+    &Object,
+    &dyn std::any::Any,
+    &mut phera_value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String>;
+
 #[derive(Clone, Copy, Default)]
 pub struct ClassHooks {
     pub clone: Option<NativeClone>,
@@ -146,6 +162,9 @@ pub struct ClassHooks {
     pub count: Option<NativeCount>,
     /// Resolve an otherwise missing instance method on a wrapped receiver.
     pub forward_method: Option<MethodForwarder>,
+    /// Copies the native state for a fork; `None` means the class keeps no
+    /// state a fork could copy, and an object with state refuses.
+    pub fork: Option<NativeForkHook>,
 }
 
 impl ClassHooks {
@@ -160,5 +179,6 @@ impl ClassHooks {
         dimensions: None,
         count: None,
         forward_method: None,
+        fork: None,
     };
 }

@@ -64,7 +64,7 @@ pub(crate) enum ScriptEnd {
 }
 
 /// The request's state for its end.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct RequestEnd {
     /// The main script's code; its frame keeps its registers until the end.
     pub(crate) main: Option<FunctionIndex>,

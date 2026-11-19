@@ -79,3 +79,11 @@ fn sole_object_owner(value: &Value) -> bool {
         _ => false,
     }
 }
+
+impl crate::snapshot::ForkCopy for Globals {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        Globals {
+            values: self.values.fork_copy(fork),
+        }
+    }
+}

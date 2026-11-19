@@ -33,12 +33,12 @@ pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn, SyncSelector};
 pub use object_handlers::{
     ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeClone,
-    NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,
+    NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeForkHook, NativeIterator,
     PropertyProjection, PropertyPurpose,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
 pub use registry::{ConstantValue, Registry};
-pub use state::RequestState;
+pub use state::{RequestState, StateFork, copy_state, fresh_state};
 pub use working_directory::WorkingDirectory;
 
 /// The PHP version exposed by the engine and its built-in modules.

@@ -36,6 +36,7 @@ pub(crate) struct UnitCache {
 /// after a successful or failed absolute declaration check. Relative types bypass
 /// this cache. Retained immutable classes cannot change ancestry or reuse an
 /// identity; request-owned UnitCaches prevent declarations leaking across requests.
+#[derive(Clone)]
 pub(crate) struct ClassTypeEntry {
     pub(crate) class: Rc<dyn phera_value::ClassHandle>,
     pub(crate) matches: bool,
@@ -134,5 +135,46 @@ pub(crate) fn value(constant: &Constant) -> Value {
         Constant::Int(value) => Value::Int(*value),
         Constant::Float(value) => Value::Float(*value),
         Constant::String(value) => Value::from(value.clone()),
+    }
+}
+
+/// A fork keeps the caches warm: classes are shared, resolved callables
+/// are copied (see `crate::snapshot`).
+impl crate::snapshot::ForkCopy for UnitCache {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        let sites = |sites: &Vec<RefCell<CachedSite>>, fork: &mut phera_value::Fork<'_>| {
+            sites
+                .iter()
+                .map(|site| RefCell::new(site.borrow().fork_copy(fork)))
+                .collect::<Vec<_>>()
+        };
+        UnitCache {
+            trace_file: self.trace_file.clone(),
+            names: self.names.clone(),
+            symbols: RefCell::new(self.symbols.borrow().fork_copy(fork)),
+            direct_natives: self.direct_natives.clone(),
+            constants: self.constants.clone(),
+            class_names: self.class_names.clone(),
+            classes: self.classes.clone(),
+            type_scopes: self.type_scopes.clone(),
+            class_types: self.class_types.clone(),
+            main_sites: sites(&self.main_sites, fork),
+            function_sites: self
+                .function_sites
+                .iter()
+                .map(|function| sites(function, fork))
+                .collect(),
+            closure_signatures: RefCell::new(self.closure_signatures.borrow().fork_copy(fork)),
+        }
+    }
+}
+
+impl crate::snapshot::ForkCopy for CachedSite {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        match self {
+            CachedSite::Empty => CachedSite::Empty,
+            CachedSite::Property(entry) => CachedSite::Property(entry.clone()),
+            CachedSite::Function(linked) => CachedSite::Function(Box::new(linked.fork_copy(fork))),
+        }
     }
 }

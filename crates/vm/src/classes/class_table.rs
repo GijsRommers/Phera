@@ -27,7 +27,7 @@ impl ClassIndex {
 }
 
 /// Definitions linked once per worker for built-ins, or per request for PHP classes.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct ClassDefinitions {
     /// Preserve registration/declaration order for get_declared_classes.
     pub(crate) order: Vec<String>,
@@ -160,6 +160,11 @@ impl ClassTable {
         self.local.order.push(name.clone());
         self.local.entries.insert(name, class);
         true
+    }
+
+    /// The request's own classes, in declaration order.
+    pub(crate) fn local_classes(&self) -> impl Iterator<Item = &Rc<Class>> {
+        self.local.numbered.iter()
     }
 
     pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
@@ -320,6 +325,26 @@ impl Drop for ClassTable {
 }
 
 impl ClassTable {
+    /// The class table of a fork: the same classes (immutable, shared), the
+    /// method tables built so far (they use name numbers the fork shares),
+    /// and the fork's own objects and id pool.
+    pub(crate) fn forked(&self, ids: Rc<ObjectIds>, objects: Vec<Weak<Object>>) -> ClassTable {
+        ClassTable {
+            native: self.native.clone(),
+            local: self.local.clone(),
+            has_dimensions: self.has_dimensions,
+            has_property_views: self.has_property_views,
+            has_lazy_objects: self.has_lazy_objects,
+            native_count: self.native_count,
+            native_methods: self.native_methods.clone(),
+            local_methods: self.local_methods.clone(),
+            objects,
+            ids,
+            allocations_before_collection: self.allocations_before_collection.clone(),
+            collection_requested: false,
+        }
+    }
+
     /// Mirrors name lookup for external handles, while linked VM classes carry
     /// a weak self identity whose owner is already kept alive by the object.
     pub(crate) fn for_object(&self, object: &Object) -> Option<Rc<Class>> {

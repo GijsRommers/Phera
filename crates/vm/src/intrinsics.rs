@@ -48,6 +48,8 @@ pub(crate) enum Intrinsic {
     ErrorReporting,
     /// The cycle collector belongs to the request.
     Gc(crate::cycles::GcFunction),
+    /// `Phera\snapshot()` copies the whole VM (see `crate::snapshot`).
+    Snapshot,
 }
 
 impl Intrinsic {
@@ -88,6 +90,7 @@ impl Intrinsic {
             "func_get_args" => Self::FuncGetArgs,
             "func_get_arg" => Self::FuncGetArg,
             "error_reporting" => Self::ErrorReporting,
+            "phera\\snapshot" => Self::Snapshot,
             name => {
                 if let Some(function) = crate::cycles::GcFunction::resolve(name) {
                     Self::Gc(function)
@@ -136,8 +139,8 @@ impl Intrinsic {
     pub(crate) fn parameters(self) -> Option<&'static [phera_extension_api::Param]> {
         match self {
             Self::Class(function) => Some(function.parameters()),
-            // The gc_* functions take no arguments.
-            Self::Gc(_) => Some(&[]),
+            // The gc_* functions take no arguments, nor does Phera\snapshot.
+            Self::Gc(_) | Self::Snapshot => Some(&[]),
             Self::SplAutoload(function) => Some(function.parameters()),
             Self::Runtime(function) => Some(function.parameters()),
             Self::Output(function) => Some(function.parameters()),
@@ -171,6 +174,7 @@ impl Intrinsic {
             "get_exception_handler",
             "trigger_error",
             "user_error",
+            "Phera\\snapshot",
         ]
         .into_iter()
         .chain(

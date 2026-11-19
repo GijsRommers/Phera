@@ -29,6 +29,14 @@ impl ExecutionTime {
             .set((seconds > 0 && self.polling.get()).then(thread_cpu_time));
     }
 
+    /// A fork's clock: the limit in force at the snapshot, as the boot code
+    /// would have set it in each request, and no time used yet.
+    pub(crate) fn forked(&self) -> Self {
+        let clock = ExecutionTime::default();
+        clock.seconds.set(self.seconds.get());
+        clock
+    }
+
     fn charge(&self) {
         if let Some(started) = self.started.get() {
             let now = thread_cpu_time();

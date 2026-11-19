@@ -7,6 +7,7 @@ use phera_extension_api::{LocalFuture, Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
 pub use native_tables::NativeTables;
+pub use snapshot::{BootOutcome, Snapshot, SnapshotMode};
 
 use crate::calls::frame::{Frame, FrameView};
 use crate::path::AccessPath;
@@ -161,6 +162,7 @@ mod request_end;
 mod scope_intrinsics;
 mod sensitive_parameters;
 mod serialization;
+mod snapshot;
 mod spl_autoload;
 mod static_variables;
 mod string_comparison;
@@ -275,6 +277,8 @@ pub struct Vm {
     active_fiber: Option<Box<fibers::Active>>,
     fiber_bailout: bool,
     suspended_fibers: fibers::SuspendedFibers,
+    /// What `Phera\snapshot()` does here, and the state it kept.
+    snapshot: snapshot::SnapshotState,
 }
 
 impl Vm {
@@ -305,6 +309,7 @@ impl Vm {
             active_fiber: None,
             fiber_bailout: false,
             suspended_fibers: Default::default(),
+            snapshot: Default::default(),
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
@@ -422,25 +427,38 @@ impl Vm {
             }
         }
         self.publish_declaration_warnings(&unit);
-        let end = if let Err(error) = self.hoist_classes(&unit, main) {
+        if let Err(error) = self.hoist_classes(&unit, main) {
             self.unwind(error);
-            request_end::ScriptEnd::Fatal
-        } else {
-            match self.interpret(0).await {
-                Ok(_) => request_end::ScriptEnd::Destructible,
-                Err(error) => {
-                    let mut error = self.materialize_error(error);
-                    // The frames the error left released their variables;
-                    // PHP runs those destructors before it reports the error.
-                    if let Err(failure) = self.run_destructors().await {
-                        error = self.materialize_error(failure);
-                    }
-                    let end = request_end::ScriptEnd::of(&error);
-                    self.report_uncaught(error).await;
-                    end
+            return self.end_script(request_end::ScriptEnd::Fatal).await;
+        }
+        self.run_script_body().await
+    }
+
+    /// Runs the script from where its frames are to its end, then ends the
+    /// request. A fork of a snapshot starts here (see `crate::snapshot`).
+    async fn run_script_body(&mut self) -> i32 {
+        let end = match self.interpret(0).await {
+            Ok(_) => request_end::ScriptEnd::Destructible,
+            // A boot run stopped at `Phera\snapshot()`: its state is kept,
+            // and nothing more of it runs.
+            Err(_) if self.snapshot.taken.is_some() => return self.status,
+            Err(error) => {
+                let mut error = self.materialize_error(error);
+                // The frames the error left released their variables;
+                // PHP runs those destructors before it reports the error.
+                if let Err(failure) = self.run_destructors().await {
+                    error = self.materialize_error(failure);
                 }
+                let end = request_end::ScriptEnd::of(&error);
+                self.report_uncaught(error).await;
+                end
             }
         };
+        self.end_script(end).await
+    }
+
+    /// Output, shutdown functions, destructors and headers at the end.
+    async fn end_script(&mut self, end: request_end::ScriptEnd) -> i32 {
         if self.output_pending()
             && let Err(error) = self.drain_output().await
         {

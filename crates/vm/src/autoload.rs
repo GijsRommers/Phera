@@ -300,3 +300,22 @@ impl Vm {
         Ok(())
     }
 }
+
+impl crate::snapshot::ForkCopy for RegisteredLoader {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        RegisteredLoader {
+            callee: self.callee.fork_copy(fork),
+            display: fork.value(&self.display),
+        }
+    }
+}
+
+impl crate::snapshot::ForkCopy for Autoloaders {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        Autoloaders {
+            callbacks: self.callbacks.fork_copy(fork),
+            extensions: self.extensions.clone(),
+            active: Default::default(),
+        }
+    }
+}

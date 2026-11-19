@@ -135,9 +135,9 @@ struct SiteHandlerFactory {
 }
 
 impl HandlerFactory for SiteHandlerFactory {
-    fn create(&self, _worker_index: usize) -> Rc<dyn Handler> {
+    fn create(&self, worker_index: usize) -> Rc<dyn Handler> {
         Rc::new(SiteHandler {
-            runtime: self.runtime.web_worker(),
+            runtime: self.runtime.web_worker(worker_index),
             site: self.site.clone(),
             compress: self.compress,
             trusted_proxies: self.trusted_proxies.clone(),
@@ -161,9 +161,40 @@ impl Handler for SiteHandler {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>> {
         Box::pin(self.respond(request))
     }
+
+    fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+        Box::pin(self.boot())
+    }
 }
 
 impl SiteHandler {
+    /// Boots the front controller before the first connection when it is
+    /// known to call `Phera\snapshot()` (see `phera_runtime::BootReport`).
+    async fn boot(&self) {
+        let Some(script) = self.site.front_controller() else {
+            return;
+        };
+        if !phera_runtime::snapshot_remembered(script) {
+            return;
+        }
+        let worker = self.runtime.index();
+        match self.runtime.boot(script, self.site.document_root()).await {
+            phera_runtime::BootReport::Snapshot { elapsed, files } => println!(
+                "Worker {worker} booted {} in {} ms ({files} files); requests continue after Phera\\snapshot()",
+                script.display(),
+                elapsed.as_millis()
+            ),
+            phera_runtime::BootReport::Classic => println!(
+                "Worker {worker}: {} ended without calling Phera\\snapshot(); it runs from the top for every request",
+                script.display()
+            ),
+            phera_runtime::BootReport::Failed(message) => eprintln!(
+                "Worker {worker}: booting {} failed, requests run from the top until a boot succeeds: {message}",
+                script.display()
+            ),
+        }
+    }
+
     async fn respond(&self, request: Request) -> Response {
         // A platform asks "are you alive?" every few seconds. The answer
         // must not depend on the application, its database or a free worker

@@ -81,6 +81,8 @@ pub struct Registry {
     /// In registration order, which puts every parent before its children.
     classes: Vec<ClassEntry>,
     class_modules: HashMap<&'static str, &'static str>,
+    /// How a fork of a snapshot gets each extension's request state.
+    state_forks: HashMap<std::any::TypeId, crate::state::StateFork>,
 }
 
 #[derive(Clone)]
@@ -93,6 +95,18 @@ struct NativeConstant {
 impl Registry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Says how a fork of a snapshot gets the request state of type `T`
+    /// (see [`crate::RequestState::fork`]). Every state type an extension
+    /// stores must be registered, or a snapshot that holds it is refused.
+    pub fn fork_state<T: 'static>(&mut self, fork: crate::state::StateFork) {
+        self.state_forks.insert(std::any::TypeId::of::<T>(), fork);
+    }
+
+    /// The registered forks of request state, by type.
+    pub fn state_forks(&self) -> &HashMap<std::any::TypeId, crate::state::StateFork> {
+        &self.state_forks
     }
 
     /// Runs the extension's registration against this registry.

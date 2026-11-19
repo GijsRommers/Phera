@@ -200,3 +200,44 @@ fn server(
     }
     server
 }
+
+/// The superglobals of a boot run (see `crate::boot`): no request. `$_SERVER`
+/// holds the environment and what PHP's command line sets without a
+/// request: the script's paths (`SCRIPT_FILENAME`, `SCRIPT_NAME`,
+/// `PHP_SELF`), `DOCUMENT_ROOT`, `SERVER_SOFTWARE` and the start time
+/// (`REQUEST_TIME`, `REQUEST_TIME_FLOAT`), which each request replaces with
+/// its own. Nothing a client sends is there.
+pub(crate) fn define_boot_superglobals(
+    vm: &mut Vm,
+    script: &Path,
+    document_root: &Path,
+    mut server: PhpArray,
+) {
+    let script_name = script
+        .strip_prefix(document_root)
+        .map(|relative| format!("/{}", relative.to_string_lossy()))
+        .unwrap_or_else(|_| script.to_string_lossy().into_owned());
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let mut set = |name: &str, value: Value| {
+        server.insert(ArrayKey::str(name), value);
+    };
+    set("SERVER_SOFTWARE", Value::from("Phera"));
+    set(
+        "DOCUMENT_ROOT",
+        Value::from(document_root.to_string_lossy().into_owned()),
+    );
+    set(
+        "SCRIPT_FILENAME",
+        Value::from(script.to_string_lossy().into_owned()),
+    );
+    set("SCRIPT_NAME", Value::from(script_name.as_str()));
+    set("PHP_SELF", Value::from(script_name.as_str()));
+    set("REQUEST_TIME", Value::Int(now.as_secs() as i64));
+    set("REQUEST_TIME_FLOAT", Value::Float(now.as_secs_f64()));
+    vm.set_global("_SERVER", Value::from(server));
+    for name in ["_GET", "_POST", "_COOKIE", "_REQUEST", "_FILES"] {
+        vm.set_global(name, Value::from(PhpArray::new()));
+    }
+}

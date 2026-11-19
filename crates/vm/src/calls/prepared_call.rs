@@ -270,3 +270,13 @@ impl<'a> Parameters<'a> {
             .find(|&index| !self.is_variadic(index) && self.name(index).as_bytes() == name)
     }
 }
+
+impl crate::snapshot::ForkCopy for CallDetails {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        CallDetails {
+            callee: self.callee.fork_copy(fork),
+            named: self.named.clone(),
+            extra_named: self.extra_named.clone(),
+        }
+    }
+}

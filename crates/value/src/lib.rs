@@ -8,6 +8,7 @@ mod cycles;
 mod destruction;
 mod error;
 mod float_format;
+mod fork;
 mod lazy_object;
 mod object;
 mod ops;
@@ -28,6 +29,7 @@ pub use error::{
 pub use float_format::{
     float_repr, float_repr_with_precision, float_to_string_precision14, with_float_repr,
 };
+pub use fork::{Fork, NativeFork, Refusal};
 pub use lazy_object::{LazyObject, LazyStrategy};
 pub use object::{
     ClassHandle, Object, ObjectIds, PropertyScope, Resource, class_display_name, split_property_key,

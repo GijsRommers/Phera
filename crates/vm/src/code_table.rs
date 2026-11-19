@@ -287,3 +287,26 @@ mod tests {
         assert!(weak.upgrade().is_some());
     }
 }
+
+/// A fork has the snapshot's files with the same numbers, and its own
+/// copies of their caches (see `crate::snapshot`).
+impl crate::snapshot::ForkCopy for CodeTable {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        CodeTable {
+            units: self
+                .units
+                .iter()
+                .map(|loaded| LoadedUnit {
+                    unit: loaded.unit.clone(),
+                    cache: loaded.cache.fork_copy(fork),
+                    first: loaded.first,
+                    name_keys: loaded.name_keys.clone(),
+                    symbol_keys: loaded.symbol_keys.clone(),
+                })
+                .collect(),
+            functions: self.functions.clone(),
+            names: self.names.clone(),
+            trait_method_names: self.trait_method_names.clone(),
+        }
+    }
+}

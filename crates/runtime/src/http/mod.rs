@@ -14,7 +14,7 @@ mod uploads;
 use std::net::SocketAddr;
 
 pub(crate) use request_parse_body::{is_urlencoded, register_request_parse_body};
-pub(crate) use superglobals::define_superglobals;
+pub(crate) use superglobals::{define_boot_superglobals, define_superglobals};
 pub(crate) use uploads::Form;
 
 fn media_type(content_type: &[u8]) -> &[u8] {

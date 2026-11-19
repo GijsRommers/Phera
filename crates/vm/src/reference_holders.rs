@@ -66,6 +66,18 @@ impl StaticProperty {
         })
     }
 
+    /// The fork's storage of a static property: its own cell, the same
+    /// flags. A typed static's reference bookkeeping is made again when the
+    /// fork first binds a reference to it.
+    pub(crate) fn forked(reference: Rc<RefCell<Value>>, original: &StaticProperty) -> Rc<Self> {
+        Rc::new(Self {
+            reference: RefCell::new(reference),
+            binding: RefCell::new(None),
+            initialized: original.initialized.clone(),
+            value_initialized: original.value_initialized.clone(),
+        })
+    }
+
     pub(crate) fn track(&self, table: &Rc<RefCell<ReferenceHolders>>, property: &PropertyDefault) {
         if self.binding.borrow().is_none() {
             let binding = ReferenceHolders::bind(
@@ -93,6 +105,12 @@ impl StaticProperty {
         *self.reference.borrow_mut() = reference;
         self.track(table, property);
     }
+}
+
+/// Whether an object's native state is the bookkeeping of its properties
+/// that are bound to references.
+pub(crate) fn is_reference_bookkeeping(state: &dyn std::any::Any) -> bool {
+    state.is::<ObjectReferences>()
 }
 
 /// The property-reference bookkeeping also occupies the opaque object slot.

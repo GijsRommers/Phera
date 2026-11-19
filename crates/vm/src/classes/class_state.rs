@@ -22,6 +22,8 @@
 
 use std::rc::Rc;
 
+use phera_value::Value;
+
 use super::class::{ConstantState, PropertyDefault};
 use crate::reference_holders::StaticProperty;
 
@@ -75,6 +77,15 @@ impl ClassStates {
         )
     }
 
+    /// The storage of a static property, if this request made it already.
+    pub(crate) fn existing_static(
+        &self,
+        property: &PropertyDefault,
+    ) -> Option<&Rc<StaticProperty>> {
+        let StaticSlot(slot) = property.static_storage?;
+        self.statics.get(slot as usize)?.as_ref()
+    }
+
     /// The state of an evaluated constant.
     pub(crate) fn constant(&self, ConstantSlot(slot): ConstantSlot) -> &ConstantState {
         self.constants
@@ -86,5 +97,35 @@ impl ClassStates {
         if let Some(entry) = self.constants.get_mut(slot as usize) {
             *entry = state;
         }
+    }
+}
+
+/// A fork gets copies of the statics made so far and of evaluated values.
+impl crate::snapshot::ForkCopy for ClassStates {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        let statics = self
+            .statics
+            .iter()
+            .map(|property| {
+                property.as_ref().map(|property| {
+                    let value = Value::Reference(property.reference.borrow().clone());
+                    let Value::Reference(cell) = fork.value(&value) else {
+                        return property.clone();
+                    };
+                    StaticProperty::forked(cell, property)
+                })
+            })
+            .collect();
+        let constants = self
+            .constants
+            .iter()
+            .map(|state| match state {
+                ConstantState::Ready(value) => ConstantState::Ready(fork.value(value)),
+                ConstantState::Evaluating | ConstantState::Uninitialized => {
+                    ConstantState::Uninitialized
+                }
+            })
+            .collect();
+        ClassStates { statics, constants }
     }
 }
