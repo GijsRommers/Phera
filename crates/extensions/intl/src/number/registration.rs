@@ -79,6 +79,7 @@ const FN_NONE: &[Param] = &[CLASS];
 
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::copy::<Formatter>()),
+    fork: Some(phera_extension_api::fork_clone::<Formatter>),
     ..ClassHooks::EMPTY
 };
 

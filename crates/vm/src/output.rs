@@ -219,3 +219,18 @@ impl Vm {
         }
     }
 }
+
+/// A fork writes to the sink its request gives it; the buffers are the
+/// snapshot's, emptied (see `crate::output_buffer`).
+impl crate::snapshot::ForkCopy for Output {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        Output {
+            buffers: self.buffers.fork_copy(fork),
+            implicit_flush: self.implicit_flush,
+            prepare_headers: self.prepare_headers,
+            set_error_status: self.set_error_status,
+            web: self.web,
+            ..Output::new()
+        }
+    }
+}

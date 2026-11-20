@@ -43,6 +43,10 @@ pub(crate) struct Class {
     pub(crate) magic: Option<Box<super::magic::MagicMethods>>,
     pub(crate) methods: HashMap<String, Rc<Method>>,
     /// The same methods by name key, built on first use by a fast call.
+    /// Name keys are numbers of the request's code table; a class shared by
+    /// the forks of a snapshot has its table built when the snapshot is
+    /// taken, from the numbers every fork shares, and never again (see
+    /// `ClassTable::build_method_tables`).
     pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
     pub(crate) serialized_fields:
         std::cell::OnceCell<Option<Rc<[phera_extension_api::serialization::SerializedProperty]>>>,
@@ -64,7 +68,9 @@ pub(crate) struct PropertyDefault {
     pub(crate) is_final: bool,
     pub(crate) key: ArrayKey,
     pub(crate) value: Value,
-    pub(crate) static_storage: Option<Rc<crate::reference_holders::StaticProperty>>,
+    /// Where this request keeps a static property's value (see
+    /// [`super::class_state`]); `None` for an instance property.
+    pub(crate) static_storage: Option<super::class_state::StaticSlot>,
     pub(crate) name: String,
     pub(crate) declaring: String,
     pub(crate) visibility: Visibility,
@@ -72,8 +78,6 @@ pub(crate) struct PropertyDefault {
     pub(crate) initializer: Option<crate::code_table::FunctionIndex>,
     pub(crate) ty: Option<phera_bytecode::Type>,
     pub(crate) is_readonly: bool,
-    pub(crate) static_initialized: Rc<std::cell::Cell<bool>>,
-    pub(crate) value_initialized: Rc<std::cell::Cell<bool>>,
     pub(crate) hooks: Option<Rc<super::property_hooks::LinkedPropertyHooks>>,
 }
 
@@ -209,7 +213,8 @@ pub(crate) struct LinkedConstant {
 pub(crate) enum ConstantInitializer {
     Compiled {
         function: crate::code_table::FunctionIndex,
-        state: std::cell::RefCell<ConstantState>,
+        /// Where the request keeps the evaluated value.
+        slot: super::class_state::ConstantSlot,
     },
     Value(Value),
     EnumCase {
@@ -301,24 +306,6 @@ pub(crate) fn ancestor_names(
 }
 
 impl Class {
-    /// `Service::$instance = new Service` points back to this class.
-    pub(super) fn release_values(&self) {
-        for property in &self.static_properties {
-            if let Some(storage) = &property.static_storage {
-                storage.release_value();
-            }
-        }
-        for constant in self.constants.values() {
-            if let ConstantInitializer::Compiled { state, .. } = &constant.initializer {
-                let previous = state
-                    .try_borrow_mut()
-                    .ok()
-                    .map(|mut state| std::mem::replace(&mut *state, ConstantState::Uninitialized));
-                drop(previous);
-            }
-        }
-    }
-
     /// Avoid repeated lowercase allocation for names from compiled type declarations.
     pub(crate) fn matches_declaration(&self, name: &str) -> bool {
         if self.name.eq_ignore_ascii_case(name) {

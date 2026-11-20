@@ -30,6 +30,7 @@ pub(crate) fn register(registry: &mut Registry) {
         ],
         hooks: Some(&ClassHooks {
             legacy_unserialize: Some(views::decode_legacy_payload),
+            fork: Some(crate::native_state::fork_spl),
             clone: Some(NativeClone::Copy(iteration::clone_storage)),
             compare: Some(views::compare),
             properties: Some(views::view),

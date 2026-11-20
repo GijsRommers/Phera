@@ -307,3 +307,40 @@ impl Vm {
             })
     }
 }
+
+impl crate::snapshot::ForkCopy for ErrorHandler {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        ErrorHandler {
+            callable: fork.value(&self.callable),
+            levels: self.levels,
+        }
+    }
+}
+
+impl crate::snapshot::ForkCopy for ExceptionHandler {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        ExceptionHandler {
+            callable: fork.value(&self.callable),
+            callee: self.callee.fork_copy(fork),
+        }
+    }
+}
+
+/// A fork keeps the handlers and settings; what belongs to one diagnostic
+/// in progress, and the last error (`error_get_last()`), start empty, as in
+/// a new request.
+impl crate::snapshot::ForkCopy for ErrorHandlers {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        ErrorHandlers {
+            exception: self.exception.fork_copy(fork),
+            exception_history: self.exception_history.fork_copy(fork),
+            error: self.error.fork_copy(fork),
+            error_history: self.error_history.fork_copy(fork),
+            reporting: self.reporting,
+            fatal_error_backtraces: self.fatal_error_backtraces,
+            trace_ignore_args: self.trace_ignore_args,
+            trace_string_limit: self.trace_string_limit,
+            ..ErrorHandlers::default()
+        }
+    }
+}

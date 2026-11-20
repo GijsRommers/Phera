@@ -11,7 +11,7 @@ use phera_extension_api::{
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, get_current_pid};
 
 #[derive(Default)]
-struct Peak {
+pub(crate) struct Peak {
     since_reset: Option<i64>,
 }
 

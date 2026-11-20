@@ -5,6 +5,9 @@
 //! worker thread holds a clone; all clones use the same extension registry
 //! and the same compiled code.
 
+pub mod adapters;
+mod boot;
+mod boot_changes;
 mod cache;
 mod constant_calls;
 mod environment;
@@ -21,6 +24,7 @@ mod native_trace_tests;
 mod preload;
 #[cfg(test)]
 mod process_oracle_tests;
+mod snapshots;
 mod worker_code_cache;
 
 use std::path::Path;
@@ -38,10 +42,12 @@ use phera_vm::{NativeTables, Vm};
 use cache::{CodeCache, FileMode};
 use worker_code_cache::{RequestCodeCache, WorkerCodeCache};
 
+pub use boot::BootReport;
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse};
 pub use phera_vm::OutputSink;
 pub use preload::PreloadSummary;
+pub use snapshots::remembered as snapshot_remembered;
 
 #[derive(Clone)]
 pub struct Runtime {
@@ -53,17 +59,45 @@ pub struct Runtime {
     startup_ini: Arc<[(String, String)]>,
     web_development: bool,
     no_process: bool,
+    /// When included files, and the files of a snapshot, are checked for
+    /// changes: opcache's settings from the start-up INI.
+    include_policy: phera_vm::IncludeCachePolicy,
+    /// Scripts that run PHP source Phera ships in place of the file (an
+    /// adapter's entry script), by the script's path.
+    entry_scripts: Arc<std::collections::HashMap<std::path::PathBuf, &'static str>>,
 }
 
-/// A web worker links the process's native definitions once on its own thread.
+/// A web worker links the process's native definitions once on its own
+/// thread, and keeps the snapshots of the scripts it booted. Cheap to clone:
+/// the clones share everything, on the same thread.
+#[derive(Clone)]
 pub struct WebWorker {
     runtime: Runtime,
-    native: NativeTables,
+    /// The worker's number, for its log lines.
+    index: usize,
+    native: Rc<NativeTables>,
     environment: Rc<PhpArray>,
+    snapshots: Rc<snapshots::WorkerSnapshots>,
+    /// Whether this worker runs on a `LocalSet`, where a boot can run in
+    /// the background (`phera serve`); see [`WebWorker::with_background_boots`].
+    background_boots: bool,
     code: Rc<WorkerCodeCache>,
 }
 
 impl WebWorker {
+    /// Lets this worker boot scripts in the background (a first request
+    /// that reached `Phera\snapshot()`, a changed file). Only for a worker
+    /// whose requests run on a Tokio `LocalSet`, as `phera serve`'s do.
+    pub fn with_background_boots(mut self) -> Self {
+        self.background_boots = true;
+        self
+    }
+
+    /// The worker's number.
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
     pub async fn handle_request(
         &self,
         script: &Path,
@@ -112,6 +146,11 @@ impl Runtime {
             parent: Some("LogicException"),
             ..phera_extension_api::ClassEntry::class("Phera\\NotSupportedException")
         });
+        // Thrown by `Phera\snapshot()` when the state cannot be kept.
+        registry.class(phera_extension_api::ClassEntry {
+            parent: Some("RuntimeException"),
+            ..phera_extension_api::ClassEntry::class("Phera\\SnapshotException")
+        });
         registry.load(&phera_ext_standard::Standard);
         registry.load(&phera_ext_tokenizer::Tokenizer);
         registry.load(&phera_ext_streams::Streams);
@@ -148,8 +187,10 @@ impl Runtime {
         registry.load(&phera_ext_reflection::Reflection);
         registry.load(&phera_ext_serialize::Serialize);
         Vm::register_fiber_classes(&mut registry);
+        Vm::register_state_forks(&mut registry);
         registry.load(&phera_ext_spl::Spl);
         registry.load(&phera_ext_session::Session);
+        adapters::register(&mut registry);
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);
         web_registry.sapi_ini("phera_server");
@@ -166,11 +207,37 @@ impl Runtime {
             startup_ini: Arc::new([]),
             web_development: false,
             no_process: false,
+            include_policy: phera_vm::IncludeCachePolicy::default(),
+            entry_scripts: Arc::default(),
+        }
+    }
+
+    /// Runs `source` whenever a request goes to `script`, compiled under
+    /// that file's name (see [`adapters`]).
+    pub fn with_entry_script(mut self, script: std::path::PathBuf, source: &'static str) -> Self {
+        Arc::make_mut(&mut self.entry_scripts).insert(script, source);
+        self
+    }
+
+    /// The compiled code a request to `script` runs.
+    async fn entry_unit(
+        &self,
+        code: &RequestCodeCache,
+        script: &Path,
+    ) -> Result<Arc<CompiledUnit>, RuntimeError> {
+        match self.entry_scripts.get(script) {
+            Some(source) => self
+                .web_cache
+                .compile_shipped(source, &script.to_string_lossy()),
+            None => code.entry(script, self.include_policy).await,
         }
     }
 
     /// Settings supplied by the host before each request begins.
     pub fn with_startup_ini(mut self, settings: Vec<(String, String)>) -> Self {
+        for (name, value) in &settings {
+            self.include_policy.set_ini(name, value.as_bytes());
+        }
         self.startup_ini = settings.into();
         self
     }
@@ -178,7 +245,21 @@ impl Runtime {
     /// Display diagnostics and validate source files on each web request.
     pub fn with_web_development(mut self, enabled: bool) -> Self {
         self.web_development = enabled;
+        if enabled {
+            // As for includes: every request looks for changed files.
+            self.include_policy.validate_timestamps = true;
+            self.include_policy.revalidate_freq = std::time::Duration::ZERO;
+        }
         self
+    }
+
+    /// What a request does while a changed snapshot boots again.
+    fn stale_snapshots(&self) -> snapshots::Stale {
+        if self.web_development {
+            snapshots::Stale::RunFromTheTop
+        } else {
+            snapshots::Stale::ForkOld
+        }
     }
 
     pub fn without_web_processes(mut self, disabled: bool) -> Self {
@@ -239,11 +320,16 @@ impl Runtime {
     }
 
     /// Create this on the thread that will run the web requests.
-    pub fn web_worker(&self) -> WebWorker {
+    /// Create this on the thread that will run the web requests; `index`
+    /// is the worker's number.
+    pub fn web_worker(&self, index: usize) -> WebWorker {
         WebWorker {
             runtime: self.clone(),
-            native: NativeTables::new(self.web_registry.clone()),
+            index,
+            native: Rc::new(NativeTables::new(self.web_registry.clone())),
             environment: self.inherited_environment(),
+            snapshots: Default::default(),
+            background_boots: false,
             code: Rc::new(WorkerCodeCache::new(self.web_cache.clone())),
         }
     }
@@ -255,7 +341,7 @@ impl Runtime {
         document_root: &Path,
         request: HttpRequest,
     ) -> HttpResponse {
-        self.web_worker()
+        self.web_worker(0)
             .handle_request(script, document_root, request)
             .await
     }
@@ -267,9 +353,8 @@ impl Runtime {
         document_root: &Path,
         request: HttpRequest,
     ) -> HttpResponse {
-        let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
         let code = Rc::new(RequestCodeCache::new(worker.code.clone()));
-        let compiled = match code.entry(script, vm.include_cache_policy()).await {
+        let compiled = match self.entry_unit(&code, script).await {
             Ok(unit) => Ok(unit),
             Err(RuntimeError::Compile(error)) => Err(error),
             Err(RuntimeError::Read { .. }) => return HttpResponse::plain(404, "File not found.\n"),
@@ -290,6 +375,32 @@ impl Runtime {
             http::Boundary::OtherMediaType => (None, None),
         };
 
+        let (plan, reboot) =
+            worker
+                .snapshots
+                .plan(script, self.include_policy, self.stale_snapshots());
+        if reboot {
+            worker.boot_in_background(script, document_root);
+        }
+        let mut carried = None;
+        let mut vm = match (plan, &compiled) {
+            (snapshots::Plan::Fork(snapshot, changes), Ok(_)) => match snapshot.fork() {
+                Ok(vm) => {
+                    carried = Some(changes.carry(&vm));
+                    vm
+                }
+                Err(error) => {
+                    eprintln!(
+                        "phera: worker {}: forking the snapshot of {} failed: {error}",
+                        worker.index,
+                        script.display()
+                    );
+                    self.new_classic_vm(worker)
+                }
+            },
+            _ => self.new_classic_vm(worker),
+        };
+        let forked = vm.is_fork();
         vm.set_local_loader(code);
         let uploads = http::define_superglobals(
             &mut vm,
@@ -299,6 +410,9 @@ impl Runtime {
             worker.environment.as_ref().clone(),
             form,
         );
+        if let Some(carried) = carried {
+            carried.apply(&mut vm);
+        }
         let buffered_post = request.method == "POST"
             && request
                 .header("Content-Type")
@@ -324,8 +438,18 @@ impl Runtime {
             vm.request_startup_warning(warning);
         }
         match compiled {
+            Ok(_) if forked => {
+                vm.resume().await;
+            }
             Ok(unit) => {
                 vm.run(unit).await;
+                // The first start of a script that snapshots cannot know it
+                // does: the request that first reaches the call has the
+                // worker boot it.
+                if vm.snapshot_called() && !worker.snapshots.knows(script) {
+                    snapshots::remember(script);
+                    worker.boot_in_background(script, document_root);
+                }
             }
             Err(error) => {
                 vm.report_entry_compile_failure(error);
@@ -378,6 +502,13 @@ impl Runtime {
 
     fn inherited_environment(&self) -> Rc<PhpArray> {
         Rc::new(php_array(self.environment.iter()))
+    }
+
+    /// A request VM that runs its script from the top.
+    fn new_classic_vm(&self, worker: &WebWorker) -> Vm {
+        let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
+        vm.set_snapshot_mode(phera_vm::SnapshotMode::Classic);
+        vm
     }
 
     fn new_vm(&self, native: &NativeTables, sapi: Sapi, environment: Rc<PhpArray>) -> Vm {

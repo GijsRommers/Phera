@@ -2,6 +2,8 @@
 
 mod cleanup;
 
+pub(crate) use cleanup::register_fork;
+
 use std::io;
 use std::os::fd::OwnedFd;
 use std::process::Stdio;

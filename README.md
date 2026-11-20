@@ -237,6 +237,47 @@ An HTTPS mirror can set `PHERA_RELEASE_BASE_URL` for both commands. Serve
 `SHA256SUMS` under `download/<tag>/`, for example `download/v0.1.0/`.
 The upgrader expects the mirror to serve these files directly.
 
+## ⏩ Boot once, fork every request
+
+`phera serve` can boot an application once per worker thread, before the
+first connection, and start every request as a copy of that booted state.
+Laravel and Symfony applications get this with no change:
+
+- **Laravel** (a project with `artisan` and `bootstrap/app.php`): Phera runs
+  its own entry script for `public/index.php`, which bootstraps the
+  application and its service providers, then handles the request.
+- **Symfony** with `symfony/runtime`: Phera sets `APP_RUNTIME` to its own
+  runtime class (unless something else chose one), which boots the kernel
+  and then handles the request.
+- **Any other application** marks the point itself:
+
+  ```php
+  $kernel = new Kernel('prod', false);
+  $kernel->boot();                 // once per worker, at server start
+  Phera\snapshot();                // true in every request; false on the command line
+  $kernel->handle(Request::createFromGlobals())->send();   // per request
+  ```
+
+  The first start serves such a script from the top until it reaches the
+  call; later starts boot it before the first connection.
+
+The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
+are empty and `$_SERVER` holds the environment and the script's paths. Each
+request gets its own copy of every object, static property and global, so
+nothing one request does reaches another. What cannot be copied (an open
+file or socket, a started session, a database transaction) makes
+`Phera\snapshot()` throw `Phera\SnapshotException`, naming the class and
+where it was found; the worker then serves the application from the top.
+A changed file boots the worker again in the background, following
+`opcache.validate_timestamps` and `opcache.revalidate_freq`. The boot's
+objects are never destroyed; each request's copies are destroyed at its end,
+as PHP-FPM destroys a request's objects. `--no-snapshot` turns all of it off.
+
+A Laravel API request took 525 million instructions run from the top, and
+102 million as a fork (PHP 8.5 with opcache: 48 million). The design is in
+[`docs/architecture.md`](docs/architecture.md) section 5.4, the decisions
+in [`docs/decisions/`](docs/decisions/).
+
 ## 🛠️ Building
 
 You'll need the Rust toolchain named in `rust-toolchain.toml` (rustup installs

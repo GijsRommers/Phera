@@ -16,6 +16,7 @@ mod class_members;
 mod constant;
 mod enum_reflection;
 mod extension;
+mod fork;
 mod function;
 mod generator;
 mod lazy;
@@ -35,6 +36,8 @@ impl Extension for Reflection {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::reference::ReferenceIds>(phera_extension_api::fresh_state);
         builtins::register(registry);
         registry.class(ClassEntry {
             parent: Some("Exception"),
@@ -66,6 +69,7 @@ impl Extension for Reflection {
 static UNCLONEABLE: phera_extension_api::ClassHooks = phera_extension_api::ClassHooks {
     clone: Some(NativeClone::Forbidden),
     properties: Some(reflected_properties),
+    fork: Some(fork::fork_state),
     ..phera_extension_api::ClassHooks::EMPTY
 };
 
