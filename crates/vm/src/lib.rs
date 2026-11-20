@@ -182,6 +182,7 @@ mod types;
 mod unit_caches;
 mod unpacking;
 mod unsupported_items;
+mod worker_code;
 
 pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
@@ -320,7 +321,7 @@ impl Vm {
             native_view_depth: None,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
-            code: code_table::CodeTable::default(),
+            code: code_table::CodeTable::for_worker(&native.code),
             class_states: Default::default(),
             globals: globals::Globals::new(),
             extension_values: Default::default(),

@@ -57,10 +57,18 @@ pub(crate) struct LoadedUnit {
 }
 
 /// The code of one request: every loaded file and every function in them.
-#[derive(Default)]
 pub(crate) struct CodeTable {
     units: Vec<LoadedUnit>,
+    /// The facts of every function by its number, which the worker gives
+    /// (see `crate::worker_code`). It covers every number up to the highest
+    /// this request uses, so it also holds placeholders for functions of
+    /// files this request has not loaded: whether a function is declared in
+    /// the request is its function table's answer, never this vector's.
     functions: Vec<FunctionFacts>,
+    worker: std::rc::Rc<crate::worker_code::WorkerCode>,
+    /// The numbers this request leased, and those of the snapshot it was
+    /// forked from, which it keeps alive.
+    leases: Vec<std::rc::Rc<crate::worker_code::Leases>>,
     /// Where each loaded file is, by its process number
     /// (`UnitMetadata::id`): its position in `units` plus one, 0 if this
     /// request has not loaded it.
@@ -68,7 +76,45 @@ pub(crate) struct CodeTable {
     trait_method_names: std::collections::HashMap<FunctionIndex, String>,
 }
 
+impl Default for CodeTable {
+    /// A table with a numbering of its own (a command-line run, a test).
+    fn default() -> Self {
+        Self::for_worker(&std::rc::Rc::default())
+    }
+}
+
 impl CodeTable {
+    /// A request's table, numbered by its worker.
+    pub(crate) fn for_worker(worker: &std::rc::Rc<crate::worker_code::WorkerCode>) -> Self {
+        CodeTable {
+            units: Vec::new(),
+            functions: Vec::new(),
+            worker: worker.clone(),
+            leases: vec![crate::worker_code::Leases::new(worker)],
+            slots: Vec::new(),
+            trait_method_names: Default::default(),
+        }
+    }
+
+    /// The worker's numbering this table uses.
+    pub(crate) fn worker(&self) -> std::rc::Rc<crate::worker_code::WorkerCode> {
+        self.worker.clone()
+    }
+
+    /// The leases of this request, the last of `leases`.
+    fn own_leases(&self) -> &crate::worker_code::Leases {
+        self.leases
+            .last()
+            .expect("a code table always has its own leases")
+    }
+
+    /// Makes room for numbers up to `end`, with placeholders.
+    fn cover(&mut self, end: usize) {
+        if self.functions.len() < end {
+            self.functions.resize(end, FunctionFacts::placeholder());
+        }
+    }
+
     pub(crate) fn next_unit_index(&self) -> UnitIndex {
         UnitIndex(self.units.len() as u32)
     }
@@ -87,30 +133,30 @@ impl CodeTable {
             }
             self.slots[id] = index.0 + 1;
         }
-        let first = FunctionIndex(self.functions.len() as u32);
+        let count = 1 + unit.functions.len() as u32;
+        let first = FunctionIndex(self.worker.number(unit, count, self.own_leases()));
+        let mut facts = Vec::with_capacity(count as usize);
         let (name_keys, symbol_keys) = if let Some(metadata) = &unit.metadata {
-            self.functions
-                .extend(metadata.functions.iter().cloned().enumerate().map(
-                    |(offset, signature)| {
-                        let local = offset.checked_sub(1).map(|local| local as u32);
-                        let instructions = body(unit, local.map(|local| local as usize))
-                            .instructions
-                            .clone();
-                        FunctionFacts::bind((index, first, local), signature, instructions)
-                    },
-                ));
+            facts.extend(metadata.functions.iter().cloned().enumerate().map(
+                |(offset, signature)| {
+                    let local = offset.checked_sub(1).map(|local| local as u32);
+                    let instructions = body(unit, local.map(|local| local as usize))
+                        .instructions
+                        .clone();
+                    FunctionFacts::bind((index, first, local), signature, instructions)
+                },
+            ));
             (metadata.name_keys.clone(), metadata.symbol_keys.clone())
         } else {
             let bodies = std::iter::once(&unit.main).chain(&unit.functions);
-            self.functions
-                .extend(bodies.enumerate().map(|(offset, body)| {
-                    let local = offset.checked_sub(1).map(|local| local as u32);
-                    FunctionFacts::bind(
-                        (index, first, local),
-                        FunctionSignature::new(body, &unit.types),
-                        body.instructions.clone(),
-                    )
-                }));
+            facts.extend(bodies.enumerate().map(|(offset, body)| {
+                let local = offset.checked_sub(1).map(|local| local as u32);
+                FunctionFacts::bind(
+                    (index, first, local),
+                    FunctionSignature::new(body, &unit.types),
+                    body.instructions.clone(),
+                )
+            }));
             let names: Vec<String> = unit
                 .names
                 .iter()
@@ -126,6 +172,11 @@ impl CodeTable {
                 phera_bytecode::name_keys::keys(symbols.iter().map(String::as_str)),
             )
         };
+        let start = first.index();
+        self.cover(start + facts.len());
+        for (slot, facts) in self.functions[start..].iter_mut().zip(facts) {
+            *slot = facts;
+        }
         self.units.push(LoadedUnit {
             unit: unit.clone(),
             cache: UnitCache::new(unit),
@@ -218,8 +269,9 @@ impl CodeTable {
     ) -> FunctionIndex {
         let mut facts = self.facts(source).clone();
         facts.class = Some(scope);
-        let function = FunctionIndex(self.functions.len() as u32);
-        self.functions.push(facts);
+        let function = FunctionIndex(self.worker.lease_one(self.own_leases()));
+        self.cover(function.index() + 1);
+        self.functions[function.index()] = facts;
         function
     }
 
@@ -345,6 +397,14 @@ impl crate::snapshot::ForkCopy for CodeTable {
                 })
                 .collect(),
             functions: self.functions.clone(),
+            worker: self.worker.clone(),
+            // The snapshot's leases stay given out while this fork lives.
+            leases: self
+                .leases
+                .iter()
+                .cloned()
+                .chain([crate::worker_code::Leases::new(&self.worker)])
+                .collect(),
             slots: self.slots.clone(),
             trait_method_names: self.trait_method_names.clone(),
         }

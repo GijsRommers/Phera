@@ -597,3 +597,38 @@ async fn temporary_files_and_unused_contexts_of_the_boot_are_each_forks_own() {
     let expected = "boot-data+fork tmp+fork 616263 CurlMultiHandle CurlShareHandle";
     assert_eq!(answers, [expected, expected]);
 }
+
+/// Two files that declare a function of the same name, run by different
+/// requests of one worker: each request calls its own, although the worker
+/// numbers both files' functions in one table.
+#[tokio::test(flavor = "current_thread")]
+async fn two_files_with_the_same_function_name_on_different_requests_of_a_worker() {
+    let site = Site::new("same-function");
+    std::fs::write(
+        site.root.join("a.php"),
+        "<?php function helper() { return 'a'; } echo helper();",
+    )
+    .expect("a.php");
+    std::fs::write(site.root.join("b.php"), "<?php function helper() { return 'b'; } echo helper(), ' ', function_exists('other') ? 'other' : 'none';").expect("b.php");
+    std::fs::write(
+        site.root.join("c.php"),
+        "<?php function other() {} echo function_exists('helper') ? 'helper' : 'none';",
+    )
+    .expect("c.php");
+    let local = tokio::task::LocalSet::new();
+    let answers = local
+        .run_until(async {
+            let worker = Runtime::new().web_worker(0);
+            let mut answers = Vec::new();
+            for script in ["a.php", "b.php", "c.php", "a.php", "b.php"] {
+                let path = site.root.join(script);
+                let response = worker
+                    .handle_request(&path, &site.root, request(&format!("/{script}")))
+                    .await;
+                answers.push(String::from_utf8_lossy(&response.body).into_owned());
+            }
+            answers
+        })
+        .await;
+    assert_eq!(answers, ["a", "b none", "none", "a", "b none"]);
+}
