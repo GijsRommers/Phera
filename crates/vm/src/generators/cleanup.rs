@@ -206,6 +206,9 @@ impl Vm {
         activation: Activation,
         caller: Option<&SourceLocation>,
     ) -> Result<(), NativeError> {
+        if self.fiber_bailout {
+            return Ok(());
+        }
         let position = activation.frame.ip().saturating_sub(1);
         let handlers: Vec<_> = self
             .code

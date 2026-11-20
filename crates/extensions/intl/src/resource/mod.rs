@@ -36,6 +36,9 @@ fn create<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         error::clear(context);
+        if args::bytes(&values, 0).len() > locale::MAX_LEN {
+            return locale::too_long_for(context, site, object.is_some());
+        }
         if let Some(object) = &object
             && object.native_payload().map_err(|_| missing())?.is_some()
         {

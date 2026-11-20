@@ -181,7 +181,9 @@ impl Matrix {
             }
         }
         match entry.handler {
-            NativeFn::Sync(_) => call(&self.registry, &mut self.context, function, arguments),
+            NativeFn::Sync(_) | NativeFn::DeprecatedSync(_) => {
+                call(&self.registry, &mut self.context, function, arguments)
+            }
             // `testing::call` runs only sync functions; this does the same
             // for an async one, awaiting it.
             NativeFn::Async(handler) => {

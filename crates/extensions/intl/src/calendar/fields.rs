@@ -2,10 +2,38 @@
 
 use icu_calendar::{AnyCalendar, AnyCalendarKind, Date, cal::Iso, types::DateFields};
 use phera_ext_date::calendar::{Civil, days, leap, month_days};
-use phera_extension_api::{Value, args};
+use phera_extension_api::{NativeError, Value, args};
 
 use super::State;
 use crate::timezone;
+
+pub(super) const CIVIL_FIELDS: &[&str] =
+    &["year", "month", "dayOfMonth", "hour", "minute", "second"];
+pub(super) const LEGACY_GREGORIAN_FIELDS: &[&str] = &[
+    "timezoneOrYear",
+    "localeOrMonth",
+    "day",
+    "hour",
+    "minute",
+    "second",
+];
+
+pub(super) fn check_components(
+    values: &[Value],
+    names: &[&str],
+    site: &str,
+    first: usize,
+) -> Result<(), NativeError> {
+    for (index, name) in names.iter().enumerate() {
+        if args::int(values, index).is_some_and(|value| i32::try_from(value).is_err()) {
+            return Err(NativeError::value_error(format!(
+                "{site}(): Argument #{} (${name}) must be between -2147483648 and 2147483647",
+                index + first
+            )));
+        }
+    }
+    Ok(())
+}
 
 fn convert(state: &State, civil: Civil) -> Option<Date<AnyCalendar>> {
     let mut kind = state.kind;

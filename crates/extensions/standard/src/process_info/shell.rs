@@ -11,6 +11,11 @@ pub(super) fn escape(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             "escapeshellcmd(): Argument #1 ($command) must not contain any null bytes",
         ));
     }
+    Ok(Value::from(escape_shell_command(command)?))
+}
+
+/// Unix mail and escapeshellcmd use the same quoting rules.
+pub fn escape_shell_command(command: &[u8]) -> Result<Vec<u8>, NativeError> {
     let limit = sysconf(SysconfVar::ARG_MAX)
         .ok()
         .flatten()
@@ -80,5 +85,5 @@ pub(super) fn escape(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             "Escaped command exceeds the allowed length of {limit} bytes"
         )));
     }
-    Ok(Value::from(output))
+    Ok(output)
 }

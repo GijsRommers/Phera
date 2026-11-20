@@ -16,7 +16,7 @@ use super::{
 const HOOKS: ClassHooks = ClassHooks {
     iterator: Some(cursor::iterator),
     properties: Some(projection),
-    property_access: Some(&NativePropertyAccess { read, mutate }),
+    property_access: Some(&NativePropertyAccess::new(read, mutate)),
     count: Some(count_hook),
     dimensions: Some(NativeDimensions {
         fallback_if_overridden: &[],

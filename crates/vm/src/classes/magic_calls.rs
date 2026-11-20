@@ -168,6 +168,7 @@ impl Vm {
                 name: String::new(),
                 ty: None,
                 by_reference: false,
+                requires_reference: false,
                 variadic: true,
             }]
             .into(),

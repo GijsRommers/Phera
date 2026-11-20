@@ -117,7 +117,6 @@ impl Vm {
         let suffix = if seconds == 1 { "" } else { "s" };
         self.execution_time.timed_out.set(true);
         self.set_hidden_fatal_status();
-        self.mark_timed_out_objects();
         self.fatal_error(
             1,
             format!("Maximum execution time of {seconds} second{suffix} exceeded"),

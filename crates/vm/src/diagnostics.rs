@@ -102,9 +102,7 @@ impl Vm {
                 }
             }
         }
-        if self.timed_out_objects.is_some() {
-            self.retain_timeout_globals();
-        }
+        self.park_global_registers();
         self.call_stack.clear();
         self.finally_stack.clear();
     }

@@ -13,6 +13,31 @@ use crate::xml::names::{XML, XMLNS};
 
 use super::super::{attributes, dom_error, namespace};
 
+pub(super) fn string_property(
+    object: &Object,
+    name: &str,
+) -> Option<phera_extension_api::NativeStringProperty> {
+    let (declaring, nullable) = match name {
+        "nodeValue" => ("DOMNode", true),
+        "textContent" | "prefix" => ("DOMNode", false),
+        "encoding" | "version" | "xmlVersion" | "documentURI"
+            if object.class.is_instance_of("DOMDocument") =>
+        {
+            ("DOMDocument", true)
+        }
+        "data" if object.class.is_instance_of("DOMProcessingInstruction") => {
+            ("DOMProcessingInstruction", false)
+        }
+        "data" if object.class.is_instance_of("DOMCharacterData") => ("DOMCharacterData", false),
+        "value" if object.class.is_instance_of("DOMAttr") => ("DOMAttr", false),
+        _ => return None,
+    };
+    Some(phera_extension_api::NativeStringProperty {
+        declaring,
+        nullable,
+    })
+}
+
 pub(super) fn mutate(
     context: &mut dyn Context,
     object: &Object,

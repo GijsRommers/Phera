@@ -63,7 +63,9 @@ pub async fn check(name: &str, cases: &[Case], oracle_cwd: &Path, native_cwd: &P
             .expect("registered stream function");
         let result = match prepare_arguments(entry, &mut arguments, &mut context) {
             Ok(()) => match entry.handler {
-                NativeFn::Sync(handler) => handler(&mut context, &arguments),
+                NativeFn::Sync(handler) | NativeFn::DeprecatedSync(handler) => {
+                    handler(&mut context, &arguments)
+                }
                 NativeFn::Async(handler) => handler(&mut context, arguments).await,
             },
             Err(error) => Err(error),

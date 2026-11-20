@@ -286,7 +286,11 @@ pub(super) fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
         hooks: Some(&ClassHooks {
             properties: Some(debug),
-            property_access: Some(&NativePropertyAccess { read, mutate }),
+            property_access: Some(&NativePropertyAccess {
+                read,
+                mutate,
+                string_property: None,
+            }),
             clone: Some(NativeClone::Forbidden),
             ..ClassHooks::EMPTY
         }),

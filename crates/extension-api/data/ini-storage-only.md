@@ -46,11 +46,6 @@ engine behavior. A directive is visible only when its owning module is loaded.
 - `ignore_repeated_source`
 - `implicit_flush`
 - `input_encoding`
-- `mail.add_x_header`
-- `mail.cr_lf_mode`
-- `mail.force_extra_parameters`
-- `mail.log`
-- `mail.mixed_lf_and_crlf`
 - `max_input_nesting_level`
 - `max_input_time`
 - `max_memory_limit`
@@ -108,7 +103,6 @@ engine behavior. A directive is visible only when its owning module is loaded.
 - `report_zend_debug`
 - `request_order`
 - `sendmail_from`
-- `sendmail_path`
 - `session.auto_start`
 - `session.referer_check`
 - `session.sid_bits_per_character`
