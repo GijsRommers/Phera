@@ -130,7 +130,7 @@ impl Vm {
                 if let Err(error) = &result
                     && crate::autoload::ClassMiss::is(error)
                 {
-                    self.registers.put(base, argument);
+                    self.return_direct_arguments(base, std::slice::from_mut(&mut { argument }));
                 }
                 return result;
             }
@@ -150,9 +150,7 @@ impl Vm {
             if let Err(error) = &result
                 && crate::autoload::ClassMiss::is(error)
             {
-                for (offset, argument) in arguments.into_iter().take(count).enumerate() {
-                    self.registers.put(base + offset, argument);
-                }
+                self.return_direct_arguments(base, &mut arguments[..count]);
             }
             return result;
         }
@@ -192,20 +190,40 @@ impl Vm {
             self.store_sent_value(offset, argument)?;
         }
         let result = self.call_native(destination);
-        // `call_native` put its call back; `CallNativeDirect` prepares its
-        // own when it runs again, so the arguments go back to where it
-        // reads them (see `calls::native_retries`).
         if let Err(error) = &result
             && crate::autoload::ClassMiss::is(error)
-            && let Ok((call, _)) = self.call_stack.pop_call()
         {
-            for offset in 0..count {
-                let argument = self.registers.take(call.base() + offset);
-                self.registers.put(base + offset, argument);
-            }
-            self.registers.truncate(call.start());
+            self.unprepare_direct_call(base, count);
         }
         result
+    }
+
+    /// After a class miss in `CallNativeDirect`, which the interpreter runs
+    /// again once the class is loaded (see `calls::native_retries`): its
+    /// arguments go back to the caller's registers it reads them from.
+    #[cold]
+    #[inline(never)]
+    fn return_direct_arguments(&mut self, base: usize, arguments: &mut [Value]) {
+        for (offset, argument) in arguments.iter_mut().enumerate() {
+            self.registers.put(base + offset, std::mem::take(argument));
+        }
+    }
+
+    /// The same when the direct call went through a prepared call:
+    /// `call_native` put that call back, but `CallNativeDirect` prepares its
+    /// own when it runs again, so the prepared call goes and its arguments
+    /// return to the caller's registers.
+    #[cold]
+    #[inline(never)]
+    fn unprepare_direct_call(&mut self, base: usize, count: usize) {
+        let Ok((call, _)) = self.call_stack.pop_call() else {
+            return;
+        };
+        for offset in 0..count {
+            let argument = self.registers.take(call.base() + offset);
+            self.registers.put(base + offset, argument);
+        }
+        self.registers.truncate(call.start());
     }
 
     /// Unhandled shapes keep their window intact for the ordinary native binder.

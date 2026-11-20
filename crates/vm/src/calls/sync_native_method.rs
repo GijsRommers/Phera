@@ -9,11 +9,15 @@ use phera_bytecode::Reg;
 use phera_extension_api::{NativeError, NativeMethod};
 use phera_value::Value;
 
-use super::{call_state::CallTarget, execution_loop::BatchExit, prepared_call::PreparedCall};
+use super::{
+    call_state::{CallTarget, Callee},
+    execution_loop::BatchExit,
+    prepared_call::{CallDetails, PreparedCall},
+};
 use crate::{
     Vm,
     calls::native_frames::NativeFrame,
-    classes::{Invocation, MethodBody},
+    classes::{Invocation, MethodBody, MethodContext},
 };
 
 impl Vm {
@@ -57,12 +61,17 @@ impl Vm {
             return fallback;
         }
         let (_, details) = self.call_stack.pop_call()?;
-        let Some(crate::calls::call_state::Callee {
-            argument_binding,
-            name,
-            parameters,
-            target: CallTarget::Method { method, context },
-        }) = details.and_then(|details| details.callee)
+        let Some(CallDetails {
+            callee:
+                Some(Callee {
+                    argument_binding,
+                    name,
+                    parameters,
+                    target: CallTarget::Method { method, context },
+                }),
+            named,
+            extra_named,
+        }) = details
         else {
             return Err(internal_error!("native method target"));
         };
@@ -71,7 +80,7 @@ impl Vm {
             *argument = self.registers.take(call.base() + offset);
         }
         self.registers.truncate(call.start());
-        let crate::classes::MethodContext {
+        let MethodContext {
             receiver,
             scope,
             called,
@@ -105,37 +114,21 @@ impl Vm {
                 )))
             }
             // The interpreter runs the `Call` again once the class is loaded
-            // (see `calls::native_retries`): the call goes back as it was,
-            // with `$this` below its window.
+            // (see `calls::native_retries`).
             Err(error) if crate::autoload::ClassMiss::is(&error) => {
-                let Some(called) = called.or(lent) else {
-                    return Err(internal_error!("native method class"));
-                };
-                if call.kind.prefix() != 1 {
-                    return Err(crate::autoload::ClassMiss::take(error)
-                        .map_or_else(|error| error, crate::autoload::ClassMiss::error));
-                }
-                let prefix = [receiver.clone().map(Value::Object), None];
-                let callee = crate::calls::call_state::Callee {
+                let taken = TakenMethodCall {
                     argument_binding,
                     name,
                     parameters,
-                    target: CallTarget::Method {
-                        method,
-                        context: crate::classes::MethodContext {
-                            receiver,
-                            scope,
-                            called,
-                            invocation,
-                        },
-                    },
+                    method,
+                    receiver,
+                    scope,
+                    called: called.or(lent),
+                    invocation,
+                    named,
+                    extra_named,
                 };
-                let details = crate::calls::prepared_call::CallDetails {
-                    callee: Some(callee),
-                    ..Default::default()
-                };
-                self.restore_native_call((call, Some(details)), prefix, &arguments[..count]);
-                Err(error)
+                Err(self.restore_native_method_call(call, taken, &arguments[..count], error))
             }
             Err(error) => {
                 self.record_native_failure(
@@ -147,4 +140,76 @@ impl Vm {
             }
         }
     }
+
+    /// Puts a fast native method call back as it was after its handler
+    /// missed a class, so that the interpreter's retry of the `Call` finds
+    /// it: the record rebuilt from the parts the call took apart, `$this`
+    /// below the window, the arguments in it. Gives the error to unwind
+    /// with.
+    #[cold]
+    #[inline(never)]
+    fn restore_native_method_call(
+        &mut self,
+        call: PreparedCall,
+        taken: TakenMethodCall,
+        arguments: &[Value],
+        error: NativeError,
+    ) -> NativeError {
+        let TakenMethodCall {
+            argument_binding,
+            name,
+            parameters,
+            method,
+            receiver,
+            scope,
+            called,
+            invocation,
+            named,
+            extra_named,
+        } = taken;
+        // A method's window keeps `$this` below its first register; another
+        // shape cannot be rebuilt here, and reports the missing class.
+        let (Some(called), 1) = (called, call.kind.prefix()) else {
+            return crate::autoload::ClassMiss::take(error)
+                .map_or_else(|error| error, crate::autoload::ClassMiss::error);
+        };
+        let prefix = [receiver.clone().map(Value::Object), None];
+        let details = CallDetails {
+            callee: Some(Callee {
+                argument_binding,
+                name,
+                parameters,
+                target: CallTarget::Method {
+                    method,
+                    context: MethodContext {
+                        receiver,
+                        scope,
+                        called,
+                        invocation,
+                    },
+                },
+            }),
+            named,
+            extra_named,
+        };
+        self.restore_native_call((call, Some(details)), prefix, arguments);
+        error
+    }
+}
+
+/// The parts a fast native method call takes its record apart into, kept
+/// for a class miss to put the record back (see
+/// [`Vm::restore_native_method_call`]).
+struct TakenMethodCall {
+    argument_binding: super::callback_binding::ArgumentBinding,
+    name: std::rc::Rc<str>,
+    parameters: std::rc::Rc<[super::call_state::ParameterSpec]>,
+    method: std::rc::Rc<crate::classes::Method>,
+    receiver: Option<std::rc::Rc<phera_value::Object>>,
+    scope: std::rc::Rc<crate::classes::Class>,
+    /// `None` while a static method's class is lent to the handler.
+    called: Option<std::rc::Rc<crate::classes::Class>>,
+    invocation: Invocation,
+    named: Option<phera_value::PhpString>,
+    extra_named: Vec<(usize, phera_value::PhpString)>,
 }
