@@ -1,6 +1,7 @@
 //! GD scales via fixed-point nearest or bilinear sampling, or a reconstruction kernel.
 
 mod kernel;
+pub(super) use kernel::weight;
 
 use phera_extension_api::{
     ConstantValue as C, Context, FunctionEntry as F, NativeResult, Param as P, ParamType as T,
@@ -154,7 +155,7 @@ fn scale_pixels(image: &Image, width: u32, height: u32, mode: i32) -> Option<Ima
                 16 => image
                     .location((x * dx) >> 8, (y * dy) >> 8)
                     .map_or(Color::BLACK, |pos| image.true_pixel(pos)),
-                _ => bilinear(image, x * dx, y * dy, None),
+                _ => bilinear(image, x * dx, y * dy),
             };
             output.set(x, y, color.0 as i32);
         }
@@ -163,7 +164,7 @@ fn scale_pixels(image: &Image, width: u32, height: u32, mode: i32) -> Option<Ima
     Some(output)
 }
 
-pub(super) fn bilinear(image: &Image, x: i64, y: i64, background: Option<Color>) -> Color {
+fn bilinear(image: &Image, x: i64, y: i64) -> Color {
     let (left, top) = (x >> 8, y >> 8);
     let (fx, fy) = (x & 255, y & 255);
     let weights = [
@@ -178,13 +179,12 @@ pub(super) fn bilinear(image: &Image, x: i64, y: i64, background: Option<Color>)
             .filter(|&position| image.transparent != Some(image.index(position)))
             .map_or(fallback, |index| image.true_pixel(index))
     };
-    let first = pixel(left, top, background.unwrap_or(Color::BLACK));
-    let fallback = background.unwrap_or(first);
+    let first = pixel(left, top, Color::BLACK);
     let colors = [
         first,
-        pixel(left + 1, top, fallback),
-        pixel(left, top + 1, fallback),
-        pixel(left + 1, top + 1, fallback),
+        pixel(left + 1, top, first),
+        pixel(left, top + 1, first),
+        pixel(left + 1, top + 1, first),
     ];
     let mut result = [0i64; 4];
     for (color, weight) in colors.into_iter().zip(weights) {

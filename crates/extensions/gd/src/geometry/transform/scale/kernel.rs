@@ -52,7 +52,7 @@ fn pass(source: &Image, width: u32, height: u32, axis: Axis, mode: i32) -> Optio
             left += 1;
         }
         let mut weights: Vec<_> = (left..=right)
-            .map(|index| filter_scale * kernel(mode, filter_scale * (center - index as f64)))
+            .map(|index| filter_scale * weight(mode, filter_scale * (center - index as f64)))
             .collect();
         let sum = weights.iter().sum::<f64>();
         if sum < 0.0 {
@@ -87,7 +87,7 @@ fn pass(source: &Image, width: u32, height: u32, axis: Axis, mode: i32) -> Optio
     Some(output)
 }
 
-fn kernel(mode: i32, signed: f64) -> f64 {
+pub(in super::super) fn weight(mode: i32, signed: f64) -> f64 {
     let x = signed.abs();
     match mode {
         1 if x < 0.5 => 0.75 - x * x,
@@ -99,7 +99,7 @@ fn kernel(mode: i32, signed: f64) -> f64 {
         6 => 0.42 + 0.5 * (PI * x).cos() + 0.08 * (2.0 * PI * x).cos(),
         7 => f64::from(u8::from((-0.5..0.5).contains(&signed))),
         8 if x < 1.0 => (4.0 + x * x * (3.0 * x - 6.0)) / 6.0,
-        8 => (2.0 - x).powi(3) / 6.0,
+        8 => (2.0 - x).max(0.0).powi(3) / 6.0,
         9 | 11 => cubic(x, -0.5),
         10 => (-2.0 * x * x).exp() * (2.0 / PI).sqrt(),
         12 if x < 1.0 => (2.0 * x - 3.0) * x * x + 1.0,
@@ -108,7 +108,8 @@ fn kernel(mode: i32, signed: f64) -> f64 {
         13 => 0.0,
         14 => 0.5 + 0.5 * (PI * x).cos(),
         15 if x < 1.0 => (16.0 + x * x * (21.0 * x - 36.0)) / 18.0,
-        15 => (32.0 + x * (-60.0 + x * (36.0 - 7.0 * x))) / 18.0,
+        15 if x < 2.0 => (32.0 + x * (-60.0 + x * (36.0 - 7.0 * x))) / 18.0,
+        15 => 0.0,
         17 => (1.0 - x * x).max(0.0),
         18 if x <= 0.5 => 1.0 - 2.0 * x * x,
         18 if x <= 1.5 => x * x - 2.5 * x + 1.5,
@@ -122,8 +123,10 @@ fn kernel(mode: i32, signed: f64) -> f64 {
 fn cubic(x: f64, a: f64) -> f64 {
     if x < 1.0 {
         1.0 + x * x * ((a + 2.0) * x - (a + 3.0))
-    } else {
+    } else if x < 2.0 {
         a * (x * (x * (x - 5.0) + 8.0) - 4.0)
+    } else {
+        0.0
     }
 }
 
