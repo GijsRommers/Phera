@@ -85,6 +85,9 @@ pub(crate) struct ClassTable {
     linking: Option<u32>,
     /// While a class links: every class name it looked up, and what it was.
     recording: std::cell::RefCell<Option<Vec<super::worker_classes::Dependency>>>,
+    /// The positions this request (last) and the snapshot it was forked
+    /// from took for classes linked for themselves alone.
+    leases: Vec<Rc<super::worker_classes::PositionLeases>>,
     pub(crate) has_dimensions: bool,
     pub(crate) has_property_views: bool,
     pub(crate) has_lazy_objects: bool,
@@ -108,6 +111,7 @@ impl ClassTable {
         worker: Rc<super::worker_classes::WorkerClasses>,
     ) -> Self {
         Self {
+            leases: vec![super::worker_classes::PositionLeases::new(&worker)],
             worker,
             declared: Vec::new(),
             order: Vec::new(),
@@ -149,6 +153,15 @@ impl ClassTable {
     pub(crate) fn end_link(&mut self) -> (Vec<super::worker_classes::Dependency>, Option<u32>) {
         let recorded = self.recording.borrow_mut().take().unwrap_or_default();
         (recorded, self.linking.take())
+    }
+
+    /// Gives `position` back to the worker when this request (and every fork
+    /// of it) is gone: a class linked for this request alone, or a link
+    /// that failed.
+    pub(crate) fn lease_position(&self, position: u32) {
+        if let Some(own) = self.leases.last() {
+            own.lease(position);
+        }
     }
 
     /// The number of the class `lowercase` names in this request, without
@@ -445,6 +458,12 @@ impl ClassTable {
             names: self.names.clone(),
             linking: None,
             recording: Default::default(),
+            leases: self
+                .leases
+                .iter()
+                .cloned()
+                .chain([super::worker_classes::PositionLeases::new(&self.worker)])
+                .collect(),
             has_dimensions: self.has_dimensions,
             has_property_views: self.has_property_views,
             has_lazy_objects: self.has_lazy_objects,

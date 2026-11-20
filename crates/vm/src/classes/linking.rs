@@ -87,7 +87,12 @@ impl Vm {
         let linked = self.link_class_body(unit, unit_first, index, key.clone());
         let (dependencies, position) = self.classes.end_link();
         let imports = self.code.end_imports();
-        linked.map_err(|error| super::declaration_errors::link_failure(unit, index, error))?;
+        if let Err(error) = linked {
+            if let Some(position) = position {
+                self.classes.lease_position(position);
+            }
+            return Err(super::declaration_errors::link_failure(unit, index, error));
+        }
         let declaration = &unit.classes[index.index()];
         // A class whose linking raised a diagnostic is linked by each request
         // that declares it, so that each sees the diagnostic (and runs its
@@ -112,6 +117,8 @@ impl Vm {
                     imports,
                 },
             );
+        } else if let Some(position) = position {
+            self.classes.lease_position(position);
         }
         Ok(())
     }

@@ -60,12 +60,46 @@ struct Inner {
     declarations: HashMap<(u32, u32), Vec<u32>>,
     /// Entries by file revision, to drop them when the revision is gone.
     revisions: Vec<RevisionEntries>,
+    /// Positions given back by requests, handed out again first.
+    free: Vec<u32>,
+}
+
+/// Positions one request (or boot) took for classes it linked for itself
+/// (an enum, an anonymous class, a class whose linking raised a
+/// diagnostic, a link that failed). They go back to the worker when the
+/// last holder is gone: a snapshot's are shared by its forks.
+pub(crate) struct PositionLeases {
+    worker: Rc<WorkerClasses>,
+    positions: RefCell<Vec<u32>>,
+}
+
+impl PositionLeases {
+    pub(crate) fn new(worker: &Rc<WorkerClasses>) -> Rc<Self> {
+        Rc::new(PositionLeases {
+            worker: worker.clone(),
+            positions: RefCell::default(),
+        })
+    }
+
+    pub(crate) fn lease(&self, position: u32) {
+        self.positions.borrow_mut().push(position);
+    }
+}
+
+impl Drop for PositionLeases {
+    fn drop(&mut self) {
+        let mut inner = self.worker.inner.borrow_mut();
+        inner.free.append(self.positions.get_mut());
+    }
 }
 
 impl WorkerClasses {
     /// A new position for a class being linked.
     pub(crate) fn reserve(&self) -> u32 {
         let mut inner = self.inner.borrow_mut();
+        if let Some(position) = inner.free.pop() {
+            return position;
+        }
         inner.entries.push(None);
         (inner.entries.len() - 1) as u32
     }
@@ -137,7 +171,41 @@ impl Inner {
                 if let Some(slot) = self.entries.get_mut(entry as usize) {
                     *slot = None;
                 }
+                self.free.push(entry);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use super::{PositionLeases, WorkerClasses};
+
+    #[test]
+    fn a_position_leased_by_a_request_is_handed_out_again() {
+        let worker = Rc::new(WorkerClasses::default());
+        let snapshot = PositionLeases::new(&worker);
+        let kept = worker.reserve();
+        snapshot.lease(kept);
+        let fork = PositionLeases::new(&worker);
+        let own = worker.reserve();
+        fork.lease(own);
+        drop(fork);
+        assert_eq!(
+            worker.reserve(),
+            own,
+            "a request's position goes back when it ends"
+        );
+        let shared_by_a_fork = snapshot.clone();
+        drop(snapshot);
+        assert_ne!(
+            worker.reserve(),
+            kept,
+            "a snapshot's position stays while a fork holds it"
+        );
+        drop(shared_by_a_fork);
+        assert_eq!(worker.reserve(), kept);
     }
 }
