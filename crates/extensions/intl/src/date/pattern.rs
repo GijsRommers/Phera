@@ -30,7 +30,7 @@ impl Style {
         }
     }
 
-    fn index(self) -> Option<usize> {
+    pub fn index(self) -> Option<usize> {
         match self {
             Self::Full => Some(0),
             Self::Long => Some(1),
@@ -42,6 +42,10 @@ impl Style {
 }
 
 pub fn select(locale: &Locale, date: Style, time: Style) -> String {
+    select_with_join(locale, date, time, None)
+}
+
+pub fn select_with_join(locale: &Locale, date: Style, time: Style, join: Option<&str>) -> String {
     let identifier = locale.id.to_string();
     let windows = |tag: &str| {
         include_str!("../../data/cldr-gregorian-styles.tsv")
@@ -65,11 +69,12 @@ pub fn select(locale: &Locale, date: Style, time: Style) -> String {
         .copied();
     match (date_text, time_text) {
         (Some(date_text), Some(time_text)) => {
-            let join = date
-                .index()
-                .and_then(|index| fields.get(8 + index))
-                .copied()
-                .unwrap_or("{1}, {0}");
+            let join = join.unwrap_or_else(|| {
+                date.index()
+                    .and_then(|index| fields.get(8 + index))
+                    .copied()
+                    .unwrap_or("{1}, {0}")
+            });
             join.replace("{1}", date_text).replace("{0}", time_text)
         }
         (Some(date), None) => date.to_owned(),

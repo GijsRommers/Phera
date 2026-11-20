@@ -1,5 +1,6 @@
 //! Format with the PHP objects across locales and check number and date parsing.
 
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{any::Any, rc::Rc};
 
 use crate::matrix::{Matrix, registry};
@@ -82,6 +83,92 @@ fn core_date_formats() {
         }
     }
     matrix.compare("intl-core-date-formats");
+}
+
+#[test]
+fn relative_date_styles() {
+    let mut matrix = Matrix::new();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("current Unix time")
+        .as_secs() as i64;
+    let today_at_noon = now.div_euclid(86_400) * 86_400 + 43_200;
+    for locale in ["en_US", "fr_FR", "ja_JP"] {
+        for style in 128..=131 {
+            for time in [-1, 3] {
+                let constructor = [
+                    Value::from(locale),
+                    Value::Int(style),
+                    Value::Int(time),
+                    Value::from("UTC"),
+                ];
+                for offset in -3..=3 {
+                    matrix.instance(
+                        "IntlDateFormatter",
+                        &constructor,
+                        "format",
+                        &[Value::Int(today_at_noon + 86_400 * offset)],
+                        None,
+                    );
+                }
+                matrix.instance("IntlDateFormatter", &constructor, "getPattern", &[], None);
+            }
+        }
+    }
+    matrix.compare("intl-relative-date-styles");
+}
+
+#[test]
+fn locale_length_and_time_zone_errors() {
+    let mut matrix = Matrix::new();
+    let locale = Value::from("a".repeat(157));
+    for (class, factory, method, values) in [
+        (
+            "NumberFormatter",
+            "numfmt_create",
+            "getErrorCode",
+            vec![locale.clone(), Value::Int(1)],
+        ),
+        (
+            "IntlDateFormatter",
+            "datefmt_create",
+            "getErrorCode",
+            vec![locale.clone(), Value::Int(1), Value::Int(1)],
+        ),
+        (
+            "Collator",
+            "collator_create",
+            "getErrorCode",
+            vec![locale.clone()],
+        ),
+        (
+            "MessageFormatter",
+            "msgfmt_create",
+            "getErrorCode",
+            vec![locale.clone(), Value::from("{0}")],
+        ),
+        (
+            "ResourceBundle",
+            "resourcebundle_create",
+            "getErrorCode",
+            vec![locale.clone(), Value::from("")],
+        ),
+    ] {
+        matrix.instance(class, &values, method, &[], None);
+        matrix.case(factory, &values);
+    }
+    matrix.instance("IntlListFormatter", &[locale], "getErrorCode", &[], None);
+    for zone in [Value::from("Not/AZone"), Value::from(vec![255])] {
+        let mut values = vec![Value::from("en_US"), Value::Int(2), Value::Int(-1)];
+        let setter = [zone.clone()];
+        matrix.instance("IntlDateFormatter", &values, "setTimeZone", &setter, None);
+        values.push(zone.clone());
+        matrix.instance("IntlDateFormatter", &values, "getErrorCode", &[], None);
+        matrix.case("datefmt_create", &values);
+        matrix.case("intlcal_create_instance", &setter);
+        matrix.instance("IntlGregorianCalendar", &setter, "getErrorCode", &[], None);
+    }
+    matrix.compare("intl-locale-length-and-time-zone-errors");
 }
 
 fn date_zone_difference(matrix: &mut Matrix, locale: &str, zone: &str, timestamp: i64) {

@@ -17,12 +17,12 @@ when it is a shared module.
 | `grapheme_*` | Length, substring, splitting, extraction, searching and weighted edit distance. Search uses grapheme sort keys and needs additional coverage for contractions spanning clusters. PHP 8.5.12 has no `grapheme_similar`. |
 | `Locale`, `locale_*` | Default locale, locale IDs, lookup, HTTP negotiation, likely subtags and localized names. Legacy ICU identifiers and display keywords have gaps. |
 | `NumberFormatter`, `numfmt_*` | Decimal, scientific, percent, currency and compact notation, with parsing and mutable settings. Custom rule-based formats, spellout, ordinal and duration raise unsupported errors. Pattern syntax, attributes and parse edge cases are partial. |
-| `IntlDateFormatter`, `datefmt_*` | Gregorian styles and patterns, PHP date objects, timestamps, local-time arrays and parsing. Traditional calendars, relative styles, calendar objects and unusual parse fields are partial. |
+| `IntlDateFormatter`, `datefmt_*` | Gregorian and relative day styles, patterns, PHP date objects, timestamps, local-time arrays and parsing. Relative text parsing, traditional calendars, calendar objects and unusual parse fields are partial. |
 | `idn_to_ascii`, `idn_to_utf8` | UTS #46 mapping, Punycode, transitional forms and error details. |
 | `intl_*error*`, `intl_is_failure`, `IntlException` | Request-local last error, ICU error names and numeric compatibility constants |
 | `Collator`, `collator_*` | Locale comparisons, array sorting and keys, strength, case, punctuation and numeric options. Sort-key bytes and some ICU-specific attributes differ. |
 | `MessageFormatter`, `msgfmt_*` | MessageFormat 1 with nested select, cardinal and ordinal plural branches, and number, date and time arguments. Indexed parsing reuses localized number and date parsers, including fractional seconds. Selection parsing, parse timezone defaults and diagnostics are partial. |
-| `Transliterator`, `transliterator_*` | Compound named transforms, Latin-ASCII, normalization, case mapping, and selected script and BGN romanizations. User rules, inverse IDs and full ICU transform coverage are partial. |
+| `Transliterator`, `transliterator_*` | Compound named transforms, Latin-ASCII, normalization, category-filtered Remove, case mapping, and selected script and BGN romanizations. User rules, inverse IDs and full ICU transform coverage are partial. |
 | `IntlTimeZone`, `intltz_*` | Zone construction, offsets, aliases, Windows mappings and conversion to PHP date zones. ICU-specific enumeration, rule comparisons and localized zone names are partial. |
 | `IntlCalendar`, `IntlGregorianCalendar`, `intlcal_*`, `intlgregcal_*` | Millisecond instants, field access and mutation, conversion to PHP dates, Gregorian cutover and locale week data. Field limits, non-Gregorian mutation and ICU wall time settings are partial. |
 | `ResourceBundle`, `resourcebundle_*` | Selected compiled locale tables and native-endian standalone ResB directories with read-only indexing and iteration. Shared pools, aliases, complete locale inheritance and many built-in keys remain incomplete. |
@@ -39,7 +39,7 @@ The two normalization mapping files under `data/` are derived from Unicode
 The ICU numeric constants and error names are the public PHP intl and ICU
 error-code tables as exposed by PHP 8.5.12 with ICU 79.1.
 
-CLDR 49's number patterns, locale display patterns, Gregorian date styles,
+CLDR 49's number patterns, locale display patterns, Gregorian date styles, relative day terms,
 currency-region map and reverse Windows zone map are compiled into the
 extension. Their source is the
 [CLDR JSON release](https://github.com/unicode-org/cldr-json/tree/49.0.0).

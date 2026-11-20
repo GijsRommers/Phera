@@ -7,7 +7,7 @@ use icu_experimental::transliterate::Transliterator;
 use icu_locale::LanguageIdentifier;
 use icu_normalizer::{ComposingNormalizer, DecomposingNormalizer};
 use icu_properties::{
-    CodePointMapData, PropertyValueNameToEnumMapper,
+    CodePointMapData, PropertyParser,
     props::{GeneralCategory, GeneralCategoryGroup, Script},
 };
 
@@ -83,8 +83,7 @@ impl Step {
             let property = property.trim();
             let inverted = property.starts_with('^');
             let category = property.trim_start_matches('^');
-            let category = PropertyValueNameToEnumMapper::<GeneralCategoryGroup>::new()
-                .get_loose(category)?;
+            let category = PropertyParser::<GeneralCategoryGroup>::new().get_loose(category)?;
             return Some(Self::RemoveCategory(category, inverted));
         }
         let id = id.strip_prefix("any-").unwrap_or(&id);

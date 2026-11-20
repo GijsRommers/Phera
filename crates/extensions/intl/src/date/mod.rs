@@ -10,6 +10,7 @@ pub(super) mod input;
 mod parse;
 mod pattern;
 mod registration;
+mod relative;
 mod render;
 
 use std::rc::Rc;
@@ -21,6 +22,7 @@ use phera_extension_api::{Value, args};
 
 use crate::{error, locale, locale_id, number};
 use pattern::Style;
+use relative::Relative;
 use render::Renderer;
 
 const CLASS: &str = "IntlDateFormatter";
@@ -70,6 +72,7 @@ pub fn parse_message(
         calendar: 1,
         lenient: true,
         pattern,
+        relative: None,
         error: (0, None),
     };
     let (parsed, _) = parse::fields(&state, input);
@@ -106,6 +109,7 @@ struct Formatter {
     calendar: i64,
     lenient: bool,
     pattern: String,
+    relative: Option<Relative>,
     render: Renderer,
     error: (i32, Option<String>),
 }
@@ -146,9 +150,17 @@ fn init(
     let Some(calendar) = input::calendar(calendar_input, site, 5)? else {
         return fail_creation(context, object, site, 1, input::CALENDAR_ERROR);
     };
+    let relative = Relative::new(&modern, date_type, time_style);
     let text = match std::str::from_utf8(args::bytes(values, 5)) {
-        Ok("") => pattern::select(&modern, date_style, time_style),
-        Ok(text) => text.to_owned(),
+        Ok(text) => {
+            if let Some(relative) = &relative {
+                relative.pattern(&modern, date_style, time_style)
+            } else if text.is_empty() {
+                pattern::select(&modern, date_style, time_style)
+            } else {
+                text.to_owned()
+            }
+        }
         Err(_) => {
             return fail_creation(
                 context,
@@ -171,6 +183,7 @@ fn init(
         calendar,
         lenient: true,
         pattern: text,
+        relative,
         render,
         error: (0, None),
     };
@@ -320,6 +333,9 @@ fn dispatch(
                     "Error converting pattern to UTF-16",
                 );
             };
+            if state.relative.is_some() {
+                return Ok(Value::Bool(true));
+            }
             let Some(render) = Renderer::new(&state.locale, pattern, state.calendar) else {
                 return fail(context, state, site, 3, "Error setting pattern");
             };

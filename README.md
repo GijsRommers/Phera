@@ -145,7 +145,7 @@ rejects secret keys whose embedded public half cannot be decoded as a point.
 ### intl
 
 The intl extension includes ICU4X normalization, grapheme operations, IDNA,
-locale queries, number and date formatting, collation, list and message
+locale queries, number and date formatting including relative days, collation, list and message
 formatting, transliteration including category-filtered accent removal,
 break iteration, resource bundles, and calendar
 and timezone objects. See the [intl coverage notes](crates/extensions/intl/README.md) for
