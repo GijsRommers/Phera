@@ -390,6 +390,7 @@ impl Machine<'_> {
 impl Machine<'_> {
     /// `Call` after `new` of a class without a constructor: the object is the
     /// result, and the arguments, already evaluated, are dropped.
+    #[inline(always)]
     fn finish_construction(&mut self, position: Position, destination: Reg) -> Step {
         let Some(call) = self.stack.pop_plain() else {
             return Step::Slow;

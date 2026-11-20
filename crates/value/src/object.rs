@@ -94,9 +94,6 @@ pub struct Object {
     /// fields are dropped in order, and the id goes back last (see
     /// [`PoolHold`]).
     pub(crate) pool: Option<PoolHold>,
-    /// This object took over another's contents for its destructor, and is
-    /// registered in the pool's incarnations (see `crate::weak_object`).
-    pub(crate) incarnated: bool,
 }
 
 impl Object {
@@ -110,7 +107,6 @@ impl Object {
             destruction: Cell::new(Destruction::Never),
             attachments: Cell::new(None),
             pool: None,
-            incarnated: false,
         }
     }
 
@@ -141,7 +137,6 @@ impl Object {
                 id,
                 incarnated: false,
             }),
-            incarnated: false,
         }
     }
 

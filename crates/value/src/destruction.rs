@@ -148,7 +148,6 @@ impl Object {
             destruction: Cell::new(Destruction::Done),
             attachments: Cell::new(self.attachments.take()),
             pool: Some(hold),
-            incarnated: true,
         });
         if let Ok(mut incarnations) = pool.incarnations.try_borrow_mut() {
             incarnations.insert(self.id, (origin, Rc::downgrade(&doomed)));
