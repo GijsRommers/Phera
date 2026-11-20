@@ -84,9 +84,15 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     if let Some(request_timeout) = options.request_timeout {
         config.request_timeout = request_timeout;
     }
+    if let Some(request_read_timeout) = options.request_read_timeout {
+        config.request_read_timeout = request_read_timeout;
+    }
     let workers = config.workers;
 
-    let mut runtime = Runtime::with_environment(loaded.environment).with_startup_ini(options.ini);
+    let mut runtime = Runtime::with_environment(loaded.environment)
+        .with_startup_ini(options.ini)
+        .with_web_development(options.dev)
+        .without_web_processes(options.no_process);
     if let (Adapter::Laravel, Some(front_controller)) = (adapter, site.front_controller()) {
         runtime = runtime.with_entry_script(
             front_controller.to_path_buf(),

@@ -12,6 +12,7 @@ mod dimensions;
 mod methods;
 mod registration;
 
+pub(crate) use methods::{legacy_clear, legacy_push, legacy_set_mode};
 pub(crate) use registration::register;
 
 use std::collections::VecDeque;

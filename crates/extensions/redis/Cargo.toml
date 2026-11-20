@@ -5,13 +5,16 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+futures-util.workspace = true
 phera-extension-api.workspace = true
 phera-io-pool.workspace = true
 redis.workspace = true
-rustls-rustcrypto.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 
 [lints]

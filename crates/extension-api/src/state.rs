@@ -2,6 +2,10 @@
 
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 /// What extensions remember during a request: the response headers, the
 /// output buffers, an open session.
@@ -102,5 +106,19 @@ impl RequestState {
             }
         }
         Ok(copy)
+    }
+}
+
+/// Child resources can check this flag at teardown after a PHP execution timeout.
+#[derive(Clone, Default)]
+pub struct ProcessCancellation(Arc<AtomicBool>);
+
+impl ProcessCancellation {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
     }
 }

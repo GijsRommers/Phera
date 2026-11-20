@@ -7,24 +7,40 @@
 //! ```
 
 mod attribute;
+mod entities;
 mod links;
+mod namespaces;
 mod walk;
 
+use std::num::NonZeroUsize;
 use std::ops::{Index, IndexMut};
 
 pub use links::LinkError;
 pub use walk::{Children, Descendants};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct NodeId(pub(crate) usize);
+pub struct NodeId(NonZeroUsize);
+
+impl NodeId {
+    pub(crate) const fn from_index(index: usize) -> Self {
+        Self(NonZeroUsize::MIN.saturating_add(index))
+    }
+
+    pub(crate) const fn index(self) -> usize {
+        self.0.get() - 1
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Kind {
     Element,
     Attribute,
+    Namespace,
     Text,
     Cdata,
     EntityReference,
+    Entity,
+    Notation,
     ProcessingInstruction,
     Comment,
     Document,
@@ -60,6 +76,15 @@ pub struct Doctype {
     pub public_id: String,
     pub system_id: String,
     pub internal_subset: Option<String>,
+    pub notations: String,
+    pub attribute_defaults: std::collections::HashMap<String, Vec<(String, String)>>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DtdEntry {
+    pub public_id: Option<String>,
+    pub system_id: Option<String>,
+    pub notation: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -69,7 +94,8 @@ pub struct Node {
     pub value: String,
     pub line: usize,
     pub is_id: bool,
-    pub doctype: Option<Doctype>,
+    pub doctype: Option<Box<Doctype>>,
+    pub dtd_entry: Option<Box<DtdEntry>>,
     parent: Option<NodeId>,
     first: Option<NodeId>,
     last: Option<NodeId>,
@@ -87,6 +113,7 @@ impl Node {
             line: 0,
             is_id: false,
             doctype: None,
+            dtd_entry: None,
             parent: None,
             first: None,
             last: None,
@@ -137,6 +164,7 @@ impl Node {
 pub struct Arena {
     nodes: Vec<Node>,
     revision: u64,
+    xpath_namespaces: Option<Box<namespaces::XPathNamespaces>>,
 }
 
 impl Default for Arena {
@@ -144,21 +172,26 @@ impl Default for Arena {
         Self {
             nodes: vec![Node::new(Kind::Document, Name::new("#document"), "")],
             revision: 0,
+            xpath_namespaces: None,
         }
     }
 }
 
 impl Arena {
-    pub const DOCUMENT: NodeId = NodeId(0);
+    pub const DOCUMENT: NodeId = NodeId::from_index(0);
 
     pub fn allocate(&mut self, node: Node) -> NodeId {
-        let id = NodeId(self.nodes.len());
+        let id = NodeId::from_index(self.nodes.len());
         self.nodes.push(node);
         id
     }
 
     pub fn get(&self, id: NodeId) -> Option<&Node> {
-        self.nodes.get(id.0)
+        self.nodes.get(id.index())
+    }
+
+    pub(crate) fn node_count(&self) -> usize {
+        self.nodes.len()
     }
 
     pub(crate) fn revision(&self) -> u64 {
@@ -221,12 +254,12 @@ impl Index<NodeId> for Arena {
     type Output = Node;
 
     fn index(&self, id: NodeId) -> &Node {
-        &self.nodes[id.0]
+        &self.nodes[id.index()]
     }
 }
 
 impl IndexMut<NodeId> for Arena {
     fn index_mut(&mut self, id: NodeId) -> &mut Node {
-        &mut self.nodes[id.0]
+        &mut self.nodes[id.index()]
     }
 }

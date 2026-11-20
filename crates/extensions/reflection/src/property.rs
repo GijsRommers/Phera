@@ -143,7 +143,8 @@ pub(crate) fn register(registry: &mut Registry) {
                     "setValue",
                     const {
                         &[
-                            Param::new("objectOrValue", ParamType::Mixed).optional(),
+                            Param::new("objectOrValue", ParamType::Mixed)
+                                .arity_checked_by_handler(),
                             Param::new("value", ParamType::Mixed).optional(),
                         ]
                     },

@@ -28,6 +28,21 @@ itself.
 | `attack_resources.py` | Area 4 battery (bounded): slow headers, huge declared bodies, idle keep-alives, 500 connections. |
 | `fuzz.py` | Area 8: mutation fuzzer over recorded valid requests; run for hours at low priority. (Round 2 fixed its `alive()` check, which passed an int to `status_of` and always aborted at the first checkpoint.) |
 | `lib.py` | Shared raw-socket helpers. |
+| `r3.py` | Shared helpers for the round-3 reproducers: each starts its own fresh `phera serve` on 127.0.0.1 (port in 18400-18499), `--workers 1`, nice 15, with a fixture site in a private temp dir. |
+| `repro_r3_multipart_boundary_cpu.py` | R3-1: O(body x boundary) boundary scan on a spawn_blocking thread the request timeout cannot cancel. |
+| `repro_r3_upload_temp_leak.py` | R3-2: an upload temp file is not deleted when the request is aborted by the request timeout. |
+| `repro_r3_trickle_body.py` | R3-4 (F4 residual): a body trickled at <1 byte/30 s is held forever; the request timeout does not cover body reads. |
+| `repro_r3_new_symlink.py` | R3-5: `phera new` writes through an existing symlink as its target. |
+
+Round-3 reproducers (each starts and stops its own server; see docs/security/round-3-findings.md):
+
+```sh
+tests/security/http/repro_r3_multipart_boundary_cpu.py   # ~50 s
+tests/security/http/repro_r3_upload_temp_leak.py
+tests/security/http/repro_r3_trickle_body.py             # ~45 s
+tests/security/http/repro_r3_new_symlink.py
+phera tests/security/repro_r3_allowed_classes_spl.php   # exit 1 = vulnerable
+```
 
 ## Running
 

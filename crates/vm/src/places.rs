@@ -76,7 +76,7 @@ impl Vm {
         if creation == Creation::Create {
             self.named_slot(&name).map(Some)
         } else {
-            if missing == Missing::Warn && self.diagnostic_reporter.is_visible() {
+            if missing == Missing::Warn {
                 self.warn(format!("Undefined variable ${name}"))
             }
             Ok(None)

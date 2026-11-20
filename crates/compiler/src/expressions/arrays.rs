@@ -24,7 +24,7 @@ impl Compiler<'_> {
                 .map(|key| self.compile_expression(key))
                 .transpose()?;
             let value = if item.by_reference {
-                let place = self.place(&item.value)?;
+                let place = self.reference_source(&item.value, line)?;
                 let dst = self.allocate_register()?;
                 self.emit(
                     Instruction::Reference {

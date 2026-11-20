@@ -73,6 +73,15 @@ impl Extension for Json {
             &[],
             error::message,
         ));
+        for (name, return_type) in [
+            ("json_encode", "string|false"),
+            ("json_decode", "mixed"),
+            ("json_validate", "bool"),
+            ("json_last_error", "int"),
+            ("json_last_error_msg", "string"),
+        ] {
+            registry.describe_function(name, return_type, None);
+        }
         for &(name, value) in CONSTANTS {
             registry.constant(name, value);
         }

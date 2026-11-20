@@ -127,6 +127,9 @@ impl Intrinsic {
             Self::Clone => &["object", "withProperties"],
             Self::ArrayMap => &["callback", "array", "arrays"],
             Self::Basename => &["path", "suffix"],
+            Self::Compact => &["var_name", "var_names"],
+            Self::Extract => &["array", "flags", "prefix"],
+            Self::Define => &["constant_name", "value", "case_insensitive"],
             Self::FunctionExists => &["function"],
             Self::Defined => &["constant_name"],
             Self::Constant => &["name"],
@@ -197,16 +200,5 @@ impl Intrinsic {
                 .iter()
                 .map(|function| function.name()),
         )
-    }
-
-    /// Named argument gaps differ from an explicitly passed null.
-    pub(crate) fn named_default(self, position: usize) -> phera_value::Value {
-        use phera_value::Value;
-        match (self, position) {
-            (Self::Output(crate::output_buffer::OutputFunction::Start), 1) => Value::Int(0),
-            (Self::IsCallable, 1) => Value::Bool(false),
-            (Self::SplAutoload(crate::spl_autoload::SplAutoload::Register), 1) => Value::Bool(true),
-            _ => Value::Null,
-        }
     }
 }

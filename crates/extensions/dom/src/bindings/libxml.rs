@@ -49,6 +49,25 @@ pub(super) fn publish(
     }
 }
 
+pub(super) fn file_failure(context: &mut dyn Context, function: &str, path: &str) {
+    let message = format!("failed to load external entity \"{path}\"");
+    let error = ParseError {
+        level: 1,
+        code: 1549,
+        column: 0,
+        message: format!("{message}\n"),
+        file: String::new(),
+        line: 0,
+    };
+    let state = context.state().get_or_default::<Errors>();
+    state.last = Some(error.clone());
+    if state.internal {
+        state.all.push(error);
+    } else {
+        context.warning(format!("{function}(): I/O warning : {message}"));
+    }
+}
+
 pub(super) fn register(registry: &mut Registry) {
     use PropertyType::{Int, String};
     use Visibility::Public;

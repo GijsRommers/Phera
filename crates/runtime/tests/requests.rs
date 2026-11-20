@@ -177,15 +177,29 @@ async fn failures_become_error_responses() {
     let broken = site.file("broken.php", "<?php echo 1 +;");
     let response = serve(&site, &broken, request("GET", "/broken.php")).await;
     assert_eq!(response.status, 500);
+    assert!(response.body.is_empty());
+
+    let crashing = site.file("crash.php", "<?php echo 'before'; undefined_function();");
+    let response = serve(&site, &crashing, request("GET", "/crash.php")).await;
+    assert_eq!(response.status, 200);
+    assert_eq!(body(&response), "before");
+
+    let settings = vec![("display_errors".into(), "1".into())];
+    let runtime = Runtime::new().with_startup_ini(settings);
+    let response = runtime
+        .handle_request(&broken, &site.root, request("GET", "/broken.php"))
+        .await;
+    assert_eq!(response.status, 200);
     assert!(
         body(&response).contains("Parse error"),
         "{}",
         body(&response)
     );
 
-    let crashing = site.file("crash.php", "<?php echo 'before'; undefined_function();");
-    let response = serve(&site, &crashing, request("GET", "/crash.php")).await;
-    assert_eq!(response.status, 500);
+    let response = runtime
+        .handle_request(&crashing, &site.root, request("GET", "/crash.php"))
+        .await;
+    assert_eq!(response.status, 200);
     assert!(body(&response).starts_with("before"), "{}", body(&response));
     assert!(body(&response).contains("Call to undefined function"));
 }

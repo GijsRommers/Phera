@@ -19,6 +19,7 @@ pub struct Files {
     pub stream_contexts: HashMap<i64, Rc<Resource>>,
     resources: Vec<Weak<Resource>>,
     next_id: i64,
+    default_context_claimed: bool,
 }
 
 impl Default for Files {
@@ -29,7 +30,8 @@ impl Default for Files {
             input: RequestInput::default(),
             stream_contexts: HashMap::new(),
             resources: Vec::new(),
-            next_id: 5,
+            next_id: 4,
+            default_context_claimed: false,
         }
     }
 }
@@ -50,6 +52,10 @@ pub fn files(context: &mut dyn Context) -> &mut Files {
     context.state().get_or_default()
 }
 
+pub fn creation_mask(context: &mut dyn Context) -> u32 {
+    files(context).mask
+}
+
 pub fn set_request(state: &mut RequestState, cwd: Option<PathBuf>, input: Arc<[u8]>) {
     if let Some(cwd) = cwd {
         state.get_or_default::<WorkingDirectory>().set(cwd);
@@ -67,8 +73,7 @@ pub fn new_resource(
     data: impl std::any::Any,
 ) -> Value {
     let files = state.get_or_default::<Files>();
-    let id = files.next_id;
-    files.next_id += 1;
+    let id = files.claim_id();
     let value = resource(id, label, data);
     files.track(&value);
     value
@@ -79,6 +84,20 @@ pub fn track_standard(state: &mut RequestState, value: &Value) {
 }
 
 impl Files {
+    pub(crate) fn claim_id(&mut self) -> i64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    /// The default stream context occupies a resource ID on its first use.
+    pub(crate) fn use_default_context(&mut self, explicit: &Value) {
+        if explicit.is_null() && !self.default_context_claimed {
+            self.claim_id();
+            self.default_context_claimed = true;
+        }
+    }
+
     fn track(&mut self, value: &Value) {
         if self.resources.len() >= 256 && self.next_id % 256 == 0 {
             self.resources

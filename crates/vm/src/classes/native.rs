@@ -140,7 +140,12 @@ impl ClassDefinitions {
                     Visibility::Protected => Object::protected_key(property.name),
                     Visibility::Public => ArrayKey::str(property.name),
                 };
-                defaults.push(PropertyDefault {
+                let inherited = defaults.iter().position(|candidate| {
+                    candidate.name == property.name
+                        && candidate.visibility != Visibility::Private
+                        && property.visibility != phera_extension_api::Visibility::Private
+                });
+                let declaration = PropertyDefault {
                     set_visibility: None,
                     is_final: false,
                     static_storage: None,
@@ -157,7 +162,12 @@ impl ClassDefinitions {
                     ty: property.ty.map(property_type),
                     is_readonly: property.is_readonly,
                     hooks: None,
-                });
+                };
+                if let Some(slot) = inherited {
+                    defaults[slot] = declaration;
+                } else {
+                    defaults.push(declaration);
+                }
             }
             if table.get(entry.name).is_none() {
                 table.order.push(entry.name.into());

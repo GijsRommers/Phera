@@ -57,6 +57,8 @@ impl Compiler<'_> {
             }
         }
         let comparisons = self.temporaries_since(mark);
+        // Found once: a switch may have thousands of cases.
+        let owned = self.owning_temporaries(&comparisons);
         let miss = self.emit(Instruction::Jump(Target(0)), line);
         self.loops.push(Loop {
             start: self.position(),
@@ -74,12 +76,12 @@ impl Compiler<'_> {
                 self.patch(miss, self.position())
             }
             // The subject and the case values are dead in every body.
-            self.clear_owning_temporaries(&comparisons, line);
+            self.clear_registers(&owned, line);
             self.block(&case.body, DeclarationTiming::AtExecution)?
         }
         if default.is_none() {
             self.patch(miss, self.position());
-            self.clear_owning_temporaries(&comparisons, line);
+            self.clear_registers(&owned, line);
         }
         self.loop_end(self.position());
         Ok(())

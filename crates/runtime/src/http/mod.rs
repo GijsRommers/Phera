@@ -13,6 +13,7 @@ mod uploads;
 
 use std::net::SocketAddr;
 
+pub(crate) use multipart::Boundary;
 pub(crate) use request_parse_body::{is_urlencoded, register_request_parse_body};
 pub(crate) use superglobals::{define_boot_superglobals, define_superglobals};
 pub(crate) use uploads::Form;
@@ -28,17 +29,19 @@ pub(crate) fn is_multipart(content_type: &[u8]) -> bool {
     media_type(content_type).eq_ignore_ascii_case(b"multipart/form-data")
 }
 
-pub(crate) fn receive_form(body: &[u8], boundary: &[u8]) -> Form {
-    uploads::receive(body, boundary, form_limits::FormLimits::default())
+pub(crate) async fn receive_form(body: Vec<u8>, boundary: Vec<u8>) -> Option<Form> {
+    let range = 0..body.len();
+    uploads::receive(body, range, boundary, form_limits::FormLimits::default())
+        .await
+        .ok()
 }
 
-/// The boundary of a `multipart/form-data` request that PHP would read as a
-/// form: only `POST` fills `$_POST` and `$_FILES`.
-pub(crate) fn form_boundary(request: &HttpRequest) -> Option<Vec<u8>> {
-    (request.method == "POST")
-        .then(|| request.header("Content-Type"))
-        .flatten()
-        .and_then(multipart::boundary)
+/// Only POST fills PHP's startup form variables.
+pub(crate) fn form_boundary(request: &HttpRequest) -> Boundary {
+    request
+        .header("Content-Type")
+        .filter(|_| request.method == "POST")
+        .map_or(Boundary::OtherMediaType, multipart::boundary)
 }
 
 /// One HTTP request, already read in full.

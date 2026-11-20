@@ -6,7 +6,9 @@
 //! echo $document->saveXML();
 //! ```
 
+mod html_file;
 pub(super) mod io;
+mod node_class;
 
 use phera_extension_api::{
     ClassEntry, ConstantValue as C, Context, MethodEntry as M, NativeError, NativeResult,
@@ -103,6 +105,23 @@ pub(super) fn register(registry: &mut Registry) {
                         mutation::import,
                     ),
                     M::public(
+                        "adoptNode",
+                        const { &[P::new("node", NODE)] },
+                        mutation::adopt,
+                    )
+                    .returning("DOMNode|false"),
+                    M::public_async(
+                        "registerNodeClass",
+                        const {
+                            &[
+                                P::new("baseClass", T::String),
+                                P::new("extendedClass", T::String).nullable(),
+                            ]
+                        },
+                        node_class::register,
+                    )
+                    .tentative_return("bool"),
+                    M::public(
                         "getElementById",
                         const { &[P::new("elementId", T::String)] },
                         by_id,
@@ -160,7 +179,11 @@ fn construct(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Native
     Ok(Value::Null)
 }
 
-fn by_id(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
+pub(super) fn by_id(
+    context: &mut dyn Context,
+    this: This<'_>,
+    arguments: &[Value],
+) -> NativeResult {
     let location = this_node(this)?;
     let id = String::from_utf8_lossy(args::bytes(arguments, 0));
     let found = {

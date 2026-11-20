@@ -73,7 +73,7 @@ const COMMON: [Method; 20] = const {
         Method::public_async("natcasesort", &[], sorting::natcasesort).tentative_return("true"),
         Method::public("serialize", &[], serialization::legacy_serialize)
             .tentative_return("string"),
-        Method::public(
+        Method::public_async(
             "unserialize",
             const { &[Param::new("data", ParamType::String)] },
             serialization::legacy_unserialize,

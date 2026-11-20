@@ -9,7 +9,7 @@
 //! A forward pass over an expression's compiled code follows each register
 //! to the end of the expression; see [`Expression::holds_a_scalar`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use phera_bytecode::Reg;
 
@@ -17,10 +17,36 @@ use crate::ir::{ArgumentSource, Binary, Instruction, PlaceScope, Target, Unary};
 
 /// The compiled code of one expression, and the function's variables.
 pub(super) struct Expression<'a> {
-    pub(super) code: &'a [Instruction],
-    pub(super) locals: &'a [Reg],
+    code: &'a [Instruction],
+    /// The function's variables that this code only reads.
+    untouched: HashSet<Reg>,
     /// The registers own nothing before the code runs.
-    pub(super) clean_start: bool,
+    clean_start: bool,
+}
+
+impl<'a> Expression<'a> {
+    /// The code of one expression; `locals` are the function's variables.
+    /// One pass finds the variables the code writes.
+    pub(super) fn new(code: &'a [Instruction], locals: &HashSet<Reg>, clean_start: bool) -> Self {
+        let mut untouched = locals.clone();
+        for instruction in code {
+            let mut mentioned = Vec::new();
+            instruction.clone().map_registers(|register| {
+                mentioned.push(register);
+                register
+            });
+            for register in mentioned {
+                if untouched.contains(&register) && !reads_only(instruction, register) {
+                    untouched.remove(&register);
+                }
+            }
+        }
+        Expression {
+            code,
+            untouched,
+            clean_start,
+        }
+    }
 }
 
 impl Expression<'_> {
@@ -94,11 +120,7 @@ impl Expression<'_> {
 
     /// Whether `register` is a variable that the expression never writes.
     fn untouched_local(&self, register: Reg) -> bool {
-        self.locals.contains(&register)
-            && self
-                .code
-                .iter()
-                .all(|instruction| reads_only(instruction, register))
+        self.untouched.contains(&register)
     }
 }
 
