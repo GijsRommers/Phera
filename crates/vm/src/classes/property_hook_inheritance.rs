@@ -81,7 +81,7 @@ impl Vm {
             return Ok(());
         }
         self.check_property_hook_signatures(property, inherited, unit)?;
-        self.check_hook_property_type(property, inherited, unit)?;
+        self.check_property_type(property, inherited, unit)?;
         let virtual_property = is_virtual(property) && is_virtual(inherited);
         let mut linked =
             property
@@ -122,7 +122,7 @@ impl Vm {
         Ok(())
     }
 
-    fn check_hook_property_type(
+    pub(super) fn check_property_type(
         &self,
         property: &PropertyDefault,
         inherited: &PropertyDefault,
@@ -210,7 +210,7 @@ impl Vm {
                     self.inherit_property_hooks(property, requirement, unit)?;
                 } else {
                     self.check_property_hook_signatures(property, requirement, unit)?;
-                    self.check_hook_property_type(property, requirement, unit)?;
+                    self.check_property_type(property, requirement, unit)?;
                 }
                 self.check_plain_set_contract(property, requirement, "interface", unit)?;
             }
