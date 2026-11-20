@@ -50,10 +50,20 @@ impl Vm {
     }
 
     pub(crate) fn serialization_class_info(class: &Rc<Class>) -> SerializationClass {
+        let legacy_native = class
+            .hooks
+            .as_ref()
+            .and_then(|hooks| hooks.legacy_unserialize)
+            .filter(|_| {
+                !Self::serialization_method(class, "unserialize").is_some_and(|method| {
+                    matches!(method.body, crate::classes::MethodBody::User(_))
+                })
+            });
         SerializationClass {
             name: class.name.clone(),
             forbidden: Self::class_forbids_serialization(class),
-            custom: class.is_a("Serializable"),
+            custom: legacy_native.is_some() || class.is_a("Serializable"),
+            legacy_native,
             has_unserialize: Self::serialization_method(class, "__unserialize").is_some(),
             plain: layout::plain_layout(class),
         }

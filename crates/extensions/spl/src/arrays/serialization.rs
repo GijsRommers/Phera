@@ -159,13 +159,21 @@ pub(super) fn legacy_unserialize(
     Box::pin(async move {
         let object = receiver(this.as_ref())?;
         let input = args::string(&arguments, 0).ok_or_else(invalid_serialization)?;
-        let kind = if object.class.is_instance_of("ArrayObject") {
-            PayloadKind::ArrayObject
-        } else {
-            PayloadKind::ArrayIterator
-        };
-        legacy::decode(context, object.clone(), input.as_bytes(), kind).await
+        decode_legacy_payload(context, object.clone(), input.as_bytes()).await
     })
+}
+
+pub(super) fn decode_legacy_payload<'a>(
+    context: &'a mut dyn Context,
+    object: Rc<Object>,
+    bytes: &'a [u8],
+) -> LocalFuture<'a, NativeResult> {
+    let kind = if object.class.is_instance_of("ArrayObject") {
+        PayloadKind::ArrayObject
+    } else {
+        PayloadKind::ArrayIterator
+    };
+    Box::pin(legacy::decode(context, object, bytes, kind))
 }
 
 pub(crate) fn legacy_check_mutable(object: &Object) -> Result<(), NativeError> {

@@ -4,7 +4,8 @@ use std::rc::Rc;
 
 use phera_extension_api::serialization::{
     ActiveLegacyUnserialize, ActiveUnserializePolicy, EnumCaseLookup, INCOMPLETE_CLASS,
-    INCOMPLETE_CLASS_NAME, SerializationClass, resolve_unserialize_class,
+    INCOMPLETE_CLASS_NAME, NativeLegacyUnserialize, SerializationClass, invoke_legacy_payload,
+    resolve_unserialize_class,
 };
 use phera_extension_api::{ArrayKey, Context, NativeError, Object, Value};
 
@@ -44,7 +45,9 @@ impl<'a> Decoder<'a> {
                 let object = allocate(context, name)?;
                 self.graph.value(place, Value::Object(object.clone()));
                 if custom {
-                    self.decode_custom_payload(context, object, payload).await?;
+                    let native = info.as_ref().and_then(|class| class.legacy_native);
+                    self.decode_custom_payload(context, object, payload, native)
+                        .await?;
                 } else if info.is_none() {
                     object.set(ArrayKey::str(INCOMPLETE_CLASS_NAME), Value::from(class));
                 }
@@ -88,16 +91,14 @@ impl<'a> Decoder<'a> {
         context: &mut dyn Context,
         object: Rc<Object>,
         payload: &[u8],
+        native: Option<NativeLegacyUnserialize>,
     ) -> Result<(), NativeError> {
         let mut policy = self.options.clone();
         policy.depth += self.frames.len();
         let previous_policy = ActiveUnserializePolicy::replace(context, Some(policy));
-        let slots = (!context.is_user_method(&object, "unserialize"))
-            .then(|| self.graph.legacy_object_slots(payload));
+        let slots = native.map(|_| self.graph.legacy_object_slots(payload));
         let previous_slots = ActiveLegacyUnserialize::replace(context, slots);
-        let result = context
-            .call_serialization_method(object, "unserialize", vec![Value::from(payload)])
-            .await;
+        let result = invoke_legacy_payload(context, object, payload, native).await;
         if let Some(mut slots) = ActiveLegacyUnserialize::replace(context, previous_slots) {
             self.delayed
                 .extend(slots.hooks.drain(..).map(Delayed::Legacy));

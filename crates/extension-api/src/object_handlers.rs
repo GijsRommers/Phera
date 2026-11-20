@@ -135,6 +135,7 @@ pub type MethodForwarder = fn(&Object) -> Result<Option<Rc<Object>>, NativeError
 pub struct ClassHooks {
     /// The error for script allocation of a factory-only native object.
     pub construction_error: Option<&'static str>,
+    pub legacy_unserialize: Option<crate::serialization::NativeLegacyUnserialize>,
     pub clone: Option<NativeClone>,
     pub compare: Option<NativeCompare>,
     /// Whole-object enumeration, with the consuming operation supplied as a purpose.
@@ -155,6 +156,7 @@ pub struct ClassHooks {
 impl ClassHooks {
     pub const EMPTY: Self = Self {
         construction_error: None,
+        legacy_unserialize: None,
         clone: None,
         compare: None,
         properties: None,

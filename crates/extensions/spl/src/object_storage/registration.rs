@@ -29,6 +29,7 @@ pub(crate) fn register(registry: &mut Registry) {
             "ArrayAccess",
         ],
         hooks: Some(&ClassHooks {
+            legacy_unserialize: Some(views::decode_legacy_payload),
             clone: Some(NativeClone::Copy(iteration::clone_storage)),
             compare: Some(views::compare),
             properties: Some(views::view),
