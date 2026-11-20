@@ -153,8 +153,19 @@ impl Vm {
         let Some(result) = (implementation.try_ready)(self, &receiver, argument.as_ref()) else {
             return Ok(None);
         };
-        self.call_stack.pop_call()?;
+        let (_, details) = self.call_stack.pop_call()?;
         self.registers.truncate(call.start());
+        if let Err(error) = &result
+            && let Some(CallTarget::Method { method, .. }) = details
+                .and_then(|details| details.callee)
+                .map(|callee| callee.target)
+        {
+            self.record_native_failure(
+                error,
+                super::native_frames::NativeFrame::Method(&method),
+                argument.as_slice(),
+            );
+        }
         result.map(Some)
     }
 }

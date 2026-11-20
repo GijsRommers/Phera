@@ -80,7 +80,7 @@ const ARRAY_UDIFF: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_udiff,
@@ -103,7 +103,7 @@ const ARRAY_UDIFF_ASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_udiff_assoc,
@@ -129,7 +129,7 @@ const ARRAY_UDIFF_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_udiff_uassoc,
@@ -155,7 +155,7 @@ const ARRAY_DIFF_UKEY: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_diff_ukey,
@@ -181,7 +181,7 @@ const ARRAY_DIFF_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_diff_uassoc,
@@ -207,7 +207,7 @@ const ARRAY_UINTERSECT: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_uintersect,
@@ -233,7 +233,7 @@ const ARRAY_UINTERSECT_ASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_uintersect_assoc,
@@ -259,7 +259,7 @@ const ARRAY_UINTERSECT_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_uintersect_uassoc,
@@ -285,7 +285,7 @@ const ARRAY_INTERSECT_UKEY: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_intersect_ukey,
@@ -311,7 +311,7 @@ const ARRAY_INTERSECT_UASSOC: FunctionEntry = FunctionEntry::asynchronous(
     // PHP checks the callbacks at the end before the arrays, and needs one
     // more argument per callback; run() does all of it, in that order.
     &[
-        Param::new("array", ParamType::Mixed).optional(),
+        Param::new("array", ParamType::Mixed).arity_checked_by_handler(),
         Param::new("rest", ParamType::Mixed).variadic(),
     ],
     array_intersect_uassoc,
