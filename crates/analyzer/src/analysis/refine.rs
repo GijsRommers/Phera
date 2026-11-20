@@ -7,6 +7,7 @@ impl Analyzer<'_> {
     pub fn refine(&mut self, expression: &Expression, scope: &mut Scope, truth: bool) {
         let mut pending = vec![(expression, truth)];
         while let Some((expression, truth)) = pending.pop() {
+            self.conditional_assertions(expression, scope, truth);
             match &expression.kind {
                 ExpressionKind::Variable(Variable::Named(name)) => {
                     scope.refine_variable_guard(name, truth);

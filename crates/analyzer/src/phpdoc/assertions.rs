@@ -5,13 +5,28 @@ use crate::{names::Names, types::ValueType};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Assertion {
+    pub branch: AssertionBranch,
+    pub negated: bool,
     pub root: String,
     pub properties: Vec<String>,
     pub ty: ValueType,
 }
 
-pub fn parse_assertion(body: &str, names: &Names, templates: &Templates) -> Option<Assertion> {
-    let parsed = parse(body, names, templates).ok()?;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AssertionBranch {
+    Always,
+    OnResult(bool),
+}
+
+pub fn parse_assertion(
+    body: &str,
+    names: &Names,
+    templates: &Templates,
+    branch: AssertionBranch,
+) -> Option<Assertion> {
+    let body = body.trim_start_matches('=');
+    let negated = body.starts_with('!');
+    let parsed = parse(body.trim_start_matches('!'), names, templates).ok()?;
     let subject = parsed.suffix.split_whitespace().next()?;
     let mut path = subject.strip_prefix('$')?.split("->");
     let root = path.next()?.to_owned();
@@ -21,6 +36,8 @@ pub fn parse_assertion(body: &str, names: &Names, templates: &Templates) -> Opti
         return None;
     }
     Some(Assertion {
+        branch,
+        negated,
         root,
         properties,
         ty: parsed.ty,

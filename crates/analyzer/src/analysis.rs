@@ -16,6 +16,7 @@ use phera_source::Span;
 
 mod argument_contracts;
 mod arguments;
+mod array_merge;
 mod array_size;
 mod array_sum;
 mod arrays;
@@ -71,6 +72,7 @@ mod receiver_types;
 mod redundant_null_coalesce;
 mod refine;
 mod refine_types;
+mod regex_captures;
 mod reporting;
 mod short_circuit;
 mod statements;

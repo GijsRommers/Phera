@@ -2,27 +2,33 @@
 //! The same fact follows if a nullsafe chain returns a non-null value.
 
 use super::*;
-use crate::scope::Place;
+use crate::scope::{AccessStep, Place};
 
 impl Analyzer<'_> {
-    /// `$node?->kind() === $kind` proves that the receiver exists when
-    /// `$kind` has a non-null type.
-    pub(super) fn refine_nullsafe_comparison(
+    /// On the equal path of `$label === $item->label`, a non-null label
+    /// property also proves that the local label is non-null.
+    pub(super) fn refine_non_null_comparison(
         &self,
         left: &Expression,
         right: &Expression,
         scope: &mut Scope,
     ) {
         for (value, peer) in [(left, right), (right, left)] {
-            if let ExpressionKind::Variable(Variable::Named(name)) = &peer.kind
-                && scope.get(name).ty.excludes_null()
+            if let Some(place) = Place::of(peer)
+                && (place.members.is_empty()
+                    || matches!(value.kind, ExpressionKind::Variable(Variable::Named(_)))
+                        && place
+                            .members
+                            .iter()
+                            .all(|step| matches!(step, AccessStep::Property(_))))
+                && self.place_type(&place, scope).excludes_null()
             {
-                self.refine_nullsafe_receivers(value, scope);
+                self.refine_type(value, ValueType::Null, scope, false, value.span);
             }
         }
     }
 
-    pub(super) fn remember_nullsafe_result(
+    pub(super) fn remember_optional_result(
         &self,
         variable: &str,
         expression: &Expression,
@@ -31,7 +37,7 @@ impl Analyzer<'_> {
         if self.level < 8 || scope.dynamic || self.context.scope_kind == ScopeKind::Global {
             return;
         }
-        let target = match &expression.kind {
+        let receiver = match &expression.kind {
             ExpressionKind::MethodCall {
                 target,
                 nullsafe: true,
@@ -41,10 +47,13 @@ impl Analyzer<'_> {
                 target,
                 nullsafe: true,
                 ..
-            } => target,
-            _ => return,
+            } => match &target.kind {
+                ExpressionKind::Variable(Variable::Named(receiver)) => Some(receiver.as_str()),
+                _ => None,
+            },
+            _ => ternary_receiver(expression),
         };
-        if let ExpressionKind::Variable(Variable::Named(receiver)) = &target.kind
+        if let Some(receiver) = receiver
             && variable != receiver
             && !scope.aliases.contains_key(receiver)
             && !scope.external_references.contains(receiver)
@@ -84,5 +93,46 @@ impl Analyzer<'_> {
                 _ => break,
             }
         }
+    }
+}
+
+// A non-null result of `$item === null ? null : $item->name()` proves $item exists.
+fn ternary_receiver(expression: &Expression) -> Option<&str> {
+    let ExpressionKind::Ternary {
+        condition,
+        then: Some(then),
+        otherwise,
+    } = &expression.kind
+    else {
+        return None;
+    };
+    let ExpressionKind::Binary {
+        operator,
+        left,
+        right,
+    } = &condition.kind
+    else {
+        return None;
+    };
+    let (skipped, evaluated) = match operator {
+        BinaryOperator::Identical => (then, otherwise),
+        BinaryOperator::NotIdentical => (otherwise, then),
+        _ => return None,
+    };
+    if !matches!(skipped.kind, ExpressionKind::Literal(Literal::Null))
+        || Place::of(evaluated).is_none() && !matches!(evaluated.kind, ExpressionKind::Literal(_))
+    {
+        return None;
+    }
+    match (&left.kind, &right.kind) {
+        (
+            ExpressionKind::Variable(Variable::Named(receiver)),
+            ExpressionKind::Literal(Literal::Null),
+        )
+        | (
+            ExpressionKind::Literal(Literal::Null),
+            ExpressionKind::Variable(Variable::Named(receiver)),
+        ) => Some(receiver),
+        _ => None,
     }
 }

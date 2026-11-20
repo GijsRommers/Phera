@@ -43,6 +43,17 @@ impl Analyzer<'_> {
         if self.level < 7 && place.root == crate::scope::SELF_PROPERTIES {
             return;
         }
+        self.refine_place(place, against, scope, truth, Some(span));
+    }
+
+    pub(super) fn refine_place(
+        &self,
+        place: Place,
+        against: ValueType,
+        scope: &mut Scope,
+        truth: bool,
+        span: Option<Span>,
+    ) {
         let original = self.place_type(&place, scope);
         let current = match &original {
             ValueType::Union(variants) | ValueType::BenevolentUnion(variants) => variants.as_ref(),
@@ -60,35 +71,15 @@ impl Analyzer<'_> {
                 }
             } else if matches == Compatibility::Accepts {
                 arm.clone()
-            } else if matches == Compatibility::Uncertain
-                && matches!(
-                    (&against, arm),
-                    (
-                        ValueType::UnknownCallable,
-                        ValueType::String
-                            | ValueType::StringLiteral(_)
-                            | ValueType::Class(_)
-                            | ValueType::Generic(_)
-                            | ValueType::Object
-                    ) | (ValueType::Object, ValueType::UnknownCallable)
-                )
-            {
-                // A callable string still passes a string parameter, and an
-                // invokable object still has its original class members.
-                ValueType::intersection(arm, &against)
-            } else if matches == Compatibility::Uncertain
-                || arm.accepts(&against, self.index, TypePolicy::Documentation)
-                    != Compatibility::Rejects
-            {
-                against.clone()
-            } else if let (Some(_), Some(_)) = (arm.class_name(), against.class_name()) {
-                if self.disjoint_classes(arm, &against) {
-                    ValueType::Never
-                } else {
-                    ValueType::intersection(arm, &against)
-                }
             } else {
-                ValueType::Never
+                match &against {
+                    ValueType::Union(tests) | ValueType::BenevolentUnion(tests) => {
+                        tests.iter().fold(ValueType::Never, |types, test| {
+                            types.join(&self.narrow_positive(arm, test))
+                        })
+                    }
+                    test => self.narrow_positive(arm, test),
+                }
             };
             out.join(&ty)
         });
@@ -101,8 +92,39 @@ impl Analyzer<'_> {
                 narrowed
             };
             if narrowed != ValueType::Never {
-                scope.facts.record(place, narrowed, Some(span));
+                scope.facts.record(place, narrowed, span);
             }
+        }
+    }
+
+    // A positive test retains only the overlap with each tested alternative.
+    fn narrow_positive(&self, arm: &ValueType, test: &ValueType) -> ValueType {
+        use ValueType as T;
+        let matches = test.accepts(arm, self.index, TypePolicy::Documentation);
+        if matches == Compatibility::Accepts {
+            arm.clone()
+        } else if matches == Compatibility::Uncertain
+            && matches!(
+                (test, arm),
+                (
+                    T::UnknownCallable,
+                    T::String | T::StringLiteral(_) | T::Class(_) | T::Generic(_) | T::Object
+                ) | (T::Object, T::UnknownCallable)
+            )
+        {
+            // Callable strings and invokable objects keep their original members.
+            T::intersection(arm, test)
+        } else if matches == Compatibility::Uncertain
+            || arm.accepts(test, self.index, TypePolicy::Documentation) != Compatibility::Rejects
+        {
+            test.clone()
+        } else if arm.class_name().is_some()
+            && test.class_name().is_some()
+            && !self.disjoint_classes(arm, test)
+        {
+            T::intersection(arm, test)
+        } else {
+            T::Never
         }
     }
 
@@ -258,7 +280,7 @@ impl Analyzer<'_> {
             } else if let Some(class) = self.enum_case_class(left) {
                 self.refine_type(right, ValueType::Class(class), scope, true, span);
             } else {
-                self.refine_nullsafe_comparison(left, right, scope);
+                self.refine_non_null_comparison(left, right, scope);
             }
         }
     }

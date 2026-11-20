@@ -1,4 +1,13 @@
 {
+  "conditional_phpdoc_assertions.php": [],
+  "contextual_array_parameters.php": [],
+  "guard_overlap.php": [],
+  "optional_ternary_results.php": [],
+  "unpacked_array_merge.php": [],
+  "widened_array_sum.php": [],
+  "regex_required_captures.php": [
+    [8, 11, "argument.type", "Parameter #1 $text of function acceptCapture expects string, string|null given."]
+  ],
   "array_count_removals.php": [
     [8, 15, "argument.type", "Parameter #1 $item of function storeRequired expects string, string|null given."]
   ],

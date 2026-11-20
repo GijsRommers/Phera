@@ -55,12 +55,9 @@ impl Analyzer<'_> {
                 let [_, array] = arguments else {
                     return Vec::new();
                 };
-                let element = self.array_map_element(&array.value, scope);
-                if element == T::Mixed {
-                    Vec::new()
-                } else {
-                    vec![element]
-                }
+                self.array_map_element(&array.value, scope)
+                    .into_iter()
+                    .collect()
             }
             ("usort()" | "uasort()", "callback") => {
                 let element = element_type(previous);
@@ -72,7 +69,7 @@ impl Analyzer<'_> {
 
     // Array filtering and reindexing keep the element type. Inspect those
     // inputs without re-evaluating arguments or their side effects.
-    fn array_map_element(&mut self, mut array: &Expression, scope: &Scope) -> ValueType {
+    fn array_map_element(&mut self, mut array: &Expression, scope: &Scope) -> Option<ValueType> {
         while let ExpressionKind::Call {
             callee,
             arguments: Arguments::List(arguments),
@@ -88,17 +85,19 @@ impl Analyzer<'_> {
         {
             array = &first.value;
         }
-        let Some(place) = Place::of(array) else {
-            return ValueType::Mixed;
-        };
-        let ty = self.place_type(&place, scope);
-        let element = super::arrays::iteration_types(&ty).1;
+        let place = Place::of(array)?;
+        let mut ty = self.place_type(&place, scope);
+        let mut element = super::arrays::iteration_types(&ty).1;
         if element.is_mixed() && !place.members.is_empty() {
             let loaded = self.load_array_receiver_types(&place, scope);
-            super::arrays::iteration_types(&loaded).1
-        } else {
-            element
+            if !loaded.is_mixed() {
+                ty = loaded;
+                element = super::arrays::iteration_types(&ty).1;
+            }
         }
+        // An inferred collection with unknown elements already supplies the
+        // callback context. It is different from a bare array declaration.
+        (element != ValueType::Mixed || matches!(ty, ValueType::Collection(_))).then_some(element)
     }
 
     // The callback is processed before PHP evaluates its array argument.

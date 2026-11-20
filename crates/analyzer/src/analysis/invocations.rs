@@ -173,7 +173,14 @@ impl Analyzer<'_> {
             scope.facts.forget_receiver(&receiver);
         }
         if !*nullsafe && result != ValueType::Never {
-            self.method_assertions(target, &receiver, name, arguments, scope);
+            self.method_assertions(
+                Some(target),
+                &receiver,
+                name,
+                arguments,
+                scope,
+                crate::phpdoc::assertions::AssertionBranch::Always,
+            );
         }
         chain.ty = if (4..8).contains(&self.level) && *nullsafe && !ty.excludes_null() {
             result.join(&ValueType::Null)

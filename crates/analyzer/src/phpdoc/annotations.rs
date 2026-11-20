@@ -1,6 +1,7 @@
 //! Attach `@param User $user` to its parameter and keep the tag's diagnostic span.
 //! PHPStan-prefixed tags take precedence over Psalm-prefixed or unprefixed tags.
 
+use super::assertions::AssertionBranch;
 use super::type_parser::{Templates, parse};
 use crate::{names::Names, types::ValueType};
 use phera_source::Span;
@@ -118,10 +119,21 @@ pub fn read(
     for tag in &tags {
         let (priority, name) = tag_name(tag.name);
         let span = Span::new(tag.offset, tag.offset);
-        if name == "assert" && priority != Priority::Standard {
-            if let Some(assertion) =
-                super::assertions::parse_assertion(&tag.body, names, &documentation.templates)
-            {
+        let assertion_branch = match name {
+            "assert" => Some(AssertionBranch::Always),
+            "assert-if-true" => Some(AssertionBranch::OnResult(true)),
+            "assert-if-false" => Some(AssertionBranch::OnResult(false)),
+            _ => None,
+        };
+        if priority != Priority::Standard
+            && let Some(branch) = assertion_branch
+        {
+            if let Some(assertion) = super::assertions::parse_assertion(
+                &tag.body,
+                names,
+                &documentation.templates,
+                branch,
+            ) {
                 documentation.assertions.push(assertion);
             }
             continue;

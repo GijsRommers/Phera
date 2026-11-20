@@ -2,7 +2,10 @@
 //! Reference writes initialize variables, while ordinary closure uses read them.
 
 use super::*;
-use crate::index::{Location, Signature};
+use crate::{
+    index::{Location, Signature},
+    types::{Compatibility, TypePolicy},
+};
 
 impl Analyzer<'_> {
     pub fn ensure_reference(&mut self, expression: &Expression, scope: &mut Scope) {
@@ -52,7 +55,17 @@ impl Analyzer<'_> {
                     }
                 })
             } else {
-                ValueType::parameter(parameter, &self.context.names)
+                let native = ValueType::parameter(parameter, &self.context.names);
+                if native == ValueType::Array
+                    && let Some(ty @ (ValueType::Shape(_) | ValueType::Collection(_))) =
+                        contextual.get(position)
+                    && native.accepts(ty, self.index, TypePolicy::Documentation)
+                        == Compatibility::Accepts
+                {
+                    ty.clone()
+                } else {
+                    native
+                }
             };
             if parameter.by_reference {
                 scope.external_references.insert(parameter.name.clone());
@@ -194,11 +207,11 @@ impl Analyzer<'_> {
                 || self.context.returns == ValueType::ExplicitMixed && !given.is_mixed()
                 || self.level >= 7
                     && self.context.returns == ValueType::Array
-                    && self.context.returns.accepts(
-                        &given,
-                        self.index,
-                        crate::types::TypePolicy::Documentation,
-                    ) == crate::types::Compatibility::Accepts)
+                    && self
+                        .context
+                        .returns
+                        .accepts(&given, self.index, TypePolicy::Documentation)
+                        == Compatibility::Accepts)
         {
             signature.returns = given;
         }

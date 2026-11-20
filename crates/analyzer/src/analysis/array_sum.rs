@@ -14,6 +14,11 @@ pub(super) fn result(array: &T) -> Option<T> {
         }
         _ => return None,
     };
+    if items == T::Mixed {
+        // No element type was recovered, for example after widening a loop.
+        // This is analyzer uncertainty rather than a PHP mixed declaration.
+        return Some(T::Mixed);
+    }
     let variants = match &items {
         T::Union(variants) | T::BenevolentUnion(variants) => variants.as_ref(),
         ty => std::slice::from_ref(ty),

@@ -57,7 +57,7 @@ impl Analyzer<'_> {
                     return ValueType::Never;
                 }
                 if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind {
-                    self.remember_nullsafe_result(name, value, scope);
+                    self.remember_optional_result(name, value, scope);
                     self.remember_null_test_flag(name, value, scope);
                     if let Some(value) = constant {
                         scope.values.insert(name.clone(), value);

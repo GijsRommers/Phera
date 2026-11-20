@@ -47,6 +47,9 @@ impl Analyzer<'_> {
         let Arguments::List(arguments) = arguments else {
             return None;
         };
+        if name == "array_merge" {
+            return super::array_merge::result(arguments, types);
+        }
         if arguments
             .iter()
             .any(|argument| argument.spread || argument.name.is_some())
@@ -95,19 +98,6 @@ impl Analyzer<'_> {
                     super::arrays::when_truthy(result)
                 } else {
                     result
-                }
-            }
-            "array_merge" => {
-                let (key, value) = types
-                    .iter()
-                    .map(super::arrays::iteration_types)
-                    .fold((T::Never, T::Never), |(keys, values), (key, value)| {
-                        (keys.join(&key), values.join(&value))
-                    });
-                if types.iter().all(is_list) {
-                    list(value)
-                } else {
-                    collection(key, value)
                 }
             }
             "array_sum" if self.level >= 7 => super::array_sum::result(first?)?,
@@ -171,7 +161,7 @@ impl Analyzer<'_> {
                     && let ExpressionKind::Variable(Variable::Named(name)) = &argument.value.kind
                 {
                     let flags = types.get(3).cloned().unwrap_or(T::IntLiteral(0));
-                    scope.define(name, match_result(&flags, multiple));
+                    scope.define(name, match_result(&flags, multiple, first));
                 }
                 if multiple {
                     T::IntRange(0, i64::MAX)
@@ -186,7 +176,7 @@ impl Analyzer<'_> {
     }
 }
 
-fn match_result(flags: &ValueType, multiple: bool) -> ValueType {
+fn match_result(flags: &ValueType, multiple: bool, pattern: Option<&ValueType>) -> ValueType {
     use ValueType as T;
     let T::IntLiteral(flags) = flags else {
         return T::Array;
@@ -221,7 +211,29 @@ fn match_result(flags: &ValueType, multiple: bool) -> ValueType {
         if flags & 2 == 0 {
             collection(keys, list(value))
         } else {
-            list(collection(keys, value))
+            let captures = if flags & 512 != 0
+                && flags & 256 == 0
+                && let Some(T::StringLiteral(pattern)) = pattern
+            {
+                super::regex_captures::required_captures(pattern)
+            } else {
+                None
+            };
+            list(captures.map_or_else(
+                || collection(keys.clone(), value.clone()),
+                |fields| {
+                    T::Shape(Arc::new(Shape {
+                        fields,
+                        remainder: Some(Collection {
+                            kind: CollectionKind::Array,
+                            key: keys.clone(),
+                            value: value.clone(),
+                            non_empty: false,
+                        }),
+                        kind: ShapeKind::Array,
+                    }))
+                },
+            ))
         }
     } else {
         collection(keys, value)
