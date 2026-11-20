@@ -112,6 +112,10 @@ const CALLS: &[(&str, &str)] = &[
     ("escape-bytea", "pg_escape_bytea($db, \"a\\x00\\xff\")"),
     ("unescape-bytea", "pg_unescape_bytea('\\x5c00ff')"),
     (
+        "unescape-bytea-octal",
+        "bin2hex(pg_unescape_bytea('\\000\\200\\377'))",
+    ),
+    (
         "query-params",
         "pg_fetch_assoc(pg_query_params($db, 'SELECT $1::integer AS a, $2::boolean AS b', [1, true]))",
     ),
