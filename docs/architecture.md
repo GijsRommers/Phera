@@ -1473,6 +1473,22 @@ opcode counter and samply profiles of the steady state:
 `benchmarks/bench-framework-patterns.php` keeps these patterns: 9.7 times
 PHP's instructions before this round, 4.4 times after it.
 
+
+**Object creation and release after the destructors work** (batch 14).
+Measured in isolation (`$o = new P` in a loop, minus the same loop without
+`new`): 779 machine instructions per object before the destructors work, 872
+with it, 839 on this branch (the pool hold gives the id back itself; tracking
+and the constructed-object call inlined again; `incarnated` kept in the pool
+hold only). What is left of the difference: the `Drop` impl on `Object`
+(which also makes the array drop take an object's properties out instead of
+moving them), the destruction and attachment fields, the allocation count of
+the cycle collector and the destructor check on each `new`. No framework
+request runs on the guarded loop: no live object has a destructor due during
+the Laravel requests measured. Requests with the owner's method (one worker,
+`opcache.validate_timestamps=0`, 100 requests, twice): Laravel `/api/hello`
+361.3 to 362.4M instructions on batch 14, 315.5 to 318.3M here; `/api/posts`
+489.3 to 490.1M, 440.1 to 440.4M.
+
 ## 11. Tools built into the runtime
 
 Tools that PHP projects today get from separate packages written in PHP
