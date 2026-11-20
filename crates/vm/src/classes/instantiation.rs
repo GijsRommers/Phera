@@ -213,10 +213,16 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let name = self.class_symbol(symbol)?;
         let matches = match self.read_local(source) {
-            Value::Object(object) => self
-                .classes
-                .get(object.class.name())
-                .is_some_and(|class| self.class_matches(&class, &name)),
+            Value::Object(object) => {
+                // Link the name once it means a class, so that the
+                // interpreter loop answers this site from then on.
+                if let Some(target) = self.classes.get(&name) {
+                    self.link_class_symbol(symbol, &target);
+                }
+                self.classes
+                    .get(object.class.name())
+                    .is_some_and(|class| self.class_matches(&class, &name))
+            }
             _ => false,
         };
         self.set(destination, Value::Bool(matches));
