@@ -28,9 +28,9 @@ pub fn register(registry: &mut Registry) {
         FunctionEntry::sync("stream_is_local", &[STREAM], is_local),
         FunctionEntry::sync("stream_isatty", &[STREAM], isatty),
         FunctionEntry::asynchronous("stream_set_blocking", BLOCK, set_blocking),
-        FunctionEntry::asynchronous("socket_set_blocking", BLOCK, set_blocking),
-        FunctionEntry::asynchronous("socket_set_timeout", TIMEOUT, set_timeout),
-        FunctionEntry::sync("socket_get_status", &[STREAM], get_meta_data),
+        FunctionEntry::asynchronous("socket_set_blocking", BLOCK, socket_set_blocking),
+        FunctionEntry::deprecated_async("socket_set_timeout", TIMEOUT, socket_set_timeout),
+        FunctionEntry::sync("socket_get_status", &[STREAM], socket_get_status),
         FunctionEntry::asynchronous("stream_set_timeout", TIMEOUT, set_timeout),
         FunctionEntry::asynchronous("stream_set_read_buffer", BUFFER, set_read_buffer),
         FunctionEntry::asynchronous("stream_set_write_buffer", BUFFER, set_write_buffer),
@@ -116,7 +116,14 @@ fn isatty(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 fn get_meta_data(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let name = "stream_get_meta_data";
+    get_metadata(arguments, "stream_get_meta_data")
+}
+
+fn socket_get_status(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    get_metadata(arguments, "socket_get_status")
+}
+
+fn get_metadata(arguments: &[Value], name: &str) -> NativeResult {
     let resource = argument_resource(args::value(arguments, 0), name, "#1 ($stream)")?;
     if crate::directory::is_open(resource) {
         let mut data = PhpArray::new();
@@ -238,42 +245,49 @@ fn metadata(stream: &Stream) -> PhpArray {
 }
 
 fn set_blocking(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let resource = stream_arg(&arguments, "stream_set_blocking")?;
-        let enable = args::bool(&arguments, 1).unwrap_or(false);
-        if let Some(file) = crate::user_file::resource_file(resource) {
-            let success = file
-                .option(
-                    context,
-                    "stream_set_blocking",
-                    1,
-                    i64::from(enable),
-                    Value::Null,
-                )
-                .await?;
-            return Ok(Value::Bool(success));
-        }
-        let value = operate(resource, IoPolicy::Inline, move |stream| {
-            if stream.child_pipe.is_some() || stream.wrapper == Wrapper::Socket {
-                stream.blocked = enable;
-                return Ok(());
-            }
-            let Some(file) = stream.descriptor() else {
-                return Ok(());
-            };
-            if stream.wrapper == Wrapper::Standard {
-                // Standard descriptors are dup()s of a process-wide open file description.
-                return Err(rustix::io::Errno::NOTSUP);
-            }
-            let mut flags = fcntl_getfl(file)?;
-            flags.set(OFlags::NONBLOCK, !enable);
-            fcntl_setfl(file, flags)?;
+    Box::pin(set_blocking_as(context, arguments, "stream_set_blocking"))
+}
+
+fn socket_set_blocking(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(set_blocking_as(context, arguments, "socket_set_blocking"))
+}
+
+async fn set_blocking_as(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+) -> NativeResult {
+    let resource = stream_arg(&arguments, function)?;
+    let enable = args::bool(&arguments, 1).unwrap_or(false);
+    if let Some(file) = crate::user_file::resource_file(resource) {
+        let success = file
+            .option(context, function, 1, i64::from(enable), Value::Null)
+            .await?;
+        return Ok(Value::Bool(success));
+    }
+    let value = operate(resource, IoPolicy::Inline, move |stream| {
+        if stream.child_pipe.is_some() || stream.wrapper == Wrapper::Socket {
             stream.blocked = enable;
-            Ok(())
-        })
-        .await?;
-        Ok(Value::Bool(value.is_ok()))
+            return Ok(());
+        }
+        let Some(file) = stream.descriptor() else {
+            return Ok(());
+        };
+        if stream.wrapper == Wrapper::Standard {
+            // Standard descriptors are dup()s of a process-wide open file description.
+            return Err(rustix::io::Errno::NOTSUP);
+        }
+        let mut flags = fcntl_getfl(file)?;
+        flags.set(OFlags::NONBLOCK, !enable);
+        fcntl_setfl(file, flags)?;
+        stream.blocked = enable;
+        Ok(())
     })
+    .await?;
+    Ok(Value::Bool(value.is_ok()))
 }
 
 fn supports_lock(
@@ -316,31 +330,43 @@ fn set_chunk_size(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 fn set_timeout(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let function = "stream_set_timeout";
-        let resource = stream_arg(&arguments, function)?;
-        let seconds = args::int(&arguments, 1).unwrap_or_default();
-        let microseconds = args::int(&arguments, 2).unwrap_or_default();
-        let Some(file) = crate::user_file::resource_file(resource) else {
-            return with_stream(resource, |stream| {
-                let Backing::Socket(socket) = &stream.backing else {
-                    return Value::Bool(false);
-                };
-                let micros = seconds
-                    .saturating_mul(1_000_000)
-                    .saturating_add(microseconds);
-                let timeout = u64::try_from(micros)
-                    .ok()
-                    .map(std::time::Duration::from_micros);
-                socket.set_timeout(timeout);
-                Value::Bool(true)
-            });
-        };
-        Ok(Value::Bool(
-            file.option(context, function, 4, seconds, Value::Int(microseconds))
-                .await?,
-        ))
-    })
+    Box::pin(set_timeout_as(context, arguments, "stream_set_timeout"))
+}
+
+fn socket_set_timeout(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(set_timeout_as(context, arguments, "socket_set_timeout"))
+}
+
+async fn set_timeout_as(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+) -> NativeResult {
+    let resource = stream_arg(&arguments, function)?;
+    let seconds = args::int(&arguments, 1).unwrap_or_default();
+    let microseconds = args::int(&arguments, 2).unwrap_or_default();
+    let Some(file) = crate::user_file::resource_file(resource) else {
+        return with_stream(resource, |stream| {
+            let Backing::Socket(socket) = &stream.backing else {
+                return Value::Bool(false);
+            };
+            let micros = seconds
+                .saturating_mul(1_000_000)
+                .saturating_add(microseconds);
+            let timeout = u64::try_from(micros)
+                .ok()
+                .map(std::time::Duration::from_micros);
+            socket.set_timeout(timeout);
+            Value::Bool(true)
+        });
+    };
+    Ok(Value::Bool(
+        file.option(context, function, 4, seconds, Value::Int(microseconds))
+            .await?,
+    ))
 }
 
 fn set_write_buffer(

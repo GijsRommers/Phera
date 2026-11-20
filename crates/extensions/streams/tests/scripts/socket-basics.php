@@ -9,6 +9,7 @@ $write = $except = null;
 var_dump(stream_select($read, $write, $except, 0), array_keys($read));
 var_dump(stream_set_timeout($left, 0, 1000), fread($left, 12), feof($left));
 var_dump(socket_get_status($left)['timed_out']);
+var_dump(socket_set_timeout($left, 1));
 var_dump(socket_set_blocking($left, false), fread($left, 12));
 var_dump(fwrite($right, "one\r\ntwo\nthree"));
 $read = ['pair' => $left];
