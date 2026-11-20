@@ -18,6 +18,7 @@ when it is a shared module.
 | `Locale`, `locale_*` | Default locale, locale IDs, lookup, HTTP negotiation, likely subtags and localized names. Legacy ICU identifiers and display keywords have gaps. |
 | `NumberFormatter`, `numfmt_*` | Decimal, scientific, percent, currency and compact notation, with parsing and mutable settings. English spellout and ordinal formatting cover the default numeric and spelled-out rules used by Laravel. Other locales, duration and custom rule formats are unsupported. Rule-based parsing, patterns and attributes are partial. |
 | `IntlDateFormatter`, `datefmt_*` | Gregorian and relative day styles, patterns, PHP date objects, timestamps, local-time arrays and parsing. Relative text parsing, traditional calendars, calendar objects and unusual parse fields are partial. |
+| `IntlDatePatternGenerator` | Gregorian date and time skeletons, localized hour cycles and width selection. Alternate calendars and uncommon field combinations are partial. |
 | `idn_to_ascii`, `idn_to_utf8` | UTS #46 mapping, Punycode, transitional forms and error details. |
 | `intl_*error*`, `intl_is_failure`, `IntlException` | Request-local last error, ICU error names and numeric compatibility constants |
 | `Collator`, `collator_*` | Locale comparisons, array sorting and keys, strength, case, punctuation and numeric options. Sort-key bytes and some ICU-specific attributes differ. |
@@ -29,6 +30,7 @@ when it is a shared module.
 | `IntlBreakIterator`, `IntlIterator`, `IntlPartsIterator` | Character, code point, word, line and sentence iteration, with PHP byte offsets and parts. Title and custom ICU break rules are unsupported. |
 | `IntlListFormatter` | PHP 8.5 conjunction, disjunction and unit patterns in wide, short and narrow widths. |
 | `IntlChar` | Code points, case mapping, combining classes, digit conversion, common Unicode predicates, character names and callback-driven enumeration, and property aliases. Other ICU property queries remain incomplete. |
+| `UConverter` | Static and instance UTF-8, UTF-16, UTF-32, ASCII, ISO-8859 and Windows-125x conversions for the available code pages. Other encodings, custom callbacks and full encoding enumeration are unsupported. |
 | `Spoofchecker` | Reports unsupported. ICU4X does not supply the corresponding ICU spoof checker. |
 
 The two normalization mapping files under `data/` are derived from Unicode
@@ -45,9 +47,14 @@ and correction aliases from
 The property alias table uses ICU 79.1's public IntlChar property identifiers.
 
 CLDR 49's number patterns, locale display patterns, Gregorian date styles, relative day terms,
+Gregorian available formats for skeletons,
 currency-region map and reverse Windows zone map are compiled into the
 extension. Their source is the
 [CLDR JSON release](https://github.com/unicode-org/cldr-json/tree/49.0.0).
+The English number rules follow the
+[CLDR English RBNF data](https://github.com/unicode-org/cldr/blob/release-49/common/rbnf/en.xml).
+UConverter's single-byte mappings, aliases and substitution defaults were
+extracted from ICU 79.1 using PHP 8.5.12.
 The [IANA Language Subtag Registry](https://www.iana.org/assignments/language-subtag-registry/)
 supplies grandfathered tags.
 

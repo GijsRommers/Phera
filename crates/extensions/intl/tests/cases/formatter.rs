@@ -167,6 +167,62 @@ fn relative_date_styles() {
 }
 
 #[test]
+fn date_pattern_generator_skeletons() {
+    let mut matrix = Matrix::new();
+    for locale in ["en_US", "de_DE", "fr_FR", "ja_JP"] {
+        let constructor = [Value::from(locale)];
+        for skeleton in [
+            "",
+            "y",
+            "MM",
+            "Hm",
+            "HHmm",
+            "ms",
+            "j",
+            "jm",
+            "jjmm",
+            "Jm",
+            "yMd",
+            "yyyyMMdd",
+            "dMy",
+            "yMMMMd",
+            "yMMMdjm",
+            "yMMMMdjm",
+            "EEEEyMMMMdjm",
+            "yMdHm",
+            "Ejm",
+            "YYYYMMMdd",
+            "YYYYMMMddjjmm",
+        ] {
+            matrix.instance(
+                "IntlDatePatternGenerator",
+                &constructor,
+                "getBestPattern",
+                &[Value::from(skeleton)],
+                None,
+            );
+        }
+        matrix.instance(
+            "IntlDatePatternGenerator",
+            &constructor,
+            "getBestPattern",
+            &[Value::from(vec![b'j', b'm', 128])],
+            None,
+        );
+    }
+    let long_locale = [Value::from("a".repeat(157))];
+    matrix.instance(
+        "IntlDatePatternGenerator",
+        &long_locale,
+        "getBestPattern",
+        &[],
+        None,
+    );
+    matrix.case("IntlDatePatternGenerator::create", &long_locale);
+    matrix.compare("intl-date-pattern-generator");
+}
+
+#[test]
 fn locale_length_and_time_zone_errors() {
     let mut matrix = Matrix::new();
     let locale = Value::from("a".repeat(157));

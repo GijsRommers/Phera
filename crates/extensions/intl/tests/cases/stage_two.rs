@@ -139,6 +139,107 @@ fn unicode_character_and_property_names() {
 }
 
 #[test]
+fn unicode_and_single_byte_conversion() {
+    let mut matrix = Matrix::new();
+    for encoding in [
+        "UTF-8",
+        "UTF-16",
+        "UTF-16BE",
+        "UTF-16LE",
+        "UTF-32",
+        "UTF-32BE",
+        "UTF-32LE",
+        "US-ASCII",
+        "ISO-8859-1",
+        "ISO-8859-5",
+        "ISO-8859-15",
+        "windows-1250",
+        "windows-1251",
+        "windows-1252",
+        "windows-1256",
+        "windows-1258",
+    ] {
+        for text in ["", "é😀", "cost: €", "Αθήνα", "Београд", "القاهرة", "A\0b"]
+        {
+            matrix.case(
+                "UConverter::transcode",
+                &[
+                    Value::from(text),
+                    Value::from(encoding),
+                    Value::from("UTF-8"),
+                ],
+            );
+        }
+    }
+    for (encoding, bytes) in [
+        ("ASCII", &[0xff, b'x'][..]),
+        ("UTF-8", &[0xe2, 0x82]),
+        ("UTF-16BE", &[0, 0xe9, 0xd8, 0x3d, 0xde, 0]),
+        ("UTF-32LE", &[0xe9, 0, 0, 0, 0, 0xf6, 1, 0]),
+        ("windows-1252", &[0x80, 0x81, 0xe9]),
+        ("ISO-8859-7", &[0xa0, 0xff]),
+        ("missing-encoding", b"hello"),
+    ] {
+        matrix.case(
+            "UConverter::transcode",
+            &[
+                Value::from(bytes.to_vec()),
+                Value::from("UTF-8"),
+                Value::from(encoding),
+            ],
+        );
+    }
+    for substitute in ["?", "", "too long"] {
+        matrix.case(
+            "UConverter::transcode",
+            &[
+                Value::from("é😀"),
+                Value::from("ASCII"),
+                Value::from("UTF-8"),
+                map(&[("to_subst", Value::from(substitute))]),
+            ],
+        );
+    }
+    let constructor = [Value::from("UTF-16BE"), Value::from("UTF-8")];
+    for method in [
+        "getSourceEncoding",
+        "getDestinationEncoding",
+        "getSourceType",
+        "getDestinationType",
+        "getErrorCode",
+        "getErrorMessage",
+        "getSubstChars",
+    ] {
+        matrix.instance("UConverter", &constructor, method, &[], None);
+    }
+    matrix.instance(
+        "UConverter",
+        &constructor,
+        "convert",
+        &[Value::from("é😀")],
+        None,
+    );
+    matrix.instance(
+        "UConverter",
+        &constructor,
+        "convert",
+        &[
+            Value::from(vec![0, 0xe9, 0xd8, 0x3d, 0xde, 0]),
+            Value::Bool(true),
+        ],
+        None,
+    );
+    for label in ["UTF-8", "ASCII", "windows-1252", "unknown"] {
+        matrix.case("UConverter::getAliases", &[Value::from(label)]);
+    }
+    matrix.case("UConverter::getStandards", &[]);
+    for reason in [-1, 0, 1, 2, 3, 4, 5, 6] {
+        matrix.case("UConverter::reasonText", &[Value::Int(reason)]);
+    }
+    matrix.compare("intl-unicode-and-single-byte-conversion");
+}
+
+#[test]
 fn message_format_arguments() {
     let mut matrix = Matrix::new();
     let inputs = [

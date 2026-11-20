@@ -9,6 +9,7 @@ mod breaks;
 mod calendar;
 mod character;
 mod collator;
+mod converter;
 mod date;
 mod error;
 mod grapheme;
@@ -53,6 +54,7 @@ impl Extension for Intl {
         locale::register(registry);
         idn::register(registry);
         collator::register(registry);
+        converter::register(registry);
         list::register(registry);
         message::register(registry);
         transliterator::register(registry);

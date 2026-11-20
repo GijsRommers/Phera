@@ -31,6 +31,7 @@ mod state;
 mod text;
 mod trim;
 mod unicode;
+pub mod unicode_codec;
 mod walk;
 
 use phera_extension_api::{Extension, Param, ParamType, Registry};

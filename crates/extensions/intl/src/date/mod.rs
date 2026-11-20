@@ -12,6 +12,8 @@ mod pattern;
 mod registration;
 mod relative;
 mod render;
+mod skeleton;
+mod skeleton_fields;
 
 use std::rc::Rc;
 
@@ -29,6 +31,7 @@ const CLASS: &str = "IntlDateFormatter";
 
 pub fn register(registry: &mut Registry) {
     registration::register(registry);
+    skeleton::register(registry);
 }
 
 pub fn render_pattern(
