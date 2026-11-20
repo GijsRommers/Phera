@@ -258,6 +258,7 @@ impl Analyzer<'_> {
         self.inherit_parameter_types(method, &mut scope);
         self.check_type(method.return_type.as_ref());
         self.method_hints(method);
+        self.unused_method_parameters(method, doc);
         for parameter in &method.parameters {
             self.property_hooks(&parameter.name, parameter.ty.as_ref(), &parameter.hooks);
         }

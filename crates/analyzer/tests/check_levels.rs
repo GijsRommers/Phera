@@ -165,6 +165,52 @@ fn phpstan_imports_type_aliases_across_files() {
 }
 
 #[test]
+fn resolved_template_in_conditional_return() {
+    // PHPStan 2.3.7 with unresolvedTemplateArguments enabled reports
+    // property.nonObject and return.type at line 28. With the switch
+    // disabled, the generic argument resolves the return to ResultRow.
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/conditional_resolved_return.php");
+    let report = check(&Options {
+        level: 10,
+        paths: vec![fixture.to_string_lossy().into_owned()],
+        ..Options::default()
+    })
+    .unwrap();
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn phpstan_unused_private_method_parameter_is_opt_in() {
+    // PHPStan 2.3.7 with featureToggles.unusedParameters enabled.
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/unused_method_parameter.php");
+    for (level, unused_parameters, reports) in
+        [(3, true, false), (4, false, false), (4, true, true)]
+    {
+        let report = check(&Options {
+            level,
+            unused_parameters,
+            paths: vec![fixture.to_string_lossy().into_owned()],
+            ..Options::default()
+        })
+        .unwrap();
+        if reports {
+            assert_eq!(report.diagnostics.len(), 1);
+            let finding = &report.diagnostics[0];
+            assert_eq!(finding.line, 10);
+            assert_eq!(finding.identifier, "method.unusedParameter");
+            assert_eq!(
+                finding.message,
+                "Method Labels::normalize() has an unused parameter $limit."
+            );
+        } else {
+            assert!(report.diagnostics.is_empty());
+        }
+    }
+}
+
+#[test]
 fn phpstan_configured_rules() {
     // PHPStan 2.3.7 with strict-rules and bleedingEdge.neon.
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/configured_rules.php");

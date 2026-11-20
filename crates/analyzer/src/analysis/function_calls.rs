@@ -129,7 +129,8 @@ impl Analyzer<'_> {
                 return ty;
             }
             resolved.signature.map_or(ValueType::Mixed, |s| {
-                s.infer_return(arguments, &facts.types, self.index)
+                let ty = s.infer_return(arguments, &facts.types, self.index);
+                self.declared_array_result(&s, ty)
             })
         }
     }

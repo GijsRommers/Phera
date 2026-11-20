@@ -65,8 +65,13 @@ impl Analyzer<'_> {
             .method_owner(class, &method.name)
             .map(|(owner, signature)| {
                 let signature = signature.clone().typed(self.index);
-                if self.level >= 2 {
+                let signature = if self.level >= 2 {
                     signature.for_receiver(self.index, owner, receiver)
+                } else {
+                    signature
+                };
+                if self.level >= 10 {
+                    signature.with_inherited_array_return(self.index, owner, &method.name, receiver)
                 } else {
                     signature
                 }
@@ -148,8 +153,9 @@ impl Analyzer<'_> {
                     &facts.types,
                 ) {
                 returns
-            } else if let Some(signature) = signature {
-                signature.infer_return(arguments, &facts.types, self.index)
+            } else if let Some(signature) = &signature {
+                let ty = signature.infer_return(arguments, &facts.types, self.index);
+                self.declared_array_result(signature, ty)
             } else if self.level >= 2 && !matches!(access, Access::Guarded | Access::GuardedStatic)
             {
                 let dispatcher = if access.static_call() {

@@ -50,6 +50,7 @@ mod foreach_iterable;
 mod function_calls;
 mod generators;
 mod if_ladder;
+mod implicit_mixed;
 mod in_array_guards;
 mod inherited_parameters;
 mod internal_methods;
@@ -87,6 +88,7 @@ mod string_replacements;
 mod switch;
 mod truthy_values;
 mod type_docs;
+mod unused_method_parameter;
 mod value_contracts;
 mod write;
 

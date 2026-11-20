@@ -70,6 +70,9 @@ Generic arguments are checked using declaration-site covariance,
 contravariance, and invariance, including through documented inheritance.
 PHPDoc types can use `@phpstan-import-type` and `@psalm-import-type`
 to import aliases declared in another class, including from Composer dependencies.
+Conditional returns retain resolved template types when a declaration and
+the argument establish the result. PHPStan's experimental
+`unresolvedTemplateArguments` feature can widen these results to mixed.
 
 The PHPStan strict-rules include enables `foreach.keyOverwrite` and
 `foreach.valueOverwrite`. Use `strict = true` or `strict = false` under
@@ -79,8 +82,8 @@ constructs, for-loop overwrites, strict function calls, switch condition
 types, and dynamic member and variable access. The PHPUnit and PHPStan
 deprecation-rule packages also produce a notice until their rules are
 implemented. The bleeding-edge include enables the redundant `?? null` rule
-for required array fields and initialized properties, and checks method calls
-on `@internal` classes from other root namespaces. The checker reports
+for required array fields and initialized properties, unused private method
+parameters, and calls to `@internal` classes from other root namespaces. The checker reports
 an informational notice for remaining bleeding-edge features.
 
 `phera <command> --help` lists the options. There is no formatter and no test

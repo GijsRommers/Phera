@@ -52,6 +52,11 @@
     [9, 29, "property.nonObject", "Cannot access property $rows on mixed."]
   ],
   "conditional_phpdoc_assertions.php": [],
+  "implicit_array_result.php": [
+    [6, 3, "missingType.iterableValue", "Function payload() return type has no value type specified in iterable type array."],
+    [10, 14, "argument.type", "Parameter #1 $name of function requireName expects string, mixed given."],
+    [10, 17, "cast.string", "Cannot cast mixed to string."]
+  ],
   "contextual_array_parameters.php": [],
   "guard_overlap.php": [],
   "optional_ternary_results.php": [],

@@ -93,6 +93,7 @@ fn include_visit(
             "phpstan/phpstan" if path.ends_with("bleedingEdge.neon") => {
                 options.unnecessary_null_coalesce = true;
                 options.internal_tag = true;
+                options.unused_parameters = true;
                 notice(options, "remaining bleeding-edge features");
             }
             _ => notice(options, &package),
@@ -193,6 +194,9 @@ fn parameters(
                             options.unnecessary_null_coalesce = value == "true";
                         }
                         Some(("internalTag", value)) => options.internal_tag = value == "true",
+                        Some(("unusedParameters", value)) => {
+                            options.unused_parameters = value == "true";
+                        }
                         _ => {}
                     }
                 }
