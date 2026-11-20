@@ -2,6 +2,8 @@
 
 use super::{Kind, le16, le32};
 
+const ZIP_HEADER_SEARCH: usize = 256 * 1024;
+
 pub(super) fn detect(bytes: &[u8], tail: &[u8]) -> Option<Kind> {
     if bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06") {
         return Some(zip(bytes));
@@ -104,12 +106,41 @@ fn zip_entry(bytes: &[u8]) -> Option<(&[u8], &[u8], &[u8])> {
     }
     let name_end = 30 + usize::from(le16(bytes, 26)?);
     let data_start = name_end + usize::from(le16(bytes, 28)?);
+    let name = bytes.get(30..name_end)?;
+    if le16(bytes, 6)? & 8 != 0 {
+        let (payload, next) = streamed_zip_entry(bytes.get(data_start..)?);
+        return Some((name, payload, next));
+    }
     let data_end = data_start.checked_add(le32(bytes, 18)? as usize)?;
     Some((
-        bytes.get(30..name_end)?,
+        name,
         bytes.get(data_start..data_end)?,
         bytes.get(data_end..)?,
     ))
+}
+
+fn streamed_zip_entry(bytes: &[u8]) -> (&[u8], &[u8]) {
+    // ZIP writers that cannot seek put sizes after the data. Find the next
+    // header within a bounded window without inflating the file.
+    let scan = &bytes[..bytes.len().min(ZIP_HEADER_SEARCH)];
+    let Some(offset) = scan
+        .windows(4)
+        .position(|magic| matches!(magic, b"PK\x03\x04" | b"PK\x01\x02"))
+    else {
+        return (&[], &[]);
+    };
+    let (framed, next) = bytes.split_at(offset);
+    (zip_descriptor_payload(framed).unwrap_or_default(), next)
+}
+
+fn zip_descriptor_payload(framed: &[u8]) -> Option<&[u8]> {
+    let descriptor = framed.len().checked_sub(12)?;
+    let size = le32(framed, descriptor + 4)? as usize;
+    if size == descriptor || framed.get(size..descriptor) == Some(b"PK\x07\x08") {
+        framed.get(..size)
+    } else {
+        None
+    }
 }
 
 fn ooxml(name: &[u8]) -> Option<Kind> {

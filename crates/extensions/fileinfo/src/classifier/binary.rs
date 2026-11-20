@@ -88,8 +88,8 @@ fn compound(bytes: &[u8]) -> Kind {
         let name = String::from_utf16_lossy(&units);
         let (mime, ext, product) = match name.as_str() {
             "Workbook" | "Book" => ("application/vnd.ms-excel", "xls", "Excel"),
-            "WordDocument" => ("application/msword", "doc", "Word"),
-            "PowerPoint Document" => ("application/vnd.ms-powerpoint", "ppt", "PowerPoint"),
+            "WordDocument" => ("application/msword", "???", "Word"),
+            "PowerPoint" => ("application/vnd.ms-powerpoint", "???", "PowerPoint"),
             _ => continue,
         };
         return Kind::new(mime, ext, format!("CDFV2 Microsoft {product}"));
@@ -97,7 +97,7 @@ fn compound(bytes: &[u8]) -> Kind {
     Kind::new(
         "application/x-ole-storage",
         "???",
-        "Composite Document File V2 Document",
+        "Composite Document File V2 Document, Cannot read section info",
     )
 }
 

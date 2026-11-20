@@ -20,3 +20,9 @@ size and decoded pixels.
 
 Linking libwebp and adding the current AGPL or commercially licensed
 zenwebp encoder.
+
+The standalone OxideAV WebP encoder from Karpelès Lab added 638,048 bytes
+in a stripped release size probe. PHP decoded its files at the expected
+dimensions. On the RGBA corpus image, the highest channel errors against
+PHP output were 45, 37, 17, and 5 at quality 0, 50, 80, and 100 respectively.
+That exceeded the two-level target at every tested quality.
