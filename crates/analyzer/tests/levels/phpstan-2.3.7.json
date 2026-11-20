@@ -65,6 +65,9 @@
     [9, 6, "preInc.type", "Cannot use ++ on mixed."],
     [9, 14, "offsetAccess.invalidOffset", "Possibly invalid array key type mixed."]
   ],
+  "loop_mixed_result.php": [
+    [10, 6, "argument.type", "Parameter #1 $string of function strlen expects string, mixed given."]
+  ],
   "redundant_nullsafe.php": [
     [4, 8, "nullsafe.neverNull", "Using nullsafe method call on non-nullable type First|Second. Use -> instead."],
     [4, 13, "nullCoalesce.expr", "Expression on left side of ?? is not nullable."],

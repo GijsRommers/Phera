@@ -107,11 +107,15 @@ impl Analyzer<'_> {
         {
             return result;
         }
-        ValueType::Collection(Arc::new(Collection {
-            kind: CollectionKind::Array,
-            key: ValueType::Int.join(&ValueType::String).benevolent(),
-            value: ValueType::ImplicitMixed,
-            non_empty: false,
-        }))
+        array_with_implicit_values()
     }
+}
+
+pub(super) fn array_with_implicit_values() -> ValueType {
+    ValueType::Collection(Arc::new(Collection {
+        kind: CollectionKind::Array,
+        key: ValueType::Int.join(&ValueType::String).benevolent(),
+        value: ValueType::ImplicitMixed,
+        non_empty: false,
+    }))
 }

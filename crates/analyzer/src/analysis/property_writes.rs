@@ -41,7 +41,7 @@ impl Analyzer<'_> {
         }
         let native = &self.resolved_property(place, scope)?.1.ty;
         if self.level >= 10 && *native == ValueType::Array && *value == ValueType::ImplicitMixed {
-            return Some(ValueType::Array);
+            return Some(super::implicit_mixed::array_with_implicit_values());
         }
         let stored = if native.excludes_null() {
             value.without_null()

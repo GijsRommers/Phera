@@ -63,6 +63,7 @@ mod invalid_array_offset;
 mod invocations;
 mod late_static_new;
 mod logical;
+mod loop_mixed_values;
 mod loop_writes;
 mod loops;
 mod match_expression;
@@ -123,6 +124,7 @@ pub struct Context {
 }
 
 pub struct Analyzer<'a> {
+    checking_loop_mixed_values: bool,
     pub index: &'a mut Index,
     pub dependencies: &'a mut Dependencies,
     pub file: &'a ParsedFile,
@@ -157,6 +159,7 @@ impl<'a> Analyzer<'a> {
         let level = options.level;
         let read_docs = index.read_type_docs;
         Self {
+            checking_loop_mixed_values: false,
             index,
             dependencies,
             file,

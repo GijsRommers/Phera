@@ -223,6 +223,10 @@ impl Analyzer<'_> {
         bypass: Option<Scope>,
         position: ConditionPosition,
     ) -> Flow {
+        let first_entry = (self.level >= 10
+            && position == ConditionPosition::BeforeBody
+            && !self.checking_loop_mixed_values)
+            .then(|| scope.clone());
         let (flow, frame) = self.control_body(body, scope);
         let mut advancing = frame.continues;
         if flow == Flow::Next {
@@ -232,7 +236,13 @@ impl Analyzer<'_> {
         let has_break = !paths.is_empty();
         if !advancing.is_empty() {
             let next = Scope::join(&advancing);
+            let repeat = first_entry.and_then(|entry| self.loop_mixed_entry(entry, &next));
             let branches = self.condition(condition, next, false);
+            if let Some(entry) = repeat
+                && branches.yes.is_some()
+            {
+                self.check_loop_mixed_body(condition, body, entry);
+            }
             if position == ConditionPosition::AfterBody
                 && (branches.truth() != Some(true) || !has_break && !self.context.generator)
             {
