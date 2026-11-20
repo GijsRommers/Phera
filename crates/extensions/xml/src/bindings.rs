@@ -175,13 +175,12 @@ async fn execute(
             return Ok(Value::Int(0));
         };
         for event in events {
-            if let Some(structure) = &mut structure {
-                if structure.observe(&event) {
-                    context.warning(
-                        "xml_parse_into_struct(): Maximum depth exceeded - Results truncated"
-                            .into(),
-                    );
-                }
+            if let Some(structure) = &mut structure
+                && structure.observe(&event)
+            {
+                context.warning(
+                    "xml_parse_into_struct(): Maximum depth exceeded - Results truncated".into(),
+                );
             }
             let callback = {
                 let handlers = state.handlers.borrow();
