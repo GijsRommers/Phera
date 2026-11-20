@@ -99,13 +99,25 @@ fn framework_locations_are_shared_by_install_metadata_and_autoload() {
         root,
         "drupal/core",
         "drupal-core",
-        &[("lib/Kernel.php", "<?php namespace Drupal; class Kernel {}")],
+        &[
+            ("lib/Kernel.php", "<?php namespace Drupal; class Kernel {}"),
+            ("assets/index.php", "<?php require 'autoload_runtime.php';"),
+        ],
     );
     drupal["autoload"] = json!({"psr-4": {"Drupal\\": "lib/"}});
+    drupal["extra"] = json!({"drupal-scaffold": {"file-mapping": {
+        "[web-root]/index.php": "assets/index.php"
+    }}});
     lock(
         root,
         &[
             package(root, "composer/installers", "composer-plugin", &[]),
+            package(
+                root,
+                "drupal/core-composer-scaffold",
+                "composer-plugin",
+                &[],
+            ),
             package(
                 root,
                 "roots/wordpress-core-installer",
@@ -122,10 +134,12 @@ fn framework_locations_are_shared_by_install_metadata_and_autoload() {
         ],
     );
     let manifest = json!({"config": {"allow-plugins": {
-        "composer/installers": true, "roots/wordpress-core-installer": true
+        "composer/installers": true, "roots/wordpress-core-installer": true,
+        "drupal/core-composer-scaffold": true
     }}, "extra": {
         "installer-paths": {"web/core": ["type:drupal-core"]},
-        "wordpress-install-dir": {"roots/wordpress-no-content": "web/wp"}
+        "wordpress-install-dir": {"roots/wordpress-no-content": "web/wp"},
+        "drupal-scaffold": {"locations": {"web-root": "web"}}
     }});
     fs::write(root.join("composer.json"), manifest.to_string()).unwrap();
     fs::create_dir_all(root.join("web/wp")).unwrap();
@@ -139,7 +153,20 @@ fn framework_locations_are_shared_by_install_metadata_and_autoload() {
     fs::remove_dir_all(root.join("web/wp")).unwrap();
 
     install(root, &options).unwrap();
+    let index = root.join("web/index.php");
+    assert_eq!(
+        fs::read_to_string(&index).unwrap(),
+        "<?php require 'autoload_runtime.php';"
+    );
+    fs::write(&index, "<?php /* project edit */").unwrap();
     install(root, &options).unwrap();
+    assert_eq!(
+        fs::read_to_string(index).unwrap(),
+        "<?php /* project edit */"
+    );
+    let loader = fs::read_to_string(root.join("web/autoload_runtime.php")).unwrap();
+    assert!(loader.contains("DrupalRuntime::class"));
+    assert!(loader.contains("../vendor/autoload_runtime.php"));
     assert!(root.join("web/wp/wp-blog-header.php").is_file());
     assert!(root.join("web/core/lib/Kernel.php").is_file());
     assert!(!root.join("vendor/drupal/core").exists());

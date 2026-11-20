@@ -63,6 +63,7 @@ and current gaps.
 When `config.allow-plugins` enables Symfony Runtime, the installer also
 generates its runtime bootstrap from the installed package. Approved Drupal
 and WordPress installers use the project's custom package paths.
+Drupal's scaffold hook copies missing entry points and other mapped files.
 Use `--no-plugins` to skip native plugin hooks.
 
 ### Serving a site

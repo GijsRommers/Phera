@@ -2,14 +2,20 @@
 //!
 //! Hooks consume package data after resolution. They never load Composer plugin PHP.
 
+mod drupal;
 pub(crate) mod layout;
 mod runtime;
 
-use crate::{Options, Package, Project};
+use crate::{InstallPaths, Options, Package, Project};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
-const NATIVE: &[&str] = &[runtime::NAME, layout::INSTALLERS, layout::WORDPRESS_CORE];
+const NATIVE: &[&str] = &[
+    runtime::NAME,
+    layout::INSTALLERS,
+    layout::WORDPRESS_CORE,
+    drupal::NAME,
+];
 
 pub(crate) fn allowed(project: &Project, name: &str) -> Result<Option<bool>> {
     let rules = &project.data["config"]["allow-plugins"];
@@ -67,6 +73,18 @@ pub(crate) fn post_autoload(
 ) -> Result<()> {
     if !options.no_scripts && active(project, options, packages, runtime::NAME)? {
         runtime::write(project)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn post_install(
+    project: &Project,
+    options: &Options,
+    packages: &[Package],
+    paths: &InstallPaths,
+) -> Result<()> {
+    if active(project, options, packages, drupal::NAME)? {
+        drupal::write(project, packages, paths)?;
     }
     Ok(())
 }

@@ -76,6 +76,7 @@ fn install_locked(
         .context("Could not generate autoload files; correct the reported PHP file and retry.")?;
     plugins::post_autoload(&project, options, &packages)?;
     runner.event(&project, options, "post-autoload-dump")?;
+    plugins::post_install(&project, options, &packages, &paths)?;
     runner.event(
         &project,
         options,
