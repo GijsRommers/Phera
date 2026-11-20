@@ -135,6 +135,7 @@ mod native_property_views;
 mod native_tables;
 mod object_comparison;
 mod object_iteration;
+mod object_operators;
 mod operators;
 mod ops;
 mod output;

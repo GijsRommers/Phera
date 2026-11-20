@@ -310,6 +310,9 @@ impl Vm {
         left: &Value,
         right: &Value,
     ) -> NativeResult {
+        if let Some(value) = self.native_binary(operator, left, right)? {
+            return Ok(value);
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         Ok(crate::ops::binary(
             operator,

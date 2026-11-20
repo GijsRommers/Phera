@@ -1,0 +1,15 @@
+[package]
+name = "phera-ext-bcmath"
+description = "PHP arbitrary-precision decimal arithmetic for Phera"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+num-bigint.workspace = true
+num-integer.workspace = true
+num-traits.workspace = true
+phera-extension-api.workspace = true
+
+[lints]
+workspace = true

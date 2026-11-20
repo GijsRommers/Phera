@@ -55,6 +55,7 @@ pub(crate) fn register(registry: &mut Registry) {
     registry.constant("PHP_EXTRA_VERSION", "");
     registry.constant("PHP_DEBUG", false);
     registry.constant("PHP_ZTS", false);
+    registry.constant("ZEND_DEBUG_BUILD", false);
     registry.constant("ZEND_THREAD_SAFE", false);
 
     registry.constant("PHP_OS", OS);
