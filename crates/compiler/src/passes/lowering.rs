@@ -389,15 +389,14 @@ impl Tables<'_> {
                 key,
                 value: src,
                 spread,
-            } => {
-                if spread {
-                    Instruction::ArraySpread { array, src }
-                } else if let Some(key) = key {
-                    Instruction::ArraySetReference { array, key, src }
-                } else {
-                    Instruction::ArrayPushReference { array, src }
-                }
-            }
+                by_reference,
+            } => match (spread, key, by_reference) {
+                (true, _, _) => Instruction::ArraySpread { array, src },
+                (false, Some(key), true) => Instruction::ArraySetReference { array, key, src },
+                (false, Some(key), false) => Instruction::ArraySet { array, key, src },
+                (false, None, true) => Instruction::ArrayPushReference { array, src },
+                (false, None, false) => Instruction::ArrayPush { array, src },
+            },
             Old::Constant {
                 destination: dst,
                 name,
