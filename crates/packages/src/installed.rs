@@ -4,8 +4,10 @@
 
 use crate::{InstallPaths, Lock, Options, Package, Project, php};
 use anyhow::Result;
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::{fs, path::Path};
 
 pub(crate) fn write(
@@ -21,10 +23,6 @@ pub(crate) fn write(
     fs::write(
         directory.join("InstalledVersions.php"),
         include_bytes!("../resources/InstalledVersions.php"),
-    )?;
-    fs::write(
-        directory.join("LICENSE"),
-        include_bytes!("../resources/LICENSE.composer"),
     )?;
     let packages = lock.packages(options.no_dev);
     let dev_names: Vec<_> = lock
@@ -50,15 +48,12 @@ pub(crate) fn write(
             } else {
                 relative_install_path(&directory, &paths.installed(package)?).into()
             };
-            Ok(value)
+            Ok(ordered_metadata(value))
         })
         .collect::<Result<_>>()?;
     let record = json!({"packages": installed, "dev": !options.no_dev,
         "dev-package-names": dev_names});
-    fs::write(
-        directory.join("installed.json"),
-        serde_json::to_string_pretty(&record)? + "\n",
-    )?;
+    fs::write(directory.join("installed.json"), metadata_json(&record)?)?;
     let root_version = project.root_version();
     let normalized_root = crate::version::normalize(&root_version)?;
     let root_relative = php::relative(&directory, &project.directory);
@@ -70,12 +65,7 @@ pub(crate) fn write(
         "aliases": [], "dev": !options.no_dev
     });
     let mut output = String::from("<?php return array(\n    'root' => ");
-    let root_code = php::value(&root);
-    output.push_str(&root_code.replacen(
-        "array(",
-        &format!("array('install_path' => {root_path}, "),
-        1,
-    ));
+    entry(&mut output, &root, Some(&root_path), "        ");
     output.push_str(",\n    'versions' => array(\n");
     let mut versions = BTreeMap::from([(
         project.name().to_owned(),
@@ -163,7 +153,6 @@ pub(crate) fn write(
                 links.sort_by(|left, right| left.as_str().cmp(&right.as_str()));
             }
         }
-        let mut code = php::value(&value);
         let path = if name == project.name() {
             Some(root_path.clone())
         } else if let Some(package) = packages.iter().find(|package| package.name == name) {
@@ -176,14 +165,116 @@ pub(crate) fn write(
         } else {
             None
         };
-        if let Some(path) = path {
-            code = code.replacen("array(", &format!("array('install_path' => {path}, "), 1);
-        }
-        output.push_str(&format!("        {} => {code},\n", php::quote(&name)));
+        write!(output, "        {} => ", php::quote(&name))?;
+        entry(&mut output, &value, path.as_deref(), "            ");
+        output.push_str(",\n");
     }
     output.push_str("    ),\n);\n");
     fs::write(directory.join("installed.php"), output)?;
     Ok(())
+}
+
+fn ordered_metadata(value: Value) -> Value {
+    const FIELDS: &[&str] = &[
+        "name",
+        "version",
+        "version_normalized",
+        "target-dir",
+        "source",
+        "dist",
+        "require",
+        "conflict",
+        "provide",
+        "replace",
+        "require-dev",
+        "suggest",
+        "time",
+        "published-time",
+        "default-branch",
+        "bin",
+        "type",
+        "extra",
+        "installation-source",
+        "autoload",
+        "autoload-dev",
+        "notification-url",
+        "include-path",
+        "php-ext",
+        "archive",
+        "scripts",
+        "license",
+        "authors",
+        "description",
+        "homepage",
+        "keywords",
+        "repositories",
+        "support",
+        "funding",
+        "abandoned",
+        "transport-options",
+        "install-path",
+    ];
+    let Value::Object(mut fields) = value else {
+        return value;
+    };
+    for field in [
+        "require",
+        "conflict",
+        "provide",
+        "replace",
+        "require-dev",
+        "suggest",
+    ] {
+        if let Some(values) = fields.get_mut(field).and_then(Value::as_object_mut) {
+            values.sort_keys();
+        }
+    }
+    if let Some(keywords) = fields.get_mut("keywords").and_then(Value::as_array_mut) {
+        keywords.sort_by(|left, right| left.as_str().cmp(&right.as_str()));
+    }
+    let mut ordered = serde_json::Map::new();
+    for field in FIELDS {
+        if let Some(value) = fields.shift_remove(*field) {
+            ordered.insert((*field).into(), value);
+        }
+    }
+    ordered.extend(fields);
+    Value::Object(ordered)
+}
+
+fn metadata_json(record: &Value) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
+    record.serialize(&mut serde_json::Serializer::with_formatter(
+        &mut output,
+        formatter,
+    ))?;
+    output.push(b'\n');
+    Ok(output)
+}
+
+fn entry(output: &mut String, value: &Value, install_path: Option<&str>, indent: &str) {
+    output.push_str("array(\n");
+    for (key, value) in value.as_object().into_iter().flatten() {
+        output.push_str(&format!("{indent}{} => ", php::quote(key)));
+        match value.as_array() {
+            Some(items) if !items.is_empty() => {
+                output.push_str("array(\n");
+                for (item, value) in items.iter().enumerate() {
+                    output.push_str(&format!("{indent}    {item} => {},\n", php::value(value)));
+                }
+                output.push_str(&format!("{indent}),\n"));
+            }
+            _ => output.push_str(&format!("{},\n", php::value(value))),
+        }
+        if key == "type"
+            && let Some(path) = install_path
+        {
+            output.push_str(&format!("{indent}'install_path' => {path},\n"));
+        }
+    }
+    output.push_str(&indent[4..]);
+    output.push(')');
 }
 
 fn relative_install_path(directory: &Path, path: &Path) -> String {

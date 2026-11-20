@@ -25,6 +25,9 @@ pub(crate) fn relative(path: &str) -> Result<PathBuf> {
 pub(crate) fn inside(root: &Path, name: &str) -> Result<PathBuf> {
     let mut current = root.to_path_buf();
     for part in relative(name)?.components() {
+        if part == Component::CurDir {
+            continue;
+        }
         current.push(part);
         if current
             .symlink_metadata()

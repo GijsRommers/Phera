@@ -7,6 +7,7 @@ mod emit;
 mod order;
 mod platform;
 mod scan;
+mod static_map;
 
 use crate::{InstallPaths, Options, Package, Project, project::strings};
 use anyhow::{Result, bail};
