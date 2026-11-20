@@ -101,6 +101,7 @@ pub fn project(
 fn get_property(state: Option<&State>, property: &PropertyEntry) -> Result<Value, NativeError> {
     if let Some(state) = state
         && matches!(state.position, Position::Before)
+        && property.name == "isEmptyElement"
     {
         return Err(NativeError::error(
             "Failed to read property because no XML data has been read yet",

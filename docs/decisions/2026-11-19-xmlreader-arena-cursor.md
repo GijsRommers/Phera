@@ -6,7 +6,9 @@
 
 ## Decision
 
-`XMLReader` keeps a forward cursor over the shared DOM arena. The parser records the spelling of empty tags and DTD default attributes for the reader.
+`XMLReader` keeps a forward cursor over the shared DOM arena. The parser records the spelling of
+empty tags and DTD default attributes. A reader retains a caller-provided stream until close,
+while an expanded DOM node owns its copied subtree and inherited namespace declarations.
 
 ## Why
 

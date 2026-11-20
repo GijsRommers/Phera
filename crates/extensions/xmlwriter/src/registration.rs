@@ -104,6 +104,8 @@ static METHODS: [MethodEntry; BINDINGS.len() + FACTORIES.len()] = {
 
 static HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    release: Some(crate::output::release),
+    forbid_serialization: true,
     ..ClassHooks::EMPTY
 };
 

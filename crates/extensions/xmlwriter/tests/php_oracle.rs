@@ -80,7 +80,7 @@ fn output_destinations() {
         })
         .unwrap_or_else(|error| panic!("{error}; outputs in {}", oracle.artifacts.display()));
     let count = matched.stdout.split(|byte| *byte == b'\n').count() - 1;
-    assert_eq!(count, 48);
+    assert_eq!(count, 52);
     eprintln!("{count} XMLWriter destination results matched");
 }
 
@@ -112,6 +112,21 @@ foreach ([['<a>&', 'é'], ['', "x\r\ny"], ['text', '日本']] as [$attribute, $t
         }
         unlink($file);
         fclose($target);
+    }
+}
+foreach (['uri', 'stream'] as $mode) {
+    foreach (['', 'text & é'] as $content) {
+        $file = 'lifetime.xml';
+        $stream = $mode === 'stream' ? fopen($file, 'w+b') : null;
+        $writer = $stream ? XMLWriter::toStream($stream) : XMLWriter::toUri($file);
+        $alias = $writer;
+        $writer->writeElement('root', $content);
+        unset($writer);
+        $before = file_get_contents($file);
+        unset($alias);
+        echo json_encode([$before, file_get_contents($file), is_resource($stream)]), "\n";
+        if ($stream) fclose($stream);
+        unlink($file);
     }
 }
 "#;

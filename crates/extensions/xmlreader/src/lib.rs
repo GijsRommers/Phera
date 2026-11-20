@@ -40,7 +40,9 @@ impl Extension for XmlReader {
 
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    forbid_serialization: true,
     property_access: Some(&properties::ACCESS),
+    virtual_properties: true,
     properties: Some(properties::project),
     ..ClassHooks::EMPTY
 };

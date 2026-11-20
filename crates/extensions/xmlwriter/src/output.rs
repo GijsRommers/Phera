@@ -76,6 +76,7 @@ pub fn install(context: &mut dyn Context, object: &Object, target: Target) {
     }));
     *object.native.borrow_mut() = Some(Box::new(shared.clone()));
     if pending {
+        object.expect_destructor();
         let outputs = context.state().get_or_default::<PendingOutputs>();
         if outputs.live.len() == outputs.live.capacity() {
             outputs.live.retain(|writer| writer.strong_count() > 0);
@@ -86,6 +87,14 @@ pub fn install(context: &mut dyn Context, object: &Object, target: Target) {
             context.register_request_finalizer(finish_pending);
         }
     }
+}
+
+pub fn release<'a>(context: &'a mut dyn Context, object: &'a Object) -> LocalFuture<'a, ()> {
+    Box::pin(async move {
+        if let Ok(writer) = state(object) {
+            publish(context, &writer, "XMLWriter").await;
+        }
+    })
 }
 
 fn finish_pending(context: &mut dyn Context, _: Vec<Value>) -> LocalFuture<'_, NativeResult> {

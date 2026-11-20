@@ -79,7 +79,12 @@ fn copy_xml(document: &Document, source: NodeId, deep: bool) -> Vec<u8> {
     let mut copy = Document::default();
     let root = copy.arena.import(tree, source, deep);
     let inherited = inherited_bindings(tree, source, deep);
-    for (prefix, uri) in inherited {
+    add_bindings(&mut copy.arena, root, inherited);
+    serialize::save(&copy, root, Options::default())
+}
+
+fn add_bindings(arena: &mut Arena, root: NodeId, bindings: Vec<(String, String)>) {
+    for (prefix, uri) in bindings {
         let name = if prefix.is_empty() {
             Name {
                 local: "xmlns".into(),
@@ -93,16 +98,26 @@ fn copy_xml(document: &Document, source: NodeId, deep: bool) -> Vec<u8> {
                 namespace: Some(XMLNS.into()),
             }
         };
-        let attribute = copy.arena.allocate(Node::new(Kind::Attribute, name, uri));
-        let _ = copy.arena.set_attribute(root, attribute, None);
+        let attribute = arena.allocate(Node::new(Kind::Attribute, name, uri));
+        let _ = arena.set_attribute(root, attribute, None);
     }
-    serialize::save(&copy, root, Options::default())
 }
 
 fn inherited_bindings(arena: &Arena, root: NodeId, deep: bool) -> Vec<(String, String)> {
     let parents: HashSet<_> = arena.ancestors(root).collect();
     let mut result = Vec::new();
-    let mut seen = HashSet::new();
+    let mut seen: HashSet<&str> = arena[root]
+        .attributes()
+        .iter()
+        .filter_map(|&id| {
+            let name = &arena[id].name;
+            (name.namespace.as_deref() == Some(XMLNS)).then_some(if name.prefix.is_none() {
+                ""
+            } else {
+                name.local.as_str()
+            })
+        })
+        .collect();
     for id in
         std::iter::once(root).chain(
             arena
@@ -121,6 +136,9 @@ fn inherited_bindings(arena: &Arena, root: NodeId, deep: bool) -> Vec<(String, S
                 continue;
             }
             let prefix = name.prefix.as_deref().unwrap_or_default();
+            if seen.contains(prefix) {
+                continue;
+            }
             let provider = std::iter::once(id)
                 .chain(arena.ancestors(id))
                 .find(|&owner| {
@@ -133,7 +151,8 @@ fn inherited_bindings(arena: &Arena, root: NodeId, deep: bool) -> Vec<(String, S
                         }
                     })
                 });
-            if provider.is_some_and(|id| parents.contains(&id)) && seen.insert(prefix) {
+            if provider.is_some_and(|id| parents.contains(&id)) {
+                seen.insert(prefix);
                 result.push((prefix.to_owned(), uri.clone()));
             }
         }
@@ -142,6 +161,19 @@ fn inherited_bindings(arena: &Arena, root: NodeId, deep: bool) -> Vec<(String, S
 }
 
 pub fn expand(context: &mut dyn Context, this: This<'_>, args: &[Value]) -> NativeResult {
+    let destination = match args::object(args, 0) {
+        Some(object) => {
+            let Some(destination) = SharedNode::from_dom(object) else {
+                context.warning(format!(
+                    "XMLReader::expand(): Couldn't fetch {}",
+                    object.class.name()
+                ));
+                return Ok(Value::Bool(false));
+            };
+            Some(destination)
+        }
+        None => None,
+    };
     let state = this
         .and_then(|object| data(object))
         .ok_or_else(|| NativeError::error("Data must be loaded before expanding"))?;
@@ -153,10 +185,17 @@ pub fn expand(context: &mut dyn Context, this: This<'_>, args: &[Value]) -> Nati
     let Some(source) = tree.select(node) else {
         return Ok(Value::Bool(false));
     };
-    let destination = args::object(args, 0).and_then(|object| SharedNode::from_dom(object));
+    let inherited = source.document(|document| {
+        if document.arena[source.id()].kind == Kind::Element {
+            inherited_bindings(&document.arena, source.id(), true)
+        } else {
+            Vec::new()
+        }
+    });
     let node = source
         .copy_to(destination.as_ref())
         .ok_or_else(|| NativeError::error("Cannot expand this XML node"))?;
+    node.document_mut(|document| add_bindings(&mut document.arena, node.id(), inherited));
     node.export_dom(context)
 }
 

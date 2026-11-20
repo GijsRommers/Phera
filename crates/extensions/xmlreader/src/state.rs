@@ -49,7 +49,7 @@ pub struct State {
     encoding: Option<String>,
     pub uri: String,
     flags: i64,
-    stream: bool,
+    stream: Option<Rc<Resource>>,
     pub tree: Option<SharedNode>,
     pub position: Position,
     pub load_dtd: bool,
@@ -67,7 +67,10 @@ impl State {
         encoding: Option<String>,
         flags: i64,
     ) -> Self {
-        let stream = matches!(&source, Input::Stream(_));
+        let stream = match &source {
+            Input::Stream(stream) => Some(stream.clone()),
+            Input::Bytes(_) => None,
+        };
         Self {
             source: Some(source),
             source_name,
@@ -101,12 +104,12 @@ impl State {
                 strip_blanks: self.flags & 256 != 0,
                 merge_cdata: self.flags & 16384 != 0,
                 default_attributes: self.default_attributes,
-                recover: self.flags & 1 != 0 || self.stream,
+                recover: self.flags & 1 != 0 || self.stream.is_some(),
                 huge: self.flags & 524288 != 0,
             },
             self.encoding.as_deref(),
         );
-        self.incomplete_stream = self.stream
+        self.incomplete_stream = self.stream.is_some()
             && parsed
                 .diagnostics
                 .iter()

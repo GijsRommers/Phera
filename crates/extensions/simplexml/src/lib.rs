@@ -59,6 +59,7 @@ static HOOKS: ClassHooks = ClassHooks {
     compare: Some(operators::compare),
     binary: Some(operators::binary),
     unary: Some(operators::unary),
+    forbid_serialization: true,
     properties: Some(projection::properties),
     property_access: Some(&properties::ACCESS),
     iterator: Some(iteration::iterator),

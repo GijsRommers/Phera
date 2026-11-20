@@ -5,7 +5,9 @@ use std::rc::Rc;
 use crate::lazy_continuation::{ReflectInitialize, ReflectedOperation};
 use crate::lazy_objects::resolved_lazy_instance;
 use phera_extension_api::reflection::{MemberInfo, PropertyRead, PropertySlot, PropertyWrite};
-use phera_extension_api::{NativeError, NativeResult};
+use phera_extension_api::{
+    NativeError, NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeResult,
+};
 use phera_value::{LazyObject, Object, Value};
 
 use crate::{
@@ -54,6 +56,16 @@ impl Vm {
                 let has_lazy_objects = self.classes.has_lazy_objects;
                 let resolved = has_lazy_objects.then(|| resolved_lazy_instance(object.clone()));
                 let object = resolved.as_ref().unwrap_or(&object);
+                if let Some(access) = self.native_virtual_access(property) {
+                    if matches!(mode, PropertyRead::Initialized) {
+                        return Ok(Value::Bool(true));
+                    }
+                    if let Some(value) =
+                        (access.read)(self, object, &property.name, NativePropertyRead::Read)?
+                    {
+                        return Ok(value);
+                    }
+                }
                 if let Some(linked) = &property.hooks {
                     let hooks = &linked.hooks;
                     if matches!(mode, PropertyRead::Value)
@@ -153,6 +165,17 @@ impl Vm {
             .filter(|_| has_lazy_objects)
             .map(|object| resolved_lazy_instance(object.clone()));
         let object = resolved.as_ref().or(object.as_ref());
+        if let Some(object) = object
+            && let Some(access) = self.native_virtual_access(property)
+            && (access.mutate)(
+                self,
+                object,
+                &property.name,
+                NativePropertyMutation::Assign(&value),
+            )?
+        {
+            return Ok(Value::Null);
+        }
         if let (Some(object), Some(linked)) = (object, &property.hooks) {
             let hooks = &linked.hooks;
             if matches!(mode, PropertyWrite::Value)
@@ -231,6 +254,20 @@ impl Vm {
             }
         }
         Ok(Value::Null)
+    }
+
+    fn native_virtual_access(
+        &self,
+        property: &PropertyDefault,
+    ) -> Option<&'static NativePropertyAccess> {
+        if property.static_storage.is_some() {
+            return None;
+        }
+        let class = self.classes.get(&property.declaring)?;
+        let hooks = class.hooks.as_ref()?;
+        (class.declaration.is_none() && hooks.virtual_properties)
+            .then_some(hooks.property_access)
+            .flatten()
     }
 
     pub(super) fn effective_property<'a>(

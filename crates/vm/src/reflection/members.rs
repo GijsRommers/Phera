@@ -172,7 +172,13 @@ impl Vm {
                 let is_virtual = property
                     .hooks
                     .as_ref()
-                    .is_some_and(|hooks| hooks.hooks.is_virtual);
+                    .is_some_and(|hooks| hooks.hooks.is_virtual)
+                    || (property.static_storage.is_none()
+                        && owner.declaration.is_none()
+                        && owner
+                            .hooks
+                            .as_ref()
+                            .is_some_and(|hooks| hooks.virtual_properties));
                 let is_abstract = property
                     .hooks
                     .as_ref()
