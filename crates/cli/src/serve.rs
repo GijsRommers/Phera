@@ -310,7 +310,7 @@ impl SiteHandler {
         let accept_encoding = request
             .header("accept-encoding")
             .filter(|_| self.compress)
-            .map(|value| String::from_utf8_lossy(value).into_owned());
+            .map(|value| Rc::<str>::from(String::from_utf8_lossy(value).as_ref()));
         // Looking at the file system blocks, so it runs off the worker
         // thread, which must stay free for other requests.
         let found = tokio::task::spawn_blocking(move || match site.resolve(&path) {
@@ -330,7 +330,11 @@ impl SiteHandler {
                                 &script,
                                 root,
                                 request,
-                                web_output::HttpOutput::new(writer),
+                                web_output::HttpOutput::new(
+                                    writer,
+                                    self.compress,
+                                    accept_encoding.clone(),
+                                ),
                             )
                             .await
                     }

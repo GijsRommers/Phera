@@ -65,7 +65,7 @@ pub trait Context {
     }
 
     /// Finish the HTTP response while the PHP request keeps running.
-    fn finish_response(&mut self) -> LocalFuture<'_, NativeResult> {
+    fn finish_response(&mut self, _function: &'static str) -> LocalFuture<'_, NativeResult> {
         Box::pin(async { Ok(Value::Bool(false)) })
     }
 

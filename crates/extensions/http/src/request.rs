@@ -43,11 +43,16 @@ pub fn register_web(registry: &mut Registry) {
     for function in ["getallheaders", "apache_request_headers"] {
         registry.function(FunctionEntry::sync(function, &[], request_headers));
     }
-    for function in ["fastcgi_finish_request", "litespeed_finish_request"] {
-        registry.function(FunctionEntry::asynchronous(function, &[], |context, _| {
-            context.finish_response()
-        }));
-    }
+    registry.function(FunctionEntry::asynchronous(
+        "fastcgi_finish_request",
+        &[],
+        |context, _| context.finish_response("fastcgi_finish_request"),
+    ));
+    registry.function(FunctionEntry::asynchronous(
+        "litespeed_finish_request",
+        &[],
+        |context, _| context.finish_response("litespeed_finish_request"),
+    ));
     registry.constant("PHP_SAPI", Sapi::Web.name());
 }
 

@@ -203,7 +203,7 @@ try {{
     fastcgi_finish_request();
 }} catch (RuntimeException $error) {{
     wait_for_client();
-    $report = [$error->getMessage(), ob_get_level(), headers_sent()];
+    $report = [$error->getMessage(), ob_get_level(), headers_sent(), $error->getTrace()[1]['function']];
     file_put_contents(__DIR__ . '/status', json_encode($report));
 }}
 echo 'late output';
@@ -214,7 +214,7 @@ echo 'late output';
     std::fs::write(root.path().join("continue"), "").unwrap();
     assert_eq!(
         wait_for_file(&root.path().join("status")),
-        r#"["handler",0,true]"#
+        r#"["handler",0,true,"fastcgi_finish_request"]"#
     );
 }
 

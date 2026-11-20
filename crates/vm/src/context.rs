@@ -58,8 +58,8 @@ impl Context for Vm {
         i64::from(self.client_aborted()) | (i64::from(self.timed_out()) << 1)
     }
 
-    fn finish_response(&mut self) -> LocalFuture<'_, NativeResult> {
-        Box::pin(Vm::finish_response_early(self))
+    fn finish_response(&mut self, function: &'static str) -> LocalFuture<'_, NativeResult> {
+        Box::pin(Vm::finish_response_early(self, function))
     }
 
     fn backtrace(&mut self, objects: bool, arguments: bool, limit: i32) -> Value {

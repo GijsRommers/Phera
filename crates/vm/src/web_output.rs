@@ -17,9 +17,11 @@ pub trait WebOutput {
     /// Send bytes, waiting for room in the transport's bounded queue.
     fn write(&mut self, bytes: Vec<u8>) -> LocalFuture<'_, bool>;
 
-    /// Complete a response before the script ends. If it had already
-    /// started streaming, `bytes` is empty and only its body ends here.
-    fn finish(&mut self, state: &RequestState, bytes: Vec<u8>);
+    /// Close a streamed body after PHP sends its last chunk.
+    fn end_stream(&mut self);
+
+    /// Send a complete buffered response before the PHP request ends.
+    fn finish_buffered(&mut self, state: &RequestState, bytes: Vec<u8>) -> LocalFuture<'_, bool>;
 }
 
 #[derive(PartialEq, Eq)]
@@ -110,7 +112,7 @@ impl Vm {
         }
     }
 
-    pub(crate) async fn finish_response_early(&mut self) -> NativeResult {
+    pub(crate) async fn finish_response_early(&mut self, function: &'static str) -> NativeResult {
         if self
             .output_writer
             .response
@@ -119,7 +121,7 @@ impl Vm {
         {
             return Ok(Value::Bool(false));
         }
-        let buffered = self.finish_response_buffers().await;
+        let buffered = self.finish_response_buffers(function).await;
         if buffered.as_ref().is_err_and(|error| {
             crate::request_end::ScriptEnd::of(error) == crate::request_end::ScriptEnd::Fatal
         }) {
@@ -128,6 +130,7 @@ impl Vm {
         self.commit_response_headers().await?;
         if self.is_streaming_response() {
             self.flush_response_body().await?;
+            self.finish_stream();
         } else if self
             .output_writer
             .response
@@ -136,8 +139,19 @@ impl Vm {
         {
             self.abort_response()?;
             return Ok(Value::Bool(false));
+        } else if let Some(response) = &mut self.output_writer.response
+            && !response.is_ended()
+        {
+            response.phase = Phase::Finished;
+            let sent = response
+                .transport
+                .finish_buffered(&self.state, std::mem::take(&mut self.output))
+                .await;
+            if !sent {
+                self.abort_response()?;
+                return Ok(Value::Bool(false));
+            }
         }
-        self.finish_transport();
         // The response can end even if the script's next operation is CPU work.
         tokio::task::yield_now().await;
         buffered.map(|()| Value::Bool(true))
@@ -148,7 +162,7 @@ impl Vm {
             if let Err(error) = self.flush_response_body().await {
                 self.unwind(error);
             }
-            self.finish_transport();
+            self.finish_stream();
         }
     }
 
@@ -159,14 +173,12 @@ impl Vm {
             .is_some_and(|response| response.phase == Phase::Streaming)
     }
 
-    fn finish_transport(&mut self) {
+    fn finish_stream(&mut self) {
         if let Some(response) = &mut self.output_writer.response
-            && !response.is_ended()
+            && response.phase == Phase::Streaming
         {
             response.phase = Phase::Finished;
-            response
-                .transport
-                .finish(&self.state, std::mem::take(&mut self.output));
+            response.transport.end_stream();
         }
     }
 }

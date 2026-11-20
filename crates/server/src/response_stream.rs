@@ -76,8 +76,8 @@ impl ResponseWriter {
     }
 
     /// Send an entire response early, with its normal body length.
-    pub fn finish(&self, response: Response) {
-        self.publish(response);
+    pub fn finish(&self, response: Response) -> bool {
+        self.publish(response)
     }
 
     /// Send the response head and start an unknown-length body.
@@ -99,10 +99,13 @@ impl ResponseWriter {
         sender
     }
 
-    fn publish(&self, response: Response) {
+    fn publish(&self, response: Response) -> bool {
         if matches!(self.slot.phase.get(), Phase::Waiting | Phase::Watching) {
             self.slot.phase.set(Phase::Published);
             self.slot.response.set(Some(response));
+            true
+        } else {
+            false
         }
     }
 }

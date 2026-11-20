@@ -11,7 +11,12 @@ pub trait WebOutput {
     fn is_disconnected(&self) -> bool;
     fn start(&mut self, head: ResponseHead);
     fn write(&mut self, bytes: Vec<u8>) -> Pin<Box<dyn Future<Output = bool> + '_>>;
-    fn finish(&mut self, head: ResponseHead, bytes: Vec<u8>);
+    fn end_stream(&mut self);
+    fn finish_buffered(
+        &mut self,
+        head: ResponseHead,
+        bytes: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = bool> + '_>>;
 }
 
 pub(crate) struct Transport<T>(pub(crate) T);
@@ -29,8 +34,16 @@ impl<T: WebOutput> phera_vm::WebOutput for Transport<T> {
         self.0.write(bytes)
     }
 
-    fn finish(&mut self, state: &RequestState, bytes: Vec<u8>) {
-        self.0.finish(head(state), bytes);
+    fn end_stream(&mut self) {
+        self.0.end_stream();
+    }
+
+    fn finish_buffered(
+        &mut self,
+        state: &RequestState,
+        bytes: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = bool> + '_>> {
+        self.0.finish_buffered(head(state), bytes)
     }
 }
 

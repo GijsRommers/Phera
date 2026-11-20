@@ -2,21 +2,32 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 
 use phera_runtime::{ResponseHead, WebOutput};
 use phera_server::{Response, ResponseWriter, StreamWriter};
 
+use super::compress;
+
 pub(super) struct HttpOutput {
     response: ResponseWriter,
     stream: Option<StreamWriter>,
+    compress: bool,
+    accept_encoding: Option<Rc<str>>,
 }
 
 impl HttpOutput {
-    pub(super) fn new(response: ResponseWriter) -> Self {
+    pub(super) fn new(
+        response: ResponseWriter,
+        compress: bool,
+        accept_encoding: Option<Rc<str>>,
+    ) -> Self {
         response.watch_disconnect();
         Self {
             response,
             stream: None,
+            compress,
+            accept_encoding,
         }
     }
 }
@@ -43,12 +54,24 @@ impl WebOutput for HttpOutput {
         })
     }
 
-    fn finish(&mut self, head: ResponseHead, bytes: Vec<u8>) {
+    fn end_stream(&mut self) {
         if let Some(stream) = self.stream.take() {
             stream.finish();
-        } else {
-            self.response.finish(to_response(head, bytes));
         }
+    }
+
+    fn finish_buffered(
+        &mut self,
+        head: ResponseHead,
+        bytes: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = bool> + '_>> {
+        Box::pin(async move {
+            let mut response = to_response(head, bytes);
+            if self.compress {
+                response = compress::php_response(response, self.accept_encoding.as_deref()).await;
+            }
+            self.response.finish(response)
+        })
     }
 }
 
