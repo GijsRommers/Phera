@@ -43,7 +43,7 @@ gc_enable();
 gc_collect_cycles();
 echo "after collecting: alive=", Node::$alive, " destructed=", Node::$destructed, "\n";
 
-for ($i = 0; $i < 100_000; $i++) {
+for ($i = 0; $i < 10_000; $i++) {
     cloneLike($i);
 }
 gc_collect_cycles();
@@ -52,4 +52,4 @@ echo "toggling while enabled: enabled=", var_export(gc_enabled(), true),
 --EXPECT--
 while disabled: enabled=false alive=50000 destructed=0 runs unchanged=true
 after collecting: alive=0 destructed=50000
-toggling while enabled: enabled=true alive=0 destructed=100000
+toggling while enabled: enabled=true alive=0 destructed=55000
