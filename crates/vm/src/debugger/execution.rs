@@ -12,7 +12,7 @@ use crate::calls::execution_loop::{BatchExit, YIELD_AFTER_STEPS};
 use crate::code_table::FunctionIndex;
 
 use super::breakpoints::Kind;
-use super::protocol::file_uri;
+use super::source::Sources;
 
 #[derive(Clone, Copy)]
 pub(super) struct Position {
@@ -121,11 +121,11 @@ impl Vm {
         let Some(frame) = self.current() else {
             return false;
         };
-        let file = file_uri(&frame.unit().file);
+        let file = debugger.sources.uri(frame.unit());
         if debugger.features.resolved_breakpoints && line {
-            let resolved = debugger
-                .breakpoints
-                .resolve_file(&file, |file, line| self.debug_line(file, line));
+            let resolved = debugger.breakpoints.resolve_file(&file, |file, line| {
+                self.debug_line(&debugger.sources, file, line)
+            });
             for breakpoint in resolved.into_iter().filter(|_| debugger.features.notify_ok) {
                 debugger.notifications.push(format!(
                     r#"<notify {} name="breakpoint_resolved">{breakpoint}</notify>"#,
@@ -161,10 +161,10 @@ impl Vm {
         debugger.stop.is_some() || !debugger.notifications.is_empty()
     }
 
-    pub(super) fn debug_line(&self, file: &str, requested: u32) -> Option<u32> {
+    pub(super) fn debug_line(&self, sources: &Sources, file: &str, requested: u32) -> Option<u32> {
         self.code
             .loaded_units()
-            .filter(|unit| file_uri(&unit.file) == file)
+            .filter(|unit| sources.uri(unit) == file)
             .flat_map(|unit| std::iter::once(&unit.main).chain(&unit.functions))
             .flat_map(|function| function.instructions.iter().zip(&function.lines))
             .filter(|(instruction, _)| is_breakable(**instruction))

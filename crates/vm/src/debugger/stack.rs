@@ -1,12 +1,18 @@
 //! `stack_get -i 2 -d 0` describes the innermost suspended PHP frame.
 
-use super::protocol::{Command, file_uri};
+use super::protocol::Command;
+use super::source::Sources;
 use crate::Vm;
 use quick_xml::escape::escape;
 use std::fmt::Write;
 
 impl Vm {
-    pub(super) fn debug_stack(&self, command: &Command, pause_line: Option<u32>) -> String {
+    pub(super) fn debug_stack(
+        &self,
+        command: &Command,
+        sources: &Sources,
+        pause_line: Option<u32>,
+    ) -> String {
         let mut body = String::new();
         let requested = command.number::<usize>(b'd');
         let frames = self.frames();
@@ -15,7 +21,7 @@ impl Vm {
             if requested.is_some_and(|selected| selected != index) {
                 continue;
             }
-            let file = file_uri(&frame.unit().file);
+            let file = sources.uri(frame.unit());
             let line = if index == 0 {
                 pause_line.map_or_else(|| frame.line(), |line| line as usize)
             } else {

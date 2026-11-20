@@ -95,6 +95,35 @@ fn condition_generator_native_values_and_exception() {
     compare(&actual, include_str!("debugger/flow.xdebug.xml"));
 }
 
+#[test]
+fn streams_and_programmatic_break() {
+    if std::env::var_os("PHERA_RECORD_DEBUG_ORACLE").is_some() {
+        return;
+    }
+    let script = Path::new(FIXTURES).join("streams.php");
+    let commands = "stdout -c 1\nstderr -c 2\nrun\ndetach\n";
+    let (packets, output) = Peer::launch(|port| phera(port, &script))
+        .expect("Phera peer")
+        .collect(commands)
+        .expect("redirected Phera streams");
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"copied\nfinished\n");
+    assert!(output.stderr.is_empty());
+    assert!(packets.iter().any(|packet| {
+        packet.contains(r#"<stream"#)
+            && packet.contains(r#"type="stdout""#)
+            && packet.contains("Y29waWVkCg==")
+    }));
+    assert!(packets.iter().any(|packet| {
+        packet.contains(r#"<stream"#)
+            && packet.contains(r#"type="stderr""#)
+            && packet.contains("cmVkaXJlY3RlZAo=")
+    }));
+    assert!(packets.iter().any(|packet| {
+        packet.contains(r#"command="run""#) && packet.contains(r#"status="break""#)
+    }));
+}
+
 fn compare(actual: &[String], expected: &str) {
     assert!(
         actual

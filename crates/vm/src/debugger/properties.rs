@@ -76,8 +76,12 @@ impl Property {
     }
 
     pub(super) fn children(&self, vm: &mut Vm, show_hidden: bool) -> Vec<Self> {
-        let value = self.value.as_ref().and_then(|value| value.try_deref().ok());
-        match value.as_deref() {
+        let value = self
+            .value
+            .as_ref()
+            .and_then(|value| value.try_deref().ok())
+            .map(|value| value.clone());
+        match value.as_ref() {
             Some(Value::Array(array)) => array
                 .iter()
                 .map(|(key, value)| {

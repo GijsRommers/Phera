@@ -8,7 +8,7 @@ use super::features::Features;
 use super::properties::Property;
 use super::property_xml::render;
 use super::protocol::Command;
-use super::source::source;
+use super::source::Sources;
 
 impl Vm {
     pub(super) async fn debug_inspection(
@@ -16,13 +16,14 @@ impl Vm {
         command: &Command,
         features: &Features,
         file: &str,
+        sources: &Sources,
         line: Option<u32>,
     ) -> String {
         match command.name.as_str() {
             "stack_depth" => {
                 command.response(&format!(r#" depth="{}""#, self.call_stack.depth()), "")
             }
-            "stack_get" => self.debug_stack(command, line),
+            "stack_get" => self.debug_stack(command, sources, line),
             "context_names" => command.response(
                 "",
                 concat!(
@@ -52,7 +53,7 @@ impl Vm {
                     Err(_) => command.error_with_status(206, "error evaluating code", "break"),
                 }
             }
-            "source" => source(command, file).await,
+            "source" => sources.command(command, file).await,
             _ => command.error(4, "unimplemented command"),
         }
     }

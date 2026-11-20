@@ -11,6 +11,7 @@ use super::breakpoints::Breakpoints;
 use super::execution::Position;
 use super::features::Features;
 use super::protocol::{Command, NAMESPACES, Wire};
+use super::source::Sources;
 use super::{DebugTimeLimit, Stream, Streams};
 
 pub(crate) struct Session {
@@ -28,6 +29,7 @@ pub(crate) struct Session {
     pub(super) stop: Option<Stop>,
     pub(super) last_exception: Option<u32>,
     pub(super) streams: Rc<Streams>,
+    pub(crate) sources: Sources,
     mode: Resume,
     pause_line: Option<u32>,
     time_limit: Option<DebugTimeLimit>,
@@ -71,6 +73,7 @@ impl Session {
             stop: None,
             last_exception: None,
             streams: Rc::new(Streams::default()),
+            sources: Sources::default(),
             mode: Resume::Run,
             pause_line: None,
             time_limit,
@@ -174,7 +177,7 @@ impl Session {
                 let response = self.breakpoints.command(
                     &command,
                     &self.file,
-                    |file, line| vm.debug_line(file, line),
+                    |file, line| vm.debug_line(&self.sources, file, line),
                     self.features.resolved_breakpoints,
                 );
                 if command.name == "breakpoint_set"
@@ -190,8 +193,14 @@ impl Session {
             }
             _ if running => command.error(5, "command is unavailable while running"),
             _ => {
-                vm.debug_inspection(&command, &self.features, &self.file, self.pause_line)
-                    .await
+                vm.debug_inspection(
+                    &command,
+                    &self.features,
+                    &self.file,
+                    &self.sources,
+                    self.pause_line,
+                )
+                .await
             }
         };
         self.wire.write(&response).await?;
