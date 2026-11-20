@@ -54,7 +54,6 @@ pub(super) fn register(registry: &mut Registry) {
     });
     for (name, legacy) in [
         ("Dom\\NodeList", "DOMNodeList"),
-        ("Dom\\HTMLCollection", "DOMNamedNodeMap"),
         ("Dom\\NamedNodeMap", "DOMNamedNodeMap"),
         ("Dom\\DtdNamedNodeMap", "DOMNamedNodeMap"),
     ] {

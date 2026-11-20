@@ -1,3 +1,5 @@
+//! Native errors can request a fresh PHP exception or forward an existing unwind.
+
 use std::any::Any;
 use std::fmt;
 
@@ -32,6 +34,14 @@ impl fmt::Debug for Unwind {
 }
 
 impl NativeError {
+    /// The VM still needs to create the PHP Throwable and capture its trace.
+    pub fn is_exception_request(&self) -> bool {
+        match self {
+            Self::Throw { .. } => true,
+            Self::Unwind(payload) => payload.0.is::<ExceptionPayload>(),
+        }
+    }
+
     /// Preserve a driver's code without coercion: `$e->getCode()` can return `"42P01"`.
     /// Only integers and strings are valid; other values report an extension implementation error.
     /// An exception already unwinding from PHP is passed through unchanged.

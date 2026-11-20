@@ -84,11 +84,12 @@ const MT_RAND: FunctionEntry = FunctionEntry::sync("mt_rand", ZERO_OR_TWO, mt_ra
 const RAND: FunctionEntry = FunctionEntry::sync("rand", ZERO_OR_TWO, rand);
 
 /// PHP takes either no arguments or both bounds, and counts them before it
-/// converts them. A signature cannot say that, so this one accepts any
-/// number and [`bounds`] checks.
+/// converts them. [`bounds`] checks both forms before coercing either bound.
 const ZERO_OR_TWO: &[Param] = &[
-    Param::new("min", ParamType::Mixed).optional(),
-    Param::new("max", ParamType::Mixed).variadic(),
+    Param::new("min", ParamType::Mixed)
+        .optional()
+        .arity_checked_by_handler(),
+    Param::new("max", ParamType::Mixed).optional(),
 ];
 
 /// The two bounds as ints, or `None` without arguments.
