@@ -17,6 +17,7 @@ symbols.
 PHP attaches compiled names to an ordered symbol table before executing
 file-level code. A named assignment declares its target before compiling
 its source, so a chain of assignments reserves symbols from left to right.
+The compiler records those positions separately from register allocation.
 A fiber switch or include moves the values, and a shutdown callback can
 replace them. Teardown still visits sole-owned objects in reverse symbol
 order and runs the remaining object and generator destructors by ID.

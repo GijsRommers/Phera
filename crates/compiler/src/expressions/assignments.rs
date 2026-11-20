@@ -42,18 +42,8 @@ impl Compiler<'_> {
         if matches!(target.kind, ast::ExpressionKind::Index { .. }) {
             return self.compile_index_assignment(target, value, line);
         }
-        if self.function.name == "{main}"
-            && matches!(
-                target.kind,
-                ast::ExpressionKind::Variable(ast::Variable::Named(_))
-            )
-        {
-            // PHP declares file-scope targets before compiling the source,
-            // including the outer names in a chain of assignments.
-            let place = self.place(target)?;
-            let source = self.compile_expression(value)?;
-            self.emit(Instruction::Write { place, source }, line);
-            return Ok(source);
+        if let ast::ExpressionKind::Variable(ast::Variable::Named(name)) = &target.kind {
+            self.declare_file_symbol(name);
         }
         let references = super::places::contains_reference(target);
         let src = if references && (writable(value) || crate::helpers::is_this(value)) {
