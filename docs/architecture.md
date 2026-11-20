@@ -614,10 +614,12 @@ files, `sprintf`, `serialize`), spl, json, pcre (bound to PCRE2), ctype, mbstrin
 date, hash, filter, random, tokenizer, reflection, session, pdo with async
 drivers. **Later:** openssl, curl, dom and xml, intl, fileinfo, iconv.
 
-DOM string parsing never opens external entities, even when entity substitution
-or DTD loading is requested. It performs no file or network I/O and bounds
-internal entity expansion. The file methods read only the document named by
-the caller.
+DOM, SimpleXML, XMLReader, and XMLParser never open external entities, even
+when entity substitution or DTD loading is requested. Document strings require
+no file or network I/O and internal entity expansion is bounded. Explicit file
+methods read the document named by the caller. DOM schema validation can also
+follow local regular-file includes and imports from the supplied XSD. It bounds
+the number and total size of the schemas and leaves external entities inert.
 
 Locale names are remembered per request, C/POSIX behavior is implemented,
 and localized data is missing.

@@ -29,7 +29,7 @@
 mod arrays;
 mod objects;
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -68,6 +68,11 @@ pub struct Refusal {
 /// A PHP reference cell.
 type Cell = Rc<RefCell<Value>>;
 
+struct NativeCopy {
+    _source: Rc<dyn Any>,
+    copy: Rc<dyn Any>,
+}
+
 /// One copy in progress. Make it with [`Fork::new`], map each root with
 /// [`Fork::value`], then call [`Fork::finish`].
 pub struct Fork<'n> {
@@ -81,15 +86,13 @@ pub struct Fork<'n> {
     references: HashMap<usize, Rc<RefCell<Value>>>,
     resources: HashMap<usize, Rc<Resource>>,
     pub(crate) arrays: HashMap<usize, Rc<crate::PhpArray>>,
+    native_copies: Option<HashMap<(TypeId, usize), NativeCopy>>,
     /// Copies made but not filled yet.
     pub(crate) unfilled_objects: Vec<(Rc<Object>, Rc<Object>)>,
     unfilled_references: Vec<(Cell, Cell)>,
     /// Copies whose originals carry `WeakMap` values; filled once every
     /// map has its copy.
     pub(crate) unfilled_attachments: Vec<(Rc<Object>, Rc<Object>)>,
-    /// Copies of native data that several objects share (see
-    /// [`Fork::shared`]), by the address of the original.
-    shared: HashMap<usize, Box<dyn Any>>,
     refusal: Option<Refusal>,
 }
 
@@ -105,38 +108,47 @@ impl<'n> Fork<'n> {
             references: HashMap::new(),
             resources: HashMap::new(),
             arrays: HashMap::new(),
+            native_copies: None,
             unfilled_objects: Vec::new(),
             unfilled_references: Vec::new(),
             unfilled_attachments: Vec::new(),
-            shared: HashMap::new(),
             refusal: None,
         }
-    }
-
-    /// The copy of native data that several objects share, made once per
-    /// fork by `copy`: the node objects of one DOM document share their
-    /// document, and each fork's nodes share the fork's copy.
-    pub fn shared<T: 'static>(
-        &mut self,
-        original: &Rc<T>,
-        copy: impl FnOnce(&T, &mut Self) -> T,
-    ) -> Rc<T> {
-        let address = Rc::as_ptr(original).cast::<()>() as usize;
-        if let Some(made) = self
-            .shared
-            .get(&address)
-            .and_then(|made| made.downcast_ref::<Rc<T>>())
-        {
-            return made.clone();
-        }
-        let made = Rc::new(copy(original, self));
-        self.shared.insert(address, Box::new(made.clone()));
-        made
     }
 
     /// The id pool of the copies.
     pub fn ids(&self) -> &Rc<ObjectIds> {
         &self.ids
+    }
+
+    /// Copy native backing shared by several PHP objects once for this fork.
+    /// For example, two views of one XML document, and every node object of
+    /// a DOM document, must keep sharing the fork's one copied tree. `copy`
+    /// gets the fork, to copy the objects the backing refers to.
+    pub fn shared_native<T: 'static>(
+        &mut self,
+        source: &Rc<T>,
+        copy: impl FnOnce(&T, &mut Self) -> T,
+    ) -> Rc<T> {
+        let key = (TypeId::of::<T>(), Rc::as_ptr(source) as usize);
+        if let Some(copied) = self
+            .native_copies
+            .as_ref()
+            .and_then(|copies| copies.get(&key))
+            && let Ok(value) = copied.copy.clone().downcast::<T>()
+        {
+            return value;
+        }
+        let value = Rc::new(copy(source, self));
+        let copies = self.native_copies.get_or_insert_with(HashMap::new);
+        copies.insert(
+            key,
+            NativeCopy {
+                _source: source.clone(),
+                copy: value.clone(),
+            },
+        );
+        value
     }
 
     /// The copy of a value. Scalars and strings are themselves.

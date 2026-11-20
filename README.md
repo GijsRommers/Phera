@@ -90,6 +90,9 @@ session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix proce
 functions, and POSIX queries.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
+Legacy `DOMDocument` supports local XSD validation for common content models,
+including Symfony's service configuration. Complex type derivation and XSD
+identity constraints remain unsupported.
 
 - Documents and elements include `Dom\Document`, `Dom\HTMLDocument`,
   `Dom\XMLDocument`, `Dom\Element`, `Dom\HTMLElement`, `Dom\Attr`.
@@ -100,6 +103,12 @@ Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 - Collections and queries include `Dom\NodeList`, `Dom\NamedNodeMap`,
   `Dom\DtdNamedNodeMap`, `Dom\HTMLCollection`, `Dom\TokenList`, `Dom\XPath`.
 - `Dom\ParentNode` and `Dom\ChildNode` expose their shared operations.
+
+The XML extensions include `XMLWriter` for memory and URI output,
+`SimpleXMLElement` and `SimpleXMLIterator` for XML and DOM interoperability,
+`XMLReader` for forward traversal, and `XMLParser` for XML events.
+XML inputs use bounded entity expansion and keep external entity declarations inert.
+XMLReader schema validation remains incomplete.
 
 Named arguments to built-ins use PHP’s declared defaults for skipped parameters.
 For example, `json_decode($json, flags: JSON_THROW_ON_ERROR)` uses the default
@@ -141,7 +150,6 @@ read, written, sought, truncated and unlinked in the current transaction.
 Native function return types are visible through reflection. Compatibility
 testing is in progress. MySQL LOCAL INFILE is disabled.
 
-In progress: SimpleXML, XMLReader, XMLWriter.
 Not started: gd, fileinfo, zip, sockets.
 
 ### Sodium

@@ -76,7 +76,7 @@ pub(crate) fn forked(
     share: &ShareHandle,
     fork: &mut phera_extension_api::value::Fork<'_>,
 ) -> ShareHandle {
-    fork.shared(share, |share, _| {
+    fork.shared_native(share, |share, _| {
         let share = share.borrow();
         let persistent = share.pool_scope & 1 << 63 != 0;
         RefCell::new(Share {

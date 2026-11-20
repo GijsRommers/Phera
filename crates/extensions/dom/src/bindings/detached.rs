@@ -30,7 +30,7 @@ impl Detached {
                 .iter()
                 .filter_map(|(id, pin)| {
                     let pin = pin.upgrade()?;
-                    Some((*id, Rc::downgrade(&fork.shared(&pin, |_, _| ()))))
+                    Some((*id, Rc::downgrade(&fork.shared_native(&pin, |_, _| ()))))
                 })
                 .collect(),
         }

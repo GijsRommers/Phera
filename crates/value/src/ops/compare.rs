@@ -15,7 +15,7 @@ use crate::array::PhpArray;
 use crate::convert::{NumVal, parse_numeric};
 use crate::error::{Diagnostics, OpError};
 use crate::float_format::{NumberText, float_text_precision14};
-use crate::object::Object;
+use crate::object::{Object, ObjectCast};
 use crate::value::Value;
 
 mod casting;
@@ -264,6 +264,30 @@ fn compare_non_resource(
             }
             match other {
                 Value::Int(_) | Value::Float(_) => {
+                    if let Value::Object(object) = obj {
+                        let kind = if other.is_int() {
+                            ObjectCast::Int
+                        } else {
+                            ObjectCast::Float
+                        };
+                        match (object.class.cast(object, kind), other) {
+                            (Some(Value::Int(left)), Value::Int(right)) => {
+                                return Ok(cmp3(if obj_first {
+                                    left.cmp(right)
+                                } else {
+                                    right.cmp(&left)
+                                }));
+                            }
+                            (Some(Value::Float(left)), Value::Float(right)) => {
+                                return Ok(if obj_first {
+                                    threeway(left, *right)
+                                } else {
+                                    threeway(*right, left)
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
                     // stdClass cannot cast to numbers: PHP notices and
                     // treats the object as 1.
                     d.notice(format!(

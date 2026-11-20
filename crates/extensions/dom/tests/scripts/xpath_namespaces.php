@@ -42,3 +42,15 @@ foreach ([
         echo json_encode([get_class($error), $error->getMessage()]), "\n";
     }
 }
+
+$document = new DOMDocument();
+$document->loadXML('<container xmlns="urn:services"><services><service/></services></container>');
+$xpath = new DOMXPath($document);
+$xpath->registerNamespace('container', 'urn:services');
+foreach ([null, $document, $document->documentElement] as $context) {
+    echo json_encode([
+        $xpath->query('./container:services/container:service', $context)->length,
+        $xpath->query('/container:container/container:services/container:service', $context)->length,
+        $xpath->evaluate('name(.)', $context),
+    ]), "\n";
+}

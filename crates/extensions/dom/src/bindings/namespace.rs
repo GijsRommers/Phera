@@ -58,7 +58,7 @@ fn fork_declaration(
     Ok(Box::new(Declaration {
         node: declaration.node.forked(fork),
         parent: declaration.parent,
-        _pin: fork.shared(&declaration._pin, |_, _| ()),
+        _pin: fork.shared_native(&declaration._pin, |_, _| ()),
     }) as Box<dyn std::any::Any>)
 }
 

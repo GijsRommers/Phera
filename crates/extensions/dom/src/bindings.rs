@@ -17,6 +17,7 @@ mod mutation;
 mod namespace;
 mod node;
 mod properties;
+pub mod shared;
 mod xpath;
 
 use std::borrow::Cow;
@@ -128,7 +129,7 @@ pub(crate) fn fork_node(
 impl Location {
     pub(super) fn forked(&self, fork: &mut phera_extension_api::value::Fork<'_>) -> Self {
         Location {
-            shared: fork.shared(&self.shared, |state, fork| {
+            shared: fork.shared_native(&self.shared, |state, fork| {
                 RefCell::new(state.borrow().forked(fork))
             }),
             id: self.id,
