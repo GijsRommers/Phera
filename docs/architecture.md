@@ -1769,8 +1769,8 @@ phera new shop --template symfony           asks nothing
 - **Without a terminal** (a script, a pipeline) an unanswered question is an
   error that names the options, not a wait.
 - **Serve the project** with `phera serve public` for the plain, Symfony
-  skeleton and Laravel templates. The webapp template prints the PHP server
-  command while its runtime requirements are still being built.
+  skeleton and Laravel templates. The webapp template reports its pending
+  Phera runtime support.
 
 ### 11.9 `phera lint`: source checks and local edits
 

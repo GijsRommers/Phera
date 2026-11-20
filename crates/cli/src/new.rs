@@ -72,10 +72,6 @@ impl Template {
             Template::Laravel => Some("Laravel"),
         }
     }
-
-    fn runs_on_phera(self) -> bool {
-        !matches!(self, Template::SymfonyWebApp)
-    }
 }
 
 /// The `--template` words, for messages.
@@ -147,11 +143,10 @@ fn create(options: &NewOptions, answers: &mut impl BufRead) -> Result<(), String
         println!("  phera install           fetches packages and writes the class loader");
         println!("  composer install        fallback for projects requiring Composer");
     }
-    match template.framework() {
-        Some(_) if !template.runs_on_phera() => println!(
-            "  php -S 127.0.0.1:8080 -t public\n\n\
-             Symfony webapp setup needs PHP features that are still being built in Phera."
-        ),
+    match template {
+        Template::SymfonyWebApp => {
+            println!("  Symfony webapp setup is pending Phera runtime support.");
+        }
         _ => println!("  phera serve public      then open http://127.0.0.1:8080/"),
     }
     Ok(())
