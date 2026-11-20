@@ -369,6 +369,14 @@ impl Vm {
         let Some(narrow) = narrow else {
             return wide == "mixed";
         };
+        if narrow == wide
+            && (narrow_scope == wide_scope
+                || !narrow
+                    .split(['?', '|', '&', '(', ')'])
+                    .any(|member| matches!(member, "self" | "parent" | "static")))
+        {
+            return true;
+        }
         let narrow = contract_alternatives(narrow);
         let wide = contract_alternatives(wide);
         narrow.split('|').all(|source| {

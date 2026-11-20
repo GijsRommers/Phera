@@ -72,15 +72,11 @@ impl Compiler<'_> {
         }
         let parent = (!is_interface)
             .then(|| declaration.extends.first())
-            .flatten()
-            .map(|parent| self.resolve(parent, crate::policies::NameKind::Class).0);
+            .flatten();
         let scope = if declaration.kind == ast::ClassKind::Trait {
             TypeScope::Deferred
         } else {
-            TypeScope::Class {
-                name,
-                parent: parent.as_deref(),
-            }
+            TypeScope::Class { name, parent }
         };
         let mut properties = std::collections::HashSet::new();
         for member in &declaration.members {

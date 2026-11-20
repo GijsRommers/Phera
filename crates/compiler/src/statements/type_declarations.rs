@@ -29,7 +29,7 @@ pub(super) enum TypeScope<'a> {
     Deferred,
     Class {
         name: &'a str,
-        parent: Option<&'a str>,
+        parent: Option<&'a Name>,
     },
 }
 
@@ -208,14 +208,21 @@ impl Compiler<'_> {
                         "Cannot use \"{lower}\" when no class scope is active"
                     )));
                 }
-                (TypeScope::Class { name, .. }, "self") => Some(name),
+                (TypeScope::Class { name, .. }, "self") => Some(Cow::Borrowed(name)),
                 (
                     TypeScope::Class {
                         parent: Some(parent),
                         ..
                     },
                     "parent",
-                ) => Some(parent),
+                ) => {
+                    if form == Bound::Standalone {
+                        return Ok(lower);
+                    }
+                    Some(Cow::Owned(
+                        self.resolve(parent, policies::NameKind::Class).0,
+                    ))
+                }
                 (TypeScope::Class { parent: None, .. }, "parent") => {
                     return Err(error(
                         "Cannot use \"parent\" when current class scope has no parent".into(),
@@ -229,7 +236,7 @@ impl Compiler<'_> {
                     name.text
                 )));
             }
-            return Ok(resolved.map_or(lower, Cow::Borrowed));
+            return Ok(resolved.unwrap_or(lower));
         }
         if builtin_type(&lower) {
             if form == Bound::Intersection {
@@ -244,7 +251,8 @@ impl Compiler<'_> {
             }
             return Ok(lower);
         }
-        if let Some((_, part)) = lower.rsplit_once('\\')
+        if name.kind != NameKind::Unqualified
+            && let Some((_, part)) = lower.rsplit_once('\\')
             && (builtin_type(part) || matches!(part, "self" | "parent" | "static"))
         {
             let resolved = self.resolve(name, policies::NameKind::Class).0;

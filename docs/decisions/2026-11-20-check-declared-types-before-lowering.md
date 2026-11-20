@@ -19,6 +19,7 @@ A redundant alternative or illegal bound is a compile error even if the
 declaration never runs. The AST already identifies the kind of each clause.
 The usual single-name declaration needs no compound type data, and validation
 does not add runtime metadata.
+Resolve the parent's name only if a compound type mentions it.
 
 ## Turned down
 
