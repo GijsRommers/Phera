@@ -1,4 +1,4 @@
-//! Array construction and match/interpolation expression lowering.
+//! A `match ($value)` comparison fetches the subject after evaluating its arm.
 
 use phera_ast as ast;
 use phera_bytecode::Reg;
@@ -23,6 +23,8 @@ impl Compiler<'_> {
         let dst = self.allocate_register()?;
         let mut done = vec![];
         let mut default = None;
+        let subject_line = self.lines.line(match_expression.subject.span.start);
+        let mut checking_jump_table = true;
         for arm in &match_expression.arms {
             if let Some(conditions) = &arm.conditions {
                 let mut jumps = vec![];
@@ -31,7 +33,25 @@ impl Compiler<'_> {
                     let rhs = self.compile_expression(condition)?;
                     let test = self.allocate_register()?;
                     let test_line = if Some(subject) == local {
-                        self.operand_line(condition)
+                        let folded = checking_jump_table.then(|| constant(condition)).flatten();
+                        checking_jump_table =
+                            matches!(folded, Some(Constant::Int(_) | Constant::Bytes(_)));
+                        // The jump-table probe folds constants with the subject's
+                        // line. PHP's scalar literal nodes keep their own lines.
+                        if folded.is_some()
+                            && !matches!(
+                                condition.kind,
+                                ast::ExpressionKind::Literal(
+                                    ast::Literal::Int(_)
+                                        | ast::Literal::Float(_)
+                                        | ast::Literal::String(_)
+                                )
+                            )
+                        {
+                            subject_line
+                        } else {
+                            self.operand_line(condition)
+                        }
                     } else {
                         line
                     };
