@@ -16,19 +16,21 @@ when it is a shared module.
 | `Normalizer`, `normalizer_*` | Five forms including NFKC casefold, normalization checks and raw decompositions |
 | `grapheme_*` | Length, substring, splitting, extraction, searching and weighted edit distance. Search uses grapheme sort keys and needs additional coverage for contractions spanning clusters. PHP 8.5.12 has no `grapheme_similar`. |
 | `Locale`, `locale_*` | Default locale, locale IDs, lookup, HTTP negotiation, likely subtags and localized names. Legacy ICU identifiers and display keywords have gaps. |
-| `NumberFormatter`, `numfmt_*` | Decimal, scientific, percent, currency and compact notation, with parsing and mutable settings. Custom rule-based formats, spellout, ordinal and duration raise unsupported errors. Pattern syntax, attributes and parse edge cases are partial. |
-| `IntlDateFormatter`, `datefmt_*` | Gregorian styles and patterns, PHP date objects, timestamps, local-time arrays and parsing. Traditional calendars, relative styles, calendar objects and unusual parse fields are partial. |
+| `NumberFormatter`, `numfmt_*` | Decimal, scientific, percent, currency and compact notation, with parsing and mutable settings. English spellout and ordinal formatting cover the default numeric and spelled-out rules used by Laravel. Other locales, duration and custom rule formats are unsupported. Rule-based parsing, patterns and attributes are partial. |
+| `IntlDateFormatter`, `datefmt_*` | Gregorian and relative day styles, patterns, PHP date objects, timestamps, local-time arrays and parsing. Relative text parsing, traditional calendars, calendar objects and unusual parse fields are partial. |
+| `IntlDatePatternGenerator` | Gregorian date and time skeletons, localized hour cycles and width selection. Alternate calendars and uncommon field combinations are partial. |
 | `idn_to_ascii`, `idn_to_utf8` | UTS #46 mapping, Punycode, transitional forms and error details. |
 | `intl_*error*`, `intl_is_failure`, `IntlException` | Request-local last error, ICU error names and numeric compatibility constants |
 | `Collator`, `collator_*` | Locale comparisons, array sorting and keys, strength, case, punctuation and numeric options. Sort-key bytes and some ICU-specific attributes differ. |
 | `MessageFormatter`, `msgfmt_*` | MessageFormat 1 with nested select, cardinal and ordinal plural branches, and number, date and time arguments. Indexed parsing reuses localized number and date parsers, including fractional seconds. Selection parsing, parse timezone defaults and diagnostics are partial. |
-| `Transliterator`, `transliterator_*` | Compound named transforms, Latin-ASCII, normalization, case mapping, and selected script and BGN romanizations. User rules, inverse IDs and full ICU transform coverage are partial. |
+| `Transliterator`, `transliterator_*` | Compound named transforms, Latin-ASCII, normalization, category-filtered Remove, case mapping, and selected script and BGN romanizations. User rules, inverse IDs and full ICU transform coverage are partial. |
 | `IntlTimeZone`, `intltz_*` | Zone construction, offsets, aliases, Windows mappings and conversion to PHP date zones. ICU-specific enumeration, rule comparisons and localized zone names are partial. |
 | `IntlCalendar`, `IntlGregorianCalendar`, `intlcal_*`, `intlgregcal_*` | Millisecond instants, field access and mutation, conversion to PHP dates, Gregorian cutover and locale week data. Field limits, non-Gregorian mutation and ICU wall time settings are partial. |
 | `ResourceBundle`, `resourcebundle_*` | Selected compiled locale tables and native-endian standalone ResB directories with read-only indexing and iteration. Shared pools, aliases, complete locale inheritance and many built-in keys remain incomplete. |
 | `IntlBreakIterator`, `IntlIterator`, `IntlPartsIterator` | Character, code point, word, line and sentence iteration, with PHP byte offsets and parts. Title and custom ICU break rules are unsupported. |
 | `IntlListFormatter` | PHP 8.5 conjunction, disjunction and unit patterns in wide, short and narrow widths. |
-| `IntlChar` | Code points, case mapping, combining classes, digit conversion and common Unicode categories and predicates. The full ICU property and name APIs are unsupported. |
+| `IntlChar` | Code points, case mapping, combining classes, digit conversion, common Unicode predicates, character names and callback-driven enumeration, and property aliases. Other ICU property queries remain incomplete. |
+| `UConverter` | Static and instance UTF-8, UTF-16, UTF-32, ASCII, ISO-8859 and Windows-125x conversions for the available code pages. Other encodings, custom callbacks and full encoding enumeration are unsupported. |
 | `Spoofchecker` | Reports unsupported. ICU4X does not supply the corresponding ICU spoof checker. |
 
 The two normalization mapping files under `data/` are derived from Unicode
@@ -38,11 +40,21 @@ The two normalization mapping files under `data/` are derived from Unicode
 (`NFKC_CF` property). The Unicode data license is included alongside them.
 The ICU numeric constants and error names are the public PHP intl and ICU
 error-code tables as exposed by PHP 8.5.12 with ICU 79.1.
+Character names use Unicode 18.0's
+[DerivedName.txt](https://www.unicode.org/Public/18.0.0/ucd/extracted/DerivedName.txt)
+and correction aliases from
+[NameAliases.txt](https://www.unicode.org/Public/18.0.0/ucd/NameAliases.txt).
+The property alias table uses ICU 79.1's public IntlChar property identifiers.
 
-CLDR 49's number patterns, locale display patterns, Gregorian date styles,
+CLDR 49's number patterns, locale display patterns, Gregorian date styles, relative day terms,
+Gregorian available formats for skeletons,
 currency-region map and reverse Windows zone map are compiled into the
 extension. Their source is the
 [CLDR JSON release](https://github.com/unicode-org/cldr-json/tree/49.0.0).
+The English number rules follow the
+[CLDR English RBNF data](https://github.com/unicode-org/cldr/blob/release-49/common/rbnf/en.xml).
+UConverter's single-byte mappings, aliases and substitution defaults were
+extracted from ICU 79.1 using PHP 8.5.12.
 The [IANA Language Subtag Registry](https://www.iana.org/assignments/language-subtag-registry/)
 supplies grandfathered tags.
 
@@ -87,6 +99,28 @@ A 195-output supplemental probe matched list types and widths, sample
 collation bytes and sorting, calendar fields, break boundaries and time zones.
 The Composer application used Symfony Intl and String 8.1.10, Symfony
 Validator 8.1.11, Twig and Twig Intl Extra 3.30.0.
+
+### Batch 13 follow-up
+
+The PHP 8.5.12 oracle matched 9,581 focused comparisons. The arm64 release
+also matched 600 relative-date formats and 105 date skeletons across the
+15 core locales, and the complete byte repertoire of each supported
+single-byte converter. The locale comparisons used CLDR 49 in both runtimes.
+
+The framework probe matched 187 outputs. It used Symfony String 8.1.10
+and Laravel 13.43.0. The probe used 32 multilingual inputs, ran
+`AsciiSlugger`, `Str::slug`, `Str::ascii` and both forms of
+`Str::transliterate`, and exercised Laravel's three English number helpers.
+
+The default arm64 release binary grew from 60,316,432 bytes at batch 13
+to 62,099,792 bytes, an increase of 1,783,360 bytes.
+Across 26 benchmark cases the largest increase in median retired
+instructions was 0.747%, for 200 HTTP requests. The 100,000-call currency
+and date probes changed by −0.121% and +0.094%, respectively.
+
+The release sweep moved 27 intl fixtures from fail to pass. The intl
+results were 222 pass, 147 fail, 145 skip and 1 expected failure.
+Across the 4,542-fixture tree, no previously passing fixture failed.
 
 ## PHP source tests
 

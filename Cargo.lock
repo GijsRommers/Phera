@@ -2818,6 +2818,7 @@ dependencies = [
  "icu_time",
  "idna",
  "phera-ext-date",
+ "phera-ext-mbstring",
  "phera-ext-standard",
  "phera-extension-api",
  "phera-value",

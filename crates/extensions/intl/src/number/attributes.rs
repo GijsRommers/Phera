@@ -7,7 +7,10 @@
 
 use phera_extension_api::{Context, NativeResult, Value, args};
 
-use super::{Call, Formatter, Operation, Style, affixes, render};
+use super::{Call, Formatter, Operation, Style, affixes, render, spellout};
+use crate::error;
+
+const LAST_SYMBOL: i64 = 28;
 
 #[derive(Clone)]
 pub struct Attributes {
@@ -40,23 +43,22 @@ impl Attributes {
         let (integer, fraction) = digits.split_once('.').unwrap_or((digits, ""));
         let mut groups = integer
             .rsplit(',')
-            .map(|group| group.chars().count() as i16);
+            .map(|group| digit_count(group.chars(), |_| true));
         let primary = groups.next().unwrap_or(0);
         let _left = groups.next();
         let secondary = if groups.next().is_some() {
             integer
                 .rsplit(',')
                 .nth(1)
-                .map_or(0, |part| part.len() as i16)
+                .map_or(0, |part| digit_count(part.chars(), |_| true))
         } else {
             0
         };
-        let integer_min = integer.chars().filter(|&ch| ch == '0').count().max(1) as i16;
-        let fraction_min = fraction.chars().filter(|&ch| ch == '0').count() as i16;
-        let fraction_max = fraction
-            .chars()
-            .filter(|&ch| matches!(ch, '0' | '#'))
-            .count() as i16;
+        let integer_min = digit_count(integer.chars(), |ch| ch == '0').max(1);
+        let fraction_min = digit_count(fraction.chars(), |ch| ch == '0');
+        let fraction_max = digit_count(fraction.chars(), |ch| matches!(ch, '0' | '#'));
+        let significant_min = digit_count(digits.chars(), |ch| ch == '@');
+        let significant_max = digit_count(digits.chars(), |ch| matches!(ch, '@' | '#'));
         let grouping =
             integer.contains(',') || matches!(style, Style::CompactShort | Style::CompactLong);
         Self {
@@ -86,9 +88,9 @@ impl Attributes {
             increment: 0.0,
             width: None,
             pad_position: 0,
-            significant: false,
-            significant_min: None,
-            significant_max: None,
+            significant: significant_min > 0,
+            significant_min: (significant_min > 0).then_some(significant_min),
+            significant_max: (significant_min > 0).then_some(significant_max),
             lenient: false,
         }
     }
@@ -181,6 +183,11 @@ impl Attributes {
     }
 }
 
+fn digit_count(digits: impl Iterator<Item = char>, matching: impl Fn(char) -> bool) -> i16 {
+    let count = digits.filter(|ch| matching(*ch)).count();
+    i16::try_from(count).unwrap_or(i16::MAX)
+}
+
 pub fn numeric_pattern(pattern: &str) -> &str {
     let matches_numeric = |ch: char| matches!(ch, '0' | '#' | '.' | ',' | '@');
     let Some(start) = pattern.find(matches_numeric) else {
@@ -217,6 +224,9 @@ pub fn symbol(state: &Formatter, key: i64) -> Option<String> {
         15 => data.symbols[10],
         16 => "@",
         17 => data.symbols[11],
+        18..=26 => return Some(state.ungrouped.format_to_string(&(key - 17).into())),
+        27 => "×",
+        28 => "~",
         _ => return None,
     };
     Some(text.to_owned())
@@ -235,6 +245,7 @@ fn text_attribute(state: &mut Formatter, key: i64) -> Option<String> {
         }
         4 => Some(" ".to_owned()),
         5 => Some(state.currency.clone()),
+        6 => spellout::default_rule(state.style).map(str::to_owned),
         _ => None,
     }
 }
@@ -247,6 +258,17 @@ pub fn apply(
     operation: Operation,
 ) -> NativeResult {
     let key = args::int(input, 0).unwrap_or(0);
+    if matches!(operation, Operation::GetSymbol | Operation::SetSymbol)
+        && !(0..=LAST_SYMBOL).contains(&key)
+    {
+        return error::fail(
+            context,
+            call.site,
+            1,
+            "invalid symbol value",
+            Value::Bool(false),
+        );
+    }
     let result = match operation {
         Operation::GetAttribute => state.attributes.get(key),
         Operation::SetAttribute => state
@@ -258,7 +280,17 @@ pub fn apply(
             let Ok(value) = std::str::from_utf8(args::bytes(input, 1)) else {
                 return call.fail(context, state, 10, "Error converting value to UTF-16");
             };
-            if key == 5 {
+            if key == 6 && spellout::default_rule(state.style).is_some() {
+                if !spellout::accepts_rule(state.style, value) {
+                    return call.fail(context, state, 1, "Error setting text attribute");
+                }
+                if value.is_empty() {
+                    state.text_attributes.remove(&key);
+                } else {
+                    state.text_attributes.insert(key, value.to_owned());
+                }
+                Some(Value::Bool(true))
+            } else if key == 5 {
                 state.currency = value.to_ascii_uppercase();
                 Some(Value::Bool(true))
             } else if (0..=4).contains(&key) {
@@ -273,14 +305,18 @@ pub fn apply(
             let Ok(value) = std::str::from_utf8(args::bytes(input, 1)) else {
                 return call.fail(context, state, 10, "Error converting value to UTF-16");
             };
-            if (0..=17).contains(&key) {
-                state.symbols.insert(key, value.to_owned());
-                Some(Value::Bool(true))
-            } else {
-                None
-            }
+            state.symbols.insert(key, value.to_owned());
+            Some(Value::Bool(true))
         }
-        Operation::GetPattern => Some(Value::from(state.pattern.clone())),
+        Operation::GetPattern => {
+            let pattern = &state.pattern;
+            let pattern = if pattern.len() > 100 && pattern.bytes().all(|byte| byte == b'@') {
+                &pattern[..100]
+            } else {
+                pattern.as_str()
+            };
+            Some(Value::from(pattern))
+        }
         Operation::SetPattern => {
             let Ok(pattern) = std::str::from_utf8(args::bytes(input, 0)) else {
                 return call.fail(context, state, 10, "Error converting pattern to UTF-16");
