@@ -131,12 +131,7 @@ pub(super) fn variable_in_use() -> NativeError {
 
 /// A PHP list, `[0 => $a, 1 => $b, …]`, of these values.
 pub(crate) fn list(values: impl IntoIterator<Item = Value>) -> PhpArray {
-    let mut array = PhpArray::new();
-    for value in values {
-        // Only an array whose next key would pass PHP_INT_MAX refuses a push.
-        array
-            .push(value)
-            .expect("a new array has a free key for every value");
-    }
-    array
+    let values = values.into_iter();
+    let capacity = values.size_hint().0;
+    PhpArray::from_values(values, capacity)
 }

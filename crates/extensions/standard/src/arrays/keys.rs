@@ -6,7 +6,7 @@ use phera_extension_api::{
     PhpString, Value, args,
 };
 
-use super::{list, search};
+use super::search;
 use crate::arguments::required_array;
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[
@@ -36,8 +36,11 @@ const ARRAY_VALUES: FunctionEntry = FunctionEntry::sync(
 );
 
 fn array_values(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let values = required_array(arguments, 0).values().cloned();
-    Ok(Value::from(list(values)))
+    let array = required_array(arguments, 0);
+    Ok(Value::from(PhpArray::from_values(
+        array.values().cloned(),
+        array.len(),
+    )))
 }
 
 /// `array_keys(array $array, mixed $filter_value, bool $strict = false):
@@ -67,7 +70,10 @@ async fn collect_keys(context: &mut dyn Context, arguments: Vec<Value>) -> Nativ
     let arguments = &arguments;
     let array = required_array(arguments, 0);
     let Some(filter) = arguments.get(1) else {
-        return Ok(Value::from(list(array.keys().map(Value::from))));
+        return Ok(Value::from(PhpArray::from_values(
+            array.keys().map(Value::from),
+            array.len(),
+        )));
     };
     let equality = search::Equality::from_strict_argument(arguments);
     let mut result = PhpArray::new();
