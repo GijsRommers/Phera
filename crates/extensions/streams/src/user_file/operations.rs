@@ -3,7 +3,7 @@
 use std::io;
 
 use phera_extension_api::{
-    ArrayKey, Context, NativeError, Value,
+    Context, NativeError, Value,
     value::{to_bool, to_int},
 };
 
@@ -299,51 +299,5 @@ impl UserFile {
             }
             _ => Ok(None),
         }
-    }
-
-    pub async fn option(
-        &self,
-        context: &mut dyn Context,
-        function: &str,
-        option: i64,
-        value: i64,
-        extra: Value,
-    ) -> Result<bool, NativeError> {
-        match self
-            .invoke(
-                context,
-                "stream_set_option",
-                vec![Value::Int(option), Value::Int(value), extra],
-            )
-            .await?
-        {
-            Some(value) => Ok(to_bool(&value)),
-            None => {
-                missing(context, &self.object, function, "stream_set_option", "");
-                Ok(false)
-            }
-        }
-    }
-
-    pub fn metadata(&self) -> Value {
-        let mut metadata = phera_extension_api::PhpArray::new();
-        for (key, value) in [
-            ("timed_out", Value::Bool(false)),
-            ("blocked", Value::Bool(true)),
-            ("eof", Value::Bool(self.eof.get())),
-            ("wrapper_data", Value::Object(self.object.clone())),
-            ("wrapper_type", Value::from("user-space")),
-            ("stream_type", Value::from("user-space")),
-            ("mode", Value::from(self.mode.clone())),
-            (
-                "unread_bytes",
-                Value::Int(self.buffer.borrow().len() as i64),
-            ),
-            ("seekable", Value::Bool(self.seekable.get())),
-            ("uri", Value::from(self.uri.clone())),
-        ] {
-            metadata.insert(ArrayKey::str(key), value);
-        }
-        Value::from(metadata)
     }
 }

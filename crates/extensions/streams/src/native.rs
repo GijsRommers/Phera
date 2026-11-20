@@ -4,12 +4,10 @@
 //! (new SplFileInfo('src'))->isDir(); // same query as is_dir('src')
 //! ```
 
-use std::os::unix::fs::MetadataExt;
-
 use phera_extension_api::{Context, NativeResult, Value};
 use rustix::fs::Access;
 
-use crate::metadata::{Query, real_path};
+use crate::metadata::{Query, StatField, real_path};
 
 pub use crate::{
     directory::directory_entries,
@@ -40,14 +38,14 @@ pub enum FileStatus {
 impl FileStatus {
     pub fn get(self, context: &mut dyn Context, path: &[u8], method: &str) -> NativeResult {
         let query = match self {
-            Self::Perms => Query::Field(|meta| i64::from(meta.mode())),
-            Self::Inode => Query::Field(|meta| meta.ino() as i64),
-            Self::Size => Query::Field(|meta| meta.len() as i64),
-            Self::Owner => Query::Field(|meta| i64::from(meta.uid())),
-            Self::Group => Query::Field(|meta| i64::from(meta.gid())),
-            Self::AccessTime => Query::Field(MetadataExt::atime),
-            Self::ModificationTime => Query::Field(MetadataExt::mtime),
-            Self::ChangeTime => Query::Field(MetadataExt::ctime),
+            Self::Perms => Query::Field(StatField::Mode),
+            Self::Inode => Query::Field(StatField::Inode),
+            Self::Size => Query::Field(StatField::Size),
+            Self::Owner => Query::Field(StatField::Uid),
+            Self::Group => Query::Field(StatField::Gid),
+            Self::AccessTime => Query::Field(StatField::Atime),
+            Self::ModificationTime => Query::Field(StatField::Mtime),
+            Self::ChangeTime => Query::Field(StatField::Ctime),
             Self::Type => Query::Type,
             Self::Writable => Query::Access(Access::WRITE_OK),
             Self::Readable => Query::Access(Access::READ_OK),

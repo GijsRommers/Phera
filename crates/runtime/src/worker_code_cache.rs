@@ -140,6 +140,22 @@ impl RequestCodeCache {
 }
 
 impl CodeLoader for RequestCodeCache {
+    fn wraps_include(&self, context: &mut dyn phera_extension_api::Context, path: &[u8]) -> bool {
+        phera_ext_streams::wraps_include(context, path)
+    }
+
+    fn load_stream<'a>(
+        &'a self,
+        context: &'a mut dyn phera_extension_api::Context,
+        path: &'a [u8],
+        operation: &'a str,
+        once: bool,
+    ) -> LocalFuture<'a, Result<phera_vm::StreamInclude, phera_extension_api::NativeError>> {
+        self.worker
+            .shared
+            .load_stream(context, path, operation, once)
+    }
+
     fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
         Box::pin(async move {
             self.entry(&path, IncludeCachePolicy::default())

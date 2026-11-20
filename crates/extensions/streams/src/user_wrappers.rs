@@ -57,6 +57,7 @@ pub fn register(registry: &mut Registry) {
 #[derive(Clone)]
 pub(crate) struct UserWrapper {
     pub class: String,
+    pub scheme: Vec<u8>,
     pub remote: bool,
 }
 
@@ -142,6 +143,7 @@ async fn add(context: &mut dyn Context, arguments: Vec<Value>, function: &str) -
         protocol.to_vec(),
         Handler::User(UserWrapper {
             class: class_handle.name().to_owned(),
+            scheme: protocol.to_vec(),
             remote,
         }),
     ));
@@ -160,7 +162,17 @@ pub(crate) fn protocol(path: &[u8]) -> Option<&[u8]> {
 
 /// The first lookup is case sensitive, then PHP retries with lowercase.
 pub(crate) fn locate(context: &mut dyn Context, path: &[u8]) -> Option<UserWrapper> {
-    let wrappers = files(context).wrappers.as_ref()?;
+    let wrappers = context
+        .state()
+        .get::<crate::request::Files>()?
+        .wrappers
+        .as_ref()?;
+    if matches!(
+        crate::wrapper::Target::parse(path),
+        crate::wrapper::Target::RemoteFile
+    ) {
+        return None;
+    }
     let protocol = protocol(path).unwrap_or(b"file");
     let handler = wrappers
         .get(protocol)
@@ -173,9 +185,10 @@ pub(crate) fn locate(context: &mut dyn Context, path: &[u8]) -> Option<UserWrapp
 }
 
 pub(crate) fn file_disabled(context: &mut dyn Context) -> bool {
-    files(context)
-        .wrappers
-        .as_ref()
+    context
+        .state()
+        .get::<crate::request::Files>()
+        .and_then(|files| files.wrappers.as_ref())
         .is_some_and(|wrappers| wrappers.get(b"file").is_none())
 }
 
@@ -230,4 +243,17 @@ fn list(context: &mut dyn Context, _: &[Value]) -> NativeResult {
         }
     }
     Ok(Value::from(result))
+}
+
+impl UserWrapper {
+    pub fn permitted(&self, context: &mut dyn Context, function: &str) -> bool {
+        if self.remote && !crate::user_file::enabled(context, b"allow_url_fopen", true) {
+            let scheme = String::from_utf8_lossy(&self.scheme);
+            context.warning(format!(
+                "{function}(): {scheme}:// wrapper is disabled in the server configuration by allow_url_fopen=0"
+            ));
+            return false;
+        }
+        true
+    }
 }

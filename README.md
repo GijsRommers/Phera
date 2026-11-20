@@ -89,7 +89,12 @@ functions, and POSIX queries.
 Register an application stream wrapper with
 `stream_wrapper_register('virtual', VirtualFile::class)`. The registration
 belongs to the current request. `fopen()`, `file_get_contents()`, and
-`file_put_contents()` can use paths such as `virtual://report`.
+`file_put_contents()` can use paths such as `virtual://report`. An included wrapper URL is resolved
+by the application during the current request.
+
+Use `php://filter` or `stream_filter_append()` to transform a native stream
+with built-in filters. Phera limits the chain to 16 stages, intermediate
+buckets to 8 MiB and output to 64 MiB per direction.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 

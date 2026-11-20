@@ -154,7 +154,26 @@ pub(crate) async fn close_arguments(
         file.close(context).await?;
         return Ok(Value::Bool(true));
     }
-    let gzip = with_stream(resource, |stream| stream.wrapper.is_gzip())?;
+    let (gzip, filtered) = with_stream(resource, |stream| {
+        (
+            stream.wrapper.is_gzip(),
+            stream
+                .filters
+                .as_ref()
+                .is_some_and(|filters| filters.write.active()),
+        )
+    })?;
+    if filtered {
+        let result = operate(resource, IoPolicy::Blocking, |stream| {
+            stream.filter_write(&[], crate::filters::Flush::Closing)
+        })
+        .await?;
+        match result {
+            Ok(output) => context.write(&output),
+            Err(error) => context.warning(format!("{function}(): {error}")),
+        }
+        with_stream(resource, |stream| stream.filters = None)?;
+    }
     let success = if gzip {
         operate(resource, IoPolicy::Blocking, |stream| stream.finish())
             .await?
@@ -211,7 +230,7 @@ pub(crate) async fn seek_arguments(
     let candidate = argument_resource(args::value(&arguments, 0), function, "#1 ($stream)")?;
     if crate::directory::is_open(candidate) {
         if offset == 0 && whence == 0 {
-            crate::directory::rewind(candidate).await?;
+            crate::directory::rewind(context, candidate).await?;
             return Ok(Value::Int(0));
         }
         return Ok(Value::Int(-1));
@@ -268,6 +287,11 @@ fn ftruncate(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
             "#2 ($size)",
             args::int(&arguments, 1).unwrap_or(0),
         )?;
+        if let Some(file) = crate::user_file::resource_file(stream) {
+            return Ok(Value::Bool(
+                file.truncate(context, "ftruncate", size).await?,
+            ));
+        }
         let result = operate(stream, IoPolicy::Blocking, move |stream| {
             stream.truncate(size)
         })
@@ -305,30 +329,50 @@ impl Flush {
             return Ok(Value::Bool(false));
         }
         let result = operate(stream, IoPolicy::Blocking, move |stream| {
+            let output = if matches!(self, Self::Buffers)
+                && stream
+                    .filters
+                    .as_ref()
+                    .is_some_and(|filters| filters.write.active())
+            {
+                stream.filter_write(&[], crate::filters::Flush::Incremental)?
+            } else {
+                Vec::new()
+            };
             if let crate::stream::Backing::Gzip(gzip) = &mut stream.backing {
                 return if matches!(self, Self::Buffers) {
-                    gzip.flush()
+                    gzip.flush().map(|()| output)
                 } else {
                     Err(io::ErrorKind::Unsupported.into())
                 };
             }
             let Some(file) = stream.descriptor() else {
                 return match self {
-                    Self::Buffers => Ok(()),
+                    Self::Buffers => Ok(output),
                     _ => Err(io::ErrorKind::Unsupported.into()),
                 };
             };
             match self {
-                Self::Buffers => (&*file).flush(),
-                Self::Data => file.sync_data(),
-                Self::All => file.sync_all(),
+                Self::Buffers => (&*file).flush().map(|()| output),
+                Self::Data => file.sync_data().map(|()| output),
+                Self::All => file.sync_all().map(|()| output),
             }
         })
         .await?;
-        if result.is_err() && !matches!(self, Self::Buffers) {
-            context.warning(format!("{function}(): Can't fsync this stream!"));
+        match result {
+            Ok(output) => {
+                context.write(&output);
+                Ok(Value::Bool(true))
+            }
+            Err(error) => {
+                if !matches!(self, Self::Buffers) {
+                    context.warning(format!("{function}(): Can't fsync this stream!"));
+                } else if error.kind() == io::ErrorKind::Other {
+                    context.warning(format!("{function}(): {error}"));
+                }
+                Ok(Value::Bool(false))
+            }
         }
-        Ok(Value::Bool(result.is_ok()))
     }
 }
 
@@ -345,7 +389,9 @@ fn fdatasync(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
 }
 
 pub fn read_notice(context: &mut dyn Context, function: &str, error: &io::Error, amount: u64) {
-    if let Some(errno) = error.raw_os_error() {
+    if error.kind() == io::ErrorKind::Other && error.get_ref().is_some() {
+        context.warning(format!("{function}(): {error}"));
+    } else if let Some(errno) = error.raw_os_error() {
         context.notice(format!(
             "{function}(): Read of {amount} bytes failed with errno={errno} {}",
             reason(error)
@@ -364,7 +410,9 @@ pub fn write_notice(
     error: &io::Error,
     length: usize,
 ) {
-    if matches!(wrapper, Wrapper::Data | Wrapper::Input) {
+    if error.kind() == io::ErrorKind::Other && error.get_ref().is_some() {
+        context.warning(format!("{function}(): {error}"));
+    } else if matches!(wrapper, Wrapper::Data | Wrapper::Input) {
         context.notice(format!("{function}(): Stream is not writable"));
     } else if let Some(errno) = error.raw_os_error() {
         context.notice(format!(

@@ -7,7 +7,7 @@ use phera_extension_api::{
     NativeResult, Object, PropertyEntry, Registry, Value, Visibility, value::Resource,
 };
 
-use crate::directory::{is_open, read, rewind};
+use crate::directory::{close, is_open, read, rewind};
 
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
@@ -23,7 +23,7 @@ pub fn register(registry: &mut Registry) {
                 MethodEntry::public("__construct", &[], construct),
                 MethodEntry::public_async("read", &[], object_read),
                 MethodEntry::public_async("rewind", &[], object_rewind),
-                MethodEntry::public("close", &[], object_close),
+                MethodEntry::public_async("close", &[], object_close),
             ]
         },
         ..ClassEntry::class("Directory")
@@ -48,22 +48,34 @@ fn object_handle(object: Option<&Rc<Object>>, action: &str) -> Result<Rc<Resourc
 }
 
 fn object_read(
-    _: &mut dyn Context,
+    context: &mut dyn Context,
     object: Option<Rc<Object>>,
     _: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move { read(object_handle(object.as_ref(), "read")?.as_ref()).await })
+    Box::pin(async move {
+        read(
+            context,
+            object_handle(object.as_ref(), "read")?.as_ref(),
+            "Directory::read",
+        )
+        .await
+    })
 }
 
 fn object_rewind(
-    _: &mut dyn Context,
+    context: &mut dyn Context,
     object: Option<Rc<Object>>,
     _: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move { rewind(object_handle(object.as_ref(), "rewind")?.as_ref()).await })
+    Box::pin(
+        async move { rewind(context, object_handle(object.as_ref(), "rewind")?.as_ref()).await },
+    )
 }
 
-fn object_close(_: &mut dyn Context, object: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    object_handle(object, "close")?.data.borrow_mut().take();
-    Ok(Value::Null)
+fn object_close(
+    context: &mut dyn Context,
+    object: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move { close(context, object_handle(object.as_ref(), "close")?.as_ref()).await })
 }

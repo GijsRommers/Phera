@@ -124,9 +124,17 @@ pub(crate) async fn open_with_errors(
     nonempty_path(name)?;
     // The PHP mode parser takes a C string and keeps at most 15 bytes in metadata.
     let mode = mode.split(|byte| *byte == 0).next().unwrap_or_default();
-    let (result, warning) = match Target::parse(name) {
+    let filter = match crate::filters::FilterUri::parse(name) {
+        Ok(filter) => filter,
+        Err(message) => return Err(NativeError::error(message)),
+    };
+    let target_name = filter.as_ref().map_or(name, |filter| filter.path);
+    if filter.is_some() {
+        nonempty_path(target_name)?;
+    }
+    let (result, warning) = match Target::parse(target_name) {
         Target::Gzip(filename) => {
-            return open_gzip(
+            let opened = open_gzip(
                 context,
                 function,
                 filename,
@@ -138,7 +146,8 @@ pub(crate) async fn open_with_errors(
                     wrapper: Wrapper::Gzip,
                 },
             )
-            .await;
+            .await?;
+            return Ok(opened.map(|stream| attach_filters(context, stream, filter, function)));
         }
         Target::File(filename) => (
             if crate::user_wrappers::file_disabled(context) {
@@ -182,14 +191,17 @@ pub(crate) async fn open_with_errors(
                 errors.report(context, wrapper_message(function, scheme))?;
             }
             wrapper_warning(context, function, scheme);
-            (open_file(context, name, name, mode, false).await?, None)
+            (
+                open_file(context, target_name, name, mode, false).await?,
+                None,
+            )
         }
     };
     if let Some(warning) = warning {
         errors.report(context, warning)?;
     }
     match result {
-        Ok(stream) => Ok(Some(stream)),
+        Ok(stream) => Ok(Some(attach_filters(context, stream, filter, function))),
         Err(failure) => {
             let uri = failure
                 .resolved
@@ -350,4 +362,16 @@ pub fn resolve_file(context: &mut dyn Context, name: &[u8]) -> io::Result<std::p
         Target::File(bytes) => directory(context).resolve(path(bytes)),
         _ => Err(io::ErrorKind::Unsupported.into()),
     }
+}
+
+fn attach_filters(
+    context: &mut dyn Context,
+    mut stream: Stream,
+    filter: Option<crate::filters::FilterUri<'_>>,
+    function: &str,
+) -> Stream {
+    if let Some(filter) = filter {
+        stream.filters = Some(Box::new(filter.build(context, function, &stream.mode)));
+    }
+    stream
 }

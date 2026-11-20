@@ -170,9 +170,31 @@ pub async fn write(
         ));
     }
     let length = data.len();
-    let (wrapper, policy) = with_stream(resource, |stream| {
-        (stream.wrapper, stream.write_policy(length as u64))
+    let (wrapper, policy, filtered) = with_stream(resource, |stream| {
+        (
+            stream.wrapper,
+            stream.write_policy(length as u64),
+            stream
+                .filters
+                .as_ref()
+                .is_some_and(|filters| filters.write.active()),
+        )
     })?;
+    if filtered && wrapper == Wrapper::Output {
+        let output = with_stream(resource, |stream| {
+            stream.filter_write(data, crate::filters::Flush::No)
+        })?;
+        return match output {
+            Ok(output) => {
+                context.write(&output);
+                Ok(Value::Int(length as i64))
+            }
+            Err(error) => {
+                context.warning(format!("{function}(): {error}"));
+                Ok(Value::Bool(false))
+            }
+        };
+    }
     let result = if let Some(pipe) = crate::child_pipe::of(resource)? {
         crate::child_pipe::bounded(context, resource, pipe.write(resource, data)).await??
     } else {

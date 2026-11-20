@@ -14,6 +14,7 @@ use crate::user_wrappers::UserWrapper;
 use crate::wrapper::Target;
 
 mod operations;
+mod options;
 
 pub(crate) const OPEN_FOR_INCLUDE: i64 = 128;
 
@@ -182,7 +183,7 @@ pub(crate) async fn open(
     })))
 }
 
-fn enabled(context: &dyn Context, directive: &[u8], default: bool) -> bool {
+pub(crate) fn enabled(context: &dyn Context, directive: &[u8], default: bool) -> bool {
     context
         .ini_get(directive)
         .map_or(default, |value| !matches!(value.as_bytes(), b"" | b"0"))

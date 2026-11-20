@@ -20,6 +20,7 @@
 //! blocking threads instead of the request's worker.
 
 mod convert;
+pub use convert::{Failure as IconvFailure, try_convert as iconv_convert};
 mod mime;
 mod settings;
 

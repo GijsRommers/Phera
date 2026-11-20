@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 flate2.workspace = true
 phera-extension-api.workspace = true
+phera-ext-mbstring.workspace = true
 phera-ext-standard.workspace = true
 phera-lexer.workspace = true
 base64.workspace = true

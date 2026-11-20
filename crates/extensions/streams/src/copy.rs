@@ -109,6 +109,34 @@ fn rename(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
     Box::pin(async move {
         let function = "rename";
         let (from, to) = endpoints(&arguments, function)?;
+        let source = crate::user_wrappers::locate(context, from);
+        let destination = crate::user_wrappers::locate(context, to);
+        match (source, destination) {
+            (Some(source), Some(destination)) if source.scheme == destination.scheme => {
+                let supplied = args::value(&arguments, 2);
+                let supplied = if supplied.is_null() {
+                    crate::context_options::default_for_wrapper(context)
+                } else {
+                    supplied.clone()
+                };
+                return crate::user_paths::method(
+                    context,
+                    source,
+                    function,
+                    "rename",
+                    vec![crate::user_paths::path(from), crate::user_paths::path(to)],
+                    supplied,
+                )
+                .await;
+            }
+            (None, None) => (),
+            _ => {
+                return warn_false(
+                    context,
+                    "rename(): Cannot rename a file across wrapper types".into(),
+                );
+            }
+        }
         if std::mem::discriminant(&Target::parse(from))
             != std::mem::discriminant(&Target::parse(to))
         {
