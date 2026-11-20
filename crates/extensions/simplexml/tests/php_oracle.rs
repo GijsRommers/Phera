@@ -28,7 +28,7 @@ fn simplexml_mutation_and_lifetime_matrix() {
         .compare(&script, |_, _| {})
         .unwrap_or_else(|error| panic!("{error}; outputs in {}", oracle.artifacts.display()));
     let count = matched.stdout.split(|byte| *byte == b'\n').count() - 1;
-    assert_eq!(count, 50);
+    assert_eq!(count, 52);
     eprintln!("{count} SimpleXML mutation and lifetime cases matched");
 }
 
@@ -45,11 +45,12 @@ foreach (['0', '-4', '12txt', 'abc', '1.2', '1e4', '99999999999999999999', ''] a
     }
 }
 foreach (['<r/>', '<r><item>old</item></r>'] as $source) {
-    foreach (['nested', 'attribute', 'append', 'unset'] as $mode) {
+    foreach (['nested', 'attribute', 'append', 'mixed', 'unset'] as $mode) {
         $x = simplexml_load_string($source);
         if ($mode === 'nested') $x->item->child->name = 'a';
         if ($mode === 'attribute') $x->item['id'] = '7';
         if ($mode === 'append') $x->item[]->child = 'b';
+        if ($mode === 'mixed') $x->item[]->child->entry[0]->name = 'a';
         if ($mode === 'unset') unset($x->item->missing);
         echo json_encode([$x->asXML(), isset($x->item->missing)]), "\n";
     }
