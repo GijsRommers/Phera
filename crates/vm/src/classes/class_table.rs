@@ -1,8 +1,9 @@
 //! Request class lookup, leased object ids, and weak cycle-cleanup records.
 
 use std::{
-    cell::OnceCell,
+    cell::{Cell, OnceCell},
     collections::HashMap,
+    num::NonZeroU32,
     rc::{Rc, Weak},
 };
 
@@ -77,6 +78,7 @@ pub(crate) struct ClassTable {
     pub(crate) has_dimensions: bool,
     pub(crate) has_property_views: bool,
     pub(crate) has_lazy_objects: bool,
+    native_count: Cell<Option<NonZeroU32>>,
     native_methods: OnceCell<NativeMethodTables>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
@@ -92,10 +94,14 @@ impl ClassTable {
     }
 
     pub(crate) fn new(native: Rc<NativeClasses>) -> Self {
+        let native_count = native
+            .initialized()
+            .and_then(|classes| NonZeroU32::new(classes.next_index().0));
         Self {
             has_dimensions: false,
             has_property_views: false,
             has_lazy_objects: false,
+            native_count: Cell::new(native_count),
             native_methods: OnceCell::new(),
             native,
             local: ClassDefinitions::default(),
@@ -111,7 +117,12 @@ impl ClassTable {
     }
 
     fn native_count(&self) -> usize {
-        self.native.definitions().numbered.len()
+        if let Some(count) = self.native_count.get() {
+            return count.get() as usize;
+        }
+        let count = self.native.definitions().numbered.len();
+        self.native_count.set(NonZeroU32::new(count as u32));
+        count
     }
 
     pub(crate) fn has_property_views(&self) -> bool {
@@ -188,10 +199,9 @@ impl ClassTable {
     #[inline]
     pub(crate) fn class(&self, index: ClassIndex) -> &Rc<Class> {
         let index = index.0 as usize;
-        let native = self.native.definitions();
-        let base = native.numbered.len();
+        let base = self.native_count();
         if index < base {
-            &native.numbered[index]
+            &self.native.definitions().numbered[index]
         } else {
             &self.local.numbered[index - base]
         }
@@ -199,10 +209,9 @@ impl ClassTable {
 
     pub(crate) fn numbered(&self, index: u32) -> Option<Rc<Class>> {
         let index = index as usize;
-        let native = self.native.definitions();
-        let base = native.numbered.len();
+        let base = self.native_count();
         if index < base {
-            native.numbered.get(index).cloned()
+            self.native.definitions().numbered.get(index).cloned()
         } else {
             self.local.numbered.get(index - base).cloned()
         }

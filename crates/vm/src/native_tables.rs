@@ -21,6 +21,15 @@ impl NativeClasses {
     }
 
     pub(crate) fn definitions(&self) -> &ClassDefinitions {
+        match self.definitions.get() {
+            Some(definitions) => definitions,
+            None => self.link(),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn link(&self) -> &ClassDefinitions {
         self.definitions
             .get_or_init(|| ClassDefinitions::native(&self.registry))
     }
