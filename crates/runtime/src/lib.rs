@@ -14,11 +14,11 @@ mod extension_introspection_tests;
 mod http;
 #[cfg(test)]
 mod ini_tests;
-mod preload;
 #[cfg(test)]
 mod native_parameter_tests;
 #[cfg(test)]
 mod native_trace_tests;
+mod preload;
 #[cfg(test)]
 mod process_oracle_tests;
 mod worker_code_cache;
