@@ -284,7 +284,10 @@ impl Machine<'_> {
         let mut ip = position.ip;
         match instruction {
             Instruction::IterNext { iter, value, end } if position.frame.has_extras() => {
-                let iterators = &mut self.stack.current_extras_mut().iterators;
+                let Some(extras) = self.stack.current_extras_present() else {
+                    return Step::Slow;
+                };
+                let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
                 match crate::iteration::snapshot_step(iter, value, end, iterators, slots, &mut ip) {
                     true => Step::Done(ip),
@@ -294,7 +297,10 @@ impl Machine<'_> {
             Instruction::IterNextKeyed {
                 iter, key, value, ..
             } if position.frame.has_extras() => {
-                let iterators = &mut self.stack.current_extras_mut().iterators;
+                let Some(extras) = self.stack.current_extras_present() else {
+                    return Step::Slow;
+                };
+                let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
                 if iterators.get_mut(iter.0).is_some_and(|state| {
                     state.traversal_mode == TraversalMode::Value
@@ -305,18 +311,8 @@ impl Machine<'_> {
                     Step::Slow
                 }
             }
-            Instruction::FetchIndex {
-                dst,
-                base,
-                index,
-                mode: phera_bytecode::FetchMode::Read,
-                ..
-            } => self.fetch_native_dimension(position, dst, base, index),
             Instruction::AppendLocal { local, src } => {
                 self.write_native_dimension(position, local, None, src)
-            }
-            Instruction::AssignPath { path, src } if self.classes.has_dimensions => {
-                self.write_dimension_path(position, path, src)
             }
             Instruction::CallDirect {
                 function,
@@ -351,6 +347,21 @@ impl Machine<'_> {
             }
             Instruction::Return { src } => self.leave_plain::<GUARDED>(Some(src)),
             Instruction::ReturnNull => self.leave_plain::<GUARDED>(None),
+            // Listed, so that the instructions further_step never takes do
+            // not pay for a call to it on their way to the VM.
+            Instruction::Binary { .. }
+            | Instruction::Unary { .. }
+            | Instruction::JumpIfNull { .. }
+            | Instruction::JumpIfNotNull { .. }
+            | Instruction::NewArray { .. }
+            | Instruction::FetchIndex { .. }
+            | Instruction::Fetch { .. }
+            | Instruction::AssignPath { .. }
+            | Instruction::IncDecPath { .. }
+            | Instruction::InitCall { .. }
+            | Instruction::FetchClassName { .. } => {
+                self.further_step::<GUARDED>(instruction, position)
+            }
             _ => Step::Slow,
         }
     }

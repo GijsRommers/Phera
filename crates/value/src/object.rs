@@ -94,9 +94,6 @@ pub struct Object {
     /// fields are dropped in order, and the id goes back last (see
     /// [`PoolHold`]).
     pub(crate) pool: Option<PoolHold>,
-    /// This object took over another's contents for its destructor, and is
-    /// registered in the pool's incarnations (see `crate::weak_object`).
-    pub(crate) incarnated: bool,
 }
 
 impl Object {
@@ -110,7 +107,6 @@ impl Object {
             destruction: Cell::new(Destruction::Never),
             attachments: Cell::new(None),
             pool: None,
-            incarnated: false,
         }
     }
 
@@ -128,15 +124,19 @@ impl Object {
         class: Rc<dyn ClassHandle>,
         properties: PhpArray,
     ) -> Self {
+        let id = ids.take();
         Object {
-            id: ids.take(),
+            id,
             class,
             properties: RefCell::new(properties),
             native: RefCell::new(None),
             destruction: Cell::new(Destruction::Never),
             attachments: Cell::new(None),
-            pool: Some(PoolHold(ids.clone())),
-            incarnated: false,
+            pool: Some(PoolHold {
+                pool: ids.clone(),
+                id,
+                incarnated: false,
+            }),
         }
     }
 
@@ -236,9 +236,6 @@ struct IdState {
     /// PHP stops reusing ids while it destroys the objects left at the end
     /// of a request.
     no_reuse: bool,
-    /// The objects being freed, innermost last, with whether each is an
-    /// incarnation; see [`PoolHold`].
-    releasing: Vec<(u32, bool)>,
 }
 
 impl ObjectIds {
@@ -258,29 +255,17 @@ impl ObjectIds {
         state.highest
     }
 
-    /// An object is being freed: its id goes back when what it holds has
-    /// been freed too ([`PoolHold`]'s drop).
-    pub(crate) fn begin_release(&self, id: u32, incarnated: bool) {
+    /// An object is gone, with what it held: its id is free for reuse. An
+    /// object that took over another's contents for its destructor is
+    /// unregistered too.
+    #[inline]
+    fn give_back(&self, id: u32, incarnated: bool) {
         // Nothing borrows the state across a call that could free an
         // object, so this cannot fail; if it ever did, the id would simply
         // not be reused.
         if let Ok(mut state) = self.state.try_borrow_mut() {
-            state.releasing.push((id, incarnated));
+            state.free.push(id);
         }
-    }
-
-    /// The innermost object being freed is gone: its id is free for
-    /// reuse. An object that took over another's contents for its
-    /// destructor is unregistered first.
-    fn finish_release(&self) {
-        let Ok(mut state) = self.state.try_borrow_mut() else {
-            return;
-        };
-        let Some((id, incarnated)) = state.releasing.pop() else {
-            return;
-        };
-        state.free.push(id);
-        drop(state);
         if incarnated && let Ok(mut incarnations) = self.incarnations.try_borrow_mut() {
             incarnations.remove(&id);
         }
@@ -296,7 +281,6 @@ impl ObjectIds {
                 highest: state.highest,
                 free: state.free.clone(),
                 no_reuse: false,
-                releasing: Vec::new(),
             }),
             doomed: DoomedObjects::default(),
             incarnations: RefCell::new(HashMap::new()),
@@ -327,24 +311,31 @@ impl ObjectIds {
 /// var_dump(new Item);           // #1
 /// ```
 ///
-/// `Object`'s `Drop` (see `crate::destruction`) notes the id with
-/// [`ObjectIds::begin_release`]; then Rust drops the fields in order, the
-/// values first (whatever they free notes and gives back its own id in
-/// between), and this hold last, which gives the id back.
+/// Rust drops an object's fields in order: the values first (whatever they
+/// free gives back its own id in between), and this hold last, which gives
+/// the object's id back. The hold carries the id itself, so freeing an
+/// object costs one return of an id and nothing else.
 #[derive(Debug)]
-pub(crate) struct PoolHold(pub(crate) Rc<ObjectIds>);
+pub(crate) struct PoolHold {
+    pub(crate) pool: Rc<ObjectIds>,
+    pub(crate) id: u32,
+    /// The object took over another's contents for its destructor (see
+    /// `crate::weak_object`).
+    pub(crate) incarnated: bool,
+}
 
 impl std::ops::Deref for PoolHold {
     type Target = Rc<ObjectIds>;
 
     fn deref(&self) -> &Rc<ObjectIds> {
-        &self.0
+        &self.pool
     }
 }
 
 impl Drop for PoolHold {
+    #[inline]
     fn drop(&mut self) {
-        self.0.finish_release();
+        self.pool.give_back(self.id, self.incarnated);
     }
 }
 

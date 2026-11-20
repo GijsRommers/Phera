@@ -148,6 +148,17 @@ impl CallStack {
         &mut self.extras[depth]
     }
 
+    /// The side-table entry of the innermost frame, which is marked as
+    /// having one; `None` if it has none yet. Unlike
+    /// [`CallStack::current_extras_mut`] this never makes an entry, so it
+    /// is a bounds check and an index: the interpreter loop's `foreach`
+    /// step uses it every round.
+    #[inline]
+    pub(crate) fn current_extras_present(&mut self) -> Option<&mut FrameExtras> {
+        let depth = self.frames.len().checked_sub(1)?;
+        self.extras.get_mut(depth)
+    }
+
     /// The innermost frame's side-table entry, for writing.
     pub(crate) fn current_extras_mut(&mut self) -> &mut FrameExtras {
         let depth = self.frames.len().saturating_sub(1);

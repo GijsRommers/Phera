@@ -28,8 +28,10 @@ pub(crate) struct UnitCache {
     /// change, so scope classification needs no invalidation. Relative types resolve per call.
     pub(crate) type_scopes: Arc<[crate::types::DeclarationScope]>,
     pub(crate) class_types: Vec<RefCell<Option<ClassTypeEntry>>>,
-    main_sites: Vec<RefCell<CachedSite>>,
-    function_sites: Vec<Vec<RefCell<CachedSite>>>,
+    /// The site cells of the top-level code and of each function, one per
+    /// instruction, made when the function first looks a site up.
+    main_sites: Sites,
+    function_sites: Box<[Sites]>,
     pub(crate) closure_signatures: RefCell<Vec<Option<crate::calls::call_state::Callee>>>,
 }
 
@@ -62,18 +64,36 @@ impl UnitCache {
         )
     }
 
-    /// IP has already advanced; the extra terminal cell covers the last instruction.
-    pub(crate) fn site(&self, function: Option<usize>, ip: usize) -> Option<&RefCell<CachedSite>> {
-        match function {
-            Some(function) => self.function_sites.get(function)?.get(ip),
-            None => self.main_sites.get(ip),
-        }
+    /// The site of the instruction of the function `facts` describes that
+    /// ends at `ip`: the VM looks it up after the instruction pointer has
+    /// advanced.
+    #[inline]
+    pub(crate) fn site(
+        &self,
+        facts: &crate::function_facts::FunctionFacts,
+        ip: usize,
+    ) -> Option<&RefCell<CachedSite>> {
+        let sites = match facts.local {
+            Some(function) => self.function_sites.get(function as usize)?,
+            None => &self.main_sites,
+        };
+        sites
+            .get_or_init(|| empty_sites(facts.instructions.len()))
+            .get(ip)
     }
 }
 
-/// Reserve only a small empty cell per instruction; resolved payloads allocate on first use.
-fn instruction_sites(function: &phera_bytecode::Function) -> Vec<RefCell<CachedSite>> {
-    (0..=function.instructions.len())
+/// The site cells of one function, made when it first uses one: a request
+/// loads every function of a file but runs few of them, so most functions
+/// never get any (and a fork of a snapshot copies only those that ran).
+pub(crate) type Sites = OnceCell<Box<[RefCell<CachedSite>]>>;
+
+/// An empty cell per instruction, and one past the last: a site is keyed by
+/// the position after its instruction. What a site resolves to is allocated
+/// when it is first used.
+#[cold]
+fn empty_sites(instructions: usize) -> Box<[RefCell<CachedSite>]> {
+    (0..=instructions)
         .map(|_| RefCell::new(CachedSite::Empty))
         .collect()
 }
@@ -101,8 +121,8 @@ impl UnitCache {
                     .collect(),
             },
             class_types: unit.types.iter().map(|_| RefCell::new(None)).collect(),
-            main_sites: instruction_sites(&unit.main),
-            function_sites: unit.functions.iter().map(instruction_sites).collect(),
+            main_sites: Sites::new(),
+            function_sites: unit.functions.iter().map(|_| Sites::new()).collect(),
             closure_signatures: RefCell::new(Vec::new()),
             class_names: unit
                 .symbols
@@ -146,11 +166,18 @@ pub(crate) fn value(constant: &Constant) -> Value {
 /// are copied (see `crate::snapshot`).
 impl crate::snapshot::ForkCopy for UnitCache {
     fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
-        let sites = |sites: &Vec<RefCell<CachedSite>>, fork: &mut phera_value::Fork<'_>| {
-            sites
-                .iter()
-                .map(|site| RefCell::new(site.borrow().fork_copy(fork)))
-                .collect::<Vec<_>>()
+        // Only the functions that used a site before the snapshot have cells.
+        let sites = |sites: &Sites, fork: &mut phera_value::Fork<'_>| {
+            let copy = Sites::new();
+            if let Some(cells) = sites.get() {
+                let _ = copy.set(
+                    cells
+                        .iter()
+                        .map(|site| RefCell::new(site.borrow().fork_copy(fork)))
+                        .collect(),
+                );
+            }
+            copy
         };
         UnitCache {
             trace_file: self.trace_file.clone(),

@@ -37,8 +37,11 @@ impl Fork<'_> {
             native: RefCell::new(None),
             destruction: Cell::new(Destruction::Never),
             attachments: Cell::new(None),
-            pool: Some(PoolHold(self.ids.clone())),
-            incarnated: false,
+            pool: Some(PoolHold {
+                pool: self.ids.clone(),
+                id: original.id,
+                incarnated: false,
+            }),
         });
         match original.destruction() {
             Destruction::Due => copy.expect_destructor(),

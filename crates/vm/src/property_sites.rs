@@ -33,6 +33,104 @@ impl PropertyEntry {
         self.slot.map(|slot| slot as usize)
     }
 
+    /// The property's value for a read from class scope `scope`, if this
+    /// entry was made for the object's class and that scope (see
+    /// [`Vm::property_entry`]) and the property holds a value that can be
+    /// read without a notice.
+    pub(crate) fn read_matching(
+        &self,
+        object: &Object,
+        scope: Option<&Rc<crate::classes::Class>>,
+    ) -> Option<Value> {
+        if !self.matches(object, scope) {
+            return None;
+        }
+        self.read(object)
+    }
+
+    /// Stores `value` for a write from `scope` when this entry was made for
+    /// the object's class and that scope and the value fits the declared
+    /// type as it is, as [`Vm::write_property_site`] does; `false`, with
+    /// nothing changed, otherwise (a setter, a coercion, a reference, a
+    /// readonly property: the general path).
+    pub(crate) fn write_matching(
+        &self,
+        object: &Object,
+        scope: Option<&Rc<crate::classes::Class>>,
+        value: &Value,
+    ) -> bool {
+        if !self.matches(object, scope) {
+            return false;
+        }
+        let widened = match self.write_rule {
+            WriteRule::Typed(declared) => crate::types::widen_int_to_float(value, declared),
+            _ => None,
+        };
+        let value = widened.as_ref().unwrap_or(value);
+        if matches!(value, Value::Reference(_))
+            || !self.write_rule.allows(crate::types::own_type(value))
+        {
+            return false;
+        }
+        crate::property_storage::write_direct_at(object, &self.key, self.slot(), value, || {
+            !has_magic_properties(object) && object.lazy().is_none()
+        })
+    }
+
+    /// `++` or `--` of an integer property, for an increment from `scope`,
+    /// as [`Vm::increment_property_site`] does: the expression's value, or
+    /// `None` with nothing changed.
+    pub(crate) fn increment_matching(
+        &self,
+        object: &Object,
+        scope: Option<&Rc<crate::classes::Class>>,
+        mode: phera_bytecode::IncDec,
+    ) -> Option<Value> {
+        if !self.matches(object, scope) {
+            return None;
+        }
+        self.increment(object, mode)
+    }
+
+    /// Whether this entry was made for the object's class and a read or
+    /// write from class scope `scope`.
+    fn matches(&self, object: &Object, scope: Option<&Rc<crate::classes::Class>>) -> bool {
+        let same_scope = match (&self.scope, scope) {
+            (None, None) => true,
+            (Some(left), Some(right)) => Rc::ptr_eq(left, right),
+            _ => false,
+        };
+        same_scope && Rc::ptr_eq(&self.class, &object.class)
+    }
+
+    /// The integer increment of [`Vm::increment_property_site`], once the
+    /// entry is known to fit the object.
+    fn increment(&self, object: &Object, mode: phera_bytecode::IncDec) -> Option<Value> {
+        use phera_bytecode::IncDec;
+        if !self.write_rule.allows(TypeMask::INT) {
+            return None;
+        }
+        let Some(Value::Int(old)) =
+            crate::property_storage::read_at(object, &self.key, self.slot())
+        else {
+            return None;
+        };
+        let delta = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
+            1
+        } else {
+            -1
+        };
+        let new = old.checked_add(delta)?;
+        crate::property_storage::write_at(object, self.key.clone(), self.slot(), Value::Int(new));
+        Some(Value::Int(
+            if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
+                old
+            } else {
+                new
+            },
+        ))
+    }
+
     fn read(&self, object: &Object) -> Option<Value> {
         if !self.read_without_static_notice {
             return None;
@@ -164,6 +262,35 @@ impl Vm {
         Ok(Some(entry))
     }
 
+    /// Records the property's site for a read of an element held in a
+    /// property (`$this->items[$key]`, `isset($object->map['a']['b'])`), so
+    /// that the interpreter loop can make the next such read itself (see
+    /// `calls::fast_property_elements`). Finding the entry raises nothing:
+    /// a property that cannot be read from here simply gets no entry, and
+    /// the read goes on in the general path, which raises PHP's error.
+    pub(crate) fn prepare_element_site(&mut self, place: &AccessPath) -> Result<(), NativeError> {
+        let mut steps = place.steps()?;
+        let (Some(Step::Property(name)), Some(Step::Index(_))) = (steps.next(), steps.next())
+        else {
+            return Ok(());
+        };
+        let object = match place.base()? {
+            phera_bytecode::PathBase::This { .. } => {
+                self.current().and_then(|frame| frame.this().cloned())
+            }
+            phera_bytecode::PathBase::Register(register) => match self.read_defined_local(register)
+            {
+                Some(Value::Object(object)) => Some(object),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(object) = object {
+            let _ = self.property_entry(&object, name);
+        }
+        Ok(())
+    }
+
     /// Mirrors read_place/read_property for an existing single property. Missing
     /// slots fall through for typed initialization errors and undefined warnings.
     pub(crate) fn read_property_site(
@@ -206,7 +333,6 @@ impl Vm {
         place: &AccessPath,
         mode: phera_bytecode::IncDec,
     ) -> Result<Option<Value>, NativeError> {
-        use phera_bytecode::IncDec;
         let Some(PropertyTarget { object, name }) =
             self.property_target(place, PropertyShape::Single)?
         else {
@@ -215,35 +341,7 @@ impl Vm {
         let Some(entry) = self.property_entry(&object, name)? else {
             return Ok(None);
         };
-        if !entry.write_rule.allows(TypeMask::INT) {
-            return Ok(None);
-        }
-        let Some(Value::Int(old)) =
-            crate::property_storage::read_at(&object, &entry.key, entry.slot())
-        else {
-            return Ok(None);
-        };
-        let delta = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
-            1
-        } else {
-            -1
-        };
-        let Some(new) = old.checked_add(delta) else {
-            return Ok(None);
-        };
-        crate::property_storage::write_at(
-            &object,
-            entry.key.clone(),
-            entry.slot(),
-            Value::Int(new),
-        );
-        Ok(Some(Value::Int(
-            if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
-                old
-            } else {
-                new
-            },
-        )))
+        Ok(entry.increment(&object, mode))
     }
 }
 
