@@ -131,13 +131,14 @@ fn evaluate<'a>(
                     .children(Arena::DOCUMENT)
                     .find(|&id| original[id].kind == Kind::Element)
             });
-            if state.auto && args::bool(&arguments, 2).unwrap_or(true) {
-                if let Some(element) = element {
-                    let mut automatic = std::collections::HashSet::new();
-                    for (prefix, uri) in node::namespace_scope(original, element) {
-                        if !prefix.is_empty() && automatic.insert(prefix.clone()) {
-                            namespaces.insert(prefix, uri);
-                        }
+            if state.auto
+                && args::bool(&arguments, 2).unwrap_or(true)
+                && let Some(element) = element
+            {
+                let mut automatic = std::collections::HashSet::new();
+                for (prefix, uri) in node::namespace_scope(original, element) {
+                    if !prefix.is_empty() && automatic.insert(prefix.clone()) {
+                        namespaces.insert(prefix, uri);
                     }
                 }
             }
