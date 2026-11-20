@@ -14,7 +14,10 @@ duration and custom rule styles explicitly unsupported.
 
 The pinned ICU4X release lacks an RBNF evaluator. The English rules have
 bounded numeric decomposition and cover the three Laravel Number helpers in
-their default locale.
+their default locale. CLDR 49 contains 778,573 bytes of rule text across
+101 locale files. The data is small enough to explore a full evaluator.
+The English implementation leaves the evaluator's cross-locale rule
+substitutions, plural branches and parsing for a later pass.
 
 ## Turned down
 

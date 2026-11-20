@@ -100,6 +100,28 @@ collation bytes and sorting, calendar fields, break boundaries and time zones.
 The Composer application used Symfony Intl and String 8.1.10, Symfony
 Validator 8.1.11, Twig and Twig Intl Extra 3.30.0.
 
+### Batch 13 follow-up
+
+The PHP 8.5.12 oracle matched 9,581 focused comparisons. The arm64 release
+also matched 600 relative-date formats and 105 date skeletons across the
+15 core locales, and the complete byte repertoire of each supported
+single-byte converter. The locale comparisons used CLDR 49 in both runtimes.
+
+The framework probe matched 187 outputs. It used Symfony String 8.1.10
+and Laravel 13.43.0. The probe used 32 multilingual inputs, ran
+`AsciiSlugger`, `Str::slug`, `Str::ascii` and both forms of
+`Str::transliterate`, and exercised Laravel's three English number helpers.
+
+The default arm64 release binary grew from 60,316,432 bytes at batch 13
+to 62,099,792 bytes, an increase of 1,783,360 bytes.
+Across 26 benchmark cases the largest increase in median retired
+instructions was 0.747%, for 200 HTTP requests. The 100,000-call currency
+and date probes changed by −0.121% and +0.094%, respectively.
+
+The release sweep moved 27 intl fixtures from fail to pass. The intl
+results were 222 pass, 147 fail, 145 skip and 1 expected failure.
+Across the 4,542-fixture tree, no previously passing fixture failed.
+
 ## PHP source tests
 
 The native PHP 8.5.12 suite reported 455 passes, 3 failures, 47 skips and
