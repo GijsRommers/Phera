@@ -65,10 +65,10 @@ pub(crate) fn insert(
                         });
                         probe.groups += 1;
                         let name_start = source.offsets[startup + cursor + 3 + kind.len()];
-                        let name_end = source.offsets[startup + end - 1];
-                        let name = original.get(name_start..name_end)?;
-                        let name = name.split(|&byte| byte == 0).next()?;
-                        probe.marks.push((probe.groups, name.into()));
+                        // Names are literal even under /x, and PHP reads them as C strings.
+                        let name = &original[name_start..];
+                        let length = name.iter().position(|&byte| matches!(byte, b')' | 0))?;
+                        probe.marks.push((probe.groups, name[..length].into()));
                         copied = end;
                     } else if is_group_verb(kind) {
                         // These verbs open groups and their bodies are pattern syntax.
