@@ -19,6 +19,7 @@ use super::{Class, Method};
 use crate::code_table::{CodeTable, NameKey};
 
 /// One method of a class, with the class that declares it.
+#[derive(Clone)]
 struct MethodSlot {
     key: NameKey,
     method: Rc<Method>,
@@ -34,6 +35,7 @@ pub(crate) struct FoundMethod<'a> {
 }
 
 /// The methods of one class by name key.
+#[derive(Clone)]
 pub(crate) struct MethodTable {
     /// A power-of-two number of slots, at most half of them in use.
     slots: Box<[Option<MethodSlot>]>,

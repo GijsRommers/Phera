@@ -9,6 +9,7 @@ use crate::{attributes, connection, constants, statement, transactions};
 
 static UNCOPYABLE_CONNECTION: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    fork: Some(refuse_fork),
     ..ClassHooks::EMPTY
 };
 
@@ -332,3 +333,14 @@ const SQLITE_METHODS: &[MethodEntry] = &[MethodEntry::public(
     &[Param::new("name", ParamType::String)],
     crate::drivers::sqlite::methods::load,
 )];
+
+/// A connection (and its statements) belongs to the request that opened it:
+/// a fork of a snapshot cannot share one. Laravel and Doctrine connect on
+/// first use, after `Phera\snapshot()`.
+fn refuse_fork(
+    _object: &phera_extension_api::Object,
+    _state: &dyn std::any::Any,
+    _fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    Err("a database connection opened before the call belongs to one request; connect after Phera\\snapshot()".into())
+}

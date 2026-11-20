@@ -146,17 +146,23 @@ impl Property {
         let mut children = Vec::new();
         if let Some(class) = class {
             for property in &class.static_properties {
-                if let Some(storage) = &property.static_storage {
-                    let value = storage
+                let value = match vm.class_states.existing_static(property) {
+                    Some(storage) if storage.value_initialized.get() => storage
                         .reference
                         .try_borrow()
                         .ok()
-                        .map(|value| Value::Reference(value.clone()));
+                        .map(|value| Value::Reference(value.clone())),
+                    None if property.initialized && property.initializer.is_none() => {
+                        Some(property.value.clone())
+                    }
+                    _ => None,
+                };
+                if value.is_some() || show_hidden {
                     let (name, member, facet) = object_key(&property.key, &class.name);
                     children.push(Self {
                         name,
                         full: format!("{}::{member}", self.full),
-                        value: value.filter(|_| property.value_initialized.get()),
+                        value,
                         facet: format!("static {facet}"),
                     });
                 }

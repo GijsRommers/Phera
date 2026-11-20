@@ -14,6 +14,7 @@ pub enum Start {
 #[derive(Clone)]
 pub struct DebugConfig {
     pub start: Start,
+    pub boot: bool,
     pub host: String,
     pub port: u16,
     pub idekey: String,
@@ -25,6 +26,7 @@ impl Default for DebugConfig {
     fn default() -> Self {
         Self {
             start: Start::Trigger,
+            boot: false,
             host: "127.0.0.1".into(),
             port: 9003,
             idekey: String::new(),

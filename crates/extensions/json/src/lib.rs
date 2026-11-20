@@ -29,6 +29,9 @@ impl Extension for Json {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::recursion::Active>(phera_extension_api::fresh_state);
+        registry.fork_state::<crate::error::Error>(phera_extension_api::fresh_state);
         registry.class(ClassEntry {
             methods: const { &[MethodEntry::required("jsonSerialize", &[]).tentative_return("mixed")] },
             ..ClassEntry::interface("JsonSerializable")

@@ -30,7 +30,7 @@ use crate::Vm;
 
 mod effects;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct IniOverrides {
     startup: Vec<Option<PhpString>>,
     values: Vec<Option<PhpString>>,

@@ -36,7 +36,7 @@ impl Vm {
     /// Request triggers use the same parsed values PHP exposes to the script.
     pub fn debugger_trigger(&self, name: &str) -> Option<String> {
         ["_GET", "_POST", "_COOKIE"].into_iter().find_map(|scope| {
-            let value = self.globals.get(scope)?.deref();
+            let value = self.request_global_value(scope)?.deref();
             let Value::Array(values) = &*value else {
                 return None;
             };

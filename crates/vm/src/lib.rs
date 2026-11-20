@@ -7,6 +7,7 @@ use phera_extension_api::{Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
 pub use native_tables::NativeTables;
+pub use snapshot::{BootOutcome, Snapshot, SnapshotMode};
 
 use crate::calls::frame::{Frame, FrameView};
 use crate::path::AccessPath;
@@ -26,6 +27,7 @@ mod arrays;
 mod attribute_diagnostics;
 mod autoload;
 mod builtin_calls;
+mod bundled_classes;
 mod callable_classes;
 mod callable_introspection;
 mod callables;
@@ -165,6 +167,7 @@ mod request_end;
 mod scope_intrinsics;
 mod sensitive_parameters;
 mod serialization;
+mod snapshot;
 mod spl_autoload;
 mod static_variables;
 mod string_comparison;
@@ -226,6 +229,8 @@ pub struct Vm {
     function_table: function_table::FunctionTable,
     /// Every loaded file and function of the request, by number.
     code: code_table::CodeTable,
+    /// Static properties and evaluated class constants of this request.
+    class_states: classes::class_state::ClassStates,
     globals: globals::Globals,
     extension_values: std::collections::HashMap<&'static str, Value>,
     static_variables: static_variables::StaticVariables,
@@ -268,6 +273,8 @@ pub struct Vm {
     active_fiber: Option<Box<fibers::Active>>,
     fiber_bailout: bool,
     suspended_fibers: fibers::SuspendedFibers,
+    /// What `Phera\snapshot()` does here, and the state it kept.
+    snapshot: snapshot::SnapshotState,
     debugger: Option<Box<debugger::Session>>,
     debug_evaluating: bool,
 }
@@ -304,6 +311,7 @@ impl Vm {
             active_fiber: None,
             fiber_bailout: false,
             suspended_fibers: Default::default(),
+            snapshot: Default::default(),
             debugger: None,
             debug_evaluating: false,
             native_callback_sites: Vec::new(),
@@ -323,6 +331,7 @@ impl Vm {
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::default(),
+            class_states: Default::default(),
             globals: globals::Globals::new(),
             extension_values: Default::default(),
             static_variables: static_variables::StaticVariables::new(),
@@ -382,6 +391,12 @@ impl Vm {
         self.publish_global(name.into(), value);
     }
 
+    /// The value of a global variable (seen through a reference), such as
+    /// a superglobal the script may have changed.
+    pub fn global(&self, name: &str) -> Option<Value> {
+        self.globals.get(name).map(|value| value.deref().clone())
+    }
+
     /// The extensions' per-request state, for the runtime to read once the
     /// script has finished.
     pub fn state_mut(&mut self) -> &mut RequestState {
@@ -428,25 +443,38 @@ impl Vm {
             }
         }
         self.publish_declaration_warnings(&unit);
-        let end = if let Err(error) = self.hoist_classes(&unit, main) {
+        if let Err(error) = self.hoist_classes(&unit, main) {
             self.unwind(error);
-            request_end::ScriptEnd::Fatal
-        } else {
-            match self.interpret(0).await {
-                Ok(_) => request_end::ScriptEnd::Destructible,
-                Err(error) => {
-                    let mut error = self.materialize_error(error);
-                    // The frames the error left released their variables;
-                    // PHP runs those destructors before it reports the error.
-                    if let Err(failure) = self.run_destructors().await {
-                        error = self.materialize_error(failure);
-                    }
-                    let end = request_end::ScriptEnd::of(&error);
-                    self.report_uncaught(error).await;
-                    end
+            return self.end_script(request_end::ScriptEnd::Fatal).await;
+        }
+        self.run_script_body().await
+    }
+
+    /// Runs the script from where its frames are to its end, then ends the
+    /// request. A fork of a snapshot starts here (see `crate::snapshot`).
+    async fn run_script_body(&mut self) -> i32 {
+        let end = match self.interpret(0).await {
+            Ok(_) => request_end::ScriptEnd::Destructible,
+            // A boot run stopped at `Phera\snapshot()`: its state is kept,
+            // and nothing more of it runs.
+            Err(_) if self.snapshot.taken.is_some() => return self.status,
+            Err(error) => {
+                let mut error = self.materialize_error(error);
+                // The frames the error left released their variables;
+                // PHP runs those destructors before it reports the error.
+                if let Err(failure) = self.run_destructors().await {
+                    error = self.materialize_error(failure);
                 }
+                let end = request_end::ScriptEnd::of(&error);
+                self.report_uncaught(error).await;
+                end
             }
         };
+        self.end_script(end).await
+    }
+
+    /// Output, shutdown functions, destructors and headers at the end.
+    async fn end_script(&mut self, end: request_end::ScriptEnd) -> i32 {
         if self.output_pending()
             && let Err(error) = self.drain_output().await
         {

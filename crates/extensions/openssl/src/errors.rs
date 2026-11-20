@@ -15,7 +15,7 @@ pub(crate) const INVALID_KEY: &str = "error:03000082:digital envelope routines::
 pub(crate) const INVALID_CHACHA_KEY: &str = "error:1C800069:Provider routines::invalid key length";
 
 #[derive(Default)]
-struct ErrorQueue(VecDeque<&'static str>);
+pub(crate) struct ErrorQueue(VecDeque<&'static str>);
 
 pub(crate) fn push(context: &mut dyn Context, message: &'static str) {
     // OpenSSL's ring reserves one of its sixteen slots.

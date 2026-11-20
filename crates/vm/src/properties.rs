@@ -105,19 +105,17 @@ impl Vm {
                 ),
             );
         }
-        if !property.static_initialized.get() {
+        let storage = self
+            .class_states
+            .static_property(property)
+            .ok_or_else(|| internal_error!("static storage"))?;
+        if !storage.initialized.get() {
             if let Some(initializer) = &property.initializer {
                 let value = self.evaluate_property_initializer(initializer, property)?;
-                if let Some(storage) = &property.static_storage {
-                    *storage.reference.borrow().borrow_mut() = value;
-                }
+                *storage.reference.borrow().borrow_mut() = value;
             }
-            property.static_initialized.set(true);
+            storage.initialized.set(true);
         }
-        let storage = property
-            .static_storage
-            .as_ref()
-            .ok_or_else(|| internal_error!("static storage"))?;
         Ok(Value::Reference(storage.reference.borrow().clone()))
     }
 

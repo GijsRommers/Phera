@@ -32,7 +32,7 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | WordPress | `mysqli` and the engine fixes it needed are in. The end-to-end comparison with PHP has not been repeated since |
 | PHP's own test suite (php-src) | 9,052 of the 13,388 core tests pass. Of 4,542 tests for the later extensions (dom, openssl, session, curl, intl and others) 1,436 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | About 15 times PHP's CPU for one Laravel API request in production mode (249 million instructions against 16.6 million for PHP with opcache). Under load PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228. Phera boots the framework again for every request; booting once per worker and answering each request from a copy of the booted application is in review and brings the same request to 63 million instructions |
+| Speed of a framework request | About 4 times PHP's CPU for one Laravel API request in production mode: 63 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 204 million against 27 million. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
 
 ## 🧰 The `phera` command
 
@@ -102,6 +102,12 @@ The IDE can inspect and change data and evaluate PHP in a stopped request.
 Phera connects only to the configured IDE address. A server enabling
 debugging on a non-loopback listen address needs `--allow-remote-debug`.
 One worker can serve other requests while PHP waits for an IDE command.
+
+A debugged request forks the application's snapshot where one exists.
+To stop in PHP that runs before the snapshot, start the IDE listener and run
+`phera serve --debug --dev --debug-boot --workers 1 public`. The boot debugger
+can pause before the worker accepts requests. The first HTTP request has its
+own debugging session.
 
 PHP exposes the active settings through `ini_get('xdebug.mode')` and the
 other `xdebug.*` directives above. PhpStorm's validator checks for the
@@ -293,6 +299,47 @@ An HTTPS mirror can set `PHERA_RELEASE_BASE_URL` for both commands. Serve
 `latest` as JSON with a `tag_name` field and put the archives and
 `SHA256SUMS` under `download/<tag>/`, for example `download/v0.1.0/`.
 The upgrader expects the mirror to serve these files directly.
+
+## ⏩ Boot once, fork every request
+
+`phera serve` can boot an application once per worker thread, before the
+first connection, and start every request as a copy of that booted state.
+Laravel and Symfony applications get this with no change:
+
+- **Laravel** (a project with `artisan` and `bootstrap/app.php`): Phera runs
+  its own entry script for `public/index.php`, which bootstraps the
+  application and its service providers, then handles the request.
+- **Symfony** with `symfony/runtime`: Phera sets `APP_RUNTIME` to its own
+  runtime class (unless something else chose one), which boots the kernel
+  and then handles the request.
+- **Any other application** marks the point itself:
+
+  ```php
+  $kernel = new Kernel('prod', false);
+  $kernel->boot();                 // once per worker, at server start
+  Phera\snapshot();                // true in every request; false on the command line
+  $kernel->handle(Request::createFromGlobals())->send();   // per request
+  ```
+
+  The first start serves such a script from the top until it reaches the
+  call; later starts boot it before the first connection.
+
+The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
+are empty and `$_SERVER` holds the environment and the script's paths. Each
+request gets its own copy of every object, static property and global, so
+nothing one request does reaches another. What cannot be copied (an open
+file or socket, a started session, a database transaction) makes
+`Phera\snapshot()` throw `Phera\SnapshotException`, naming the class and
+where it was found; the worker then serves the application from the top.
+A changed file boots the worker again in the background, following
+`opcache.validate_timestamps` and `opcache.revalidate_freq`. The boot's
+objects are never destroyed; each request's copies are destroyed at its end,
+as PHP-FPM destroys a request's objects. `--no-snapshot` turns all of it off.
+
+A Laravel API request took 525 million instructions run from the top, and
+102 million as a fork (PHP 8.5 with opcache: 48 million). The design is in
+[`docs/architecture.md`](docs/architecture.md) section 5.4, the decisions
+in [`docs/decisions/`](docs/decisions/).
 
 ## 🛠️ Building
 

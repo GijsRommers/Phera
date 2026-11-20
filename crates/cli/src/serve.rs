@@ -57,6 +57,11 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         }
     };
     loaded.paths.extend(settings.path);
+    let adapter = if options.no_snapshot {
+        Adapter::Off
+    } else {
+        Adapter::detect(&site, &mut loaded.environment)
+    };
     site.exclude_files(loaded.paths);
     let site = Arc::new(site);
     let trusted_proxies = match options
@@ -72,7 +77,11 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         None => TrustedProxies::default(),
     };
     let listen = options.listen.unwrap_or_else(default_address);
-    let debug = match crate::debug_settings::configure(
+    if options.debug_boot && (!options.debug || !options.dev || options.no_snapshot) {
+        eprintln!("--debug-boot requires --debug --dev and snapshots");
+        return ExitCode::FAILURE;
+    }
+    let mut debug = match crate::debug_settings::configure(
         options.debug,
         &settings.table,
         &options.ini,
@@ -84,7 +93,8 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if let Some(debug) = &debug {
+    if let Some(debug) = &mut debug {
+        debug.boot = options.debug_boot;
         if !listen.ip().is_loopback() && !options.allow_remote_debug {
             eprintln!("Debugging on a non-loopback address requires --allow-remote-debug");
             return ExitCode::FAILURE;
@@ -114,11 +124,17 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         None
     };
 
-    let runtime = Runtime::with_environment(loaded.environment)
+    let mut runtime = Runtime::with_environment(loaded.environment)
         .with_startup_ini(options.ini)
         .with_debug(debug)
         .with_web_development(options.dev)
         .without_web_processes(options.no_process);
+    if let (Adapter::Laravel, Some(front_controller)) = (adapter, site.front_controller()) {
+        runtime = runtime.with_entry_script(
+            front_controller.to_path_buf(),
+            phera_runtime::adapters::LARAVEL_ENTRY,
+        );
+    }
     let preload = if options.preload || settings.preload {
         match runtime.preload_composer(&project) {
             Ok(summary) => {
@@ -139,6 +155,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     };
     let factory = SiteHandlerFactory {
         runtime,
+        adapter,
         debug_timeout,
         site: site.clone(),
         compress: options.compress,
@@ -166,6 +183,45 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     }
 }
 
+/// Which framework adapter `phera serve` uses (see `phera_runtime::adapters`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Adapter {
+    /// `--no-snapshot`: nothing boots, not even a script that calls
+    /// `Phera\snapshot()` itself.
+    Off,
+    None,
+    /// The front controller runs Phera's Laravel entry script.
+    Laravel,
+    /// `APP_RUNTIME` names Phera's runtime for symfony/runtime.
+    SymfonyRuntime,
+}
+
+impl Adapter {
+    /// The adapter for the site, setting `APP_RUNTIME` for a symfony/runtime
+    /// application that has not chosen a runtime itself.
+    fn detect(site: &Site, environment: &mut phera_dotenv::Environment) -> Adapter {
+        let root = site.document_root();
+        let front_controller = site.front_controller();
+        if front_controller.is_some_and(|script| script == root.join("index.php"))
+            && phera_runtime::adapters::is_laravel(root)
+        {
+            Adapter::Laravel
+        } else if phera_runtime::adapters::uses_symfony_runtime(root)
+            && environment.get(b"APP_RUNTIME").is_none()
+        {
+            environment.insert(
+                b"APP_RUNTIME".to_vec(),
+                phera_runtime::adapters::SYMFONY_RUNTIME_CLASS
+                    .as_bytes()
+                    .to_vec(),
+            );
+            Adapter::SymfonyRuntime
+        } else {
+            Adapter::None
+        }
+    }
+}
+
 /// Where to listen when `--listen` is not given. A hosting platform says
 /// which port it will send traffic to through `PORT`, and reaches the
 /// container from outside, so every interface is listened on. Without
@@ -185,6 +241,9 @@ fn default_address() -> SocketAddr {
 /// request, on the worker's own thread.
 struct SiteHandlerFactory {
     runtime: Runtime,
+    /// The framework adapter in use, which makes the front controller boot
+    /// at start.
+    adapter: Adapter,
     debug_timeout: Option<Duration>,
     site: Arc<Site>,
     compress: bool,
@@ -193,9 +252,16 @@ struct SiteHandlerFactory {
 }
 
 impl HandlerFactory for SiteHandlerFactory {
-    fn create(&self, _worker_index: usize) -> Rc<dyn Handler> {
+    fn create(&self, worker_index: usize) -> Rc<dyn Handler> {
         Rc::new(SiteHandler {
-            runtime: self.runtime.web_worker(),
+            runtime: match self.adapter {
+                Adapter::Off => self.runtime.web_worker(worker_index),
+                _ => self
+                    .runtime
+                    .web_worker(worker_index)
+                    .with_background_boots(),
+            },
+            adapter: self.adapter,
             debug_timeout: self.debug_timeout,
             site: self.site.clone(),
             compress: self.compress,
@@ -207,6 +273,7 @@ impl HandlerFactory for SiteHandlerFactory {
 
 struct SiteHandler {
     runtime: WebWorker,
+    adapter: Adapter,
     debug_timeout: Option<Duration>,
     site: Arc<Site>,
     /// `--compress`: compress responses for clients that accept it.
@@ -230,9 +297,47 @@ impl Handler for SiteHandler {
             }),
         }
     }
+
+    fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+        Box::pin(self.boot())
+    }
 }
 
 impl SiteHandler {
+    /// Boots the front controller before the first connection when it is
+    /// known to call `Phera\snapshot()` (see `phera_runtime::BootReport`).
+    async fn boot(&self) {
+        let Some(script) = self.site.front_controller() else {
+            return;
+        };
+        match self.adapter {
+            Adapter::Off => return,
+            Adapter::None
+                if !self.runtime.debug_boot_enabled()
+                    && !phera_runtime::snapshot_remembered(script) =>
+            {
+                return;
+            }
+            _ => {}
+        }
+        let worker = self.runtime.index();
+        match self.runtime.boot(script, self.site.document_root()).await {
+            phera_runtime::BootReport::Snapshot { elapsed, files } => println!(
+                "Worker {worker} booted {} in {} ms ({files} files); requests continue after Phera\\snapshot()",
+                script.display(),
+                elapsed.as_millis()
+            ),
+            phera_runtime::BootReport::Classic => println!(
+                "Worker {worker}: {} ended without calling Phera\\snapshot(); it runs from the top for every request",
+                script.display()
+            ),
+            phera_runtime::BootReport::Failed(message) => eprintln!(
+                "Worker {worker}: booting {} failed, requests run from the top until a boot succeeds: {message}",
+                script.display()
+            ),
+        }
+    }
+
     async fn respond(&self, request: Request, time_limit: Option<DebugTimeLimit>) -> Response {
         // A platform asks "are you alive?" every few seconds. The answer
         // must not depend on the application, its database or a free worker

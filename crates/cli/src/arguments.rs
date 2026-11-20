@@ -16,6 +16,7 @@ Usage:
     --workers N                           default: one per CPU core
     --preload                             compile Composer files before listening
     --debug                               start a DBGp session for each request
+    --debug-boot                          debug worker boot with --debug --dev
     --allow-remote-debug                  allow debug mode on a non-loopback address
     --no-process                          forbid starting external programs
     --request-timeout SECONDS             stop a request after this long
@@ -35,6 +36,9 @@ Usage:
                                           private means every private range
     --health PATH                         answer this path with 200 and ok,
                                           without running PHP
+    --no-snapshot                         run every request from the top: no
+                                          boot at start, no Laravel or Symfony
+                                          adapter
     ENV OPTIONS as below
   phera new [OPTIONS] [DIRECTORY]         start a project; asks for what
                                           is not given
@@ -75,6 +79,7 @@ pub(crate) struct ServeOptions {
     pub ini: Vec<(String, String)>,
     pub dev: bool,
     pub debug: bool,
+    pub debug_boot: bool,
     pub allow_remote_debug: bool,
     /// `None`: `0.0.0.0:$PORT` when a platform sets `PORT`, else
     /// `127.0.0.1:8080`.
@@ -94,6 +99,9 @@ pub(crate) struct ServeOptions {
     pub trusted_proxies: Option<String>,
     /// `--health`: a path the server answers itself.
     pub health_path: Option<String>,
+    /// `--no-snapshot`: no boot at start and no framework adapter; every
+    /// request runs the script from the top.
+    pub no_snapshot: bool,
     pub path: PathBuf,
 }
 
@@ -265,6 +273,7 @@ fn parse_serve(
         ini,
         dev: false,
         debug: false,
+        debug_boot: false,
         allow_remote_debug: false,
         listen: None,
         workers: None,
@@ -275,6 +284,7 @@ fn parse_serve(
         request_read_timeout: None,
         trusted_proxies: None,
         health_path: None,
+        no_snapshot: false,
         path: PathBuf::from("."),
     };
     while let Some(argument) = arguments.next() {
@@ -301,8 +311,10 @@ fn parse_serve(
             }
             "--compress" => options.compress = true,
             "--preload" => options.preload = true,
+            "--no-snapshot" => options.no_snapshot = true,
             "--dev" => options.dev = true,
             "--debug" => options.debug = true,
+            "--debug-boot" => options.debug_boot = true,
             "--allow-remote-debug" => options.allow_remote_debug = true,
             "--no-process" => options.no_process = true,
             "--trusted-proxies" => {

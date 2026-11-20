@@ -17,6 +17,7 @@ pub(crate) fn register(registry: &mut Registry) {
         hooks: Some(&ClassHooks {
             cast: Some(object_id),
             clone: Some(NativeClone::Copy(clone_handle)),
+            fork: Some(phera_extension_api::fork_refused_handle),
             forbid_serialization: true,
             ..ClassHooks::EMPTY
         }),
@@ -26,6 +27,7 @@ pub(crate) fn register(registry: &mut Registry) {
         &[PropertyEntry::typed("options", PropertyType::Array, Visibility::Public).readonly()];
     const NON_CLONEABLE: ClassHooks = ClassHooks {
         clone: Some(NativeClone::Copy(reject_clone)),
+        fork: Some(phera_extension_api::fork_refused_handle),
         forbid_serialization: true,
         ..ClassHooks::EMPTY
     };

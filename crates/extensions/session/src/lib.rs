@@ -35,6 +35,7 @@ impl Extension for Session {
     }
 
     fn register(&self, registry: &mut Registry) {
+        registry.fork_state::<state::SessionState>(state::fork_state);
         settings::register(registry);
         registry.constant("PHP_SESSION_DISABLED", 0);
         registry.constant("PHP_SESSION_NONE", 1);

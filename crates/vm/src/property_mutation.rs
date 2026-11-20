@@ -93,7 +93,9 @@ impl Vm {
                 *value = converted;
             }
         }
-        property.value_initialized.set(true);
+        if let Some(storage) = self.class_states.static_property(property) {
+            storage.value_initialized.set(true);
+        }
         Ok(())
     }
 
