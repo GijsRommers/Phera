@@ -87,7 +87,9 @@ fn gd_codecs_match_php_pixels() {
         LOSSLESS,
         LOSSY,
     );
-    compare_pixels(&reference, &decoded, 2, &mut mismatches);
+    assert!(reference.diagnostics.is_empty());
+    assert_eq!(reference.diagnostics, decoded.diagnostics);
+    compare_pixels(&reference.rasters, &decoded.rasters, 2, &mut mismatches);
     let outputs = [
         "rgba.png",
         "interlaced.png",
@@ -130,7 +132,13 @@ fn gd_codecs_match_php_pixels() {
             &["gradient.jpeg"],
         ));
     }
-    compare_pixels(&decoded[0], &decoded[1], 2, &mut mismatches);
+    // Some libgd builds emit an interlace diagnostic on stderr for any Adam7
+    // PNG, including a file that they encoded themselves.
+    assert_eq!(
+        decoded[0].diagnostics, decoded[1].diagnostics,
+        "PHP reported different decoder diagnostics for the two encoders"
+    );
+    compare_pixels(&decoded[0].rasters, &decoded[1].rasters, 2, &mut mismatches);
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
 }
 
@@ -140,6 +148,11 @@ struct Raster {
     lossy: bool,
 }
 
+struct Decoded {
+    rasters: BTreeMap<String, Raster>,
+    diagnostics: Vec<u8>,
+}
+
 fn decode(
     comparison: &Comparison,
     runtime: Runtime,
@@ -147,7 +160,7 @@ fn decode(
     directory: &Path,
     lossless: &[&str],
     lossy: &[&str],
-) -> BTreeMap<String, Raster> {
+) -> Decoded {
     let result = comparison
         .command(runtime, script)
         .arg(directory)
@@ -156,7 +169,7 @@ fn decode(
         .output()
         .expect("decode pixels");
     assert!(
-        result.status.success() && result.stderr.is_empty(),
+        result.status.success(),
         "{} decode failed: {} {}",
         runtime.label(),
         String::from_utf8_lossy(&result.stdout),
@@ -165,7 +178,7 @@ fn decode(
     let source = String::from_utf8(result.stdout).expect("ASCII pixel matrix");
     let lines = source.lines();
     assert_eq!(lines.clone().count(), lossless.len() + lossy.len());
-    lines
+    let rasters = lines
         .map(|row| {
             let mut columns = row.split('\t');
             let name = columns.next().expect("filename");
@@ -188,7 +201,11 @@ fn decode(
                 },
             )
         })
-        .collect()
+        .collect();
+    Decoded {
+        rasters,
+        diagnostics: result.stderr,
+    }
 }
 
 fn compare_pixels(
