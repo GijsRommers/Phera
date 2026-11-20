@@ -1591,6 +1591,8 @@ that a project can use either tool.
 
 The current autoloader supports PSR-4, PSR-0, class maps, eager files and
 package include paths.
+Native package hooks can generate framework files from the selected packages.
+They use the project's `allow-plugins` configuration and run after resolution.
 The runtime executes the generated PHP autoloader. The server's `--preload`
 option reads the generated metadata to compile PHP files before serving
 requests.

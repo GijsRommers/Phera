@@ -112,7 +112,7 @@ impl Tools {
         )?;
         run(
             self.phera(&right, fixture)
-                .args(["install", "--frozen-lockfile"])
+                .args(["install", "--frozen-lockfile", "--no-plugins"])
                 .args(INSTALL),
             &logs,
             "phera-install",
@@ -210,7 +210,9 @@ impl Tools {
             "composer-update",
         )?;
         run(
-            self.phera(right, fixture).arg("update").args(UPDATE),
+            self.phera(right, fixture)
+                .args(["update", "--no-plugins"])
+                .args(UPDATE),
             logs,
             "phera-update",
         )?;

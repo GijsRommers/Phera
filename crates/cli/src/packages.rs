@@ -15,6 +15,7 @@ Install packages from composer.lock, or resolve composer.json and write a lock.
   --offline                      use the local package cache
   --prefer-dist                  prefer distribution archives (default)
   --no-scripts                   skip composer.json scripts
+  --no-plugins                   skip native Composer plugin hooks
   -o, --optimize-autoloader       build a class map from PSR mappings
   -a, --classmap-authoritative    look up classes only in the class map
   --ignore-platform-req PACKAGE   skip a named platform requirement
@@ -55,6 +56,7 @@ fn execute(arguments: &[String]) -> Result<(), String> {
             "-a" | "--classmap-authoritative" => options.authoritative = true,
             "-v" | "--verbose" => options.verbose = true,
             "--no-scripts" => options.no_scripts = true,
+            "--no-plugins" => options.no_plugins = true,
             "--no-install" => options.no_install = true,
             "--prefer-lowest" => options.prefer_lowest = true,
             "--ignore-platform-reqs" => options.ignore_platform = true,

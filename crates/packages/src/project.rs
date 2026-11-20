@@ -17,6 +17,7 @@ pub struct Options {
     pub authoritative: bool,
     pub verbose: bool,
     pub no_scripts: bool,
+    pub no_plugins: bool,
     pub no_install: bool,
     pub prefer_lowest: bool,
     pub ignore_platform: bool,

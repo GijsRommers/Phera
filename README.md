@@ -60,6 +60,10 @@ from a warm cache, `--no-dev` to omit development dependencies, or
 [package compatibility](crates/packages/README.md) for the supported commands
 and current gaps.
 
+When `config.allow-plugins` enables Symfony Runtime, the installer also
+generates its runtime bootstrap from the installed package. Use `--no-plugins`
+to skip native plugin hooks.
+
 ### Serving a site
 
 Run `phera serve public` to serve a document root. PHP diagnostics, including

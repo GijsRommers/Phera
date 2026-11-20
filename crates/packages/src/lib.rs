@@ -15,6 +15,7 @@ mod path_install;
 mod paths;
 mod php;
 mod platform;
+mod plugins;
 mod project;
 mod registry;
 mod scripts;
@@ -56,10 +57,11 @@ fn install_locked(
     }
     platform::validate(&project, &lock, options)?;
     project.validate_output_paths()?;
+    let packages = lock.packages(options.no_dev);
+    plugins::validate(&project, options, &packages)?;
     if !updating {
         runner.event(&project, options, "pre-install-cmd")?;
     }
-    let packages = lock.packages(options.no_dev);
     let previous = cleanup::previous(&project)?;
     materialise_packages(&project, &packages, options)?;
     cleanup::remove_stale(&project, &previous, &packages)?;
@@ -68,6 +70,7 @@ fn install_locked(
     runner.event(&project, options, "pre-autoload-dump")?;
     autoload::generate(&project, &packages, options)
         .context("Could not generate autoload files; correct the reported PHP file and retry.")?;
+    plugins::post_autoload(&project, options, &packages)?;
     runner.event(&project, options, "post-autoload-dump")?;
     runner.event(
         &project,
@@ -78,14 +81,7 @@ fn install_locked(
             "post-install-cmd"
         },
     )?;
-    for package in &packages {
-        if matches!(package.kind(), "composer-plugin" | "composer-installer") {
-            eprintln!(
-                "Skipped Composer plugin {} (plugins are not executed).",
-                package.name
-            );
-        }
-    }
+    plugins::report(&project, options, &packages)?;
     println!(
         "Installed {} packages in {:.2}s.",
         packages.len(),
@@ -165,7 +161,10 @@ pub fn dump_autoload(directory: &Path, options: &Options) -> Result<()> {
         options.no_dev = true;
     }
     let mut runner = scripts::Runner::default();
+    let packages = lock.packages(options.no_dev);
+    plugins::validate(&project, &options, &packages)?;
     runner.event(&project, &options, "pre-autoload-dump")?;
-    autoload::generate(&project, &lock.packages(options.no_dev), &options)?;
+    autoload::generate(&project, &packages, &options)?;
+    plugins::post_autoload(&project, &options, &packages)?;
     runner.event(&project, &options, "post-autoload-dump")
 }
