@@ -54,7 +54,15 @@ pub fn refine(index: &mut Index) {
         "stream_get_contents",
         "sodium_crypto_secretbox_open",
         "openssl_decrypt",
+        "dns_get_record",
     ] {
         super::runtime_signatures::literal_false(index, name);
+    }
+    if let Some(method) = index
+        .classes
+        .get_mut("redis")
+        .and_then(|class| class.methods.get_mut("scan"))
+    {
+        super::runtime_signatures::boolean_failure(&mut method.returns);
     }
 }

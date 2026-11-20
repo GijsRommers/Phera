@@ -46,6 +46,7 @@ mod enum_guards;
 mod exceptions;
 mod expressions;
 mod finally;
+mod foreach_iterable;
 mod function_calls;
 mod generators;
 mod if_ladder;

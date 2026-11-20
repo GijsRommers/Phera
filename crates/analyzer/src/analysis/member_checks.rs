@@ -69,7 +69,7 @@ pub(super) fn receiver_name(ty: &ValueType) -> String {
     if let ValueType::Union(arms) = ty {
         let mut names: Vec<_> = arms
             .iter()
-            .map(|arm| (type_order(arm), arm.to_string()))
+            .map(|arm| (type_order(arm), type_name(arm)))
             .collect();
         names.sort_unstable();
         names
@@ -78,11 +78,29 @@ pub(super) fn receiver_name(ty: &ValueType) -> String {
             .collect::<Vec<_>>()
             .join("|")
     } else {
-        ty.to_string()
+        type_name(ty)
     }
 }
 
-pub(super) fn type_order(ty: &ValueType) -> u8 {
+fn type_name(ty: &ValueType) -> String {
+    if let ValueType::Collection(collection) = ty
+        && collection.kind == crate::types::CollectionKind::Array
+        && let ValueType::Union(keys) | ValueType::BenevolentUnion(keys) = &collection.key
+        && keys.len() == 2
+        && keys.contains(&ValueType::Int)
+        && keys.contains(&ValueType::String)
+    {
+        let prefix = if collection.non_empty {
+            "non-empty-"
+        } else {
+            ""
+        };
+        return format!("{prefix}array<{}>", collection.value);
+    }
+    ty.to_string()
+}
+
+fn type_order(ty: &ValueType) -> u8 {
     match ty {
         ValueType::Class(_) | ValueType::Generic(_) | ValueType::Intersection(_) => 1,
         ValueType::Null => 2,

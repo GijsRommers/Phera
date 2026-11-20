@@ -32,6 +32,7 @@ pub fn takes_facts(label: &str) -> bool {
                 | "get_class()"
                 | "preg_match()"
                 | "preg_match_all()"
+                | "preg_split()"
         )
 }
 
@@ -60,6 +61,39 @@ impl Analyzer<'_> {
         let array_parts = || first.map_or((T::Mixed, T::Mixed), super::arrays::iteration_types);
         Some(match name {
             "array_values" => list(array_parts().1),
+            "preg_split" if self.level >= 7 => {
+                let flags = match types.get(3) {
+                    None => 0,
+                    Some(T::IntLiteral(flags)) => *flags,
+                    _ => return None,
+                };
+                let text = if flags & 1 != 0 {
+                    T::StringRefinement(crate::types::StringKind::NonEmpty)
+                } else {
+                    T::String
+                };
+                let item = if flags & 4 != 0 {
+                    T::Shape(Arc::new(Shape {
+                        kind: ShapeKind::List,
+                        remainder: None,
+                        fields: vec![
+                            Field {
+                                key: ShapeKey::Integer(0),
+                                value: text,
+                                optional: false,
+                            },
+                            Field {
+                                key: ShapeKey::Integer(1),
+                                value: T::IntRange(0, i64::MAX),
+                                optional: false,
+                            },
+                        ],
+                    }))
+                } else {
+                    text
+                };
+                list(item).join(&T::BoolLiteral(false))
+            }
             "array_keys" => list(array_parts().0),
             "array_map" => {
                 let (callback, arrays) = types.split_first()?;

@@ -93,6 +93,51 @@ fn phpstan_core_offset_return_and_property_thresholds() {
 }
 
 #[test]
+fn phpstan_inherited_parameters_and_iterable_unions() {
+    // PHPStan 2.3.7 at the level before and after each check starts.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels");
+    for (file, threshold, line, identifier, message) in [
+        (
+            "phpdoc_inherited_parameters.php",
+            4,
+            13,
+            "instanceof.alwaysFalse",
+            "Instanceof between array<string>|string and Traversable will always evaluate to false.",
+        ),
+        (
+            "foreach_union.php",
+            7,
+            5,
+            "foreach.nonIterable",
+            "Argument of an invalid type list<string>|false supplied for foreach, only iterables are supported.",
+        ),
+    ] {
+        for level in [threshold - 1, threshold, 10] {
+            let report = check(&Options {
+                level,
+                paths: vec![root.join(file).to_string_lossy().into_owned()],
+                ..Options::default()
+            })
+            .unwrap();
+            if level < threshold {
+                assert!(report.diagnostics.is_empty(), "{file} at level {level}");
+            } else {
+                assert_eq!(report.diagnostics.len(), 1, "{file} at level {level}");
+                let finding = &report.diagnostics[0];
+                assert_eq!(
+                    (
+                        finding.line,
+                        finding.identifier.as_str(),
+                        finding.message.as_str()
+                    ),
+                    (line, identifier, message),
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn phpstan_configured_rules() {
     // PHPStan 2.3.7 with strict-rules and bleedingEdge.neon.
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/configured_rules.php");

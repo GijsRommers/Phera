@@ -2,7 +2,6 @@
 //! still needs a return statement when the PHPDoc fallthrough check is enabled.
 
 use super::*;
-use crate::types::CollectionKind;
 
 impl Analyzer<'_> {
     pub(super) fn fallthrough_doc_type(&self) -> Option<ValueType> {
@@ -59,46 +58,11 @@ impl Analyzer<'_> {
         } else {
             format!("Function {name}()")
         };
-        let ty = type_label(ty);
+        let ty = super::member_checks::receiver_name(ty);
         self.diagnose(
             "return.missing",
             span,
             format!("{callable} should return {ty} but return statement is missing."),
         );
     }
-}
-
-fn type_label(ty: &ValueType) -> String {
-    let arms = match ty {
-        ValueType::Union(arms) => arms.as_ref(),
-        ty => std::slice::from_ref(ty),
-    };
-    let mut names: Vec<_> = arms
-        .iter()
-        .map(|arm| (super::member_checks::type_order(arm), member_name(arm)))
-        .collect();
-    names.sort_unstable();
-    names
-        .into_iter()
-        .map(|(_, name)| name)
-        .collect::<Vec<_>>()
-        .join("|")
-}
-
-fn member_name(ty: &ValueType) -> String {
-    if let ValueType::Collection(collection) = ty
-        && collection.kind == CollectionKind::Array
-        && let ValueType::Union(keys) = &collection.key
-        && keys.len() == 2
-        && keys.contains(&ValueType::Int)
-        && keys.contains(&ValueType::String)
-    {
-        let prefix = if collection.non_empty {
-            "non-empty-"
-        } else {
-            ""
-        };
-        return format!("{prefix}array<{}>", collection.value);
-    }
-    ty.to_string()
 }

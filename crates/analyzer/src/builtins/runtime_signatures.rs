@@ -95,10 +95,14 @@ fn preserve_false_return(index: &mut Index) {
 }
 
 pub(super) fn literal_false(index: &mut Index, name: &str) {
-    if let Some(signature) = index.functions.get_mut(name)
-        && let ValueType::Union(arms) = &signature.returns
-    {
-        signature.returns = ValueType::Union(
+    if let Some(signature) = index.functions.get_mut(name) {
+        boolean_failure(&mut signature.returns);
+    }
+}
+
+pub(super) fn boolean_failure(returns: &mut ValueType) {
+    if let ValueType::Union(arms) = returns {
+        *returns = ValueType::Union(
             arms.iter()
                 .map(|arm| {
                     if *arm == ValueType::Bool {
