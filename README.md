@@ -66,6 +66,9 @@ native type evidence. Settings in `phera.toml` under `[check]` take
 precedence, followed by command-line options. Unsupported includes and PHP
 configuration files produce a notice.
 
+Generic arguments are checked using declaration-site covariance,
+contravariance, and invariance, including through documented inheritance.
+
 The PHPStan strict-rules include enables `foreach.keyOverwrite` and
 `foreach.valueOverwrite`. Use `strict = true` or `strict = false` under
 `[check]` to override it. Pending strict rules cover boolean conditions,

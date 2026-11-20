@@ -14,6 +14,14 @@ mod type_parser;
 pub use annotations::{Annotation, Documentation, read};
 pub use type_parser::Templates;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Variance {
+    #[default]
+    Invariant,
+    Covariant,
+    Contravariant,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Members {
     pub methods: std::collections::BTreeSet<String>,
@@ -22,6 +30,7 @@ pub struct Members {
     pub mixins: Vec<String>,
     pub templates: Templates,
     pub template_names: Vec<String>,
+    pub(crate) template_variances: std::collections::BTreeMap<String, Variance>,
     pub method_types: std::collections::BTreeMap<String, std::sync::Arc<crate::index::Signature>>,
     pub property_types: std::collections::BTreeMap<String, crate::types::ValueType>,
     pub generic_bases: Vec<crate::types::ValueType>,

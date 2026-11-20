@@ -41,6 +41,7 @@ pub fn class_info(
         let doc = crate::phpdoc::read(source, class.doc_comment, names, &Default::default());
         info.documented.templates = doc.templates;
         info.documented.template_names = doc.template_names;
+        info.documented.template_variances = doc.template_variances;
         info.documented.method_types = doc
             .methods
             .into_iter()

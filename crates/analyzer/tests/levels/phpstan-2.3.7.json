@@ -1,4 +1,9 @@
 {
+  "generic_variance.php": [
+    [7, 42, "argument.type", "Parameter #1 $source of function readDog expects Source<Dog>, Source<Animal> given."],
+    [7, 44, "argument.type", "Parameter #1 $sink of function writeAnimal expects Sink<Animal>, Sink<Dog> given."],
+    [5, 45, "argument.type", "Parameter #1 $cell of function keepAnimal expects Cell<Animal>, Cell<Dog> given."]
+  ],
   "mixed_offset_chains.php": [
     [6, 10, "missingType.parameter", "Function useOffsets() has parameter $position with no type specified."],
     [10, 12, "argument.type", "Parameter #1 $label of function displayRow expects string, mixed given."],

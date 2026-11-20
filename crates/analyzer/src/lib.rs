@@ -99,6 +99,7 @@ fn analyze_types(
 ) -> Result<(Vec<Diagnostic>, usize), String> {
     let mut diagnostics = Vec::new();
     let mut index = builtins::load_supported();
+    index.report_maybe_generic_types = options.level >= 7;
     index.read_type_docs = read_docs
         && (options.level >= 2
             || options.strict

@@ -257,7 +257,11 @@ fn infer_templates(
     }
 }
 
-fn project_generic(index: &Index, owner: &str, receiver: &ValueType) -> Option<Vec<ValueType>> {
+pub(crate) fn project_generic(
+    index: &Index,
+    owner: &str,
+    receiver: &ValueType,
+) -> Option<Vec<ValueType>> {
     let class = index.class(owner)?;
     let bindings = class_bindings(index, owner, receiver);
     if bindings.is_empty() {

@@ -178,6 +178,7 @@ pub struct ClassInfo {
 pub struct Index {
     pub builtin_functions: BTreeSet<String>,
     pub read_type_docs: bool,
+    pub(crate) report_maybe_generic_types: bool,
     pub builtin_classes: BTreeSet<String>,
     pub trait_users: crate::trait_users::TraitUsers,
     pub classes: BTreeMap<String, ClassInfo>,

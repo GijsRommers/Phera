@@ -22,6 +22,7 @@ pub struct Documentation {
     pub variables: BTreeMap<Option<String>, Annotation>,
     pub templates: Templates,
     pub template_names: Vec<String>,
+    pub(crate) template_variances: BTreeMap<String, super::Variance>,
     pub bases: Vec<Annotation>,
     pub properties: BTreeMap<String, Annotation>,
     pub methods: BTreeMap<String, Annotation>,
@@ -91,6 +92,15 @@ pub fn read(
             if !documentation.template_names.iter().any(|old| old == name) {
                 documentation.template_names.push(name.into());
             }
+            let (_, tag) = tag_name(tag.name);
+            let variance = match tag {
+                "template-covariant" => super::Variance::Covariant,
+                "template-contravariant" => super::Variance::Contravariant,
+                _ => super::Variance::Invariant,
+            };
+            documentation
+                .template_variances
+                .insert(name.into(), variance);
             templates.insert(name.into(), bound.limit_complexity());
         }
     }
