@@ -15,10 +15,11 @@ symbols.
 ## Why
 
 PHP attaches compiled names to an ordered symbol table before executing
-file-level code. A fiber switch or include moves the values, and a shutdown
-callback can replace them. Teardown still visits sole-owned objects in
-reverse symbol order and runs the remaining object and generator
-destructors by ID.
+file-level code. A named assignment declares its target before compiling
+its source, so a chain of assignments reserves symbols from left to right.
+A fiber switch or include moves the values, and a shutdown callback can
+replace them. Teardown still visits sole-owned objects in reverse symbol
+order and runs the remaining object and generator destructors by ID.
 
 ## Turned down
 
