@@ -91,7 +91,12 @@ pub fn install(context: &mut dyn Context, object: &Object, target: Target) {
 
 pub fn release<'a>(context: &'a mut dyn Context, object: &'a Object) -> LocalFuture<'a, ()> {
     Box::pin(async move {
-        if let Ok(writer) = state(object) {
+        let writer = object
+            .native
+            .borrow_mut()
+            .take()
+            .and_then(|native| native.downcast::<Shared>().ok());
+        if let Some(writer) = writer {
             publish(context, &writer, "XMLWriter").await;
         }
     })

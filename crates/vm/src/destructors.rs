@@ -139,15 +139,14 @@ impl Vm {
         let Some(class) = self.classes.for_object(&object) else {
             return Ok(());
         };
-        let release = class.hooks.as_ref().and_then(|hooks| hooks.release);
+        if let Some(release) = class.hooks.as_ref().and_then(|hooks| hooks.release) {
+            release(self, &object).await;
+        }
         let Some(method) = class
             .magic
             .as_ref()
             .and_then(|magic| magic.destruct.clone())
         else {
-            if let Some(release) = release {
-                release(self, &object).await;
-            }
             return Ok(());
         };
         if method.visibility != Visibility::Public {
@@ -174,18 +173,15 @@ impl Vm {
             }
             self.check_destructor_visibility(&method, &class.name)?;
         }
-        let result = self
-            .invoke_magic_method(method, class.clone(), object.clone(), [])
-            .await;
+        self.invoke_magic_method(method, class.clone(), object.clone(), [])
+            .await?;
         // The destructor may have stored `$this`; the object is a new `Rc`
         // (see `phera_value::Destruction`), so the request's list of objects
         // must point at this one for the end of the request.
         if Rc::strong_count(&object) > 1 {
             self.classes.track(&object);
-        } else if let Some(release) = release {
-            release(self, &object).await;
         }
-        result.map(drop)
+        Ok(())
     }
 
     /// PHP names the object's class, not the declaring one:

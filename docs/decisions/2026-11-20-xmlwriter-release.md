@@ -9,6 +9,8 @@
 An XMLWriter with a destination registers for native release. The runtime drains it asynchronously
 when the last PHP reference goes away. The URI file is owned by the writer, while a caller's
 stream stays open if its resource is still referenced.
+The native destructor empties the writer before a subclass's PHP destructor runs. If it saves
+the object, the saved wrapper has no writer until it is opened again.
 
 ## Why
 

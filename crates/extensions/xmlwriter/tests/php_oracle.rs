@@ -80,7 +80,7 @@ fn output_destinations() {
         })
         .unwrap_or_else(|error| panic!("{error}; outputs in {}", oracle.artifacts.display()));
     let count = matched.stdout.split(|byte| *byte == b'\n').count() - 1;
-    assert_eq!(count, 52);
+    assert_eq!(count, 53);
     eprintln!("{count} XMLWriter destination results matched");
 }
 
@@ -129,4 +129,20 @@ foreach (['uri', 'stream'] as $mode) {
         unlink($file);
     }
 }
+class ResurrectingWriter extends XMLWriter {
+    public function __destruct() { $GLOBALS['saved'] = $this; }
+}
+$writer = new ResurrectingWriter();
+$writer->openUri('resurrection.xml');
+$writer->writeElement('root', 'text');
+unset($writer);
+try {
+    $saved->writeElement('again');
+    $write = true;
+} catch (Error $e) {
+    $write = $e->getMessage();
+}
+echo json_encode([$write, file_get_contents('resurrection.xml')]), "\n";
+unset($saved);
+unlink('resurrection.xml');
 "#;
