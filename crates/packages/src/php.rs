@@ -30,6 +30,19 @@ pub(crate) fn value(value: &Value) -> String {
     }
 }
 
+pub(crate) fn quote_bytes(bytes: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return quote(text);
+    }
+    use std::fmt::Write;
+    let mut literal = String::from("\"");
+    for byte in bytes {
+        let _ = write!(literal, "\\x{byte:02x}");
+    }
+    literal.push('"');
+    literal
+}
+
 pub(crate) fn relative(from: &Path, to: &Path) -> String {
     let from: Vec<_> = from.components().collect();
     let to: Vec<_> = to.components().collect();

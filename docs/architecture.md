@@ -1589,7 +1589,8 @@ that a project can use either tool.
   reason for each difference. Timings are measured cold and warm against
   Composer.
 
-The current autoloader supports PSR-4, PSR-0, class maps and eager files.
+The current autoloader supports PSR-4, PSR-0, class maps, eager files and
+package include paths.
 The runtime executes the generated PHP autoloader. The server's `--preload`
 option reads the generated metadata to compile PHP files before serving
 requests.

@@ -5,7 +5,7 @@
 use phera_packages::{Options, update};
 use serde_json::{Value, json};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::sync::mpsc::{self, Sender};
 use std::thread::JoinHandle;
@@ -33,8 +33,14 @@ impl Registry {
                     stream
                         .set_read_timeout(Some(Duration::from_secs(5)))
                         .unwrap();
-                    let mut request = [0; 4096];
-                    let _ = stream.read(&mut request);
+                    let mut request = BufReader::new(&mut stream);
+                    let mut line = String::new();
+                    while request.read_line(&mut line).is_ok_and(|count| count > 0) {
+                        if line == "\r\n" {
+                            break;
+                        }
+                        line.clear();
+                    }
                     write!(
                         stream,
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\

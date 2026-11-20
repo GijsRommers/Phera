@@ -7,7 +7,7 @@ use crate::{Options, Project, php};
 use anyhow::Result;
 use md5::{Digest, Md5};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub(super) fn write(project: &Project, maps: &Maps, options: &Options) -> Result<()> {
     let vendor = project.vendor_dir()?;
@@ -44,11 +44,17 @@ pub(super) fn write(project: &Project, maps: &Maps, options: &Options) -> Result
     for (filename, mappings) in [
         (
             "autoload_classmap.php",
-            maps.classes.iter().collect::<Vec<_>>(),
+            maps.classes
+                .iter()
+                .map(|(name, path)| (name.as_slice(), path))
+                .collect::<Vec<_>>(),
         ),
         (
             "autoload_files.php",
-            maps.files.iter().map(|(name, path)| (name, path)).collect(),
+            maps.files
+                .iter()
+                .map(|(name, path)| (name.as_bytes(), path))
+                .collect(),
         ),
     ] {
         let mut code = php::header(&vendor, &project.directory, filename);
@@ -56,7 +62,7 @@ pub(super) fn write(project: &Project, maps: &Maps, options: &Options) -> Result
         for (name, path) in mappings {
             code.push_str(&format!(
                 "    {} => {},\n",
-                php::quote(name),
+                php::quote_bytes(name),
                 php::path(path, &vendor, &project.directory)
             ));
         }
@@ -70,8 +76,10 @@ pub(super) fn write(project: &Project, maps: &Maps, options: &Options) -> Result
     let static_code = static_file(maps, &vendor, &suffix);
     fs::write(composer.join("autoload_static.php"), static_code)?;
     let authoritative = options.authoritative(project);
+    let include_paths = write_include_paths(project, &vendor, &maps.include_paths)?;
     let real = include_str!("../../resources/autoload_real.php.in")
         .replace("@SUFFIX@", &suffix)
+        .replace("@INCLUDE_PATHS@", include_paths)
         .replace(
             "@AUTHORITATIVE@",
             if authoritative { "true" } else { "false" },
@@ -88,6 +96,36 @@ pub(super) fn write(project: &Project, maps: &Maps, options: &Options) -> Result
         eprintln!("Generated autoloader: {} classes.", maps.classes.len());
     }
     Ok(())
+}
+
+fn write_include_paths(
+    project: &Project,
+    vendor: &Path,
+    paths: &[PathBuf],
+) -> Result<&'static str> {
+    let filename = "include_paths.php";
+    let destination = vendor.join("composer").join(filename);
+    if paths.is_empty() {
+        if let Err(error) = fs::remove_file(destination)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(error.into());
+        }
+        return Ok("");
+    }
+    let mut code = php::header(vendor, &project.directory, filename);
+    code.push_str("return array(\n");
+    for path in paths {
+        let expression = php::path(path, vendor, &project.directory);
+        code.push_str(&format!("    {expression},\n"));
+    }
+    code.push_str(");\n");
+    fs::write(destination, code)?;
+    Ok(concat!(
+        "        $includePaths = require __DIR__ . '/include_paths.php';\n",
+        "        $includePaths[] = get_include_path();\n",
+        "        set_include_path(implode(PATH_SEPARATOR, $includePaths));\n\n",
+    ))
 }
 
 fn static_file(maps: &Maps, vendor: &Path, suffix: &str) -> String {
@@ -175,17 +213,26 @@ fn static_file(maps: &Maps, vendor: &Path, suffix: &str) -> String {
     }
     code.push_str("    );\n");
     for (property, entries) in [
-        ("classMap", maps.classes.iter().collect::<Vec<_>>()),
+        (
+            "classMap",
+            maps.classes
+                .iter()
+                .map(|(name, path)| (name.as_slice(), path))
+                .collect::<Vec<_>>(),
+        ),
         (
             "files",
-            maps.files.iter().map(|(name, path)| (name, path)).collect(),
+            maps.files
+                .iter()
+                .map(|(name, path)| (name.as_bytes(), path))
+                .collect(),
         ),
     ] {
         code.push_str(&format!("\n    public static ${property} = array(\n"));
         for (name, item) in entries {
             code.push_str(&format!(
                 "        {} => {},\n",
-                php::quote(name),
+                php::quote_bytes(name),
                 path(item)
             ));
         }

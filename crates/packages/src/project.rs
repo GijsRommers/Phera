@@ -96,6 +96,7 @@ impl Project {
             "autoload_static.php",
             "autoload_real.php",
             "platform_check.php",
+            "include_paths.php",
         ] {
             crate::paths::inside(&composer, name)?;
         }
@@ -115,7 +116,7 @@ impl Project {
             .as_str()
             .map(str::to_owned)
             .or_else(|| std::env::var("COMPOSER_ROOT_VERSION").ok())
-            .unwrap_or_else(|| "1.0.0".into())
+            .unwrap_or_else(|| "1.0.0+no-version-set".into())
     }
 
     pub fn name(&self) -> &str {

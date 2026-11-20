@@ -6,11 +6,11 @@
 use anyhow::Result;
 use phera_lexer::{Lexer, Token, TokenKind};
 
-pub(super) fn names(source: &[u8]) -> Result<Vec<String>> {
+pub(super) fn names(source: &[u8]) -> Result<Vec<Vec<u8>>> {
     use TokenKind::*;
 
     let mut lexer = Lexer::for_tokenizer(source);
-    let mut namespace = "";
+    let mut namespace: &[u8] = b"";
     let mut names = Vec::new();
     let mut previous = Eof;
     let mut current = next(&mut lexer)?;
@@ -19,17 +19,17 @@ pub(super) fn names(source: &[u8]) -> Result<Vec<String>> {
         if !matches!(previous, Arrow | NullsafeArrow | DoubleColon) {
             match current.kind {
                 Namespace => match following.kind {
-                    Identifier | QualifiedName => namespace = text(source, &following)?,
-                    LeftBrace => namespace = "",
+                    Identifier | QualifiedName => namespace = text(source, &following),
+                    LeftBrace => namespace = b"",
                     _ => {}
                 },
                 Class | Interface | Trait | Enum if following.kind == Identifier => {
-                    let name = text(source, &following)?;
-                    names.push(if namespace.is_empty() {
-                        name.to_owned()
-                    } else {
-                        format!("{namespace}\\{name}")
-                    });
+                    let mut name = namespace.to_vec();
+                    if !name.is_empty() {
+                        name.push(b'\\');
+                    }
+                    name.extend_from_slice(text(source, &following));
+                    names.push(name);
                 }
                 _ => {}
             }
@@ -58,14 +58,20 @@ fn next(lexer: &mut Lexer<'_>) -> Result<Token> {
     }
 }
 
-fn text<'source>(source: &'source [u8], token: &Token) -> Result<&'source str> {
-    Ok(std::str::from_utf8(
-        &source[token.span.start..token.span.end],
-    )?)
+fn text<'source>(source: &'source [u8], token: &Token) -> &'source [u8] {
+    &source[token.span.start..token.span.end]
 }
 
 #[cfg(test)]
 mod tests {
+    fn names(source: &[u8]) -> Vec<String> {
+        super::names(source)
+            .unwrap()
+            .into_iter()
+            .map(|name| String::from_utf8(name).unwrap())
+            .collect()
+    }
+
     #[test]
     fn discovers_method_closure_and_anonymous_method_declarations() {
         // Observed with Composer ClassMapGenerator 1.9.0 under PHP 8.5.12.
@@ -74,7 +80,7 @@ mod tests {
             $factory = static function () { class ClosureNested {} };\n\
             $anonymous = new class { function factory() { class AnonymousMethodNested {} } };";
         assert_eq!(
-            super::names(source.as_bytes()).unwrap(),
+            names(source.as_bytes()),
             [
                 "Acme\\OuterClass",
                 "Acme\\MethodNested",
@@ -91,7 +97,7 @@ mod tests {
             return `echo 'class Fake {}'`; }\n\
             } interface Contract {} trait Helper {} enum State {}";
         assert_eq!(
-            super::names(source.as_bytes()).unwrap(),
+            names(source.as_bytes()),
             [
                 "Acme\\Runner",
                 "Acme\\Contract",
@@ -105,6 +111,7 @@ mod tests {
     fn scans_php_files_with_non_utf8_strings_and_incomplete_syntax() {
         let source = b"<?php namespace App { $raw = '\xff'; class One {} cl/**/ass invalid }\n\
             namespace { $name = App\\One::class; class GlobalType {} }";
-        assert_eq!(super::names(source).unwrap(), ["App\\One", "GlobalType"]);
+        assert_eq!(names(source), ["App\\One", "GlobalType"]);
+        assert_eq!(super::names(b"<?php class \xa9 {}").unwrap(), [vec![0xa9]]);
     }
 }

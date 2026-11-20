@@ -18,7 +18,8 @@ $normalize = static function ($path) {
 };
 $result = ['classes' => [], 'files' => [], 'psr4' => [], 'psr0' => []];
 foreach ($loader->getClassMap() as $name => $path) {
-    $result['classes'][$name] = $normalize($loader->findFile($name));
+    $key = preg_match('//u', $name) ? $name : 'hex:' . bin2hex($name);
+    $result['classes'][$key] = $normalize($loader->findFile($name));
 }
 foreach (['Phera\DefinitelyMissing', 'NoSuchPheraClass', 'Composer\DefinitelyMissing'] as $name) {
     $result['classes'][$name] = $loader->findFile($name);

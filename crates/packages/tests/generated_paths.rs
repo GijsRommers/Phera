@@ -27,7 +27,12 @@ fn generated_output_symlinks_cannot_redirect_installer_writes() {
         no_scripts: true,
         ..Options::default()
     };
-    for path in ["composer", "composer/installed.php", "autoload.php"] {
+    for path in [
+        "composer",
+        "composer/installed.php",
+        "composer/include_paths.php",
+        "autoload.php",
+    ] {
         let vendor = root.join("vendor");
         let link = vendor.join(path);
         fs::create_dir_all(link.parent().unwrap()).unwrap();

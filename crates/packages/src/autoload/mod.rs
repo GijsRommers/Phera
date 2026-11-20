@@ -19,8 +19,9 @@ use std::path::{Path, PathBuf};
 pub(super) struct Maps {
     psr4: BTreeMap<String, Vec<PathBuf>>,
     psr0: BTreeMap<String, Vec<PathBuf>>,
-    classes: BTreeMap<String, PathBuf>,
+    classes: BTreeMap<Vec<u8>, PathBuf>,
     files: Vec<(String, PathBuf)>,
+    include_paths: Vec<PathBuf>,
 }
 
 pub(crate) fn generate(project: &Project, packages: &[Package], options: &Options) -> Result<()> {
@@ -92,7 +93,7 @@ pub(crate) fn generate(project: &Project, packages: &[Package], options: &Option
     let store = crate::store::Store::open(options.cache_dir.as_deref())?;
     maps.classes = scan::classes(&scans, &vendor, &store.directory.join("autoload"))?;
     maps.classes.insert(
-        "Composer\\InstalledVersions".into(),
+        b"Composer\\InstalledVersions".to_vec(),
         vendor.join("composer/InstalledVersions.php"),
     );
     for package in ordered {
@@ -104,6 +105,12 @@ pub(crate) fn generate(project: &Project, packages: &[Package], options: &Option
         } else {
             &vendor.join(&package.name)
         };
+        for path in strings(package.field("include-path")) {
+            let path = crate::paths::inside(base, &legacy_path(package, base, path))?;
+            if !maps.include_paths.contains(&path) {
+                maps.include_paths.push(path);
+            }
+        }
         let mut autoloads = vec![package.field("autoload")];
         if std::ptr::eq(package, &root) && !options.no_dev {
             autoloads.push(package.field("autoload-dev"));

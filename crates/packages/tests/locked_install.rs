@@ -64,6 +64,7 @@ fn installs_relocatable_composer_autoloader_and_protects_store() {
         &[
             ("src/Thing.php", "<?php namespace Acme; class Thing {}"),
             ("legacy/Legacy/Item.php", "<?php class Legacy_Item {}"),
+            ("include/Loose.php", "<?php return 'include path';"),
             (
                 "map/types.php",
                 "<?php namespace Shapes; interface Shape {} trait T {} enum E {}",
@@ -80,6 +81,7 @@ fn installs_relocatable_composer_autoloader_and_protects_store() {
         "psr-0": {"Legacy_": "legacy/"}, "classmap": ["map/"],
         "exclude-from-classmap": ["/map/excluded.php"], "files": ["files.php"]});
     dependency["bin"] = json!(["bin/tool"]);
+    dependency["include-path"] = json!(["include"]);
     let mut consumer = archive(
         root,
         "acme/consumer",
@@ -89,11 +91,14 @@ fn installs_relocatable_composer_autoloader_and_protects_store() {
     consumer["autoload"] = json!({"files": ["files.php"]});
     let mut dev = archive(root, "acme/dev", &[("Dev.php", "<?php class Dev {}")]);
     dev["autoload"] = json!({"classmap": ["Dev.php"]});
-    let manifest = json!({"name": "test/root", "autoload": {"files": ["root.php"]},
+    let manifest = json!({"name": "test/root", "autoload": {
+        "files": ["root.php"], "classmap": ["Binary.php"]
+    },
         "autoload-dev": {"classmap": ["RootDev.php"]}});
     fs::write(root.join("composer.json"), manifest.to_string()).unwrap();
     fs::write(root.join("root.php"), "<?php $GLOBALS['order'][] = 'root';").unwrap();
     fs::write(root.join("RootDev.php"), "<?php class RootDev {}").unwrap();
+    fs::write(root.join("Binary.php"), b"<?php class \xa9 {}").unwrap();
     fs::write(
         root.join("composer.lock"),
         json!({"content-hash": "stale",
@@ -114,10 +119,12 @@ fn installs_relocatable_composer_autoloader_and_protects_store() {
             echo $name, ':', (int)(false !== $loader->findFile($name)), "\n";
         }
         echo implode(',', $GLOBALS['order']), "\n";
+        echo (require 'Loose.php'), "\n";
+        echo (int)class_exists(chr(0xa9)), "\n";
         echo Composer\InstalledVersions::getPrettyVersion('acme/base'), "\n";
         echo (int)Composer\InstalledVersions::isInstalled('acme/dev', false);"#;
     let expected = "Acme\\Thing:1\nLegacy_Item:1\nShapes\\Shape:1\nShapes\\T:1\nShapes\\E:1\n\
-        Dev:1\nRootDev:1\nExcluded:0\nMissing:0\nbase,consumer,root\n1.0.0\n0";
+        Dev:1\nRootDev:1\nExcluded:0\nMissing:0\nbase,consumer,root\ninclude path\n1\n1.0.0\n0";
     assert_eq!(php(root, probe), expected);
     assert_eq!(php(root, "include 'vendor/bin/tool';"), "bin");
     fs::write(root.join("vendor/acme/base/src/Thing.php"), "corrupted").unwrap();
@@ -131,7 +138,7 @@ fn installs_relocatable_composer_autoloader_and_protects_store() {
     assert_eq!(php(root, probe), expected);
     let moved = root.join("moved");
     fs::create_dir(&moved).unwrap();
-    for name in ["vendor", "root.php", "RootDev.php"] {
+    for name in ["vendor", "root.php", "RootDev.php", "Binary.php"] {
         fs::rename(root.join(name), moved.join(name)).unwrap();
     }
     assert_eq!(php(&moved, probe), expected);

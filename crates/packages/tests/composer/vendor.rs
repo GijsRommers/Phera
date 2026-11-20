@@ -73,6 +73,9 @@ pub(super) fn differences(left: &Path, right: &Path) -> Result<(Vec<String>, Vec
                 | "composer/autoload_static.php"
                 | "composer/autoload_real.php"
         ) || path.starts_with("bin")
+            || name == "composer/include_paths.php"
+                && left.contains_key(path)
+                && right.contains_key(path)
         {
             generated.push(name);
         } else {

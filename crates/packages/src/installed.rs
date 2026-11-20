@@ -6,7 +6,7 @@ use crate::{Lock, Options, Package, Project, php};
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::fs;
+use std::{fs, path::Path};
 
 pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result<()> {
     project.validate_output_paths()?;
@@ -33,23 +33,17 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
         .map(|package| -> Result<Value> {
             let mut value = serde_json::to_value(package)?;
             value["version_normalized"] = normalized(package).into();
-            value["installation-source"] = if package.field("dist").is_null() {
-                "source".into()
-            } else {
-                "dist".into()
-            };
+            if package.kind() != "metapackage" {
+                value["installation-source"] = if package.field("dist").is_null() {
+                    "source".into()
+                } else {
+                    "dist".into()
+                };
+            }
             value["install-path"] = if package.kind() == "metapackage" {
                 Value::Null
             } else {
-                {
-                    let relative = php::relative(&directory, &package.install_path(&vendor)?);
-                    if relative.starts_with('.') {
-                        relative
-                    } else {
-                        format!("./{relative}")
-                    }
-                }
-                .into()
+                relative_install_path(&directory, &package.install_path(&vendor)?).into()
             };
             Ok(value)
         })
@@ -91,8 +85,13 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
         if let Some(alias) = package.field("extra")["branch-alias"]
             .get(&package.version)
             .and_then(Value::as_str)
+            && let Ok(version) = crate::version::Version::branch_alias(alias)
         {
-            aliases.push(alias.to_owned());
+            let normalized = version.normalized();
+            aliases.push(match normalized.split_once(".9999999") {
+                Some((prefix, _)) => format!("{prefix}.x-dev"),
+                None => normalized.to_owned(),
+            });
         }
         if let Some(locked_aliases) = lock.other.get("aliases").and_then(Value::as_array) {
             for alias in locked_aliases
@@ -166,7 +165,8 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
             Some(if package.kind() == "metapackage" {
                 "null".into()
             } else {
-                php::static_path(&package.install_path(&vendor)?, &directory)
+                let relative = relative_install_path(&directory, &package.install_path(&vendor)?);
+                format!("__DIR__ . {}", php::quote(&format!("/{relative}")))
             })
         } else {
             None
@@ -179,6 +179,15 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
     output.push_str("    ),\n);\n");
     fs::write(directory.join("installed.php"), output)?;
     Ok(())
+}
+
+fn relative_install_path(directory: &Path, path: &Path) -> String {
+    let relative = php::relative(directory, path);
+    if relative.starts_with('.') {
+        relative
+    } else {
+        format!("./{relative}")
+    }
 }
 
 fn normalized(package: &Package) -> String {

@@ -56,7 +56,7 @@ pub(super) fn classes(
     sources: &[Source],
     vendor: &Path,
     cache: &Path,
-) -> Result<BTreeMap<String, PathBuf>> {
+) -> Result<BTreeMap<Vec<u8>, PathBuf>> {
     fs::create_dir_all(cache)?;
     let mut files = Vec::new();
     for source in sources {
@@ -88,18 +88,18 @@ pub(super) fn classes(
             }
         }
     }
-    let discovered: Vec<Vec<(String, PathBuf)>> = files
+    let discovered: Vec<_> = files
         .par_iter()
         .map(|(path, source)| -> Result<_> {
             let text = fs::read(path)
                 .with_context(|| format!("Cannot read PHP file {}.", path.display()))?;
             let mut digest = Sha256::new();
-            digest.update(b"class-map-v3");
+            digest.update(b"class-map-v4");
             digest.update(env!("CARGO_PKG_VERSION"));
             digest.update(&text);
             let key = format!("{:x}.json", digest.finalize());
             let cache_file = cache.join(key);
-            let cached: Option<Vec<String>> = fs::read(&cache_file)
+            let cached: Option<Vec<Vec<u8>>> = fs::read(&cache_file)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice(&bytes).ok());
             let names = if let Some(names) = cached {
@@ -117,7 +117,7 @@ pub(super) fn classes(
                 .into_iter()
                 .filter(|name| compliant(name, path, source))
                 .map(|name| (name, path.clone()))
-                .collect())
+                .collect::<Vec<_>>())
         })
         .collect::<Result<_>>()?;
     let mut classes = BTreeMap::new();
@@ -129,9 +129,12 @@ pub(super) fn classes(
     Ok(classes)
 }
 
-fn compliant(name: &str, path: &Path, source: &Source) -> bool {
+fn compliant(name: &[u8], path: &Path, source: &Source) -> bool {
     let Some((prefix, psr4)) = &source.psr else {
         return true;
+    };
+    let Ok(name) = std::str::from_utf8(name) else {
+        return false;
     };
     let Some(suffix) = name.strip_prefix(prefix) else {
         return false;
