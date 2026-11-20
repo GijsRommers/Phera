@@ -11,6 +11,15 @@ foreach ([[SORT_ASC], [777], ['wrong'], [[1], SORT_ASC, SORT_DESC], [[1], SORT_S
 try { array_multisort($first, SORT_DESC, $second); }
 catch (ValueError $error) { echo $error->getMessage(), "\n"; }
 echo json_encode([$first, $second]), "\n";
+foreach ([
+    fn() => array_multisort(array: $first, rest: SORT_DESC),
+    fn() => array_multisort(...[$first, 'unknown' => SORT_DESC]),
+    fn() => call_user_func_array('array_multisort', [$first, 'unknown' => SORT_DESC]),
+    fn() => call_user_func('array_multisort', $first, unknown: SORT_DESC),
+] as $call) {
+    try { $call(); }
+    catch (ArgumentCountError $error) { echo $error->getMessage(), "\n"; }
+}
 --EXPECT--
 TypeError: array_multisort(): Argument #1 ($array) must be an array or a sort flag that has not already been specified
 ValueError: array_multisort(): Argument #1 ($array) must be a valid sort flag
@@ -20,3 +29,7 @@ TypeError: array_multisort(): Argument #3 must be an array or a sort flag that h
 ValueError: array_multisort(): Argument #2 must be a valid sort flag
 Array sizes are inconsistent
 [[3,1],[1]]
+array_multisort() does not accept unknown named parameters
+array_multisort() does not accept unknown named parameters
+array_multisort() does not accept unknown named parameters
+array_multisort() does not accept unknown named parameters

@@ -26,6 +26,11 @@ pub(super) fn register(registry: &mut Registry) {
         PARAMETERS,
         |context, arguments| Box::pin(sort(context, arguments)),
     ));
+    registry.register_extra_named_handler("array_multisort", |_, _| {
+        Err(NativeError::argument_count_error(
+            "array_multisort() does not accept unknown named parameters",
+        ))
+    });
     registry.describe_function("array_multisort", "true", None);
 }
 
