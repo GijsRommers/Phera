@@ -65,6 +65,7 @@ impl Analyzer<'_> {
                 }
                 let last_condition = self.last_condition;
                 if self.level >= 4
+                    && !self.options.report_always_true_last_condition
                     && index > 0
                     && index + 1 == branches.len()
                     && otherwise

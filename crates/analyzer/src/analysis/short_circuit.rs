@@ -11,6 +11,7 @@ impl Analyzer<'_> {
         scope: &mut Scope,
         quiet: bool,
     ) -> ValueType {
+        self.redundant_null_coalesce(left, right, scope, "??");
         self.constant_null_check(left, scope, dead_code::NullCheck::Coalesce);
         let nullish = self.nullish(left, scope);
         let left_ty = self.expression(left, scope, true);

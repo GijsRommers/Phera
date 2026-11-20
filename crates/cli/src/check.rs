@@ -11,12 +11,13 @@ use std::process::ExitCode;
 pub(crate) const HELP: &str = "\
 Usage: phera check [OPTIONS] [paths...]
 
-Type-check PHP. Paths may also be set in [check].paths in phera.toml.
+Type-check PHP. Settings come from PHPStan NEON and [check] in phera.toml.
 
 Options:
   --level LEVEL             Choose level 0 through 10, or max (default: 1).
   --format FORMAT           Print text, json or github output.
   --no-progress             Hide progress output.
+  --strict, --no-strict     Enable or disable PHPStan strict rules.
   --generate-baseline FILE  Save a baseline. Load it through [check].baseline.
   -h, --help                Print this help.
   --                        Treat the remaining arguments as paths.
@@ -35,6 +36,9 @@ pub(crate) fn check(options: Options) -> ExitCode {
 }
 
 fn run(options: &Options) -> Result<bool, String> {
+    for notice in &options.config_notices {
+        eprintln!("phera check: {notice}");
+    }
     let mut report = phera_analyzer::check(options)?;
     if let Some(path) = &options.generate_baseline {
         baseline::write(path, &report.diagnostics)?;

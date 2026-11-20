@@ -9,7 +9,9 @@ impl Analyzer<'_> {
     pub fn array_literal(&mut self, items: &[ArrayItem], scope: &mut Scope) -> ValueType {
         // Large literals still evaluate every element. Limit the precise shape
         // so repeatedly joining a scope with a large lookup table stays cheap.
-        let mut fields = (self.level >= 2 && items.len() <= 32).then(Vec::new);
+        let mut fields = (items.len() <= 32
+            && (self.level >= 2 || self.level >= 1 && self.options.unnecessary_null_coalesce))
+            .then(Vec::new);
         let mut next_key = Some(0i64);
         for item in items {
             let key = if let Some(key) = &item.key {
@@ -127,7 +129,7 @@ pub fn offset_type(target: &ValueType, key: &ValueType) -> ValueType {
     }
 }
 
-fn shape_key(ty: &ValueType) -> Option<ShapeKey> {
+pub(super) fn shape_key(ty: &ValueType) -> Option<ShapeKey> {
     match ty {
         ValueType::IntLiteral(value) => Some(ShapeKey::Integer(*value)),
         ValueType::BoolLiteral(value) => Some(ShapeKey::Integer(i64::from(*value))),

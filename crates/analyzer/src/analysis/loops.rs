@@ -69,7 +69,10 @@ impl Analyzer<'_> {
                 value,
                 body,
                 by_reference,
-            } => self.foreach_loop(subject, key.as_ref(), value, *by_reference, body, scope),
+            } => {
+                self.foreach_overwrite(key.as_ref(), value, scope, statement.span);
+                self.foreach_loop(subject, key.as_ref(), value, *by_reference, body, scope)
+            }
             _ => Flow::Next,
         }
     }

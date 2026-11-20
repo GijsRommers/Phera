@@ -65,7 +65,7 @@ impl Analyzer<'_> {
         let mut scope = Scope::default();
         self.check_attributes(&function.attributes, &mut scope);
         self.parameter_scope(&function.parameters, &mut scope);
-        if self.level >= 2 && function.doc_comment.is_some() {
+        if self.index.read_type_docs && function.doc_comment.is_some() {
             let signature = self.declaration_signature(
                 &function.parameters,
                 function.return_type.as_ref(),
@@ -248,7 +248,7 @@ impl Analyzer<'_> {
         let mut scope = Scope::default();
         self.check_attributes(&method.attributes, &mut scope);
         self.parameter_scope(&method.parameters, &mut scope);
-        if self.level >= 2 && doc.is_some() {
+        if self.index.read_type_docs && doc.is_some() {
             let signature =
                 self.declaration_signature(&method.parameters, method.return_type.as_ref(), span);
             if let Some(returns) = self.function_documentation(doc, &signature, span, &mut scope) {

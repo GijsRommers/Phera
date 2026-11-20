@@ -33,3 +33,55 @@ fn phpstan_level_fixtures() {
         }
     }
 }
+
+#[test]
+fn phpstan_configured_rules() {
+    // PHPStan 2.3.7 with strict-rules and bleedingEdge.neon.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/configured_rules.php");
+    for level in [0, 1, 5] {
+        let options = Options {
+            level,
+            paths: vec![path.to_string_lossy().into_owned()],
+            ..Options::default()
+        };
+        assert!(check(&options).unwrap().diagnostics.is_empty());
+        let report = check(&Options {
+            strict: true,
+            unnecessary_null_coalesce: true,
+            ..options
+        })
+        .unwrap();
+        let actual: Vec<_> = report
+            .diagnostics
+            .iter()
+            .map(|finding| {
+                (
+                    finding.line,
+                    finding.identifier.as_str(),
+                    finding.message.as_str(),
+                )
+            })
+            .collect();
+        let mut expected = vec![
+            (
+                12,
+                "foreach.keyOverwrite",
+                "Foreach overwrites $key with its key variable.",
+            ),
+            (
+                12,
+                "foreach.valueOverwrite",
+                "Foreach overwrites $value with its value variable.",
+            ),
+        ];
+        if level >= 1 {
+            expected.push((
+                17,
+                "nullCoalesce.unnecessary",
+                "Coalesce operator ?? is unnecessary because the left side is always set \
+                 and the right side is null.",
+            ));
+        }
+        assert_eq!(actual, expected, "level {level}");
+    }
+}

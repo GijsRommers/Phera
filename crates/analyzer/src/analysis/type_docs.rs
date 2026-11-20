@@ -15,7 +15,7 @@ impl Analyzer<'_> {
         declaration: Span,
         scope: &mut Scope,
     ) -> Option<ValueType> {
-        if self.level < 2 || doc.is_none() {
+        if !self.index.read_type_docs || doc.is_none() {
             return None;
         }
         let docs = self.read_documentation(doc);
@@ -25,11 +25,13 @@ impl Analyzer<'_> {
                 .iter()
                 .find(|parameter| parameter.name == *name)
             else {
-                self.diagnose(
-                    "parameter.notFound",
-                    declaration,
-                    format!("PHPDoc tag @param references unknown parameter: ${name}"),
-                );
+                if self.level >= 2 {
+                    self.diagnose(
+                        "parameter.notFound",
+                        declaration,
+                        format!("PHPDoc tag @param references unknown parameter: ${name}"),
+                    );
+                }
                 continue;
             };
             if self.check_doc_annotation(
@@ -99,8 +101,10 @@ impl Analyzer<'_> {
             .and_then(|class| self.index.class(class))
             .map_or(&empty, |class| &class.documented.templates);
         let docs = crate::phpdoc::read(&self.file.source, doc, &self.context.names, templates);
-        for invalid in &docs.errors {
-            self.diagnose("phpDoc.parseError", invalid.span, invalid.message.clone());
+        if self.level >= 2 {
+            for invalid in &docs.errors {
+                self.diagnose("phpDoc.parseError", invalid.span, invalid.message.clone());
+            }
         }
         docs
     }
@@ -118,6 +122,10 @@ impl Analyzer<'_> {
         }
         if annotation.ty == ValueType::ExplicitMixed && native.is_mixed() {
             return true;
+        }
+        if self.level < 2 {
+            return native.accepts(&annotation.ty, self.index, TypePolicy::Documentation)
+                == Compatibility::Accepts;
         }
         let known = self.check_doc_classes(&annotation.ty, span);
         let expected = self.context.class.as_ref().map_or_else(

@@ -5,8 +5,14 @@ use crate::index::Signature;
 use crate::rules::missing_type;
 
 impl Analyzer<'_> {
+    fn check_missing_typehints(&self) -> bool {
+        self.options
+            .check_missing_typehints
+            .unwrap_or(self.level >= 6)
+    }
+
     pub fn function_hints(&mut self, function: &FunctionDeclaration) {
-        if self.level < 6 {
+        if !self.check_missing_typehints() {
             return;
         }
         let name = self.context.names.declaration(&function.name.name);
@@ -28,7 +34,7 @@ impl Analyzer<'_> {
     }
 
     pub fn method_hints(&mut self, method: &Method) {
-        if self.level < 6 {
+        if !self.check_missing_typehints() {
             return;
         }
         let Some(class) = self.context.documentation_class.as_deref() else {
@@ -112,7 +118,7 @@ impl Analyzer<'_> {
     }
 
     pub fn property_hints(&mut self, name: &str, span: Span) {
-        if self.level < 6 {
+        if !self.check_missing_typehints() {
             return;
         }
         if let Some(class) = self.context.class.clone()

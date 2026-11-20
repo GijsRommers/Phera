@@ -51,6 +51,22 @@ uses entity class strings to infer Doctrine repository, find, and reference
 results. It recognizes Doctrine lifecycle callbacks and Symfony service injection,
 command, route, listener, and scheduled-task attributes.
 
+The checker reads `phpstan.neon`, `phpstan.neon.dist`, or `phpstan.dist.neon`
+in that order. It uses analysis paths, exclusions, levels, included baselines,
+and `ignoreErrors`. It honors `checkMissingTypehints`,
+`reportAlwaysTrueInLastCondition`, and inline unmatched-ignore reporting.
+With `treatPhpDocTypesAsCertain: false`, constant-condition checks require
+native type evidence. Settings in `phera.toml` under `[check]` take
+precedence, followed by command-line options. Unsupported includes and PHP
+configuration files produce a notice.
+
+The PHPStan strict-rules include enables `foreach.keyOverwrite` and
+`foreach.valueOverwrite`. Use `strict = true` or `strict = false` under
+`[check]` to override it. Other rules from the strict-rules package are
+pending. The bleeding-edge include enables the redundant `?? null` rule
+for required array fields and initialized properties. The checker reports
+an informational notice for remaining bleeding-edge features.
+
 `phera <command> --help` lists the options. There is no formatter and no test
 runner yet.
 

@@ -87,6 +87,7 @@ impl Analyzer<'_> {
                         left,
                         right,
                     } => {
+                        self.redundant_null_coalesce(left, right, &scope, "??");
                         let (non_null, fallback) = self.coalescing_condition(left, scope);
                         outcome = non_null;
                         if let Some(scope) = fallback {

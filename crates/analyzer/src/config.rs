@@ -3,6 +3,10 @@
 //! For example, `new Missing` is checked at the configured level for these paths.
 
 use crate::diagnostic::Format;
+use std::{collections::BTreeSet, path::Path};
+
+mod phpstan;
+pub use phpstan::Ignore;
 
 #[derive(Clone)]
 pub struct Options {
@@ -14,6 +18,14 @@ pub struct Options {
     pub generate_baseline: Option<String>,
     pub format: Format,
     pub no_progress: bool,
+    pub strict: bool,
+    pub report_always_true_last_condition: bool,
+    pub report_unmatched_ignores: bool,
+    pub treat_phpdoc_types_as_certain: bool,
+    pub check_missing_typehints: Option<bool>,
+    pub unnecessary_null_coalesce: bool,
+    pub config_notices: BTreeSet<String>,
+    pub phpstan_ignores: Vec<Ignore>,
 }
 
 impl Default for Options {
@@ -27,14 +39,27 @@ impl Default for Options {
             generate_baseline: None,
             format: Format::Text,
             no_progress: false,
+            strict: false,
+            report_always_true_last_condition: false,
+            report_unmatched_ignores: false,
+            treat_phpdoc_types_as_certain: true,
+            check_missing_typehints: None,
+            unnecessary_null_coalesce: false,
+            config_notices: BTreeSet::new(),
+            phpstan_ignores: Vec::new(),
         }
     }
 }
 
 impl Options {
     pub fn parse(arguments: impl Iterator<Item = String>) -> Result<Self, String> {
+        Self::parse_at(Path::new("."), arguments)
+    }
+
+    fn parse_at(directory: &Path, arguments: impl Iterator<Item = String>) -> Result<Self, String> {
         let mut options = Self::default();
-        match std::fs::read_to_string("phera.toml") {
+        phpstan::read(directory, &mut options)?;
+        match std::fs::read_to_string(directory.join("phera.toml")) {
             Ok(source) => options.read_config(&source)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(format!("phera.toml: {e}")),
@@ -60,6 +85,8 @@ impl Options {
                     }
                 }
                 "--no-progress" => options.no_progress = true,
+                "--strict" => options.strict = true,
+                "--no-strict" => options.strict = false,
                 "--baseline" => use_phpstan_baseline = true,
                 "--generate-baseline" => {
                     options.generate_baseline =
@@ -75,7 +102,13 @@ impl Options {
             options.paths = paths;
         }
         if options.paths.is_empty() {
-            return Err("check needs paths or [check].paths in phera.toml".into());
+            let mut message =
+                String::from("check needs paths, [check].paths or PHPStan parameters.paths");
+            for notice in &options.config_notices {
+                message.push('\n');
+                message.push_str(notice);
+            }
+            return Err(message);
         }
         if use_phpstan_baseline && options.baseline.is_none() {
             options.baseline = Some(default_baseline(&options.paths));
@@ -99,6 +132,19 @@ impl Options {
         };
         match key {
             "level" if !array => self.level = level(scalar()?)?,
+            "strict" if !array => self.strict = boolean("strict", scalar()?)?,
+            "treat_phpdoc_types_as_certain" if !array => {
+                self.treat_phpdoc_types_as_certain = boolean(key, scalar()?)?;
+            }
+            "report_unmatched_ignores" if !array => {
+                self.report_unmatched_ignores = boolean(key, scalar()?)?;
+            }
+            "report_always_true_last_condition" if !array => {
+                self.report_always_true_last_condition = boolean(key, scalar()?)?;
+            }
+            "check_missing_typehints" if !array => {
+                self.check_missing_typehints = Some(boolean(key, scalar()?)?);
+            }
             "paths" if array => {
                 self.paths = values.iter().map(|s| string(s)).collect::<Result<_, _>>()?
             }
@@ -118,11 +164,7 @@ impl Options {
                 }
             }
             "no_progress" | "no-progress" if !array => {
-                self.no_progress = match scalar()?.as_str() {
-                    "true" => true,
-                    "false" => false,
-                    _ => return Err("phera.toml: no_progress must be true or false".into()),
-                }
+                self.no_progress = boolean("no_progress", scalar()?)?;
             }
             _ => {
                 return Err(format!(
@@ -132,6 +174,12 @@ impl Options {
         }
         Ok(())
     }
+}
+
+fn boolean(key: &str, value: &str) -> Result<bool, String> {
+    value
+        .parse()
+        .map_err(|_| format!("phera.toml: {key} must be true or false"))
 }
 
 fn default_baseline(paths: &[String]) -> String {
@@ -280,4 +328,119 @@ fn tokenize(source: &str) -> Result<Vec<String>, String> {
         }
     }
     Ok(tokens)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn checker_configuration_uses_project_precedence() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        fs::create_dir(root.join("config")).unwrap();
+        fs::write(
+            root.join("phpstan.dist.neon"),
+            "parameters:\n    level: 10\n    paths: [wrong-dist]\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("phpstan.neon.dist"),
+            "parameters:\n    level: 9\n    paths: [wrong-neon-dist]\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("config/local.neon"),
+            "parameters:\n    level: 7\n    paths: [source]\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("phpstan.neon"),
+            r#"
+includes:
+    - config/local.neon
+    - vendor/phpstan/phpstan-strict-rules/rules.neon
+    - vendor/sample/custom/extension.neon
+    - vendor/sample/custom/rules.neon
+parameters:
+    level: 8
+    paths: ['tests, new']
+    treatPhpDocTypesAsCertain: false
+    checkMissingTypehints: false
+    excludePaths:
+        analyse:
+            - src/skip.php
+"#,
+        )
+        .unwrap();
+
+        let loaded = Options::parse_at(root, std::iter::empty()).unwrap();
+        assert!(loaded.strict);
+        assert!(!loaded.treat_phpdoc_types_as_certain);
+        assert_eq!(loaded.check_missing_typehints, Some(false));
+        assert_eq!(loaded.level, 8);
+        assert_eq!(
+            loaded.paths[0],
+            root.join("config/source").to_string_lossy()
+        );
+        assert_eq!(loaded.paths[1], root.join("tests, new").to_string_lossy());
+        assert_eq!(
+            loaded.exclude,
+            [root.join("src/skip.php").to_string_lossy()]
+        );
+        assert_eq!(
+            loaded.config_notices.into_iter().collect::<Vec<_>>(),
+            ["PHPStan configuration sample/custom: not applied"],
+        );
+
+        fs::write(
+            root.join("phera.toml"),
+            "[check]\nstrict = false\nlevel = 4\n",
+        )
+        .unwrap();
+        let local = Options::parse_at(root, std::iter::empty()).unwrap();
+        assert!(!local.strict);
+        assert_eq!(local.level, 4);
+
+        let command = ["--level", "1", "--strict", "src"]
+            .into_iter()
+            .map(String::from);
+        let command = Options::parse_at(root, command).unwrap();
+        assert!(command.strict);
+        assert_eq!(command.level, 1);
+        assert_eq!(command.paths, ["src"]);
+    }
+
+    #[test]
+    fn phpstan_ignore_counts_apply_by_identifier_and_path() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        fs::write(
+            root.join("src.php"),
+            "<?php\nfunction test(): void {\n    missing_one();\n    missing_two();\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("phpstan.neon"),
+            r#"
+parameters:
+    level: 0
+    paths:
+        - src.php
+    ignoreErrors:
+        - identifier: function.notFound
+          message: '#missing_(?=one|two)#'
+          path: src.php
+          count: 1
+"#,
+        )
+        .unwrap();
+        let options = Options::parse_at(root, std::iter::empty()).unwrap();
+        assert!(options.config_notices.is_empty());
+        let report = crate::check(&options).unwrap();
+        assert_eq!(report.diagnostics.len(), 1);
+        assert_eq!(report.diagnostics[0].line, 4);
+        assert_eq!(report.diagnostics[0].identifier, "function.notFound");
+    }
 }

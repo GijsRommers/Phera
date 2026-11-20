@@ -38,6 +38,7 @@ impl Analyzer<'_> {
             if let Some(next) = statements.get(position + 1) {
                 self.prepare_local_rebinding(statement, next, scope);
                 if self.level >= 4
+                    && !self.options.report_always_true_last_condition
                     && position + 2 == statements.len()
                     && is_throw(next)
                     && let StatementKind::If {

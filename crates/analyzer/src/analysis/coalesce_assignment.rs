@@ -10,6 +10,7 @@ impl Analyzer<'_> {
         value: &Expression,
         scope: &mut Scope,
     ) -> ValueType {
+        self.redundant_null_coalesce(target, value, scope, "??=");
         let nullish = self.nullish(target, scope);
         let original = self.expression(target, scope, true);
         if original == ValueType::Never || nullish == Some(false) {

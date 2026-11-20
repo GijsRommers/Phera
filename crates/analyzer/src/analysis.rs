@@ -58,12 +58,14 @@ mod not_supported;
 mod operators;
 mod property_hooks;
 mod receiver_types;
+mod redundant_null_coalesce;
 mod refine;
 mod refine_types;
 mod reporting;
 mod short_circuit;
 mod statements;
 mod strict_mixed;
+mod strict_rules;
 mod string_replacements;
 mod switch;
 mod truthy_values;
@@ -98,6 +100,7 @@ pub struct Analyzer<'a> {
     pub dependencies: &'a mut Dependencies,
     pub file: &'a ParsedFile,
     pub level: u8,
+    pub options: &'a crate::config::Options,
     pub report_unused_traits: bool,
     pub strict_types: bool,
     pub diagnostics: Vec<Diagnostic>,
@@ -120,14 +123,17 @@ impl<'a> Analyzer<'a> {
         index: &'a mut Index,
         dependencies: &'a mut Dependencies,
         file: &'a ParsedFile,
-        level: u8,
+        options: &'a crate::config::Options,
         report_unused_traits: bool,
     ) -> Self {
+        let level = options.level;
+        let read_docs = index.read_type_docs;
         Self {
             index,
             dependencies,
             file,
             level,
+            options,
             report_unused_traits,
             strict_types: file.program.statements.iter().any(|statement| {
                 matches!(&statement.kind, StatementKind::Declare { directives, .. }
@@ -145,7 +151,7 @@ impl<'a> Analyzer<'a> {
             last_condition: None,
             discarded_expression: None,
             trait_diagnostics: None,
-            statement_docs: if level >= 2 {
+            statement_docs: if read_docs {
                 type_docs::statement_comments(&file.source)
             } else {
                 Default::default()
