@@ -3,8 +3,8 @@
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, ClassEntry, ClassKind, ConstantValue, Context, LocalFuture, MethodEntry, NativeError,
-    NativeResult, Object, PropertyEntry, Registry, Value, Visibility, value::Resource,
+    ArrayKey, ClassEntry, ClassHooks, ClassKind, ConstantValue, Context, LocalFuture, MethodEntry,
+    NativeError, NativeResult, Object, PropertyEntry, Registry, Value, Visibility, value::Resource,
 };
 
 use crate::directory::{close, is_open, read, rewind};
@@ -18,9 +18,12 @@ pub fn register(registry: &mut Registry) {
                 PropertyEntry::new("handle", ConstantValue::Null, Visibility::Public).readonly(),
             ]
         },
+        hooks: Some(&ClassHooks {
+            construction_error: Some("Cannot directly construct Directory, use dir() instead"),
+            ..ClassHooks::EMPTY
+        }),
         methods: const {
             &[
-                MethodEntry::public("__construct", &[], construct),
                 MethodEntry::public_async("read", &[], object_read),
                 MethodEntry::public_async("rewind", &[], object_rewind),
                 MethodEntry::public_async("close", &[], object_close),
@@ -28,12 +31,6 @@ pub fn register(registry: &mut Registry) {
         },
         ..ClassEntry::class("Directory")
     });
-}
-
-fn construct(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    Err(NativeError::error(
-        "Cannot directly construct Directory, use dir() instead",
-    ))
 }
 
 fn object_handle(object: Option<&Rc<Object>>, action: &str) -> Result<Rc<Resource>, NativeError> {

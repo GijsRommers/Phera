@@ -26,7 +26,9 @@ impl Vm {
         let reference = receiving.is_some_and(|parameter| parameters.by_reference(parameter))
             || (index == 0 && !matches!(argument, SentArgument::Value(_)) && view.is_extract());
         let value = match (reference, argument) {
-            (true, SentArgument::Value(_)) => {
+            (true, SentArgument::Value(_))
+                if receiving.is_some_and(|parameter| parameters.requires_reference(parameter)) =>
+            {
                 return Err(NativeError::error(format!(
                     "{}(): Argument #{} (${}) could not be passed by reference",
                     view.name(),
@@ -40,7 +42,7 @@ impl Vm {
             (false, SentArgument::Path(place)) => {
                 self.read_place(&place, crate::access_mode::Missing::Warn)?
             }
-            (false, SentArgument::Value(source)) => self.get(source),
+            (_, SentArgument::Value(source)) => self.get(source),
         };
         self.store_sent_value(index, value)
     }

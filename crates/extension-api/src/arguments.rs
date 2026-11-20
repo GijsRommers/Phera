@@ -19,7 +19,7 @@
 //! guarantees.
 
 use phera_value::{
-    NumVal, PhpString, Value, cast_to_bool, float_repr, parse_numeric, to_php_string,
+    NumVal, ObjectCast, PhpString, Value, cast_to_bool, float_repr, parse_numeric, to_php_string,
 };
 
 use crate::{Context, FunctionEntry, NativeError, Param, ParamType};
@@ -106,8 +106,11 @@ fn prepare_argument(
                 ))
             })?;
             convert(&mut target, &site, strict, context)?;
+            return Ok(());
         }
-        return Ok(());
+        if param.requires_ref() {
+            return Ok(());
+        }
     }
     if argument.is_reference() {
         let plain = argument.deref().clone();
@@ -195,7 +198,7 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
         ParamType::ArrayOrFloat => "array|float",
         ParamType::ArrayOrBool => "array|bool",
         ParamType::ArrayOrObject => "array|object",
-        ParamType::RecursiveOrAggregate => "RecursiveIterator|IteratorAggregate",
+        ParamType::ClassUnion(declaration) => declaration,
     }
 }
 
@@ -323,6 +326,7 @@ fn convert(
         ParamType::StringOrNumber => match value {
             Value::String(_) | Value::Int(_) | Value::Float(_) => Some(None),
             _ if strict => None,
+            Value::Object(object) => object.class.cast(object, ObjectCast::String).map(Some),
             _ => to_number(value, site, context).map(Some),
         },
         ParamType::ArrayOrNumber => match value {
@@ -336,10 +340,12 @@ fn convert(
             _ if strict => None,
             _ => to_float(value, site, context).map(Some),
         },
-        ParamType::RecursiveOrAggregate => matches!(value, Value::Object(object)
-            if object.class.is_instance_of("RecursiveIterator")
-                || object.class.is_instance_of("IteratorAggregate"))
-        .then_some(None),
+        ty @ ParamType::ClassUnion(_) => match value {
+            Value::Object(object) if ty.union_accepts_class(object.class.as_ref()) => Some(None),
+            Value::String(_) if ty.union_accepts_string() => Some(None),
+            _ if !strict && ty.union_accepts_string() => to_string(value, site, context).map(Some),
+            _ => None,
+        },
         ParamType::ArrayOrObject => {
             matches!(value, Value::Array(_) | Value::Object(_)).then_some(None)
         }

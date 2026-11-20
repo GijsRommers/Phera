@@ -11,7 +11,7 @@ use crate::errors;
 pub const CLIENT_INFO: &str = "mysqlnd 8.5.13";
 pub const CLIENT_VERSION: i64 = 80513;
 
-pub static ACCESS: NativePropertyAccess = NativePropertyAccess { read, mutate };
+pub static ACCESS: NativePropertyAccess = NativePropertyAccess::new(read, mutate);
 
 const NAMES: &[&str] = &[
     "affected_rows",

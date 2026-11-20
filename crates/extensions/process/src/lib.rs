@@ -9,6 +9,7 @@
 mod child;
 mod command;
 mod descriptors;
+pub mod mail;
 mod pcntl;
 mod posix;
 mod proc;
@@ -31,6 +32,7 @@ impl Extension for Process {
 
     fn register(&self, registry: &mut Registry) {
         proc::register(registry);
+        mail::register(registry);
         shell::register(registry);
         shell::popen::register(registry);
     }

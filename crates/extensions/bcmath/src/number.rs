@@ -32,7 +32,11 @@ pub(crate) const CLASS: ClassEntry = ClassEntry {
         binary: Some(operators::binary),
         cast: Some(cast),
         properties: Some(properties),
-        property_access: Some(&NativePropertyAccess { read, mutate }),
+        property_access: Some(&NativePropertyAccess {
+            read,
+            mutate,
+            string_property: None,
+        }),
         ..ClassHooks::EMPTY
     }),
     ..ClassEntry::class(NAME)

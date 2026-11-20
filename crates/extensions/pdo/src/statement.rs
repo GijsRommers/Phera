@@ -32,6 +32,7 @@ pub struct Statement {
     pub fetch: FetchMode,
     pub column: usize,
     pub fetch_flags: i64,
+    pub row_class: Option<crate::fetch_class::RowClass>,
     pub error: ErrorState,
     /// SQLite: whether the statement ran since it was prepared or its
     /// cursor closed, which `getColumnMeta()` needs.
@@ -111,6 +112,11 @@ async fn create(
         return Err(unsupported("Statement driver options"));
     }
     let attributes = connection.attributes.borrow().clone();
+    let row_class = if query {
+        crate::fetch_class::RowClass::configured(context, arguments, 1, "PDO::query").await?
+    } else {
+        None
+    };
     let configuration = if query {
         crate::fetch_options::validate(
             crate::fetch_options::Method::Query,
@@ -181,6 +187,7 @@ async fn create(
         fetch: configuration.mode,
         column: configuration.column,
         fetch_flags: configuration.flags,
+        row_class,
         error,
         sqlite_executed: false,
     }))));

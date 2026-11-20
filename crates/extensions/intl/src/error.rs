@@ -39,6 +39,13 @@ pub fn warning_code(context: &mut dyn Context, code: i32) {
     *context.state().get_or_default::<ErrorState>() = ErrorState { code, detail: None };
 }
 
+pub fn store(context: &mut dyn Context, function: &str, code: i32, detail: &str) {
+    *context.state().get_or_default::<ErrorState>() = ErrorState {
+        code,
+        detail: Some(format!("{function}(): {detail}")),
+    };
+}
+
 pub fn fail(
     context: &mut dyn Context,
     function: &str,

@@ -26,6 +26,7 @@ const CONSTANTS: &[(&str, ConstantValue)] = &[
 ];
 
 const ARRAY_HOOKS: ClassHooks = ClassHooks {
+    legacy_unserialize: Some(serialization::decode_legacy_payload),
     clone: Some(NativeClone::Copy(properties::clone_state)),
     properties: Some(properties::view),
     property_access: Some(&properties::ACCESS),

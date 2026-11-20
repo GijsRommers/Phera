@@ -59,7 +59,7 @@ pub(crate) const FUNCTIONS: &[FunctionEntry] = &[
         &[KEY, PATH, PASSPHRASE, OPTIONS],
         export_to_file,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::deprecated_sync(
         "openssl_pkey_free",
         &[Param::new("key", ParamType::Class(CLASS))],
         free,
@@ -71,8 +71,8 @@ pub(crate) const FUNCTIONS: &[FunctionEntry] = &[
     ),
 ];
 
-fn free(context: &mut dyn Context, _: &[Value]) -> NativeResult {
-    deprecate_free(context, "openssl_pkey_free")
+fn free(_: &mut dyn Context, _: &[Value]) -> NativeResult {
+    Ok(Value::Null)
 }
 
 fn free_alias(context: &mut dyn Context, _: &[Value]) -> NativeResult {

@@ -6,7 +6,7 @@ use std::rc::Rc;
 use crate::{Diagnostics, Object, OpError, PhpString, Value};
 
 use super::structure::{CompareStep, Comparison, Pair, Table, TableComparison};
-use super::{ObjectComparator, compare_resolved, smart_strcmp};
+use super::{ObjectComparator, smart_strcmp};
 
 pub enum StringComparisonStep {
     Complete(i8),
@@ -127,13 +127,16 @@ pub fn compare_with_string_objects(
 ) -> Result<StringComparisonStep, OpError> {
     let left = left.try_deref()?;
     let right = right.try_deref()?;
+    let mut comparison = Comparison::Native(objects);
+    if let Some(order) = comparison.mixed(&left, &right, diagnostics)? {
+        return Ok(StringComparisonStep::Complete(order));
+    }
     if let Some(pair) = CastPair::from_values(&left, &right) {
         return Ok(StringComparisonStep::Cast(Box::new(StringComparison {
             pair,
             remaining: None,
         })));
     }
-    let mut comparison = Comparison::Native(objects);
     let (left, right) = match (&*left, &*right) {
         (Value::Array(left), Value::Array(right)) => {
             if Rc::ptr_eq(left, right) {
@@ -155,7 +158,8 @@ pub fn compare_with_string_objects(
             }
         }
         _ => {
-            return compare_resolved(&left, &right, &mut comparison, diagnostics)
+            return comparison
+                .leaf(&left, &right, diagnostics)
                 .map(StringComparisonStep::Complete);
         }
     };

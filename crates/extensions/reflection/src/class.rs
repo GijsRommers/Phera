@@ -181,12 +181,22 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
         MethodEntry::public_async("getTraits", &[], |c, o, _| relations(c, o, |r| &r.traits)),
         MethodEntry::public_async(
             "isSubclassOf",
-            const { &[Param::new("class", ParamType::ObjectOrString)] },
+            const {
+                &[Param::new(
+                    "class",
+                    ParamType::ClassUnion("ReflectionClass|string"),
+                )]
+            },
             |c, o, a| relationship(c, o, a, Relationship::Subclass),
         ),
         MethodEntry::public_async(
             "implementsInterface",
-            const { &[Param::new("interface", ParamType::ObjectOrString)] },
+            const {
+                &[Param::new(
+                    "interface",
+                    ParamType::ClassUnion("ReflectionClass|string"),
+                )]
+            },
             |c, o, a| relationship(c, o, a, Relationship::Interface),
         ),
         MethodEntry::public_async_named(

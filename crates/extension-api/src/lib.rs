@@ -28,15 +28,15 @@ pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value}
 pub use arguments::{args, prepare_arguments, prepare_call, prepare_single_argument};
 pub use class::{
     AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
-    NativePropertyAccess, NativePropertyMutation, NativePropertyRead, PrepareMethod, PropertyEntry,
-    PropertyType, SyncMethod, Visibility, WindowMethod,
+    NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeStringProperty,
+    PrepareMethod, PropertyEntry, PropertyType, SyncMethod, Visibility, WindowMethod,
 };
 pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{
     AsyncFn, FunctionEntry, NativeFn, NativeNumericParameter, Param, ParamType, SyncFn,
-    SyncSelector,
+    SyncSelector, deprecated_method,
 };
 pub use object_handlers::{
     ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeBinary,
