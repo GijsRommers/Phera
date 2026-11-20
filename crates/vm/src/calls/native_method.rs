@@ -115,50 +115,68 @@ impl Vm {
                 if method.is_static {
                     self.native_called_class = Some(context.called.clone());
                 }
-                let result = match entry.handler {
-                    phera_extension_api::NativeMethod::Sync(handler) => {
-                        let track =
-                            self.error_handlers.error.is_some() && !self.error_handlers.active;
-                        let previous = if track {
-                            let operator = if method.is_static { "::" } else { "->" };
-                            self.error_handlers.native_site.replace(
-                                crate::error_traces::NativeTrace::new(
-                                    &format!("{}{operator}{}", method.declaring, method.name),
+                // A class miss from the handler loads the class and runs it
+                // again with the same arguments (see `calls::native_retries`).
+                let mut attempts = 0;
+                let result = loop {
+                    let again = self.has_autoloaders().then(|| arguments.clone());
+                    let outcome = match entry.handler {
+                        phera_extension_api::NativeMethod::Sync(handler) => {
+                            let track =
+                                self.error_handlers.error.is_some() && !self.error_handlers.active;
+                            let previous = if track {
+                                let operator = if method.is_static { "::" } else { "->" };
+                                self.error_handlers.native_site.replace(
+                                    crate::error_traces::NativeTrace::new(
+                                        &format!("{}{operator}{}", method.declaring, method.name),
+                                        &arguments,
+                                    ),
+                                )
+                            } else {
+                                None
+                            };
+                            let result = handler(self, context.receiver.as_ref(), &arguments);
+                            if track {
+                                self.error_handlers.native_site = previous;
+                            }
+                            if let Err(error) = &result {
+                                self.record_native_failure(
+                                    error,
+                                    NativeFrame::Method(method),
                                     &arguments,
-                                ),
-                            )
-                        } else {
-                            None
-                        };
-                        let result = handler(self, context.receiver.as_ref(), &arguments);
-                        if track {
-                            self.error_handlers.native_site = previous;
+                                );
+                            }
+                            self.call_stack.recycle_native_arguments(arguments);
+                            result
                         }
-                        if let Err(error) = &result {
-                            self.record_native_failure(
-                                error,
-                                NativeFrame::Method(method),
-                                &arguments,
-                            );
+                        handler => {
+                            let retained = self.retain_native_arguments(&arguments);
+                            let result = match handler {
+                                phera_extension_api::NativeMethod::Async(handler) => {
+                                    handler(self, context.receiver.clone(), arguments).await
+                                }
+                                phera_extension_api::NativeMethod::Window(window) => {
+                                    (window.run)(self, context.receiver.clone(), arguments).await
+                                }
+                                phera_extension_api::NativeMethod::AsyncNamed(handler) => {
+                                    handler(self, context.receiver.clone(), arguments, named).await
+                                }
+                                _ => Err(NativeError::error("Cannot call abstract method")),
+                            };
+                            self.finish_native_future(result, NativeFrame::Method(method), retained)
                         }
-                        self.call_stack.recycle_native_arguments(arguments);
-                        result
-                    }
-                    handler => {
-                        let retained = self.retain_native_arguments(&arguments);
-                        let result = match handler {
-                            phera_extension_api::NativeMethod::Async(handler) => {
-                                handler(self, context.receiver.clone(), arguments).await
+                    };
+                    match outcome {
+                        Err(error) if crate::autoload::ClassMiss::is(&error) => {
+                            match self
+                                .load_missed_class(error, &mut attempts, again.is_some())
+                                .await
+                            {
+                                Ok(()) => arguments = again.unwrap_or_default(),
+                                Err(error) => break Err(error),
                             }
-                            phera_extension_api::NativeMethod::Window(window) => {
-                                (window.run)(self, context.receiver.clone(), arguments).await
-                            }
-                            phera_extension_api::NativeMethod::AsyncNamed(handler) => {
-                                handler(self, context.receiver.clone(), arguments, named).await
-                            }
-                            _ => Err(NativeError::error("Cannot call abstract method")),
-                        };
-                        self.finish_native_future(result, NativeFrame::Method(method), retained)
+                        }
+                        outcome => break outcome,
                     }
                 };
                 self.native_called_class = previous;

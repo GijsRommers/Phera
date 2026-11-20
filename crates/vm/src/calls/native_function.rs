@@ -100,7 +100,21 @@ impl Vm {
         }
         match entry.handler {
             NativeFn::Sync(handler) | NativeFn::DeprecatedSync(handler) => {
-                let result = handler(self, &arguments);
+                // A class miss from the handler loads the class and runs it
+                // again (see `calls::native_retries`).
+                let mut attempts = 0;
+                let result = loop {
+                    match handler(self, &arguments) {
+                        Err(error) if crate::autoload::ClassMiss::is(&error) => {
+                            if let Err(error) =
+                                self.load_missed_class(error, &mut attempts, true).await
+                            {
+                                break Err(error);
+                            }
+                        }
+                        result => break result,
+                    }
+                };
                 if let Err(error) = &result
                     && binding.has_native_frame()
                 {
@@ -114,8 +128,23 @@ impl Vm {
                 result
             }
             NativeFn::Async(handler) => {
-                self.run_async_native_function(entry.name, handler, arguments, binding)
-                    .await
+                let mut attempts = 0;
+                loop {
+                    // The handler takes its arguments; a copy is kept for a
+                    // second call only when a loader could load a class.
+                    let again = self.has_autoloaders().then(|| arguments.clone());
+                    match self
+                        .run_async_native_function(entry.name, handler, arguments, binding)
+                        .await
+                    {
+                        Err(error) if crate::autoload::ClassMiss::is(&error) => {
+                            self.load_missed_class(error, &mut attempts, again.is_some())
+                                .await?;
+                            arguments = again.unwrap_or_default();
+                        }
+                        result => return result,
+                    }
+                }
             }
         }
     }

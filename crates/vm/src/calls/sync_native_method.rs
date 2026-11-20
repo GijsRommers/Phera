@@ -56,10 +56,12 @@ impl Vm {
         {
             return fallback;
         }
-        let (_, details) = self.call_stack.pop_call()?;
-        let Some(CallTarget::Method { method, context }) = details
-            .and_then(|details| details.callee)
-            .map(|callee| callee.target)
+        let record = self.call_stack.pop_call()?;
+        let Some(CallTarget::Method { method, context }) = record
+            .1
+            .as_ref()
+            .and_then(|details| details.callee.as_ref())
+            .map(|callee| callee.target.clone())
         else {
             return Err(internal_error!("native method target"));
         };
@@ -67,6 +69,7 @@ impl Vm {
         for (offset, argument) in arguments[..count].iter_mut().enumerate() {
             *argument = self.registers.take(call.base() + offset);
         }
+        let prefix = self.take_call_prefix(&call);
         self.registers.truncate(call.start());
         let previous = self.native_called_class.take();
         if method.is_static {
@@ -93,6 +96,12 @@ impl Vm {
                     destination,
                     Box::new((error, method)),
                 )))
+            }
+            // The interpreter runs the `Call` again once the class is
+            // loaded (see `calls::native_retries`).
+            Err(error) if crate::autoload::ClassMiss::is(&error) => {
+                self.restore_native_call(record, prefix, &arguments[..count]);
+                Err(error)
             }
             Err(error) => {
                 self.record_native_failure(

@@ -120,25 +120,41 @@ impl Vm {
         {
             if count == 1 {
                 let argument = self.registers.take(base);
-                return self.invoke_sync_function(
+                let result = self.invoke_sync_function(
                     link.name,
                     handler,
                     std::slice::from_ref(&argument),
                     destination,
                     ArgumentBinding::Caller,
                 );
+                if let Err(error) = &result
+                    && crate::autoload::ClassMiss::is(error)
+                {
+                    self.registers.put(base, argument);
+                }
+                return result;
             }
             let mut arguments = [const { Value::Null }; 4];
             for (offset, argument) in arguments[..count].iter_mut().enumerate() {
                 *argument = self.registers.take(base + offset);
             }
-            return self.invoke_sync_function(
+            let result = self.invoke_sync_function(
                 link.name,
                 handler,
                 &arguments[..count],
                 destination,
                 ArgumentBinding::Caller,
             );
+            // The interpreter runs `CallNativeDirect` again once the class
+            // is loaded (see `calls::native_retries`): its arguments go back.
+            if let Err(error) = &result
+                && crate::autoload::ClassMiss::is(error)
+            {
+                for (offset, argument) in arguments.into_iter().take(count).enumerate() {
+                    self.registers.put(base + offset, argument);
+                }
+            }
+            return result;
         }
         self.call_native_direct_fallback(symbol, base, count, destination)
     }
@@ -175,7 +191,21 @@ impl Vm {
             let argument = self.registers.take(base + offset);
             self.store_sent_value(offset, argument)?;
         }
-        self.call_native(destination)
+        let result = self.call_native(destination);
+        // `call_native` put its call back; `CallNativeDirect` prepares its
+        // own when it runs again, so the arguments go back to where it
+        // reads them (see `calls::native_retries`).
+        if let Err(error) = &result
+            && crate::autoload::ClassMiss::is(error)
+            && let Ok((call, _)) = self.call_stack.pop_call()
+        {
+            for offset in 0..count {
+                let argument = self.registers.take(call.base() + offset);
+                self.registers.put(base + offset, argument);
+            }
+            self.registers.truncate(call.start());
+        }
+        result
     }
 
     /// Unhandled shapes keep their window intact for the ordinary native binder.
@@ -219,11 +249,19 @@ impl Vm {
                 arguments.push(value);
             }
         }
-        self.call_stack.pop_call()?;
+        let record = self.call_stack.pop_call()?;
+        let prefix = self.take_call_prefix(&call);
         self.registers.truncate(call.start());
 
         let result =
             self.invoke_sync_function(entry.name, handler, &arguments, destination, binding);
+        // The interpreter runs the `Call` again once the class is loaded
+        // (see `calls::native_retries`).
+        if let Err(error) = &result
+            && crate::autoload::ClassMiss::is(error)
+        {
+            self.restore_native_call(record, prefix, &arguments);
+        }
         self.call_stack.recycle_native_arguments(arguments);
         result
     }
