@@ -29,6 +29,7 @@ use anyhow::{Context, Result, bail};
 use rayon::prelude::*;
 use std::fs;
 use std::path::Path;
+use std::time::Instant;
 
 /// Install the exact locked packages and generate a standalone PHP autoloader.
 pub fn install(directory: &Path, options: &Options) -> Result<()> {
@@ -44,6 +45,7 @@ fn install_locked(
     updating: bool,
     runner: &mut scripts::Runner,
 ) -> Result<()> {
+    let started = Instant::now();
     let project = Project::read(directory)?;
     let lock = Lock::read(directory)?;
     if lock.content_hash != content_hash::compute(&project.data)? {
@@ -57,36 +59,9 @@ fn install_locked(
     if !updating {
         runner.event(&project, options, "pre-install-cmd")?;
     }
-    let vendor = project.vendor_dir()?;
-    fs::create_dir_all(&vendor)?;
-    let cache = store::Store::open(options.cache_dir.as_deref())?;
-    let network = network::Network::new(&project.directory)?;
     let packages = lock.packages(options.no_dev);
     let previous = cleanup::previous(&project)?;
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(16.min(std::thread::available_parallelism()?.get() * 2))
-        .build()?;
-    pool.install(|| {
-        packages.par_iter().try_for_each(|package| -> Result<()> {
-            package.validate()?;
-            if package.kind() == "metapackage" {
-                return Ok(());
-            }
-            let source = cache
-                .prepare(package, &network, options.offline, &project.directory)
-                .with_context(|| format!("Cannot install {} {}.", package.name, package.version))?;
-            let destination = path_install::destination(&vendor, package)?;
-            let method = if path_install::link(&project, package, &destination)? {
-                "live path repository link"
-            } else {
-                store::materialise(&source, &destination, package.field("target-dir").as_str())?
-            };
-            if options.verbose {
-                eprintln!("  {} {}: {method}", package.name, package.version);
-            }
-            Ok(())
-        })
-    })?;
+    materialise_packages(&project, &packages, options)?;
     cleanup::remove_stale(&project, &previous, &packages)?;
     installed::write(&project, &lock, options)?;
     binaries::write(&project, &packages)?;
@@ -111,8 +86,56 @@ fn install_locked(
             );
         }
     }
-    println!("Installed {} packages.", packages.len());
+    println!(
+        "Installed {} packages in {:.2}s.",
+        packages.len(),
+        started.elapsed().as_secs_f64()
+    );
     Ok(())
+}
+
+fn materialise_packages(project: &Project, packages: &[Package], options: &Options) -> Result<()> {
+    for package in packages {
+        package.validate()?;
+    }
+    if packages.windows(2).any(|pair| pair[0].name == pair[1].name) {
+        bail!("composer.lock contains duplicate package names. Run `phera update`.");
+    }
+    let cache = store::Store::open(options.cache_dir.as_deref())?;
+    let network = network::Network::new(project)?;
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(16.min(std::thread::available_parallelism()?.get() * 2))
+        .build()?;
+    let prepared = pool.install(|| {
+        packages
+            .par_iter()
+            .filter(|package| package.kind() != "metapackage")
+            .map(|package| {
+                let source = cache
+                    .prepare(package, &network, options.offline, &project.directory)
+                    .with_context(|| {
+                        format!("Cannot install {} {}.", package.name, package.version)
+                    })?;
+                Ok((package, source))
+            })
+            .collect::<Result<Vec<_>>>()
+    })?;
+    let vendor = project.vendor_dir()?;
+    fs::create_dir_all(&vendor)?;
+    pool.install(|| {
+        prepared.par_iter().try_for_each(|(package, source)| {
+            let destination = path_install::destination(&vendor, package)?;
+            let method = if path_install::link(project, package, &destination)? {
+                "live path repository link"
+            } else {
+                store::materialise(source, &destination, package.field("target-dir").as_str())?
+            };
+            if options.verbose {
+                eprintln!("  {} {}: {method}", package.name, package.version);
+            }
+            Ok(())
+        })
+    })
 }
 
 /// Resolve composer.json through PubGrub, write a Composer lock and install it.

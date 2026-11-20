@@ -1475,6 +1475,8 @@ crate against the extension API.
 The initial implementation lives in `crates/packages`. The CLI passes platform
 versions from Phera's runtime registry. The package crate handles resolution,
 archive downloads, the global store and Composer-compatible autoloader files.
+Downloads use the runtime's rustls and ring configuration. Locked installs
+prepare every archive before materializing packages into `vendor/`.
 See [package compatibility](../crates/packages/README.md) for implementation
 status. The list below describes the intended scope.
 
@@ -1510,7 +1512,7 @@ that a project can use either tool.
   warm, no network: it is linking files.
 - **Commands**: `phera install`, `phera update`, `phera add`, `phera remove`,
   `phera why`, `phera outdated`, `phera audit` (security advisories from
-  Packagist), `phera dump-autoload`, and `phera x vendor/bin-tool` to run a
+  Packagist), `phera dump-autoload`, and `phera exec bin-tool` to run a
   package's binary.
 - **What does not carry over**: Composer plugins (they are PHP code that
   hooks into Composer's internals). The few that matter are handled natively

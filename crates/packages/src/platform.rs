@@ -31,6 +31,9 @@ pub(crate) fn validate(project: &Project, lock: &Lock, options: &Options) -> Res
             continue;
         };
         for (name, text) in links.iter().filter(|(name, _)| solver::is_platform(name)) {
+            if options.ignores_platform(name) {
+                continue;
+            }
             let text = text
                 .as_str()
                 .context("Platform constraint must be a string.")?;

@@ -230,13 +230,14 @@ fn no_dev_removes_previous_packages_and_runs_root_events_in_order() {
 fn rejects_a_dist_checksum_mismatch() {
     let directory = project();
     let root = directory.path();
+    let valid = archive(root, "acme/valid", &[("Valid.php", "<?php class Valid {}")]);
     let mut package = archive(root, "acme/base", &[("Base.php", "<?php class Base {}")]);
     package["dist"]["shasum"] = "0000000000000000000000000000000000000000".into();
     fs::write(root.join("composer.json"), "{}").unwrap();
     fs::write(
         root.join("composer.lock"),
         json!({"content-hash": "stale",
-        "packages": [package]})
+        "packages": [valid, package]})
         .to_string(),
     )
     .unwrap();
@@ -245,7 +246,7 @@ fn rejects_a_dist_checksum_mismatch() {
         ..Options::default()
     };
     assert!(format!("{:#}", install(root, &options).unwrap_err()).contains("Checksum mismatch"));
-    assert!(!root.join("vendor/acme/base").exists());
+    assert!(!root.join("vendor").exists());
 }
 
 #[test]
@@ -285,4 +286,28 @@ fn incomplete_cached_objects_fail_offline_and_are_repaired_online() {
         fs::read_to_string(root.join("vendor/acme/cache/Thing.php")).unwrap(),
         "<?php class Thing {}"
     );
+}
+
+#[test]
+fn refuses_an_http_dist_without_an_explicit_opt_out() {
+    let directory = project();
+    let root = directory.path();
+    fs::write(root.join("composer.json"), "{}").unwrap();
+    fs::write(
+        root.join("composer.lock"),
+        json!({"content-hash": "fixture", "packages": [{
+            "name": "acme/base", "version": "1.0.0",
+            "dist": {"type": "zip", "url": "http://127.0.0.1:9/base.zip"}
+        }]})
+        .to_string(),
+    )
+    .unwrap();
+    let options = Options {
+        cache_dir: Some(root.join("cache")),
+        no_scripts: true,
+        ..Options::default()
+    };
+    let error = install(root, &options).unwrap_err();
+    assert!(format!("{error:#}").contains("Refusing HTTP to 127.0.0.1"));
+    assert!(!root.join("vendor").exists());
 }

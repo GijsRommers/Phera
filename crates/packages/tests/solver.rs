@@ -81,6 +81,7 @@ fn resolve(require: Value, packages: Value, extra: Value, lowest: bool) -> Value
         .as_object_mut()
         .unwrap()
         .extend(extra.as_object().unwrap().clone());
+    manifest["config"]["secure-http"] = false.into();
     fs::write(directory.path().join("composer.json"), manifest.to_string()).unwrap();
     let mut options = Options {
         cache_dir: Some(directory.path().join("cache")),
@@ -215,7 +216,8 @@ fn reports_unsatisfied_platform_without_writing_a_lock() {
     fs::write(
         directory.path().join("composer.json"),
         json!({"name": "test/root",
-        "require": {"php": "^9"}, "config": {"platform": {"php": "8.5.12"}},
+        "require": {"php": "^9"},
+        "config": {"secure-http": false, "platform": {"php": "8.5.12"}},
         "repositories": [{"type": "composer", "url": registry.url},
             {"packagist.org": false}]})
         .to_string(),

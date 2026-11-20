@@ -69,7 +69,7 @@ pub(crate) fn generate(project: &Project, packages: &[Package], options: &Option
             }
             if options.optimize
                 || project.config_bool("optimize-autoloader")
-                || project.config_bool("classmap-authoritative")
+                || options.authoritative(project)
             {
                 for (key, psr4) in [("psr-4", true), ("psr-0", false)] {
                     if let Some(prefixes) = autoload[key].as_object() {

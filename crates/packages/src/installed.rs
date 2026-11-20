@@ -5,6 +5,7 @@
 use crate::{Lock, Options, Package, Project, php};
 use anyhow::Result;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::fs;
 
 pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result<()> {
@@ -61,7 +62,8 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
     )?;
     let root_version = project.root_version();
     let normalized_root = crate::version::normalize(&root_version)?;
-    let root_path = php::static_path(&project.directory, &directory);
+    let root_relative = php::relative(&directory, &project.directory);
+    let root_path = format!("__DIR__ . {}", php::quote(&format!("/{root_relative}/")));
     let root_type = project.data["type"].as_str().unwrap_or("library");
     let root = json!({
         "name": project.name(), "pretty_version": root_version,
@@ -76,16 +78,13 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
         1,
     ));
     output.push_str(",\n    'versions' => array(\n");
-    output.push_str(&format!(
-        "        {} => array('pretty_version' => {}, \
-        'version' => {}, 'aliases' => array(), 'reference' => null, \
-        'type' => {}, 'install_path' => {root_path}, 'dev_requirement' => false),\n",
-        php::quote(project.name()),
-        php::quote(&root_version),
-        php::quote(&normalized_root),
-        php::quote(root_type)
-    ));
-    let mut versions = serde_json::Map::<String, Value>::new();
+    let mut versions = BTreeMap::from([(
+        project.name().to_owned(),
+        json!({
+            "pretty_version": root_version, "version": normalized_root, "reference": null,
+            "type": root_type, "aliases": [], "dev_requirement": false,
+        }),
+    )]);
     for package in &packages {
         let dev = dev_names.contains(&package.name.as_str());
         let mut aliases = Vec::new();
@@ -117,7 +116,12 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
             }),
         );
     }
-    for package in &packages {
+    let root_package = Package {
+        name: project.name().into(),
+        version: root_version,
+        data: project.data.as_object().cloned().unwrap_or_default(),
+    };
+    for package in packages.iter().chain(std::iter::once(&root_package)) {
         for (field, key) in [("replace", "replaced"), ("provide", "provided")] {
             if let Some(links) = package.field(field).as_object() {
                 for (name, constraint) in links {
@@ -140,32 +144,37 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
                     if !dev_names.contains(&package.name.as_str()) {
                         entry["dev_requirement"] = false.into();
                     }
-                    if let Some(items) = entry[key].as_array_mut() {
+                    if let Some(items) = entry[key].as_array_mut()
+                        && !items.contains(&constraint)
+                    {
                         items.push(constraint);
                     }
                 }
             }
         }
     }
-    let mut entries: Vec<_> = versions.iter().collect();
-    entries.sort_by_key(|(name, _)| *name);
-    for (name, value) in entries {
-        let path = if value.get("version").is_some()
-            && packages
-                .iter()
-                .any(|package| package.name == *name && package.kind() != "metapackage")
-        {
-            let package = packages
-                .iter()
-                .find(|package| package.name == *name)
-                .ok_or_else(|| anyhow::anyhow!("Installed package record is missing."))?;
-            php::static_path(&package.install_path(&vendor)?, &directory)
+    for (name, mut value) in versions {
+        for key in ["provided", "replaced"] {
+            if let Some(links) = value.get_mut(key).and_then(Value::as_array_mut) {
+                links.sort_by(|left, right| left.as_str().cmp(&right.as_str()));
+            }
+        }
+        let mut code = php::value(&value);
+        let path = if name == project.name() {
+            Some(root_path.clone())
+        } else if let Some(package) = packages.iter().find(|package| package.name == name) {
+            Some(if package.kind() == "metapackage" {
+                "null".into()
+            } else {
+                php::static_path(&package.install_path(&vendor)?, &directory)
+            })
         } else {
-            "null".into()
+            None
         };
-        let code =
-            php::value(value).replacen("array(", &format!("array('install_path' => {path}, "), 1);
-        output.push_str(&format!("        {} => {code},\n", php::quote(name)));
+        if let Some(path) = path {
+            code = code.replacen("array(", &format!("array('install_path' => {path}, "), 1);
+        }
+        output.push_str(&format!("        {} => {code},\n", php::quote(&name)));
     }
     output.push_str("    ),\n);\n");
     fs::write(directory.join("installed.php"), output)?;

@@ -51,10 +51,13 @@ runner yet.
 
 ### Installing dependencies
 
-The package manager is in development. Try `phera install --frozen-lockfile
---no-scripts` to install the versions in an existing Composer lock and generate
-`vendor/autoload.php`. See [package compatibility](crates/packages/README.md)
-for the supported commands and current gaps.
+The package manager is in development. Try
+`phera install --locked --no-scripts` to install the versions in an existing
+Composer lock and generate `vendor/autoload.php`. Use `--offline` to install
+from a warm cache, `--no-dev` to omit development dependencies, or
+`-a` to generate an authoritative class map. See
+[package compatibility](crates/packages/README.md) for the supported commands
+and current gaps.
 
 ### Serving a site
 

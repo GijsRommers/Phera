@@ -69,7 +69,7 @@ pub(super) fn write(project: &Project, maps: &Maps, options: &Options) -> Result
     );
     let static_code = static_file(maps, &vendor, &suffix);
     fs::write(composer.join("autoload_static.php"), static_code)?;
-    let authoritative = project.config_bool("classmap-authoritative");
+    let authoritative = options.authoritative(project);
     let real = include_str!("../../resources/autoload_real.php.in")
         .replace("@SUFFIX@", &suffix)
         .replace(

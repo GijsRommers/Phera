@@ -202,10 +202,9 @@ impl DependencyProvider for Provider<'_> {
         }
         for (field, negative) in [("require", false), ("conflict", true)] {
             if let Some(requirements) = package.field(field).as_object() {
-                for (platform, constraint) in requirements
-                    .iter()
-                    .filter(|(name, _)| super::is_platform(name))
-                {
+                for (platform, constraint) in requirements.iter().filter(|(name, _)| {
+                    super::is_platform(name) && !self.options.ignores_platform(name)
+                }) {
                     let constraint = constraint
                         .as_str()
                         .context("Platform constraint must be a string.")?;
@@ -213,7 +212,7 @@ impl DependencyProvider for Provider<'_> {
                         Constraint::parse(constraint)
                             .is_ok_and(|constraint| constraint.matches(version))
                     });
-                    if matched == negative && !self.options.ignore_platform {
+                    if matched == negative {
                         return Ok(Dependencies::Unavailable(format!(
                             "{} {} needs {platform} {constraint}; \
                             configure config.platform or use a Phera binary providing it",

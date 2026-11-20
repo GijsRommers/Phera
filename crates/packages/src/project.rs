@@ -14,13 +14,38 @@ pub struct Options {
     pub frozen: bool,
     pub offline: bool,
     pub optimize: bool,
+    pub authoritative: bool,
     pub verbose: bool,
     pub no_scripts: bool,
     pub no_install: bool,
     pub prefer_lowest: bool,
     pub ignore_platform: bool,
+    pub ignored_platform_requirements: Vec<glob::Pattern>,
     pub cache_dir: Option<PathBuf>,
     pub platform: std::collections::BTreeMap<String, String>,
+}
+
+impl Options {
+    pub fn ignore_platform_requirement(&mut self, name: &str) -> Result<()> {
+        if name.is_empty() {
+            bail!("--ignore-platform-req needs a platform package name.");
+        }
+        self.ignored_platform_requirements
+            .push(glob::Pattern::new(name)?);
+        Ok(())
+    }
+
+    pub(crate) fn ignores_platform(&self, name: &str) -> bool {
+        self.ignore_platform
+            || self
+                .ignored_platform_requirements
+                .iter()
+                .any(|p| p.matches(name))
+    }
+
+    pub(crate) fn authoritative(&self, project: &Project) -> bool {
+        self.authoritative || project.config_bool("classmap-authoritative")
+    }
 }
 
 #[derive(Clone, Debug)]

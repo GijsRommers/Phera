@@ -9,6 +9,7 @@ Installed projects load under ordinary PHP.
 ```sh
 phera install --frozen-lockfile --no-scripts -o
 phera install --offline --no-dev
+phera install --locked --classmap-authoritative
 phera update --no-install
 phera add psr/log:^3
 phera remove psr/log
@@ -19,9 +20,10 @@ phera dump-autoload -o
 
 Use `--verbose` to see each package's materialization method. `--no-scripts` is
 available for controlled installations and differential tests. Platform checks
-use Phera's registered capabilities plus `config.platform`; the comparison
-harness explicitly uses `--ignore-platform-reqs` in both tools to compare package
-selection independently of PHP/Phera's different extension sets.
+use Phera's registered capabilities plus `config.platform`. Use
+`--ignore-platform-req ext-name` to skip one requirement. The comparison harness
+uses `--ignore-platform-reqs` in both tools so their different extension sets
+do not affect the package comparison.
 
 ## Store and safety
 
@@ -33,6 +35,11 @@ records file sizes, links and executable bits; incomplete objects fail offline
 and are repaired from a verified archive online. Downloads and
 materialization run in parallel. PHP declaration scans use all available cores
 and cache declaration names by source content.
+
+HTTPS is required unless the project explicitly sets `config.secure-http` to
+`false`. Credentials are used only over HTTPS at the original request origin.
+Downloads share the runtime's rustls configuration with the ring provider.
+Each archive is prepared before the install changes package files in `vendor/`.
 
 Vendor files are copy-on-write clones where available, otherwise private copies.
 There is deliberately no hard-link fallback: every root script can modify any

@@ -24,11 +24,18 @@ fn rejects_incompatible_platform_before_creating_vendor_and_honors_no_dev() {
     let error = install(root, &options).unwrap_err().to_string();
     assert!(error.contains("requires php ^8.5"));
     assert!(!root.join("vendor").exists());
+    let mut ignore_extension = options.clone();
+    ignore_extension
+        .ignore_platform_requirement("ext-example")
+        .unwrap();
+    let error = install(root, &ignore_extension).unwrap_err().to_string();
+    assert!(error.contains("requires php ^8.5"));
 
     manifest["config"] = json!({"platform": {"php": "8.5.0"}});
     fs::write(root.join("composer.json"), manifest.to_string()).unwrap();
     let error = install(root, &options).unwrap_err().to_string();
     assert!(error.contains("requires ext-example ^1"));
+    install(root, &ignore_extension).unwrap();
     options.no_dev = true;
     install(root, &options).unwrap();
 

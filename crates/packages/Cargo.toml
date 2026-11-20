@@ -8,11 +8,12 @@ license.workspace = true
 [dependencies]
 phera-parser.workspace = true
 phera-ast.workspace = true
+phera-io-pool.workspace = true
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 reqwest = { version = "0.12", default-features = false, features = [
-    "blocking", "rustls-tls", "json",
+    "blocking", "rustls-tls-no-provider", "json",
 ] }
 rayon = "1"
 sha1 = "0.10"

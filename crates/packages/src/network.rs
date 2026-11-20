@@ -3,6 +3,7 @@
 //! `COMPOSER_AUTH={"http-basic":{"repo.example":{"username":"u","password":"p"}}}`
 //! authenticates only that host, including when a download redirects elsewhere.
 
+use crate::Project;
 use anyhow::{Context, Result, bail};
 use reqwest::Url;
 use reqwest::blocking::{Client, Response};
@@ -10,7 +11,6 @@ use reqwest::header::{AUTHORIZATION, HeaderValue, IF_MODIFIED_SINCE, IF_NONE_MAT
 use serde_json::Value;
 use std::fs;
 use std::io::Read;
-use std::path::Path;
 use std::time::Duration;
 
 const MAX_DOWNLOAD: u64 = 512 * 1024 * 1024;
@@ -18,12 +18,13 @@ const MAX_DOWNLOAD: u64 = 512 * 1024 * 1024;
 pub(crate) struct Network {
     client: Client,
     auth: Value,
+    secure_http: bool,
 }
 
 impl Network {
-    pub(crate) fn new(project: &Path) -> Result<Self> {
+    pub(crate) fn new(project: &Project) -> Result<Self> {
         let mut auth = Value::Object(Default::default());
-        let file = project.join("auth.json");
+        let file = project.directory.join("auth.json");
         if file.is_file() {
             auth = serde_json::from_slice(&fs::read(file)?)
                 .context("Invalid project auth.json; correct its JSON syntax.")?;
@@ -44,11 +45,16 @@ impl Network {
             }
         }
         let client = Client::builder()
+            .use_preconfigured_tls((*phera_io_pool::tls::webpki_client()?).clone())
             .user_agent("Phera/0.1 Composer-compatible")
             .timeout(Duration::from_secs(120))
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
-        Ok(Self { client, auth })
+        Ok(Self {
+            client,
+            auth,
+            secure_http: project.data["config"]["secure-http"] != false,
+        })
     }
 
     pub(crate) fn response(
@@ -58,7 +64,7 @@ impl Network {
         modified: Option<&str>,
     ) -> Result<Response> {
         let mut url = Url::parse(address).map_err(|_| anyhow::anyhow!("Invalid download URL."))?;
-        let original_host = url.host_str().unwrap_or_default().to_owned();
+        let original_origin = url.origin();
         for _ in 0..10 {
             if !matches!(url.scheme(), "https" | "http")
                 || !url.username().is_empty()
@@ -66,9 +72,14 @@ impl Network {
             {
                 bail!("Use an HTTP(S) URL and put credentials in auth.json.");
             }
-            let host = url.host_str().unwrap_or_default();
+            let host = url.host_str().context("Download URL has no host.")?;
+            if url.scheme() == "http" && self.secure_http {
+                bail!(
+                    "Refusing HTTP to {host}. Use HTTPS or explicitly set config.secure-http to false."
+                );
+            }
             let mut request = self.client.get(url.clone());
-            if host == original_host {
+            if url.scheme() == "https" && url.origin() == original_origin {
                 let credentials = &self.auth["http-basic"][host];
                 if let Some(username) = credentials["username"].as_str() {
                     request = request.basic_auth(username, credentials["password"].as_str());

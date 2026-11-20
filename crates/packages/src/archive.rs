@@ -76,8 +76,12 @@ fn unzip(bytes: &[u8], target: &Path) -> Result<()> {
         let mut entry = archive.by_index(index)?;
         let destination = crate::paths::inside(target, &entry.name()?)?;
         let mode = entry.unix_mode().unwrap_or(0o644);
+        let kind = mode & 0o170000;
         check_size(entry.size(), &mut total)?;
-        if mode & 0o170000 == 0o120000 {
+        if !matches!(kind, 0 | 0o040000 | 0o100000 | 0o120000) {
+            bail!("Archive contains a device or unsupported special entry.");
+        }
+        if kind == 0o120000 {
             let mut link = String::new();
             entry.take(4097).read_to_string(&mut link)?;
             if link.len() > 4096 {

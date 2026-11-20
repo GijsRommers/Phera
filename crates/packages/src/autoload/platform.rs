@@ -30,6 +30,9 @@ pub(super) fn write(project: &Project, options: &Options) -> Result<()> {
     for requires in requirements {
         if let Some(requires) = requires.as_object() {
             for (name, text) in requires {
+                if options.ignores_platform(name) {
+                    continue;
+                }
                 if matches!(name.as_str(), "php" | "php-64bit") {
                     bit64 |= name == "php-64bit";
                     let constraint = Constraint::parse(text.as_str().unwrap_or("*"))?;

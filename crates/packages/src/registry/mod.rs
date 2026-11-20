@@ -36,7 +36,7 @@ pub(crate) struct Registry {
 impl Registry {
     pub(crate) fn new(project: &Project, options: &Options) -> Result<Self> {
         let store = Store::open(options.cache_dir.as_deref())?;
-        let network = Network::new(&project.directory)?;
+        let network = Network::new(project)?;
         let mut repositories = Vec::new();
         let mut packagist = true;
         let configurations = match &project.data["repositories"] {
