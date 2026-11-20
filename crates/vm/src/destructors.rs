@@ -88,8 +88,10 @@ impl Vm {
         error: NativeError,
         stop: usize,
     ) -> Result<(), NativeError> {
-        // With no destructor due anywhere, unwinding cannot make one due.
-        if !self.classes.ids().has_due() {
+        // With no destructor due anywhere, unwinding cannot make one due;
+        // but native code that threw may have let go of an object whose
+        // destructor is waiting, and it runs before the handler too.
+        if !self.classes.ids().has_due() && !self.destructors_due() {
             return self.handle_exception(error, stop);
         }
         let mut error = error;
