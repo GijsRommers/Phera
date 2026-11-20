@@ -89,6 +89,9 @@ impl Extension for Streams {
         registry.fork_state::<request::Files>(request::fork_files);
         registry.fork_resource("stream", stream_fork::fork_stream);
         registry.fork_resource("stream-context", context_options::fork_context);
+        user_file::register_fork(registry);
+        user_stat::register_fork(registry);
+        user_resource::register_fork(registry);
         registry.fork_state::<phera_extension_api::WorkingDirectory>(
             phera_extension_api::copy_state::<phera_extension_api::WorkingDirectory>,
         );

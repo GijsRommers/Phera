@@ -17,6 +17,23 @@ enum Handle {
 #[derive(Default)]
 struct OpenHandles(BTreeMap<i64, (Weak<Resource>, Handle)>);
 
+pub(crate) fn register_fork(registry: &mut phera_extension_api::Registry) {
+    registry.fork_state::<OpenHandles>(|state, fork| {
+        let handles = state.downcast_ref::<OpenHandles>()?;
+        if let Some((_, handle)) = handles.0.values().next() {
+            let object = match handle {
+                Handle::File(file) => &file.object,
+                Handle::Directory(directory) => &directory.object,
+            };
+            fork.refuse_state(
+                object.class.name(),
+                "an open user wrapper handle belongs to the boot",
+            );
+        }
+        None
+    });
+}
+
 pub(crate) fn make_file(context: &mut dyn Context, file: Rc<UserFile>) -> Value {
     let resource = new_resource(context.state(), "stream", file.clone());
     track(context, &resource, Handle::File(file));

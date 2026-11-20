@@ -34,6 +34,9 @@ const INSERT: &[Param] = &[
 ];
 
 pub fn register(registry: &mut Registry) {
+    registry.fork_resource("stream filter", |_, _| {
+        Err("an attached stream filter belongs to the boot".into())
+    });
     super::user::register(registry);
     for function in [
         FunctionEntry::sync("stream_get_filters", &[], get_filters),

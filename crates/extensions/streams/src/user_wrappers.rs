@@ -68,6 +68,7 @@ pub(crate) enum Handler {
 }
 
 /// PHP keeps the original insertion order until a scheme is removed and reinserted.
+#[derive(Clone)]
 pub(crate) struct Wrappers(Vec<(Vec<u8>, Handler)>);
 
 impl Default for Wrappers {

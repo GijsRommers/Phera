@@ -95,6 +95,10 @@ belongs to the current request. `fopen()`, `file_get_contents()`, and
 `file_put_contents()` can use paths such as `virtual://report`. An included wrapper URL is resolved
 by the application during the current request.
 
+Wrapper and filter registrations made during a snapshot boot carry over to
+each fork. Open application wrapper handles and attached filters must be
+created after the snapshot.
+
 Use `php://filter` or `stream_filter_append()` to transform a native stream
 with built-in filters. Register user filters with `stream_filter_register()` and
 attach them to a stream resource with `stream_filter_append()`. Phera limits the chain to 16 stages, intermediate

@@ -20,6 +20,28 @@ use super::{FEED, PASS, buckets};
 #[derive(Default)]
 struct Streams(HashMap<i64, Rc<Chains>>);
 
+pub(super) fn register_fork(registry: &mut phera_extension_api::Registry) {
+    registry.fork_state::<Streams>(|state, fork| {
+        let streams = state.downcast_ref::<Streams>()?;
+        for chains in streams.0.values() {
+            let read = chains.read.borrow();
+            let write = chains.write.borrow();
+            if let Some(stage) = read.first().or_else(|| write.first()) {
+                fork.refuse_state(
+                    stage.filter.class.name(),
+                    "an attached user stream filter belongs to the boot",
+                );
+                break;
+            }
+            if chains.has_buffered() {
+                fork.refuse_state("stream", "unread filtered bytes belong to the boot");
+                break;
+            }
+        }
+        None
+    });
+}
+
 #[derive(Default)]
 pub(crate) struct Chains {
     read: RefCell<Vec<Stage>>,

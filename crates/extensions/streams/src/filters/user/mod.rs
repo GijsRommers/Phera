@@ -22,10 +22,12 @@ pub(super) const ERROR: i64 = 0;
 pub(super) const FEED: i64 = 1;
 pub(super) const PASS: i64 = 2;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Factories(Vec<(Vec<u8>, String)>);
 
 pub(super) fn register(registry: &mut Registry) {
+    registry.fork_state::<Factories>(phera_extension_api::copy_state::<Factories>);
+    chain::register_fork(registry);
     buckets::register(registry);
     registry.function(FunctionEntry::sync(
         "stream_filter_register",

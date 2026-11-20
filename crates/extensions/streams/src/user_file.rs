@@ -198,6 +198,10 @@ type OpenList = Rc<RefCell<Vec<Rc<(Vec<u8>, bool)>>>>;
 #[derive(Default)]
 struct OpenWrappers(OpenList);
 
+pub(crate) fn register_fork(registry: &mut phera_extension_api::Registry) {
+    registry.fork_state::<OpenWrappers>(phera_extension_api::fresh_state);
+}
+
 fn restricted_include(context: &mut dyn Context) -> bool {
     context
         .state()

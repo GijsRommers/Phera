@@ -15,7 +15,10 @@
 //! another request's body.
 
 use std::any::Any;
-use std::io::{BufReader, Cursor};
+use std::{
+    io::{BufReader, Cursor},
+    rc::Rc,
+};
 
 use phera_extension_api::value::Fork;
 
@@ -23,9 +26,30 @@ use crate::stream::{Backing, Stream, Wrapper};
 
 /// The fork of a `"stream"` resource's data.
 pub(crate) fn fork_stream(data: &dyn Any, _fork: &mut Fork<'_>) -> Result<Box<dyn Any>, String> {
+    if let Some(file) = data.downcast_ref::<Rc<crate::user_file::UserFile>>() {
+        return Err(format!(
+            "open user wrapper {} for {} belongs to the boot",
+            file.object.class.name(),
+            String::from_utf8_lossy(&file.uri)
+        ));
+    }
+    if let Some(directory) = data.downcast_ref::<Rc<crate::user_directory::UserDirectory>>() {
+        return Err(format!(
+            "open user wrapper directory {} belongs to the boot",
+            directory.object.class.name()
+        ));
+    }
     let stream = data
         .downcast_ref::<Stream>()
         .ok_or("a directory handle belongs to one request")?;
+    if stream.filters.as_ref().is_some_and(|filters| {
+        filters.read.active() || filters.write.active() || !filters.buffered.is_empty()
+    }) {
+        return Err(format!(
+            "an attached stream filter on {} belongs to the boot",
+            String::from_utf8_lossy(&stream.uri)
+        ));
+    }
     let backing = match (&stream.backing, stream.wrapper) {
         (Backing::Output, _) => Backing::Output,
         (Backing::Memory(cursor), _) if stream.temporary_path.is_none() => {

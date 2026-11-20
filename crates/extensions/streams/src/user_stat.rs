@@ -19,6 +19,10 @@ struct StatusCache {
     link: Option<(Vec<u8>, [i64; 13])>,
 }
 
+pub(crate) fn register_fork(registry: &mut phera_extension_api::Registry) {
+    registry.fork_state::<StatusCache>(phera_extension_api::fresh_state);
+}
+
 pub(crate) fn clear(context: &mut dyn Context, _: &[Value]) -> NativeResult {
     context.state().take::<StatusCache>();
     Ok(Value::Null)
