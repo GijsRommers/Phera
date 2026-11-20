@@ -160,7 +160,7 @@ impl Pool {
         }
         let key = Key::new(dsn, username, password, policy);
         let worker = Worker::current(self.admission(key.database(), options.size), options);
-        timeout(options.wait, worker.lend(key, connect))
+        timeout(options.wait, worker.lend(Arc::new(key), connect))
             .await
             .map_err(|_| {
                 DbError::general(format!(

@@ -1,5 +1,6 @@
 //! Grouped, unique, key-pair and ordinary fetchAll result construction.
 
+use crate::column_keys::Layout;
 use crate::constants::FETCH_GROUP;
 use crate::fetch::{FetchMode, ValueOptions, convert, stringify};
 use crate::statement::{Statement, state};
@@ -47,7 +48,7 @@ pub fn all(
     let keys = if mode.uses_names() {
         keys.get(&rows.columns)
     } else {
-        &[]
+        Layout::default()
     };
     let mut result = PhpArray::with_capacity(rows.values.len().saturating_sub(*cursor));
     while let Some(row) = rows.values.get_mut(*cursor) {
@@ -121,7 +122,7 @@ pub fn all(
                     let value = convert(
                         context,
                         rest.iter_mut().map(std::mem::take),
-                        keys.get(1..).unwrap_or_default(),
+                        keys.without_first(),
                         mode,
                         column,
                         attributes,

@@ -161,7 +161,7 @@ impl RowClass {
             *cursor += 1;
             let attributes = ValueOptions::from(&*connection.attributes.borrow());
             let mut fields = PhpArray::with_capacity(row.len());
-            for (value, key) in row.iter_mut().zip(keys.get(&rows.columns)) {
+            for (value, key) in row.iter_mut().zip(keys.get(&rows.columns).keys) {
                 fields.insert(
                     key.property.clone(),
                     stringify(context, std::mem::take(value), attributes)?,

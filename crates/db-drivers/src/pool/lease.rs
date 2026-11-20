@@ -25,7 +25,7 @@ pub struct Lease(Rc<Shared>);
 
 struct Shared {
     socket: Cell<Slot>,
-    owner: Option<(Arc<Worker>, Key)>,
+    owner: Option<(Arc<Worker>, Arc<Key>)>,
     waiting: Cell<bool>,
     available: Notify,
     runtime: Handle,
@@ -45,7 +45,7 @@ struct Checkout<'a> {
 }
 
 impl Lease {
-    pub(super) fn new(socket: Socket, owner: Option<(Arc<Worker>, Key)>) -> Self {
+    pub(super) fn new(socket: Socket, owner: Option<(Arc<Worker>, Arc<Key>)>) -> Self {
         Self(Rc::new(Shared {
             socket: Cell::new(Slot::Ready(socket)),
             owner,

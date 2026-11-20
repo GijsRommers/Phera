@@ -8,7 +8,7 @@ use phera_extension_api::{
 };
 
 use crate::attributes::{Attributes, NullHandling};
-use crate::column_keys::Key;
+use crate::column_keys::Layout;
 use crate::constants::{
     FETCH_ASSOC, FETCH_BOTH, FETCH_CLASS, FETCH_COLUMN, FETCH_DEFAULT, FETCH_KEY_PAIR, FETCH_NAMED,
     FETCH_NUM, FETCH_OBJ,
@@ -88,7 +88,7 @@ impl FetchMode {
 pub fn convert(
     context: &mut dyn Context,
     mut row: impl ExactSizeIterator<Item = Value>,
-    keys: &[Key],
+    layout: Layout<'_>,
     mode: FetchMode,
     column: usize,
     attributes: ValueOptions,
@@ -106,6 +106,28 @@ pub fn convert(
         return Err(NativeError::value_error(
             "PDO::FETCH_KEY_PAIR is only valid for fetchAll()",
         ));
+    }
+    let keys = layout.keys;
+    if layout.distinct
+        && matches!(
+            mode,
+            FetchMode::Assoc | FetchMode::Named | FetchMode::Object
+        )
+    {
+        let entries = row.zip(keys).map(|(value, key)| {
+            let key = if matches!(mode, FetchMode::Object) {
+                &key.property
+            } else {
+                &key.array
+            };
+            stringify(context, value, attributes).map(|value| (key.clone(), value))
+        });
+        let array = PhpArray::try_from_distinct(entries)?;
+        return if matches!(mode, FetchMode::Object) {
+            context.create_object("stdClass", array)
+        } else {
+            Ok(Value::from(array))
+        };
     }
     let mut values = PhpArray::with_capacity(row.len());
     if matches!(mode, FetchMode::Num) {
@@ -230,7 +252,7 @@ fn next(
     let keys = if mode.uses_names() {
         keys.get(&rows.columns)
     } else {
-        &[]
+        Layout::default()
     };
     convert(
         context,

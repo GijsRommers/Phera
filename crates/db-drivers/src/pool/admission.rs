@@ -25,7 +25,7 @@ struct State {
 
 struct Waiter {
     worker: WorkerId,
-    key: Key,
+    key: Arc<Key>,
     grant: oneshot::Sender<Grant>,
 }
 
@@ -61,7 +61,11 @@ impl Admission {
         state.workers.push(Arc::downgrade(worker));
     }
 
-    pub(super) async fn acquire(self: &Arc<Self>, worker: WorkerId, key: Key) -> Option<Grant> {
+    pub(super) async fn acquire(
+        self: &Arc<Self>,
+        worker: WorkerId,
+        key: Arc<Key>,
+    ) -> Option<Grant> {
         let receiver = {
             let mut state = self.state();
             if state.closed {

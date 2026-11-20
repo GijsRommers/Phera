@@ -2,7 +2,7 @@
 
 use crate::drivers::{Column, Prepared, RowBuffer, Rows};
 use crate::errors::{DbError, ErrorState};
-use crate::parameters;
+use crate::parameters::Bindings;
 use crate::statement::Statement;
 use phera_extension_api::{ArrayKey, Context, NativeResult, PhpArray, Value};
 use phera_sqlite::{Cell, kind};
@@ -17,7 +17,7 @@ pub async fn execute(
     method: &str,
 ) -> NativeResult {
     if let Some(params) = arguments.first().filter(|v| !v.is_null()) {
-        state.borrow_mut().bindings = parameters::execute_bindings(params)?;
+        state.borrow_mut().bindings = Bindings::from_execute(params)?;
     }
     let (handle, bindings, extended) = {
         let statement = state.borrow();
@@ -27,7 +27,12 @@ pub async fn execute(
             ));
         };
         let mut bindings = Vec::new();
-        for (key, binding) in &statement.bindings {
+        let Bindings::Keyed(parameters) = &statement.bindings else {
+            return Err(phera_extension_api::NativeError::error(
+                "SQLite statement bindings must be keyed",
+            ));
+        };
+        for (key, binding) in parameters {
             let index = key.parse::<usize>().ok().map(|i| i + 1).or_else(|| {
                 handle
                     .description

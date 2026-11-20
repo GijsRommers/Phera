@@ -38,7 +38,7 @@ pub(super) struct Worker {
 }
 
 pub(super) struct Idle {
-    pub(super) key: Key,
+    pub(super) key: Arc<Key>,
     socket: Socket,
     returned: Instant,
 }
@@ -109,7 +109,7 @@ impl Worker {
 
     pub(super) async fn lend(
         self: Arc<Self>,
-        key: Key,
+        key: Arc<Key>,
         connect: impl Future<Output = Result<Driver, DbError>>,
     ) -> Result<Lease, DbError> {
         loop {
@@ -145,7 +145,7 @@ impl Worker {
         }
     }
 
-    pub(super) async fn recycle(&self, mut socket: Socket, key: Key) {
+    pub(super) async fn recycle(&self, mut socket: Socket, key: Arc<Key>) {
         let keep = socket.born.elapsed() < self.options.lifetime
             && !self.admission.is_closed()
             && match socket.driver_mut() {

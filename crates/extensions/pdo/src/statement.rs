@@ -1,7 +1,6 @@
 //! Prepared statements retain their PDO connection: `$stmt = $pdo->prepare('SELECT :id')`.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -15,7 +14,7 @@ use crate::constants::PARAM_STR;
 use crate::drivers::{Prepared, Rows};
 use crate::errors::{DbError, ErrorState, unsupported};
 use crate::fetch::FetchMode;
-use crate::parameters::{self, Binding, ParameterType};
+use crate::parameters::{self, Binding, Bindings, ParameterType};
 use crate::placeholders::Sql;
 use crate::statement_execute::{execute_named, fail};
 
@@ -26,8 +25,8 @@ pub struct Statement {
     pub stream_owner: Option<Arc<()>>,
     pub postgres_lazy: bool,
     pub connection: Rc<Session>,
-    pub sql: Sql,
-    pub bindings: HashMap<String, Binding>,
+    pub sql: Rc<Sql>,
+    pub bindings: Bindings,
     pub rows: Rows,
     pub keys: ColumnKeys,
     pub cursor: usize,
@@ -189,10 +188,10 @@ async fn create(
         postgres_lazy: connection.name == crate::dsn::DriverName::Postgres
             && !attributes.pgsql_prefetch,
         connection,
-        sql,
+        sql: Rc::new(sql),
         prepared,
         stream_owner: None,
-        bindings: HashMap::new(),
+        bindings: Bindings::default(),
         rows: Rows::default(),
         keys: ColumnKeys::default(),
         cursor: 0,

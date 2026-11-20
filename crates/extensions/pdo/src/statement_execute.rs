@@ -5,7 +5,8 @@ use crate::errors::PdoError;
 use crate::drivers::{Execution, Prepared, Rows};
 use crate::dsn::DriverName;
 use crate::errors::{DbError, ErrorState};
-use crate::parameters;
+use crate::parameters::{self, Bindings};
+use crate::placeholders::Parameter;
 use crate::statement::{Statement, state};
 use phera_extension_api::{Context, LocalFuture, NativeResult, Object, Value};
 use std::cell::RefCell;
@@ -32,34 +33,55 @@ pub fn execute_named<'a>(
                 .await;
         }
         if let Some(params) = arguments.first().filter(|value| !value.is_null()) {
-            state.borrow_mut().bindings = parameters::execute_bindings(params)?;
+            let mut statement = state.borrow_mut();
+            let bindings = match (&statement.prepared, statement.sql.parameters.first()) {
+                (Prepared::Emulated, Some(Parameter::Position(_))) => Bindings::packed(params),
+                _ => None,
+            };
+            statement.bindings = match bindings {
+                Some(bindings) => bindings,
+                None => Bindings::from_execute(params)?,
+            };
         }
         let (connection, sql, prepared, values) = {
             let statement = state.borrow();
-            let ordered = match statement.prepared {
-                Prepared::Emulated if statement.bindings.is_empty() => Ok(Vec::new()),
-                Prepared::Emulated => parameters::ordered(&statement.sql, &statement.bindings),
-                _ => crate::native_parameters::ordered(
-                    &statement.sql,
-                    &statement.bindings,
-                    statement.connection.name,
-                ),
-            };
-            let values = match ordered {
-                Ok(bindings) => Ok(bindings
-                    .into_iter()
-                    .map(|binding| {
-                        if statement.connection.name == crate::dsn::DriverName::Postgres
-                            && !matches!(statement.prepared, Prepared::Emulated)
-                            && statement.sql.parameters.is_empty()
-                        {
-                            Ok(parameters::BoundValue::Null)
-                        } else {
-                            binding.read(context)
-                        }
-                    })
-                    .collect::<Result<Vec<_>, _>>()?),
-                Err(error) => Err(error),
+            let values = match &statement.bindings {
+                Bindings::Packed(array) => {
+                    if !array.is_empty() && array.len() != statement.sql.parameters.len() {
+                        Err(DbError::parameter(
+                            "number of bound variables does not match number of tokens",
+                        ))
+                    } else {
+                        Ok(parameters::read_packed(context, array)?)
+                    }
+                }
+                Bindings::Keyed(bindings) => {
+                    let ordered = match statement.prepared {
+                        Prepared::Emulated if bindings.is_empty() => Ok(Vec::new()),
+                        Prepared::Emulated => parameters::ordered(&statement.sql, bindings),
+                        _ => crate::native_parameters::ordered(
+                            &statement.sql,
+                            bindings,
+                            statement.connection.name,
+                        ),
+                    };
+                    let omit = statement.connection.name == DriverName::Postgres
+                        && !matches!(statement.prepared, Prepared::Emulated)
+                        && statement.sql.parameters.is_empty();
+                    match ordered {
+                        Ok(bindings) => Ok(bindings
+                            .into_iter()
+                            .map(|binding| {
+                                if omit {
+                                    Ok(parameters::BoundValue::Null)
+                                } else {
+                                    binding.read(context)
+                                }
+                            })
+                            .collect::<Result<Vec<_>, _>>()?),
+                        Err(error) => Err(error),
+                    }
+                }
             };
             (
                 statement.connection.clone(),
