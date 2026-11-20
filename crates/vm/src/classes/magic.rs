@@ -12,6 +12,9 @@ pub(crate) struct MagicMethods {
     pub(crate) call: Option<Rc<Method>>,
     pub(crate) call_static: Option<Rc<Method>>,
     pub(crate) clone: Option<Rc<Method>>,
+    /// Runs when the last reference to an instance goes away; see
+    /// `crate::destructors`.
+    pub(crate) destruct: Option<Rc<Method>>,
     pub(crate) get: Option<Rc<Method>>,
     pub(crate) set: Option<Rc<Method>>,
     pub(crate) isset: Option<Rc<Method>>,
@@ -28,6 +31,7 @@ impl MagicMethods {
             "__call"
                 | "__callstatic"
                 | "__clone"
+                | "__destruct"
                 | "__get"
                 | "__set"
                 | "__isset"
@@ -47,6 +51,7 @@ impl MagicMethods {
             call: methods.get("__call").cloned(),
             call_static: methods.get("__callstatic").cloned(),
             clone: methods.get("__clone").cloned(),
+            destruct: methods.get("__destruct").cloned(),
             get: methods.get("__get").cloned(),
             set: methods.get("__set").cloned(),
             isset: methods.get("__isset").cloned(),
@@ -59,6 +64,7 @@ impl MagicMethods {
             || linked.call_static.is_some()
             || linked.invoke.is_some()
             || linked.clone.is_some()
+            || linked.destruct.is_some()
             || linked.debug_info.is_some()
             || linked.to_string.is_some()
             || linked.has_properties()

@@ -19,9 +19,12 @@ enum Kind {
     Instance,
     Static,
     CloneMethod,
+    /// `__destruct`: may be private like `__clone`, and declares no
+    /// return type at all.
+    Destructor,
 }
 
-use Kind::{CloneMethod, Instance, Static};
+use Kind::{CloneMethod, Destructor, Instance, Static};
 
 fn signature(name: &str) -> Option<Signature<'static>> {
     let (parameters, returns, kind): (&[Option<&str>], _, _) = match name {
@@ -33,6 +36,7 @@ fn signature(name: &str) -> Option<Signature<'static>> {
         "__callstatic" => (&[Some("string"), Some("array")], "", Static),
         "__tostring" => (&[], "string", Instance),
         "__clone" => (&[], "void", CloneMethod),
+        "__destruct" => (&[], "", Destructor),
         "__debuginfo" => (&[], "?array", Instance),
         "__set_state" => (&[Some("array")], "object", Static),
         "__serialize" | "__sleep" => (&[], "array", Instance),
@@ -94,7 +98,10 @@ pub fn validate(
         };
         return Err(format!("Method {qualified} {message}"));
     }
-    if kind != CloneMethod
+    if kind == Destructor && method.return_type.is_some() {
+        return Err(format!("Method {qualified} cannot declare a return type"));
+    }
+    if !matches!(kind, CloneMethod | Destructor)
         && matches!(
             method.modifiers.visibility,
             Some(Visibility::Private | Visibility::Protected)
