@@ -32,6 +32,7 @@ impl Analyzer<'_> {
             _ => place,
         };
         if non_null_test {
+            self.refine_nonnull_offset_receiver(place, scope);
             self.refine_nullsafe_receivers(place, scope);
             if self.level >= 8 {
                 self.refine_other_non_null(place, scope, false);

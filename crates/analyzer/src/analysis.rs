@@ -66,6 +66,7 @@ mod member_checks;
 mod member_expressions;
 mod members;
 mod missing_array_offset;
+mod non_offset_receiver;
 mod not_supported;
 mod null_pairs;
 mod null_test_flags;

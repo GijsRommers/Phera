@@ -227,7 +227,11 @@ fn add_method(
                 PropertyInfo {
                     ty: ValueType::declared(p.ty.as_ref(), names),
                     documented_type: None,
-                    default: crate::index::PropertyDefault::Other,
+                    default: if info.modifiers.is_readonly || p.modifiers.is_readonly {
+                        PropertyDefault::ReadonlyPromotion
+                    } else {
+                        PropertyDefault::Other
+                    },
                     modifiers: p.modifiers,
                     location: location(p.span.start),
                 },

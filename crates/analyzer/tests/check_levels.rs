@@ -181,6 +181,28 @@ fn resolved_template_in_conditional_return() {
 }
 
 #[test]
+fn phpstan_readonly_promoted_property_coalesce() {
+    // PHPStan 2.3.7 with featureToggles.unnecessaryNullCoalesce enabled.
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/readonly_promoted_coalesce.php");
+    let report = check(&Options {
+        level: 1,
+        unnecessary_null_coalesce: true,
+        paths: vec![fixture.to_string_lossy().into_owned()],
+        ..Options::default()
+    })
+    .unwrap();
+    assert_eq!(report.diagnostics.len(), 1);
+    let finding = &report.diagnostics[0];
+    assert_eq!(finding.line, 15);
+    assert_eq!(finding.identifier, "nullCoalesce.unnecessary");
+    assert_eq!(
+        finding.message,
+        "Coalesce operator ?? is unnecessary because the left side is always set and the right side is null."
+    );
+}
+
+#[test]
 fn phpstan_unused_private_method_parameter_is_opt_in() {
     // PHPStan 2.3.7 with featureToggles.unusedParameters enabled.
     let fixture =

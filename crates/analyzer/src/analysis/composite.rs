@@ -123,7 +123,11 @@ impl Analyzer<'_> {
                 }
                 self.record_exception(scope);
                 scope.unknown_writes();
-                ValueType::Mixed
+                if self.level >= 10 && matches!(expression.kind, ExpressionKind::Include { .. }) {
+                    ValueType::ImplicitMixed
+                } else {
+                    ValueType::Mixed
+                }
             }
             _ => {
                 for child in crate::walk::children(expression) {
@@ -161,6 +165,9 @@ impl Analyzer<'_> {
         if index.is_some() {
             self.invalid_array_offset(&chain.ty, &key, expression.span);
             self.missing_array_offset(&chain.ty, &key, expression, scope, quiet);
+            if !quiet && !scope.facts.has_expression(expression) {
+                self.check_offset_receiver(&chain.ty, &key, expression.span);
+            }
         }
         if self.strict_mixed(&chain.ty) && !scope.facts.has_expression(expression) {
             self.mixed_offset(&chain.ty, index.as_ref().map(|_| &key), expression.span);

@@ -1,5 +1,5 @@
 //! With `array{email: ?string}`, `$row['email'] ?? null` adds nothing.
-//! The key must exist on every path. An optional field still needs the fallback.
+//! The key must exist on every path. A promoted readonly property also exists.
 
 use super::*;
 use crate::scope::{AccessStep, Place};

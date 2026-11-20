@@ -110,6 +110,7 @@ pub enum PropertyDefault {
     Other,
     ExplicitNull,
     ImplicitNull,
+    ReadonlyPromotion,
 }
 
 #[derive(Clone, Debug)]

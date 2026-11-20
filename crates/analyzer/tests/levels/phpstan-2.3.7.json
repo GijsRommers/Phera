@@ -57,6 +57,13 @@
     [10, 14, "argument.type", "Parameter #1 $name of function requireName expects string, mixed given."],
     [10, 17, "cast.string", "Cannot cast mixed to string."]
   ],
+  "known_offset_receivers.php": [
+    [7, 6, "offsetAccess.nonOffsetAccessible", "Cannot access offset 0 on list<string>|false."]
+  ],
+  "untyped_require.php": [
+    [10, 6, "offsetAccess.nonOffsetAccessible", "Cannot access offset 'name' on mixed."],
+    [10, 6, "return.type", "Function readData() should return string but returns mixed."]
+  ],
   "contextual_array_parameters.php": [],
   "guard_overlap.php": [],
   "optional_ternary_results.php": [],
