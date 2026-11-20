@@ -14,6 +14,12 @@
 //! compared with what the boot run started with) are made again on top of
 //! each request's values. The values come from the fork's own copy of the
 //! boot's superglobals, so that an object stored there is the fork's.
+//!
+//! A key the boot added, which its empty boot request did not have, yields
+//! to the request's own value. Boot code that adds a key fills in what is
+//! missing (WordPress's `wp_fix_server_vars()` sets `REQUEST_URI` when it is
+//! empty, Dotenv does not override a variable that is already set), so
+//! under PHP-FPM a request that has the key keeps its own value.
 
 use phera_value::{ArrayKey, PhpArray, Value};
 use phera_vm::{Snapshot, Vm};
@@ -22,12 +28,14 @@ use phera_vm::{Snapshot, Vm};
 const REQUEST_SUPERGLOBALS: [&str; 6] =
     ["_SERVER", "_GET", "_POST", "_COOKIE", "_REQUEST", "_FILES"];
 
-/// The keys the boot set or removed, per superglobal.
+/// The keys the boot set or removed, per superglobal, each with whether
+/// the boot added it.
 #[derive(Default)]
-pub(crate) struct BootChanges(Vec<(&'static str, Vec<ArrayKey>)>);
+pub(crate) struct BootChanges(Vec<(&'static str, Vec<(ArrayKey, bool)>)>);
 
-/// A key's value in a fork: `None` for a key the boot removed.
-type KeyValue = (ArrayKey, Option<Value>);
+/// A key's value in a fork (`None` for a key the boot removed), and whether
+/// the boot added it.
+type KeyValue = (ArrayKey, Option<Value>, bool);
 
 /// The values of those keys in one fork, read before its request's
 /// superglobals replace them.
@@ -42,12 +50,19 @@ impl BootChanges {
                 Some(Value::Array(array)) => array,
                 _ => continue,
             };
-            let mut changed: Vec<ArrayKey> = current
+            let mut changed: Vec<(ArrayKey, bool)> = current
                 .iter()
-                .filter(|(key, value)| initial.get(key).is_none_or(|old| !same(old, value)))
-                .map(|(key, _)| key)
+                .filter_map(|(key, value)| match initial.get(&key) {
+                    None => Some((key, true)),
+                    Some(old) => (!same(old, value)).then_some((key, false)),
+                })
                 .collect();
-            changed.extend(initial.keys().filter(|key| !current.contains_key(key)));
+            changed.extend(
+                initial
+                    .keys()
+                    .filter(|key| !current.contains_key(key))
+                    .map(|key| (key, false)),
+            );
             if !changed.is_empty() {
                 changes.push((*name, changed));
             }
@@ -79,9 +94,9 @@ impl BootChanges {
                 };
                 let values = keys
                     .iter()
-                    .map(|key| {
+                    .map(|(key, added)| {
                         let value = array.as_ref().and_then(|array| array.get(key)).cloned();
-                        (key.clone(), value)
+                        (key.clone(), value, *added)
                     })
                     .collect();
                 (*name, values)
@@ -99,7 +114,10 @@ impl Carried {
                 Some(Value::Array(array)) => (*array).clone(),
                 _ => PhpArray::new(),
             };
-            for (key, value) in changes {
+            for (key, value, added) in changes {
+                if added && array.contains_key(&key) {
+                    continue;
+                }
                 match value {
                     Some(value) => {
                         array.insert(key, value);

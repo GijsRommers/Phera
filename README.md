@@ -355,16 +355,23 @@ Laravel and Symfony applications get this with no change:
 The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
 are empty and `$_SERVER` holds the environment and the script's paths. Each
 request gets its own copy of every object, static property and global, so
-nothing one request does reaches another. A boot `GdImage` copies its pixels,
-palette and rendering options into each request. A boot `finfo` object copies
-its flags. What cannot be copied (an open
-file or socket, a started session, a database transaction) makes
+nothing one request does reaches another. A database or Redis connection
+made in the boot connects again on first use in each request, from the pool,
+with what the boot set on its session (`SET`, `USE`, the charset) replayed;
+an open file is opened again at the same position; DOM documents, generators,
+curl handles and temporary files are copied; a `GdImage` copies its pixels,
+palette and rendering options, and a `finfo` object its flags. What cannot be duplicated (an
+open transaction, a lock, a suspended Fiber, a pipe to a process, a directory
+handle, an open gzip file, an `SQLite3` object, a prepared statement) makes
 `Phera\snapshot()` throw `Phera\SnapshotException`, naming the class and
 where it was found; the worker then serves the application from the top.
 A changed file boots the worker again in the background, following
 `opcache.validate_timestamps` and `opcache.revalidate_freq`. The boot's
 objects are never destroyed; each request's copies are destroyed at its end,
-as PHP-FPM destroys a request's objects. `--no-snapshot` turns all of it off.
+as PHP-FPM destroys a request's objects. Snapshots are the only mode and
+cannot be turned off; a request that has to run from the top (its boot was
+refused) is logged as a defect and counted in the `--health` answer's
+`Phera-From-The-Top` header.
 
 A Laravel API request took 525 million instructions run from the top, and
 102 million as a fork (PHP 8.5 with opcache: 48 million). The design is in

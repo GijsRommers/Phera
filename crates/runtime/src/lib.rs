@@ -49,7 +49,7 @@ pub use http::{HttpRequest, HttpResponse};
 pub use phera_extension_api::web_log::flush as flush_web_log;
 pub use phera_vm::OutputSink;
 pub use preload::PreloadSummary;
-pub use snapshots::remembered as snapshot_remembered;
+pub use snapshots::{remembered as snapshot_remembered, requests_from_the_top};
 
 #[derive(Clone)]
 pub struct Runtime {
@@ -401,10 +401,11 @@ impl Runtime {
                 }
                 Err(error) => {
                     eprintln!(
-                        "phera: worker {}: forking the snapshot of {} failed: {error}",
+                        "phera: worker {}: DEFECT: this request to {} runs from the top: {error}",
                         worker.index,
                         script.display()
                     );
+                    snapshots::count_from_the_top();
                     self.new_classic_vm(worker)
                 }
             },

@@ -28,7 +28,10 @@ pub async fn execute<const OP: usize>(
     arguments: &[Value],
     call: &str,
 ) -> NativeResult {
-    let lease = handle.borrow().lease()?;
+    let lease = match super::lease(context, &handle, call).await {
+        Ok(lease) => lease,
+        Err(answer) => return answer,
+    };
     let text = |index| args::string(arguments, index).map(|s| s.to_string_lossy());
     let name = text(0).unwrap_or_default();
     let password = text(1).unwrap_or_default();
@@ -59,6 +62,13 @@ pub async fn execute<const OP: usize>(
         );
     }
     let requested = name.clone();
+    // A fork replays what the script changed about its session.
+    let noted = match OP {
+        SELECT_DB => Some(format!("USE {}", identifier(&name))),
+        SET_CHARSET => Some(format!("SET NAMES {name}")),
+        AUTOCOMMIT => Some(format!("SET autocommit={}", u8::from(enabled))),
+        _ => None,
+    };
     let answer = run(&lease, move |mysql| {
         Box::pin(async move {
             match OP {
@@ -99,6 +109,9 @@ pub async fn execute<const OP: usize>(
             if OP == SET_CHARSET {
                 state.charset = Some(requested);
             }
+            if let Some(statement) = noted {
+                state.session.record(statement.into_bytes());
+            }
             Ok(Value::Bool(true))
         }
         Ok(Answer::Text(text)) => Ok(Value::from(text)),
@@ -126,7 +139,10 @@ pub(crate) async fn warnings(
     count: u16,
     call: &str,
 ) -> NativeResult {
-    let lease = handle.borrow().lease()?;
+    let lease = match super::lease(context, &handle, call).await {
+        Ok(lease) => lease,
+        Err(answer) => return answer,
+    };
     if count == 0 {
         return Ok(Value::Bool(false));
     }

@@ -272,7 +272,7 @@ async fn number_result(state: &Handle, expression: String) -> Result<Option<i64>
 }
 
 async fn scalar(state: &Handle, expression: String) -> Result<Option<Vec<u8>>, NativeError> {
-    let lease = state.borrow().lease()?;
+    let lease = crate::connection::lease(state).await?;
     let result = connection::run(&lease, move |driver| {
         Box::pin(scalar_query(driver, expression))
     })

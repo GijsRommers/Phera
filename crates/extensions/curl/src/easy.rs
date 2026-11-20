@@ -136,6 +136,56 @@ fn init(context: &mut dyn Context, values: &[Value]) -> NativeResult {
     classes::create(context, "CurlHandle", Rc::new(RefCell::new(easy)))
 }
 
+/// The fork hook of `CurlHandle`: a handle the boot set up, with its own
+/// copy of the options, the last transfer's information and the cookies it
+/// received. Each fork connects on its own (connections are pooled per
+/// worker, as for handles made in the request).
+///
+/// ```php
+/// $api = curl_init('https://api.example.test/');
+/// curl_setopt($api, CURLOPT_RETURNTRANSFER, true);
+/// Phera\snapshot();
+/// curl_exec($api);   // every request: its own transfer
+/// ```
+pub(crate) fn fork_handle(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    let handle = state
+        .downcast_ref::<Handle>()
+        .ok_or("its built-in state is not initialized")?;
+    let original = handle.borrow();
+    if original.active {
+        return Err("a transfer on it is running".into());
+    }
+    if original
+        .multi
+        .as_ref()
+        .is_some_and(|multi| multi.strong_count() > 0)
+    {
+        return Err("it is added to a CurlMultiHandle; remove it before Phera\\snapshot(), or add it after the call".into());
+    }
+    let mut copy = Easy {
+        settings: original.settings.forked(fork),
+        info: original.info.clone(),
+        error: original.error.clone(),
+        content: original.content.clone(),
+        active: false,
+        paused: original.paused,
+        multi: None,
+        cookie_jar: Rc::new(RefCell::new(original.cookie_jar.borrow().clone())),
+        share: None,
+    };
+    copy.attach_share(
+        original
+            .share
+            .as_ref()
+            .map(|share| crate::share::forked(share, fork)),
+    );
+    Ok(Box::new(Rc::new(RefCell::new(copy))) as Box<dyn std::any::Any>)
+}
+
 pub(crate) fn copy(object: &Object) -> Result<Handle, NativeError> {
     let state: Handle = classes::state(object)?;
     let original = state.borrow();

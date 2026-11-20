@@ -33,9 +33,6 @@ Usage:
                                           private means every private range
     --health PATH                         answer this path with 200 and ok,
                                           without running PHP
-    --no-snapshot                         run every request from the top: no
-                                          boot at start, no Laravel or Symfony
-                                          adapter
     ENV OPTIONS as below
   phera new [OPTIONS] [DIRECTORY]         start a project; asks for what
                                           is not given
@@ -107,9 +104,6 @@ pub(crate) struct ServeOptions {
     pub trusted_proxies: Option<String>,
     /// `--health`: a path the server answers itself.
     pub health_path: Option<String>,
-    /// `--no-snapshot`: no boot at start and no framework adapter; every
-    /// request runs the script from the top.
-    pub no_snapshot: bool,
     pub path: PathBuf,
 }
 
@@ -297,7 +291,6 @@ fn parse_serve(
         request_read_timeout: None,
         trusted_proxies: None,
         health_path: None,
-        no_snapshot: false,
         path: PathBuf::from("."),
     };
     while let Some(argument) = arguments.next() {
@@ -324,7 +317,6 @@ fn parse_serve(
             }
             "--compress" => options.compress = true,
             "--preload" => options.preload = true,
-            "--no-snapshot" => options.no_snapshot = true,
             "--dev" => options.dev = true,
             "--no-process" => options.no_process = true,
             "--trusted-proxies" => {

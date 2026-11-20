@@ -41,10 +41,12 @@ mod display;
 mod function;
 mod ids;
 mod instruction;
+pub mod name_keys;
 pub mod reflection;
 mod unit;
 mod unit_metadata;
 
+pub use name_keys::NameKey;
 pub use unit_metadata::{DeclarationScope, FunctionShape, FunctionSignature, UnitMetadata};
 
 pub use builtin::{BuiltinFrame, BuiltinUnary, CallbackArguments};

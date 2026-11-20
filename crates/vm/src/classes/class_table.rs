@@ -11,7 +11,6 @@ use phera_value::{Object, ObjectIds, PhpArray};
 use super::Class;
 use super::method_table::MethodTable;
 use super::operations::ClassOperations;
-use crate::code_table::CodeTable;
 
 type NativeMethodTables = Box<[OnceCell<MethodTable>]>;
 
@@ -107,14 +106,11 @@ impl ClassTable {
         ClassIndex((self.native_count as usize + self.local.numbered.len()) as u32)
     }
 
-    /// `$reflection->getName()` uses this request's name numbers, even when
-    /// the class definition is shared with another request on this worker.
+    /// The class's methods by name key, built on first use. The keys are
+    /// the process's, so the table is valid in every request that shares
+    /// the class.
     #[inline]
-    pub(crate) fn method_table<'c>(
-        &'c self,
-        class: &'c Class,
-        code: &CodeTable,
-    ) -> &'c MethodTable {
+    pub(crate) fn method_table<'c>(&'c self, class: &'c Class) -> &'c MethodTable {
         let index = class.index.0 as usize;
         let cell = if index < self.native_count as usize {
             &self
@@ -124,7 +120,7 @@ impl ClassTable {
         } else {
             &class.method_table
         };
-        cell.get_or_init(|| MethodTable::build(class, code, |method| self.get(&method.declaring)))
+        cell.get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)))
     }
 
     #[cold]
@@ -143,14 +139,13 @@ impl ClassTable {
     }
 
     /// Builds the method table of every class of this request that has
-    /// none yet. Taking a snapshot calls this: the classes are then shared
-    /// by every fork, and a table built later in one fork could use name
-    /// numbers that mean other names in another fork.
-    pub(crate) fn build_method_tables(&self, code: &CodeTable) {
+    /// none yet. Taking a snapshot calls this, so that no fork builds a
+    /// table of a class they all share.
+    pub(crate) fn build_method_tables(&self) {
         for class in &self.local.numbered {
-            class.method_table.get_or_init(|| {
-                MethodTable::build(class, code, |method| self.get(&method.declaring))
-            });
+            class
+                .method_table
+                .get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)));
         }
     }
 

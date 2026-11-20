@@ -52,9 +52,34 @@ pub(crate) const FUNCTIONS: &[(FunctionEntry, &str)] = &[
     ),
 ];
 
+/// The fork hook of `DeflateContext` and `InflateContext`: a context the
+/// boot made and has not used yet is made again in each fork. Once data
+/// went through it, its state is the compressor's own and is refused.
+fn fork_context(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    _fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    const STARTED: &str =
+        "data already went through this compression context; make it after Phera\\snapshot()";
+    if let Some(encoder) = state.downcast_ref::<Encoder>() {
+        return encoder
+            .unstarted_copy()
+            .map(|copy| Box::new(copy) as Box<dyn std::any::Any>)
+            .ok_or_else(|| STARTED.to_owned());
+    }
+    if let Some(decoder) = state.downcast_ref::<Decoder>() {
+        return decoder
+            .unstarted_copy()
+            .map(|copy| Box::new(copy) as Box<dyn std::any::Any>)
+            .ok_or_else(|| STARTED.to_owned());
+    }
+    Err("its built-in state is not initialized".into())
+}
+
 const CONTEXT_HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
-    fork: Some(phera_extension_api::fork_refused_handle),
+    fork: Some(fork_context),
     forbid_serialization: true,
     ..ClassHooks::EMPTY
 };
