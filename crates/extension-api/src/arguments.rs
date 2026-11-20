@@ -43,7 +43,11 @@ pub fn prepare_call(
     arguments: &mut [Value],
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
-    check_count(name, params, arguments.len())?;
+    if let Err(error) = check_count(name, params, arguments.len())
+        && params.first().is_none_or(Param::uses_parameter_arity)
+    {
+        return Err(error);
+    }
     let strict = context.strict_types();
     for (index, argument) in arguments.iter_mut().enumerate() {
         // Arguments past the declared list belong to the variadic parameter.
@@ -145,11 +149,11 @@ impl Site<'_> {
     /// `strict_types`.
     fn null_deprecated(&self, context: &mut dyn Context) {
         context.deprecated(format!(
-            "{}(): Passing null to parameter #{}{} of type {} is deprecated",
+            "{}(): Passing null to parameter #{}{} {} is deprecated",
             self.function,
             self.number,
             self.name(),
-            type_text(self.param.ty)
+            expected(self.param)
         ));
     }
 }
@@ -216,7 +220,7 @@ fn convert(
     strict: bool,
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
-    if value.is_null() && site.param.nullable {
+    if value.is_null() && site.param.accepts_null() {
         return Ok(());
     }
     let converted = match site.param.ty {

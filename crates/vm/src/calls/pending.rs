@@ -189,8 +189,11 @@ impl Vm {
                         ty: None,
                         by_reference: matches!(intrinsic, crate::intrinsics::Intrinsic::IsCallable)
                             && *name == "callable_name",
-                        variadic: matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc)
-                            && *name == "args",
+                        variadic: matches!(
+                            (intrinsic, *name),
+                            (crate::intrinsics::Intrinsic::CallUserFunc, "args")
+                                | (crate::intrinsics::Intrinsic::Compact, "var_names")
+                        ),
                     })
                     .collect()
             };

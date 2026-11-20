@@ -9,6 +9,7 @@ use phera_extension_api::{
 };
 
 use crate::class::{NAME_PROPERTY, reflect_class, split};
+pub(crate) mod display;
 use crate::{UNCLONEABLE, allocate, bind, engine, exception, load, receiver, values};
 
 pub(crate) const ARGS: Param = Param::new("args", ParamType::Mixed).variadic();
@@ -61,7 +62,7 @@ pub(crate) fn register(registry: &mut Registry) {
                 })
                 .returning("Closure"),
                 MethodEntry::public("__toString", &[], |_, o, _| {
-                    data(o, |f| Value::from(format!("Function [ {} ]\n", f.name)))
+                    data(o, |f| Value::from(display::function(f)))
                 })
                 .returning("string"),
             ]

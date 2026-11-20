@@ -10,13 +10,37 @@ use crate::Vm;
 impl Vm {
     /// Resolve before iteration so an empty input still rejects an invalid callback.
     pub(crate) async fn map_arrays(&mut self, arguments: Vec<Value>) -> NativeResult {
-        if arguments.len() < 2 {
+        let prepared = self.prepare_array_map(&arguments).await;
+        let (callee, arrays) = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => return self.finish_array_map(Err(error), arguments),
+        };
+        let Some(callee) = callee.as_ref() else {
+            let result = self.map_rows(None, &arrays).await;
+            return self.finish_array_map(result, arguments);
+        };
+        self.push_native_callback(crate::error_traces::NativeCaller::ArrayMap(arguments));
+        let result = self.map_rows(Some(callee), &arrays).await;
+        if let Some(crate::error_traces::NativeCallbackSite {
+            native: crate::error_traces::NativeCaller::ArrayMap(arguments),
+            ..
+        }) = self.native_callback_sites.pop()
+        {
+            return self.finish_array_map(result, arguments);
+        }
+        result
+    }
+
+    async fn prepare_array_map(
+        &mut self,
+        arguments: &[Value],
+    ) -> Result<(Option<crate::calls::call_state::Callee>, Vec<Rc<PhpArray>>), NativeError> {
+        let [callback, _, ..] = arguments else {
             return Err(NativeError::argument_count_error(format!(
                 "array_map() expects at least 2 arguments, {} given",
                 arguments.len()
             )));
-        }
-        let callback = &arguments[0];
+        };
         let callee = if callback.is_null() {
             None
         } else {
@@ -27,23 +51,20 @@ impl Vm {
                 self.invalid_callback("array_map", 1, "callback", callback, error, true)
             })?)
         };
-        let arrays = map_arguments(&arguments)?;
-        let Some(callee) = callee.as_ref() else {
-            return self.map_rows(None, &arrays).await;
-        };
-        self.native_callback_sites
-            .push(crate::error_traces::NativeCallbackSite {
-                boundary: self.call_stack.depth(),
-                native: crate::error_traces::NativeCaller::ArrayMap(arguments),
-            });
-        let result = self.map_rows(Some(callee), &arrays).await;
-        if let Some(crate::error_traces::NativeCallbackSite {
-            native: crate::error_traces::NativeCaller::ArrayMap(arguments),
-            ..
-        }) = self.native_callback_sites.pop()
-        {
-            self.call_stack.recycle_native_arguments(arguments);
+        Ok((callee, map_arguments(arguments)?))
+    }
+
+    /// Keep the array_map frame on a fresh exception, reusing the arguments the
+    /// intrinsic already owns while it invokes its callbacks.
+    fn finish_array_map(&mut self, result: NativeResult, arguments: Vec<Value>) -> NativeResult {
+        if let Err(error) = &result {
+            self.record_native_failure(
+                error,
+                crate::calls::native_frames::NativeFrame::Function("array_map"),
+                &arguments,
+            );
         }
+        self.call_stack.recycle_native_arguments(arguments);
         result
     }
 

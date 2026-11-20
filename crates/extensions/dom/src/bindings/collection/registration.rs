@@ -1,4 +1,4 @@
-//! Register the DOMNodeList and DOMNamedNodeMap PHP hooks and methods.
+//! Register the PHP hooks and methods of the DOM collection classes.
 //!
 //! ```php
 //! foreach ($root->attributes as $name => $attribute) echo $name;
@@ -76,5 +76,24 @@ pub(in crate::bindings) fn register(registry: &mut Registry) {
         },
         hooks: Some(&HOOKS),
         ..ClassEntry::class("DOMNamedNodeMap")
+    });
+    // `Dom\HTMLCollection` looks an element up by its `id` or `name` attribute.
+    registry.class(ClassEntry {
+        interfaces: &["IteratorAggregate", "Countable"],
+        methods: const {
+            &[
+                ITEM.returning("?Dom\\Element"),
+                MethodEntry::public(
+                    "namedItem",
+                    const { &[Param::new("key", ParamType::String)] },
+                    named,
+                )
+                .returning("?Dom\\Element"),
+                COUNT.returning("int"),
+                ITERATOR,
+            ]
+        },
+        hooks: Some(&HOOKS),
+        ..ClassEntry::class("Dom\\HTMLCollection")
     });
 }

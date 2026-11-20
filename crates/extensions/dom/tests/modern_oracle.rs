@@ -13,7 +13,7 @@ fn modern_dom_matches_php() {
         .compare(&script, |_, _| {})
         .unwrap_or_else(|error| panic!("{error}; outputs in {}", oracle.artifacts.display()));
     let rows = output.stdout.iter().filter(|&&byte| byte == b'\n').count();
-    assert_eq!(rows, 308);
+    assert_eq!(rows, 310);
     eprintln!("{rows} modern DOM rows matched");
 }
 
@@ -88,4 +88,19 @@ foreach ([false, true] as $html) {
 foreach (['<p>A &amp; B</p>', '<!doctype html><p>é<input checked>'] as $source) {
     echo json_encode(Dom\HTMLDocument::createFromString($source, LIBXML_NOERROR)->saveHtml()), "\n";
 }
+// An HTML collection finds an element by its `id` or `name`; it has no `getNamedItem()`.
+$document = Dom\HTMLDocument::createFromString(
+    '<!doctype html><p id="first">one</p><p name="second">two</p>',
+    LIBXML_NOERROR,
+);
+$paragraphs = $document->getElementsByTagName('p');
+echo json_encode([
+    get_class($paragraphs), count($paragraphs),
+    $paragraphs->namedItem('first')->textContent, $paragraphs->namedItem('second')->textContent,
+    $paragraphs->namedItem('missing'), method_exists($paragraphs, 'getNamedItem'),
+]), "\n";
+echo json_encode([
+    get_class($paragraphs->item(0)->getRootNode()),
+    get_class($paragraphs->item(0)->getRootNode(options: [])),
+]), "\n";
 "#;
