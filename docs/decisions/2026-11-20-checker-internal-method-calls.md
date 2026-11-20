@@ -1,4 +1,4 @@
-# Check calls outside the root namespace of internal methods and classes
+# Check method calls outside the root namespace of internal classes
 
 - Date: 2026-11-20
 - Area: Tools
@@ -7,8 +7,8 @@
 ## Decision
 
 At level 2 and above, with the PHPStan internal-tag feature enabled,
-check method calls against the declaring class or method's
-`@internal` tag and root namespace.
+check method calls against the declaring class's `@internal` tag and
+root namespace. Method-level tags need further signature resolution.
 
 ## Why
 

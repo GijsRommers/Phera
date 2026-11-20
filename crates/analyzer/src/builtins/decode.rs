@@ -106,7 +106,6 @@ fn signature(f: &[&str]) -> Signature {
         .collect();
     Signature {
         pure: false,
-        internal: false,
         closure_object: true,
         returns_reference: false,
         parameters,

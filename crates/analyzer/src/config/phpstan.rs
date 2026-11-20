@@ -83,6 +83,9 @@ fn include_visit(
     if let Some(package) = composer_package(path) {
         match package.as_str() {
             "phpstan/phpstan-strict-rules" if path.ends_with("rules.neon") => options.strict = true,
+            "phpstan/phpstan-doctrine" if path.ends_with("extension.neon") => {
+                options.doctrine_stubs = true;
+            }
             "phpstan/phpstan-doctrine" => {}
             "phpstan/phpstan-symfony" if path.ends_with("extension.neon") => {
                 options.symfony_stubs = true;

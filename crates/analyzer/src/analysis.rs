@@ -109,6 +109,7 @@ pub struct Analyzer<'a> {
     pub report_unused_traits: bool,
     pub strict_types: bool,
     pub diagnostics: Vec<Diagnostic>,
+    pub unverified_internal_ignores: std::collections::BTreeSet<usize>,
     pub context: Context,
     pub depth: usize,
     pub checked_declarations: std::collections::BTreeSet<usize>,
@@ -146,6 +147,7 @@ impl<'a> Analyzer<'a> {
                         && matches!(directive.value.kind, ExpressionKind::Literal(Literal::Int(1)))))
             }),
             diagnostics: Vec::new(),
+            unverified_internal_ignores: std::collections::BTreeSet::new(),
             depth: 0,
             checked_declarations: std::collections::BTreeSet::new(),
             exception_scopes: Vec::new(),
@@ -188,6 +190,12 @@ impl<'a> Analyzer<'a> {
         scope.define("argv", ValueType::Array);
         self.block(&self.file.program.statements, &mut scope);
         self.deferred_declarations();
+        crate::suppress::filter(
+            self.file,
+            &mut self.diagnostics,
+            self.options.report_unmatched_ignores,
+            &self.unverified_internal_ignores,
+        );
         self.diagnostics
     }
 

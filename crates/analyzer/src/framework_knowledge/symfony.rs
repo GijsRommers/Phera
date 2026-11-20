@@ -11,3 +11,8 @@ pub fn unresolved_result(index: &Index, class: &str, method: &str) -> bool {
             .method_owner(class, method)
             .is_some_and(|(owner, _)| owner.name.eq_ignore_ascii_case(DENORMALIZER))
 }
+
+pub fn has_internal_polyfill(class: &str) -> bool {
+    // PHPStan can resolve the polyfill's internal parent even with ext/intl present.
+    class.eq_ignore_ascii_case("IntlDateFormatter")
+}

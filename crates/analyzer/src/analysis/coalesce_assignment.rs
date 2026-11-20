@@ -38,10 +38,12 @@ impl Analyzer<'_> {
         } else {
             original.without_null().join(&replacement)
         };
-        if self.level >= 7
-            && let Some(place) = crate::scope::Place::of(target)
-        {
-            scope.facts.record(place, result.clone(), None);
+        if self.level >= 7 {
+            if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind {
+                scope.define(name, result.clone());
+            } else if let Some(place) = crate::scope::Place::of(target) {
+                scope.facts.record(place, result.clone(), None);
+            }
         }
         result
     }

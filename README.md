@@ -72,8 +72,8 @@ constructs, for-loop overwrites, strict function calls, switch condition
 types, and dynamic member and variable access. The PHPUnit and PHPStan
 deprecation-rule packages also produce a notice until their rules are
 implemented. The bleeding-edge include enables the redundant `?? null` rule
-for required array fields and initialized properties, and checks calls to
-`@internal` methods and classes from other root namespaces. The checker reports
+for required array fields and initialized properties, and checks method calls
+on `@internal` classes from other root namespaces. The checker reports
 an informational notice for remaining bleeding-edge features.
 
 `phera <command> --help` lists the options. There is no formatter and no test

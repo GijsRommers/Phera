@@ -9,7 +9,12 @@ enum Directive<'a> {
     Identifiers(&'a str),
 }
 
-pub fn filter(file: &ParsedFile, diagnostics: &mut Vec<Diagnostic>, report_unmatched: bool) {
+pub fn filter(
+    file: &ParsedFile,
+    diagnostics: &mut Vec<Diagnostic>,
+    report_unmatched: bool,
+    unverified_internal: &std::collections::BTreeSet<usize>,
+) {
     if (diagnostics.is_empty() && !report_unmatched)
         || !file.source.contains("-ignore") && !file.source.contains("@psalm-suppress")
     {
@@ -102,6 +107,8 @@ pub fn filter(file: &ParsedFile, diagnostics: &mut Vec<Diagnostic>, report_unmat
         .into_iter()
         .filter(|(line, identifier)| {
             !traits.iter().any(|range| range.contains(line))
+                && !(identifier.is_none_or(|id| id.ends_with(".internalClass"))
+                    && unverified_internal.contains(line))
                 && !diagnostics.iter().any(|diagnostic| {
                     diagnostic.line == *line
                         && identifier.is_none_or(|id| id == diagnostic.identifier)

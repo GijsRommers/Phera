@@ -11,7 +11,18 @@ impl Analyzer<'_> {
         let Some((owner, signature)) = self.index.method_owner(class, method) else {
             return;
         };
-        if !owner.internal && !signature.internal || owner.name.contains("@anonymous") {
+        if self.options.symfony_stubs
+            && self.options.report_unmatched_ignores
+            && crate::framework_knowledge::symfony::has_internal_polyfill(&owner.name)
+        {
+            self.unverified_internal_ignores
+                .insert(self.file.lines.line(span.start));
+        }
+        if !owner.internal
+            || owner.name.contains("@anonymous")
+            || self.options.doctrine_stubs
+                && crate::framework_knowledge::doctrine::stub_is_public(&owner.name)
+        {
             return;
         }
         let namespace = owner.name.split_once('\\').map(|(first, _)| first);
@@ -29,29 +40,16 @@ impl Analyzer<'_> {
         let location = namespace.map_or_else(String::new, |namespace| {
             format!(" from outside its root namespace {namespace}")
         });
-        let (identifier, message) = if signature.internal {
-            (
-                format!("{identifier}.internal"),
-                format!(
-                    "Call to internal {static_label}method {}::{method}(){location}.",
-                    owner.name
-                ),
-            )
-        } else {
-            let kind = match owner.kind {
-                ClassKind::Class => ("Class", "class"),
-                ClassKind::Interface => ("Interface", "interface"),
-                ClassKind::Trait => ("Trait", "trait"),
-                ClassKind::Enum => ("Enum", "enum"),
-            };
-            (
-                format!("{identifier}.internal{}", kind.0),
-                format!(
-                    "Call to {static_label}method {method}() of internal {} {}{location}.",
-                    kind.1, owner.name,
-                ),
-            )
+        let (kind_id, kind_name) = match owner.kind {
+            ClassKind::Class => ("Class", "class"),
+            ClassKind::Interface => ("Interface", "interface"),
+            ClassKind::Trait => ("Trait", "trait"),
+            ClassKind::Enum => ("Enum", "enum"),
         };
-        self.diagnose(&identifier, span, message);
+        let message = format!(
+            "Call to {static_label}method {method}() of internal {kind_name} {}{location}.",
+            owner.name,
+        );
+        self.diagnose(&format!("{identifier}.internal{kind_id}"), span, message);
     }
 }

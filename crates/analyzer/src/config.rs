@@ -26,6 +26,7 @@ pub struct Options {
     pub unnecessary_null_coalesce: bool,
     pub internal_tag: bool,
     pub symfony_stubs: bool,
+    pub doctrine_stubs: bool,
     pub config_notices: BTreeSet<String>,
     pub phpstan_ignores: Vec<Ignore>,
 }
@@ -49,6 +50,7 @@ impl Default for Options {
             unnecessary_null_coalesce: false,
             internal_tag: false,
             symfony_stubs: false,
+            doctrine_stubs: false,
             config_notices: BTreeSet::new(),
             phpstan_ignores: Vec::new(),
         }

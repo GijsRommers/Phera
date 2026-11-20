@@ -11,6 +11,12 @@ use std::sync::Arc;
 
 const MANAGER: &str = "Doctrine\\ORM\\EntityManagerInterface";
 const REPOSITORY: &str = "Doctrine\\ORM\\EntityRepository";
+const LAZY_REPOSITORY: &str =
+    "Doctrine\\Bundle\\DoctrineBundle\\Repository\\LazyServiceEntityRepository";
+
+pub fn stub_is_public(class: &str) -> bool {
+    LAZY_REPOSITORY.eq_ignore_ascii_case(class)
+}
 
 const QUERY_RESULTS: &[(&str, &[&str])] = &[
     (

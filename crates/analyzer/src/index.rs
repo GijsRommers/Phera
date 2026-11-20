@@ -34,7 +34,6 @@ pub struct Signature {
     pub abstract_body: bool,
     pub accepts_extra: bool,
     pub pure: bool,
-    pub internal: bool,
     pub closure_object: bool,
     pub returns_reference: bool,
     pub unbound_this: Vec<Location>,
@@ -80,7 +79,6 @@ impl Signature {
             abstract_body: false,
             accepts_extra: false,
             pure: false,
-            internal: false,
             closure_object: true,
             returns_reference: false,
             unbound_this: Vec::new(),
@@ -90,7 +88,6 @@ impl Signature {
     }
     pub fn apply_phpdoc(&mut self, doc: Option<&str>, names: &Names) {
         if let Some(doc) = doc {
-            self.internal = crate::phpdoc::internal(doc);
             self.pure = doc
                 .split_ascii_whitespace()
                 .any(|tag| matches!(tag, "@pure" | "@phpstan-pure" | "@psalm-pure"));

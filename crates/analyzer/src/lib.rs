@@ -130,7 +130,7 @@ fn analyze_types(
             .iter()
             .any(|path| std::path::Path::new(path).is_dir());
     for file in files {
-        let mut found = analysis::Analyzer::new(
+        let found = analysis::Analyzer::new(
             &mut index,
             &mut dependencies,
             file,
@@ -138,7 +138,6 @@ fn analyze_types(
             report_unused_traits,
         )
         .run();
-        suppress::filter(file, &mut found, options.report_unmatched_ignores);
         diagnostics.extend(found);
     }
     Ok((diagnostics, dependencies.vendor_files))
