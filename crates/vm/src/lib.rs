@@ -56,6 +56,7 @@ mod context;
 mod control_flow;
 mod cycles;
 mod debug_info;
+mod debugger;
 mod declaration_diagnostics;
 mod default_autoload;
 #[cfg(test)]
@@ -179,6 +180,8 @@ mod unit_caches;
 mod unpacking;
 mod unsupported_items;
 
+pub use debugger::{DebugConfig, DebugTimeLimit, Start as DebugStart};
+
 pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
 };
@@ -265,6 +268,8 @@ pub struct Vm {
     active_fiber: Option<Box<fibers::Active>>,
     fiber_bailout: bool,
     suspended_fibers: fibers::SuspendedFibers,
+    debugger: Option<Box<debugger::Session>>,
+    debug_evaluating: bool,
 }
 
 impl Vm {
@@ -294,6 +299,8 @@ impl Vm {
             active_fiber: None,
             fiber_bailout: false,
             suspended_fibers: Default::default(),
+            debugger: None,
+            debug_evaluating: false,
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
@@ -443,6 +450,9 @@ impl Vm {
         self.finish_request(end).await;
         self.finish_request_headers().await;
         self.finish_resource_finalizers().await;
+        if self.debugger.is_some() {
+            self.finish_debugger().await;
+        }
         self.status
     }
 

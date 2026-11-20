@@ -77,6 +77,57 @@ Composer's generated class map and files autoload list. The start line gives
 the count and elapsed time. PHP still runs each file when the application
 includes it. The Zend-specific `opcache.preload` directive is unsupported.
 
+### Step debugging
+
+Phera speaks DBGp, the protocol PHP IDEs use for Xdebug. Start the IDE listener
+and run `phera run --debug script.php` or `phera serve --debug public`.
+
+For request-triggered debugging, set `xdebug.mode=debug` using `-d` or
+`XDEBUG_MODE=debug`, then send `XDEBUG_TRIGGER=1` or `XDEBUG_SESSION=1` as a
+cookie, query parameter, POST form field, or environment variable. The default
+destination is `127.0.0.1:9003`. Set `xdebug.client_host` and `xdebug.client_port`
+with `-d`, or use `XDEBUG_CONFIG="client_host=127.0.0.1 client_port=9003"`.
+You can also set this in your project's `phera.toml`:
+
+```toml
+[debug]
+enabled = true
+start_with_request = "trigger"
+client_host = "127.0.0.1"
+client_port = 9003
+```
+
+The IDE can inspect and change data and evaluate PHP in a stopped request.
+Phera connects only to the configured IDE address. A server enabling
+debugging on a non-loopback listen address needs `--allow-remote-debug`.
+One worker can serve other requests while PHP waits for an IDE command.
+
+#### PhpStorm
+
+1. Open the PHP project in PhpStorm.
+2. Go to **Settings → PHP → Debug**.
+3. Confirm the Xdebug port includes `9003`.
+4. Select **Run → Start Listening for PHP Debug Connections**.
+5. Set a breakpoint on an executable line.
+6. Run `phera run --debug script.php` from the project directory.
+7. For HTTP, run `phera serve --debug public` and load the relevant URL.
+8. If the IDE prompts for a mapping, map the server path to the project file.
+9. Use **Variables**, **Step Into**, **Step Over**, and **Step Out** at the stop.
+10. Resume to let the script finish or the request return its response.
+
+#### VS Code
+
+1. Install the **PHP Debug** extension from Xdebug.
+2. Open the PHP project in VS Code.
+3. In **Run and Debug**, create a PHP launch configuration.
+4. Choose **Listen for Xdebug**, with `"port": 9003`.
+5. Start the listener with **F5**.
+6. Set a breakpoint on an executable line in the PHP file.
+7. Run `phera run --debug script.php` in a separate terminal.
+8. For HTTP, run `phera serve --debug public` and load the relevant URL.
+9. Expand **Variables** and use **Watch** to evaluate an expression.
+10. Step or continue from the **Run and Debug** toolbar.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,

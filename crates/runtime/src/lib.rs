@@ -7,6 +7,7 @@
 
 mod cache;
 mod constant_calls;
+mod debugger;
 mod environment;
 mod error;
 #[cfg(test)]
@@ -40,7 +41,7 @@ use worker_code_cache::{RequestCodeCache, WorkerCodeCache};
 
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse};
-pub use phera_vm::OutputSink;
+pub use phera_vm::{DebugConfig, DebugTimeLimit, OutputSink};
 pub use preload::PreloadSummary;
 
 #[derive(Clone)]
@@ -53,6 +54,7 @@ pub struct Runtime {
     startup_ini: Arc<[(String, String)]>,
     web_development: bool,
     no_process: bool,
+    debug: Option<Arc<DebugConfig>>,
 }
 
 /// A web worker links the process's native definitions once on its own thread.
@@ -64,6 +66,19 @@ pub struct WebWorker {
 }
 
 impl WebWorker {
+    /// A debug-enabled server can pause its request deadline while PHP waits for the IDE.
+    pub async fn handle_debug_request(
+        &self,
+        script: &Path,
+        document_root: &Path,
+        request: HttpRequest,
+        time_limit: DebugTimeLimit,
+    ) -> HttpResponse {
+        self.runtime
+            .handle_web_request(self, script, document_root, request, Some(time_limit))
+            .await
+    }
+
     pub async fn handle_request(
         &self,
         script: &Path,
@@ -71,7 +86,7 @@ impl WebWorker {
         request: HttpRequest,
     ) -> HttpResponse {
         self.runtime
-            .handle_web_request(self, script, document_root, request)
+            .handle_web_request(self, script, document_root, request, None)
             .await
     }
 }
@@ -166,6 +181,7 @@ impl Runtime {
             startup_ini: Arc::new([]),
             web_development: false,
             no_process: false,
+            debug: None,
         }
     }
 
@@ -230,6 +246,9 @@ impl Runtime {
             phera_ext_streams::track_standard(vm.state_mut(), &stream);
             vm.set_constant(name, stream);
         }
+        if self.debug.is_some() {
+            self.connect_debugger(&mut vm, &unit.file, None).await;
+        }
         let status = vm.run(unit).await;
         Ok(RunResult {
             executed_instructions: vm.executed_instructions,
@@ -266,6 +285,7 @@ impl Runtime {
         script: &Path,
         document_root: &Path,
         request: HttpRequest,
+        debug_time_limit: Option<DebugTimeLimit>,
     ) -> HttpResponse {
         let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
         let code = Rc::new(RequestCodeCache::new(worker.code.clone()));
@@ -325,6 +345,10 @@ impl Runtime {
         }
         match compiled {
             Ok(unit) => {
+                if self.debug.is_some() {
+                    self.connect_debugger(&mut vm, &unit.file, debug_time_limit)
+                        .await;
+                }
                 vm.run(unit).await;
             }
             Err(error) => {

@@ -30,6 +30,7 @@ pub(crate) struct Output {
     queued_origin: Option<SourceLocation>,
     pub(crate) chunk_caller: Option<&'static str>,
     queued: Vec<u8>,
+    pub(crate) debugger: Option<std::rc::Rc<crate::debugger::Streams>>,
 }
 
 impl Output {
@@ -46,6 +47,7 @@ impl Output {
             queued_origin: None,
             chunk_caller: None,
             queued: Vec::new(),
+            debugger: None,
         }
     }
 
@@ -59,6 +61,13 @@ impl Output {
 
     /// Forward first, then retain the bytes, matching the existing sink observation order.
     pub(crate) fn write(&mut self, captured: &mut Vec<u8>, bytes: &[u8]) {
+        if self
+            .debugger
+            .as_ref()
+            .is_some_and(|debugger| !debugger.buffer(crate::debugger::Stream::Stdout, bytes))
+        {
+            return;
+        }
         if let Some(sink) = &mut self.sink {
             sink.write(bytes);
             if self.implicit_flush {

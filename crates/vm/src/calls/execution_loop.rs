@@ -61,6 +61,7 @@ pub(crate) enum BatchExit {
     Destructors,
     /// The first generator changed which deferred work this request can queue.
     GeneratorTracking,
+    DebugCommand,
 }
 
 /// Why the loop stopped. Small enough to be returned in registers.
@@ -107,7 +108,9 @@ impl Vm {
         stop: usize,
         work: &mut usize,
     ) -> Result<BatchExit, NativeError> {
-        let exit = if self.generator_releases.is_some() {
+        let exit = if self.debugger.is_some() {
+            self.debug_batch(stop, work)
+        } else if self.generator_releases.is_some() {
             self.run_batch_loop::<true>(stop, work)
         } else {
             self.run_batch_loop::<false>(stop, work)

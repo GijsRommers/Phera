@@ -41,6 +41,11 @@ impl Vm {
                             },
                             Err(error) => error,
                         };
+                        let error = if self.debugger.is_some() {
+                            self.debug_exception(error).await
+                        } else {
+                            error
+                        };
                         let error = if self.error_handlers.pending.is_empty() {
                             error
                         } else {
@@ -103,6 +108,7 @@ impl Vm {
                 BatchExit::Handlers => {}
                 BatchExit::Destructors => self.run_destructors().await?,
                 BatchExit::GeneratorTracking => {}
+                BatchExit::DebugCommand => self.debugger_commands().await?,
                 BatchExit::Compare(pending) => {
                     Box::pin(self.continue_comparison(pending)).await?;
                 }

@@ -20,8 +20,9 @@ use std::pin::Pin;
 use std::process::ExitCode;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
-use phera_runtime::{HttpRequest, HttpResponse, Runtime, WebWorker};
+use phera_runtime::{DebugTimeLimit, HttpRequest, HttpResponse, Runtime, WebWorker};
 use phera_server::{Handler, HandlerFactory, HttpVersion, Request, Response, Server, ServerConfig};
 
 use crate::arguments::ServeOptions;
@@ -71,6 +72,28 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         None => TrustedProxies::default(),
     };
     let listen = options.listen.unwrap_or_else(default_address);
+    let debug = match crate::debug_settings::configure(
+        options.debug,
+        &settings.table,
+        &options.ini,
+        &loaded.environment,
+    ) {
+        Ok(debug) => debug,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Some(debug) = &debug {
+        if !listen.ip().is_loopback() && !options.allow_remote_debug {
+            eprintln!("Debugging on a non-loopback address requires --allow-remote-debug");
+            return ExitCode::FAILURE;
+        }
+        eprintln!(
+            "WARNING: PHP step debugging is enabled. Debug sessions connect to {}:{}.",
+            debug.host, debug.port,
+        );
+    }
     let mut config = ServerConfig {
         addr: listen,
         ..ServerConfig::default()
@@ -85,9 +108,15 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         config.request_read_timeout = request_read_timeout;
     }
     let workers = config.workers;
+    let debug_timeout = if debug.is_some() {
+        config.request_timeout.take()
+    } else {
+        None
+    };
 
     let runtime = Runtime::with_environment(loaded.environment)
         .with_startup_ini(options.ini)
+        .with_debug(debug)
         .with_web_development(options.dev)
         .without_web_processes(options.no_process);
     let preload = if options.preload || settings.preload {
@@ -110,6 +139,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     };
     let factory = SiteHandlerFactory {
         runtime,
+        debug_timeout,
         site: site.clone(),
         compress: options.compress,
         trusted_proxies: Arc::new(trusted_proxies),
@@ -155,6 +185,7 @@ fn default_address() -> SocketAddr {
 /// request, on the worker's own thread.
 struct SiteHandlerFactory {
     runtime: Runtime,
+    debug_timeout: Option<Duration>,
     site: Arc<Site>,
     compress: bool,
     trusted_proxies: Arc<TrustedProxies>,
@@ -165,6 +196,7 @@ impl HandlerFactory for SiteHandlerFactory {
     fn create(&self, _worker_index: usize) -> Rc<dyn Handler> {
         Rc::new(SiteHandler {
             runtime: self.runtime.web_worker(),
+            debug_timeout: self.debug_timeout,
             site: self.site.clone(),
             compress: self.compress,
             trusted_proxies: self.trusted_proxies.clone(),
@@ -175,6 +207,7 @@ impl HandlerFactory for SiteHandlerFactory {
 
 struct SiteHandler {
     runtime: WebWorker,
+    debug_timeout: Option<Duration>,
     site: Arc<Site>,
     /// `--compress`: compress responses for clients that accept it.
     compress: bool,
@@ -186,12 +219,21 @@ struct SiteHandler {
 
 impl Handler for SiteHandler {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>> {
-        Box::pin(self.respond(request))
+        match self.debug_timeout {
+            None => Box::pin(self.respond(request, None)),
+            Some(timeout) => Box::pin(async move {
+                let clock = DebugTimeLimit::new(timeout);
+                clock
+                    .run(self.respond(request, Some(clock.clone())))
+                    .await
+                    .unwrap_or_else(|| Response::text(504, "the request took too long\n"))
+            }),
+        }
     }
 }
 
 impl SiteHandler {
-    async fn respond(&self, request: Request) -> Response {
+    async fn respond(&self, request: Request, time_limit: Option<DebugTimeLimit>) -> Response {
         // A platform asks "are you alive?" every few seconds. The answer
         // must not depend on the application, its database or a free worker
         // slot in PHP.
@@ -215,14 +257,16 @@ impl SiteHandler {
         .await;
         match found {
             Ok(Found::Script(script)) => {
-                let response = self
-                    .runtime
-                    .handle_request(
-                        &script,
-                        self.site.document_root(),
-                        to_runtime(request, &self.trusted_proxies),
-                    )
-                    .await;
+                let request = to_runtime(request, &self.trusted_proxies);
+                let root = self.site.document_root();
+                let response = match time_limit {
+                    Some(clock) => {
+                        self.runtime
+                            .handle_debug_request(&script, root, request, clock)
+                            .await
+                    }
+                    None => self.runtime.handle_request(&script, root, request).await,
+                };
                 let response = from_runtime(response);
                 if self.compress {
                     compress::php_response(response, accept_encoding.as_deref()).await

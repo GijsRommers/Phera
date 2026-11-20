@@ -287,6 +287,9 @@ impl Vm {
 
     /// Numeric exit values set status; strings are output before unwinding the request.
     pub(crate) async fn exit_value(&mut self, register: Reg) -> NativeResult {
+        if self.debug_evaluating {
+            return Err(NativeError::error("Cannot exit from a debugger expression"));
+        }
         let value = self.get(register);
         if value.is_object()
             && (self

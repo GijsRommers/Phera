@@ -5,13 +5,13 @@
 //! preload = true
 //! ```
 
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 #[derive(Default)]
 pub(super) struct Settings {
     pub(super) preload: bool,
     pub(super) path: Option<PathBuf>,
+    pub(super) table: toml::Table,
 }
 
 pub(super) fn project_root(document_root: &Path) -> &Path {
@@ -32,14 +32,7 @@ pub(super) fn project_root(document_root: &Path) -> &Path {
 
 pub(super) fn read(project: &Path) -> Result<Settings, String> {
     let path = project.join("phera.toml");
-    let source = match std::fs::read_to_string(&path) {
-        Ok(source) => source,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Settings::default()),
-        Err(error) => return Err(format!("{}: {error}", path.display())),
-    };
-    let table: toml::Table = source
-        .parse()
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+    let (table, config_path) = crate::debug_settings::read_table(project)?;
     let preload = table.get("server").and_then(|server| server.get("preload"));
     let preload = match preload {
         Some(toml::Value::Boolean(enabled)) => *enabled,
@@ -53,6 +46,7 @@ pub(super) fn read(project: &Path) -> Result<Settings, String> {
     };
     Ok(Settings {
         preload,
-        path: path.canonicalize().ok(),
+        path: config_path,
+        table,
     })
 }
