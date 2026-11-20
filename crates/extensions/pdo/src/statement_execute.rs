@@ -137,9 +137,8 @@ pub fn execute_named<'a>(
         match result {
             Ok(rows) => {
                 let mut statement = state.borrow_mut();
-                if !rows.columns.is_empty() {
-                    statement.stream_owner = new_owner;
-                }
+                statement.stream_owner =
+                    new_owner.filter(|_| rows.has_pending_rows || !rows.columns.is_empty());
                 statement.set_rows(rows);
                 statement.error = ErrorState::Success;
                 Ok(Value::Bool(true))

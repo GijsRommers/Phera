@@ -98,6 +98,7 @@ pub async fn execute(
                 columns,
                 values,
                 affected,
+                has_pending_rows: false,
             });
             statement.sqlite_executed = true;
             statement.error = ErrorState::Success;

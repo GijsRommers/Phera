@@ -187,6 +187,7 @@ impl Postgres {
                         self.lazy =
                             Some(lazy::Active::new(owner, rows.columns.clone(), query, body));
                         rows.affected = 1;
+                        rows.has_pending_rows = true;
                         return Ok(rows);
                     }
                     if let Err(error) = values::append(&rows.columns, &mut rows.values, &body) {

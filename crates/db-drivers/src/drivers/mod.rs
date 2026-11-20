@@ -54,6 +54,8 @@ pub struct Rows {
     pub values: RowBuffer,
     /// `rowCount()`: rows changed, or for a query the rows returned.
     pub affected: u64,
+    /// PostgreSQL can stream rows even when their column count is zero.
+    pub has_pending_rows: bool,
 }
 
 #[derive(Default)]
