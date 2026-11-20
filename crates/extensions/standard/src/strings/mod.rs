@@ -14,6 +14,7 @@ mod encode;
 mod escaping;
 pub(crate) mod format;
 mod html;
+mod join;
 mod metaphone;
 mod number_format;
 mod padding;
@@ -47,6 +48,7 @@ pub(crate) fn register(registry: &mut Registry) {
         registry.function(*entry);
     }
     format::register(registry);
+    join::register_sync_selectors(registry);
     let modules = [
         html::FUNCTIONS,
         metaphone::FUNCTIONS,
