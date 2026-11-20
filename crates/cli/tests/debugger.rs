@@ -53,7 +53,12 @@ fn commands(script: &Path, scenario: &str) -> String {
     scenario.replace("{file}", uri.as_str())
 }
 
-fn session(scenario: &str, name: &str, stdout: &[u8]) -> Vec<String> {
+enum ScriptResult<'a> {
+    Prints(&'a [u8]),
+    UncaughtException,
+}
+
+fn session(scenario: &str, name: &str, result: ScriptResult<'_>) -> Vec<String> {
     let script = Path::new(FIXTURES).join(format!("{name}.php"));
     let commands = commands(&script, scenario);
     let mut normalize = Normalize::default();
@@ -69,8 +74,13 @@ fn session(scenario: &str, name: &str, stdout: &[u8]) -> Vec<String> {
             .collect(&commands)
             .expect("Phera session")
     };
-    assert!(output.status.success(), "{:?}", output.status);
-    assert_eq!(output.stdout, stdout);
+    match result {
+        ScriptResult::Prints(stdout) => {
+            assert!(output.status.success(), "{:?}", output.status);
+            assert_eq!(output.stdout, stdout);
+        }
+        ScriptResult::UncaughtException => assert_eq!(output.status.code(), Some(255)),
+    }
     let normalized: Vec<_> = packets
         .iter()
         .map(|xml| normalize.packet(xml, &script.to_string_lossy()))
@@ -84,7 +94,11 @@ fn session(scenario: &str, name: &str, stdout: &[u8]) -> Vec<String> {
 
 #[test]
 fn line_breakpoint_inspection_steps_and_eval() {
-    let actual = session(include_str!("debugger/session.commands"), "session", b"2\n");
+    let actual = session(
+        include_str!("debugger/session.commands"),
+        "session",
+        ScriptResult::Prints(b"2\n"),
+    );
     if std::env::var_os("PHERA_RECORD_DEBUG_ORACLE").is_some() {
         return;
     }
@@ -93,11 +107,28 @@ fn line_breakpoint_inspection_steps_and_eval() {
 
 #[test]
 fn condition_generator_native_values_and_exception() {
-    let actual = session(include_str!("debugger/flow.commands"), "flow", b"27\n");
+    let actual = session(
+        include_str!("debugger/flow.commands"),
+        "flow",
+        ScriptResult::Prints(b"27\n"),
+    );
     if std::env::var_os("PHERA_RECORD_DEBUG_ORACLE").is_some() {
         return;
     }
     compare(&actual, include_str!("debugger/flow.xdebug.xml"));
+}
+
+#[test]
+fn uncaught_exception_stops_before_the_request_reports_it() {
+    let actual = session(
+        include_str!("debugger/uncaught.commands"),
+        "uncaught",
+        ScriptResult::UncaughtException,
+    );
+    if std::env::var_os("PHERA_RECORD_DEBUG_ORACLE").is_some() {
+        return;
+    }
+    compare(&actual, include_str!("debugger/uncaught.xdebug.xml"));
 }
 
 #[test]
@@ -130,13 +161,17 @@ fn streams_and_programmatic_break() {
 }
 
 fn compare(actual: &[String], expected: &str) {
-    assert!(
-        actual
-            .first()
-            .is_some_and(|packet| packet.contains(">Phera</engine>"))
-    );
     let expected: Vec<_> = expected.lines().collect();
     assert_eq!(actual.len(), expected.len(), "session packet count");
+    let init = actual.first().expect("Phera init");
+    assert!(init.contains(">Phera</engine>"));
+    assert_eq!(
+        init.split_once('>').map(|(opening, _)| opening),
+        expected
+            .first()
+            .and_then(|packet| packet.split_once('>'))
+            .map(|(opening, _)| opening),
+    );
     let differences: Vec<_> = actual
         .iter()
         .zip(expected)
