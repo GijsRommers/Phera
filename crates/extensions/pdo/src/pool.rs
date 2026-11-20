@@ -21,88 +21,31 @@ mod lease;
 
 pub use lease::Lease;
 
-use std::collections::BTreeMap;
-use std::time::Duration;
-
 use phera_extension_api::value::to_bool;
 use phera_extension_api::{ArrayKey, PhpArray};
-use phera_io_pool::{AcquireError, IoRuntime, Options, Pool};
 
-use crate::connect_options::ConnectOptions;
-use crate::drivers::{Driver, connection_error};
-use crate::dsn::{DriverName, Dsn};
+pub use phera_db_drivers::pool::Policy;
+
+#[cfg(test)]
+use crate::drivers::Driver;
+#[cfg(test)]
+use phera_db_drivers::pool::{Key, POOL, RUNTIME};
+#[cfg(test)]
+use phera_io_pool::Pool;
+
+use crate::dsn::Dsn;
 use crate::errors::DbError;
-
-static RUNTIME: IoRuntime = IoRuntime::new("phera-db-io");
-
-static POOL: Pool<Key, Driver> = Pool::new(
-    &RUNTIME,
-    "PHERA_PDO",
-    Options {
-        size: 20,
-        idle: Duration::from_secs(60),
-        lifetime: Duration::from_secs(1800),
-        wait: Duration::from_secs(30),
-        io_threads: 2,
-    },
-);
-
-/// Connections are only shared between `new PDO` calls that would get the
-/// same session: the same driver, settings and credentials. The password is
-/// part of the key and is never printed, which is why there is no `Debug`.
-#[derive(PartialEq, Eq, Hash)]
-struct Key {
-    driver: DriverName,
-    fields: BTreeMap<String, String>,
-    options: ConnectOptions,
-    username: String,
-    password: String,
-}
-
-impl Key {
-    /// Credentials that came in the DSN are already the arguments, and the
-    /// driver's default host, port and database are spelled out, so that
-    /// equal settings written differently share one pool.
-    fn new(dsn: &Dsn, username: &str, password: &str) -> Self {
-        let mut fields = dsn.fields.clone();
-        fields.remove("user");
-        fields.remove("password");
-        fields
-            .entry("host".into())
-            .or_insert_with(|| "localhost".into());
-        fields
-            .entry("port".into())
-            .or_insert_with(|| dsn.default_port().to_string());
-        fields
-            .entry("dbname".into())
-            .or_insert_with(|| match dsn.driver {
-                DriverName::Postgres => username.to_owned(),
-                // SQLite never reaches the pool.
-                DriverName::Mysql | DriverName::Sqlite => String::new(),
-            });
-        Self {
-            driver: dsn.driver,
-            fields,
-            options: dsn.options.clone(),
-            username: username.to_owned(),
-            password: password.to_owned(),
-        }
-    }
-}
 
 /// `PDO::PHERA_ATTR_POOL`, Phera's own constructor option.
 pub const PHERA_ATTR_POOL: i64 = 100_000;
 
-/// Whether a `new PDO` borrows from the pool.
-#[derive(Clone, Copy)]
-pub enum Policy {
-    Pooled,
-    Unpooled,
+pub trait FromOptions {
+    fn from_options(options: Option<&PhpArray>) -> Self;
 }
 
-impl Policy {
+impl FromOptions for Policy {
     /// Pooled unless the constructor options say `PDO::PHERA_ATTR_POOL => false`.
-    pub fn from_options(options: Option<&PhpArray>) -> Self {
+    fn from_options(options: Option<&PhpArray>) -> Self {
         let opted_out = options
             .and_then(|options| options.get(&ArrayKey::Int(PHERA_ATTR_POOL)))
             .is_some_and(|value| !to_bool(value));
@@ -120,9 +63,10 @@ pub async fn acquire(
     password: &str,
     policy: Policy,
 ) -> Result<Lease, DbError> {
-    acquire_from(&POOL, dsn, username, password, policy).await
+    Lease::new(phera_db_drivers::pool::acquire(dsn, username, password, policy).await?).await
 }
 
+#[cfg(test)]
 async fn acquire_from(
     pool: &Pool<Key, Driver>,
     dsn: &Dsn,
@@ -130,31 +74,8 @@ async fn acquire_from(
     password: &str,
     policy: Policy,
 ) -> Result<Lease, DbError> {
-    let connect = {
-        let (dsn, username, password) = (dsn.clone(), username.to_owned(), password.to_owned());
-        async move { Driver::connect(&dsn, &username, &password).await }
-    };
-    // A SQLite handle is never pooled: see `drivers::sqlite`.
-    let policy = match dsn.driver {
-        DriverName::Sqlite => Policy::Unpooled,
-        _ => policy,
-    };
-    let lease = match policy {
-        Policy::Pooled => {
-            pool.acquire(Key::new(dsn, username, password), connect)
-                .await
-        }
-        Policy::Unpooled => pool.connect_unpooled(connect).await,
-    };
-    let lease = lease.map_err(|error| match error {
-        AcquireError::Settings(detail) => DbError::general(detail),
-        AcquireError::Runtime(detail) => connection_error(detail),
-        AcquireError::Exhausted { limit } => DbError::general(format!(
-            "PDO connection pool exhausted (limit {limit}); timed out waiting"
-        )),
-        AcquireError::Connect(error) => error,
-    })?;
-    Lease::new(lease).await
+    Lease::new(phera_db_drivers::pool::acquire_from(pool, dsn, username, password, policy).await?)
+        .await
 }
 
 #[cfg(test)]

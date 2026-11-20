@@ -3,10 +3,7 @@
 //! PHP numbers locations, including overwritten keys. Values and their locations
 //! are stored separately so overwriting a key can leave earlier aliases alive.
 
-use std::{
-    cell::RefCell,
-    rc::{Rc, Weak},
-};
+use std::{cell::RefCell, rc::Rc};
 
 use phera_extension_api::{
     ArrayKey, Context, NativeError, Object, PhpArray, Value, serialization::LegacyUnserializeState,
@@ -220,13 +217,8 @@ impl Graph {
     }
 
     pub(super) fn retain_array_cycles(&mut self, context: &mut dyn Context) {
-        let cycles = std::mem::take(&mut self.cyclic_references);
-        if !cycles.is_empty() {
-            let state = context.state().get_or_default::<RequestCycles>();
-            if state.0.len() == state.0.capacity() {
-                state.0.retain(|entry| entry.strong_count() != 0);
-            }
-            state.0.extend(cycles.iter().map(Rc::downgrade));
+        for cell in self.cyclic_references.drain(..) {
+            context.state().track_cycle_reference(&cell);
         }
     }
 }
@@ -236,19 +228,6 @@ impl Drop for Graph {
         // If an error stopped construction before a PHP hook could see these
         // arrays, no other code owns the back edges.
         for cell in &self.cyclic_references {
-            if let Ok(mut value) = cell.try_borrow_mut() {
-                *value = Value::Null;
-            }
-        }
-    }
-}
-
-#[derive(Default)]
-struct RequestCycles(Vec<Weak<RefCell<Value>>>);
-
-impl Drop for RequestCycles {
-    fn drop(&mut self) {
-        for cell in self.0.iter().filter_map(Weak::upgrade) {
             if let Ok(mut value) = cell.try_borrow_mut() {
                 *value = Value::Null;
             }

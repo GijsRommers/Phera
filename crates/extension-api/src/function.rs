@@ -29,6 +29,8 @@ pub enum NativeFn {
 /// the function runs, with PHP's rules and PHP's error messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParamType {
+    /// A parameter with no declaration. It accepts the same values as `mixed`.
+    Untyped,
     Mixed,
     Bool,
     Int,

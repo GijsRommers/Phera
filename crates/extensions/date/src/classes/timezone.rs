@@ -7,7 +7,7 @@ use super::{transition_list, zone_kind::ZoneKind};
 
 const CLASS: &str = "DateTimeZone";
 
-fn parse(input: &[u8]) -> Result<ZoneKind, String> {
+pub(super) fn parse(input: &[u8]) -> Result<ZoneKind, String> {
     let mut end = 0;
     let (parsed, found) = crate::parse_format::zone::parse(input, &mut end);
     if let Some(zone) = ZoneKind::parsed(&parsed) {

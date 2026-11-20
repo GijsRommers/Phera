@@ -131,6 +131,11 @@ impl Registry {
         self.extensions.push(name);
     }
 
+    /// Register SAPI settings without reporting them as a loaded extension.
+    pub fn sapi_ini(&mut self, name: &str) {
+        self.ini.register(name);
+    }
+
     /// Names and defaults for INI settings of modules loaded by this runtime.
     pub fn ini_entries(
         &self,

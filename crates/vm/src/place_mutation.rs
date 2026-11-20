@@ -30,7 +30,14 @@ impl Vm {
             && let Some(Value::Array(array)) =
                 self.current_slot_mut(register).and_then(Option::as_mut)
         {
+            let reference = match &value {
+                Value::Reference(cell) => Some(cell.clone()),
+                _ => None,
+            };
             Rc::make_mut(array).push(value)?;
+            if let Some(reference) = reference {
+                self.state.track_cycle_reference(&reference);
+            }
             return Ok(());
         }
         if let PathBase::StaticProperty { class, name, .. } = place.base()?
@@ -77,6 +84,12 @@ impl Vm {
             && !self.get(register).is_object()
         {
             self.validate_static_mutation(class, name, &mut value, PropertyChange::Indirect)?;
+        }
+        if binding == Binding::ByReference
+            && matches!(keys.iter().last(), Some(PathKey::Index(_)))
+            && let Value::Reference(reference) = &value
+        {
+            self.state.track_cycle_reference(reference);
         }
         let mut root = self
             .current_slot_mut(register)
