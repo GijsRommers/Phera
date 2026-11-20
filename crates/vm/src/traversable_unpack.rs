@@ -70,7 +70,7 @@ impl Vm {
         let parameters = view.parameters();
         if parameters
             .receiving(index)
-            .is_some_and(|parameter| parameters.by_reference(parameter))
+            .is_some_and(|parameter| parameters.requires_reference(parameter))
         {
             self.warn(format!(
                 "Cannot pass by-reference argument {} of {}() by unpacking a Traversable, passing by-value instead",

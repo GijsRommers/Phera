@@ -167,12 +167,19 @@ pub(super) fn legacy_unserialize(
         let object = receiver(this.as_ref())?;
         let input = args::string(&arguments, 0)
             .ok_or_else(|| NativeError::error("Missing serialized storage data"))?;
-        legacy::decode(
-            context,
-            object.clone(),
-            input.as_bytes(),
-            PayloadKind::ObjectStorage,
-        )
-        .await
+        decode_legacy_payload(context, object.clone(), input.as_bytes()).await
     })
+}
+
+pub(super) fn decode_legacy_payload<'a>(
+    context: &'a mut dyn Context,
+    object: Rc<Object>,
+    bytes: &'a [u8],
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(legacy::decode(
+        context,
+        object,
+        bytes,
+        PayloadKind::ObjectStorage,
+    ))
 }

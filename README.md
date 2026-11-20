@@ -105,9 +105,18 @@ For example, `json_decode($json, flags: JSON_THROW_ON_ERROR)` uses the default
 depth. Reflection reads the same defaults, and native errors include the
 function or method that raised them in the exception trace.
 
+`min()`, `max()`, and loose array searches use native object comparisons,
+including comparisons inside nested arrays. `range()` accepts Stringable
+endpoints in weak mode.
+`array_multisort()` sorts parallel arrays by their columns and accepts sort
+flags as literals. Writable arguments receive the sorted arrays.
+
 Unix scripts can launch programs with `shell_exec()`, backticks, and the process
-functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
-launching for web requests, run `phera serve --no-process public`.
+functions. Backticks emit PHP 8.5's compile-time deprecation. On Unix, `mail()`
+and `mb_send_mail()` pipe the message to the command in `sendmail_path`.
+`phera serve --no-process public` disables program launches for web requests,
+including `mail()` and `mb_send_mail()`.
+The standard library retains PHP’s deprecated `utf8_encode()` Latin-1 conversion.
 
 BCMath provides arbitrary-precision decimal functions and the immutable
 `BcMath\Number` class. Set the default procedural scale with `bcmath.scale`

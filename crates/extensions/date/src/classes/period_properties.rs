@@ -7,7 +7,7 @@ use phera_extension_api::{
 
 use super::period::{CLASS, Period};
 
-pub(super) const ACCESS: NativePropertyAccess = NativePropertyAccess { read, mutate };
+pub(super) const ACCESS: NativePropertyAccess = NativePropertyAccess::new(read, mutate);
 
 #[derive(Clone, Copy)]
 pub(super) enum Field {

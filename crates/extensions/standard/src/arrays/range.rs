@@ -5,12 +5,11 @@
 //! range_values.rs; this file checks the arguments in PHP's order.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args, prepare_call,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
 
 use super::range_endpoint::{ByteMeaning, Endpoint, NumberKind, endpoint, error};
 use super::range_values::{RangeKind, RangeValues};
-use crate::arguments::given_type;
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[RANGE];
 
@@ -30,49 +29,15 @@ pub(super) const FUNCTIONS: &[FunctionEntry] = &[RANGE];
 const RANGE: FunctionEntry = FunctionEntry::sync(
     "range",
     &[
-        // string|int|float, which a parameter list cannot declare; see below.
-        Param::new("start", ParamType::Mixed),
-        Param::new("end", ParamType::Mixed),
-        Param::new("step", ParamType::Mixed).optional(),
+        Param::new("start", ParamType::StringOrNumber),
+        Param::new("end", ParamType::StringOrNumber),
+        Param::new("step", ParamType::Number).optional(),
     ],
     range,
 );
 
-/// The parameters once the endpoints are checked, to prepare the step.
-const PREPARED_PARAMS: &[Param] = &[
-    Param::new("start", ParamType::Mixed),
-    Param::new("end", ParamType::Mixed),
-    Param::new("step", ParamType::Number).optional(),
-];
-
-fn range(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    // The endpoints are checked as `string|int|float` here, before the step
-    // is prepared, so that their deprecations and errors come first.
-    for (index, name) in [(0, "start"), (1, "end")] {
-        let value = &arguments[index];
-        let scalar = matches!(value, Value::Int(_) | Value::Float(_) | Value::String(_));
-        let coercible = matches!(value, Value::Null | Value::Bool(_));
-        if !scalar && (context.strict_types() || !coercible) {
-            return Err(NativeError::type_error(format!(
-                "range(): Argument #{} (${name}) must be of type string|int|float, {} given",
-                index + 1,
-                given_type(value)
-            )));
-        }
-        if value.is_null() {
-            context.deprecated(format!(
-                "range(): Passing null to parameter #{} (${name}) of type string|int|float is deprecated",
-                index + 1
-            ));
-        }
-    }
-    let mut prepared = arguments.to_vec();
-    prepare_call("range", PREPARED_PARAMS, &mut prepared, context)?;
-    range_values(context, &prepared)
-}
-
 /// A negative step is valid only for a decreasing or constant range.
-fn range_values(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+fn range(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let step = Step::parse(arguments)?;
     let mut start = endpoint(context, args::value(arguments, 0), 1, "start")?;
     let mut end = endpoint(context, args::value(arguments, 1), 2, "end")?;

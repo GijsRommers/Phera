@@ -20,6 +20,7 @@ use super::{Location, attributes, collection, location, text};
 pub(super) const ACCESS: NativePropertyAccess = NativePropertyAccess {
     read,
     mutate: write::mutate,
+    string_property: Some(write::string_property),
 };
 
 fn read(
