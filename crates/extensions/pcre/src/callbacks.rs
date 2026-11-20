@@ -60,9 +60,16 @@ impl Operation<'_> {
             };
             errors::set(context, Error::None);
             let mut splice = Splice::new(&subject);
-            for found in Scanner::new(&compiled, &subject, 0).take(self.limit) {
-                let captures = match found {
-                    Ok(captures) => captures,
+            let mut scanner = Scanner::new(&compiled, &subject, 0);
+            let next = std::iter::from_fn(|| match compiled.marks.as_deref() {
+                Some(probe) => scanner.next_marked(probe),
+                None => scanner
+                    .next()
+                    .map(|found| found.map(|captures| (captures, None))),
+            });
+            for found in next.take(self.limit) {
+                let (captures, mark) = match found {
+                    Ok(found) => found,
                     Err(error) => {
                         errors::set(context, error);
                         return Ok(Value::Null);
@@ -73,6 +80,7 @@ impl Operation<'_> {
                     &captures,
                     compiled.regex.capture_names(),
                     self.flags,
+                    mark,
                 );
                 self.count += 1;
                 // With an exception pending (from a callback on an earlier
