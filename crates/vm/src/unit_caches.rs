@@ -60,19 +60,18 @@ impl UnitCache {
         )
     }
 
-    /// The site of the instruction of `body` (function `function` of the
-    /// file, or its top-level code) that ends at `ip`: the VM looks it up
-    /// after the instruction pointer has advanced. `None` for an
-    /// instruction without one.
+    /// The site of the instruction of the function `facts` describes that
+    /// ends at `ip`: the VM looks it up after the instruction pointer has
+    /// advanced. `None` for an instruction without one.
+    #[inline]
     pub(crate) fn site(
         &self,
-        body: &phera_bytecode::Function,
-        function: Option<usize>,
+        facts: &crate::function_facts::FunctionFacts,
         ip: usize,
     ) -> Option<&RefCell<CachedSite>> {
-        let slot = body.sites.site(&body.instructions, ip)?;
-        match function {
-            Some(function) => self.function_sites.get(function)?.get(slot),
+        let slot = phera_bytecode::site_of(&facts.sites, ip)?;
+        match facts.local {
+            Some(function) => self.function_sites.get(function as usize)?.get(slot),
             None => self.main_sites.get(slot),
         }
     }

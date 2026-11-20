@@ -60,7 +60,7 @@ pub use instruction::{
     BinaryOp, CallResult, CaptureKind, CastKind, ClassBinding, ClosureBinding, FetchMode,
     FinallyEntry, IncDec, IncludeKind, Instruction, RuntimeError, UnaryOp,
 };
-pub use sites::SiteTable;
+pub use sites::{SiteTable, site_of};
 pub use unit::{
     CompiledUnit, Constant, ConstantKey, DeclarationWarning, Symbol, Type, TypeMask,
     union_in_php_order,

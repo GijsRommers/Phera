@@ -17,7 +17,7 @@
 //! snapshot. The table is worked out once per compiled function, the first
 //! time a request asks, and shared by every request after that.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use crate::Instruction;
 
@@ -27,14 +27,13 @@ const NONE: u32 = u32::MAX;
 /// The site number of each position after an instruction (the VM keys a
 /// site by where execution continues), or none.
 #[derive(Debug, Clone, Default)]
-pub struct SiteTable(OnceLock<Box<[u32]>>);
+pub struct SiteTable(OnceLock<Arc<[u32]>>);
 
 impl SiteTable {
-    /// The site of the instruction that ends at `position`, if it has one.
-    #[inline]
-    pub fn site(&self, instructions: &[Instruction], position: usize) -> Option<usize> {
-        let slot = *self.table(instructions).get(position)?;
-        (slot != NONE).then_some(slot as usize)
+    /// The table, shared: a request keeps a handle on it beside what it
+    /// knows about the function, and looks sites up with [`site_of`].
+    pub fn shared(&self, instructions: &[Instruction]) -> Arc<[u32]> {
+        self.table(instructions).clone()
     }
 
     /// How many sites the function has.
@@ -46,7 +45,7 @@ impl SiteTable {
     }
 
     #[inline]
-    fn table(&self, instructions: &[Instruction]) -> &[u32] {
+    fn table(&self, instructions: &[Instruction]) -> &Arc<[u32]> {
         match self.0.get() {
             Some(table) => table,
             None => self.fill(instructions),
@@ -56,7 +55,7 @@ impl SiteTable {
     /// Works the table out, the first time a request asks.
     #[cold]
     #[inline(never)]
-    fn fill(&self, instructions: &[Instruction]) -> &[u32] {
+    fn fill(&self, instructions: &[Instruction]) -> &Arc<[u32]> {
         self.0.get_or_init(|| {
             let mut next = 0;
             // One more position than instructions: a site is keyed by the
@@ -73,6 +72,14 @@ impl SiteTable {
                 .collect()
         })
     }
+}
+
+/// The site of the instruction that ends at `position`, in a table from
+/// [`SiteTable::shared`], if it has one.
+#[inline]
+pub fn site_of(table: &[u32], position: usize) -> Option<usize> {
+    let slot = *table.get(position)?;
+    (slot != NONE).then_some(slot as usize)
 }
 
 /// The table is derived from the instructions, so it never makes two

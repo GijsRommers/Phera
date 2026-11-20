@@ -66,11 +66,7 @@ impl Machine<'_> {
         // The VM keys the site by the position after the instruction,
         // which is where the loop stands now.
         let site = cache
-            .site(
-                self.code.function(function),
-                self.code.local(function),
-                position.ip,
-            )?
+            .site(self.code.facts(function), position.ip)?
             .try_borrow()
             .ok()?;
         match &*site {

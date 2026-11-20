@@ -22,6 +22,8 @@ use crate::code_table::{FunctionIndex, UnitIndex};
 pub(crate) struct FunctionFacts {
     /// The function's instructions, which the interpreter loop runs.
     pub(crate) instructions: Code,
+    /// Which of them have a per-request cache (see `phera_bytecode::SiteTable`).
+    pub(crate) sites: std::sync::Arc<[u32]>,
     pub(crate) unit: UnitIndex,
     /// `None` for a file's top-level code, else its number within the file.
     pub(crate) local: Option<u32>,
@@ -107,6 +109,7 @@ impl FunctionFacts {
             || body.argument_layout == phera_bytecode::ArgumentLayout::Variadic;
         Self {
             instructions: body.instructions.clone(),
+            sites: body.sites.shared(&body.instructions),
             unit,
             local,
             unit_first,

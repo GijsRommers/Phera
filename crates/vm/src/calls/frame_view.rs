@@ -199,6 +199,6 @@ impl<'a> FrameView<'a> {
         &self,
     ) -> Option<&'a std::cell::RefCell<crate::unit_caches::CachedSite>> {
         self.cache()
-            .site(self.function(), self.function_id(), self.ip())
+            .site(self.code.facts(self.frame.function), self.ip())
     }
 }
