@@ -3,8 +3,8 @@
 use phera_ast as ast;
 use phera_bytecode::Reg;
 
-use crate::ir::{Binary, Instruction, Target};
-use crate::{CompileError, Compiler};
+use crate::ir::{Binary, Constant, Instruction, Target};
+use crate::{CompileError, Compiler, constant};
 
 impl Compiler<'_> {
     /// Compare conditions strictly and evaluate only the selected arm body.
@@ -13,7 +13,13 @@ impl Compiler<'_> {
         match_expression: &ast::Match,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let subject = self.compile_expression(&match_expression.subject)?;
+        let local = self.compiled_variable(&match_expression.subject)?;
+        // Zend's jump-table form fetches the CV once. Sequential comparisons
+        // instead reuse the CV after evaluating each arm's condition.
+        let subject = match local {
+            Some(local) if !has_jump_table(match_expression) => local,
+            _ => self.compile_expression(&match_expression.subject)?,
+        };
         let dst = self.allocate_register()?;
         let mut done = vec![];
         let mut default = None;
@@ -24,6 +30,11 @@ impl Compiler<'_> {
                     let mark = self.mark_temporaries();
                     let rhs = self.compile_expression(condition)?;
                     let test = self.allocate_register()?;
+                    let test_line = if Some(subject) == local {
+                        self.operand_line(condition)
+                    } else {
+                        line
+                    };
                     self.emit(
                         Instruction::Binary {
                             destination: test,
@@ -31,7 +42,7 @@ impl Compiler<'_> {
                             left: subject,
                             right: rhs,
                         },
-                        line,
+                        test_line,
                     );
                     jumps.push(self.emit(
                         Instruction::Branch {
@@ -73,11 +84,35 @@ impl Compiler<'_> {
                 line,
             );
         } else {
-            self.emit(Instruction::MatchError { subject }, line);
+            self.emit(
+                Instruction::MatchError {
+                    subject: local.unwrap_or(subject),
+                },
+                line,
+            );
         }
         for jump in done {
             self.patch(jump, self.position())
         }
         Ok(dst)
     }
+}
+
+fn has_jump_table(expression: &ast::Match) -> bool {
+    let mut count = 0;
+    for condition in expression
+        .arms
+        .iter()
+        .filter_map(|arm| arm.conditions.as_ref())
+        .flatten()
+    {
+        if !matches!(
+            constant(condition),
+            Some(Constant::Int(_) | Constant::Bytes(_))
+        ) {
+            return false;
+        }
+        count += 1;
+    }
+    count >= 2
 }

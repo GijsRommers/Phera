@@ -4,6 +4,7 @@ mod builtin_calls;
 mod builtin_format;
 mod builtin_literals;
 mod builtin_search;
+mod operand_order;
 
 use phera_ast as ast;
 use phera_bytecode::Reg;

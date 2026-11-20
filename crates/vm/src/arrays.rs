@@ -33,12 +33,23 @@ impl Vm {
         if let Value::Reference(reference) = &value {
             self.state.track_cycle_reference(reference);
         }
+        let missing_key = key.filter(|register| {
+            self.current()
+                .and_then(|frame| frame.slots(&self.registers).get(register.index()))
+                .is_none_or(Option::is_none)
+        });
+        if let Some(register) = missing_key {
+            self.read_local(register);
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        let key = key
-            .map(|key| {
+        let key = if missing_key.is_some() {
+            Some(ArrayKey::str(""))
+        } else {
+            key.map(|key| {
                 ArrayKey::from_value_diag(&diagnostics.vm.operand(key), &mut diagnostics.buffer)
             })
-            .transpose()?;
+            .transpose()?
+        };
         drop(diagnostics);
         let mut target = self
             .current_slot_mut(register)

@@ -81,9 +81,19 @@ impl Vm {
                 }
             }
             Instruction::Binary { dst, op, lhs, rhs } => {
-                let value = self
-                    .binary_with_strings(op, self.get(lhs), self.get(rhs))
-                    .await?;
+                let left_missing = self.warn_missing_operand(lhs).await?;
+                let right_missing = self.warn_missing_operand(rhs).await?;
+                let left = if left_missing {
+                    Value::Null
+                } else {
+                    self.get(lhs)
+                };
+                let right = if right_missing {
+                    Value::Null
+                } else {
+                    self.get(rhs)
+                };
+                let value = self.binary_with_strings(op, left, right).await?;
                 self.set(dst, value);
             }
             Instruction::AssignOp { op, local, src } => {

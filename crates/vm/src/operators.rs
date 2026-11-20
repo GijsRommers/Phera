@@ -59,9 +59,16 @@ impl Vm {
             .slots(&self.registers)
             .get(rhs.index())
             .and_then(Option::as_ref);
-        let null = Value::Null;
-        let left = left.unwrap_or(&null).deref();
-        let right = right.unwrap_or(&null).deref();
+        let (Some(left), Some(right)) = (left, right) else {
+            return Ok(Some(BatchExit::Instruction(Instruction::Binary {
+                dst: destination,
+                op: operator,
+                lhs,
+                rhs,
+            })));
+        };
+        let left = left.deref();
+        let right = right.deref();
         let result = match fast_binary(operator, &left, &right) {
             None if crate::object_operators::has_binary(&left, &right) => {
                 return Ok(Some(BatchExit::Instruction(Instruction::Binary {

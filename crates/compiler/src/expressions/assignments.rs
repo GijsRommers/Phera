@@ -75,18 +75,22 @@ impl Compiler<'_> {
         let mut indexes = Vec::new();
         let place = self.assignment_place(target, &mut indexes)?;
         let source = self.compile_expression(value)?;
+        self.read_deferred_indexes(&indexes);
+        self.emit(Instruction::Write { place, source }, line);
+        Ok(source)
+    }
+
+    fn read_deferred_indexes(&mut self, indexes: &[super::paths::DeferredIndex]) {
         for index in indexes {
             self.emit(
                 Instruction::Read {
                     destination: index.destination,
-                    place: index.source,
+                    place: index.source.clone(),
                     mode: phera_bytecode::FetchMode::Read,
                 },
                 index.line,
             );
         }
-        self.emit(Instruction::Write { place, source }, line);
-        Ok(source)
     }
 
     /// Bind references while retaining the original target evaluation order.
@@ -170,8 +174,10 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<Reg, CompileError> {
         if *operator != ast::BinaryOperator::NullCoalesce {
-            let place = self.place(target)?;
+            let mut indexes = Vec::new();
+            let place = self.assignment_place(target, &mut indexes)?;
             let source = self.compile_expression(value)?;
+            self.read_deferred_indexes(&indexes);
             let dst = self.allocate_register()?;
             let operator =
                 binary(*operator).ok_or_else(|| self.error("Operator not supported yet", line))?;
@@ -196,7 +202,9 @@ impl Compiler<'_> {
         value: &ast::Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let place = self.place(target)?;
+        let mut indexes = Vec::new();
+        let place = self.assignment_place(target, &mut indexes)?;
+        self.read_deferred_indexes(&indexes);
         let lhs = self.allocate_register()?;
         self.emit(
             Instruction::Read {
@@ -216,6 +224,7 @@ impl Compiler<'_> {
         let end = self.emit(Instruction::Jump(Target(0)), line);
         self.patch(jump, self.position());
         let rhs = self.compile_expression(value)?;
+        self.read_deferred_indexes(&indexes);
         self.emit(Instruction::Write { place, source: rhs }, line);
         self.emit(
             Instruction::Move {

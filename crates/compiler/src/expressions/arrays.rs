@@ -18,11 +18,17 @@ impl Compiler<'_> {
         self.emit(Instruction::Array(dst), line);
         for item in items {
             let mark = self.mark_temporaries();
-            let key = item
+            let local_key = item
                 .key
                 .as_ref()
-                .map(|key| self.compile_expression(key))
-                .transpose()?;
+                .map(|key| self.compiled_variable(key))
+                .transpose()?
+                .flatten();
+            let key = match (&item.key, local_key) {
+                (_, Some(local)) => Some(local),
+                (Some(key), None) => Some(self.compile_expression(key)?),
+                (None, None) => None,
+            };
             let value = if item.by_reference {
                 let place = self.reference_source(&item.value, line)?;
                 let dst = self.allocate_register()?;
@@ -44,7 +50,11 @@ impl Compiler<'_> {
                     value,
                     spread: item.spread,
                 },
-                line,
+                if local_key.is_some() {
+                    self.operand_line(&item.value)
+                } else {
+                    line
+                },
             );
             self.release_temporaries(mark);
         }
