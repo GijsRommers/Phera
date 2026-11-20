@@ -216,8 +216,7 @@ impl Vm {
     /// first, until a pass changes nothing.
     async fn destroy_globals(&mut self) -> Result<(), NativeError> {
         self.run_destructors().await?;
-        // With no destructor due anywhere, neither phase has work.
-        if !self.object_ids.has_due() {
+        if !self.end_phases_have_work() {
             return Ok(());
         }
         let count = self
@@ -246,6 +245,13 @@ impl Vm {
         }
     }
 
+    /// Whether the destructor phases can do anything: some object has a
+    /// destructor due, or a generator exists (destroying one runs its
+    /// `finally` blocks).
+    fn end_phases_have_work(&self) -> bool {
+        self.object_ids.has_due() || self.generator_releases.is_some()
+    }
+
     /// How many globals exist, PHP's test for "the pass changed something".
     fn defined_globals(&self, count: usize) -> usize {
         let variables = self
@@ -260,7 +266,7 @@ impl Vm {
     /// Phase 3: every object whose destructor has not run, by id, including
     /// objects created meanwhile.
     async fn destroy_remaining_objects(&mut self) -> Result<(), NativeError> {
-        if !self.object_ids.has_due() {
+        if !self.end_phases_have_work() {
             return Ok(());
         }
         self.classes.ids().stop_reuse();
@@ -270,6 +276,12 @@ impl Vm {
             let Some(object) = object.upgrade() else {
                 continue;
             };
+            if crate::generators::generator_object(&object) {
+                // A generator is destroyed here too: its `finally` runs.
+                self.close_live_generator(&object).await?;
+                self.run_destructors().await?;
+                continue;
+            }
             if object.destruction() != Destruction::Due {
                 continue;
             }

@@ -23,6 +23,16 @@ impl Compiler<'_> {
                 return compiler.compile_expression(operand).map(drop);
             }
             let result = compiler.compile_expression(expression)?;
+            // The call is the last instruction but for the clears of its
+            // operands (`expressions::operand_release`).
+            let call = compiler
+                .function
+                .instructions
+                .iter_mut()
+                .rev()
+                .find(|instruction| {
+                    !matches!(instruction, Instruction::Clear { register } if *register != result)
+                });
             if let Some(
                 Instruction::FinishCall {
                     destination,
@@ -33,7 +43,7 @@ impl Compiler<'_> {
                     result: use_of_result,
                     ..
                 },
-            ) = compiler.function.instructions.last_mut()
+            ) = call
                 && *destination == result
             {
                 *use_of_result = phera_bytecode::CallResult::Discarded;
