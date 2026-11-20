@@ -216,6 +216,7 @@ pub struct Vm {
     /// Every loaded file and function of the request, by number.
     code: code_table::CodeTable,
     globals: globals::Globals,
+    extension_values: std::collections::HashMap<&'static str, Value>,
     static_variables: static_variables::StaticVariables,
     diagnostic_reporter: diagnostic_reporter::DiagnosticReporter,
     diagnostic_location: Option<diagnostics::SourceLocation>,
@@ -298,6 +299,7 @@ impl Vm {
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::default(),
             globals: globals::Globals::new(),
+            extension_values: Default::default(),
             static_variables: static_variables::StaticVariables::new(),
             diagnostic_reporter: diagnostic_reporter::DiagnosticReporter::new(),
             diagnostic_location: None,

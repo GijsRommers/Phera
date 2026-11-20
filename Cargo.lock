@@ -2231,6 +2231,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-db-drivers"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "chrono",
+ "fallible-iterator 0.2.0",
+ "futures-core",
+ "futures-util",
+ "mysql_async",
+ "percent-encoding",
+ "phera-extension-api",
+ "phera-io-pool",
+ "phera-sqlite",
+ "postgres-protocol",
+ "rcgen",
+ "rsa",
+ "rustls",
+ "sha1 0.11.0",
+ "tempfile",
+ "tokio",
+ "tokio-postgres",
+ "tokio-rustls",
+ "url",
+]
+
+[[package]]
 name = "phera-dotenv"
 version = "0.1.0"
 dependencies = [
@@ -2401,6 +2427,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-mysqli"
+version = "0.1.0"
+dependencies = [
+ "mysql_async",
+ "phera-db-drivers",
+ "phera-extension-api",
+ "phera-io-pool",
+]
+
+[[package]]
 name = "phera-ext-openssl"
 version = "0.1.0"
 dependencies = [
@@ -2454,21 +2490,24 @@ dependencies = [
 name = "phera-ext-pdo"
 version = "0.1.0"
 dependencies = [
- "bytes",
- "chrono",
- "futures-core",
  "mysql_async",
+ "phera-db-drivers",
  "phera-extension-api",
  "phera-io-pool",
  "phera-sqlite",
- "rcgen",
- "rsa",
- "rustls",
- "sha1 0.11.0",
  "tempfile",
  "tokio",
  "tokio-postgres",
- "tokio-rustls",
+]
+
+[[package]]
+name = "phera-ext-pgsql"
+version = "0.1.0"
+dependencies = [
+ "phera-db-drivers",
+ "phera-extension-api",
+ "phera-io-pool",
+ "tokio",
 ]
 
 [[package]]
@@ -2706,9 +2745,11 @@ dependencies = [
  "phera-ext-http",
  "phera-ext-json",
  "phera-ext-mbstring",
+ "phera-ext-mysqli",
  "phera-ext-openssl",
  "phera-ext-pcre",
  "phera-ext-pdo",
+ "phera-ext-pgsql",
  "phera-ext-process",
  "phera-ext-random",
  "phera-ext-redis",

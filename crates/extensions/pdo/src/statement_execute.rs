@@ -1,5 +1,7 @@
 //! Executing bound parameters releases all statement borrows before awaiting I/O.
 
+use crate::errors::PdoError;
+
 use crate::drivers::{Execution, Prepared, Rows};
 use crate::dsn::DriverName;
 use crate::errors::{DbError, ErrorState};

@@ -9,24 +9,10 @@ use phera_extension_api::{
 use tokio_postgres::types::Type;
 
 use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_LOB, PARAM_STR};
-use crate::drivers::Column;
+
 use crate::statement::state;
 
-#[derive(Clone, Debug)]
-pub enum Metadata {
-    Postgres(PostgresColumn),
-    Mysql(mysql_async::Column),
-    Sqlite(phera_sqlite::Column, i64),
-}
-
-/// What tokio-postgres tells about a result column.
-#[derive(Clone, Debug)]
-pub struct PostgresColumn {
-    pub oid: u32,
-    pub table_oid: u32,
-    pub modifier: i32,
-    pub native_type: String,
-}
+pub use phera_db_drivers::metadata::{Metadata, PostgresColumn};
 
 pub fn get<'a>(
     context: &'a mut dyn Context,
@@ -139,18 +125,6 @@ pub fn mysql(column: &mysql_async::Column) -> PhpArray {
         Value::Int(i64::from(column.decimals())),
     );
     values
-}
-
-pub fn postgres(column: &tokio_postgres::Column) -> Column {
-    Column {
-        name: column.name().into(),
-        metadata: Metadata::Postgres(PostgresColumn {
-            oid: column.type_().oid(),
-            table_oid: column.table_oid().unwrap_or(0),
-            modifier: column.type_modifier(),
-            native_type: column.type_().name().into(),
-        }),
-    }
 }
 
 pub fn insert(array: &mut PhpArray, name: &str, value: Value) {

@@ -27,24 +27,24 @@ constant	GSLC_SSL_NO_AUTH	8.5	as it is broken since PHP 8.0	keep
 constant	GSLC_SSL_ONEWAY_AUTH	8.5	as it is broken since PHP 8.0	omit
 constant	GSLC_SSL_TWOWAY_AUTH	8.5	as it is broken since PHP 8.0	omit
 constant	MT_RAND_PHP	8.3	as it uses a biased non-standard variant of Mt19937	omit
-constant	MYSQLI_DATA_TRUNCATED	8.1	as it was unused	omit
-constant	MYSQLI_IS_MARIADB	8.2	as it is always false	omit
-constant	MYSQLI_NO_DATA	8.1	as it was unused	omit
-constant	MYSQLI_REFRESH_BACKUP_LOG	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_GRANT	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_HOSTS	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_LOG	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_MASTER	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_REPLICA	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_SLAVE	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_STATUS	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_TABLES	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_REFRESH_THREADS	8.4	as mysqli_refresh() is deprecated	omit
-constant	MYSQLI_SERVER_PS_OUT_PARAMS	8.1	as it was unused	omit
-constant	MYSQLI_SERVER_QUERY_NO_GOOD_INDEX_USED	8.1	as it was unused	omit
-constant	MYSQLI_SERVER_QUERY_NO_INDEX_USED	8.1	as it was unused	omit
-constant	MYSQLI_SERVER_QUERY_WAS_SLOW	8.1	as it was unused	omit
-constant	MYSQLI_STORE_RESULT_COPY_DATA	8.4	as the mysqli_store_result() parameter is unused since 8.1	omit
+constant	MYSQLI_DATA_TRUNCATED	8.1	as it was unused	keep
+constant	MYSQLI_IS_MARIADB	8.2	as it is always false	keep
+constant	MYSQLI_NO_DATA	8.1	as it was unused	keep
+constant	MYSQLI_REFRESH_BACKUP_LOG	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_GRANT	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_HOSTS	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_LOG	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_MASTER	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_REPLICA	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_SLAVE	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_STATUS	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_TABLES	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_REFRESH_THREADS	8.4	as mysqli_refresh() is deprecated	keep
+constant	MYSQLI_SERVER_PS_OUT_PARAMS	8.1	as it was unused	keep
+constant	MYSQLI_SERVER_QUERY_NO_GOOD_INDEX_USED	8.1	as it was unused	keep
+constant	MYSQLI_SERVER_QUERY_NO_INDEX_USED	8.1	as it was unused	keep
+constant	MYSQLI_SERVER_QUERY_WAS_SLOW	8.1	as it was unused	keep
+constant	MYSQLI_STORE_RESULT_COPY_DATA	8.4	as the mysqli_store_result() parameter is unused since 8.1	keep
 constant	PGSQL_LIBPQ_VERSION_STR	8.0	as it is the same as PGSQL_LIBPQ_VERSION	omit
 constant	SID	8.4	as GET/POST sessions were deprecated	omit
 constant	SOAP_FUNCTIONS_ALL	8.4	as enabling all functions is a possible security concern	omit
@@ -85,17 +85,17 @@ function	odbc_result_all	8.1		omit
 function	openssl_free_key	8.0	as OpenSSLAsymmetricKey objects are freed automatically	omit
 function	openssl_pkey_free	8.0	as OpenSSLAsymmetricKey objects are freed automatically	keep
 function	openssl_x509_free	8.0	as OpenSSLCertificate objects are freed automatically	omit
-function	pg_clientencoding	8.0	use pg_client_encoding() instead	omit
-function	pg_cmdtuples	8.0	use pg_affected_rows() instead	omit
-function	pg_errormessage	8.0	use pg_last_error() instead	omit
+function	pg_clientencoding	8.0	use pg_client_encoding() instead	keep
+function	pg_cmdtuples	8.0	use pg_affected_rows() instead	keep
+function	pg_errormessage	8.0	use pg_last_error() instead	keep
 function	pg_fieldisnull	8.0	use pg_field_is_null() instead	omit
-function	pg_fieldname	8.0	use pg_field_name() instead	omit
-function	pg_fieldnum	8.0	use pg_field_num() instead	omit
+function	pg_fieldname	8.0	use pg_field_name() instead	keep
+function	pg_fieldnum	8.0	use pg_field_num() instead	keep
 function	pg_fieldprtlen	8.0	use pg_field_prtlen() instead	omit
-function	pg_fieldsize	8.0	use pg_field_size() instead	omit
-function	pg_fieldtype	8.0	use pg_field_type() instead	omit
-function	pg_freeresult	8.0	use pg_free_result() instead	omit
-function	pg_getlastoid	8.0	use pg_last_oid() instead	omit
+function	pg_fieldsize	8.0	use pg_field_size() instead	keep
+function	pg_fieldtype	8.0	use pg_field_type() instead	keep
+function	pg_freeresult	8.0	use pg_free_result() instead	keep
+function	pg_getlastoid	8.0	use pg_last_oid() instead	keep
 function	pg_loclose	8.0	use pg_lo_close() instead	omit
 function	pg_locreate	8.0	use pg_lo_create() instead	omit
 function	pg_loexport	8.0	use pg_lo_export() instead	omit
@@ -105,10 +105,10 @@ function	pg_loread	8.0	use pg_lo_read() instead	omit
 function	pg_loreadall	8.0	use pg_lo_read_all() instead	omit
 function	pg_lounlink	8.0	use pg_lo_unlink() instead	omit
 function	pg_lowrite	8.0	use pg_lo_write() instead	omit
-function	pg_numfields	8.0	use pg_num_fields() instead	omit
-function	pg_numrows	8.0	use pg_num_rows() instead	omit
-function	pg_result	8.0	use pg_fetch_result() instead	omit
-function	pg_setclientencoding	8.0	use pg_set_client_encoding() instead	omit
+function	pg_numfields	8.0	use pg_num_fields() instead	keep
+function	pg_numrows	8.0	use pg_num_rows() instead	keep
+function	pg_result	8.0	use pg_fetch_result() instead	keep
+function	pg_setclientencoding	8.0	use pg_set_client_encoding() instead	keep
 function	shmop_close	8.0	as Shmop objects are freed automatically	omit
 function	socket_set_timeout	8.5	use stream_set_timeout() instead	omit
 function	strftime	8.1	use IntlDateFormatter::format() instead	omit

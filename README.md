@@ -29,7 +29,7 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | --- | --- |
 | Laravel 13 JSON API with Eloquent | Runs. `artisan migrate` and 20 API requests (validation, create, read, update, delete, pagination, relations, a transaction) give PHP's answers on SQLite, MySQL and PostgreSQL |
 | Symfony 7.4 | A skeleton route runs. An application with Doctrine does not yet: it needs destructors that run at the end of a statement, which is being built |
-| WordPress | Not yet: `mysqli` is being built |
+| WordPress | Compatibility testing in progress for the new `mysqli` extension |
 | PHP's own test suite (php-src, 13,388 tests) | 8,704 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
 | Speed of a framework request | Roughly 10 times slower than PHP with opcache (one Laravel API request: about 150 ms against 9 to 17 ms). Phera links every class again for each request; sharing linked code between requests, forking a booted application and a worker mode with FrankenPHP's interface are designed ([architecture, 5.4](docs/architecture.md)) and not built. Measured CPU per request for a Laravel route with two MySQL queries: 34 million cycles on PHP with opcache, 369 million on Phera |
@@ -119,7 +119,17 @@ gzip file functions, and the `compress.zlib://` wrapper. The
 `zlib.output_compression` directive stores its value. Use `ob_gzhandler` for
 PHP output-buffer compression or `phera serve --compress` for server compression.
 
-In progress: intl, mysqli, pgsql, SimpleXML, XMLReader, XMLWriter.
+The `mysqli` and `pgsql` extensions share PDO's async connections, TLS and
+connection pool. For mysqli single statements, `MYSQLI_USE_RESULT` fetches one
+row at a time, including in `foreach`. PostgreSQL supports the `pg_exec` alias
+and other PHP 8.5 aliases for supported operations. `pg_copy_from()` accepts
+arrays and traversable row sources. PostgreSQL large objects can be opened,
+read, written, sought, truncated and unlinked in the current transaction.
+`pg_lo_import()` and `pg_lo_export()` transfer local files in bounded chunks.
+Native function return types are visible through reflection. Compatibility
+testing is in progress. MySQL LOCAL INFILE is disabled.
+
+In progress: intl, SimpleXML, XMLReader, XMLWriter.
 Not started: gd, fileinfo, zip, sockets.
 
 ### Sodium

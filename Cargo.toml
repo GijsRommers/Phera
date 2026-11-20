@@ -19,6 +19,7 @@ members = [
     "crates/extension-api",
     "crates/sqlite",
     "crates/io-pool",
+    "crates/db-drivers",
     "crates/extensions/*",
 ]
 
@@ -39,6 +40,7 @@ rustls-native-certs = "0.8"
 tokio-rustls = { version = "0.26", default-features = false, features = ["tls12"] }
 webpki-roots = "1"
 futures-core = "0.3"
+fallible-iterator = "0.2"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 rsa = { version = "0.10", features = ["pkcs1v15"] }
@@ -46,6 +48,7 @@ sha1_011 = { package = "sha1", version = "0.11" }
 redis = { version = "=1.0.5", default-features = false, features = ["tokio-comp"] }
 phera-ext-reflection = { path = "crates/extensions/reflection" }
 phera-ext-redis = { path = "crates/extensions/redis" }
+phera-db-drivers = { path = "crates/db-drivers" }
 phera-io-pool = { path = "crates/io-pool" }
 phera-dotenv = { path = "crates/dotenv" }
 indexmap = "2"
@@ -92,6 +95,8 @@ phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-sqlite = { path = "crates/sqlite" }
 phera-ext-sqlite3 = { path = "crates/extensions/sqlite3" }
 rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled", "column_metadata", "column_decltype", "backup"] }
+phera-ext-mysqli = { path = "crates/extensions/mysqli" }
+phera-ext-pgsql = { path = "crates/extensions/pgsql" }
 phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-random = { path = "crates/extensions/random" }
 phera-ext-serialize = { path = "crates/extensions/serialize" }
@@ -195,6 +200,7 @@ pcre2 = "=0.2.11"
 pcre2-sys = "=0.2.10"
 
 tokio-postgres = "0.7.18"
+postgres-protocol = "0.6"
 mysql_async = { version = "0.37.1", default-features = false, features = [
     "minimal-rust",
     "rustls-tls",

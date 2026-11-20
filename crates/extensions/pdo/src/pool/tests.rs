@@ -6,6 +6,8 @@ mod isolation;
 mod limits;
 mod threads;
 
+use crate::dsn::ParseDsn;
+
 use std::sync::Arc;
 use std::time::Duration;
 

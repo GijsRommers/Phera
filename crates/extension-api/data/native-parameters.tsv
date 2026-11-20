@@ -1299,6 +1299,195 @@ multipleiterator::next	ext/spl/spl_observer.stub.php:163
 multipleiterator::rewind	ext/spl/spl_observer.stub.php:151
 multipleiterator::setflags	ext/spl/spl_observer.stub.php:136	flags	r--		-
 multipleiterator::valid	ext/spl/spl_observer.stub.php:154
+mysqli::__construct	ext/mysqli/mysqli.stub.php:719	hostname	o--	null	n	username	o--	null	n	password	o--	null	n	database	o--	null	n	port	o--	null	n	socket	o--	null	n
+mysqli::autocommit	ext/mysqli/mysqli.stub.php:732	enable	r--		-
+mysqli::begin_transaction	ext/mysqli/mysqli.stub.php:738	flags	o--	0	i0	name	o--	null	n
+mysqli::change_user	ext/mysqli/mysqli.stub.php:744	username	r--		-	password	r--		-	database	r--		-
+mysqli::character_set_name	ext/mysqli/mysqli.stub.php:750
+mysqli::close	ext/mysqli/mysqli.stub.php:756
+mysqli::commit	ext/mysqli/mysqli.stub.php:762	flags	o--	0	i0	name	o--	null	n
+mysqli::connect	ext/mysqli/mysqli.stub.php:769	hostname	o--	null	n	username	o--	null	n	password	o--	null	n	database	o--	null	n	port	o--	null	n	socket	o--	null	n
+mysqli::debug	ext/mysqli/mysqli.stub.php:789	options	r--		-
+mysqli::dump_debug_info	ext/mysqli/mysqli.stub.php:782
+mysqli::escape_string	ext/mysqli/mysqli.stub.php:914	string	r--		-
+mysqli::execute_query	ext/mysqli/mysqli.stub.php:800	query	r--		-	params	o--	null	n
+mysqli::get_charset	ext/mysqli/mysqli.stub.php:795
+mysqli::get_client_info	ext/mysqli/mysqli.stub.php:807
+mysqli::get_connection_stats	ext/mysqli/mysqli.stub.php:814
+mysqli::get_server_info	ext/mysqli/mysqli.stub.php:820
+mysqli::get_warnings	ext/mysqli/mysqli.stub.php:826
+mysqli::init	ext/mysqli/mysqli.stub.php:832
+mysqli::kill	ext/mysqli/mysqli.stub.php:839	process_id	r--		-
+mysqli::more_results	ext/mysqli/mysqli.stub.php:851
+mysqli::multi_query	ext/mysqli/mysqli.stub.php:845	query	r--		-
+mysqli::next_result	ext/mysqli/mysqli.stub.php:857
+mysqli::options	ext/mysqli/mysqli.stub.php:957	option	r--		-	value	r--		-
+mysqli::ping	ext/mysqli/mysqli.stub.php:864
+mysqli::poll	ext/mysqli/mysqli.stub.php:870	read	r-&		-	error	r-&		-	reject	r-&		-	seconds	r--		-	microseconds	o--	0	i0
+mysqli::prepare	ext/mysqli/mysqli.stub.php:876	query	r--		-
+mysqli::query	ext/mysqli/mysqli.stub.php:882	query	r--		-	result_mode	o--	MYSQLI_STORE_RESULT	i0
+mysqli::real_connect	ext/mysqli/mysqli.stub.php:888	hostname	o--	null	n	username	o--	null	n	password	o--	null	n	database	o--	null	n	port	o--	null	n	socket	o--	null	n	flags	o--	0	i0
+mysqli::real_escape_string	ext/mysqli/mysqli.stub.php:902	string	r--		-
+mysqli::real_query	ext/mysqli/mysqli.stub.php:920	query	r--		-
+mysqli::reap_async_query	ext/mysqli/mysqli.stub.php:908
+mysqli::refresh	ext/mysqli/mysqli.stub.php:1013	flags	r--		-
+mysqli::release_savepoint	ext/mysqli/mysqli.stub.php:926	name	r--		-
+mysqli::rollback	ext/mysqli/mysqli.stub.php:932	flags	o--	0	i0	name	o--	null	n
+mysqli::savepoint	ext/mysqli/mysqli.stub.php:938	name	r--		-
+mysqli::select_db	ext/mysqli/mysqli.stub.php:944	database	r--		-
+mysqli::set_charset	ext/mysqli/mysqli.stub.php:950	charset	r--		-
+mysqli::set_opt	ext/mysqli/mysqli.stub.php:964	option	r--		-	value	r--		-
+mysqli::ssl_set	ext/mysqli/mysqli.stub.php:970	key	r--		-	certificate	r--		-	ca_certificate	r--		-	ca_path	r--		-	cipher_algos	r--		-
+mysqli::stat	ext/mysqli/mysqli.stub.php:982
+mysqli::stmt_init	ext/mysqli/mysqli.stub.php:988
+mysqli::store_result	ext/mysqli/mysqli.stub.php:994	mode	o--	0	i0
+mysqli::thread_safe	ext/mysqli/mysqli.stub.php:1000
+mysqli::use_result	ext/mysqli/mysqli.stub.php:1006
+mysqli_affected_rows	ext/mysqli/mysqli.stub.php:1331	mysql	r--		-
+mysqli_autocommit	ext/mysqli/mysqli.stub.php:1333	mysql	r--		-	enable	r--		-
+mysqli_begin_transaction	ext/mysqli/mysqli.stub.php:1335	mysql	r--		-	flags	o--	0	i0	name	o--	null	n
+mysqli_change_user	ext/mysqli/mysqli.stub.php:1337	mysql	r--		-	username	r--		-	password	r--		-	database	r--		-
+mysqli_character_set_name	ext/mysqli/mysqli.stub.php:1340	mysql	r--		-
+mysqli_close	ext/mysqli/mysqli.stub.php:1342	mysql	r--		-
+mysqli_commit	ext/mysqli/mysqli.stub.php:1344	mysql	r--		-	flags	o--	0	i0	name	o--	null	n
+mysqli_connect	ext/mysqli/mysqli.stub.php:1349	hostname	o--	null	n	username	o--	null	n	password	o--	null	n	database	o--	null	n	port	o--	null	n	socket	o--	null	n
+mysqli_connect_errno	ext/mysqli/mysqli.stub.php:1358
+mysqli_connect_error	ext/mysqli/mysqli.stub.php:1361
+mysqli_data_seek	ext/mysqli/mysqli.stub.php:1363	result	r--		-	offset	r--		-
+mysqli_debug	ext/mysqli/mysqli.stub.php:1367	options	r--		-
+mysqli_dump_debug_info	ext/mysqli/mysqli.stub.php:1365	mysql	r--		-
+mysqli_errno	ext/mysqli/mysqli.stub.php:1369	mysql	r--		-
+mysqli_error	ext/mysqli/mysqli.stub.php:1372	mysql	r--		-
+mysqli_error_list	ext/mysqli/mysqli.stub.php:1378	mysql	r--		-
+mysqli_escape_string	ext/mysqli/mysqli.stub.php:1543	mysql	r--		-	string	r--		-
+mysqli_execute	ext/mysqli/mysqli.stub.php:1384	statement	r--		-	params	o--	null	n
+mysqli_execute_query	ext/mysqli/mysqli.stub.php:1386	mysql	r--		-	query	r--		-	params	o--	null	n
+mysqli_fetch_all	ext/mysqli/mysqli.stub.php:1410	result	r--		-	mode	o--	MYSQLI_NUM	i2
+mysqli_fetch_array	ext/mysqli/mysqli.stub.php:1416	result	r--		-	mode	o--	MYSQLI_BOTH	i3
+mysqli_fetch_assoc	ext/mysqli/mysqli.stub.php:1422	result	r--		-
+mysqli_fetch_column	ext/mysqli/mysqli.stub.php:1433	result	r--		-	column	o--	0	i0
+mysqli_fetch_field	ext/mysqli/mysqli.stub.php:1389	result	r--		-
+mysqli_fetch_field_direct	ext/mysqli/mysqli.stub.php:1398	result	r--		-	index	r--		-
+mysqli_fetch_fields	ext/mysqli/mysqli.stub.php:1395	result	r--		-
+mysqli_fetch_lengths	ext/mysqli/mysqli.stub.php:1404	result	r--		-
+mysqli_fetch_object	ext/mysqli/mysqli.stub.php:1425	result	r--		-	class	o--	"stdClass"	s737464436c617373	constructor_args	o--	[]	a
+mysqli_fetch_row	ext/mysqli/mysqli.stub.php:1431	result	r--		-
+mysqli_field_count	ext/mysqli/mysqli.stub.php:1435	mysql	r--		-
+mysqli_field_seek	ext/mysqli/mysqli.stub.php:1437	result	r--		-	index	r--		-
+mysqli_field_tell	ext/mysqli/mysqli.stub.php:1439	result	r--		-
+mysqli_free_result	ext/mysqli/mysqli.stub.php:1441	result	r--		-
+mysqli_get_charset	ext/mysqli/mysqli.stub.php:1456	mysql	r--		-
+mysqli_get_client_info	ext/mysqli/mysqli.stub.php:1459	mysql	o--	null	n
+mysqli_get_client_stats	ext/mysqli/mysqli.stub.php:1453
+mysqli_get_client_version	ext/mysqli/mysqli.stub.php:1461
+mysqli_get_connection_stats	ext/mysqli/mysqli.stub.php:1447	mysql	r--		-
+mysqli_get_host_info	ext/mysqli/mysqli.stub.php:1470	mysql	r--		-
+mysqli_get_links_stats	ext/mysqli/mysqli.stub.php:1467
+mysqli_get_proto_info	ext/mysqli/mysqli.stub.php:1472	mysql	r--		-
+mysqli_get_server_info	ext/mysqli/mysqli.stub.php:1475	mysql	r--		-
+mysqli_get_server_version	ext/mysqli/mysqli.stub.php:1477	mysql	r--		-
+mysqli_get_warnings	ext/mysqli/mysqli.stub.php:1480	mysql	r--		-
+mysqli_info	ext/mysqli/mysqli.stub.php:1486	mysql	r--		-
+mysqli_init	ext/mysqli/mysqli.stub.php:1483
+mysqli_insert_id	ext/mysqli/mysqli.stub.php:1489	mysql	r--		-
+mysqli_kill	ext/mysqli/mysqli.stub.php:1492	mysql	r--		-	process_id	r--		-
+mysqli_more_results	ext/mysqli/mysqli.stub.php:1494	mysql	r--		-
+mysqli_multi_query	ext/mysqli/mysqli.stub.php:1496	mysql	r--		-	query	r--		-
+mysqli_next_result	ext/mysqli/mysqli.stub.php:1498	mysql	r--		-
+mysqli_num_fields	ext/mysqli/mysqli.stub.php:1500	result	r--		-
+mysqli_num_rows	ext/mysqli/mysqli.stub.php:1503	result	r--		-
+mysqli_options	ext/mysqli/mysqli.stub.php:1506	mysql	r--		-	option	r--		-	value	r--		-
+mysqli_ping	ext/mysqli/mysqli.stub.php:1515	mysql	r--		-
+mysqli_poll	ext/mysqli/mysqli.stub.php:1517	read	r-&		-	error	r-&		-	reject	r-&		-	seconds	r--		-	microseconds	o--	0	i0
+mysqli_prepare	ext/mysqli/mysqli.stub.php:1520	mysql	r--		-	query	r--		-
+mysqli_query	ext/mysqli/mysqli.stub.php:1525	mysql	r--		-	query	r--		-	result_mode	o--	MYSQLI_STORE_RESULT	i0
+mysqli_real_connect	ext/mysqli/mysqli.stub.php:1527	mysql	r--		-	hostname	o--	null	n	username	o--	null	n	password	o--	null	n	database	o--	null	n	port	o--	null	n	socket	o--	null	n	flags	o--	0	i0
+mysqli_real_escape_string	ext/mysqli/mysqli.stub.php:1540	mysql	r--		-	string	r--		-
+mysqli_real_query	ext/mysqli/mysqli.stub.php:1545	mysql	r--		-	query	r--		-
+mysqli_reap_async_query	ext/mysqli/mysqli.stub.php:1548	mysql	r--		-
+mysqli_refresh	ext/mysqli/mysqli.stub.php:1655	mysql	r--		-	flags	r--		-
+mysqli_release_savepoint	ext/mysqli/mysqli.stub.php:1550	mysql	r--		-	name	r--		-
+mysqli_report	ext/mysqli/mysqli.stub.php:1522	flags	r--		-
+mysqli_result::__construct	ext/mysqli/mysqli.stub.php:1044	mysql	r--		-	result_mode	o--	MYSQLI_STORE_RESULT	i0
+mysqli_result::close	ext/mysqli/mysqli.stub.php:1050
+mysqli_result::data_seek	ext/mysqli/mysqli.stub.php:1062	offset	r--		-
+mysqli_result::fetch_all	ext/mysqli/mysqli.stub.php:1088	mode	o--	MYSQLI_NUM	i2
+mysqli_result::fetch_array	ext/mysqli/mysqli.stub.php:1095	mode	o--	MYSQLI_BOTH	i3
+mysqli_result::fetch_assoc	ext/mysqli/mysqli.stub.php:1102
+mysqli_result::fetch_column	ext/mysqli/mysqli.stub.php:1118	column	o--	0	i0
+mysqli_result::fetch_field	ext/mysqli/mysqli.stub.php:1068
+mysqli_result::fetch_field_direct	ext/mysqli/mysqli.stub.php:1081	index	r--		-
+mysqli_result::fetch_fields	ext/mysqli/mysqli.stub.php:1075
+mysqli_result::fetch_object	ext/mysqli/mysqli.stub.php:1108	class	o--	"stdClass"	s737464436c617373	constructor_args	o--	[]	a
+mysqli_result::fetch_row	ext/mysqli/mysqli.stub.php:1115
+mysqli_result::field_seek	ext/mysqli/mysqli.stub.php:1124	index	r--		-
+mysqli_result::free	ext/mysqli/mysqli.stub.php:1056
+mysqli_result::free_result	ext/mysqli/mysqli.stub.php:1130
+mysqli_result::getiterator	ext/mysqli/mysqli.stub.php:1132
+mysqli_rollback	ext/mysqli/mysqli.stub.php:1552	mysql	r--		-	flags	o--	0	i0	name	o--	null	n
+mysqli_savepoint	ext/mysqli/mysqli.stub.php:1554	mysql	r--		-	name	r--		-
+mysqli_select_db	ext/mysqli/mysqli.stub.php:1556	mysql	r--		-	database	r--		-
+mysqli_set_charset	ext/mysqli/mysqli.stub.php:1558	mysql	r--		-	charset	r--		-
+mysqli_set_opt	ext/mysqli/mysqli.stub.php:1512	mysql	r--		-	option	r--		-	value	r--		-
+mysqli_sql_exception::getsqlstate	ext/mysqli/mysqli.stub.php:1327
+mysqli_sqlstate	ext/mysqli/mysqli.stub.php:1628	mysql	r--		-
+mysqli_ssl_set	ext/mysqli/mysqli.stub.php:1630	mysql	r--		-	key	r--		-	certificate	r--		-	ca_certificate	r--		-	ca_path	r--		-	cipher_algos	r--		-
+mysqli_stat	ext/mysqli/mysqli.stub.php:1640	mysql	r--		-
+mysqli_stmt::__construct	ext/mysqli/mysqli.stub.php:1193	mysql	r--		-	query	o--	null	n
+mysqli_stmt::attr_get	ext/mysqli/mysqli.stub.php:1199	attribute	r--		-
+mysqli_stmt::attr_set	ext/mysqli/mysqli.stub.php:1205	attribute	r--		-	value	r--		-
+mysqli_stmt::bind_param	ext/mysqli/mysqli.stub.php:1211	types	r--		-	vars	ov&		-
+mysqli_stmt::bind_result	ext/mysqli/mysqli.stub.php:1217	vars	ov&		-
+mysqli_stmt::close	ext/mysqli/mysqli.stub.php:1223
+mysqli_stmt::data_seek	ext/mysqli/mysqli.stub.php:1229	offset	r--		-
+mysqli_stmt::execute	ext/mysqli/mysqli.stub.php:1235	params	o--	null	n
+mysqli_stmt::fetch	ext/mysqli/mysqli.stub.php:1241
+mysqli_stmt::free_result	ext/mysqli/mysqli.stub.php:1283
+mysqli_stmt::get_result	ext/mysqli/mysqli.stub.php:1307
+mysqli_stmt::get_warnings	ext/mysqli/mysqli.stub.php:1247
+mysqli_stmt::more_results	ext/mysqli/mysqli.stub.php:1259
+mysqli_stmt::next_result	ext/mysqli/mysqli.stub.php:1265
+mysqli_stmt::num_rows	ext/mysqli/mysqli.stub.php:1271
+mysqli_stmt::prepare	ext/mysqli/mysqli.stub.php:1295	query	r--		-
+mysqli_stmt::reset	ext/mysqli/mysqli.stub.php:1289
+mysqli_stmt::result_metadata	ext/mysqli/mysqli.stub.php:1253
+mysqli_stmt::send_long_data	ext/mysqli/mysqli.stub.php:1277	param_num	r--		-	data	r--		-
+mysqli_stmt::store_result	ext/mysqli/mysqli.stub.php:1301
+mysqli_stmt_affected_rows	ext/mysqli/mysqli.stub.php:1561	statement	r--		-
+mysqli_stmt_attr_get	ext/mysqli/mysqli.stub.php:1563	statement	r--		-	attribute	r--		-
+mysqli_stmt_attr_set	ext/mysqli/mysqli.stub.php:1565	statement	r--		-	attribute	r--		-	value	r--		-
+mysqli_stmt_bind_param	ext/mysqli/mysqli.stub.php:1567	statement	r--		-	types	r--		-	vars	ov&		-
+mysqli_stmt_bind_result	ext/mysqli/mysqli.stub.php:1569	statement	r--		-	vars	ov&		-
+mysqli_stmt_close	ext/mysqli/mysqli.stub.php:1571	statement	r--		-
+mysqli_stmt_data_seek	ext/mysqli/mysqli.stub.php:1573	statement	r--		-	offset	r--		-
+mysqli_stmt_errno	ext/mysqli/mysqli.stub.php:1575	statement	r--		-
+mysqli_stmt_error	ext/mysqli/mysqli.stub.php:1578	statement	r--		-
+mysqli_stmt_error_list	ext/mysqli/mysqli.stub.php:1584	statement	r--		-
+mysqli_stmt_execute	ext/mysqli/mysqli.stub.php:1380	statement	r--		-	params	o--	null	n
+mysqli_stmt_fetch	ext/mysqli/mysqli.stub.php:1586	statement	r--		-
+mysqli_stmt_field_count	ext/mysqli/mysqli.stub.php:1588	statement	r--		-
+mysqli_stmt_free_result	ext/mysqli/mysqli.stub.php:1590	statement	r--		-
+mysqli_stmt_get_result	ext/mysqli/mysqli.stub.php:1593	statement	r--		-
+mysqli_stmt_get_warnings	ext/mysqli/mysqli.stub.php:1596	statement	r--		-
+mysqli_stmt_init	ext/mysqli/mysqli.stub.php:1599	mysql	r--		-
+mysqli_stmt_insert_id	ext/mysqli/mysqli.stub.php:1602	statement	r--		-
+mysqli_stmt_more_results	ext/mysqli/mysqli.stub.php:1604	statement	r--		-
+mysqli_stmt_next_result	ext/mysqli/mysqli.stub.php:1606	statement	r--		-
+mysqli_stmt_num_rows	ext/mysqli/mysqli.stub.php:1609	statement	r--		-
+mysqli_stmt_param_count	ext/mysqli/mysqli.stub.php:1611	statement	r--		-
+mysqli_stmt_prepare	ext/mysqli/mysqli.stub.php:1613	statement	r--		-	query	r--		-
+mysqli_stmt_reset	ext/mysqli/mysqli.stub.php:1615	statement	r--		-
+mysqli_stmt_result_metadata	ext/mysqli/mysqli.stub.php:1618	statement	r--		-
+mysqli_stmt_send_long_data	ext/mysqli/mysqli.stub.php:1620	statement	r--		-	param_num	r--		-	data	r--		-
+mysqli_stmt_sqlstate	ext/mysqli/mysqli.stub.php:1625	statement	r--		-
+mysqli_stmt_store_result	ext/mysqli/mysqli.stub.php:1622	statement	r--		-
+mysqli_store_result	ext/mysqli/mysqli.stub.php:1643	mysql	r--		-	mode	o--	0	i0
+mysqli_thread_id	ext/mysqli/mysqli.stub.php:1645	mysql	r--		-
+mysqli_thread_safe	ext/mysqli/mysqli.stub.php:1647
+mysqli_use_result	ext/mysqli/mysqli.stub.php:1650	mysql	r--		-
+mysqli_warning::__construct	ext/mysqli/mysqli.stub.php:1318
+mysqli_warning::next	ext/mysqli/mysqli.stub.php:1320
+mysqli_warning_count	ext/mysqli/mysqli.stub.php:1652	mysql	r--		-
 natcasesort	ext/standard/basic_functions.stub.php:1566	array	r-&		-
 natsort	ext/standard/basic_functions.stub.php:1564	array	r-&		-
 net_get_interfaces	ext/standard/basic_functions.stub.php:2159
@@ -1593,6 +1782,129 @@ pdostatement::rowcount	ext/pdo/pdo_stmt.stub.php:59
 pdostatement::setattribute	ext/pdo/pdo_stmt.stub.php:62	attribute	r--		-	value	r--		-
 pdostatement::setfetchmode	ext/pdo/pdo_stmt.stub.php:65	mode	r--		-	args	ov-		-
 pfsockopen	ext/standard/basic_functions.stub.php:2990	hostname	r--		-	port	o--	-1	i-1	error_code	o-&	null	n	error_message	o-&	null	n	timeout	o--	null	n
+pg_affected_rows	ext/pgsql/pgsql.stub.php:567	result	r--		-
+pg_cancel_query	ext/pgsql/pgsql.stub.php:891	connection	r--		-
+pg_change_password	ext/pgsql/pgsql.stub.php:960	connection	r--		-	user	r--		-	password	r--		-
+pg_client_encoding	ext/pgsql/pgsql.stub.php:831	connection	o--	null	n
+pg_clientencoding	ext/pgsql/pgsql.stub.php:837	connection	o--	null	n
+pg_close	ext/pgsql/pgsql.stub.php:474	connection	o--	null	n
+pg_close_stmt	ext/pgsql/pgsql.stub.php:974	connection	r--		-	statement_name	r--		-
+pg_cmdtuples	ext/pgsql/pgsql.stub.php:573	result	r--		-
+pg_connect	ext/pgsql/pgsql.stub.php:468	connection_string	r--		-	flags	o--	0	i0
+pg_connect_poll	ext/pgsql/pgsql.stub.php:472	connection	r--		-
+pg_connection_busy	ext/pgsql/pgsql.stub.php:893	connection	r--		-
+pg_connection_reset	ext/pgsql/pgsql.stub.php:889	connection	r--		-
+pg_connection_status	ext/pgsql/pgsql.stub.php:885	connection	r--		-
+pg_consume_input	ext/pgsql/pgsql.stub.php:923	connection	r--		-
+pg_convert	ext/pgsql/pgsql.stub.php:937	connection	r--		-	table_name	r--		-	values	r--		-	flags	o--	0	i0
+pg_copy_from	ext/pgsql/pgsql.stub.php:850	connection	r--		-	table_name	r--		-	rows	r--		-	separator	o--	"\t"	s09	null_as	o--	"\\\\N"	s5c5c4e
+pg_copy_to	ext/pgsql/pgsql.stub.php:848	connection	r--		-	table_name	r--		-	separator	o--	"\t"	s09	null_as	o--	"\\\\N"	s5c5c4e
+pg_dbname	ext/pgsql/pgsql.stub.php:477	connection	o--	null	n
+pg_delete	ext/pgsql/pgsql.stub.php:946	connection	r--		-	table_name	r--		-	conditions	r--		-	flags	o--	PGSQL_DML_EXEC	i512
+pg_end_copy	ext/pgsql/pgsql.stub.php:839	connection	o--	null	n
+pg_errormessage	ext/pgsql/pgsql.stub.php:485	connection	o--	null	n
+pg_escape_bytea	ext/pgsql/pgsql.stub.php:862	connection	r--		-	string	o--	UNKNOWN	-
+pg_escape_identifier	ext/pgsql/pgsql.stub.php:877	connection	r--		-	string	o--	UNKNOWN	-
+pg_escape_literal	ext/pgsql/pgsql.stub.php:871	connection	r--		-	string	o--	UNKNOWN	-
+pg_escape_string	ext/pgsql/pgsql.stub.php:856	connection	r--		-	string	o--	UNKNOWN	-
+pg_exec	ext/pgsql/pgsql.stub.php:529	connection	r--		-	query	o--	UNKNOWN	-
+pg_execute	ext/pgsql/pgsql.stub.php:549	connection	r--		-	statement_name	r--		-	params	o--	UNKNOWN	-
+pg_fetch_all	ext/pgsql/pgsql.stub.php:653	result	r--		-	mode	o--	PGSQL_ASSOC	i1
+pg_fetch_all_columns	ext/pgsql/pgsql.stub.php:659	result	r--		-	field	o--	0	i0
+pg_fetch_array	ext/pgsql/pgsql.stub.php:644	result	r--		-	row	o--	null	n	mode	o--	PGSQL_BOTH	i3
+pg_fetch_assoc	ext/pgsql/pgsql.stub.php:638	result	r--		-	row	o--	null	n
+pg_fetch_object	ext/pgsql/pgsql.stub.php:647	result	r--		-	row	o--	null	n	class	o--	"stdClass"	s737464436c617373	constructor_args	o--	[]	a
+pg_fetch_result	ext/pgsql/pgsql.stub.php:619	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_fetch_row	ext/pgsql/pgsql.stub.php:632	result	r--		-	row	o--	null	n	mode	o--	PGSQL_NUM	i2
+pg_field_is_null	ext/pgsql/pgsql.stub.php:673	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_field_name	ext/pgsql/pgsql.stub.php:580	result	r--		-	field	r--		-
+pg_field_num	ext/pgsql/pgsql.stub.php:607	result	r--		-	field	r--		-
+pg_field_prtlen	ext/pgsql/pgsql.stub.php:664	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_field_size	ext/pgsql/pgsql.stub.php:588	result	r--		-	field	r--		-
+pg_field_table	ext/pgsql/pgsql.stub.php:577	result	r--		-	field	r--		-	oid_only	o--	false	f
+pg_field_type	ext/pgsql/pgsql.stub.php:596	result	r--		-	field	r--		-
+pg_field_type_oid	ext/pgsql/pgsql.stub.php:605	result	r--		-	field	r--		-
+pg_fieldisnull	ext/pgsql/pgsql.stub.php:679	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_fieldname	ext/pgsql/pgsql.stub.php:586	result	r--		-	field	r--		-
+pg_fieldnum	ext/pgsql/pgsql.stub.php:613	result	r--		-	field	r--		-
+pg_fieldprtlen	ext/pgsql/pgsql.stub.php:670	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_fieldsize	ext/pgsql/pgsql.stub.php:594	result	r--		-	field	r--		-
+pg_fieldtype	ext/pgsql/pgsql.stub.php:602	result	r--		-	field	r--		-
+pg_flush	ext/pgsql/pgsql.stub.php:925	connection	r--		-
+pg_free_result	ext/pgsql/pgsql.stub.php:681	result	r--		-
+pg_freeresult	ext/pgsql/pgsql.stub.php:687	result	r--		-
+pg_get_notify	ext/pgsql/pgsql.stub.php:913	connection	r--		-	mode	o--	PGSQL_ASSOC	i1
+pg_get_pid	ext/pgsql/pgsql.stub.php:915	connection	r--		-
+pg_get_result	ext/pgsql/pgsql.stub.php:904	connection	r--		-
+pg_getlastoid	ext/pgsql/pgsql.stub.php:696	result	r--		-
+pg_host	ext/pgsql/pgsql.stub.php:497	connection	o--	null	n
+pg_insert	ext/pgsql/pgsql.stub.php:940	connection	r--		-	table_name	r--		-	values	r--		-	flags	o--	PGSQL_DML_EXEC	i512
+pg_jit	ext/pgsql/pgsql.stub.php:509	connection	o--	null	n
+pg_last_error	ext/pgsql/pgsql.stub.php:479	connection	o--	null	n
+pg_last_notice	ext/pgsql/pgsql.stub.php:575	connection	r--		-	mode	o--	PGSQL_NOTICE_LAST	i1
+pg_last_oid	ext/pgsql/pgsql.stub.php:690	result	r--		-
+pg_lo_close	ext/pgsql/pgsql.stub.php:746	lob	r--		-
+pg_lo_create	ext/pgsql/pgsql.stub.php:707	connection	o--	UNKNOWN	-	oid	o--	UNKNOWN	-
+pg_lo_export	ext/pgsql/pgsql.stub.php:801	connection	r--		-	oid	o--	UNKNOWN	-	filename	o--	UNKNOWN	-
+pg_lo_import	ext/pgsql/pgsql.stub.php:785	connection	r--		-	filename	o--	UNKNOWN	-	oid	o--	UNKNOWN	-
+pg_lo_open	ext/pgsql/pgsql.stub.php:736	connection	r--		-	oid	o--	UNKNOWN	-	mode	o--	UNKNOWN	-
+pg_lo_read	ext/pgsql/pgsql.stub.php:755	lob	r--		-	length	o--	8192	i8192
+pg_lo_read_all	ext/pgsql/pgsql.stub.php:771	lob	r--		-
+pg_lo_seek	ext/pgsql/pgsql.stub.php:812	lob	r--		-	offset	r--		-	whence	o--	SEEK_CUR	i1
+pg_lo_tell	ext/pgsql/pgsql.stub.php:814	lob	r--		-
+pg_lo_truncate	ext/pgsql/pgsql.stub.php:816	lob	r--		-	size	r--		-
+pg_lo_unlink	ext/pgsql/pgsql.stub.php:721	connection	r--		-	oid	o--	UNKNOWN	-
+pg_lo_write	ext/pgsql/pgsql.stub.php:763	lob	r--		-	data	r--		-	length	o--	null	n
+pg_loclose	ext/pgsql/pgsql.stub.php:752	lob	r--		-
+pg_locreate	ext/pgsql/pgsql.stub.php:715	connection	o--	UNKNOWN	-	oid	o--	UNKNOWN	-
+pg_loexport	ext/pgsql/pgsql.stub.php:810	connection	r--		-	oid	o--	UNKNOWN	-	filename	o--	UNKNOWN	-
+pg_loimport	ext/pgsql/pgsql.stub.php:794	connection	r--		-	filename	o--	UNKNOWN	-	oid	o--	UNKNOWN	-
+pg_loopen	ext/pgsql/pgsql.stub.php:744	connection	r--		-	oid	o--	UNKNOWN	-	mode	o--	UNKNOWN	-
+pg_loread	ext/pgsql/pgsql.stub.php:761	lob	r--		-	length	o--	8192	i8192
+pg_loreadall	ext/pgsql/pgsql.stub.php:777	lob	r--		-
+pg_lounlink	ext/pgsql/pgsql.stub.php:729	connection	r--		-	oid	o--	UNKNOWN	-
+pg_lowrite	ext/pgsql/pgsql.stub.php:769	lob	r--		-	data	r--		-	length	o--	null	n
+pg_meta_data	ext/pgsql/pgsql.stub.php:931	connection	r--		-	table_name	r--		-	extended	o--	false	f
+pg_num_fields	ext/pgsql/pgsql.stub.php:559	result	r--		-
+pg_num_rows	ext/pgsql/pgsql.stub.php:551	result	r--		-
+pg_numfields	ext/pgsql/pgsql.stub.php:565	result	r--		-
+pg_numrows	ext/pgsql/pgsql.stub.php:557	result	r--		-
+pg_options	ext/pgsql/pgsql.stub.php:488	connection	o--	null	n
+pg_parameter_status	ext/pgsql/pgsql.stub.php:515	connection	r--		-	name	o--	UNKNOWN	-
+pg_pconnect	ext/pgsql/pgsql.stub.php:470	connection_string	r--		-	flags	o--	0	i0
+pg_ping	ext/pgsql/pgsql.stub.php:517	connection	o--	null	n
+pg_port	ext/pgsql/pgsql.stub.php:491	connection	o--	null	n
+pg_prepare	ext/pgsql/pgsql.stub.php:542	connection	r--		-	statement_name	r--		-	query	o--	UNKNOWN	-
+pg_put_copy_data	ext/pgsql/pgsql.stub.php:962	connection	r--		-	cmd	r--		-
+pg_put_copy_end	ext/pgsql/pgsql.stub.php:963	connection	r--		-	error	o--	null	n
+pg_put_line	ext/pgsql/pgsql.stub.php:842	connection	r--		-	query	o--	UNKNOWN	-
+pg_query	ext/pgsql/pgsql.stub.php:523	connection	r--		-	query	o--	UNKNOWN	-
+pg_query_params	ext/pgsql/pgsql.stub.php:536	connection	r--		-	query	r--		-	params	o--	UNKNOWN	-
+pg_result	ext/pgsql/pgsql.stub.php:626	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_result_error	ext/pgsql/pgsql.stub.php:880	result	r--		-
+pg_result_error_field	ext/pgsql/pgsql.stub.php:883	result	r--		-	field_code	r--		-
+pg_result_memory_size	ext/pgsql/pgsql.stub.php:957	result	r--		-
+pg_result_seek	ext/pgsql/pgsql.stub.php:661	result	r--		-	row	r--		-
+pg_result_status	ext/pgsql/pgsql.stub.php:907	result	r--		-	mode	o--	PGSQL_STATUS_LONG	i1
+pg_select	ext/pgsql/pgsql.stub.php:952	connection	r--		-	table_name	r--		-	conditions	o--	[]	a	flags	o--	PGSQL_DML_EXEC	i512	mode	o--	PGSQL_ASSOC	i1
+pg_send_execute	ext/pgsql/pgsql.stub.php:901	connection	r--		-	statement_name	r--		-	params	r--		-
+pg_send_prepare	ext/pgsql/pgsql.stub.php:899	connection	r--		-	statement_name	r--		-	query	r--		-
+pg_send_query	ext/pgsql/pgsql.stub.php:895	connection	r--		-	query	r--		-
+pg_send_query_params	ext/pgsql/pgsql.stub.php:897	connection	r--		-	query	r--		-	params	r--		-
+pg_set_chunked_rows_size	ext/pgsql/pgsql.stub.php:971	connection	r--		-	size	r--		-
+pg_set_client_encoding	ext/pgsql/pgsql.stub.php:822	connection	r--		-	encoding	o--	UNKNOWN	-
+pg_set_error_context_visibility	ext/pgsql/pgsql.stub.php:954	connection	r--		-	visibility	r--		-
+pg_set_error_verbosity	ext/pgsql/pgsql.stub.php:819	connection	r--		-	verbosity	o--	UNKNOWN	-
+pg_setclientencoding	ext/pgsql/pgsql.stub.php:829	connection	r--		-	encoding	o--	UNKNOWN	-
+pg_socket	ext/pgsql/pgsql.stub.php:921	connection	r--		-
+pg_socket_poll	ext/pgsql/pgsql.stub.php:968	socket	r--		-	read	r--		-	write	r--		-	timeout	o--	-1	i-1
+pg_trace	ext/pgsql/pgsql.stub.php:698	filename	r--		-	mode	o--	"w"	s77	connection	o--	null	n	trace_mode	o--	0	i0
+pg_transaction_status	ext/pgsql/pgsql.stub.php:887	connection	r--		-
+pg_tty	ext/pgsql/pgsql.stub.php:494	connection	o--	null	n
+pg_unescape_bytea	ext/pgsql/pgsql.stub.php:865	string	r--		-
+pg_untrace	ext/pgsql/pgsql.stub.php:700	connection	o--	null	n
+pg_update	ext/pgsql/pgsql.stub.php:943	connection	r--		-	table_name	r--		-	values	r--		-	conditions	r--		-	flags	o--	PGSQL_DML_EXEC	i512
+pg_version	ext/pgsql/pgsql.stub.php:503	connection	o--	null	n
 php_ini_loaded_file	ext/standard/basic_functions.stub.php:3064
 php_ini_scanned_files	ext/standard/basic_functions.stub.php:3061
 php_sapi_name	ext/standard/basic_functions.stub.php:3052
