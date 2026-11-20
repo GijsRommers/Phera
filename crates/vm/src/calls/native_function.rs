@@ -95,40 +95,32 @@ impl Vm {
             && let Some(handler) = self.registry.object_handler(entry.name)
         {
             return self
-                .run_async_native_retrying(entry.name, handler, arguments, binding)
+                .run_async_native_function(entry.name, handler, arguments, binding)
                 .await;
         }
         match entry.handler {
             NativeFn::Sync(handler) | NativeFn::DeprecatedSync(handler) => {
-                // A class miss from the handler loads the class and runs it
-                // again (see `calls::native_retries`).
-                let mut attempts = 0;
-                let result = loop {
-                    match handler(self, &arguments) {
-                        Err(error) if crate::autoload::ClassMiss::is(&error) => {
-                            if let Err(error) =
-                                self.load_missed_class(error, &mut attempts, true).await
-                            {
-                                break Err(error);
-                            }
-                        }
-                        result => break result,
+                let mut result = handler(self, &arguments);
+                if let Err(error) = &result {
+                    if crate::autoload::ClassMiss::is(error) {
+                        // Loads the class and runs the handler again (see
+                        // `calls::native_retries`).
+                        result = self
+                            .retry_sync_native(entry.name, handler, &arguments, binding, result)
+                            .await;
+                    } else if binding.has_native_frame() {
+                        self.record_native_failure(
+                            error,
+                            NativeFrame::Function(entry.name),
+                            &arguments,
+                        );
                     }
-                };
-                if let Err(error) = &result
-                    && binding.has_native_frame()
-                {
-                    self.record_native_failure(
-                        error,
-                        NativeFrame::Function(entry.name),
-                        &arguments,
-                    );
                 }
                 self.call_stack.recycle_native_arguments(arguments);
                 result
             }
             NativeFn::Async(handler) => {
-                self.run_async_native_retrying(entry.name, handler, arguments, binding)
+                self.run_async_native_function(entry.name, handler, arguments, binding)
                     .await
             }
         }
@@ -172,73 +164,40 @@ impl Vm {
         })
     }
 
-    /// Runs an async native, and after a class miss loads the class and
-    /// runs it again (see `calls::native_retries`). The arguments come back
-    /// with the miss, from the copy kept anyway for a failure's native
-    /// frame, so that a call that does not miss copies nothing more.
-    async fn run_async_native_retrying(
-        &mut self,
-        name: &'static str,
-        handler: phera_extension_api::AsyncFn,
-        mut arguments: Vec<Value>,
-        binding: ArgumentBinding,
-    ) -> NativeResult {
-        let mut attempts = 0;
-        loop {
-            let (result, again) = self
-                .run_async_native_function(name, handler, arguments, binding)
-                .await;
-            match result {
-                Err(error) if crate::autoload::ClassMiss::is(&error) => {
-                    let retry = again.is_some();
-                    self.load_missed_class(error, &mut attempts, retry).await?;
-                    arguments = again.unwrap_or_default();
-                }
-                result => return result,
-            }
-        }
-    }
-
-    /// The result, and for a class miss the arguments to call the native
-    /// with again when they were kept (see `calls::native_retries`).
     async fn run_async_native_function(
         &mut self,
         name: &'static str,
         handler: phera_extension_api::AsyncFn,
         arguments: Vec<Value>,
         binding: ArgumentBinding,
-    ) -> (NativeResult, Option<Vec<Value>>) {
+    ) -> NativeResult {
         if !binding.has_native_frame() {
-            return (handler(self, arguments).await, None);
+            return handler(self, arguments).await;
         }
         if self.registry.has_callback_frame(name) {
             return self.native_callback_frame(name, handler, arguments).await;
         }
         let retained = self.retain_native_arguments(&arguments);
         let result = handler(self, arguments).await;
-        match result {
-            Err(error) if crate::autoload::ClassMiss::is(&error) => {
-                (Err(error), Some(retained.into_vec()))
-            }
-            result => (
-                self.finish_native_future(result, NativeFrame::Function(name), retained),
-                None,
-            ),
+        if let Err(error) = &result
+            && crate::autoload::ClassMiss::is(error)
+        {
+            // Loads the class and runs the handler again with the copy kept
+            // for the failure's frame (see `calls::native_retries`).
+            return self
+                .retry_async_native(name, handler, retained.into_vec(), result)
+                .await;
         }
+        self.finish_native_future(result, NativeFrame::Function(name), retained)
     }
 
     /// Publish the native frame while PHP callbacks are active, for Throwable::getTrace().
-    ///
-    /// For a class miss, the arguments come back from the frame's trace,
-    /// which keeps a copy of each: the same value for a parameter taken by
-    /// value, so only a native with no by-reference or sensitive parameter
-    /// (the trace masks those) is called again (see `calls::native_retries`).
     fn native_callback_frame(
         &mut self,
         name: &'static str,
         handler: phera_extension_api::AsyncFn,
         arguments: Vec<Value>,
-    ) -> phera_extension_api::LocalFuture<'_, (NativeResult, Option<Vec<Value>>)> {
+    ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
         let native = self.native_function_trace(name, &arguments);
         Box::pin(async move {
             self.native_callback_sites
@@ -248,35 +207,22 @@ impl Vm {
                 });
             let result = handler(self, arguments).await;
             let site = self.native_callback_sites.pop();
-            let trace = site.and_then(|site| match site.native {
-                crate::error_traces::NativeCaller::Saved(trace) => Some(trace),
-                _ => None,
-            });
             if let Err(error) = &result
                 && crate::autoload::ClassMiss::is(error)
             {
-                let by_value = self.registry.get_function(name).is_some_and(|entry| {
-                    entry
-                        .params
-                        .iter()
-                        .all(|parameter| !parameter.by_ref && !parameter.sensitive)
-                });
-                let again = trace
-                    .filter(|_| by_value)
-                    .and_then(|trace| match trace.arguments {
-                        Value::Array(values) => {
-                            Some(values.iter().map(|(_, value)| value.clone()).collect())
-                        }
-                        _ => None,
-                    });
-                return (result, again);
+                // Loads the class and runs the handler again with the
+                // arguments of the frame's trace (see `calls::native_retries`).
+                return self.retry_traced_native(name, handler, site, result).await;
             }
             if let Err(error) = &result
                 && self.needs_native_failure_frame(error)
             {
-                self.failed_native = trace;
+                self.failed_native = site.and_then(|site| match site.native {
+                    crate::error_traces::NativeCaller::Saved(trace) => Some(trace),
+                    _ => None,
+                });
             }
-            (result, None)
+            result
         })
     }
 }

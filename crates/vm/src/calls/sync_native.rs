@@ -250,7 +250,6 @@ impl Vm {
             }
         }
         let record = self.call_stack.pop_call()?;
-        let prefix = self.take_call_prefix(&call);
         self.registers.truncate(call.start());
 
         let result =
@@ -260,7 +259,8 @@ impl Vm {
         if let Err(error) = &result
             && crate::autoload::ClassMiss::is(error)
         {
-            self.restore_native_call(record, prefix, &arguments);
+            // A function's window keeps nothing below its first register.
+            self.restore_native_call(record, [None, None], &arguments);
         }
         self.call_stack.recycle_native_arguments(arguments);
         result

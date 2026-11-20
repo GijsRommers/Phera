@@ -56,12 +56,13 @@ impl Vm {
         {
             return fallback;
         }
-        let record = self.call_stack.pop_call()?;
-        let Some(CallTarget::Method { method, context }) = record
-            .1
-            .as_ref()
-            .and_then(|details| details.callee.as_ref())
-            .map(|callee| callee.target.clone())
+        let (_, details) = self.call_stack.pop_call()?;
+        let Some(crate::calls::call_state::Callee {
+            argument_binding,
+            name,
+            parameters,
+            target: CallTarget::Method { method, context },
+        }) = details.and_then(|details| details.callee)
         else {
             return Err(internal_error!("native method target"));
         };
@@ -69,15 +70,21 @@ impl Vm {
         for (offset, argument) in arguments[..count].iter_mut().enumerate() {
             *argument = self.registers.take(call.base() + offset);
         }
-        let prefix = self.take_call_prefix(&call);
         self.registers.truncate(call.start());
+        let crate::classes::MethodContext {
+            receiver,
+            scope,
+            called,
+            invocation,
+        } = context;
+        let mut called = Some(called);
         let previous = self.native_called_class.take();
         if method.is_static {
-            self.native_called_class = Some(context.called);
+            self.native_called_class = called.take();
         }
         let pending = self.error_handlers.pending.len();
-        let result = handler(self, context.receiver.as_ref(), &arguments[..count]);
-        self.native_called_class = previous;
+        let result = handler(self, receiver.as_ref(), &arguments[..count]);
+        let lent = std::mem::replace(&mut self.native_called_class, previous);
         if pending != self.error_handlers.pending.len() {
             let operator = if method.is_static { "::" } else { "->" };
             let name = format!("{}{operator}{}", method.declaring, method.name);
@@ -97,10 +104,37 @@ impl Vm {
                     Box::new((error, method)),
                 )))
             }
-            // The interpreter runs the `Call` again once the class is
-            // loaded (see `calls::native_retries`).
+            // The interpreter runs the `Call` again once the class is loaded
+            // (see `calls::native_retries`): the call goes back as it was,
+            // with `$this` below its window.
             Err(error) if crate::autoload::ClassMiss::is(&error) => {
-                self.restore_native_call(record, prefix, &arguments[..count]);
+                let Some(called) = called.or(lent) else {
+                    return Err(internal_error!("native method class"));
+                };
+                if call.kind.prefix() != 1 {
+                    return Err(crate::autoload::ClassMiss::take(error)
+                        .map_or_else(|error| error, crate::autoload::ClassMiss::error));
+                }
+                let prefix = [receiver.clone().map(Value::Object), None];
+                let callee = crate::calls::call_state::Callee {
+                    argument_binding,
+                    name,
+                    parameters,
+                    target: CallTarget::Method {
+                        method,
+                        context: crate::classes::MethodContext {
+                            receiver,
+                            scope,
+                            called,
+                            invocation,
+                        },
+                    },
+                };
+                let details = crate::calls::prepared_call::CallDetails {
+                    callee: Some(callee),
+                    ..Default::default()
+                };
+                self.restore_native_call((call, Some(details)), prefix, &arguments[..count]);
                 Err(error)
             }
             Err(error) => {

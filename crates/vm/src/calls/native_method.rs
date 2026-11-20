@@ -115,90 +115,78 @@ impl Vm {
                 if method.is_static {
                     self.native_called_class = Some(context.called.clone());
                 }
-                // A class miss from the handler loads the class and runs it
-                // again with the same arguments (see `calls::native_retries`).
-                // They come back with the miss: the synchronous handler only
-                // borrowed them, and the others' are the copy kept anyway for
-                // the native frame of a failure, so a call that does not miss
-                // copies nothing more.
-                let mut attempts = 0;
-                let result = loop {
-                    let (outcome, again) = match entry.handler {
-                        phera_extension_api::NativeMethod::Sync(handler) => {
-                            let track =
-                                self.error_handlers.error.is_some() && !self.error_handlers.active;
-                            let previous = if track {
-                                let operator = if method.is_static { "::" } else { "->" };
-                                self.error_handlers.native_site.replace(
-                                    crate::error_traces::NativeTrace::new(
-                                        &format!("{}{operator}{}", method.declaring, method.name),
-                                        &arguments,
-                                    ),
-                                )
-                            } else {
-                                None
-                            };
-                            let result = handler(self, context.receiver.as_ref(), &arguments);
-                            if track {
-                                self.error_handlers.native_site = previous;
-                            }
-                            match result {
-                                Err(error) if crate::autoload::ClassMiss::is(&error) => {
-                                    (Err(error), Some(std::mem::take(&mut arguments)))
-                                }
-                                result => {
-                                    if let Err(error) = &result {
-                                        self.record_native_failure(
-                                            error,
-                                            NativeFrame::Method(method),
-                                            &arguments,
-                                        );
-                                    }
-                                    self.call_stack
-                                        .recycle_native_arguments(std::mem::take(&mut arguments));
-                                    (result, None)
-                                }
-                            }
-                        }
-                        handler => {
-                            let retained = self.retain_native_arguments(&arguments);
-                            let arguments = std::mem::take(&mut arguments);
-                            let result = match handler {
-                                phera_extension_api::NativeMethod::Async(handler) => {
-                                    handler(self, context.receiver.clone(), arguments).await
-                                }
-                                phera_extension_api::NativeMethod::Window(window) => {
-                                    (window.run)(self, context.receiver.clone(), arguments).await
-                                }
-                                phera_extension_api::NativeMethod::AsyncNamed(handler) => {
-                                    handler(self, context.receiver.clone(), arguments, named).await
-                                }
-                                _ => Err(NativeError::error("Cannot call abstract method")),
-                            };
-                            match result {
-                                Err(error) if crate::autoload::ClassMiss::is(&error) => {
-                                    (Err(error), Some(retained.into_vec()))
-                                }
-                                result => (
-                                    self.finish_native_future(
-                                        result,
-                                        NativeFrame::Method(method),
-                                        retained,
-                                    ),
-                                    None,
+                let result = match entry.handler {
+                    phera_extension_api::NativeMethod::Sync(handler) => {
+                        let track =
+                            self.error_handlers.error.is_some() && !self.error_handlers.active;
+                        let previous = if track {
+                            let operator = if method.is_static { "::" } else { "->" };
+                            self.error_handlers.native_site.replace(
+                                crate::error_traces::NativeTrace::new(
+                                    &format!("{}{operator}{}", method.declaring, method.name),
+                                    &arguments,
                                 ),
+                            )
+                        } else {
+                            None
+                        };
+                        let mut result = handler(self, context.receiver.as_ref(), &arguments);
+                        if track {
+                            self.error_handlers.native_site = previous;
+                        }
+                        if let Err(error) = &result {
+                            if crate::autoload::ClassMiss::is(error) {
+                                // Loads the class and runs the handler again
+                                // (see `calls::native_retries`).
+                                result = self
+                                    .retry_native_method(
+                                        method,
+                                        (entry.handler, context.receiver.clone()),
+                                        (arguments.clone(), named),
+                                        result,
+                                    )
+                                    .await;
+                            } else {
+                                self.record_native_failure(
+                                    error,
+                                    NativeFrame::Method(method),
+                                    &arguments,
+                                );
                             }
                         }
-                    };
-                    match (outcome, again) {
-                        (Err(error), again) if crate::autoload::ClassMiss::is(&error) => {
-                            let retry = again.is_some();
-                            match self.load_missed_class(error, &mut attempts, retry).await {
-                                Ok(()) => arguments = again.unwrap_or_default(),
-                                Err(error) => break Err(error),
+                        self.call_stack.recycle_native_arguments(arguments);
+                        result
+                    }
+                    handler => {
+                        let retained = self.retain_native_arguments(&arguments);
+                        let result = match handler {
+                            phera_extension_api::NativeMethod::Async(handler) => {
+                                handler(self, context.receiver.clone(), arguments).await
                             }
+                            phera_extension_api::NativeMethod::Window(window) => {
+                                (window.run)(self, context.receiver.clone(), arguments).await
+                            }
+                            phera_extension_api::NativeMethod::AsyncNamed(handler) => {
+                                handler(self, context.receiver.clone(), arguments, named).await
+                            }
+                            _ => Err(NativeError::error("Cannot call abstract method")),
+                        };
+                        if let Err(error) = &result
+                            && crate::autoload::ClassMiss::is(error)
+                        {
+                            // Loads the class and runs the handler again with
+                            // the copy kept for the failure's frame (see
+                            // `calls::native_retries`).
+                            self.retry_native_method(
+                                method,
+                                (handler, context.receiver.clone()),
+                                (retained.into_vec(), named),
+                                result,
+                            )
+                            .await
+                        } else {
+                            self.finish_native_future(result, NativeFrame::Method(method), retained)
                         }
-                        (outcome, _) => break outcome,
                     }
                 };
                 self.native_called_class = previous;
