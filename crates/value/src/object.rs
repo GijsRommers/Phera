@@ -13,6 +13,8 @@ pub enum ObjectCast {
     Bool,
     Int,
     Float,
+    /// An int when the value fits one, a float otherwise: what `array_sum()` asks for.
+    Number,
     String,
 }
 

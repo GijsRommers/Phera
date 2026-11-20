@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use num_bigint::BigInt;
-use num_traits::Zero;
+use num_traits::{ToPrimitive, Zero};
 use phera_extension_api::{
     ArrayKey, ClassEntry, ClassHooks, ClassKind, ConstantValue, Context, MethodEntry,
     NativeCastKind, NativeClone, NativeError, NativeResult, Object, Param, ParamType, PhpArray,
@@ -141,6 +141,10 @@ fn cast(object: &Object, kind: NativeCastKind) -> Option<Value> {
         NativeCastKind::Bool => Value::Bool(!number.is_zero()),
         NativeCastKind::Int => Value::Int(integer::to_int(&number)),
         NativeCastKind::Float => Value::Float(integer::to_float(&number)),
+        NativeCastKind::Number => match number.to_i64() {
+            Some(integer) => Value::Int(integer),
+            None => Value::Float(integer::to_float(&number)),
+        },
         NativeCastKind::String => Value::from(number.to_str_radix(10)),
     })
 }
