@@ -431,6 +431,7 @@ impl Machine<'_> {
             | Instruction::InitCall { .. }
             | Instruction::FetchClassName { .. }
             | Instruction::InstanceOf { .. }
+            | Instruction::SendPath { .. }
             | Instruction::IterStart { .. }
             | Instruction::IterEnd { .. } => self.further_step::<GUARDED>(instruction, position),
             _ => Step::Slow,

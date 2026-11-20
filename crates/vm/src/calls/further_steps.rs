@@ -117,6 +117,7 @@ impl Machine<'_> {
             Instruction::FetchClassName { dst, class } => {
                 self.fetch_class_name::<GUARDED>(position, dst, class)
             }
+            Instruction::SendPath { path } => self.send_path_value(position, path),
             Instruction::IterStart { iter, src, .. } => {
                 self.start_array_iteration::<GUARDED>(position, iter, src)
             }

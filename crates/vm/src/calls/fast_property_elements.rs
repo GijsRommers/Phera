@@ -55,7 +55,12 @@ impl Machine<'_> {
         }
     }
 
-    fn property_element(&self, position: Position, path: PathId, quiet: bool) -> Option<Value> {
+    pub(super) fn property_element(
+        &self,
+        position: Position,
+        path: PathId,
+        quiet: bool,
+    ) -> Option<Value> {
         let property =
             self.with_site(position, (path, Shape::Element), |entry, object, scope| {
                 if entry.hooks.is_some() {

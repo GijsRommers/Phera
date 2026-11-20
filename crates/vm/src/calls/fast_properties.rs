@@ -143,7 +143,7 @@ impl Machine<'_> {
     }
 
     /// The value the instruction's property site gives for this read.
-    fn cached_property(&self, position: Position, path: PathId) -> Option<Value> {
+    pub(super) fn cached_property(&self, position: Position, path: PathId) -> Option<Value> {
         self.with_site(position, (path, Shape::Read), |entry, object, scope| {
             entry.read_matching(object, scope)
         })

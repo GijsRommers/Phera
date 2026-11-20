@@ -367,7 +367,12 @@ impl Machine<'_> {
     /// for anything else.
     #[cold]
     #[inline(never)]
-    fn widen_argument(&self, function: FunctionIndex, index: usize, value: &mut Value) -> bool {
+    pub(super) fn widen_argument(
+        &self,
+        function: FunctionIndex,
+        index: usize,
+        value: &mut Value,
+    ) -> bool {
         let facts = self.code.facts(function);
         let Value::Int(integer) = *value else {
             return false;
@@ -387,7 +392,12 @@ impl Machine<'_> {
     /// value: no declared type, a built-in type the value has, or a class
     /// type the unit's cache knows the value's class satisfies.
     #[inline(always)]
-    fn accepts_argument(&self, function: FunctionIndex, index: usize, value: &Value) -> bool {
+    pub(super) fn accepts_argument(
+        &self,
+        function: FunctionIndex,
+        index: usize,
+        value: &Value,
+    ) -> bool {
         let facts = self.code.facts(function);
         if !facts.takes_value(index) {
             return false;
@@ -424,7 +434,7 @@ impl Machine<'_> {
     /// native call, [`Machine::native_accepts`]. Inline, so that a
     /// described callee costs what it did before lean records existed.
     #[inline(always)]
-    fn other_accepts(&self, callee: PreparedCallee, index: usize) -> bool {
+    pub(super) fn other_accepts(&self, callee: PreparedCallee, index: usize) -> bool {
         match callee {
             PreparedCallee::Native(id) => self.native_accepts(id, index),
             _ => self.general_accepts(index),

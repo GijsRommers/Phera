@@ -37,6 +37,7 @@ mod fast_methods;
 mod fast_named_calls;
 mod fast_native_methods;
 mod fast_objects;
+mod fast_path_sends;
 mod fast_properties;
 mod fast_property_elements;
 pub(crate) mod frame;
