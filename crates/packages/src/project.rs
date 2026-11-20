@@ -18,6 +18,7 @@ pub struct Options {
     pub verbose: bool,
     pub no_scripts: bool,
     pub no_plugins: bool,
+    pub no_interaction: bool,
     pub no_install: bool,
     pub dry_run: bool,
     pub refresh_lock: bool,

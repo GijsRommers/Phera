@@ -8,9 +8,10 @@
 
 Give each supported Composer plugin a Rust hook for its data-driven install
 operation. Use the root `config.allow-plugins` boolean or first matching
-package rule before activating the hook. An unlisted required native hook
-reports how to allow or explicitly skip it. `--no-plugins` skips the native
-hooks. Hooks run only after selecting the dependencies.
+package rule before activating the hook. An interactive prompt records an
+allow or deny decision, or skips the hook for the current invocation.
+Noninteractive installs require an explicit rule for required plugins.
+`--no-plugins` skips the native hooks. Hooks run after dependency selection.
 
 ## Why
 
@@ -23,5 +24,5 @@ installs.
 ## Turned down
 
 Loading third-party plugin PHP into the resolver or emulating the Composer
-objects that plugins receive. Interactive trust prompts, global plugin
-configuration and the pre-2.2 lock exception are separate compatibility work.
+objects that plugins receive. Global plugin configuration remains separate
+from the project's allowed-plugin map.

@@ -13,7 +13,6 @@ use std::path::{Component, Path, PathBuf};
 pub(super) struct Outputs<'a> {
     project: &'a Project,
     vendor: PathBuf,
-    config: BTreeMap<&'static str, &'a str>,
     files: BTreeMap<PathBuf, (Vec<u8>, bool)>,
     bundles: BTreeMap<String, Vec<String>>,
     env: BTreeMap<String, Vec<String>>,
@@ -21,21 +20,9 @@ pub(super) struct Outputs<'a> {
 
 impl<'a> Outputs<'a> {
     pub(super) fn new(project: &'a Project) -> Result<Self> {
-        let settings = &project.data["extra"];
-        let config = [
-            ("%BIN_DIR%", "bin-dir", "bin"),
-            ("%CONFIG_DIR%", "config-dir", "config"),
-            ("%PUBLIC_DIR%", "public-dir", "public"),
-            ("%SRC_DIR%", "src-dir", "src"),
-            ("%VAR_DIR%", "var-dir", "var"),
-        ]
-        .into_iter()
-        .map(|(token, key, default)| (token, settings[key].as_str().unwrap_or(default)))
-        .collect();
         Ok(Self {
             project,
             vendor: project.vendor_dir()?,
-            config,
             files: BTreeMap::new(),
             bundles: BTreeMap::new(),
             env: BTreeMap::new(),
@@ -150,11 +137,7 @@ impl<'a> Outputs<'a> {
     }
 
     fn expand(&self, input: &str) -> String {
-        self.config
-            .iter()
-            .fold(input.into(), |result, (token, path)| {
-                result.replace(token, path)
-            })
+        super::expand(self.project, input)
     }
 
     fn bundles_path(&self) -> Result<PathBuf> {

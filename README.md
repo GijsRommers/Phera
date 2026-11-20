@@ -67,6 +67,8 @@ Drupal's scaffold hook copies missing entry points and other mapped files.
 The approved Symfony Flex hook can restore missing recipe files and create
 the initial bundle list and dotenv defaults.
 Use `--no-plugins` to skip native plugin hooks.
+In a terminal Phera can save a Composer plugin trust decision to composer.json.
+Use `--no-interaction` to require a decision already present in the project.
 
 Use `phera update vendor/package` to update selected dependencies, or
 `--dry-run` to see what would change. `-W` also unlocks their dependencies.

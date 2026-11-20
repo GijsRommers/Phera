@@ -52,7 +52,7 @@ fn install_locked(
     runner: &mut scripts::Runner,
 ) -> Result<()> {
     let started = Instant::now();
-    let project = Project::read(directory)?;
+    let mut project = Project::read(directory)?;
     let lock = Lock::read(directory)?;
     if lock.content_hash != content_hash::compute(&project.data)? {
         if options.frozen {
@@ -63,7 +63,7 @@ fn install_locked(
     platform::validate(&project, &lock, options)?;
     project.validate_output_paths()?;
     let packages = lock.packages(options.no_dev);
-    plugins::validate(&project, options, &packages)?;
+    plugins::prepare(&mut project, &lock, options, &packages)?;
     let paths = InstallPaths::new(&project, options, &packages)?;
     let previous = cleanup::previous(&project)?;
     paths.validate_replacement(&project, &packages, &previous)?;
@@ -158,7 +158,7 @@ pub fn update_selected(directory: &Path, names: &[String], options: &Options) ->
 
 /// Rebuild the PHP autoloader from the installed lock file.
 pub fn dump_autoload(directory: &Path, options: &Options) -> Result<()> {
-    let project = Project::read(directory)?;
+    let mut project = Project::read(directory)?;
     let lock = Lock::read(directory)?;
     let mut options = options.clone();
     let installed = project.vendor_dir()?.join("composer/installed.json");
@@ -170,7 +170,7 @@ pub fn dump_autoload(directory: &Path, options: &Options) -> Result<()> {
     }
     let mut runner = scripts::Runner::default();
     let packages = lock.packages(options.no_dev);
-    plugins::validate(&project, &options, &packages)?;
+    plugins::prepare(&mut project, &lock, &options, &packages)?;
     let paths = InstallPaths::new(&project, &options, &packages)?;
     runner.event(&project, &options, "pre-autoload-dump")?;
     autoload::generate(&project, &packages, &options, &paths)?;

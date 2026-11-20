@@ -6,6 +6,8 @@ class Event
         private string $name,
         private string $vendorDir,
         private bool $devMode,
+        private array $arguments,
+        private array $flags,
     ) {}
 
     public function getName(): string
@@ -16,6 +18,16 @@ class Event
     public function isDevMode(): bool
     {
         return $this->devMode;
+    }
+
+    public function getArguments(): array
+    {
+        return $this->arguments;
+    }
+
+    public function getFlags(): array
+    {
+        return $this->flags;
     }
 
     public function getComposer(): object

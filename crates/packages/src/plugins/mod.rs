@@ -3,9 +3,12 @@
 //! Hooks consume package data after resolution. They never load Composer plugin PHP.
 
 mod drupal;
-mod flex;
+pub(crate) mod flex;
 pub(crate) mod layout;
 mod runtime;
+mod trust;
+
+pub(crate) use trust::prepare;
 
 use crate::{InstallPaths, Options, Package, Project};
 use anyhow::{Context, Result, bail};
@@ -72,13 +75,6 @@ pub(crate) fn active(
     }
 }
 
-pub(crate) fn validate(project: &Project, options: &Options, packages: &[Package]) -> Result<()> {
-    for name in NATIVE {
-        active(project, options, packages, name)?;
-    }
-    Ok(())
-}
-
 pub(crate) fn post_autoload(
     project: &Project,
     options: &Options,
@@ -111,10 +107,26 @@ pub(crate) fn report(project: &Project, options: &Options, packages: &[Package])
             continue;
         }
         if !NATIVE.contains(&package.name.as_str()) {
-            eprintln!(
-                "Skipped Composer plugin {}. Phera cannot apply its install changes yet.",
-                package.name
-            );
+            let instruction = match package.name.as_str() {
+                "phpstan/extension-installer" => {
+                    "List the extensions' configuration in phpstan.neon."
+                }
+                "dealerdirect/phpcodesniffer-composer-installer" => {
+                    "Set PHP_CodeSniffer installed_paths for your external standards."
+                }
+                "php-http/discovery" => {
+                    "Declare a concrete HTTP client and PSR-17 factory implementation."
+                }
+                "pestphp/pest-plugin" => "Use Composer for the Pest plugin registration file.",
+                "drupal/core-project-message" => {
+                    "See the Drupal package README for project setup notes."
+                }
+                "drupal/core-recipe-unpack" => {
+                    "Use Composer to unpack recipe requirements when changing recipes."
+                }
+                _ => "Apply its project setup instructions manually or install with Composer.",
+            };
+            eprintln!("Skipped Composer plugin {}. {instruction}", package.name);
         }
     }
     Ok(())

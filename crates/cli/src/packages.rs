@@ -16,6 +16,7 @@ Install packages from composer.lock, or resolve composer.json and write a lock.
   --prefer-dist                  prefer distribution archives (default)
   --no-scripts                   skip composer.json scripts
   --no-plugins                   skip native Composer plugin hooks
+  --no-interaction, -n           require an existing plugin decision
   --no-audit                     skip the Packagist advisory summary
   -o, --optimize-autoloader       build a class map from PSR mappings
   -a, --classmap-authoritative    look up classes only in the class map
@@ -86,6 +87,7 @@ fn execute(arguments: &[String]) -> Result<ExitCode, String> {
             "-v" | "--verbose" => options.verbose = true,
             "--no-scripts" => options.no_scripts = true,
             "--no-plugins" => options.no_plugins = true,
+            "--no-interaction" | "-n" => options.no_interaction = true,
             "--no-audit" => options.audit_summary = false,
             "--format" if command == "audit" => {
                 format = remaining.next().ok_or("--format needs table or json.")?;

@@ -1,6 +1,6 @@
 //! Solve updates and publish matching composer.json and composer.lock files.
 
-use crate::{Lock, Options, Package, Project, content_hash, lock_writer, platform, plugins};
+use crate::{Lock, Options, Package, Project, content_hash, lock_writer, platform};
 use crate::{
     install_locked,
     registry::Registry,
@@ -67,7 +67,6 @@ pub(crate) fn run(
     let next = serde_json::from_value::<Lock>(lock.clone())?;
     if !options.no_install {
         platform::validate(&project, &next, options)?;
-        plugins::validate(&project, options, &next.packages(options.no_dev))?;
         project.validate_output_paths()?;
     }
     print_changes(previous.as_ref(), &packages);
@@ -173,7 +172,7 @@ fn print_changes(previous: Option<&Lock>, packages: &[Package]) {
     }
 }
 
-fn write_json(path: &Path, value: &Value) -> Result<()> {
+pub(crate) fn write_json(path: &Path, value: &Value) -> Result<()> {
     let bytes = serde_json::to_string_pretty(value)? + "\n";
     write_file(path, bytes.as_bytes())
 }

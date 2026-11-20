@@ -9,9 +9,24 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-pub(super) const NAME: &str = "symfony/flex";
+pub(crate) const NAME: &str = "symfony/flex";
 const OFFICIAL: &str = "symfony/recipes";
 const CONTRIB: &str = "symfony/recipes-contrib";
+
+pub(crate) fn expand(project: &Project, input: &str) -> String {
+    let extra = &project.data["extra"];
+    [
+        ("%BIN_DIR%", "bin-dir", "bin"),
+        ("%CONFIG_DIR%", "config-dir", "config"),
+        ("%PUBLIC_DIR%", "public-dir", "public"),
+        ("%SRC_DIR%", "src-dir", "src"),
+        ("%VAR_DIR%", "var-dir", "var"),
+    ]
+    .into_iter()
+    .fold(input.into(), |text, (token, key, default)| {
+        text.replace(token, extra[key].as_str().unwrap_or(default))
+    })
+}
 
 pub(super) fn apply(project: &Project, options: &Options, packages: &[Package]) -> Result<()> {
     let path = paths::inside(&project.directory, "symfony.lock")?;

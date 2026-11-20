@@ -69,10 +69,11 @@ exact generated-file differences, benchmarks and the readiness gate.
   forwarding these credentials into git source clones remain unfinished.
 - Root pre/post install, update and autoload-dump events run. Shell commands run in
   the project with vendor/bin on PATH; `@php` uses the current Phera binary.
-  PHP callable scripts receive a Script Event with the event name, dev mode
-  and vendor directory. Laravel's post-autoload callback and artisan package
-  discovery use that interface. Package events, aliases with arguments,
-  Symfony Flex auto-scripts and PHP `-r` forwarding are unfinished.
+  PHP callable scripts receive a Script Event with the event name, arguments,
+  optimization flag, dev mode and vendor directory. Laravel's post-autoload
+  callback and artisan package discovery use that interface. Approved Symfony
+  Flex projects can use `symfony-cmd`, `php-script` and `script` auto-scripts.
+  Package-specific install and uninstall callback objects remain open.
 - The PHP 8.5 binary proxies expose Composer's globals. Older-PHP stream wrappers,
   PHPUnit process-isolation special cases, Windows batch proxies and bash-sourcing
   behavior have not been ported from Composer's proxy generator.
@@ -85,7 +86,8 @@ exact generated-file differences, benchmarks and the readiness gate.
 
 Native hooks use the project's ordered `config.allow-plugins` rules.
 `--no-plugins` disables them, while `--no-scripts` suppresses root scripts.
-Other plugin effects need explicit project setup.
+Use `--no-interaction` to require an existing trust decision. Other plugin
+effects need explicit project setup.
 
 | Plugin | Current coverage |
 | --- | --- |
