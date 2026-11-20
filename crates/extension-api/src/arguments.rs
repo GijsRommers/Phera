@@ -182,7 +182,7 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
         ParamType::ArrayOrFloat => "array|float",
         ParamType::ArrayOrBool => "array|bool",
         ParamType::ArrayOrObject => "array|object",
-        ParamType::RecursiveOrAggregate => "RecursiveIterator|IteratorAggregate",
+        ParamType::ClassUnion(declaration) => declaration,
     }
 }
 
@@ -295,10 +295,12 @@ fn convert(
             _ if strict => None,
             _ => to_float(value, site, context).map(Some),
         },
-        ParamType::RecursiveOrAggregate => matches!(value, Value::Object(object)
-            if object.class.is_instance_of("RecursiveIterator")
-                || object.class.is_instance_of("IteratorAggregate"))
-        .then_some(None),
+        ty @ ParamType::ClassUnion(_) => match value {
+            Value::Object(object) if ty.union_accepts_class(object.class.as_ref()) => Some(None),
+            Value::String(_) if ty.union_accepts_string() => Some(None),
+            _ if !strict && ty.union_accepts_string() => to_string(value, site, context).map(Some),
+            _ => None,
+        },
         ParamType::ArrayOrObject => {
             matches!(value, Value::Array(_) | Value::Object(_)).then_some(None)
         }

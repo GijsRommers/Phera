@@ -103,7 +103,7 @@ impl Vm {
     ) -> bool {
         arguments.iter().enumerate().any(|(index, value)| {
             value.is_object()
-                && native_string_param(parameters, index)
+                && native_string_param(parameters, index, value)
                 && Self::has_string_conversion(value)
         }) && !self.call_is_strict(origin, CallFlags::default())
     }
@@ -127,7 +127,9 @@ impl Vm {
             return Ok(());
         }
         for (index, argument) in arguments.iter_mut().enumerate() {
-            if native_string_param(parameters, index) && Self::has_string_conversion(argument) {
+            if native_string_param(parameters, index, argument)
+                && Self::has_string_conversion(argument)
+            {
                 *argument = self.coerce_stringable(argument.clone()).await?;
             } else {
                 let Some(param) = parameters.get(index).or(parameters.last()) else {
@@ -142,11 +144,16 @@ impl Vm {
     }
 }
 
-fn native_string_param(parameters: &[Param], index: usize) -> bool {
+fn native_string_param(parameters: &[Param], index: usize, value: &Value) -> bool {
     parameters
         .get(index)
         .or(parameters.last())
         .is_some_and(|parameter| {
+            if let ParamType::ClassUnion(_) = parameter.ty {
+                return parameter.ty.union_accepts_string()
+                    && matches!(&*value.deref(), Value::Object(object)
+                        if !parameter.ty.union_accepts_class(object.class.as_ref()));
+            }
             matches!(
                 parameter.ty,
                 ParamType::String

@@ -67,13 +67,28 @@ pub enum ParamType {
     ArrayOrBool,
     /// `array|object`
     ArrayOrObject,
-    /// `RecursiveIterator|IteratorAggregate`
-    RecursiveOrAggregate,
+    /// A PHP declaration with named classes or interfaces and an optional
+    /// string arm. Nullability is supplied separately by Param.
+    ClassUnion(&'static str),
 }
 
 impl ParamType {
     pub fn name(self) -> &'static str {
         crate::arguments::type_text(self)
+    }
+
+    pub fn union_accepts_class(self, class: &dyn phera_value::ClassHandle) -> bool {
+        match self {
+            Self::ClassUnion(declaration) => declaration
+                .split('|')
+                .filter(|name| *name != "string")
+                .any(|name| class.is_instance_of(name)),
+            _ => false,
+        }
+    }
+
+    pub fn union_accepts_string(self) -> bool {
+        matches!(self, Self::ClassUnion(declaration) if declaration.split('|').any(|member| member == "string"))
     }
 }
 
