@@ -68,6 +68,11 @@ The approved Symfony Flex hook can restore missing recipe files and create
 the initial bundle list and dotenv defaults.
 Use `--no-plugins` to skip native plugin hooks.
 
+Use `phera update vendor/package` to update selected dependencies, or
+`--dry-run` to see what would change. `-W` also unlocks their dependencies.
+`phera update --lock` refreshes the content hash without resolving.
+`phera add` (also `phera require`) and `phera remove` accept several packages.
+
 ### Serving a site
 
 Run `phera serve public` to serve a document root. PHP diagnostics, including

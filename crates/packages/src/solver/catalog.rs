@@ -25,9 +25,11 @@ impl Provider<'_> {
                 .insert(name.into(), catalog.clone());
             return Ok(catalog);
         }
-        let mut candidates = self
-            .registry
-            .packages(name)?
+        let packages = match self.locked.package(name) {
+            Some(package) => vec![package.clone()],
+            None => self.registry.packages(name)?,
+        };
+        let mut candidates = packages
             .into_iter()
             .filter(|package| self.allowed(package))
             .map(|package| Candidate {
@@ -36,6 +38,8 @@ impl Provider<'_> {
             })
             .collect::<Vec<_>>();
         let mut providers = self.registry.providers(name)?;
+        providers.retain(|package| self.locked.package(&package.name).is_none());
+        providers.extend(self.locked.providers(name).cloned());
         if self.root.field("replace").get(name).is_some()
             || self.root.field("provide").get(name).is_some()
         {

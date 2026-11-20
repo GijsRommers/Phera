@@ -3,6 +3,7 @@
 //! Root `"require": {"acme/a":"^2"}` pins the solve while PubGrub backtracks transitive choices.
 
 mod catalog;
+pub(crate) mod locked;
 mod provider;
 
 use crate::{Options, Package, Project, registry::Registry, version::Version};
@@ -14,9 +15,10 @@ pub(crate) fn solve(
     project: &Project,
     options: &Options,
     registry: &Registry,
+    locked: &locked::Locked,
 ) -> Result<Vec<Package>> {
     let platform = platform(project, options)?;
-    let provider = provider::Provider::new(project, options, registry, platform)?;
+    let provider = provider::Provider::new(project, options, registry, locked, platform)?;
     let selected = match resolve(&provider, "@root".to_owned(), 1u32) {
         Ok(selected) => selected,
         Err(PubGrubError::NoSolution(tree)) => {

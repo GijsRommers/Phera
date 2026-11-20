@@ -137,9 +137,10 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             arguments.next();
             parse_new(arguments).map(Command::New)
         }
-        Some("install" | "update" | "add" | "remove" | "why" | "outdated" | "dump-autoload") => {
-            Ok(Command::Packages(arguments.collect()))
-        }
+        Some(
+            "install" | "update" | "add" | "require" | "remove" | "why" | "outdated"
+            | "dump-autoload",
+        ) => Ok(Command::Packages(arguments.collect())),
         Some("upgrade") => {
             arguments.next();
             command_with_help(arguments, crate::upgrade::HELP, |args| {

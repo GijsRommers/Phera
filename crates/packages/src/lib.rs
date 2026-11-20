@@ -22,9 +22,10 @@ mod registry;
 mod scripts;
 mod solver;
 mod store;
+mod update;
 pub mod version;
 
-pub use commands::{add, outdated, remove, why};
+pub use commands::{add, add_many, outdated, remove, remove_many, why};
 pub use project::{Lock, Options, Package, Project};
 
 use anyhow::{Context, Result, bail};
@@ -144,16 +145,12 @@ fn materialise_packages(
 
 /// Resolve composer.json through PubGrub, write a Composer lock and install it.
 pub fn update(directory: &Path, options: &Options) -> Result<()> {
-    let project = Project::read(directory)?;
-    let mut runner = scripts::Runner::default();
-    runner.event(&project, options, "pre-update-cmd")?;
-    let registry = registry::Registry::new(&project, options)?;
-    let packages = solver::solve(&project, options, &registry)?;
-    lock_writer::write(&project, options, &packages)?;
-    if options.no_install {
-        return Ok(());
-    }
-    install_locked(directory, options, true, &mut runner)
+    update_selected(directory, &[], options)
+}
+
+/// Resolve selected packages while keeping the other locked versions fixed.
+pub fn update_selected(directory: &Path, names: &[String], options: &Options) -> Result<()> {
+    update::run(Project::read(directory)?, names, None, options)
 }
 
 /// Rebuild the PHP autoloader from the installed lock file.

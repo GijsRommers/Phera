@@ -6,9 +6,8 @@ use crate::{Options, Package, Project, content_hash, version::Stability};
 use anyhow::Result;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
-use std::io::Write;
 
-pub(crate) fn write(project: &Project, options: &Options, packages: &[Package]) -> Result<()> {
+pub(crate) fn build(project: &Project, options: &Options, packages: &[Package]) -> Result<Value> {
     let mut production = BTreeSet::new();
     let mut pending = keys(&project.data["require"]);
     while let Some(name) = pending.pop() {
@@ -102,10 +101,7 @@ pub(crate) fn write(project: &Project, options: &Options, packages: &[Package]) 
     if let Some(platform) = project.data["config"].get("platform") {
         value["platform-overrides"] = platform.clone();
     }
-    let mut file = tempfile::NamedTempFile::new_in(&project.directory)?;
-    file.write_all((serde_json::to_string_pretty(&value)? + "\n").as_bytes())?;
-    file.persist(project.directory.join("composer.lock"))?;
-    Ok(())
+    Ok(value)
 }
 
 fn keys(value: &Value) -> Vec<String> {

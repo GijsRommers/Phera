@@ -16,6 +16,8 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use super::locked::Locked;
+
 #[derive(Clone)]
 pub(super) struct Candidate {
     pub(super) package: Package,
@@ -27,6 +29,7 @@ pub(super) struct Provider<'a> {
     pub(super) project: &'a Project,
     pub(super) options: &'a Options,
     pub(super) registry: &'a Registry,
+    pub(super) locked: &'a Locked,
     pub(super) platform: BTreeMap<String, Version>,
     pub(super) catalogs: RefCell<BTreeMap<String, Arc<Vec<Candidate>>>>,
 }
@@ -36,6 +39,7 @@ impl<'a> Provider<'a> {
         project: &'a Project,
         options: &'a Options,
         registry: &'a Registry,
+        locked: &'a Locked,
         platform: BTreeMap<String, Version>,
     ) -> Result<Self> {
         let mut data = project.data.as_object().cloned().unwrap_or_default();
@@ -55,13 +59,15 @@ impl<'a> Provider<'a> {
             version: project.root_version(),
             data,
         };
-        let names = names(root.field("require"));
+        let mut names = names(root.field("require"));
+        names.retain(|name| locked.package(name).is_none());
         registry.prefetch(&names)?;
         Ok(Self {
             root,
             project,
             options,
             registry,
+            locked,
             platform,
             catalogs: RefCell::new(BTreeMap::new()),
         })
@@ -82,7 +88,9 @@ impl<'a> Provider<'a> {
         &self,
         package: &Package,
     ) -> Result<DependencyConstraints<String, Ranges<u32>>> {
-        self.registry.prefetch(&names(package.field("require")))?;
+        let mut names = names(package.field("require"));
+        names.retain(|name| self.locked.package(name).is_none());
+        self.registry.prefetch(&names)?;
         let mut dependencies = BTreeMap::new();
         if package.name == self.root.name {
             dependencies.insert(self.root.name.clone(), Ranges::singleton(1u32));

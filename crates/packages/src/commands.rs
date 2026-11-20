@@ -2,38 +2,28 @@
 //!
 //! `phera add psr/log:^3`, `phera remove psr/log`, `phera why psr/log`, `phera outdated`.
 
-use crate::{Lock, Options, Project, registry::Registry, version::Version};
+use crate::{Lock, Options, Project, registry::Registry, update, version::Version};
 use anyhow::{Context, Result, bail};
 use rayon::prelude::*;
 use serde_json::{Map, Value};
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 pub fn add(directory: &Path, spec: &str, development: bool, options: &Options) -> Result<()> {
+    add_many(directory, &[spec.to_owned()], development, options)
+}
+
+pub fn add_many(
+    directory: &Path,
+    specs: &[String],
+    development: bool,
+    options: &Options,
+) -> Result<()> {
+    if specs.is_empty() {
+        bail!("Pass at least one package to add.");
+    }
     let mut project = Project::read(directory)?;
-    let (name, constraint) = spec
-        .split_once(':')
-        .map_or((spec, None), |(name, constraint)| (name, Some(constraint)));
-    validate_name(name)?;
-    let constraint = if let Some(constraint) = constraint {
-        crate::version::Constraint::parse(constraint)?;
-        constraint.to_owned()
-    } else {
-        let registry = Registry::new(&project, options)?;
-        let latest = registry
-            .packages(name)?
-            .into_iter()
-            .filter_map(|package| {
-                Version::parse(&package.version)
-                    .ok()
-                    .map(|version| (version, package))
-            })
-            .filter(|(version, _)| version.stability() == crate::version::Stability::Stable)
-            .max_by(|(left, _), (right, _)| left.cmp(right))
-            .context("No stable version found; pass an explicit vendor/package:constraint.")?;
-        format!("^{}", latest.1.version.trim_start_matches('v'))
-    };
+    let original = fs::read(project.directory.join("composer.json"))?;
     let key = if development {
         "require-dev"
     } else {
@@ -42,32 +32,69 @@ pub fn add(directory: &Path, spec: &str, development: bool, options: &Options) -
     if project.data.get(key).is_none() {
         project.data[key] = Value::Object(Map::new());
     }
-    project.data[key]
+    let sort = project.config_bool("sort-packages");
+    let requirements = project.data[key]
         .as_object_mut()
-        .context("require must be a JSON object.")?
-        .insert(name.into(), constraint.into());
-    if project.config_bool("sort-packages") {
-        let requirements = project.data[key]
-            .as_object_mut()
-            .context("Invalid require object.")?;
+        .with_context(|| format!("{key} must be a JSON object."))?;
+    let mut names = Vec::new();
+    let mut inferred = Vec::new();
+    for spec in specs {
+        let (name, constraint) = spec.split_once(':').unwrap_or((spec, "*"));
+        let name = name.to_ascii_lowercase();
+        validate_name(&name)?;
+        if names.contains(&name) {
+            bail!("{name} was given more than once.");
+        }
+        crate::version::Constraint::parse(constraint)?;
+        requirements.insert(name.clone(), constraint.into());
+        if !spec.contains(':') {
+            inferred.push((key.to_owned(), name.clone()));
+        }
+        names.push(name);
+    }
+    if sort {
         requirements.sort_keys();
     }
-    edit_and_update(&project, options)
+    update::run(
+        project,
+        &names,
+        Some(update::Edit { original, inferred }),
+        options,
+    )
 }
 
 pub fn remove(directory: &Path, name: &str, options: &Options) -> Result<()> {
+    remove_many(directory, &[name.to_owned()], options)
+}
+
+pub fn remove_many(directory: &Path, names: &[String], options: &Options) -> Result<()> {
+    if names.is_empty() {
+        bail!("Pass at least one package to remove.");
+    }
     let mut project = Project::read(directory)?;
-    validate_name(name)?;
-    let mut found = false;
-    for key in ["require", "require-dev"] {
-        if let Some(requirements) = project.data[key].as_object_mut() {
-            found |= requirements.remove(name).is_some();
+    let original = fs::read(project.directory.join("composer.json"))?;
+    let names: Vec<_> = names.iter().map(|name| name.to_ascii_lowercase()).collect();
+    for name in &names {
+        validate_name(name)?;
+        let mut found = false;
+        for key in ["require", "require-dev"] {
+            if let Some(requirements) = project.data[key].as_object_mut() {
+                found |= requirements.shift_remove(name).is_some();
+            }
+        }
+        if !found {
+            bail!("{name} is not a root dependency in composer.json.");
         }
     }
-    if !found {
-        bail!("{name} is not a root dependency in composer.json.");
-    }
-    edit_and_update(&project, options)
+    update::run(
+        project,
+        &names,
+        Some(update::Edit {
+            original,
+            inferred: Vec::new(),
+        }),
+        options,
+    )
 }
 
 pub fn why(directory: &Path, name: &str) -> Result<String> {
@@ -128,26 +155,6 @@ pub fn outdated(directory: &Path, options: &Options) -> Result<String> {
     } else {
         lines.join("\n")
     })
-}
-
-fn edit_and_update(project: &Project, options: &Options) -> Result<()> {
-    let manifest_path = project.directory.join("composer.json");
-    let original = fs::read(&manifest_path)?;
-    let lock_path = project.directory.join("composer.lock");
-    let original_lock = fs::read(&lock_path).ok();
-    let mut file = tempfile::NamedTempFile::new_in(&project.directory)?;
-    file.write_all((serde_json::to_string_pretty(&project.data)? + "\n").as_bytes())?;
-    file.persist(&manifest_path)?;
-    if let Err(error) = crate::update(&project.directory, options) {
-        fs::write(manifest_path, original)?;
-        match original_lock {
-            Some(bytes) => fs::write(lock_path, bytes)?,
-            None if lock_path.exists() => fs::remove_file(lock_path)?,
-            None => {}
-        }
-        return Err(error.context("Restored composer.json and composer.lock after failed update."));
-    }
-    Ok(())
 }
 
 fn validate_name(name: &str) -> Result<()> {

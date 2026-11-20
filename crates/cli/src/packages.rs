@@ -23,6 +23,19 @@ Install packages from composer.lock, or resolve composer.json and write a lock.
   -v, --verbose                  show package installation details
 ";
 
+const UPDATE_HELP: &str = "\
+Usage: phera update [packages...] [OPTIONS]
+
+Resolve dependencies within composer.json constraints and refresh composer.lock.
+
+  -W, --with-all-dependencies    update dependencies of the named packages
+  --dry-run                      print version changes without applying them
+  --lock                         refresh only the existing lock's content hash
+  --no-install                   write the lock without installing packages
+  --offline                      use the local package cache
+  --prefer-lowest                prefer the lowest allowed versions
+";
+
 pub(crate) fn run(arguments: Vec<String>) -> ExitCode {
     match execute(&arguments) {
         Ok(()) => ExitCode::SUCCESS,
@@ -43,7 +56,7 @@ fn execute(arguments: &[String]) -> Result<(), String> {
         return Ok(());
     }
     let mut options = Options::default();
-    let mut subject = None;
+    let mut subjects = Vec::new();
     let mut development = false;
     let mut remaining = arguments[1..].iter();
     while let Some(argument) = remaining.next() {
@@ -58,6 +71,15 @@ fn execute(arguments: &[String]) -> Result<(), String> {
             "--no-scripts" => options.no_scripts = true,
             "--no-plugins" => options.no_plugins = true,
             "--no-install" => options.no_install = true,
+            "--dry-run" if matches!(command, "update" | "add" | "require" | "remove") => {
+                options.dry_run = true;
+            }
+            "--lock" if command == "update" => options.refresh_lock = true,
+            "-W" | "--with-all-dependencies"
+                if matches!(command, "update" | "add" | "require" | "remove") =>
+            {
+                options.with_all_dependencies = true;
+            }
             "--prefer-lowest" => options.prefer_lowest = true,
             "--ignore-platform-reqs" => options.ignore_platform = true,
             "--ignore-platform-req" => {
@@ -76,31 +98,32 @@ fn execute(arguments: &[String]) -> Result<(), String> {
                     .map_err(|error| error.to_string())?;
             }
             "--dev" => development = true,
-            value if !value.starts_with('-') && subject.is_none() => subject = Some(value),
+            value if !value.starts_with('-') => subjects.push(value.to_owned()),
             other => return Err(format!("Unknown package option: {other}")),
         }
     }
     let directory = std::env::current_dir().map_err(|error| error.to_string())?;
     options.platform = phera_runtime::Runtime::new().platform_packages();
+    if !matches!(command, "update" | "add" | "require" | "remove" | "why") && !subjects.is_empty() {
+        return Err(format!("Unexpected positional argument for {command}."));
+    }
     let result = match command {
         "install" => phera_packages::install(&directory, &options),
-        "update" => phera_packages::update(&directory, &options),
-        "add" => phera_packages::add(
-            &directory,
-            subject.ok_or("Usage: phera add vendor/package[:constraint] [--dev]")?,
-            development,
-            &options,
-        ),
-        "remove" => phera_packages::remove(
-            &directory,
-            subject.ok_or("Usage: phera remove vendor/package")?,
-            &options,
-        ),
-        "why" => phera_packages::why(
-            &directory,
-            subject.ok_or("Usage: phera why vendor/package")?,
-        )
-        .map(|report| println!("{report}")),
+        "update" => {
+            let subjects: Vec<_> = subjects
+                .iter()
+                .map(|name| name.to_ascii_lowercase())
+                .collect();
+            phera_packages::update_selected(&directory, &subjects, &options)
+        }
+        "add" | "require" => phera_packages::add_many(&directory, &subjects, development, &options),
+        "remove" => phera_packages::remove_many(&directory, &subjects, &options),
+        "why" => {
+            let [subject] = subjects.as_slice() else {
+                return Err("Usage: phera why vendor/package".into());
+            };
+            phera_packages::why(&directory, subject).map(|report| println!("{report}"))
+        }
         "outdated" => {
             phera_packages::outdated(&directory, &options).map(|report| println!("{report}"))
         }
@@ -113,9 +136,16 @@ fn execute(arguments: &[String]) -> Result<(), String> {
 fn help(command: &str) -> &'static str {
     match command {
         "install" => INSTALL_HELP,
-        "update" => "Usage: phera update [--no-install] [--offline] [--prefer-lowest]\n",
-        "add" => "Usage: phera add vendor/package[:constraint] [--dev]\n",
-        "remove" => "Usage: phera remove vendor/package\n",
+        "update" => UPDATE_HELP,
+        "add" | "require" => {
+            "Usage: phera add [--dev] vendor/package[:constraint]...\n\n\
+            Add production dependencies, or development dependencies with --dev.\n\
+            The Composer spelling, `phera require`, is also accepted.\n"
+        }
+        "remove" => {
+            "Usage: phera remove vendor/package...\n\n\
+            Remove root dependencies and update the lock.\n"
+        }
         "why" => "Usage: phera why vendor/package\n",
         "outdated" => "Usage: phera outdated\n",
         "dump-autoload" => "Usage: phera dump-autoload [-o] [-a] [--no-dev]\n",
