@@ -191,10 +191,13 @@ impl Vm {
 }
 
 fn is_breakable(instruction: Instruction) -> bool {
+    // Releasing temporaries can be the first work after a generator resumes.
+    // It still belongs to the previous yield's source line.
     !matches!(
         instruction,
         Instruction::AttributeDiagnostics
             | Instruction::Nop
+            | Instruction::Clear { .. }
             | Instruction::CheckType { .. }
             | Instruction::ReceiveDefault { .. }
             | Instruction::GeneratorStart
