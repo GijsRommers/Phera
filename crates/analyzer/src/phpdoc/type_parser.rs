@@ -27,6 +27,13 @@ pub struct Templates {
     pub(super) aliases: std::collections::BTreeMap<String, ValueType>,
     pub(super) imported_aliases: std::collections::BTreeSet<String>,
 }
+
+impl Templates {
+    pub(crate) fn bound(&self, name: &str) -> Option<&ValueType> {
+        self.parameters.get(name)
+    }
+}
+
 type Result<T> = std::result::Result<T, ParseError>;
 
 pub fn parse<'a>(source: &'a str, names: &Names, templates: &Templates) -> Result<Parsed<'a>> {

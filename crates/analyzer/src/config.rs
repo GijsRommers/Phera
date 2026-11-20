@@ -27,6 +27,7 @@ pub struct Options {
     pub unnecessary_null_coalesce: bool,
     pub internal_tag: bool,
     pub unused_parameters: bool,
+    pub unused_variables: bool,
     pub symfony_stubs: bool,
     pub doctrine_stubs: bool,
     pub config_notices: BTreeSet<String>,
@@ -53,6 +54,7 @@ impl Default for Options {
             unnecessary_null_coalesce: false,
             internal_tag: false,
             unused_parameters: false,
+            unused_variables: false,
             symfony_stubs: false,
             doctrine_stubs: false,
             config_notices: BTreeSet::new(),
@@ -145,6 +147,7 @@ impl Options {
             "strict" if !array => self.strict = boolean("strict", scalar()?)?,
             "internal_tag" if !array => self.internal_tag = boolean(key, scalar()?)?,
             "unused_parameters" if !array => self.unused_parameters = boolean(key, scalar()?)?,
+            "unused_variables" if !array => self.unused_variables = boolean(key, scalar()?)?,
             "treat_phpdoc_types_as_certain" if !array => {
                 self.treat_phpdoc_types_as_certain = boolean(key, scalar()?)?;
             }

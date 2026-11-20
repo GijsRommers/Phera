@@ -6,6 +6,7 @@ mod date_intervals;
 mod decode;
 mod encode;
 mod fields;
+pub(crate) mod regex_version;
 mod runtime_signatures;
 mod virtual_properties;
 

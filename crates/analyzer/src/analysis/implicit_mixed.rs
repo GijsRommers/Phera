@@ -62,6 +62,29 @@ impl Signature {
 }
 
 impl Analyzer<'_> {
+    pub(super) fn untyped_callable_result(&self, callable: &ValueType) -> ValueType {
+        if self.level < 10 {
+            return ValueType::Mixed;
+        }
+        let arms = match callable {
+            ValueType::Union(arms) => arms.as_ref(),
+            callable => std::slice::from_ref(callable),
+        };
+        let mut result = ValueType::Never;
+        for arm in arms {
+            let returns = match arm {
+                ValueType::UnknownCallable => ValueType::ImplicitMixed,
+                ValueType::Class(class) if class.eq_ignore_ascii_case("Closure") => {
+                    ValueType::ImplicitMixed
+                }
+                ValueType::Callable(signature) => signature.returns.clone(),
+                _ => return ValueType::Mixed,
+            };
+            result = result.join(&returns);
+        }
+        result
+    }
+
     pub(super) fn declared_array_result(
         &self,
         signature: &Signature,

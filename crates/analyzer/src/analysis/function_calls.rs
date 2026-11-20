@@ -9,6 +9,7 @@ struct ResolvedCall {
     label: String,
     intrinsic: Option<String>,
     kind: CallKind,
+    unknown_result: ValueType,
 }
 
 impl Analyzer<'_> {
@@ -40,11 +41,13 @@ impl Analyzer<'_> {
             } else {
                 "callable".into()
             };
+            let unknown_result = self.untyped_callable_result(&ty);
             ResolvedCall {
                 signature: self.callable_signature(ty),
                 label,
                 intrinsic: None,
                 kind: CallKind::Callable,
+                unknown_result,
             }
         };
         // A class string used to probe availability can name a missing
@@ -128,7 +131,7 @@ impl Analyzer<'_> {
             {
                 return ty;
             }
-            resolved.signature.map_or(ValueType::Mixed, |s| {
+            resolved.signature.map_or(resolved.unknown_result, |s| {
                 let ty = s.infer_return(arguments, &facts.types, self.index);
                 self.declared_array_result(&s, ty)
             })
@@ -176,6 +179,7 @@ impl Analyzer<'_> {
             signature: found.map(|(_, signature)| signature),
             intrinsic,
             kind: CallKind::Direct,
+            unknown_result: ValueType::Mixed,
         }
     }
 }

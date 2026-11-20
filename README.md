@@ -83,8 +83,9 @@ types, and dynamic member and variable access. The PHPUnit and PHPStan
 deprecation-rule packages also produce a notice until their rules are
 implemented. The bleeding-edge include enables the redundant `?? null` rule
 for required array fields and initialized properties, unused private method
-parameters, and calls to `@internal` classes from other root namespaces. The checker reports
-an informational notice for remaining bleeding-edge features.
+parameters, unread local assignments and foreach keys, and calls to
+`@internal` classes from other root namespaces. The checker reports an
+informational notice for remaining bleeding-edge features.
 
 `phera <command> --help` lists the options. There is no formatter and no test
 runner yet. A package manager (`phera install`) and a step debugger are being

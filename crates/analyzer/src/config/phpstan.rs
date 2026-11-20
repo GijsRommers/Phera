@@ -94,6 +94,7 @@ fn include_visit(
                 options.unnecessary_null_coalesce = true;
                 options.internal_tag = true;
                 options.unused_parameters = true;
+                options.unused_variables = true;
                 notice(options, "remaining bleeding-edge features");
             }
             _ => notice(options, &package),
@@ -196,6 +197,9 @@ fn parameters(
                         Some(("internalTag", value)) => options.internal_tag = value == "true",
                         Some(("unusedParameters", value)) => {
                             options.unused_parameters = value == "true";
+                        }
+                        Some(("unusedVariable", value)) => {
+                            options.unused_variables = value == "true";
                         }
                         _ => {}
                     }

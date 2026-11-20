@@ -203,6 +203,48 @@ fn phpstan_readonly_promoted_property_coalesce() {
 }
 
 #[test]
+fn phpstan_unused_local_bindings_are_opt_in() {
+    // PHPStan 2.3.7 with featureToggles.unusedVariable enabled.
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/unused_local_bindings.php");
+    for unused_variables in [false, true] {
+        let report = check(&Options {
+            level: 4,
+            unused_variables,
+            paths: vec![fixture.to_string_lossy().into_owned()],
+            ..Options::default()
+        })
+        .unwrap();
+        let actual = report
+            .diagnostics
+            .iter()
+            .map(|finding| {
+                (
+                    finding.line,
+                    finding.identifier.as_str(),
+                    finding.message.as_str(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if unused_variables {
+            assert_eq!(
+                actual,
+                [
+                    (5, "variable.unused", "Variable $unused is never read."),
+                    (
+                        13,
+                        "foreach.unusedKey",
+                        "Foreach key variable $position is never read."
+                    ),
+                ]
+            );
+        } else {
+            assert!(actual.is_empty());
+        }
+    }
+}
+
+#[test]
 fn phpstan_unused_private_method_parameter_is_opt_in() {
     // PHPStan 2.3.7 with featureToggles.unusedParameters enabled.
     let fixture =

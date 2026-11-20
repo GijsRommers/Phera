@@ -60,9 +60,9 @@ impl Analyzer<'_> {
 }
 
 fn needs_annotation(parameter: &Parameter, scope: &Scope) -> bool {
-    parameter.ty.is_none()
-        && matches!(
-            scope.get(&parameter.name).ty,
-            ValueType::Mixed | ValueType::ImplicitMixed
-        )
+    match scope.get(&parameter.name).ty {
+        ValueType::ExplicitMixed => true,
+        ValueType::Mixed | ValueType::ImplicitMixed => parameter.ty.is_none(),
+        _ => false,
+    }
 }

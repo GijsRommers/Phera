@@ -79,6 +79,7 @@ impl Analyzer<'_> {
         }
         self.check_type(function.return_type.as_ref());
         self.function_hints(function);
+        self.check_unused_local_bindings(&function.body, &function.parameters);
         let flow = self.block(&function.body, &mut scope);
         self.check_return_path(flow, &function.body, span);
         self.context = previous;
@@ -263,6 +264,7 @@ impl Analyzer<'_> {
             self.property_hooks(&parameter.name, parameter.ty.as_ref(), &parameter.hooks);
         }
         if let Some(body) = &method.body {
+            self.check_unused_local_bindings(body, &method.parameters);
             let flow = self.block(body, &mut scope);
             self.check_return_path(flow, body, span);
         }

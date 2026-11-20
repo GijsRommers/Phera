@@ -152,6 +152,9 @@ impl Analyzer<'_> {
             ));
             base = target;
         }
+        if let [(_, None, _)] = keys.as_slice() {
+            self.check_template_key_append(base, value, scope);
+        }
         let mut receiver = ValueType::Mixed;
         let variable = if let ExpressionKind::Variable(Variable::Named(name)) = &base.kind {
             let old = scope.get(name);
