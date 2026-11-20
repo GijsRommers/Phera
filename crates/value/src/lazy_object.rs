@@ -93,6 +93,21 @@ impl Object {
         matches!(self.lazy().as_deref(), Some(LazyObject::Pending { .. }))
     }
 
+    /// Whether PHP skips this object's destructor: a lazy object that was
+    /// never initialized has no state to tear down, and an initialized
+    /// proxy only forwards to its real instance, whose own destructor runs
+    /// when that instance goes. An initialized ghost is an ordinary object.
+    ///
+    /// ```php
+    /// $ghost = $class->newLazyGhost($initializer);
+    /// unset($ghost);        // no __destruct, and no initialization
+    /// $proxy = $class->newLazyProxy(fn () => new D);
+    /// $proxy->n; unset($proxy);   // __destruct runs once, on the real D
+    /// ```
+    pub fn skips_destructor(&self) -> bool {
+        self.lazy().is_some()
+    }
+
     pub fn lazy(&self) -> Option<Ref<'_, LazyObject>> {
         Ref::filter_map(self.native.try_borrow().ok()?, |native| {
             native

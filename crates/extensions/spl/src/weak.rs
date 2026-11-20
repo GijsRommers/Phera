@@ -7,6 +7,7 @@
 //! ```
 
 mod cursor;
+mod entries;
 mod references;
 
 use std::{
@@ -14,7 +15,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use indexmap::IndexMap;
+use phera_extension_api::value::WeakObject;
 use phera_extension_api::{
     ArrayKey, ClassEntry, ClassHooks, ClassKind, Context, MethodEntry as Method, NativeClone,
     NativeDimensions, NativeError, NativePropertyAccess, NativePropertyMutation, NativeResult,
@@ -23,8 +24,11 @@ use phera_extension_api::{
 
 use crate::{This, make, read_state, receiver, store, update_state};
 
+/// The WeakReference of each object, by the object's id and identity
+/// (which stay the same while it waits for its destructor; see
+/// `WeakObject`): `WeakReference::create()` twice gives the same reference.
 #[derive(Default)]
-struct References(HashMap<*const Object, Weak<Object>>);
+struct References(HashMap<(u32, usize), Weak<Object>>);
 
 fn construct(_: &mut dyn Context, _: This<'_>, _: &[Value]) -> NativeResult {
     Err(NativeError::error(
@@ -35,7 +39,7 @@ fn construct(_: &mut dyn Context, _: This<'_>, _: &[Value]) -> NativeResult {
 fn create(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> NativeResult {
     let target = args::object(arguments, 0)
         .ok_or_else(|| NativeError::error("Missing WeakReference target"))?;
-    let key = Rc::as_ptr(target);
+    let key = (target.id, target.identity());
     if let Some(existing) = context
         .state()
         .get_or_default::<References>()
@@ -45,7 +49,7 @@ fn create(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) -> Native
     {
         return Ok(Value::Object(existing));
     }
-    let reference = make(context, "WeakReference", Rc::downgrade(target))?;
+    let reference = make(context, "WeakReference", WeakObject::new(target))?;
     context
         .state()
         .get_or_default::<References>()
@@ -59,7 +63,7 @@ fn get_reference(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResu
 }
 
 fn target_value(reference: &Object) -> NativeResult {
-    read_state(reference, |target: &Weak<Object>| {
+    read_state(reference, |target: &WeakObject| {
         target.upgrade().map_or(Value::Null, Value::Object)
     })
 }
@@ -78,8 +82,7 @@ fn reference_view(
     }
 }
 
-#[derive(Clone, Default)]
-struct Map(IndexMap<u32, (Weak<Object>, Value)>);
+type Map = entries::Entries;
 
 fn key(offset: Value, append: bool) -> Result<Rc<Object>, NativeError> {
     match &*offset.deref() {
@@ -91,14 +94,10 @@ fn key(offset: Value, append: bool) -> Result<Rc<Object>, NativeError> {
 
 fn get(_: &mut dyn Context, map: &Object, offset: Value) -> NativeResult {
     let key = key(offset, false)?;
-    let result = read_state(map, |state: &Map| {
-        state
-            .0
-            .get(&key.id)
-            .filter(|(weak, _)| weak.as_ptr() == Rc::as_ptr(&key))
-            .map(|(_, value)| value.deref().clone())
-    })?;
-    result.ok_or_else(|| missing_key(&key))
+    let result = read_state(map, |state: &Map| state.get(&key))?;
+    result
+        .map(|value| value.deref().clone())
+        .ok_or_else(|| missing_key(&key))
 }
 
 fn missing_key(key: &Object) -> NativeError {
@@ -113,39 +112,26 @@ fn exists(_: &mut dyn Context, map: &Object, offset: Value) -> Result<bool, Nati
     let key = key(offset, false)?;
     read_state(map, |state: &Map| {
         state
-            .0
-            .get(&key.id)
-            .is_some_and(|(weak, value)| weak.as_ptr() == Rc::as_ptr(&key) && !value.is_null())
+            .get(&key)
+            .is_some_and(|value| !value.deref().is_null())
     })
 }
 
 fn set(_: &mut dyn Context, map: &Object, offset: Value, value: Value) -> Result<(), NativeError> {
     let key = key(offset, true)?;
-    update_state(map, |state: &mut Map| {
-        if state
-            .0
-            .get(&key.id)
-            .is_some_and(|(weak, _)| weak.strong_count() == 0)
-        {
-            state.0.shift_remove(&key.id);
-        }
-        state
-            .0
-            .insert(key.id, (Rc::downgrade(&key), value.deref().clone()));
-    })
+    let owner = map.identity();
+    let replaced = update_state(map, |state: &mut Map| {
+        state.set(owner, &key, value.deref().clone())
+    })?;
+    drop(replaced);
+    Ok(())
 }
 
 fn unset(_: &mut dyn Context, map: &Object, offset: Value) -> Result<(), NativeError> {
     let key = key(offset, false)?;
-    update_state(map, |state: &mut Map| {
-        if state
-            .0
-            .get(&key.id)
-            .is_some_and(|(weak, _)| weak.as_ptr() == Rc::as_ptr(&key))
-        {
-            state.0.shift_remove(&key.id);
-        }
-    })
+    let removed = update_state(map, |state: &mut Map| state.unset(&key))?;
+    drop(removed);
+    Ok(())
 }
 
 fn offset_get(context: &mut dyn Context, this: This<'_>, args: &[Value]) -> NativeResult {
@@ -175,10 +161,7 @@ fn offset_unset(context: &mut dyn Context, this: This<'_>, args: &[Value]) -> Na
 }
 
 fn native_count(_: &mut dyn Context, map: &Object) -> Result<i64, NativeError> {
-    update_state(map, |state: &mut Map| {
-        state.0.retain(|_, (target, _)| target.strong_count() != 0);
-        state.0.len() as i64
-    })
+    update_state(map, |state: &mut Map| state.count() as i64)
 }
 
 fn count(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
@@ -186,7 +169,11 @@ fn count(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult
 }
 
 fn clone_map(original: &Rc<Object>, copy: &Object) -> Result<(), NativeError> {
-    store(copy, read_state(original, Map::clone)?)
+    let owner = copy.identity();
+    store(
+        copy,
+        read_state(original, |state: &Map| state.copy_for(owner))?,
+    )
 }
 
 fn view(
@@ -197,14 +184,12 @@ fn view(
     match purpose {
         PropertyPurpose::Debug => read_state(map, |state: &Map| {
             state
-                .0
-                .values()
-                .filter_map(|(key, value)| Some((key.upgrade()?, value)))
+                .live()
                 .enumerate()
                 .map(|(index, (key, value))| {
                     let pair = [
                         (ArrayKey::str("key"), Value::Object(key)),
-                        (ArrayKey::str("value"), value.clone()),
+                        (ArrayKey::str("value"), value),
                     ]
                     .into_iter()
                     .collect::<PhpArray>();
@@ -214,10 +199,8 @@ fn view(
         }),
         PropertyPurpose::Comparison => read_state(map, |state: &Map| {
             state
-                .0
-                .iter()
-                .filter(|(_, (key, _))| key.strong_count() != 0)
-                .map(|(id, (_, value))| (ArrayKey::Int(i64::from(*id)), value.clone()))
+                .live()
+                .map(|(key, value)| (ArrayKey::Int(i64::from(key.id)), value))
                 .collect()
         }),
         _ => Ok(map.to_array()),

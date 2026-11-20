@@ -226,7 +226,13 @@ impl Expansion {
     }
 }
 
+/// The patterns a pattern's first brace group stands for:
+/// `src/{a,b}/x` gives `src/a/x` and `src/b/x`, and `{config}` gives
+/// `config`. As in BSD glob, a pattern that is exactly `{}` stays literal.
 fn split_brace(pattern: &[u8], escape: bool) -> Option<Vec<Vec<u8>>> {
+    if pattern == b"{}" {
+        return None;
+    }
     let mut open = None;
     let mut depth = 0;
     let mut parts = Vec::new();
@@ -248,7 +254,7 @@ fn split_brace(pattern: &[u8], escape: bool) -> Option<Vec<Vec<u8>>> {
             b',' if depth == 1 => parts.push(index),
             b'}' if depth > 0 => {
                 depth -= 1;
-                if depth == 0 && parts.len() > 1 {
+                if depth == 0 {
                     parts.push(index);
                     let start = open?;
                     return Some(
@@ -264,9 +270,6 @@ fn split_brace(pattern: &[u8], escape: bool) -> Option<Vec<Vec<u8>>> {
                             })
                             .collect(),
                     );
-                }
-                if depth == 0 {
-                    parts.clear();
                 }
             }
             _ => (),

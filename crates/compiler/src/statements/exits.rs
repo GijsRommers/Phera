@@ -33,10 +33,11 @@ impl ExitScope {
 /// Ordinary loops have no temporary state to release.
 #[derive(Clone, Copy)]
 pub(crate) enum LoopCleanup {
+    /// The iterator, and the temporaries of the subject and of the
+    /// registers the loop copies values into.
     Foreach {
         iterator: Reg,
-        subject: Reg,
-        value: Reg,
+        owned: crate::expressions::operand_release::Temporaries,
     },
     Switch(Reg),
 }
@@ -78,14 +79,9 @@ impl Compiler<'_> {
         };
         let start = self.position();
         match cleanup {
-            LoopCleanup::Foreach {
-                iterator,
-                subject,
-                value,
-            } => {
+            LoopCleanup::Foreach { iterator, owned } => {
                 self.emit(Instruction::IterEnd(iterator), line);
-                self.emit(Instruction::Clear { register: subject }, line);
-                self.emit(Instruction::Clear { register: value }, line);
+                self.clear_owning_temporaries(&owned, line);
             }
             LoopCleanup::Switch(register) => {
                 self.emit(Instruction::Clear { register }, line);

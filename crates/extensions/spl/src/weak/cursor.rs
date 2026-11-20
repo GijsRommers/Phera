@@ -51,12 +51,7 @@ struct Cursor {
 
 impl Cursor {
     fn entry(&self) -> Result<Option<(Rc<Object>, Value)>, NativeError> {
-        read_state(&self.map, |state: &Map| {
-            state
-                .0
-                .get_index(self.index)
-                .and_then(|(_, (key, value))| Some((key.upgrade()?, value.clone())))
-        })
+        read_state(&self.map, |state: &Map| state.at(self.index))
     }
 }
 
@@ -70,7 +65,7 @@ impl NativeIterator for Cursor {
         Ok(())
     }
     fn valid(&mut self, _: &mut dyn Context) -> Result<bool, NativeError> {
-        let len = read_state(&self.map, |state: &Map| state.0.len())?;
+        let len = read_state(&self.map, |state: &Map| state.positions())?;
         while self.index < len {
             if self.entry()?.is_some() {
                 return Ok(true);

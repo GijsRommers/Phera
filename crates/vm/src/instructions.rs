@@ -27,6 +27,11 @@ impl Vm {
         work: &mut usize,
     ) -> Result<Option<BatchExit>, NativeError> {
         use Instruction as I;
+        // A simple instruction that only fell back because it overwrites
+        // an array or object (see `crate::fast`).
+        if self.object_ids.has_due() && self.release_and_store(instruction) {
+            return Ok(None);
+        }
         match instruction {
             I::AssignPathFromLocal { .. }
             | I::MakeReference { .. }

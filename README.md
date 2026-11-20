@@ -43,6 +43,7 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | `phera new shop` | Starts a project: a small JSON application, or Symfony's or Laravel's official one |
 | `phera check src` | Type-checks PHP with PHPStan's levels and identifiers; reads a PHPStan baseline |
 | `phera lint src` | Finds unused code and suspicious constructs; `--fix` applies the safe fixes |
+| `phera upgrade` | Updates Phera. Use `--check` to see the available version or `--version X` to install a specific release |
 | `phera --dump file.php` | Prints the compiled bytecode |
 
 `phera <command> --help` lists the options. There is no formatter and no test
@@ -208,6 +209,29 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 The extensions live under `crates/extensions/`, behind `phera-extension-api`.
 See [`docs/architecture.md`](docs/architecture.md) for the design and
 [`docs/decisions/`](docs/decisions/README.md) for the decisions behind it.
+
+## Install
+
+Once the first release is published, install Phera on macOS or Linux with
+glibc 2.35 or newer (arm64 or x86_64) with:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/GijsRommers/Phera/main/install.sh | sh
+```
+
+It verifies the archive and installs Phera in `~/.phera/bin`. Set
+`PHERA_INSTALL` to choose another install directory. To pick a version, set
+`PHERA_VERSION` or pipe to `sh -s -- v0.1.0`. The installer prints the
+`PATH` line when needed.
+
+Run `phera upgrade` to update a writable installation. Use your package
+manager to update a package-managed copy. Phera keeps its previous binary
+as `phera.old` next to the upgraded one.
+
+An HTTPS mirror can set `PHERA_RELEASE_BASE_URL` for both commands. Serve
+`latest` as JSON with a `tag_name` field and put the archives and
+`SHA256SUMS` under `download/<tag>/`, for example `download/v0.1.0/`.
+The upgrader expects the mirror to serve these files directly.
 
 ## 🛠️ Building
 

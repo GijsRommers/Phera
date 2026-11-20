@@ -7,18 +7,24 @@
 
 use super::PhpArray;
 use super::storage::Storage;
+use crate::destruction::Destruction;
 use crate::value::Value;
 use std::rc::Rc;
 
 impl PhpArray {
     /// Moves this array's values into `work`, leaving it empty, so that
-    /// dropping it afterwards does nothing more.
+    /// dropping it afterwards does nothing more. They go in last first, so
+    /// that `pop` frees them in order: PHP destroys an array's elements
+    /// first to last, which decides the order of their destructors.
     fn take_values(&mut self, work: &mut Vec<Value>) {
         match std::mem::take(&mut self.storage) {
-            Storage::List(values) => work.extend(values.into_iter().flatten()),
-            Storage::Map(map) => {
-                work.extend(map.entries.into_iter().filter_map(|entry| entry.value))
-            }
+            Storage::List(values) => work.extend(values.into_iter().rev().flatten()),
+            Storage::Map(map) => work.extend(
+                map.entries
+                    .into_iter()
+                    .rev()
+                    .filter_map(|entry| entry.value),
+            ),
         }
     }
 
@@ -33,9 +39,13 @@ impl PhpArray {
                     }
                 }
                 Value::Object(owner) => {
-                    if let Ok(object) = Rc::try_unwrap(owner) {
-                        object.properties.into_inner().take_values(&mut work);
-                        crate::lazy_object::release_native(object.native.into_inner(), &mut work);
+                    // An object that waits for its destructor is handed to
+                    // the interpreter whole by its own `Drop`.
+                    if let Ok(object) = Rc::try_unwrap(owner)
+                        && object.destruction() != Destruction::Due
+                    {
+                        object.properties.take().take_values(&mut work);
+                        crate::lazy_object::release_native(object.native.take(), &mut work);
                     }
                 }
                 Value::Reference(owner) => {

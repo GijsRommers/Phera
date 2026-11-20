@@ -266,6 +266,7 @@ impl Vm {
 
 /// By-value, unkeyed iteration retains the current
 /// register window and local IP. Live reference iteration uses iter_next instead.
+#[inline(always)]
 pub(crate) fn snapshot_step(
     iterator: IterId,
     destination: Reg,
@@ -284,20 +285,23 @@ pub(crate) fn snapshot_step(
         return state.traversal_mode == frame::TraversalMode::Value
             && native_step(state, None, destination, slots);
     };
-    let position = if state.started {
-        state
-            .position
-            .and_then(|position| array.next_position(position))
-    } else {
-        array.first_position()
+    // Plain matches rather than `Option` combinators: this runs on every
+    // round of a `foreach`, and a closure is a separate function that the
+    // compiler need not inline.
+    let position = match (state.started, state.position) {
+        (true, Some(position)) => array.next_position(position),
+        (true, None) => None,
+        (false, _) => array.first_position(),
     };
     state.position = position;
     state.started = true;
-    let value = position
-        .and_then(|position| array.entry_at(position))
-        .map(|(_, value)| value.deref().clone());
-    match value {
-        Some(value) => {
+    let entry = match position {
+        Some(position) => array.entry_at(position),
+        None => None,
+    };
+    match entry {
+        Some((_, value)) => {
+            let value = crate::fast::duplicate(&value.deref());
             if let Some(slot) = slots.get_mut(destination.index()) {
                 *slot = Some(value);
             }
