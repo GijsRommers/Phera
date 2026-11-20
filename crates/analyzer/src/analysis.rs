@@ -27,6 +27,7 @@ mod call_assertions;
 mod callable_signatures;
 mod callback_parameters;
 mod calls;
+mod chain_value;
 mod closure_binding;
 mod closure_effects;
 mod coalesce_assignment;

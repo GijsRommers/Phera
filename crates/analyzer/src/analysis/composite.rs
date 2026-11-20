@@ -2,6 +2,7 @@
 //! Uncertain facts become mixed rather than producing a guessed diagnostic.
 //! For example, `[throw new Exception, $missing]` never reads the second item.
 
+use super::chain_value::ChainValue;
 use super::*;
 
 impl Analyzer<'_> {
@@ -13,23 +14,8 @@ impl Analyzer<'_> {
     ) -> ValueType {
         match &expression.kind {
             ExpressionKind::Array(items) => self.array_literal(items, scope),
-            ExpressionKind::Index { target, index } => {
-                let target = self.expression(target, scope, quiet);
-                if target == ValueType::Never {
-                    return target;
-                }
-                let key = index.as_ref().map_or(ValueType::Mixed, |index| {
-                    self.expression(index, scope, quiet)
-                });
-                if key == ValueType::Never {
-                    return key;
-                }
-                self.mixed_offset(&target, index.as_ref().map(|_| &key), expression.span);
-                if self.strict_mixed(&target) {
-                    target
-                } else {
-                    super::arrays::offset_type(&target, &key)
-                }
+            ExpressionKind::Index { .. } => {
+                self.offset_chain(expression, scope, quiet).finish(scope)
             }
             ExpressionKind::Unary { operator, operand } if self.level >= 3 => {
                 let ty = self.expression(operand, scope, quiet);
@@ -151,5 +137,31 @@ impl Analyzer<'_> {
                 }
             }
         }
+    }
+    pub(super) fn offset_chain(
+        &mut self,
+        expression: &Expression,
+        scope: &mut Scope,
+        quiet: bool,
+    ) -> ChainValue {
+        let ExpressionKind::Index { target, index } = &expression.kind else {
+            return ChainValue::plain(ValueType::Mixed);
+        };
+        let mut chain = self.chain_expression(target, scope, quiet);
+        if chain.ty == ValueType::Never {
+            return chain;
+        }
+        let key = index.as_ref().map_or(ValueType::Mixed, |index| {
+            self.expression(index, scope, quiet)
+        });
+        if key == ValueType::Never {
+            chain.ty = key;
+            return chain;
+        }
+        self.mixed_offset(&chain.ty, index.as_ref().map(|_| &key), expression.span);
+        if !self.strict_mixed(&chain.ty) {
+            chain.ty = super::arrays::offset_type(&chain.ty, &key);
+        }
+        chain
     }
 }

@@ -96,6 +96,7 @@ fn signature(f: &[&str]) -> Signature {
                 ty: decode_type(p[1]),
                 optional: p[2] == "true",
                 default_is_null: false,
+                default_boolean: None,
                 variadic: p[3] == "true",
                 by_reference: p[4] == "true",
                 closure_receiver: None,

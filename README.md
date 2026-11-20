@@ -62,8 +62,12 @@ configuration files produce a notice.
 
 The PHPStan strict-rules include enables `foreach.keyOverwrite` and
 `foreach.valueOverwrite`. Use `strict = true` or `strict = false` under
-`[check]` to override it. Other rules from the strict-rules package are
-pending. The bleeding-edge include enables the redundant `?? null` rule
+`[check]` to override it. Pending strict rules cover boolean conditions,
+loose comparisons, operands and casts, constructor calls, disallowed
+constructs, for-loop overwrites, strict function calls, switch condition
+types, and dynamic member and variable access. The PHPUnit and PHPStan
+deprecation-rule packages also produce a notice until their rules are
+implemented. The bleeding-edge include enables the redundant `?? null` rule
 for required array fields and initialized properties. The checker reports
 an informational notice for remaining bleeding-edge features.
 

@@ -85,3 +85,17 @@ fn phpstan_configured_rules() {
         assert_eq!(actual, expected, "level {level}");
     }
 }
+
+#[test]
+fn strict_loop_initializers_do_not_guarantee_later_overwrites() {
+    // PHPStan 2.3.7 with strict-rules at level 0.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/strict_loops.php");
+    let report = check(&Options {
+        level: 0,
+        strict: true,
+        paths: vec![path.to_string_lossy().into_owned()],
+        ..Options::default()
+    })
+    .unwrap();
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+}

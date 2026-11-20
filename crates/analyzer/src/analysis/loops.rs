@@ -39,29 +39,18 @@ impl Analyzer<'_> {
                 step,
                 body,
             } => {
-                let (last, earlier) = condition
-                    .split_last()
-                    .map_or((None, &[][..]), |(last, earlier)| (Some(last), earlier));
-                for expression in init.iter().chain(earlier) {
-                    if self.expression(expression, scope, false) == ValueType::Never {
-                        return Flow::Terminal;
+                let new_locals = self.loop_initializer_locals(init, scope);
+                let flow = self.for_iteration(init, condition, step, body, scope);
+                if flow == Flow::Next {
+                    for name in new_locals {
+                        if let Some(variable) = scope.variables.get_mut(name) {
+                            variable.definition = Definition::Possible;
+                        }
+                        scope.facts.forget_variable(name);
+                        scope.values.remove(name);
                     }
                 }
-                let Some(last) = last else {
-                    self.widen_loop(body, step, scope);
-                    return self.for_loop(body, step, scope, None, true);
-                };
-                let definitely_enters = self.level >= 4
-                    && crate::constants::value(last, scope).is_some_and(|value| value.truth());
-                self.widen_loop(body, condition.iter().chain(step), scope);
-                let branches = self.condition(last, std::mem::take(scope), false);
-                if let Some(entered) = branches.yes {
-                    *scope = entered;
-                    let bypass = if definitely_enters { None } else { branches.no };
-                    self.for_loop(body, step, scope, bypass, always_true(last))
-                } else {
-                    Self::finish_paths(branches.no.into_iter().collect(), scope)
-                }
+                flow
             }
             StatementKind::Foreach {
                 subject,
@@ -74,6 +63,39 @@ impl Analyzer<'_> {
                 self.foreach_loop(subject, key.as_ref(), value, *by_reference, body, scope)
             }
             _ => Flow::Next,
+        }
+    }
+
+    fn for_iteration(
+        &mut self,
+        init: &[Expression],
+        condition: &[Expression],
+        step: &[Expression],
+        body: &[Statement],
+        scope: &mut Scope,
+    ) -> Flow {
+        let (last, earlier) = condition
+            .split_last()
+            .map_or((None, &[][..]), |(last, earlier)| (Some(last), earlier));
+        for expression in init.iter().chain(earlier) {
+            if self.expression(expression, scope, false) == ValueType::Never {
+                return Flow::Terminal;
+            }
+        }
+        let Some(last) = last else {
+            self.widen_loop(body, step, scope);
+            return self.for_loop(body, step, scope, None, true);
+        };
+        let definitely_enters = self.level >= 4
+            && crate::constants::value(last, scope).is_some_and(|value| value.truth());
+        self.widen_loop(body, condition.iter().chain(step), scope);
+        let branches = self.condition(last, std::mem::take(scope), false);
+        if let Some(entered) = branches.yes {
+            *scope = entered;
+            let bypass = if definitely_enters { None } else { branches.no };
+            self.for_loop(body, step, scope, bypass, always_true(last))
+        } else {
+            Self::finish_paths(branches.no.into_iter().collect(), scope)
         }
     }
 
@@ -148,7 +170,7 @@ impl Analyzer<'_> {
         if flow == Flow::Next {
             paths.push(scope.clone());
         }
-        if !nonempty {
+        if !nonempty || self.options.strict && !paths.is_empty() {
             paths.push(before);
         }
         Self::finish_paths(paths, scope)

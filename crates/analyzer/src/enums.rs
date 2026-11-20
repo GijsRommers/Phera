@@ -44,6 +44,7 @@ pub fn add_members(info: &mut ClassInfo, class: &ClassDeclaration, names: &Names
                 ty: ty.clone(),
                 optional: false,
                 default_is_null: false,
+                default_boolean: None,
                 variadic: false,
                 by_reference: false,
                 closure_receiver: None,

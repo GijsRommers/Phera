@@ -2,6 +2,8 @@
 
 use crate::{index::Index, types::ValueType};
 
+pub(crate) const JSON_THROW_ON_ERROR: i64 = 4194304;
+
 pub fn refine(index: &mut Index) {
     for (name, value) in [
         ("ENT_QUOTES", 3),
@@ -13,7 +15,7 @@ pub fn refine(index: &mut Index) {
         ("ENT_HTML401", 0),
         ("ENT_XML1", 16),
         ("ENT_XHTML", 32),
-        ("JSON_THROW_ON_ERROR", 4194304),
+        ("JSON_THROW_ON_ERROR", JSON_THROW_ON_ERROR),
         ("JSON_UNESCAPED_SLASHES", 64),
         ("JSON_UNESCAPED_UNICODE", 256),
         ("PREG_SPLIT_NO_EMPTY", 1),
@@ -45,6 +47,8 @@ pub fn refine(index: &mut Index) {
         "iconv_substr",
         "preg_split",
         "mb_detect_encoding",
+        "base64_decode",
+        "json_encode",
     ] {
         super::runtime_signatures::literal_false(index, name);
     }

@@ -2,6 +2,7 @@
 //! Refine php-src signatures from evaluated arguments without executing PHP.
 
 use super::*;
+use crate::builtins::analysis_facts::JSON_THROW_ON_ERROR;
 use crate::types::{Collection, CollectionKind, Field, Shape, ShapeKey, ShapeKind};
 use std::sync::Arc;
 
@@ -146,6 +147,23 @@ impl Analyzer<'_> {
                 Some(ty) if ty.class_name().is_some() => T::ClassString(Arc::new(ty.clone())),
                 _ => T::ClassString(Arc::new(T::Object)),
             },
+            "base64_decode"
+                if self.level >= 7
+                    && types
+                        .get(1)
+                        .is_none_or(|flag| *flag == T::BoolLiteral(false)) =>
+            {
+                T::String
+            }
+            "json_encode"
+                if self.level >= 7
+                    && matches!(
+                        types.get(1),
+                        Some(T::IntLiteral(flags)) if flags & JSON_THROW_ON_ERROR != 0
+                    ) =>
+            {
+                T::String
+            }
             "preg_match" | "preg_match_all" => {
                 let multiple = name == "preg_match_all";
                 if let Some(argument) = arguments.get(2)

@@ -18,6 +18,7 @@ pub struct ParameterInfo {
     pub ty: ValueType,
     pub optional: bool,
     pub default_is_null: bool,
+    pub default_boolean: Option<bool>,
     pub variadic: bool,
     pub by_reference: bool,
     pub closure_receiver: Option<String>,
@@ -59,6 +60,12 @@ impl Signature {
                             value.kind,
                             phera_ast::ExpressionKind::Literal(phera_ast::Literal::Null)
                         )
+                    }),
+                    default_boolean: p.default.as_ref().and_then(|value| match value.kind {
+                        phera_ast::ExpressionKind::Literal(phera_ast::Literal::Bool(value)) => {
+                            Some(value)
+                        }
+                        _ => None,
                     }),
                     variadic: p.variadic,
                     by_reference: p.by_reference,

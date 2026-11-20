@@ -1,6 +1,7 @@
 //! Member expression facts: `self::MISSING` checks the indexed class constants.
 //! Uncertain facts become mixed rather than producing a guessed diagnostic.
 
+use super::chain_value::ChainValue;
 use super::*;
 use phera_source::deprecations::ItemKind;
 
@@ -12,59 +13,8 @@ impl Analyzer<'_> {
         quiet: bool,
     ) -> ValueType {
         match &expression.kind {
-            ExpressionKind::Property {
-                target,
-                name,
-                nullsafe,
-            } => {
-                let ty = self.expression(target, scope, quiet);
-                if ty == ValueType::Never {
-                    return ty;
-                }
-                if self.level >= 2 && *nullsafe && ty == ValueType::Null {
-                    if let MemberName::Identifier(property) = name {
-                        self.property_receiver(&ty, &property.name, expression.span, quiet);
-                    }
-                    return ty;
-                }
-                let guarded = match name {
-                    MemberName::Identifier(name) if !scope.known.is_empty() => {
-                        crate::scope::Place::of(target).is_some_and(|receiver| {
-                            scope
-                                .known
-                                .contains(&Symbol::Property(receiver, name.name.clone()))
-                        })
-                    }
-                    _ => false,
-                };
-                if *nullsafe {
-                    self.check_nullsafe(
-                        "property access",
-                        target,
-                        name,
-                        &ty,
-                        scope,
-                        expression.span,
-                    );
-                }
-                let receiver = if self.level >= 8 && *nullsafe {
-                    ty.without_null()
-                } else {
-                    ty.clone()
-                };
-                let result = self.property(
-                    &receiver,
-                    name,
-                    scope,
-                    expression.span,
-                    quiet || guarded,
-                    Access::object(target),
-                );
-                if self.level >= 4 && *nullsafe && !ty.excludes_null() {
-                    result.join(&ValueType::Null)
-                } else {
-                    result
-                }
+            ExpressionKind::Property { .. } => {
+                self.property_chain(expression, scope, quiet).finish(scope)
             }
             ExpressionKind::StaticProperty { class, name, .. } => {
                 self.static_property(class, name, scope, expression.span, quiet)
@@ -74,6 +24,70 @@ impl Analyzer<'_> {
             }
             _ => ValueType::Mixed,
         }
+    }
+
+    pub(super) fn property_chain(
+        &mut self,
+        expression: &Expression,
+        scope: &mut Scope,
+        quiet: bool,
+    ) -> ChainValue {
+        let ExpressionKind::Property {
+            target,
+            name,
+            nullsafe,
+        } = &expression.kind
+        else {
+            return ChainValue::plain(ValueType::Mixed);
+        };
+        let mut chain = self.chain_expression(target, scope, quiet);
+        let ty = chain.ty.clone();
+        if ty == ValueType::Never {
+            return chain;
+        }
+        if self.level >= 2 && *nullsafe && ty == ValueType::Null {
+            if self.level >= 8 {
+                chain.skip_null(scope);
+                return chain;
+            }
+            if let MemberName::Identifier(property) = name {
+                self.property_receiver(&ty, &property.name, expression.span, quiet);
+            }
+            return chain;
+        }
+        let guarded = match name {
+            MemberName::Identifier(name) if !scope.known.is_empty() => {
+                crate::scope::Place::of(target).is_some_and(|receiver| {
+                    scope
+                        .known
+                        .contains(&Symbol::Property(receiver, name.name.clone()))
+                })
+            }
+            _ => false,
+        };
+        if *nullsafe {
+            self.check_nullsafe("property access", target, name, &ty, scope, expression.span);
+        }
+        let receiver = if self.level >= 8 && *nullsafe {
+            chain.skip_null(scope);
+            chain.ty.clone()
+        } else {
+            ty.clone()
+        };
+        let result = self.property(
+            &receiver,
+            name,
+            scope,
+            expression.span,
+            quiet || guarded,
+            Access::object(target),
+        );
+        chain.ty = if (4..8).contains(&self.level) && *nullsafe && !ty.excludes_null() {
+            result.join(&ValueType::Null)
+        } else {
+            result
+        };
+        chain
     }
     fn static_property(
         &mut self,

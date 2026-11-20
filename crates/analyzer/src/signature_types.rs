@@ -86,21 +86,30 @@ impl Signature {
         let mut resolved = self.returns.substitute(&inferred, None);
         while let ValueType::Conditional(conditional) = &resolved {
             let subject = if let Some(name) = &conditional.variable {
-                actual.get(name.as_str()).copied().or_else(|| {
-                    (!arguments.iter().any(|argument| argument.spread)
-                        && self
+                actual
+                    .get(name.as_str())
+                    .map(|ty| (*ty).clone())
+                    .or_else(|| {
+                        if arguments.iter().any(|argument| argument.spread) {
+                            return None;
+                        }
+                        let parameter = self
                             .parameters
                             .iter()
-                            .any(|parameter| parameter.name == *name && parameter.default_is_null))
-                    .then_some(&ValueType::Null)
-                })
+                            .find(|parameter| parameter.name == *name)?;
+                        if parameter.default_is_null {
+                            Some(ValueType::Null)
+                        } else {
+                            parameter.default_boolean.map(ValueType::BoolLiteral)
+                        }
+                    })
             } else {
-                Some(&conditional.subject)
+                Some(conditional.subject.clone())
             };
             let Some(subject) = subject else {
                 break;
             };
-            let relation = conditional_relation(&conditional.tested, subject, index);
+            let relation = conditional_relation(&conditional.tested, &subject, index);
             let matches = match relation {
                 Compatibility::Accepts => true,
                 Compatibility::Rejects
