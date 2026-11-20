@@ -141,6 +141,11 @@ pub trait Context {
         None
     }
 
+    /// A registered INI string before PHP's public ini_get() maps null to empty.
+    fn ini_value(&self, name: &[u8]) -> Option<PhpString> {
+        self.ini_get(name)
+    }
+
     /// Decimal precision for serialization and PHP variable dumps.
     fn serialization_precision(&self) -> i32 {
         self.ini_get(b"serialize_precision")

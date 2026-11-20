@@ -137,7 +137,25 @@ fn mb_encode_mimeheader(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     );
     let newline = args::string(a, 3).map_or(&b"\r\n"[..], |newline| newline.as_bytes());
     let indent = args::int(a, 4).unwrap_or(0).max(0) as usize;
-    let source = args::bytes(a, 0);
+    Ok(Value::from(encode_header(
+        args::bytes(a, 0),
+        &settings,
+        target,
+        scheme,
+        newline,
+        indent,
+    )))
+}
+
+/// Mail and mb_encode_mimeheader both encode and fold MIME header words.
+pub(crate) fn encode_header(
+    source: &[u8],
+    settings: &Settings,
+    target: Encoding,
+    scheme: Scheme,
+    newline: &[u8],
+    indent: usize,
+) -> Vec<u8> {
     let needs_encoding =
         |byte: &u8| !matches!(byte, 32..=126) || matches!(byte, b'=' | b'?' | b'_');
     let Some(first_special) = source.iter().position(needs_encoding) else {
@@ -145,9 +163,9 @@ fn mb_encode_mimeheader(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
             let mut output = newline.to_vec();
             output.push(b' ');
             output.extend_from_slice(source);
-            return Ok(Value::from(output));
+            return output;
         }
-        return Ok(Value::from(source));
+        return source.to_vec();
     };
     // The plain words before that byte stay as they are.
     let plain = source[..first_special]
@@ -180,7 +198,7 @@ fn mb_encode_mimeheader(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
         pending.extend_from_slice(&character);
     }
     output.extend_from_slice(scheme.word(&pending, label).as_bytes());
-    Ok(Value::from(output))
+    output
 }
 
 const MB_DECODE_MIMEHEADER: &[Param] = &[Param::new("string", ParamType::String)];

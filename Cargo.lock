@@ -2184,6 +2184,7 @@ dependencies = [
  "base64 0.22.1",
  "encoding_rs",
  "iconv-native",
+ "phera-ext-process",
  "phera-extension-api",
  "tokio",
 ]

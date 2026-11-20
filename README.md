@@ -80,8 +80,10 @@ Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 - `Dom\ParentNode` and `Dom\ChildNode` expose their shared operations.
 
 Unix scripts can launch programs with `shell_exec()`, backticks, and the process
-functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
-launching for web requests, run `phera serve --no-process public`.
+functions. Backticks emit PHP 8.5's compile-time deprecation. On Unix, `mail()`
+and `mb_send_mail()` pipe the message to the command in `sendmail_path`.
+`phera serve --no-process public` disables program launches for web requests,
+including `mail()` and `mb_send_mail()`.
 
 In progress: bcmath, curl, gmp, intl, mysqli, pgsql, sodium, zlib.
 Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.

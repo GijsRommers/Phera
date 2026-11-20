@@ -22,6 +22,7 @@ mod entities;
 mod iconv;
 mod ini;
 mod kana;
+mod mail;
 mod mime;
 mod names;
 mod query;
@@ -63,6 +64,7 @@ impl Extension for Mbstring {
         ini::register(registry);
         entities::register(registry);
         kana::register(registry);
+        mail::register(registry);
         mime::register(registry);
         query::register(registry);
         iconv::register(registry);

@@ -94,6 +94,10 @@ impl Context for Vm {
         Vm::serialization_precision(self)
     }
 
+    fn ini_value(&self, name: &[u8]) -> Option<phera_value::PhpString> {
+        Vm::ini_value(self, name)
+    }
+
     fn ini_set(
         &mut self,
         function: &str,
