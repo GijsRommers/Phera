@@ -79,7 +79,7 @@ impl Context for Vm {
 
     fn write_chunk(&mut self, bytes: &[u8]) -> Option<LocalFuture<'_, Result<(), NativeError>>> {
         self.out(bytes);
-        if self.output_writer.response.is_some() && self.output_pending() {
+        if self.output_writer.response().is_some() && self.output_pending() {
             Some(Box::pin(self.drain_output()))
         } else {
             None

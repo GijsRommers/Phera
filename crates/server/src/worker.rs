@@ -6,7 +6,6 @@ use std::net::{SocketAddr, TcpListener as StdListener};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use hyper_util::server::graceful::GracefulShutdown;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
@@ -14,6 +13,7 @@ use tokio::sync::{Semaphore, watch};
 use crate::config::{ConnectionLimits, ServerConfig};
 use crate::connection::handle_connection;
 use crate::handler::HandlerFactory;
+use crate::response_stream::ResponseSlot;
 use crate::response_task::{ConnectionWork, DetachedRequests};
 
 const BACKLOG: i32 = 1024;
@@ -108,7 +108,7 @@ pub(super) fn run(
             .expect("listening socket has an address");
         let limits = ConnectionLimits::from(&config);
         let free_slots = Arc::new(Semaphore::new(config.max_connections_per_worker.max(1)));
-        let graceful = GracefulShutdown::new();
+        let (stop_connections, _) = watch::channel(());
         let detached = Rc::new(DetachedRequests::new());
         loop {
             // A slot first, then a connection: beyond the limit, clients
@@ -124,10 +124,11 @@ pub(super) fn run(
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
                         let handler = handler.clone();
-                        let watcher = graceful.watcher();
+                        let watcher = stop_connections.subscribe();
                         let work = Rc::new(ConnectionWork {
                             _slot: slot,
                             detached: detached.clone(),
+                            response: ResponseSlot::new(),
                         });
                         tokio::task::spawn_local(async move {
                             handle_connection(stream, peer, local_addr, handler, watcher, limits, work)
@@ -149,7 +150,8 @@ pub(super) fn run(
         // Finish in-flight requests and close idle keep-alive connections;
         // give up if something (a stuck upload) refuses to leave in time.
         let _ = tokio::time::timeout(config.shutdown_timeout, async {
-            graceful.shutdown().await;
+            let _ = stop_connections.send(());
+            stop_connections.closed().await;
             detached.drain().await;
         })
         .await;

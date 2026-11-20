@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, watch};
 
-use crate::response_stream::{ResponseSlot, ResponseWriter};
+use crate::response_stream::{ResponseExchange, ResponseSlot, ResponseWriter};
 use crate::{Handler, Request, Response};
 
 /// A detached request retains its connection's slot and participates in
@@ -20,6 +20,7 @@ use crate::{Handler, Request, Response};
 pub(crate) struct ConnectionWork {
     pub(crate) _slot: OwnedSemaphorePermit,
     pub(crate) detached: Rc<DetachedRequests>,
+    pub(crate) response: ResponseSlot,
 }
 
 pub(crate) struct DetachedRequests {
@@ -48,14 +49,13 @@ type ResponseFuture = Pin<Box<dyn Future<Output = Response>>>;
 
 struct ResponseTask {
     future: Option<ResponseFuture>,
-    slot: Rc<ResponseSlot>,
-    connection: Rc<ConnectionWork>,
+    exchange: ResponseExchange,
 }
 
 impl ResponseTask {
     fn detach(&mut self) {
         if let Some(future) = self.future.take() {
-            let connection = self.connection.clone();
+            let connection = self.exchange.connection.clone();
             let guard = connection.detached.tasks.subscribe();
             tokio::task::spawn_local(async move {
                 let _ = future.await;
@@ -68,8 +68,8 @@ impl ResponseTask {
 impl Drop for ResponseTask {
     fn drop(&mut self) {
         if self.future.is_some()
-            && !self.connection.detached.stopping.get()
-            && self.slot.disconnect()
+            && !self.exchange.connection.detached.stopping.get()
+            && self.exchange.slot().disconnect()
         {
             self.detach();
         }
@@ -82,8 +82,8 @@ pub(crate) async fn answer(
     time_limit: Option<Duration>,
     connection: Rc<ConnectionWork>,
 ) -> Response {
-    let slot = Rc::new(ResponseSlot::new());
-    let writer = ResponseWriter::new(slot.clone(), request.method == "HEAD");
+    let exchange = ResponseExchange::new(connection, request.version);
+    let writer = ResponseWriter::new(exchange.clone(), request.method == "HEAD");
     let future = Box::pin(async move {
         let run = handler.handle_with_response(request, writer);
         match time_limit {
@@ -96,8 +96,7 @@ pub(crate) async fn answer(
     });
     let mut task = ResponseTask {
         future: Some(future),
-        slot,
-        connection,
+        exchange,
     };
     poll_fn(|cx| {
         let Some(future) = task.future.as_mut() else {
@@ -105,7 +104,7 @@ pub(crate) async fn answer(
         };
         let polled = catch_unwind(AssertUnwindSafe(|| future.as_mut().poll(cx)));
         match polled {
-            Ok(Poll::Pending) => match task.slot.take() {
+            Ok(Poll::Pending) => match task.exchange.slot().take() {
                 Some(response) => {
                     task.detach();
                     Poll::Ready(response)
@@ -114,7 +113,7 @@ pub(crate) async fn answer(
             },
             Ok(Poll::Ready(response)) => {
                 task.future = None;
-                Poll::Ready(task.slot.take().unwrap_or(response))
+                Poll::Ready(task.exchange.slot().take().unwrap_or(response))
             }
             Err(_) => {
                 task.future = None;

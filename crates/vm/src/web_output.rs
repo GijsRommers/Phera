@@ -50,7 +50,7 @@ impl ResponseOutput {
 
 impl Vm {
     pub fn set_web_output(&mut self, transport: Box<dyn WebOutput>) {
-        self.output_writer.response = Some(ResponseOutput {
+        self.output_writer.set_response(ResponseOutput {
             transport,
             phase: Phase::Buffered,
             pending: false,
@@ -58,7 +58,7 @@ impl Vm {
     }
 
     pub(crate) fn queue_response_flush(&mut self) {
-        if let Some(response) = &mut self.output_writer.response
+        if let Some(response) = self.output_writer.response_mut()
             && !response.is_ended()
         {
             response.pending = true;
@@ -68,13 +68,12 @@ impl Vm {
 
     pub(crate) fn client_aborted(&self) -> bool {
         self.output_writer
-            .response
-            .as_ref()
+            .response()
             .is_some_and(|response| response.phase == Phase::Aborted)
     }
 
     pub(crate) async fn flush_response_body(&mut self) -> Result<(), NativeError> {
-        let Some(response) = &mut self.output_writer.response else {
+        let Some(response) = self.output_writer.response_mut() else {
             return Ok(());
         };
         response.pending = false;
@@ -99,7 +98,7 @@ impl Vm {
     }
 
     fn abort_response(&mut self) -> Result<(), NativeError> {
-        if let Some(response) = &mut self.output_writer.response {
+        if let Some(response) = self.output_writer.response_mut() {
             response.phase = Phase::Aborted;
         }
         self.output = Vec::new();
@@ -115,8 +114,7 @@ impl Vm {
     pub(crate) async fn finish_response_early(&mut self, function: &'static str) -> NativeResult {
         if self
             .output_writer
-            .response
-            .as_ref()
+            .response()
             .is_none_or(ResponseOutput::is_ended)
         {
             return Ok(Value::Bool(false));
@@ -133,13 +131,12 @@ impl Vm {
             self.finish_stream();
         } else if self
             .output_writer
-            .response
-            .as_ref()
+            .response()
             .is_some_and(|response| response.transport.is_disconnected())
         {
             self.abort_response()?;
             return Ok(Value::Bool(false));
-        } else if let Some(response) = &mut self.output_writer.response
+        } else if let Some(response) = self.output_writer.response_mut()
             && !response.is_ended()
         {
             response.phase = Phase::Finished;
@@ -168,13 +165,12 @@ impl Vm {
 
     fn is_streaming_response(&self) -> bool {
         self.output_writer
-            .response
-            .as_ref()
+            .response()
             .is_some_and(|response| response.phase == Phase::Streaming)
     }
 
     fn finish_stream(&mut self) {
-        if let Some(response) = &mut self.output_writer.response
+        if let Some(response) = self.output_writer.response_mut()
             && response.phase == Phase::Streaming
         {
             response.phase = Phase::Finished;

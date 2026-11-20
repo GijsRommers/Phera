@@ -17,6 +17,7 @@ use std::task::{Context, Poll};
 use bytes::Bytes;
 use tokio::sync::mpsc;
 
+use crate::response_task::ConnectionWork;
 use crate::{Body, Response};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -29,6 +30,7 @@ enum Phase {
 
 pub(crate) struct ResponseSlot {
     phase: Cell<Phase>,
+    generation: Cell<u64>,
     /// Buffered requests carry only the empty pointer.
     response: Cell<Option<Box<Response>>>,
 }
@@ -37,12 +39,21 @@ impl ResponseSlot {
     pub(crate) fn new() -> Self {
         Self {
             phase: Cell::new(Phase::Waiting),
+            generation: Cell::new(0),
             response: Cell::new(None),
         }
     }
 
     pub(crate) fn take(&self) -> Option<Response> {
         self.response.take().map(|response| *response)
+    }
+
+    pub(crate) fn begin(&self) -> u64 {
+        self.phase.set(Phase::Waiting);
+        self.response.set(None);
+        let generation = self.generation.get().wrapping_add(1);
+        self.generation.set(generation);
+        generation
     }
 
     /// PHP still gets to observe a disconnect at its next write.
@@ -56,24 +67,61 @@ impl ResponseSlot {
     }
 }
 
+/// HTTP/1 has one service future at a time. It reuses its connection's
+/// slot. An HTTP/2 stream owns a slot because it can run concurrently.
+#[derive(Clone)]
+pub(crate) struct ResponseExchange {
+    pub(crate) connection: Rc<ConnectionWork>,
+    stream_slot: Option<Rc<ResponseSlot>>,
+    generation: u64,
+}
+
+impl ResponseExchange {
+    pub(crate) fn new(connection: Rc<ConnectionWork>, version: crate::HttpVersion) -> Self {
+        let (stream_slot, generation) = if version == crate::HttpVersion::Http2 {
+            (Some(Rc::new(ResponseSlot::new())), 0)
+        } else {
+            (None, connection.response.begin())
+        };
+        Self {
+            connection,
+            stream_slot,
+            generation,
+        }
+    }
+
+    pub(crate) fn slot(&self) -> &ResponseSlot {
+        self.stream_slot
+            .as_deref()
+            .unwrap_or(&self.connection.response)
+    }
+}
+
 /// Lets a request hand off its response while it keeps running.
 pub struct ResponseWriter {
-    slot: Rc<ResponseSlot>,
+    exchange: ResponseExchange,
     head_only: bool,
 }
 
 impl ResponseWriter {
-    pub(crate) fn new(slot: Rc<ResponseSlot>, head_only: bool) -> Self {
-        Self { slot, head_only }
+    pub(crate) fn new(exchange: ResponseExchange, head_only: bool) -> Self {
+        Self {
+            exchange,
+            head_only,
+        }
     }
 
     /// Keep the request alive after a disconnect, so the script can handle it.
     pub fn watch_disconnect(&self) {
-        self.slot.phase.set(Phase::Watching);
+        let slot = self.exchange.slot();
+        if self.exchange.generation == slot.generation.get() {
+            slot.phase.set(Phase::Watching);
+        }
     }
 
     pub fn is_disconnected(&self) -> bool {
-        self.slot.phase.get() == Phase::Disconnected
+        let slot = self.exchange.slot();
+        slot.phase.get() == Phase::Disconnected || self.exchange.generation != slot.generation.get()
     }
 
     /// Send an entire response early, with its normal body length.
@@ -96,14 +144,16 @@ impl ResponseWriter {
             } else {
                 None
             };
-        self.publish(response);
-        sender
+        if self.publish(response) { sender } else { None }
     }
 
     fn publish(&self, response: Response) -> bool {
-        if matches!(self.slot.phase.get(), Phase::Waiting | Phase::Watching) {
-            self.slot.phase.set(Phase::Published);
-            self.slot.response.set(Some(Box::new(response)));
+        let slot = self.exchange.slot();
+        if self.exchange.generation == slot.generation.get()
+            && matches!(slot.phase.get(), Phase::Waiting | Phase::Watching)
+        {
+            slot.phase.set(Phase::Published);
+            slot.response.set(Some(Box::new(response)));
             true
         } else {
             false

@@ -9,7 +9,9 @@
 Use Hyper's end-of-stream signal to skip the body reader when the request
 head already completes the message. Build static-file conditions only
 after resolving a static file. Move the existing response headers into
-the wire response. Allocate storage for the early response at handoff.
+the wire response. Borrow incoming header names and values until duplicate
+values must be joined. A missing path can use the front controller as
+soon as its metadata lookup reports that it is absent.
 
 ## Why
 

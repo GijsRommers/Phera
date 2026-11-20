@@ -2,7 +2,6 @@
 //! or HTTP/2 DATA.
 
 use std::future::Future;
-use std::io;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Duration;
@@ -10,19 +9,21 @@ use std::time::Duration;
 use http_body_util::BodyExt;
 use hyper::body::{Body as HyperBody, Bytes, Incoming};
 use hyper::header::{HeaderName, HeaderValue};
+use hyper::server::conn::{http1, http2};
 use hyper::service::service_fn;
 use hyper::{Request as HyperRequest, Response as HyperResponse};
 use hyper_util::rt::{TokioIo, TokioTimer};
-use hyper_util::server::conn::auto;
-use hyper_util::server::graceful::Watcher;
+use hyper_util::server::graceful::GracefulConnection;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use tokio::sync::watch;
 use tokio::time::Instant;
 
 use crate::config::ConnectionLimits;
 use crate::file_body::WireBody;
 use crate::handler::Handler;
-use crate::receive_timeout::{HeadTimer, PrefaceTimeout, TimeoutStream};
+use crate::protocol::{self, Protocol};
+use crate::receive_timeout::{HeadTimer, TimeoutStream};
 use crate::request::{HttpVersion, Request};
 use crate::response::Response;
 use crate::response_task::{ConnectionWork, answer};
@@ -30,15 +31,31 @@ use crate::response_task::{ConnectionWork, answer};
 /// Serve one connection. Runs until the client or the server closes it; a
 /// shutdown watcher finishes in-flight requests and stops new ones.
 pub(super) async fn handle_connection(
-    stream: TcpStream,
+    mut stream: TcpStream,
     peer: SocketAddr,
     local_addr: SocketAddr,
     handler: Rc<dyn Handler>,
-    graceful: Watcher,
+    mut shutdown: watch::Receiver<()>,
     limits: ConnectionLimits,
     work: Rc<ConnectionWork>,
 ) {
     let accepted = Instant::now();
+    let read_limit = limits.idle_timeout.min(limits.request_read_timeout);
+    let detected = tokio::select! {
+        biased;
+        _ = shutdown.changed() => return,
+        result = tokio::time::timeout_at(accepted + read_limit, protocol::detect(&mut stream)) => result,
+    };
+    let (protocol, read_ahead) = match detected {
+        Ok(Ok(protocol)) => protocol,
+        Ok(Err(_)) => return,
+        Err(_) => {
+            if limits.request_read_timeout <= limits.idle_timeout {
+                reply_to_head_timeout(&mut stream).await;
+            }
+            return;
+        }
+    };
     let timer = HeadTimer::new(accepted);
     let head_timer = timer.clone();
     let service = service_fn(move |hyper_request: HyperRequest<Incoming>| {
@@ -66,40 +83,56 @@ pub(super) async fn handle_connection(
             Ok::<_, std::convert::Infallible>(to_hyper_response(response))
         }
     });
-    let mut stream = TimeoutStream::new(stream);
-    let read_limit = limits.idle_timeout.min(limits.request_read_timeout);
-    let mut builder = auto::Builder::new(LocalExecutor);
-    builder
-        .http1()
-        // Hyper starts the head timer again for every new request. The
-        // time already spent here counts against the body's budget too.
-        .header_read_timeout(read_limit)
-        .timer(timer.clone());
-    builder
-        .http2()
-        .timer(TokioTimer::new())
-        .keep_alive_interval(Some(limits.idle_timeout));
-    let io = PrefaceTimeout::new(stream.clone(), accepted + read_limit);
-    let connection = builder.serve_connection(TokioIo::new(io), service);
-    if let Err(error) = graceful.watch(connection).await {
-        let http = error.downcast_ref::<hyper::Error>();
-        let io = error.downcast_ref::<io::Error>();
-        let timed_out = http.is_some_and(hyper::Error::is_timeout)
-            || io.is_some_and(|error| error.kind() == io::ErrorKind::TimedOut);
-        if timed_out
-            && (timer.has_started() || http.is_none())
-            && limits.request_read_timeout <= limits.idle_timeout
-        {
-            // There was no complete request to dispatch to the HTTP service.
-            const TIMEOUT: &[u8] =
-                b"HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
-            let _ = tokio::time::timeout(Duration::from_secs(1), stream.write_all(TIMEOUT)).await;
-        } else if !timed_out
-            && !http.is_some_and(hyper::Error::is_incomplete_message)
-            && !io.is_some_and(|error| error.kind() == io::ErrorKind::Interrupted)
-        {
-            eprintln!("phera-server: connection error: {error}");
+    let mut stream = TimeoutStream::new(stream, read_ahead);
+    let io = TokioIo::new(stream.clone());
+    let result = match protocol {
+        Protocol::Http1 => {
+            let connection = http1::Builder::new()
+                .header_read_timeout(read_limit)
+                .timer(timer)
+                .serve_connection(io, service);
+            let result = until_shutdown(connection, shutdown).await;
+            if result.as_ref().is_err_and(hyper::Error::is_timeout)
+                && limits.request_read_timeout <= limits.idle_timeout
+            {
+                reply_to_head_timeout(&mut stream).await;
+            }
+            result
         }
+        Protocol::Http2 => {
+            let connection = http2::Builder::new(LocalExecutor)
+                .timer(TokioTimer::new())
+                .keep_alive_interval(Some(limits.idle_timeout))
+                .serve_connection(io, service);
+            until_shutdown(connection, shutdown).await
+        }
+    };
+    if let Err(error) = result
+        && !error.is_timeout()
+        && !error.is_incomplete_message()
+    {
+        eprintln!("phera-server: connection error: {error}");
+    }
+}
+
+async fn reply_to_head_timeout(stream: &mut (impl tokio::io::AsyncWrite + Unpin)) {
+    const TIMEOUT: &[u8] =
+        b"HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+    let _ = tokio::time::timeout(Duration::from_secs(1), stream.write_all(TIMEOUT)).await;
+}
+
+async fn until_shutdown<C: GracefulConnection>(
+    connection: C,
+    mut shutdown: watch::Receiver<()>,
+) -> Result<(), C::Error> {
+    let mut connection = std::pin::pin!(connection);
+    tokio::select! {
+        biased;
+        _ = shutdown.changed() => {
+            connection.as_mut().graceful_shutdown();
+            connection.await
+        }
+        result = connection.as_mut() => result,
     }
 }
 

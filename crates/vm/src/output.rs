@@ -20,7 +20,7 @@ impl Vm {
 
 /// Output forwarding is separate from the public capture buffer required by embedders.
 pub(crate) struct Output {
-    sink: Option<Box<dyn OutputSink>>,
+    destination: Destination,
     pub(crate) buffers: Buffers,
     implicit_flush: bool,
     prepare_headers: Option<fn(&mut RequestState)>,
@@ -31,13 +31,18 @@ pub(crate) struct Output {
     queued_origin: Option<SourceLocation>,
     pub(crate) chunk_caller: Option<&'static str>,
     queued: Vec<u8>,
-    pub(crate) response: Option<ResponseOutput>,
+}
+
+enum Destination {
+    Capture,
+    Terminal(Box<dyn OutputSink>),
+    Web(ResponseOutput),
 }
 
 impl Output {
     pub(crate) fn new() -> Self {
         Self {
-            sink: None,
+            destination: Destination::Capture,
             buffers: Buffers::default(),
             implicit_flush: false,
             prepare_headers: None,
@@ -48,12 +53,29 @@ impl Output {
             queued_origin: None,
             chunk_caller: None,
             queued: Vec::new(),
-            response: None,
         }
     }
 
     pub(crate) fn set_sink(&mut self, sink: Box<dyn OutputSink>) {
-        self.sink = Some(sink);
+        self.destination = Destination::Terminal(sink);
+    }
+
+    pub(crate) fn set_response(&mut self, response: ResponseOutput) {
+        self.destination = Destination::Web(response);
+    }
+
+    pub(crate) fn response(&self) -> Option<&ResponseOutput> {
+        match &self.destination {
+            Destination::Web(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn response_mut(&mut self) -> Option<&mut ResponseOutput> {
+        match &mut self.destination {
+            Destination::Web(response) => Some(response),
+            _ => None,
+        }
     }
 
     pub(crate) fn set_implicit_flush(&mut self, enable: bool) {
@@ -62,25 +84,26 @@ impl Output {
 
     /// Forward first, then retain the bytes, matching the existing sink observation order.
     fn write(&mut self, captured: &mut Vec<u8>, bytes: &[u8]) -> bool {
-        if let Some(sink) = &mut self.sink {
-            sink.write(bytes);
-            if self.implicit_flush {
-                sink.flush();
+        let flush = match &mut self.destination {
+            Destination::Capture => false,
+            Destination::Terminal(sink) => {
+                sink.write(bytes);
+                if self.implicit_flush {
+                    sink.flush();
+                }
+                false
             }
-        }
-        if let Some(response) = &mut self.response {
-            if response.is_ended() {
-                return false;
+            Destination::Web(response) => {
+                if response.is_ended() {
+                    return false;
+                }
+                let flush = self.implicit_flush || response.writes_immediately();
+                response.pending |= flush;
+                flush
             }
-            let flush = self.implicit_flush || response.writes_immediately();
-            if flush {
-                response.pending = true;
-            }
-            captured.extend_from_slice(bytes);
-            return flush;
-        }
+        };
         captured.extend_from_slice(bytes);
-        false
+        flush
     }
 }
 
@@ -160,8 +183,7 @@ impl Vm {
             || self.output_writer.buffers.pending.is_some()
             || self
                 .output_writer
-                .response
-                .as_ref()
+                .response()
                 .is_some_and(|response| response.pending)
     }
 
@@ -171,7 +193,7 @@ impl Vm {
 
     pub(crate) async fn flush_transport(&mut self) -> Result<(), NativeError> {
         self.commit_response_headers().await?;
-        if let Some(sink) = &mut self.output_writer.sink {
+        if let Destination::Terminal(sink) = &mut self.output_writer.destination {
             sink.flush();
         }
         self.flush_response_body().await

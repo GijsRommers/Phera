@@ -197,7 +197,7 @@ tower-service = "0.3"
 memchr = "2"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "http2", "server"] }
-hyper-util = { version = "0.1", default-features = false, features = ["tokio", "server-auto", "server-graceful"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "http2", "server-graceful"] }
 socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = [
     "rt", "rt-multi-thread", "net", "time", "sync", "signal", "macros", "fs",

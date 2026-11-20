@@ -89,28 +89,29 @@ pub(crate) fn define_superglobals(
 }
 
 /// One request header as PHP sees it.
-struct JoinedHeader {
-    /// In lower case: header names do not distinguish case.
-    name: String,
+struct JoinedHeader<'a> {
+    /// Header names do not distinguish case.
+    name: &'a str,
     /// Every value sent under this name, joined with ", ".
-    value: Vec<u8>,
+    value: std::borrow::Cow<'a, [u8]>,
 }
 
 /// Collects the headers by name, in the order each name first appeared.
-fn join_repeated_headers(request: &HttpRequest) -> Vec<JoinedHeader> {
-    let mut joined: Vec<JoinedHeader> = Vec::new();
+fn join_repeated_headers(request: &HttpRequest) -> Vec<JoinedHeader<'_>> {
+    let mut joined: Vec<JoinedHeader<'_>> = Vec::with_capacity(request.headers.len());
     for (name, value) in &request.headers {
         let earlier = joined
             .iter_mut()
             .find(|header| header.name.eq_ignore_ascii_case(name));
         match earlier {
             Some(header) => {
-                header.value.extend_from_slice(b", ");
-                header.value.extend_from_slice(value);
+                let joined = header.value.to_mut();
+                joined.extend_from_slice(b", ");
+                joined.extend_from_slice(value);
             }
             None => joined.push(JoinedHeader {
-                name: name.to_ascii_lowercase(),
-                value: value.clone(),
+                name,
+                value: std::borrow::Cow::Borrowed(value),
             }),
         }
     }
@@ -118,16 +119,16 @@ fn join_repeated_headers(request: &HttpRequest) -> Vec<JoinedHeader> {
 }
 
 /// The joined value of the header with this lower-case name.
-fn header<'a>(headers: &'a [JoinedHeader], name: &str) -> Option<&'a [u8]> {
+fn header<'a>(headers: &'a [JoinedHeader<'_>], name: &str) -> Option<&'a [u8]> {
     headers
         .iter()
-        .find(|header| header.name == name)
-        .map(|header| header.value.as_slice())
+        .find(|header| header.name.eq_ignore_ascii_case(name))
+        .map(|header| header.value.as_ref())
 }
 
 fn server(
     request: &HttpRequest,
-    headers: &[JoinedHeader],
+    headers: &[JoinedHeader<'_>],
     script: &Path,
     document_root: &Path,
     mut server: PhpArray,
@@ -193,12 +194,9 @@ fn server(
         // prefix, as PHP's own server does.
         let upper = header.name.to_ascii_uppercase().replace('-', "_");
         if matches!(upper.as_str(), "CONTENT_TYPE" | "CONTENT_LENGTH") {
-            set(&upper, Value::from(header.value.as_slice()));
+            set(&upper, Value::from(header.value.as_ref()));
         }
-        set(
-            &format!("HTTP_{upper}"),
-            Value::from(header.value.as_slice()),
-        );
+        set(&format!("HTTP_{upper}"), Value::from(header.value.as_ref()));
     }
     server
 }

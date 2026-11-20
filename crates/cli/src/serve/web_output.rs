@@ -10,10 +10,15 @@ use phera_server::{Response, ResponseWriter, StreamWriter};
 use super::compress;
 
 pub(super) struct HttpOutput {
-    response: ResponseWriter,
-    stream: Option<StreamWriter>,
+    target: Target,
     compress: bool,
     accept_encoding: Option<Rc<str>>,
+}
+
+enum Target {
+    Buffered(ResponseWriter),
+    Streaming(StreamWriter),
+    Complete,
 }
 
 impl HttpOutput {
@@ -24,8 +29,7 @@ impl HttpOutput {
     ) -> Self {
         response.watch_disconnect();
         Self {
-            response,
-            stream: None,
+            target: Target::Buffered(response),
             compress,
             accept_encoding,
         }
@@ -34,28 +38,32 @@ impl HttpOutput {
 
 impl WebOutput for HttpOutput {
     fn is_disconnected(&self) -> bool {
-        self.response.is_disconnected()
-            || self
-                .stream
-                .as_ref()
-                .is_some_and(StreamWriter::is_disconnected)
+        match &self.target {
+            Target::Buffered(response) => response.is_disconnected(),
+            Target::Streaming(stream) => stream.is_disconnected(),
+            Target::Complete => false,
+        }
     }
 
     fn start(&mut self, head: ResponseHead) {
-        self.stream = self.response.stream(to_response(head, Vec::new()));
+        if let Target::Buffered(response) = std::mem::replace(&mut self.target, Target::Complete)
+            && let Some(stream) = response.stream(to_response(head, Vec::new()))
+        {
+            self.target = Target::Streaming(stream);
+        }
     }
 
     fn write(&mut self, bytes: Vec<u8>) -> Pin<Box<dyn Future<Output = bool> + '_>> {
         Box::pin(async move {
-            match &self.stream {
-                Some(stream) => stream.write(bytes).await,
-                None => !self.response.is_disconnected(),
+            match &self.target {
+                Target::Streaming(stream) => stream.write(bytes).await,
+                _ => true,
             }
         })
     }
 
     fn end_stream(&mut self) {
-        if let Some(stream) = self.stream.take() {
+        if let Target::Streaming(stream) = std::mem::replace(&mut self.target, Target::Complete) {
             stream.finish();
         }
     }
@@ -66,11 +74,15 @@ impl WebOutput for HttpOutput {
         bytes: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = bool> + '_>> {
         Box::pin(async move {
+            let Target::Buffered(writer) = std::mem::replace(&mut self.target, Target::Complete)
+            else {
+                return false;
+            };
             let mut response = to_response(head, bytes);
             if self.compress {
                 response = compress::php_response(response, self.accept_encoding.as_deref()).await;
             }
-            self.response.finish(response)
+            writer.finish(response)
         })
     }
 }

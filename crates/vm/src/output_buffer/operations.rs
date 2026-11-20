@@ -188,8 +188,7 @@ impl Vm {
         }
         if self
             .output_writer
-            .response
-            .as_ref()
+            .response()
             .is_some_and(|response| response.pending)
         {
             self.flush_response_body().await?;
