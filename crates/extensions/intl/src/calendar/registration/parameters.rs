@@ -6,9 +6,7 @@ use super::{CLASS, GREGORIAN};
 
 const OBJECT: Param = Param::new("calendar", ParamType::Class(CLASS));
 const GREG: Param = Param::new("calendar", ParamType::Class(GREGORIAN));
-const TZ: Param = Param::new("timezone", ParamType::ObjectOrString)
-    .nullable()
-    .with_default(ConstantValue::Null);
+const TZ: Param = Param::new("timezone", ParamType::ObjectOrString).nullable();
 const LOCALE: Param = Param::new("locale", ParamType::String)
     .nullable()
     .with_default(ConstantValue::Null);
@@ -30,11 +28,9 @@ const DAY_VALUE: Param = Param::new("dayOfWeek", ParamType::Int);
 const DAYS_VALUE: Param = Param::new("days", ParamType::Int);
 const OPTION_VALUE: Param = Param::new("option", ParamType::Int);
 const LENIENT_VALUE: Param = Param::new("lenient", ParamType::Bool);
-const UNKNOWN: ConstantValue = ConstantValue::Null;
-
 pub const INSTANCE: &[Param] = &[OBJECT];
 pub const GREG_INSTANCE: &[Param] = &[GREG];
-pub const CREATE: &[Param] = &[TZ, LOCALE];
+pub const CREATE: &[Param] = &[TZ.with_default(ConstantValue::Null), LOCALE];
 pub const ZONE_ARG: &[Param] = &[TZ];
 pub const FN_ZONE: &[Param] = &[OBJECT, TZ];
 pub const FROM_DATE: &[Param] = &[Param::new("datetime", ParamType::ObjectOrString), LOCALE];
@@ -77,17 +73,17 @@ pub const CIVIL_FULL: &[Param] = &[YEAR_VALUE, MONTH, DATE, HOUR, MINUTE, OPTION
 pub const SET: &[Param] = &[
     YEAR_VALUE,
     MONTH,
-    DATE.nullable().with_default(UNKNOWN),
-    HOUR.nullable().with_default(UNKNOWN),
-    MINUTE.nullable().with_default(UNKNOWN),
-    OPTIONAL_SECOND,
+    DATE.nullable().optional(),
+    HOUR.nullable().optional(),
+    MINUTE.nullable().optional(),
+    SECOND.nullable().optional(),
 ];
 pub const FN_SET: &[Param] = &[OBJECT, SET[0], SET[1], SET[2], SET[3], SET[4], SET[5]];
 pub const GREG_CREATE: &[Param] = &[
-    Param::new("timezoneOrYear", ParamType::Mixed).with_default(UNKNOWN),
-    Param::new("localeOrMonth", ParamType::Mixed).with_default(UNKNOWN),
-    Param::new("day", ParamType::Mixed).with_default(UNKNOWN),
-    Param::new("hour", ParamType::Mixed).with_default(UNKNOWN),
-    Param::new("minute", ParamType::Mixed).with_default(UNKNOWN),
-    Param::new("second", ParamType::Mixed).with_default(UNKNOWN),
+    Param::new("timezoneOrYear", ParamType::Mixed).optional(),
+    Param::new("localeOrMonth", ParamType::Mixed).optional(),
+    Param::new("day", ParamType::Mixed).optional(),
+    Param::new("hour", ParamType::Mixed).optional(),
+    Param::new("minute", ParamType::Mixed).optional(),
+    Param::new("second", ParamType::Mixed).optional(),
 ];

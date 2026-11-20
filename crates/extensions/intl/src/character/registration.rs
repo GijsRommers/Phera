@@ -17,8 +17,17 @@ const FOLD: &[Param] = &[
     Param::new("options", ParamType::Int)
         .with_constant_default("IntlChar::FOLD_CASE_DEFAULT", ConstantValue::Int(0)),
 ];
-const PROPERTY: &[Param] = &[CODE, Param::new("property", ParamType::Int)];
-const UNSUPPORTED: &[Param] = &[Param::new("arguments", ParamType::Mixed).variadic()];
+const PROPERTY_ID: Param = Param::new("property", ParamType::Int);
+const PROPERTY: &[Param] = &[CODE, PROPERTY_ID];
+const NAME: Param = Param::new("name", ParamType::String);
+const NAME_TYPE: Param = Param::new("type", ParamType::Int).optional();
+const CALLBACK: Param = Param::new("callback", ParamType::Callable);
+const CHARACTER_RANGE: &[Param] = &[
+    Param::new("start", ParamType::IntOrString),
+    Param::new("end", ParamType::IntOrString),
+    CALLBACK,
+    NAME_TYPE,
+];
 
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
@@ -33,6 +42,8 @@ const CONSTANTS: &[(&str, ConstantValue)] = &[
     ("CODEPOINT_MIN", ConstantValue::Int(0)),
     ("CODEPOINT_MAX", ConstantValue::Int(1114111)),
     ("NO_NUMERIC_VALUE", ConstantValue::Float(-123456789.0)),
+    ("UNICODE_CHAR_NAME", ConstantValue::Int(0)),
+    ("LONG_PROPERTY_NAME", ConstantValue::Int(1)),
     ("PROPERTY_ALPHABETIC", ConstantValue::Int(0)),
     ("PROPERTY_ASCII_HEX_DIGIT", ConstantValue::Int(1)),
     ("PROPERTY_BIDI_MIRRORED", ConstantValue::Int(3)),
@@ -305,72 +316,76 @@ const METHODS: &[MethodEntry] = &[
     })
     .static_()
     .returning("?bool"),
-    MethodEntry::public("charAge", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("charAge", CODEPOINT, |_, _, _| {
         Err(unsupported::item("IntlChar::charAge"))
     })
     .static_(),
-    MethodEntry::public("charDirection", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("charDirection", CODEPOINT, |_, _, _| {
         Err(unsupported::item("IntlChar::charDirection"))
     })
     .static_(),
-    MethodEntry::public("charFromName", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("charFromName", &[NAME, NAME_TYPE], |_, _, _| {
         Err(unsupported::item("IntlChar::charFromName"))
     })
     .static_(),
-    MethodEntry::public("charMirror", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("charMirror", CODEPOINT, |_, _, _| {
         Err(unsupported::item("IntlChar::charMirror"))
     })
     .static_(),
-    MethodEntry::public("charName", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("charName", &[CODE, NAME_TYPE], |_, _, _| {
         Err(unsupported::item("IntlChar::charName"))
     })
     .static_(),
-    MethodEntry::public("enumCharNames", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("enumCharNames", CHARACTER_RANGE, |_, _, _| {
         Err(unsupported::item("IntlChar::enumCharNames"))
     })
     .static_(),
-    MethodEntry::public("enumCharTypes", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("enumCharTypes", &[CALLBACK], |_, _, _| {
         Err(unsupported::item("IntlChar::enumCharTypes"))
     })
     .static_(),
-    MethodEntry::public("getBidiPairedBracket", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("getBidiPairedBracket", CODEPOINT, |_, _, _| {
         Err(unsupported::item("IntlChar::getBidiPairedBracket"))
     })
     .static_(),
-    MethodEntry::public("getBlockCode", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("getBlockCode", CODEPOINT, |_, _, _| {
         Err(unsupported::item("IntlChar::getBlockCode"))
     })
     .static_(),
-    MethodEntry::public("getFC_NFKC_Closure", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("getFC_NFKC_Closure", CODEPOINT, |_, _, _| {
         Err(unsupported::item("IntlChar::getFC_NFKC_Closure"))
     })
     .static_(),
-    MethodEntry::public("getIntPropertyMaxValue", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("getIntPropertyMaxValue", &[PROPERTY_ID], |_, _, _| {
         Err(unsupported::item("IntlChar::getIntPropertyMaxValue"))
     })
     .static_(),
-    MethodEntry::public("getIntPropertyMinValue", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("getIntPropertyMinValue", &[PROPERTY_ID], |_, _, _| {
         Err(unsupported::item("IntlChar::getIntPropertyMinValue"))
     })
     .static_(),
-    MethodEntry::public("getNumericValue", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("getNumericValue", CODEPOINT, |_, _, _| {
         Err(unsupported::item("IntlChar::getNumericValue"))
     })
     .static_(),
-    MethodEntry::public("getPropertyEnum", UNSUPPORTED, |_, _, _| {
-        Err(unsupported::item("IntlChar::getPropertyEnum"))
-    })
+    MethodEntry::public(
+        "getPropertyEnum",
+        &[Param::new("alias", ParamType::String)],
+        |_, _, _| Err(unsupported::item("IntlChar::getPropertyEnum")),
+    )
     .static_(),
-    MethodEntry::public("getPropertyName", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("getPropertyName", &[PROPERTY_ID, NAME_TYPE], |_, _, _| {
         Err(unsupported::item("IntlChar::getPropertyName"))
     })
     .static_(),
-    MethodEntry::public("getPropertyValueEnum", UNSUPPORTED, |_, _, _| {
+    MethodEntry::public("getPropertyValueEnum", &[PROPERTY_ID, NAME], |_, _, _| {
         Err(unsupported::item("IntlChar::getPropertyValueEnum"))
     })
     .static_(),
-    MethodEntry::public("getPropertyValueName", UNSUPPORTED, |_, _, _| {
-        Err(unsupported::item("IntlChar::getPropertyValueName"))
-    })
+    MethodEntry::public(
+        "getPropertyValueName",
+        &[PROPERTY_ID, Param::new("value", ParamType::Int), NAME_TYPE],
+        |_, _, _| Err(unsupported::item("IntlChar::getPropertyValueName")),
+    )
     .static_(),
 ];

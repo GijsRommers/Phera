@@ -195,6 +195,33 @@ closure::bindto	Zend/zend_closures.stub.php:19	newThis	r--		-	newScope	o--	"stat
 closure::call	Zend/zend_closures.stub.php:21	newThis	r--		-	args	ov-		-
 closure::fromcallable	Zend/zend_closures.stub.php:23	callback	r--		-
 closure::getcurrent	Zend/zend_closures.stub.php:25
+collator::__construct	ext/intl/collator/collator.stub.php:78	locale	r--		-
+collator::asort	ext/intl/collator/collator.stub.php:108	array	r-&		-	flags	o--	Collator::SORT_REGULAR	i0
+collator::compare	ext/intl/collator/collator.stub.php:90	string1	r--		-	string2	r--		-
+collator::create	ext/intl/collator/collator.stub.php:84	locale	r--		-
+collator::getattribute	ext/intl/collator/collator.stub.php:114	attribute	r--		-
+collator::geterrorcode	ext/intl/collator/collator.stub.php:144
+collator::geterrormessage	ext/intl/collator/collator.stub.php:150
+collator::getlocale	ext/intl/collator/collator.stub.php:138	type	r--		-
+collator::getsortkey	ext/intl/collator/collator.stub.php:156	string	r--		-
+collator::getstrength	ext/intl/collator/collator.stub.php:126
+collator::setattribute	ext/intl/collator/collator.stub.php:120	attribute	r--		-	value	r--		-
+collator::setstrength	ext/intl/collator/collator.stub.php:132	strength	r--		-
+collator::sort	ext/intl/collator/collator.stub.php:96	array	r-&		-	flags	o--	Collator::SORT_REGULAR	i0
+collator::sortwithsortkeys	ext/intl/collator/collator.stub.php:102	array	r-&		-
+collator_asort	ext/intl/php_intl.stub.php:307	object	r--		-	array	r-&		-	flags	o--	Collator::SORT_REGULAR	i0
+collator_compare	ext/intl/php_intl.stub.php:293	object	r--		-	string1	r--		-	string2	r--		-
+collator_create	ext/intl/php_intl.stub.php:291	locale	r--		-
+collator_get_attribute	ext/intl/php_intl.stub.php:295	object	r--		-	attribute	r--		-
+collator_get_error_code	ext/intl/php_intl.stub.php:311	object	r--		-
+collator_get_error_message	ext/intl/php_intl.stub.php:313	object	r--		-
+collator_get_locale	ext/intl/php_intl.stub.php:309	object	r--		-	type	r--		-
+collator_get_sort_key	ext/intl/php_intl.stub.php:315	object	r--		-	string	r--		-
+collator_get_strength	ext/intl/php_intl.stub.php:299	object	r--		-
+collator_set_attribute	ext/intl/php_intl.stub.php:297	object	r--		-	attribute	r--		-	value	r--		-
+collator_set_strength	ext/intl/php_intl.stub.php:301	object	r--		-	strength	r--		-
+collator_sort	ext/intl/php_intl.stub.php:303	object	r--		-	array	r-&		-	flags	o--	Collator::SORT_REGULAR	i0
+collator_sort_with_sort_keys	ext/intl/php_intl.stub.php:305	object	r--		-	array	r-&		-
 compact	ext/standard/basic_functions.stub.php:1634	var_name	r--		-	var_names	ov-		-
 config_get_hash	ext/standard/basic_functions.stub.php:2069
 connection_aborted	ext/standard/basic_functions.stub.php:2019
@@ -250,6 +277,26 @@ date_timestamp_get	ext/date/php_date.stub.php:201	object	r--		-
 date_timestamp_set	ext/date/php_date.stub.php:199	object	r--		-	timestamp	r--		-
 date_timezone_get	ext/date/php_date.stub.php:182	object	r--		-
 date_timezone_set	ext/date/php_date.stub.php:184	object	r--		-	timezone	r--		-
+datefmt_create	ext/intl/php_intl.stub.php:329	locale	r--		-	dateType	o--	IntlDateFormatter::FULL	i0	timeType	o--	IntlDateFormatter::FULL	i0	timezone	o--	null	n	calendar	o--	null	n	pattern	o--	null	n
+datefmt_format	ext/intl/php_intl.stub.php:365	formatter	r--		-	datetime	r--		-
+datefmt_format_object	ext/intl/php_intl.stub.php:371	datetime	r--		-	format	o--	null	n	locale	o--	null	n
+datefmt_get_calendar	ext/intl/php_intl.stub.php:342	formatter	r--		-
+datefmt_get_calendar_object	ext/intl/php_intl.stub.php:348	formatter	r--		-
+datefmt_get_datetype	ext/intl/php_intl.stub.php:338	formatter	r--		-
+datefmt_get_error_code	ext/intl/php_intl.stub.php:383	formatter	r--		-
+datefmt_get_error_message	ext/intl/php_intl.stub.php:385	formatter	r--		-
+datefmt_get_locale	ext/intl/php_intl.stub.php:358	formatter	r--		-	type	o--	ULOC_ACTUAL_LOCALE	i0
+datefmt_get_pattern	ext/intl/php_intl.stub.php:356	formatter	r--		-
+datefmt_get_timetype	ext/intl/php_intl.stub.php:340	formatter	r--		-
+datefmt_get_timezone	ext/intl/php_intl.stub.php:350	formatter	r--		-
+datefmt_get_timezone_id	ext/intl/php_intl.stub.php:346	formatter	r--		-
+datefmt_is_lenient	ext/intl/php_intl.stub.php:362	formatter	r--		-
+datefmt_localtime	ext/intl/php_intl.stub.php:381	formatter	r--		-	string	r--		-	offset	o-&	null	n
+datefmt_parse	ext/intl/php_intl.stub.php:374	formatter	r--		-	string	r--		-	offset	o-&	null	n
+datefmt_set_calendar	ext/intl/php_intl.stub.php:344	formatter	r--		-	calendar	r--		-
+datefmt_set_lenient	ext/intl/php_intl.stub.php:360	formatter	r--		-	lenient	r--		-
+datefmt_set_pattern	ext/intl/php_intl.stub.php:354	formatter	r--		-	pattern	r--		-
+datefmt_set_timezone	ext/intl/php_intl.stub.php:352	formatter	r--		-	timezone	r--		-
 dateinterval::__construct	ext/date/php_date.stub.php:647	duration	r--		-
 dateinterval::__serialize	ext/date/php_date.stub.php:660
 dateinterval::__set_state	ext/date/php_date.stub.php:669	array	r--		-
@@ -885,6 +932,17 @@ globiterator::count	ext/spl/spl_directory.stub.php:215
 gmdate	ext/date/php_date.stub.php:101	format	r--		-	timestamp	o--	null	n
 gmmktime	ext/date/php_date.stub.php:107	hour	r--		-	minute	o--	null	n	second	o--	null	n	month	o--	null	n	day	o--	null	n	year	o--	null	n
 gmstrftime	ext/date/php_date.stub.php:123	format	r--		-	timestamp	o--	null	n
+grapheme_extract	ext/intl/php_intl.stub.php:449	haystack	r--		-	size	r--		-	type	o--	GRAPHEME_EXTR_COUNT	i0	offset	o--	0	i0	next	o-&	null	n
+grapheme_levenshtein	ext/intl/php_intl.stub.php:446	string1	r--		-	string2	r--		-	insertion_cost	o--	1	i1	replacement_cost	o--	1	i1	deletion_cost	o--	1	i1	locale	o--	""	s
+grapheme_str_split	ext/intl/php_intl.stub.php:444	string	r--		-	length	o--	1	i1
+grapheme_stripos	ext/intl/php_intl.stub.php:432	haystack	r--		-	needle	r--		-	offset	o--	0	i0	locale	o--	""	s
+grapheme_stristr	ext/intl/php_intl.stub.php:442	haystack	r--		-	needle	r--		-	beforeNeedle	o--	false	f	locale	o--	""	s
+grapheme_strlen	ext/intl/php_intl.stub.php:428	string	r--		-
+grapheme_strpos	ext/intl/php_intl.stub.php:430	haystack	r--		-	needle	r--		-	offset	o--	0	i0	locale	o--	""	s
+grapheme_strripos	ext/intl/php_intl.stub.php:436	haystack	r--		-	needle	r--		-	offset	o--	0	i0	locale	o--	""	s
+grapheme_strrpos	ext/intl/php_intl.stub.php:434	haystack	r--		-	needle	r--		-	offset	o--	0	i0	locale	o--	""	s
+grapheme_strstr	ext/intl/php_intl.stub.php:440	haystack	r--		-	needle	r--		-	beforeNeedle	o--	false	f	locale	o--	""	s
+grapheme_substr	ext/intl/php_intl.stub.php:438	string	r--		-	offset	r--		-	length	o--	null	n	locale	o--	""	s
 hash	ext/hash/hash.stub.php:12	algo	r--		-	data	r--		-	binary	o--	false	f	options	o--	[]	a
 hash_algos	ext/hash/hash.stub.php:51
 hash_copy	ext/hash/hash.stub.php:44	context	r--		-
@@ -935,6 +993,8 @@ iconv_strpos	ext/iconv/iconv.stub.php:31	haystack	r--		-	needle	r--		-	offset	o-
 iconv_strrpos	ext/iconv/iconv.stub.php:33	haystack	r--		-	needle	r--		-	encoding	o--	null	n
 iconv_substr	ext/iconv/iconv.stub.php:29	string	r--		-	offset	r--		-	length	o--	null	n	encoding	o--	null	n
 idate	ext/date/php_date.stub.php:98	format	r--		-	timestamp	o--	null	n
+idn_to_ascii	ext/intl/php_intl.stub.php:454	domain	r--		-	flags	o--	IDNA_DEFAULT	i48	variant	o--	INTL_IDNA_VARIANT_UTS46	i1	idna_info	o-&	null	n
+idn_to_utf8	ext/intl/php_intl.stub.php:457	domain	r--		-	flags	o--	IDNA_DEFAULT	i48	variant	o--	INTL_IDNA_VARIANT_UTS46	i1	idna_info	o-&	null	n
 ignore_user_abort	ext/standard/basic_functions.stub.php:2023	enable	o--	null	n
 image_type_to_extension	ext/standard/basic_functions.stub.php:3020	image_type	r--		-	include_dot	o--	true	t
 image_type_to_mime_type	ext/standard/basic_functions.stub.php:3014	image_type	r--		-
@@ -958,6 +1018,287 @@ internaliterator::key	Zend/zend_interfaces.stub.php:78
 internaliterator::next	Zend/zend_interfaces.stub.php:80
 internaliterator::rewind	Zend/zend_interfaces.stub.php:84
 internaliterator::valid	Zend/zend_interfaces.stub.php:82
+intl_error_name	ext/intl/php_intl.stub.php:325	errorCode	r--		-
+intl_get_error_code	ext/intl/php_intl.stub.php:319
+intl_get_error_message	ext/intl/php_intl.stub.php:321
+intl_is_failure	ext/intl/php_intl.stub.php:323	errorCode	r--		-
+intlbreakiterator::__construct	ext/intl/breakiterator/breakiterator.stub.php:68
+intlbreakiterator::createcharacterinstance	ext/intl/breakiterator/breakiterator.stub.php:51	locale	o--	null	n
+intlbreakiterator::createcodepointinstance	ext/intl/breakiterator/breakiterator.stub.php:54
+intlbreakiterator::createlineinstance	ext/intl/breakiterator/breakiterator.stub.php:57	locale	o--	null	n
+intlbreakiterator::createsentenceinstance	ext/intl/breakiterator/breakiterator.stub.php:60	locale	o--	null	n
+intlbreakiterator::createtitleinstance	ext/intl/breakiterator/breakiterator.stub.php:63	locale	o--	null	n
+intlbreakiterator::createwordinstance	ext/intl/breakiterator/breakiterator.stub.php:66	locale	o--	null	n
+intlbreakiterator::current	ext/intl/breakiterator/breakiterator.stub.php:71
+intlbreakiterator::first	ext/intl/breakiterator/breakiterator.stub.php:74
+intlbreakiterator::following	ext/intl/breakiterator/breakiterator.stub.php:77	offset	r--		-
+intlbreakiterator::geterrorcode	ext/intl/breakiterator/breakiterator.stub.php:80
+intlbreakiterator::geterrormessage	ext/intl/breakiterator/breakiterator.stub.php:83
+intlbreakiterator::getiterator	ext/intl/breakiterator/breakiterator.stub.php:112
+intlbreakiterator::getlocale	ext/intl/breakiterator/breakiterator.stub.php:86	type	r--		-
+intlbreakiterator::getpartsiterator	ext/intl/breakiterator/breakiterator.stub.php:89	type	o--	IntlPartsIterator::KEY_SEQUENTIAL	i0
+intlbreakiterator::gettext	ext/intl/breakiterator/breakiterator.stub.php:92
+intlbreakiterator::isboundary	ext/intl/breakiterator/breakiterator.stub.php:95	offset	r--		-
+intlbreakiterator::last	ext/intl/breakiterator/breakiterator.stub.php:98
+intlbreakiterator::next	ext/intl/breakiterator/breakiterator.stub.php:101	offset	o--	null	n
+intlbreakiterator::preceding	ext/intl/breakiterator/breakiterator.stub.php:104	offset	r--		-
+intlbreakiterator::previous	ext/intl/breakiterator/breakiterator.stub.php:107
+intlbreakiterator::settext	ext/intl/breakiterator/breakiterator.stub.php:110	text	r--		-
+intlcal_add	ext/intl/php_intl.stub.php:194	calendar	r--		-	field	r--		-	value	r--		-
+intlcal_after	ext/intl/php_intl.stub.php:198	calendar	r--		-	other	r--		-
+intlcal_before	ext/intl/php_intl.stub.php:200	calendar	r--		-	other	r--		-
+intlcal_clear	ext/intl/php_intl.stub.php:208	calendar	r--		-	field	o--	null	n
+intlcal_create_instance	ext/intl/php_intl.stub.php:176	timezone	o--	null	n	locale	o--	null	n
+intlcal_equals	ext/intl/php_intl.stub.php:256	calendar	r--		-	other	r--		-
+intlcal_field_difference	ext/intl/php_intl.stub.php:210	calendar	r--		-	timestamp	r--		-	field	r--		-
+intlcal_from_date_time	ext/intl/php_intl.stub.php:264	datetime	r--		-	locale	o--	null	n
+intlcal_get	ext/intl/php_intl.stub.php:188	calendar	r--		-	field	r--		-
+intlcal_get_actual_maximum	ext/intl/php_intl.stub.php:212	calendar	r--		-	field	r--		-
+intlcal_get_actual_minimum	ext/intl/php_intl.stub.php:214	calendar	r--		-	field	r--		-
+intlcal_get_available_locales	ext/intl/php_intl.stub.php:186
+intlcal_get_day_of_week_type	ext/intl/php_intl.stub.php:216	calendar	r--		-	dayOfWeek	r--		-
+intlcal_get_error_code	ext/intl/php_intl.stub.php:268	calendar	r--		-
+intlcal_get_error_message	ext/intl/php_intl.stub.php:270	calendar	r--		-
+intlcal_get_first_day_of_week	ext/intl/php_intl.stub.php:218	calendar	r--		-
+intlcal_get_greatest_minimum	ext/intl/php_intl.stub.php:222	calendar	r--		-	field	r--		-
+intlcal_get_keyword_values_for_locale	ext/intl/php_intl.stub.php:178	keyword	r--		-	locale	r--		-	onlyCommon	r--		-
+intlcal_get_least_maximum	ext/intl/php_intl.stub.php:220	calendar	r--		-	field	r--		-
+intlcal_get_locale	ext/intl/php_intl.stub.php:224	calendar	r--		-	type	r--		-
+intlcal_get_maximum	ext/intl/php_intl.stub.php:226	calendar	r--		-	field	r--		-
+intlcal_get_minimal_days_in_first_week	ext/intl/php_intl.stub.php:228	calendar	r--		-
+intlcal_get_minimum	ext/intl/php_intl.stub.php:232	calendar	r--		-	field	r--		-
+intlcal_get_now	ext/intl/php_intl.stub.php:180
+intlcal_get_repeated_wall_time_option	ext/intl/php_intl.stub.php:254	calendar	r--		-
+intlcal_get_skipped_wall_time_option	ext/intl/php_intl.stub.php:258	calendar	r--		-
+intlcal_get_time	ext/intl/php_intl.stub.php:190	calendar	r--		-
+intlcal_get_time_zone	ext/intl/php_intl.stub.php:234	calendar	r--		-
+intlcal_get_type	ext/intl/php_intl.stub.php:236	calendar	r--		-
+intlcal_get_weekend_transition	ext/intl/php_intl.stub.php:238	calendar	r--		-	dayOfWeek	r--		-
+intlcal_in_daylight_time	ext/intl/php_intl.stub.php:240	calendar	r--		-
+intlcal_is_equivalent_to	ext/intl/php_intl.stub.php:246	calendar	r--		-	other	r--		-
+intlcal_is_lenient	ext/intl/php_intl.stub.php:242	calendar	r--		-
+intlcal_is_set	ext/intl/php_intl.stub.php:244	calendar	r--		-	field	r--		-
+intlcal_is_weekend	ext/intl/php_intl.stub.php:248	calendar	r--		-	timestamp	o--	null	n
+intlcal_roll	ext/intl/php_intl.stub.php:206	calendar	r--		-	field	r--		-	value	r--		-
+intlcal_set	ext/intl/php_intl.stub.php:203	calendar	r--		-	year	r--		-	month	r--		-	dayOfMonth	o--	UNKNOWN	-	hour	o--	UNKNOWN	-	minute	o--	UNKNOWN	-	second	o--	UNKNOWN	-
+intlcal_set_first_day_of_week	ext/intl/php_intl.stub.php:250	calendar	r--		-	dayOfWeek	r--		-
+intlcal_set_lenient	ext/intl/php_intl.stub.php:252	calendar	r--		-	lenient	r--		-
+intlcal_set_minimal_days_in_first_week	ext/intl/php_intl.stub.php:230	calendar	r--		-	days	r--		-
+intlcal_set_repeated_wall_time_option	ext/intl/php_intl.stub.php:260	calendar	r--		-	option	r--		-
+intlcal_set_skipped_wall_time_option	ext/intl/php_intl.stub.php:262	calendar	r--		-	option	r--		-
+intlcal_set_time	ext/intl/php_intl.stub.php:192	calendar	r--		-	timestamp	r--		-
+intlcal_set_time_zone	ext/intl/php_intl.stub.php:196	calendar	r--		-	timezone	r--		-
+intlcal_to_date_time	ext/intl/php_intl.stub.php:266	calendar	r--		-
+intlcalendar::__construct	ext/intl/calendar/calendar.stub.php:90
+intlcalendar::add	ext/intl/calendar/calendar.stub.php:114	field	r--		-	value	r--		-
+intlcalendar::after	ext/intl/calendar/calendar.stub.php:120	other	r--		-
+intlcalendar::before	ext/intl/calendar/calendar.stub.php:126	other	r--		-
+intlcalendar::clear	ext/intl/calendar/calendar.stub.php:132	field	o--	null	n
+intlcalendar::createinstance	ext/intl/calendar/calendar.stub.php:96	timezone	o--	null	n	locale	o--	null	n
+intlcalendar::equals	ext/intl/calendar/calendar.stub.php:102	other	r--		-
+intlcalendar::fielddifference	ext/intl/calendar/calendar.stub.php:108	timestamp	r--		-	field	r--		-
+intlcalendar::fromdatetime	ext/intl/calendar/calendar.stub.php:138	datetime	r--		-	locale	o--	null	n
+intlcalendar::get	ext/intl/calendar/calendar.stub.php:144	field	r--		-
+intlcalendar::getactualmaximum	ext/intl/calendar/calendar.stub.php:150	field	r--		-
+intlcalendar::getactualminimum	ext/intl/calendar/calendar.stub.php:156	field	r--		-
+intlcalendar::getavailablelocales	ext/intl/calendar/calendar.stub.php:163
+intlcalendar::getdayofweektype	ext/intl/calendar/calendar.stub.php:169	dayOfWeek	r--		-
+intlcalendar::geterrorcode	ext/intl/calendar/calendar.stub.php:175
+intlcalendar::geterrormessage	ext/intl/calendar/calendar.stub.php:181
+intlcalendar::getfirstdayofweek	ext/intl/calendar/calendar.stub.php:187
+intlcalendar::getgreatestminimum	ext/intl/calendar/calendar.stub.php:193	field	r--		-
+intlcalendar::getkeywordvaluesforlocale	ext/intl/calendar/calendar.stub.php:199	keyword	r--		-	locale	r--		-	onlyCommon	r--		-
+intlcalendar::getleastmaximum	ext/intl/calendar/calendar.stub.php:205	field	r--		-
+intlcalendar::getlocale	ext/intl/calendar/calendar.stub.php:211	type	r--		-
+intlcalendar::getmaximum	ext/intl/calendar/calendar.stub.php:217	field	r--		-
+intlcalendar::getminimaldaysinfirstweek	ext/intl/calendar/calendar.stub.php:223
+intlcalendar::getminimum	ext/intl/calendar/calendar.stub.php:235	field	r--		-
+intlcalendar::getnow	ext/intl/calendar/calendar.stub.php:241
+intlcalendar::getrepeatedwalltimeoption	ext/intl/calendar/calendar.stub.php:247
+intlcalendar::getskippedwalltimeoption	ext/intl/calendar/calendar.stub.php:253
+intlcalendar::gettime	ext/intl/calendar/calendar.stub.php:259
+intlcalendar::gettimezone	ext/intl/calendar/calendar.stub.php:265
+intlcalendar::gettype	ext/intl/calendar/calendar.stub.php:271
+intlcalendar::getweekendtransition	ext/intl/calendar/calendar.stub.php:277	dayOfWeek	r--		-
+intlcalendar::indaylighttime	ext/intl/calendar/calendar.stub.php:283
+intlcalendar::isequivalentto	ext/intl/calendar/calendar.stub.php:289	other	r--		-
+intlcalendar::islenient	ext/intl/calendar/calendar.stub.php:295
+intlcalendar::isset	ext/intl/calendar/calendar.stub.php:314	field	r--		-
+intlcalendar::isweekend	ext/intl/calendar/calendar.stub.php:301	timestamp	o--	null	n
+intlcalendar::roll	ext/intl/calendar/calendar.stub.php:308	field	r--		-	value	r--		-
+intlcalendar::set	ext/intl/calendar/calendar.stub.php:320	year	r--		-	month	r--		-	dayOfMonth	o--	UNKNOWN	-	hour	o--	UNKNOWN	-	minute	o--	UNKNOWN	-	second	o--	UNKNOWN	-
+intlcalendar::setdate	ext/intl/calendar/calendar.stub.php:322	year	r--		-	month	r--		-	dayOfMonth	r--		-
+intlcalendar::setdatetime	ext/intl/calendar/calendar.stub.php:324	year	r--		-	month	r--		-	dayOfMonth	r--		-	hour	r--		-	minute	r--		-	second	o--	null	n
+intlcalendar::setfirstdayofweek	ext/intl/calendar/calendar.stub.php:330	dayOfWeek	r--		-
+intlcalendar::setlenient	ext/intl/calendar/calendar.stub.php:336	lenient	r--		-
+intlcalendar::setminimaldaysinfirstweek	ext/intl/calendar/calendar.stub.php:229	days	r--		-
+intlcalendar::setrepeatedwalltimeoption	ext/intl/calendar/calendar.stub.php:342	option	r--		-
+intlcalendar::setskippedwalltimeoption	ext/intl/calendar/calendar.stub.php:348	option	r--		-
+intlcalendar::settime	ext/intl/calendar/calendar.stub.php:354	timestamp	r--		-
+intlcalendar::settimezone	ext/intl/calendar/calendar.stub.php:359	timezone	r--		-
+intlcalendar::todatetime	ext/intl/calendar/calendar.stub.php:365
+intlchar::charage	ext/intl/uchar/uchar.stub.php:1392	codepoint	r--		-
+intlchar::chardigitvalue	ext/intl/uchar/uchar.stub.php:1395	codepoint	r--		-
+intlchar::chardirection	ext/intl/uchar/uchar.stub.php:1398	codepoint	r--		-
+intlchar::charfromname	ext/intl/uchar/uchar.stub.php:1401	name	r--		-	type	o--	IntlChar::UNICODE_CHAR_NAME	i0
+intlchar::charmirror	ext/intl/uchar/uchar.stub.php:1404	codepoint	r--		-
+intlchar::charname	ext/intl/uchar/uchar.stub.php:1407	codepoint	r--		-	type	o--	IntlChar::UNICODE_CHAR_NAME	i0
+intlchar::chartype	ext/intl/uchar/uchar.stub.php:1410	codepoint	r--		-
+intlchar::chr	ext/intl/uchar/uchar.stub.php:1413	codepoint	r--		-
+intlchar::digit	ext/intl/uchar/uchar.stub.php:1416	codepoint	r--		-	base	o--	10	i10
+intlchar::enumcharnames	ext/intl/uchar/uchar.stub.php:1419	start	r--		-	end	r--		-	callback	r--		-	type	o--	IntlChar::UNICODE_CHAR_NAME	i0
+intlchar::enumchartypes	ext/intl/uchar/uchar.stub.php:1422	callback	r--		-
+intlchar::foldcase	ext/intl/uchar/uchar.stub.php:1425	codepoint	r--		-	options	o--	IntlChar::FOLD_CASE_DEFAULT	i0
+intlchar::fordigit	ext/intl/uchar/uchar.stub.php:1428	digit	r--		-	base	o--	10	i10
+intlchar::getbidipairedbracket	ext/intl/uchar/uchar.stub.php:1431	codepoint	r--		-
+intlchar::getblockcode	ext/intl/uchar/uchar.stub.php:1434	codepoint	r--		-
+intlchar::getcombiningclass	ext/intl/uchar/uchar.stub.php:1437	codepoint	r--		-
+intlchar::getfc_nfkc_closure	ext/intl/uchar/uchar.stub.php:1440	codepoint	r--		-
+intlchar::getintpropertymaxvalue	ext/intl/uchar/uchar.stub.php:1443	property	r--		-
+intlchar::getintpropertyminvalue	ext/intl/uchar/uchar.stub.php:1446	property	r--		-
+intlchar::getintpropertyvalue	ext/intl/uchar/uchar.stub.php:1449	codepoint	r--		-	property	r--		-
+intlchar::getnumericvalue	ext/intl/uchar/uchar.stub.php:1452	codepoint	r--		-
+intlchar::getpropertyenum	ext/intl/uchar/uchar.stub.php:1455	alias	r--		-
+intlchar::getpropertyname	ext/intl/uchar/uchar.stub.php:1458	property	r--		-	type	o--	IntlChar::LONG_PROPERTY_NAME	i1
+intlchar::getpropertyvalueenum	ext/intl/uchar/uchar.stub.php:1461	property	r--		-	name	r--		-
+intlchar::getpropertyvaluename	ext/intl/uchar/uchar.stub.php:1464	property	r--		-	value	r--		-	type	o--	IntlChar::LONG_PROPERTY_NAME	i1
+intlchar::getunicodeversion	ext/intl/uchar/uchar.stub.php:1467
+intlchar::hasbinaryproperty	ext/intl/uchar/uchar.stub.php:1389	codepoint	r--		-	property	r--		-
+intlchar::isalnum	ext/intl/uchar/uchar.stub.php:1470	codepoint	r--		-
+intlchar::isalpha	ext/intl/uchar/uchar.stub.php:1473	codepoint	r--		-
+intlchar::isbase	ext/intl/uchar/uchar.stub.php:1476	codepoint	r--		-
+intlchar::isblank	ext/intl/uchar/uchar.stub.php:1479	codepoint	r--		-
+intlchar::iscntrl	ext/intl/uchar/uchar.stub.php:1482	codepoint	r--		-
+intlchar::isdefined	ext/intl/uchar/uchar.stub.php:1485	codepoint	r--		-
+intlchar::isdigit	ext/intl/uchar/uchar.stub.php:1488	codepoint	r--		-
+intlchar::isgraph	ext/intl/uchar/uchar.stub.php:1491	codepoint	r--		-
+intlchar::isidignorable	ext/intl/uchar/uchar.stub.php:1494	codepoint	r--		-
+intlchar::isidpart	ext/intl/uchar/uchar.stub.php:1497	codepoint	r--		-
+intlchar::isidstart	ext/intl/uchar/uchar.stub.php:1500	codepoint	r--		-
+intlchar::isisocontrol	ext/intl/uchar/uchar.stub.php:1503	codepoint	r--		-
+intlchar::isjavaidpart	ext/intl/uchar/uchar.stub.php:1506	codepoint	r--		-
+intlchar::isjavaidstart	ext/intl/uchar/uchar.stub.php:1509	codepoint	r--		-
+intlchar::isjavaspacechar	ext/intl/uchar/uchar.stub.php:1512	codepoint	r--		-
+intlchar::islower	ext/intl/uchar/uchar.stub.php:1515	codepoint	r--		-
+intlchar::ismirrored	ext/intl/uchar/uchar.stub.php:1518	codepoint	r--		-
+intlchar::isprint	ext/intl/uchar/uchar.stub.php:1521	codepoint	r--		-
+intlchar::ispunct	ext/intl/uchar/uchar.stub.php:1524	codepoint	r--		-
+intlchar::isspace	ext/intl/uchar/uchar.stub.php:1527	codepoint	r--		-
+intlchar::istitle	ext/intl/uchar/uchar.stub.php:1530	codepoint	r--		-
+intlchar::isualphabetic	ext/intl/uchar/uchar.stub.php:1533	codepoint	r--		-
+intlchar::isulowercase	ext/intl/uchar/uchar.stub.php:1536	codepoint	r--		-
+intlchar::isupper	ext/intl/uchar/uchar.stub.php:1539	codepoint	r--		-
+intlchar::isuuppercase	ext/intl/uchar/uchar.stub.php:1542	codepoint	r--		-
+intlchar::isuwhitespace	ext/intl/uchar/uchar.stub.php:1545	codepoint	r--		-
+intlchar::iswhitespace	ext/intl/uchar/uchar.stub.php:1548	codepoint	r--		-
+intlchar::isxdigit	ext/intl/uchar/uchar.stub.php:1551	codepoint	r--		-
+intlchar::ord	ext/intl/uchar/uchar.stub.php:1554	character	r--		-
+intlchar::tolower	ext/intl/uchar/uchar.stub.php:1557	codepoint	r--		-
+intlchar::totitle	ext/intl/uchar/uchar.stub.php:1560	codepoint	r--		-
+intlchar::toupper	ext/intl/uchar/uchar.stub.php:1563	codepoint	r--		-
+intlcodepointbreakiterator::getlastcodepoint	ext/intl/breakiterator/breakiterator.stub.php:137
+intldateformatter::__construct	ext/intl/dateformat/dateformat.stub.php:37	locale	r--		-	dateType	o--	IntlDateFormatter::FULL	i0	timeType	o--	IntlDateFormatter::FULL	i0	timezone	o--	null	n	calendar	o--	null	n	pattern	o--	null	n
+intldateformatter::create	ext/intl/dateformat/dateformat.stub.php:50	locale	r--		-	dateType	o--	IntlDateFormatter::FULL	i0	timeType	o--	IntlDateFormatter::FULL	i0	timezone	o--	null	n	calendar	o--	null	n	pattern	o--	null	n
+intldateformatter::format	ext/intl/dateformat/dateformat.stub.php:141	datetime	r--		-
+intldateformatter::formatobject	ext/intl/dateformat/dateformat.stub.php:149	datetime	r--		-	format	o--	null	n	locale	o--	null	n
+intldateformatter::getcalendar	ext/intl/dateformat/dateformat.stub.php:75
+intldateformatter::getcalendarobject	ext/intl/dateformat/dateformat.stub.php:93
+intldateformatter::getdatetype	ext/intl/dateformat/dateformat.stub.php:63
+intldateformatter::geterrorcode	ext/intl/dateformat/dateformat.stub.php:175
+intldateformatter::geterrormessage	ext/intl/dateformat/dateformat.stub.php:181
+intldateformatter::getlocale	ext/intl/dateformat/dateformat.stub.php:122	type	o--	ULOC_ACTUAL_LOCALE	i0
+intldateformatter::getpattern	ext/intl/dateformat/dateformat.stub.php:116
+intldateformatter::gettimetype	ext/intl/dateformat/dateformat.stub.php:69
+intldateformatter::gettimezone	ext/intl/dateformat/dateformat.stub.php:99
+intldateformatter::gettimezoneid	ext/intl/dateformat/dateformat.stub.php:87
+intldateformatter::islenient	ext/intl/dateformat/dateformat.stub.php:134
+intldateformatter::localtime	ext/intl/dateformat/dateformat.stub.php:169	string	r--		-	offset	o-&	null	n
+intldateformatter::parse	ext/intl/dateformat/dateformat.stub.php:156	string	r--		-	offset	o-&	null	n
+intldateformatter::parsetocalendar	ext/intl/dateformat/dateformat.stub.php:161	string	r--		-	offset	o-&	null	n
+intldateformatter::setcalendar	ext/intl/dateformat/dateformat.stub.php:81	calendar	r--		-
+intldateformatter::setlenient	ext/intl/dateformat/dateformat.stub.php:128	lenient	r--		-
+intldateformatter::setpattern	ext/intl/dateformat/dateformat.stub.php:110	pattern	r--		-
+intldateformatter::settimezone	ext/intl/dateformat/dateformat.stub.php:104	timezone	r--		-
+intldatepatterngenerator::__construct	ext/intl/dateformat/datepatterngenerator.stub.php:8	locale	o--	null	n
+intldatepatterngenerator::create	ext/intl/dateformat/datepatterngenerator.stub.php:10	locale	o--	null	n
+intldatepatterngenerator::getbestpattern	ext/intl/dateformat/datepatterngenerator.stub.php:12	skeleton	r--		-
+intlgregcal_create_instance	ext/intl/php_intl.stub.php:281	timezoneOrYear	o--	UNKNOWN	-	localeOrMonth	o--	UNKNOWN	-	day	o--	UNKNOWN	-	hour	o--	UNKNOWN	-	minute	o--	UNKNOWN	-	second	o--	UNKNOWN	-
+intlgregcal_get_gregorian_change	ext/intl/php_intl.stub.php:285	calendar	r--		-
+intlgregcal_is_leap_year	ext/intl/php_intl.stub.php:287	calendar	r--		-	year	r--		-
+intlgregcal_set_gregorian_change	ext/intl/php_intl.stub.php:283	calendar	r--		-	timestamp	r--		-
+intlgregoriancalendar::__construct	ext/intl/calendar/calendar.stub.php:383	timezoneOrYear	o--	UNKNOWN	-	localeOrMonth	o--	UNKNOWN	-	day	o--	UNKNOWN	-	hour	o--	UNKNOWN	-	minute	o--	UNKNOWN	-	second	o--	UNKNOWN	-
+intlgregoriancalendar::createfromdate	ext/intl/calendar/calendar.stub.php:371	year	r--		-	month	r--		-	dayOfMonth	r--		-
+intlgregoriancalendar::createfromdatetime	ext/intl/calendar/calendar.stub.php:373	year	r--		-	month	r--		-	dayOfMonth	r--		-	hour	r--		-	minute	r--		-	second	o--	null	n
+intlgregoriancalendar::getgregorianchange	ext/intl/calendar/calendar.stub.php:395
+intlgregoriancalendar::isleapyear	ext/intl/calendar/calendar.stub.php:401	year	r--		-
+intlgregoriancalendar::setgregorianchange	ext/intl/calendar/calendar.stub.php:389	timestamp	r--		-
+intliterator::current	ext/intl/common/common.stub.php:739
+intliterator::key	ext/intl/common/common.stub.php:742
+intliterator::next	ext/intl/common/common.stub.php:745
+intliterator::rewind	ext/intl/common/common.stub.php:748
+intliterator::valid	ext/intl/common/common.stub.php:751
+intllistformatter::__construct	ext/intl/listformatter/listformatter.stub.php:43	locale	r--		-	type	o--	IntlListFormatter::TYPE_AND	i0	width	o--	IntlListFormatter::WIDTH_WIDE	i0
+intllistformatter::format	ext/intl/listformatter/listformatter.stub.php:45	strings	r--		-
+intllistformatter::geterrorcode	ext/intl/listformatter/listformatter.stub.php:47
+intllistformatter::geterrormessage	ext/intl/listformatter/listformatter.stub.php:49
+intlpartsiterator::getbreakiterator	ext/intl/breakiterator/breakiterator_iterators.stub.php:16
+intlpartsiterator::getrulestatus	ext/intl/breakiterator/breakiterator_iterators.stub.php:19
+intlrulebasedbreakiterator::__construct	ext/intl/breakiterator/breakiterator.stub.php:118	rules	r--		-	compiled	o--	false	f
+intlrulebasedbreakiterator::getbinaryrules	ext/intl/breakiterator/breakiterator.stub.php:121
+intlrulebasedbreakiterator::getrules	ext/intl/breakiterator/breakiterator.stub.php:124
+intlrulebasedbreakiterator::getrulestatus	ext/intl/breakiterator/breakiterator.stub.php:127
+intlrulebasedbreakiterator::getrulestatusvec	ext/intl/breakiterator/breakiterator.stub.php:130
+intltimezone::__construct	ext/intl/timezone/timezone.stub.php:33
+intltimezone::countequivalentids	ext/intl/timezone/timezone.stub.php:39	timezoneId	r--		-
+intltimezone::createdefault	ext/intl/timezone/timezone.stub.php:45
+intltimezone::createenumeration	ext/intl/timezone/timezone.stub.php:51	countryOrRawOffset	o--	null	n
+intltimezone::createtimezone	ext/intl/timezone/timezone.stub.php:57	timezoneId	r--		-
+intltimezone::createtimezoneidenumeration	ext/intl/timezone/timezone.stub.php:63	type	r--		-	region	o--	null	n	rawOffset	o--	null	n
+intltimezone::fromdatetimezone	ext/intl/timezone/timezone.stub.php:69	timezone	r--		-
+intltimezone::getcanonicalid	ext/intl/timezone/timezone.stub.php:76	timezoneId	r--		-	isSystemId	o-&	null	n
+intltimezone::getdisplayname	ext/intl/timezone/timezone.stub.php:82	dst	o--	false	f	style	o--	IntlTimeZone::DISPLAY_LONG	i2	locale	o--	null	n
+intltimezone::getdstsavings	ext/intl/timezone/timezone.stub.php:88
+intltimezone::getequivalentid	ext/intl/timezone/timezone.stub.php:94	timezoneId	r--		-	offset	r--		-
+intltimezone::geterrorcode	ext/intl/timezone/timezone.stub.php:100
+intltimezone::geterrormessage	ext/intl/timezone/timezone.stub.php:106
+intltimezone::getgmt	ext/intl/timezone/timezone.stub.php:112
+intltimezone::getianaid	ext/intl/timezone/timezone.stub.php:118	timezoneId	r--		-
+intltimezone::getid	ext/intl/timezone/timezone.stub.php:125
+intltimezone::getidforwindowsid	ext/intl/timezone/timezone.stub.php:169	timezoneId	r--		-	region	o--	null	n
+intltimezone::getoffset	ext/intl/timezone/timezone.stub.php:133	timestamp	r--		-	local	r--		-	rawOffset	r-&		-	dstOffset	r-&		-
+intltimezone::getrawoffset	ext/intl/timezone/timezone.stub.php:139
+intltimezone::getregion	ext/intl/timezone/timezone.stub.php:145	timezoneId	r--		-
+intltimezone::gettzdataversion	ext/intl/timezone/timezone.stub.php:151
+intltimezone::getunknown	ext/intl/timezone/timezone.stub.php:157
+intltimezone::getwindowsid	ext/intl/timezone/timezone.stub.php:163	timezoneId	r--		-
+intltimezone::hassamerules	ext/intl/timezone/timezone.stub.php:175	other	r--		-
+intltimezone::todatetimezone	ext/intl/timezone/timezone.stub.php:181
+intltimezone::usedaylighttime	ext/intl/timezone/timezone.stub.php:187
+intltz_count_equivalent_ids	ext/intl/php_intl.stub.php:566	timezoneId	r--		-
+intltz_create_default	ext/intl/php_intl.stub.php:568
+intltz_create_enumeration	ext/intl/php_intl.stub.php:570	countryOrRawOffset	o--	null	n
+intltz_create_time_zone	ext/intl/php_intl.stub.php:572	timezoneId	r--		-
+intltz_create_time_zone_id_enumeration	ext/intl/php_intl.stub.php:574	type	r--		-	region	o--	null	n	rawOffset	o--	null	n
+intltz_from_date_time_zone	ext/intl/php_intl.stub.php:576	timezone	r--		-
+intltz_get_canonical_id	ext/intl/php_intl.stub.php:579	timezoneId	r--		-	isSystemId	o-&	null	n
+intltz_get_display_name	ext/intl/php_intl.stub.php:581	timezone	r--		-	dst	o--	false	f	style	o--	IntlTimeZone::DISPLAY_LONG	i2	locale	o--	null	n
+intltz_get_dst_savings	ext/intl/php_intl.stub.php:583	timezone	r--		-
+intltz_get_equivalent_id	ext/intl/php_intl.stub.php:585	timezoneId	r--		-	offset	r--		-
+intltz_get_error_code	ext/intl/php_intl.stub.php:587	timezone	r--		-
+intltz_get_error_message	ext/intl/php_intl.stub.php:589	timezone	r--		-
+intltz_get_gmt	ext/intl/php_intl.stub.php:591
+intltz_get_iana_id	ext/intl/php_intl.stub.php:620	timezoneId	r--		-
+intltz_get_id	ext/intl/php_intl.stub.php:593	timezone	r--		-
+intltz_get_id_for_windows_id	ext/intl/php_intl.stub.php:611	timezoneId	r--		-	region	o--	null	n
+intltz_get_offset	ext/intl/php_intl.stub.php:599	timezone	r--		-	timestamp	r--		-	local	r--		-	rawOffset	r-&		-	dstOffset	r-&		-
+intltz_get_raw_offset	ext/intl/php_intl.stub.php:601	timezone	r--		-
+intltz_get_region	ext/intl/php_intl.stub.php:603	timezoneId	r--		-
+intltz_get_tz_data_version	ext/intl/php_intl.stub.php:605
+intltz_get_unknown	ext/intl/php_intl.stub.php:607
+intltz_get_windows_id	ext/intl/php_intl.stub.php:609	timezoneId	r--		-
+intltz_has_same_rules	ext/intl/php_intl.stub.php:613	timezone	r--		-	other	r--		-
+intltz_to_date_time_zone	ext/intl/php_intl.stub.php:615	timezone	r--		-
+intltz_use_daylight_time	ext/intl/php_intl.stub.php:617	timezone	r--		-
 intval	ext/standard/basic_functions.stub.php:3587	value	r--		-	base	o--	10	i10
 ip2long	ext/standard/basic_functions.stub.php:1918	ip	r--		-
 iptcembed	ext/standard/basic_functions.stub.php:3069	iptc_data	r--		-	filename	r--		-	spool	o--	0	i0
@@ -1039,6 +1380,48 @@ limititerator::seek	ext/spl/spl_iterators.stub.php:204	offset	r--		-
 limititerator::valid	ext/spl/spl_iterators.stub.php:198
 link	ext/standard/basic_functions.stub.php:3091	target	r--		-	link	r--		-
 linkinfo	ext/standard/basic_functions.stub.php:3087	path	r--		-
+locale::acceptfromhttp	ext/intl/locale/locale.stub.php:135	header	r--		-
+locale::addlikelysubtags	ext/intl/locale/locale.stub.php:145	locale	r--		-
+locale::canonicalize	ext/intl/locale/locale.stub.php:129	locale	r--		-
+locale::composelocale	ext/intl/locale/locale.stub.php:99	subtags	r--		-
+locale::filtermatches	ext/intl/locale/locale.stub.php:117	languageTag	r--		-	locale	r--		-	canonicalize	o--	false	f
+locale::getallvariants	ext/intl/locale/locale.stub.php:111	locale	r--		-
+locale::getdefault	ext/intl/locale/locale.stub.php:32
+locale::getdisplaylanguage	ext/intl/locale/locale.stub.php:87	locale	r--		-	displayLocale	o--	null	n
+locale::getdisplayname	ext/intl/locale/locale.stub.php:81	locale	r--		-	displayLocale	o--	null	n
+locale::getdisplayregion	ext/intl/locale/locale.stub.php:75	locale	r--		-	displayLocale	o--	null	n
+locale::getdisplayscript	ext/intl/locale/locale.stub.php:69	locale	r--		-	displayLocale	o--	null	n
+locale::getdisplayvariant	ext/intl/locale/locale.stub.php:93	locale	r--		-	displayLocale	o--	null	n
+locale::getkeywords	ext/intl/locale/locale.stub.php:63	locale	r--		-
+locale::getprimarylanguage	ext/intl/locale/locale.stub.php:44	locale	r--		-
+locale::getregion	ext/intl/locale/locale.stub.php:56	locale	r--		-
+locale::getscript	ext/intl/locale/locale.stub.php:50	locale	r--		-
+locale::isrighttoleft	ext/intl/locale/locale.stub.php:140	locale	r--		-
+locale::lookup	ext/intl/locale/locale.stub.php:123	languageTag	r--		-	locale	r--		-	canonicalize	o--	false	f	defaultLocale	o--	null	n
+locale::minimizesubtags	ext/intl/locale/locale.stub.php:150	locale	r--		-
+locale::parselocale	ext/intl/locale/locale.stub.php:105	locale	r--		-
+locale::setdefault	ext/intl/locale/locale.stub.php:38	locale	r--		-
+locale_accept_from_http	ext/intl/php_intl.stub.php:500	header	r--		-
+locale_add_likely_subtags	ext/intl/php_intl.stub.php:504	locale	r--		-
+locale_canonicalize	ext/intl/php_intl.stub.php:496	locale	r--		-
+locale_compose	ext/intl/php_intl.stub.php:488	subtags	r--		-
+locale_filter_matches	ext/intl/php_intl.stub.php:494	languageTag	r--		-	locale	r--		-	canonicalize	o--	false	f
+locale_get_all_variants	ext/intl/php_intl.stub.php:492	locale	r--		-
+locale_get_default	ext/intl/php_intl.stub.php:462
+locale_get_display_language	ext/intl/php_intl.stub.php:484	locale	r--		-	displayLocale	o--	null	n
+locale_get_display_name	ext/intl/php_intl.stub.php:482	locale	r--		-	displayLocale	o--	null	n
+locale_get_display_region	ext/intl/php_intl.stub.php:480	locale	r--		-	displayLocale	o--	null	n
+locale_get_display_script	ext/intl/php_intl.stub.php:478	locale	r--		-	displayLocale	o--	null	n
+locale_get_display_variant	ext/intl/php_intl.stub.php:486	locale	r--		-	displayLocale	o--	null	n
+locale_get_keywords	ext/intl/php_intl.stub.php:476	locale	r--		-
+locale_get_primary_language	ext/intl/php_intl.stub.php:466	locale	r--		-
+locale_get_region	ext/intl/php_intl.stub.php:470	locale	r--		-
+locale_get_script	ext/intl/php_intl.stub.php:468	locale	r--		-
+locale_is_right_to_left	ext/intl/php_intl.stub.php:502	locale	r--		-
+locale_lookup	ext/intl/php_intl.stub.php:498	languageTag	r--		-	locale	r--		-	canonicalize	o--	false	f	defaultLocale	o--	null	n
+locale_minimize_subtags	ext/intl/php_intl.stub.php:506	locale	r--		-
+locale_parse	ext/intl/php_intl.stub.php:490	locale	r--		-
+locale_set_default	ext/intl/php_intl.stub.php:464	locale	r--		-
 localeconv	ext/standard/basic_functions.stub.php:2570
 localtime	ext/date/php_date.stub.php:131	timestamp	o--	null	n	associative	o--	false	f
 log	ext/standard/basic_functions.stub.php:3190	num	r--		-	base	o--	M_E	d2.718281828459045
@@ -1119,6 +1502,17 @@ md5_file	ext/standard/basic_functions.stub.php:2178	filename	r--		-	binary	o--	f
 memory_get_peak_usage	ext/standard/basic_functions.stub.php:3788	real_usage	o--	false	f
 memory_get_usage	ext/standard/basic_functions.stub.php:3786	real_usage	o--	false	f
 memory_reset_peak_usage	ext/standard/basic_functions.stub.php:3790
+messageformatter::__construct	ext/intl/msgformat/msgformat.stub.php:8	locale	r--		-	pattern	r--		-
+messageformatter::create	ext/intl/msgformat/msgformat.stub.php:14	locale	r--		-	pattern	r--		-
+messageformatter::format	ext/intl/msgformat/msgformat.stub.php:20	values	r--		-
+messageformatter::formatmessage	ext/intl/msgformat/msgformat.stub.php:26	locale	r--		-	pattern	r--		-	values	r--		-
+messageformatter::geterrorcode	ext/intl/msgformat/msgformat.stub.php:64
+messageformatter::geterrormessage	ext/intl/msgformat/msgformat.stub.php:70
+messageformatter::getlocale	ext/intl/msgformat/msgformat.stub.php:58
+messageformatter::getpattern	ext/intl/msgformat/msgformat.stub.php:52
+messageformatter::parse	ext/intl/msgformat/msgformat.stub.php:33	string	r--		-
+messageformatter::parsemessage	ext/intl/msgformat/msgformat.stub.php:40	locale	r--		-	pattern	r--		-	message	r--		-
+messageformatter::setpattern	ext/intl/msgformat/msgformat.stub.php:46	pattern	r--		-
 metaphone	ext/standard/basic_functions.stub.php:2219	string	r--		-	max_phonemes	o--	0	i0
 method_exists	Zend/zend_builtin_functions.stub.php:77	object_or_class	r--		-	method	r--		-
 mhash	ext/hash/hash.stub.php:95	algo	r--		-	data	r--		-	key	o--	null	n
@@ -1131,6 +1525,16 @@ min	ext/standard/basic_functions.stub.php:1601	value	r--		-	values	ov-		-
 mkdir	ext/standard/basic_functions.stub.php:2818	directory	r--		-	permissions	o--	0777	i511	recursive	o--	false	f	context	o--	null	n
 mktime	ext/date/php_date.stub.php:103	hour	r--		-	minute	o--	null	n	second	o--	null	n	month	o--	null	n	day	o--	null	n	year	o--	null	n
 move_uploaded_file	ext/standard/basic_functions.stub.php:2049	from	r--		-	to	r--		-
+msgfmt_create	ext/intl/php_intl.stub.php:510	locale	r--		-	pattern	r--		-
+msgfmt_format	ext/intl/php_intl.stub.php:512	formatter	r--		-	values	r--		-
+msgfmt_format_message	ext/intl/php_intl.stub.php:514	locale	r--		-	pattern	r--		-	values	r--		-
+msgfmt_get_error_code	ext/intl/php_intl.stub.php:534	formatter	r--		-
+msgfmt_get_error_message	ext/intl/php_intl.stub.php:536	formatter	r--		-
+msgfmt_get_locale	ext/intl/php_intl.stub.php:532	formatter	r--		-
+msgfmt_get_pattern	ext/intl/php_intl.stub.php:530	formatter	r--		-
+msgfmt_parse	ext/intl/php_intl.stub.php:520	formatter	r--		-	string	r--		-
+msgfmt_parse_message	ext/intl/php_intl.stub.php:526	locale	r--		-	pattern	r--		-	message	r--		-
+msgfmt_set_pattern	ext/intl/php_intl.stub.php:528	formatter	r--		-	pattern	r--		-
 mt_getrandmax	ext/random/random.stub.php:31
 mt_rand	ext/random/random.stub.php:28	min	o--	UNKNOWN	-	max	o--	UNKNOWN	-
 mt_srand	ext/random/random.stub.php:21	seed	o--	null	n	mode	o--	MT_RAND_MT19937	i0
@@ -1160,7 +1564,46 @@ norewinditerator::key	ext/spl/spl_iterators.stub.php:300
 norewinditerator::next	ext/spl/spl_iterators.stub.php:306
 norewinditerator::rewind	ext/spl/spl_iterators.stub.php:294
 norewinditerator::valid	ext/spl/spl_iterators.stub.php:297
+normalizer::getrawdecomposition	ext/intl/normalizer/normalizer.stub.php:44	string	r--		-	form	o--	Normalizer::FORM_C	i16
+normalizer::isnormalized	ext/intl/normalizer/normalizer.stub.php:38	string	r--		-	form	o--	Normalizer::FORM_C	i16
+normalizer::normalize	ext/intl/normalizer/normalizer.stub.php:32	string	r--		-	form	o--	Normalizer::FORM_C	i16
+normalizer_get_raw_decomposition	ext/intl/php_intl.stub.php:544	string	r--		-	form	o--	Normalizer::FORM_C	i16
+normalizer_is_normalized	ext/intl/php_intl.stub.php:542	string	r--		-	form	o--	Normalizer::FORM_C	i16
+normalizer_normalize	ext/intl/php_intl.stub.php:540	string	r--		-	form	o--	Normalizer::FORM_C	i16
 number_format	ext/standard/basic_functions.stub.php:3245	num	r--		-	decimals	o--	0	i0	decimal_separator	o--	"."	s2e	thousands_separator	o--	","	s2c
+numberformatter::__construct	ext/intl/formatter/formatter.stub.php:198	locale	r--		-	style	r--		-	pattern	o--	null	n
+numberformatter::create	ext/intl/formatter/formatter.stub.php:204	locale	r--		-	style	r--		-	pattern	o--	null	n
+numberformatter::format	ext/intl/formatter/formatter.stub.php:210	num	r--		-	type	o--	NumberFormatter::TYPE_DEFAULT	i0
+numberformatter::formatcurrency	ext/intl/formatter/formatter.stub.php:223	amount	r--		-	currency	r--		-
+numberformatter::getattribute	ext/intl/formatter/formatter.stub.php:243	attribute	r--		-
+numberformatter::geterrorcode	ext/intl/formatter/formatter.stub.php:291
+numberformatter::geterrormessage	ext/intl/formatter/formatter.stub.php:297
+numberformatter::getlocale	ext/intl/formatter/formatter.stub.php:285	type	o--	ULOC_ACTUAL_LOCALE	i0
+numberformatter::getpattern	ext/intl/formatter/formatter.stub.php:279
+numberformatter::getsymbol	ext/intl/formatter/formatter.stub.php:267	symbol	r--		-
+numberformatter::gettextattribute	ext/intl/formatter/formatter.stub.php:255	attribute	r--		-
+numberformatter::parse	ext/intl/formatter/formatter.stub.php:217	string	r--		-	type	o--	NumberFormatter::TYPE_DOUBLE	i3	offset	o-&	null	n
+numberformatter::parsecurrency	ext/intl/formatter/formatter.stub.php:231	string	r--		-	currency	r-&		-	offset	o-&	null	n
+numberformatter::setattribute	ext/intl/formatter/formatter.stub.php:237	attribute	r--		-	value	r--		-
+numberformatter::setpattern	ext/intl/formatter/formatter.stub.php:273	pattern	r--		-
+numberformatter::setsymbol	ext/intl/formatter/formatter.stub.php:261	symbol	r--		-	value	r--		-
+numberformatter::settextattribute	ext/intl/formatter/formatter.stub.php:249	attribute	r--		-	value	r--		-
+numfmt_create	ext/intl/php_intl.stub.php:389	locale	r--		-	style	r--		-	pattern	o--	null	n
+numfmt_format	ext/intl/php_intl.stub.php:391	formatter	r--		-	num	r--		-	type	o--	NumberFormatter::TYPE_DEFAULT	i0
+numfmt_format_currency	ext/intl/php_intl.stub.php:396	formatter	r--		-	amount	r--		-	currency	r--		-
+numfmt_get_attribute	ext/intl/php_intl.stub.php:406	formatter	r--		-	attribute	r--		-
+numfmt_get_error_code	ext/intl/php_intl.stub.php:422	formatter	r--		-
+numfmt_get_error_message	ext/intl/php_intl.stub.php:424	formatter	r--		-
+numfmt_get_locale	ext/intl/php_intl.stub.php:420	formatter	r--		-	type	o--	ULOC_ACTUAL_LOCALE	i0
+numfmt_get_pattern	ext/intl/php_intl.stub.php:418	formatter	r--		-
+numfmt_get_symbol	ext/intl/php_intl.stub.php:414	formatter	r--		-	symbol	r--		-
+numfmt_get_text_attribute	ext/intl/php_intl.stub.php:410	formatter	r--		-	attribute	r--		-
+numfmt_parse	ext/intl/php_intl.stub.php:394	formatter	r--		-	string	r--		-	type	o--	NumberFormatter::TYPE_DOUBLE	i3	offset	o-&	null	n
+numfmt_parse_currency	ext/intl/php_intl.stub.php:402	formatter	r--		-	string	r--		-	currency	r-&		-	offset	o-&	null	n
+numfmt_set_attribute	ext/intl/php_intl.stub.php:404	formatter	r--		-	attribute	r--		-	value	r--		-
+numfmt_set_pattern	ext/intl/php_intl.stub.php:416	formatter	r--		-	pattern	r--		-
+numfmt_set_symbol	ext/intl/php_intl.stub.php:412	formatter	r--		-	symbol	r--		-	value	r--		-
+numfmt_set_text_attribute	ext/intl/php_intl.stub.php:408	formatter	r--		-	attribute	r--		-	value	r--		-
 ob_clean	ext/standard/basic_functions.stub.php:1503
 ob_end_clean	ext/standard/basic_functions.stub.php:1507
 ob_end_flush	ext/standard/basic_functions.stub.php:1505
@@ -2200,6 +2643,20 @@ register_tick_function	ext/standard/basic_functions.stub.php:2043	callback	r--		
 rename	ext/standard/basic_functions.stub.php:2821	from	r--		-	to	r--		-	context	o--	null	n
 request_parse_body	ext/standard/basic_functions.stub.php:3006	options	o--	null	n
 reset	ext/standard/basic_functions.stub.php:1588	array	r-&		-
+resourcebundle::__construct	ext/intl/resourcebundle/resourcebundle.stub.php:8	locale	r--		-	bundle	r--		-	fallback	o--	true	t
+resourcebundle::count	ext/intl/resourcebundle/resourcebundle.stub.php:23
+resourcebundle::create	ext/intl/resourcebundle/resourcebundle.stub.php:14	locale	r--		-	bundle	r--		-	fallback	o--	true	t
+resourcebundle::get	ext/intl/resourcebundle/resourcebundle.stub.php:17	index	r--		-	fallback	o--	true	t
+resourcebundle::geterrorcode	ext/intl/resourcebundle/resourcebundle.stub.php:36
+resourcebundle::geterrormessage	ext/intl/resourcebundle/resourcebundle.stub.php:42
+resourcebundle::getiterator	ext/intl/resourcebundle/resourcebundle.stub.php:44
+resourcebundle::getlocales	ext/intl/resourcebundle/resourcebundle.stub.php:30	bundle	r--		-
+resourcebundle_count	ext/intl/php_intl.stub.php:552	bundle	r--		-
+resourcebundle_create	ext/intl/php_intl.stub.php:548	locale	r--		-	bundle	r--		-	fallback	o--	true	t
+resourcebundle_get	ext/intl/php_intl.stub.php:550	bundle	r--		-	index	r--		-	fallback	o--	true	t
+resourcebundle_get_error_code	ext/intl/php_intl.stub.php:560	bundle	r--		-
+resourcebundle_get_error_message	ext/intl/php_intl.stub.php:562	bundle	r--		-
+resourcebundle_locales	ext/intl/php_intl.stub.php:558	bundle	r--		-
 restore_error_handler	Zend/zend_builtin_functions.stub.php:121
 restore_exception_handler	Zend/zend_builtin_functions.stub.php:128
 returntypewillchange::__construct	Zend/zend_attributes.stub.php:35
@@ -2469,6 +2926,13 @@ splsubject::attach	ext/spl/spl_observer.stub.php:14	observer	r--		-
 splsubject::detach	ext/spl/spl_observer.stub.php:17	observer	r--		-
 splsubject::notify	ext/spl/spl_observer.stub.php:20
 spltempfileobject::__construct	ext/spl/spl_directory.stub.php:333	maxMemory	o--	2 * 1024 * 1024	i2097152
+spoofchecker::__construct	ext/intl/spoofchecker/spoofchecker.stub.php:52
+spoofchecker::areconfusable	ext/intl/spoofchecker/spoofchecker.stub.php:64	string1	r--		-	string2	r--		-	errorCode	o-&	null	n
+spoofchecker::issuspicious	ext/intl/spoofchecker/spoofchecker.stub.php:58	string	r--		-	errorCode	o-&	null	n
+spoofchecker::setallowedchars	ext/intl/spoofchecker/spoofchecker.stub.php:74	pattern	r--		-	patternOptions	o--	0	i0
+spoofchecker::setallowedlocales	ext/intl/spoofchecker/spoofchecker.stub.php:67	locales	r--		-
+spoofchecker::setchecks	ext/intl/spoofchecker/spoofchecker.stub.php:70	checks	r--		-
+spoofchecker::setrestrictionlevel	ext/intl/spoofchecker/spoofchecker.stub.php:73	level	r--		-
 sprintf	ext/standard/basic_functions.stub.php:2960	format	r--		-	values	ov-		-
 sqlite3::__construct	ext/sqlite3/sqlite3.stub.php:165	filename	r--		-	flags	o--	SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE	i6	encryptionKey	o--	""	s
 sqlite3::backup	ext/sqlite3/sqlite3.stub.php:204	destination	r--		-	sourceDatabase	o--	"main"	s6d61696e	destinationDatabase	o--	"main"	s6d61696e
@@ -2647,10 +3111,44 @@ token_get_all	ext/tokenizer/tokenizer.stub.php:11	code	r--		-	flags	o--	0	i0
 token_name	ext/tokenizer/tokenizer.stub.php:13	id	r--		-
 touch	ext/standard/basic_functions.stub.php:2937	filename	r--		-	mtime	o--	null	n	atime	o--	null	n
 trait_exists	Zend/zend_builtin_functions.stub.php:93	trait	r--		-	autoload	o--	true	t
+transliterator::__construct	ext/intl/transliterator/transliterator.stub.php:15
+transliterator::create	ext/intl/transliterator/transliterator.stub.php:21	id	r--		-	direction	o--	Transliterator::FORWARD	i0
+transliterator::createfromrules	ext/intl/transliterator/transliterator.stub.php:27	rules	r--		-	direction	o--	Transliterator::FORWARD	i0
+transliterator::createinverse	ext/intl/transliterator/transliterator.stub.php:33
+transliterator::geterrorcode	ext/intl/transliterator/transliterator.stub.php:52
+transliterator::geterrormessage	ext/intl/transliterator/transliterator.stub.php:58
+transliterator::listids	ext/intl/transliterator/transliterator.stub.php:40
+transliterator::transliterate	ext/intl/transliterator/transliterator.stub.php:46	string	r--		-	start	o--	0	i0	end	o--	-1	i-1
+transliterator_create	ext/intl/php_intl.stub.php:625	id	r--		-	direction	o--	Transliterator::FORWARD	i0
+transliterator_create_from_rules	ext/intl/php_intl.stub.php:627	rules	r--		-	direction	o--	Transliterator::FORWARD	i0
+transliterator_create_inverse	ext/intl/php_intl.stub.php:635	transliterator	r--		-
+transliterator_get_error_code	ext/intl/php_intl.stub.php:639	transliterator	r--		-
+transliterator_get_error_message	ext/intl/php_intl.stub.php:641	transliterator	r--		-
+transliterator_list_ids	ext/intl/php_intl.stub.php:633
+transliterator_transliterate	ext/intl/php_intl.stub.php:637	transliterator	r--		-	string	r--		-	start	o--	0	i0	end	o--	-1	i-1
 trigger_error	Zend/zend_builtin_functions.stub.php:113	message	r--		-	error_level	o--	E_USER_NOTICE	i1024
 trim	ext/standard/basic_functions.stub.php:2307	string	r--		-	characters	o--	" \n\r\t\v\0"	s200a0d090b00
 uasort	ext/standard/basic_functions.stub.php:1578	array	r-&		-	callback	r--		-
 ucfirst	ext/standard/basic_functions.stub.php:2461	string	r--		-
+uconverter::__construct	ext/intl/converter/converter.stub.php:96	destination_encoding	o--	null	n	source_encoding	o--	null	n
+uconverter::convert	ext/intl/converter/converter.stub.php:99	str	r--		-	reverse	o--	false	f
+uconverter::fromucallback	ext/intl/converter/converter.stub.php:105	reason	r--		-	source	r--		-	codePoint	r--		-	error	r-&		-
+uconverter::getaliases	ext/intl/converter/converter.stub.php:111	name	r--		-
+uconverter::getavailable	ext/intl/converter/converter.stub.php:117
+uconverter::getdestinationencoding	ext/intl/converter/converter.stub.php:120
+uconverter::getdestinationtype	ext/intl/converter/converter.stub.php:123
+uconverter::geterrorcode	ext/intl/converter/converter.stub.php:126
+uconverter::geterrormessage	ext/intl/converter/converter.stub.php:129
+uconverter::getsourceencoding	ext/intl/converter/converter.stub.php:132
+uconverter::getsourcetype	ext/intl/converter/converter.stub.php:135
+uconverter::getstandards	ext/intl/converter/converter.stub.php:138
+uconverter::getsubstchars	ext/intl/converter/converter.stub.php:141
+uconverter::reasontext	ext/intl/converter/converter.stub.php:144	reason	r--		-
+uconverter::setdestinationencoding	ext/intl/converter/converter.stub.php:147	encoding	r--		-
+uconverter::setsourceencoding	ext/intl/converter/converter.stub.php:150	encoding	r--		-
+uconverter::setsubstchars	ext/intl/converter/converter.stub.php:153	chars	r--		-
+uconverter::toucallback	ext/intl/converter/converter.stub.php:159	reason	r--		-	source	r--		-	codeUnits	r--		-	error	r-&		-
+uconverter::transcode	ext/intl/converter/converter.stub.php:162	str	r--		-	toEncoding	r--		-	fromEncoding	r--		-	options	o--	null	n
 ucwords	ext/standard/basic_functions.stub.php:2470	string	r--		-	separators	o--	" \t\r\n\f\v"	s20090d0a0c0b
 uksort	ext/standard/basic_functions.stub.php:1580	array	r-&		-	callback	r--		-
 umask	ext/standard/basic_functions.stub.php:2743	mask	o--	null	n
