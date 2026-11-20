@@ -152,13 +152,13 @@ async fn fetch(path: &str, options: &PhpArray, ssl: &PhpArray) -> io::Result<(Ve
     };
     let reason = header.status.canonical_reason().unwrap_or_default();
     let mut lines = format!("HTTP/{version} {} {reason}", header.status.as_u16()).into_bytes();
-    if header.status.is_client_error() || header.status.is_server_error() {
-        if !option(options, "ignore_errors").is_some_and(to_bool) {
-            return Err(invalid(format!(
-                "HTTP request failed! {}",
-                String::from_utf8_lossy(&lines)
-            )));
-        }
+    if (header.status.is_client_error() || header.status.is_server_error())
+        && !option(options, "ignore_errors").is_some_and(to_bool)
+    {
+        return Err(invalid(format!(
+            "HTTP request failed! {}",
+            String::from_utf8_lossy(&lines)
+        )));
     }
     for (name, value) in &header.headers {
         lines.push(b'\n');

@@ -3,7 +3,7 @@
 use std::io;
 use std::sync::atomic::Ordering;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt, Interest};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{Io, Socket};
 
@@ -42,12 +42,11 @@ impl Io {
             if length.is_some() && ending.is_none() && !output.is_empty() {
                 return Ok(output);
             }
-            if !self.blocked && !self.socket.ready(Interest::READABLE) {
-                return Ok(output);
-            }
             let result = {
                 let mut bytes = vec![0; chunk];
-                let result = self.wait(self.socket.receive(&mut bytes)).await;
+                let result = self
+                    .wait(self.socket.receive(&mut bytes, self.blocked))
+                    .await;
                 match result {
                     Ok(0) => {
                         if !self.socket.transport.datagram() {
@@ -74,12 +73,12 @@ impl Io {
     }
 
     pub(crate) async fn write(self, bytes: &[u8]) -> io::Result<usize> {
-        if !self.blocked && !self.socket.ready(Interest::WRITABLE) {
-            return Ok(0);
-        }
         let mut written = 0;
         while written < bytes.len() {
-            match self.wait(self.socket.send(&bytes[written..])).await {
+            match self
+                .wait(self.socket.send(&bytes[written..], self.blocked))
+                .await
+            {
                 Ok(0) => break,
                 Ok(count) => written += count,
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock || written > 0 => break,
@@ -116,36 +115,29 @@ impl Io {
 }
 
 impl Socket {
-    fn ready(&self, interest: Interest) -> bool {
-        use rustix::event::{PollFd, PollFlags, Timespec, poll};
-        let flags = if interest.is_readable() {
-            PollFlags::IN
-        } else {
-            PollFlags::OUT
-        };
-        let mut fds = [PollFd::new(self.descriptor(), flags)];
-        poll(&mut fds, Some(&Timespec::default())).is_ok_and(|count| count != 0)
-    }
-
-    async fn receive(&self, target: &mut [u8]) -> io::Result<usize> {
+    async fn receive(&self, target: &mut [u8], blocked: bool) -> io::Result<usize> {
         let mut secure = self.secure.lock().await;
         if let Some(stream) = secure.as_mut() {
             stream.read(target).await
-        } else {
+        } else if blocked {
             drop(secure);
             self.wire.clone().read(target).await
+        } else {
+            Ok(rustix::io::read(self.descriptor(), target)?)
         }
     }
 
-    async fn send(&self, bytes: &[u8]) -> io::Result<usize> {
+    async fn send(&self, bytes: &[u8], blocked: bool) -> io::Result<usize> {
         let mut secure = self.secure.lock().await;
         if let Some(stream) = secure.as_mut() {
             let written = stream.write(bytes).await?;
             stream.flush().await?;
             Ok(written)
-        } else {
+        } else if blocked {
             drop(secure);
             self.wire.clone().write(bytes).await
+        } else {
+            self.sockref().send(bytes)
         }
     }
 }

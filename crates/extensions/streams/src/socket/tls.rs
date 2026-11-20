@@ -21,6 +21,14 @@ use tokio_rustls::TlsConnector;
 use super::Io;
 
 pub(super) async fn enable(io: &Io, options: &PhpArray, requested_method: i64) -> io::Result<()> {
+    for restrictive in ["capath", "peer_fingerprint", "verify_depth", "local_cert"] {
+        if option(options, restrictive).is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                format!("The SSL context option {restrictive} is not supported"),
+            ));
+        }
+    }
     let mut secure = io.socket.secure.lock().await;
     if secure.is_some() {
         return Err(io::Error::new(
@@ -56,19 +64,16 @@ pub(super) async fn enable(io: &Io, options: &PhpArray, requested_method: i64) -
     } else {
         None
     };
-    let mut config = if let Some(roots) = root_store.as_ref().filter(|_| verify_name) {
-        builder
-            .with_root_certificates(roots.clone())
-            .with_no_client_auth()
-    } else {
-        builder
+    let mut config = match root_store {
+        Some(roots) if verify_name => builder.with_root_certificates(roots).with_no_client_auth(),
+        roots => builder
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(Verifier {
-                roots: root_store,
+                roots,
                 verify_name,
                 algorithms: provider.signature_verification_algorithms,
             }))
-            .with_no_client_auth()
+            .with_no_client_auth(),
     };
     config.enable_sni = option(options, "SNI_enabled").is_none_or(to_bool);
     let connector = TlsConnector::from(Arc::new(config));
