@@ -1,6 +1,6 @@
 //! The open containers of `json_encode([[1], [2]])` stay on an explicit stack.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
 use phera_extension_api::value::{PropertyScope, split_property_key};
 use phera_extension_api::{ArrayKey, Object, PhpArray, Value};
@@ -89,11 +89,19 @@ impl Work {
 pub(super) struct Stack {
     top: Option<Work>,
     parents: Vec<Work>,
+    older: BTreeSet<usize>,
 }
+
+/// Search the nearest parents directly. Beyond this depth, an ordered set
+/// prevents repeated searches of the whole ancestry of a deeply nested value.
+const NEARBY_PARENTS: usize = 32;
 
 impl Stack {
     pub(super) fn push(&mut self, work: Work) {
         if let Some(parent) = self.top.replace(work) {
+            if let Some(identity) = self.oldest_nearby_identity() {
+                self.older.insert(identity);
+            }
             self.parents.push(parent);
         }
     }
@@ -101,13 +109,22 @@ impl Stack {
     pub(super) fn pop(&mut self) -> Option<Work> {
         let top = self.top.take()?;
         self.top = self.parents.pop();
+        if let Some(identity) = self.oldest_nearby_identity() {
+            self.older.remove(&identity);
+        }
         Some(top)
+    }
+
+    fn oldest_nearby_identity(&self) -> Option<usize> {
+        let oldest = self.parents.len().checked_sub(NEARBY_PARENTS)?;
+        self.parents.get(oldest)?.identity()
     }
 
     pub(super) fn contains(&self, identity: usize) -> bool {
         self.top
             .iter()
-            .chain(self.parents.iter().rev())
+            .chain(self.parents.iter().rev().take(NEARBY_PARENTS))
             .any(|work| work.identity() == Some(identity))
+            || self.older.contains(&identity)
     }
 }
