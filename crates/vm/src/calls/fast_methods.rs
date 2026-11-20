@@ -64,28 +64,11 @@ impl Machine<'_> {
                 let receiver = Some(object.clone());
                 self.prepare_php_method(function, receiver, None, position.ip)
             }
-            // `Closure::__invoke` and the methods of a generator have their
-            // own preparation in the VM.
-            MethodBody::Native(entry)
-                if method.visibility == Visibility::Public
-                    && class.name != "Closure"
-                    && class.name != "Generator"
-                    && (!self.classes.has_lazy_objects || object.lazy().is_none())
-                    && !self.shadowed_by_private(self.running_scope(), key, method) =>
-            {
-                let Some(class) = class.identity.upgrade() else {
+            MethodBody::Native(entry) => {
+                let Some((context, method)) =
+                    self.native_class_method((object, class), &found, key)
+                else {
                     return Step::Slow;
-                };
-                let receiver = object.clone();
-                let Some(scope) = found.scope.upgrade() else {
-                    return Step::Slow;
-                };
-                let method = method.clone();
-                let context = crate::classes::MethodContext {
-                    receiver: Some(receiver),
-                    scope,
-                    called: class,
-                    invocation: crate::classes::Invocation::Method,
                 };
                 match entry.direct {
                     Some(_) => self.prepare_direct_method(position, context, method, entry),
@@ -94,6 +77,37 @@ impl Machine<'_> {
             }
             _ => Step::Slow,
         }
+    }
+
+    /// The context and method for a call of the public method of a native
+    /// class on `object`, as the VM prepares it. Out of line and cold, so
+    /// that the PHP method path above compiles as it did before native
+    /// methods were prepared here. `Closure::__invoke` and the methods of a
+    /// generator have their own preparation in the VM.
+    #[cold]
+    #[inline(never)]
+    fn native_class_method(
+        &self,
+        (object, class): (&Rc<Object>, &Class),
+        found: &FoundMethod<'_>,
+        key: NameKey,
+    ) -> Option<(crate::classes::MethodContext, Rc<crate::classes::Method>)> {
+        let method = found.method;
+        if method.visibility != Visibility::Public
+            || class.name == "Closure"
+            || class.name == "Generator"
+            || (self.classes.has_lazy_objects && object.lazy().is_some())
+            || self.shadowed_by_private(self.running_scope(), key, method)
+        {
+            return None;
+        }
+        let context = crate::classes::MethodContext {
+            receiver: Some(object.clone()),
+            scope: found.scope.upgrade()?,
+            called: class.identity.upgrade()?,
+            invocation: crate::classes::Invocation::Method,
+        };
+        Some((context, method.clone()))
     }
 
     /// `InitStaticCall` of `self::`, `parent::`, `static::` or a named class,

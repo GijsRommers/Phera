@@ -421,18 +421,24 @@ impl Machine<'_> {
     }
 
     /// [`Machine::general_accepts`] for a described callee; for a lean
-    /// native call, a by-value parameter that is not variadic (its type is
-    /// the function's to check, at the call).
-    #[inline(never)]
+    /// native call, [`Machine::native_accepts`]. Inline, so that a
+    /// described callee costs what it did before lean records existed.
+    #[inline(always)]
     fn other_accepts(&self, callee: PreparedCallee, index: usize) -> bool {
         match callee {
-            PreparedCallee::Native(id) => self
-                .registry
-                .function_at(id)
-                .and_then(|entry| entry.params.get(index))
-                .is_some_and(|parameter| !parameter.by_ref && !parameter.variadic),
+            PreparedCallee::Native(id) => self.native_accepts(id, index),
             _ => self.general_accepts(index),
         }
+    }
+
+    /// For a lean native call: a by-value parameter that is not variadic
+    /// (its type is the function's to check, at the call).
+    #[inline(never)]
+    fn native_accepts(&self, id: phera_extension_api::NativeId, index: usize) -> bool {
+        self.registry
+            .function_at(id)
+            .and_then(|entry| entry.params.get(index))
+            .is_some_and(|parameter| !parameter.by_ref && !parameter.variadic)
     }
 
     /// `Call` of a prepared function, method or closure written in PHP whose
