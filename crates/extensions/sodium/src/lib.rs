@@ -10,7 +10,9 @@
 //! `sodium_crypto_sign` and `sodium_crypto_sign_detached` reject secret keys
 //! whose stored public half dalek cannot decode, a deliberate difference from PHP.
 
-use phera_extension_api::{ClassEntry, Extension, FunctionEntry, NativeError, Registry};
+use phera_extension_api::{
+    ClassEntry, ClassHooks, Extension, FunctionEntry, NativeError, Registry,
+};
 
 mod aead;
 mod blake2b_compress;
@@ -45,9 +47,12 @@ impl Extension for Sodium {
     fn register(&self, registry: &mut Registry) {
         registry.class(ClassEntry {
             parent: Some("Exception"),
+            hooks: Some(&ClassHooks {
+                redact_trace_arguments: true,
+                ..ClassHooks::EMPTY
+            }),
             ..ClassEntry::class("SodiumException")
         });
-        registry.redact_exception_arguments("SodiumException");
         register(registry, encoding::FUNCTIONS);
         register(registry, ristretto_scalar::FUNCTIONS);
         register(registry, ristretto::FUNCTIONS);

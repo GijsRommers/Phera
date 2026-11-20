@@ -152,6 +152,9 @@ pub struct ClassHooks {
     pub cast: Option<NativeCast>,
     /// Native state that cannot be represented by PHP's serialization format.
     pub forbid_serialization: bool,
+    /// An exception of this class (or a subclass) shows no argument values in
+    /// its trace: they may be keys or passwords.
+    pub redact_trace_arguments: bool,
     /// Whole-object enumeration, with the consuming operation supplied as a purpose.
     pub properties: Option<PropertyProjection>,
     /// Direct read, mutation or presence check for one virtual property.
@@ -175,6 +178,7 @@ impl ClassHooks {
         unary: None,
         cast: None,
         forbid_serialization: false,
+        redact_trace_arguments: false,
         properties: None,
         property_access: None,
         iterator: None,

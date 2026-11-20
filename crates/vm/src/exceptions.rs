@@ -184,11 +184,13 @@ impl Vm {
     }
 
     fn redact_exception_arguments(&self, object: &Object, origin: TraceOrigin) -> bool {
-        let class_redacts = self.classes.for_object(object).is_some_and(|class| {
-            self.registry
-                .classes_with_redacted_exception_arguments()
-                .any(|name| class.is_a(name))
-        });
+        // One flag on the class, inherited by subclasses: every exception passes here.
+        let class_redacts = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+            .and_then(|class| class.hooks.as_ref())
+            .is_some_and(|hooks| hooks.redact_trace_arguments);
         class_redacts
             || matches!(origin, TraceOrigin::Engine)
                 && matches!(object.class.name(), "TypeError" | "ArgumentCountError")
