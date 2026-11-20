@@ -281,7 +281,9 @@ The connection polls PHP directly until the response starts. On an explicit
 handoff it moves pending PHP work into a task on the same worker. Dropping
 the connection also detaches an unfinished request. It retains the
 connection slot and its original deadline, and takes part in graceful
-shutdown. The buffered path captures bytes without observing the socket,
+shutdown. HTTP/2 also limits in-flight requests per worker, including
+detached requests. An excess stream receives HTTP 503. The buffered path
+captures bytes without observing the socket,
 so PHP finishes its work and the server discards the buffered response if
 the client already left. An explicit or implicit flush opens the
 transport. With `ignore_user_abort(false)`, a failed transport write ends

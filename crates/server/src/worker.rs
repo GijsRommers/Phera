@@ -107,9 +107,10 @@ pub(super) fn run(
             .local_addr()
             .expect("listening socket has an address");
         let limits = ConnectionLimits::from(&config);
-        let free_slots = Arc::new(Semaphore::new(config.max_connections_per_worker.max(1)));
+        let connection_limit = config.max_connections_per_worker.max(1);
+        let free_slots = Arc::new(Semaphore::new(connection_limit));
         let (stop_connections, _) = watch::channel(());
-        let detached = Rc::new(DetachedRequests::new());
+        let detached = Rc::new(DetachedRequests::new(connection_limit));
         loop {
             // A slot first, then a connection: beyond the limit, clients
             // wait in the operating system's queue instead of being

@@ -7,10 +7,11 @@ use std::future::{Future, poll_fn};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 
-use tokio::sync::{OwnedSemaphorePermit, watch};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
 use crate::response_stream::{ResponseExchange, ResponseSlot, ResponseWriter};
 use crate::{Handler, Request, Response};
@@ -26,14 +27,20 @@ pub(crate) struct ConnectionWork {
 pub(crate) struct DetachedRequests {
     tasks: watch::Sender<()>,
     stopping: Cell<bool>,
+    http2_requests: Arc<Semaphore>,
 }
 
 impl DetachedRequests {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(limit: usize) -> Self {
         Self {
             tasks: watch::channel(()).0,
             stopping: Cell::new(false),
+            http2_requests: Arc::new(Semaphore::new(limit)),
         }
+    }
+
+    pub(crate) fn http2_slot(&self) -> Option<OwnedSemaphorePermit> {
+        self.http2_requests.clone().try_acquire_owned().ok()
     }
 
     pub(crate) async fn drain(&self) {
@@ -55,11 +62,11 @@ struct ResponseTask {
 impl ResponseTask {
     fn detach(&mut self) {
         if let Some(future) = self.future.take() {
-            let connection = self.exchange.connection.clone();
-            let guard = connection.detached.tasks.subscribe();
+            let exchange = self.exchange.clone();
+            let guard = exchange.connection.detached.tasks.subscribe();
             tokio::task::spawn_local(async move {
                 let _ = future.await;
-                drop((guard, connection));
+                drop((guard, exchange));
             });
         }
     }
@@ -82,7 +89,9 @@ pub(crate) async fn answer(
     time_limit: Option<Duration>,
     connection: Rc<ConnectionWork>,
 ) -> Response {
-    let exchange = ResponseExchange::new(connection, request.version);
+    let Some(exchange) = ResponseExchange::new(connection, request.version) else {
+        return Response::text(503, "too many requests in flight\n");
+    };
     let writer = ResponseWriter::new(exchange.clone(), request.method == "HEAD");
     let future = Box::pin(async move {
         let run = writer.scope(handler.handle(request));

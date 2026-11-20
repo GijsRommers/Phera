@@ -13,5 +13,8 @@ hyper-util = { workspace = true }
 socket2 = { workspace = true }
 tokio = { workspace = true, features = ["io-util"] }
 
+[dev-dependencies]
+hyper = { workspace = true, features = ["client"] }
+
 [lints]
 workspace = true

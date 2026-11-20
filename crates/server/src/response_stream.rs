@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use tokio::sync::mpsc;
+use tokio::sync::{OwnedSemaphorePermit, mpsc};
 
 use crate::response_task::ConnectionWork;
 use crate::{Body, Response};
@@ -72,28 +72,40 @@ impl ResponseSlot {
 #[derive(Clone)]
 pub(crate) struct ResponseExchange {
     pub(crate) connection: Rc<ConnectionWork>,
-    stream_slot: Option<Rc<ResponseSlot>>,
+    stream: Option<Rc<Http2Exchange>>,
     generation: u64,
 }
 
+struct Http2Exchange {
+    slot: ResponseSlot,
+    _permit: OwnedSemaphorePermit,
+}
+
 impl ResponseExchange {
-    pub(crate) fn new(connection: Rc<ConnectionWork>, version: crate::HttpVersion) -> Self {
-        let (stream_slot, generation) = if version == crate::HttpVersion::Http2 {
-            (Some(Rc::new(ResponseSlot::new())), 0)
+    pub(crate) fn new(connection: Rc<ConnectionWork>, version: crate::HttpVersion) -> Option<Self> {
+        let (stream, generation) = if version == crate::HttpVersion::Http2 {
+            let permit = connection.detached.http2_slot()?;
+            (
+                Some(Rc::new(Http2Exchange {
+                    slot: ResponseSlot::new(),
+                    _permit: permit,
+                })),
+                0,
+            )
         } else {
             (None, connection.response.begin())
         };
-        Self {
+        Some(Self {
             connection,
-            stream_slot,
+            stream,
             generation,
-        }
+        })
     }
 
     pub(crate) fn slot(&self) -> &ResponseSlot {
-        self.stream_slot
-            .as_deref()
-            .unwrap_or(&self.connection.response)
+        self.stream
+            .as_ref()
+            .map_or(&self.connection.response, |stream| &stream.slot)
     }
 }
 

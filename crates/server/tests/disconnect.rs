@@ -12,6 +12,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::time::{Duration, Instant};
 
+use http_body_util::Empty;
+use hyper::body::Bytes;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 use phera_server::{Handler, HandlerFactory, Request, Response, ServerConfig};
 use tokio::sync::Semaphore;
 
@@ -136,5 +139,62 @@ fn disconnected_requests_keep_their_slot_and_deadline() {
     assert_eq!(work.peak.load(SeqCst), LIMIT);
     assert_eq!(work.finished.load(SeqCst), 2);
     assert_eq!(work.timed_out.load(SeqCst), 2);
+    server.shutdown();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn reset_http2_streams_still_count_as_in_flight() {
+    let work = Arc::new(Work {
+        active: AtomicUsize::new(0),
+        peak: AtomicUsize::new(0),
+        finished: AtomicUsize::new(0),
+        timed_out: AtomicUsize::new(0),
+        release: Semaphore::new(0),
+    });
+    let (server, address) = common::start_with(
+        Routes(work.clone()),
+        ServerConfig {
+            max_connections_per_worker: 2,
+            request_timeout: Some(Duration::from_secs(2)),
+            ..common::test_config()
+        },
+    );
+    tokio::time::timeout(Duration::from_secs(6), async {
+        let socket = tokio::net::TcpStream::connect(address).await.unwrap();
+        let (mut client, connection) =
+            hyper::client::conn::http2::handshake(TokioExecutor::new(), TokioIo::new(socket))
+                .await
+                .unwrap();
+        let connection = tokio::spawn(connection);
+        let request = |path: &str| {
+            hyper::Request::post(format!("http://{address}{path}"))
+                .body(Empty::<Bytes>::new())
+                .unwrap()
+        };
+        let first = client.send_request(request("/finish"));
+        let second = client.send_request(request("/timeout"));
+        while work.active.load(SeqCst) != 2 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        drop((first, second));
+        let excess = client.send_request(request("/probe")).await.unwrap();
+        assert_eq!(excess.status(), hyper::StatusCode::SERVICE_UNAVAILABLE);
+
+        work.release.add_permits(1);
+        while work.active.load(SeqCst) != 1 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let admitted = client.send_request(request("/probe")).await.unwrap();
+        assert_eq!(admitted.status(), hyper::StatusCode::OK);
+        while work.active.load(SeqCst) != 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(work.peak.load(SeqCst), 2);
+        assert_eq!(work.finished.load(SeqCst), 1);
+        assert_eq!(work.timed_out.load(SeqCst), 1);
+        connection.abort();
+    })
+    .await
+    .unwrap();
     server.shutdown();
 }

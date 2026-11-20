@@ -10,8 +10,10 @@ The server previously canceled an unfinished request when Hyper dropped
 its response future. Now the owner moves that already-boxed future to a
 local task if the client disconnects. The task keeps the request deadline,
 continues to count against the worker's connection limit, and joins
-graceful shutdown. On a live connection the request stays in its original
-future until it finishes or hands off a response.
+graceful shutdown. HTTP/2 also counts in-flight handlers, including
+detached ones, up to the same number per worker. Excess streams get a
+503. On a live connection the request stays in its original future until
+it finishes or hands off a response.
 
 Buffered PHP output still goes into the capture buffer. The engine opens
 a transport when PHP flushes or finishes the response early. If PHP
