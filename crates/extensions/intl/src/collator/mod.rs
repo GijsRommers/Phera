@@ -43,6 +43,9 @@ fn construct(
     site: &str,
 ) -> NativeResult {
     error::clear(context);
+    if args::bytes(arguments, 0).len() > locale::MAX_LEN {
+        return locale::too_long_for(context, site, object.is_some());
+    }
     let input = locale::effective(context, args::bytes(arguments, 0));
     let locale = locale_id::cldr(input.split('\0').next().unwrap_or_default());
     let prefs: CollatorPreferences = locale.into();

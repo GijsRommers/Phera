@@ -152,10 +152,31 @@ impl Vm {
                 let last = steps.peek().is_none();
                 if let Some(access) = class.property_access {
                     use phera_extension_api::NativePropertyMutation as NativeMutation;
+                    if !last
+                        && let Some(value) = (access.read)(
+                            self,
+                            object,
+                            &display,
+                            phera_extension_api::NativePropertyRead::Update,
+                        )?
+                        && value.is_object()
+                    {
+                        // Object-valued native getters return a handle. The
+                        // remaining write is to that object, not the getter.
+                        cursor = value.clone();
+                        path.detached = Some(value);
+                        path.resolved = InlineStack::new();
+                        continue;
+                    }
+                    let converted;
                     let change = match (last, &mut *operation) {
                         (false, _) => NativeMutation::Indirect,
                         (true, PropertyMutation::Write(value, Binding::ByValue)) => {
-                            NativeMutation::Assign(value.read(self))
+                            let value = value.read(self);
+                            converted = self
+                                .native_string_assignment(access, object, &display, value)
+                                .await?;
+                            NativeMutation::Assign(converted.as_ref().unwrap_or(value))
                         }
                         (true, PropertyMutation::Write(_, Binding::ByReference)) => {
                             NativeMutation::Bind

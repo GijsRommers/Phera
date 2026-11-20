@@ -7,7 +7,7 @@
 use phera_ext_date::{DateTimeValue, ZoneKind, calendar::Civil, parse_timezone, read_timezone};
 use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, PhpArray, Value, args};
 
-use super::{Formatter, Style, current_zone, fail, pattern, render::Renderer};
+use super::{Formatter, Relative, Style, current_zone, fail, pattern, render::Renderer};
 use crate::{error, locale, locale_id};
 
 pub const CALENDAR_ERROR: &str = concat!(
@@ -21,22 +21,34 @@ pub fn timezone(
     value: &Value,
     site: &str,
     index: usize,
-) -> Result<Option<ZoneKind>, NativeError> {
+) -> Result<ZoneKind, NativeError> {
     match &*value.deref() {
-        Value::Null => Ok(Some(current_zone(context))),
-        Value::String(value) if value.as_bytes().is_empty() => Ok(Some(current_zone(context))),
+        Value::Null => Ok(current_zone(context)),
+        Value::String(value) if value.as_bytes().is_empty() => Ok(current_zone(context)),
         Value::String(value) => {
             let bytes = value.as_bytes();
+            let name = std::str::from_utf8(bytes).map_err(|_| {
+                NativeError::throw(
+                    "IntlException",
+                    format!("{site}(): Time zone identifier given is not a valid UTF-8 string"),
+                )
+            })?;
             let wrapped = [b"GMT+".as_slice(), b"GMT-"]
                 .iter()
                 .any(|prefix| bytes.starts_with(prefix));
-            Ok(parse_timezone(if wrapped { &bytes[3..] } else { bytes }))
+            parse_timezone(if wrapped { &bytes[3..] } else { bytes }).ok_or_else(|| {
+                let name = name.split('\0').next().unwrap_or_default();
+                NativeError::throw(
+                    "IntlException",
+                    format!("{site}(): No such time zone: \"{name}\""),
+                )
+            })
         }
         Value::Object(object) if object.class.is_instance_of("DateTimeZone") => {
-            read_timezone(object).map(Some)
+            read_timezone(object)
         }
         Value::Object(object) if object.class.is_instance_of("IntlTimeZone") => {
-            crate::timezone::read_zone(object).map(Some)
+            crate::timezone::read_zone(object)
         }
         other => Err(type_error(
             site,
@@ -164,7 +176,12 @@ fn formatted(
     micros: i64,
     site: &str,
 ) -> NativeResult {
-    match state.render.format(timestamp, micros, &state.zone) {
+    let output = state
+        .relative
+        .as_ref()
+        .and_then(|relative| relative.format(timestamp, micros, &state.zone))
+        .or_else(|| state.render.format(timestamp, micros, &state.zone));
+    match output {
         Some(output) => Ok(Value::from(output)),
         None => fail(context, state, site, 1, "Date formatting failed"),
     }
@@ -206,14 +223,21 @@ pub fn format_object(context: &mut dyn Context, arguments: &[Value], site: &str)
             .set(icu_locale::extensions::unicode::key!("ca"), calendar);
     }
     let style = |date, time| {
-        Style::parse(date)
-            .zip(Style::parse(time))
-            .map(|(date, time)| pattern::select(&locale, date, time))
+        let (date_style, time_style) = Style::parse(date).zip(Style::parse(time))?;
+        let relative = Relative::new(&locale, date, time_style);
+        let pattern = if let Some(relative) = &relative {
+            relative.pattern(&locale, date_style, time_style)
+        } else {
+            pattern::select(&locale, date_style, time_style)
+        };
+        Some((pattern, relative))
     };
     let text = match &*args::value(arguments, 1).deref() {
         Value::Null => style(2, 2),
         Value::Int(value) => style(*value, *value),
-        Value::String(text) => std::str::from_utf8(text.as_bytes()).ok().map(str::to_owned),
+        Value::String(text) => std::str::from_utf8(text.as_bytes())
+            .ok()
+            .map(|text| (text.to_owned(), None)),
         Value::Array(styles) => {
             let mut values = styles.iter();
             match (values.next(), values.next(), values.next()) {
@@ -226,10 +250,14 @@ pub fn format_object(context: &mut dyn Context, arguments: &[Value], site: &str)
         _ => None,
     };
     let calendar = i64::from(calendar.is_none());
-    let Some(formatter) = text.and_then(|pattern| Renderer::new(&locale, &pattern, calendar))
-    else {
+    let Some((pattern, relative)) = text else {
         return error::fail(context, site, 1, "invalid format", Value::Bool(false));
     };
-    let output = formatter.format(instant.timestamp, instant.micros, &instant.zone);
+    let Some(formatter) = Renderer::new(&locale, &pattern, calendar) else {
+        return error::fail(context, site, 1, "invalid format", Value::Bool(false));
+    };
+    let output = relative
+        .and_then(|relative| relative.format(instant.timestamp, instant.micros, &instant.zone))
+        .or_else(|| formatter.format(instant.timestamp, instant.micros, &instant.zone));
     Ok(output.map_or(Value::Bool(false), Value::from))
 }

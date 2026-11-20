@@ -5,6 +5,7 @@
 mod callbacks;
 mod corpus;
 mod edges;
+mod marks;
 pub use callbacks::Harness;
 pub use corpus::{patterns, subjects};
 pub use edges::cases as edge_cases;

@@ -62,6 +62,7 @@ $storageOnly = ($argv[1] ?? null) === '--storage-only';
 $applied = explode(' ', 'arg_separator.output assert.active assert.exception assert.warning '
     . 'date.timezone default_charset display_errors error_reporting fiber.stack_size ignore_user_abort '
     . 'include_path internal_encoding output_encoding mbstring.detect_order '
+    . 'mail.add_x_header mail.cr_lf_mode mail.force_extra_parameters mail.log mail.mixed_lf_and_crlf sendmail_path '
     . 'mbstring.http_output mbstring.internal_encoding mbstring.language mbstring.substitute_character '
     . 'pcre.backtrack_limit pcre.jit pcre.recursion_limit precision serialize_precision '
     . 'unserialize_callback_func unserialize_max_depth zend.assertions zend.exception_ignore_args '

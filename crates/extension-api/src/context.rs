@@ -158,6 +158,11 @@ pub trait Context {
         None
     }
 
+    /// A registered INI string before PHP's public ini_get() maps null to empty.
+    fn ini_value(&self, name: &[u8]) -> Option<PhpString> {
+        self.ini_get(name)
+    }
+
     /// Decimal precision for serialization and PHP variable dumps.
     fn serialization_precision(&self) -> i32 {
         self.ini_get(b"serialize_precision")
@@ -620,6 +625,16 @@ pub trait Context {
         Err(NativeError::error(format!(
             "An object of class {class} cannot be created here"
         )))
+    }
+
+    /// Invoke an allocated object's constructor in its declaring scope.
+    /// Factories may call this after hydrating properties, including for private constructors.
+    fn call_hydration_constructor(
+        &mut self,
+        _object: Rc<Object>,
+        _arguments: &PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(Ok(Value::Null)))
     }
 
     /// Access to the runtime's cold reflection queries.

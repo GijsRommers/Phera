@@ -33,8 +33,9 @@ pub use object::{
     ClassHandle, Object, ObjectCast, ObjectIds, PropertyScope, Resource, class_display_name,
     split_property_key,
 };
+pub use ops::compare::{smart_strcmp, threeway};
 pub use ops::{
-    ConvFail, LazyComparison, ObjectComparator, ObjectComparison, StringComparison,
+    ConvFail, LazyComparison, ObjectComparator, ObjectComparison, ObjectOperands, StringComparison,
     StringComparisonStep, add, binop_type_error, bitwise_and, bitwise_not, bitwise_or, bitwise_xor,
     compare, compare_after_error, compare_op, compare_with_objects, compare_with_string_objects,
     concat, decrement, div, increment, less, less_equal, loose_equals, loose_equals_with_objects,

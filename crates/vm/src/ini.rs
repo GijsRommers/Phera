@@ -96,6 +96,11 @@ impl Vm {
         Some(self.ini_local(slot, entry).unwrap_or_default())
     }
 
+    pub(crate) fn ini_value(&self, name: &[u8]) -> Option<PhpString> {
+        let (slot, entry) = self.registry.ini_entry(name)?;
+        self.ini_local(slot, entry)
+    }
+
     /// Directives with a null default can be explicitly set to the empty string.
     pub(crate) fn ini_override(&self, name: &[u8]) -> Option<&PhpString> {
         let (slot, _) = self.registry.ini_entry(name)?;

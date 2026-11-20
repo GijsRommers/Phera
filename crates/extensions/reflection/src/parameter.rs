@@ -75,7 +75,7 @@ pub(crate) fn register(registry: &mut Registry) {
                     data(o, |p| Value::Bool(p.by_reference))
                 }),
                 MethodEntry::public("canBePassedByValue", &[], |_, o, _| {
-                    data(o, |p| Value::Bool(!p.by_reference))
+                    data(o, |p| Value::Bool(p.can_pass_by_value))
                 }),
                 MethodEntry::public("isPromoted", &[], |_, o, _| {
                     data(o, |p| Value::Bool(p.promoted))
@@ -101,13 +101,19 @@ pub(crate) fn register(registry: &mut Registry) {
                     crate::function::make(c, parameter(o)?.function.target.clone())
                 }),
                 MethodEntry::public_async("getDeclaringClass", &[], declaring),
-                MethodEntry::public_async("getClass", &[], legacy_class),
-                MethodEntry::public("isArray", &[], |c, o, _| {
-                    legacy_type(c, o, "isArray", "array")
-                }),
-                MethodEntry::public("isCallable", &[], |c, o, _| {
-                    legacy_type(c, o, "isCallable", "callable")
-                }),
+                MethodEntry::public_async("getClass", &[], legacy_class).with_preparation(
+                    |c, _, _| {
+                        phera_extension_api::deprecated_method(c, "ReflectionParameter::getClass")
+                    },
+                ),
+                MethodEntry::public("isArray", &[], |_, o, _| legacy_type(o, "array"))
+                    .with_preparation(|c, _, _| {
+                        phera_extension_api::deprecated_method(c, "ReflectionParameter::isArray")
+                    }),
+                MethodEntry::public("isCallable", &[], |_, o, _| legacy_type(o, "callable"))
+                    .with_preparation(|c, _, _| {
+                        phera_extension_api::deprecated_method(c, "ReflectionParameter::isCallable")
+                    }),
                 MethodEntry::public_async(
                     "getAttributes",
                     crate::attribute::FILTER,
@@ -302,7 +308,6 @@ fn legacy_class(
     _: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        deprecation(context, "getClass");
         let parameter = parameter(this.as_ref())?;
         let Some(declared) = parameter.info()?.declared_type.as_deref() else {
             return Ok(Value::Null);
@@ -333,13 +338,7 @@ fn legacy_class(
     })
 }
 
-fn legacy_type(
-    context: &mut dyn Context,
-    this: Option<&Rc<Object>>,
-    method: &str,
-    ty: &str,
-) -> NativeResult {
-    deprecation(context, method);
+fn legacy_type(this: Option<&Rc<Object>>, ty: &str) -> NativeResult {
     data(this, |parameter| {
         Value::Bool(
             parameter
@@ -348,10 +347,4 @@ fn legacy_type(
                 .is_some_and(|declared| declared.trim_start_matches('?') == ty),
         )
     })
-}
-
-fn deprecation(context: &mut dyn Context, method: &str) {
-    context.deprecated(format!(
-        "Method ReflectionParameter::{method}() is deprecated since 8.0, use ReflectionParameter::getType() instead"
-    ));
 }

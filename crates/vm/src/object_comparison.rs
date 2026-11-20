@@ -6,7 +6,7 @@
 
 use phera_bytecode::BinaryOp;
 use phera_extension_api::{ClassHooks, Context, NativeComparison, NativeError, PropertyPurpose};
-use phera_value::{Diagnostics, Object, ObjectComparison, OpError, Value};
+use phera_value::{Diagnostics, Object, ObjectComparison, ObjectOperands, OpError, Value};
 
 use crate::{Vm, classes::Class};
 
@@ -50,6 +50,17 @@ pub(crate) fn compare_objects(
         NativeComparison::Ordered(order) => ObjectComparison::Compared(order as i8),
         NativeComparison::Uncomparable => ObjectComparison::Compared(1),
     })
+}
+
+/// The immediate operator path has object hooks but no runtime context.
+pub(crate) fn compare_objects_without_context(
+    operands: ObjectOperands<'_>,
+    diagnostics: &mut dyn Diagnostics,
+) -> Result<ObjectComparison, OpError> {
+    match operands {
+        ObjectOperands::Pair(left, right) => compare_objects(left, right, diagnostics),
+        ObjectOperands::Mixed(_, _) => Ok(ObjectComparison::Default),
+    }
 }
 
 #[cold]
@@ -119,8 +130,26 @@ impl Vm {
         ) -> Result<T, OpError>,
     ) -> Result<T, NativeError> {
         let mut diagnostics = self.diagnostic_reporter.take_operator();
-        let mut projection_error = None;
-        let result = step(&mut diagnostics, &mut |left, right, diagnostics| {
+        let mut hook_error = None;
+        let result = step(&mut diagnostics, &mut |operands, diagnostics| {
+            let (left, right) = match operands {
+                ObjectOperands::Pair(left, right) => (left, right),
+                ObjectOperands::Mixed(left, right) => {
+                    return self
+                        .native_binary(BinaryOp::Spaceship, left, right)
+                        .and_then(|value| match value {
+                            Some(Value::Int(order)) => {
+                                Ok(ObjectComparison::Compared(order.signum() as i8))
+                            }
+                            None => Ok(ObjectComparison::Default),
+                            Some(_) => Err(internal_error!("native comparison result")),
+                        })
+                        .map_err(|error| {
+                            hook_error = Some(error);
+                            OpError::error("Native object comparison failed")
+                        });
+                }
+            };
             let result = compare_objects(left, right, diagnostics)?;
             if self.classes.has_lazy_objects
                 && matches!(result, ObjectComparison::Default)
@@ -140,7 +169,7 @@ impl Vm {
                     ))
                 })();
                 return views.map_err(|error| {
-                    projection_error = Some(error);
+                    hook_error = Some(error);
                     OpError::error("Failed to project native properties")
                 });
             }
@@ -148,7 +177,7 @@ impl Vm {
         });
         self.diagnostics_flush_reuse(&mut diagnostics);
         self.diagnostic_reporter.restore_operator(diagnostics);
-        match projection_error {
+        match hook_error {
             Some(error) => Err(error),
             None => Ok(result?),
         }

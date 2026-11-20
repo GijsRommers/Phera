@@ -22,7 +22,20 @@ pub type AsyncFn = for<'a> fn(&'a mut dyn Context, Vec<Value>) -> LocalFuture<'a
 #[derive(Clone, Copy)]
 pub enum NativeFn {
     Sync(SyncFn),
+    DeprecatedSync(SyncFn),
     Async(AsyncFn),
+}
+
+/// Emit an installed method's catalog notice before its argument binder runs.
+pub fn deprecated_method(
+    context: &mut dyn Context,
+    name: &str,
+) -> Result<crate::MethodPreparation, crate::NativeError> {
+    use phera_source::deprecations::{ItemKind, kept_notice};
+    if let Some(message) = kept_notice(ItemKind::Method, name) {
+        context.deprecated(message.into());
+    }
+    Ok(crate::MethodPreparation::Default)
 }
 
 /// The declared type of a parameter, used to coerce and check arguments before
@@ -73,8 +86,9 @@ pub enum ParamType {
     ArrayOrBool,
     /// `array|object`
     ArrayOrObject,
-    /// `RecursiveIterator|IteratorAggregate`
-    RecursiveOrAggregate,
+    /// A PHP declaration with named classes or interfaces and an optional
+    /// string arm. Nullability is supplied separately by Param.
+    ClassUnion(&'static str),
 }
 
 /// Early validation for a native numeric type's string input.
@@ -102,6 +116,20 @@ impl ParamType {
     pub fn name(self) -> &'static str {
         crate::arguments::type_text(self)
     }
+
+    pub fn union_accepts_class(self, class: &dyn phera_value::ClassHandle) -> bool {
+        match self {
+            Self::ClassUnion(declaration) => declaration
+                .split('|')
+                .filter(|name| *name != "string")
+                .any(|name| class.is_instance_of(name)),
+            _ => false,
+        }
+    }
+
+    pub fn union_accepts_string(self) -> bool {
+        matches!(self, Self::ClassUnion(declaration) if declaration.split('|').any(|member| member == "string"))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -119,6 +147,7 @@ pub struct Param {
     /// The constant spelling PHP uses in a declaration, when the value is symbolic.
     pub default_name: Option<&'static str>,
     pub by_ref: bool,
+    reference_mode: ReferenceMode,
     pub(crate) raw_reference: bool,
     /// Replace the argument value in PHP traces.
     pub sensitive: bool,
@@ -137,6 +166,12 @@ enum ArgumentCount {
     Handler,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReferenceMode {
+    Required,
+    Preferred,
+}
+
 impl Param {
     pub const fn new(name: &'static str, ty: ParamType) -> Self {
         Self {
@@ -150,6 +185,7 @@ impl Param {
             default: None,
             default_name: None,
             by_ref: false,
+            reference_mode: ReferenceMode::Required,
             raw_reference: false,
             sensitive: false,
             variadic: false,
@@ -218,13 +254,25 @@ impl Param {
 
     pub const fn by_ref(mut self) -> Self {
         self.by_ref = true;
+        self.reference_mode = ReferenceMode::Required;
         self
+    }
+
+    /// Bind a writable argument, but accept a temporary by value.
+    pub const fn prefer_ref(mut self) -> Self {
+        self.by_ref = true;
+        self.reference_mode = ReferenceMode::Preferred;
+        self
+    }
+
+    pub const fn requires_ref(self) -> bool {
+        self.by_ref && matches!(self.reference_mode, ReferenceMode::Required)
     }
 
     /// Preserve the declared type for reflection and let the native function check
     /// the original referenced value and report its own diagnostic.
     pub const fn raw_by_ref(mut self) -> Self {
-        self.by_ref = true;
+        self = self.by_ref();
         self.raw_reference = true;
         self
     }
@@ -256,6 +304,19 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Sync(handler),
+        }
+    }
+
+    /// A retained deprecated function dispatches its notice before argument parsing.
+    pub const fn deprecated_sync(
+        name: &'static str,
+        params: &'static [Param],
+        handler: SyncFn,
+    ) -> Self {
+        Self {
+            name,
+            params,
+            handler: NativeFn::DeprecatedSync(handler),
         }
     }
 
