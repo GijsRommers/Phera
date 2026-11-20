@@ -9,6 +9,8 @@
 Canonicalize declaration displays when lowering bytecode. An intersection
 inside a union is one parenthesized alternative. Signature checks and
 lexical type resolution read that grouping from the existing display.
+When reporting a method contract error, resolve `self` and `parent` in
+the declaring class and expand `iterable` for display.
 
 ## Why
 

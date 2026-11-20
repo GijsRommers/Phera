@@ -259,8 +259,8 @@ impl Vm {
                         let previous = self.diagnostic_location.replace(location);
                         self.diagnostic("Deprecated", format!(
                             "Return type of {} should either be compatible with {}, or the #[\\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice",
-                            child.display(method, |ty| self.contract_type_name(ty, &method.declaring, trait_scope, unit)),
-                            base.display(inherited, |ty| self.contract_type_name(ty, inherited_scope, trait_scope, unit))
+                            child.display(method, |ty| self.contract_type_name(ty, &method.declaring, unit)),
+                            base.display(inherited, |ty| self.contract_type_name(ty, inherited_scope, unit))
                         ));
                         self.diagnostic_location = previous;
                     }
@@ -276,10 +276,10 @@ impl Vm {
             return Ok(None);
         };
         let child = child.display(method, |ty| {
-            self.contract_type_name(ty, &method.declaring, trait_scope, unit)
+            self.contract_type_name(ty, &method.declaring, unit)
         });
         let base = base.display(inherited, |ty| {
-            self.contract_type_name(ty, inherited_scope, trait_scope, unit)
+            self.contract_type_name(ty, inherited_scope, unit)
         });
         let file = self.code.unit(*reference).file.clone();
         let line = self.code.function(*reference).definition_line as usize;
@@ -305,12 +305,8 @@ impl Vm {
         &self,
         ty: &str,
         scope: &str,
-        trait_scope: Option<&str>,
         unit: &phera_bytecode::CompiledUnit,
     ) -> String {
-        if trait_scope.is_none() {
-            return ty.to_owned();
-        }
         let separators = ['|', '&', '?', '(', ')'];
         let mut display = String::new();
         for segment in ty.split_inclusive(separators) {
@@ -322,7 +318,11 @@ impl Vm {
                 display.push_str(segment);
             }
         }
-        display
+        if ty.split(['?', '|']).any(|member| member == "iterable") {
+            crate::types::expanded_iterable_display(&display)
+        } else {
+            display
+        }
     }
 
     pub(super) fn unresolved_contract_types<'a, 'vm>(
