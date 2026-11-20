@@ -6,7 +6,7 @@
 
 use std::os::unix::fs::MetadataExt;
 
-use phera_extension_api::{Context, NativeResult, Value};
+use phera_extension_api::{Context, NativeResult, Value, value::Resource};
 use rustix::fs::Access;
 
 use crate::metadata::{Query, real_path};
@@ -16,6 +16,11 @@ pub use crate::{
     errors::{check_path, reason},
     path_text::{basename, parent},
 };
+
+/// Adapters such as XMLWriter borrow only open byte streams.
+pub fn is_stream(resource: &Resource) -> bool {
+    crate::resource::with_stream(resource, |_| ()).is_ok()
+}
 
 /// File status queries shared with SplFileInfo.
 #[derive(Clone, Copy)]

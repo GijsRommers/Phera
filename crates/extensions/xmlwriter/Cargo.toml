@@ -1,0 +1,17 @@
+[package]
+name = "phera-ext-xmlwriter"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+encoding_rs.workspace = true
+percent-encoding.workspace = true
+phera-ext-dom.workspace = true
+phera-ext-streams.workspace = true
+phera-extension-api.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+
+[lints]
+workspace = true

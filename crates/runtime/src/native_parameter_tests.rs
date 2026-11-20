@@ -38,6 +38,7 @@ fn native_parameter_tables_match_php_stubs() {
             "PgSql\\Connection::__construct",
             "PgSql\\Lob::__construct",
             "PgSql\\Result::__construct",
+            "XMLParser::__construct",
         ],
         "These private constructors have no declaration in PHP's stubs",
     );

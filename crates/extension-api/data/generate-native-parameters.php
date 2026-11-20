@@ -205,7 +205,7 @@ function is_runtime_stub(string $file): bool {
             'bcmath', 'ctype', 'curl', 'date', 'dom', 'exif', 'fileinfo', 'filter', 'gd', 'gmp', 'hash', 'iconv', 'intl',
             'json', 'libxml', 'mbstring', 'mysqli', 'openssl', 'pcntl', 'pcre', 'pdo', 'pdo_mysql',
             'pdo_pgsql', 'pdo_sqlite', 'pgsql', 'posix', 'random', 'reflection', 'session', 'sodium',
-            'spl', 'sqlite3', 'standard', 'tokenizer', 'zlib',
+            'simplexml', 'spl', 'sqlite3', 'standard', 'tokenizer', 'xml', 'xmlreader', 'xmlwriter', 'zlib',
         ], true));
 }
 
