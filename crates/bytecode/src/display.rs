@@ -88,7 +88,8 @@ mod tests {
                         src: Reg(1),
                     },
                     Instruction::Jump { target: Target(0) },
-                ],
+                ]
+                .into(),
                 lines: vec![3, 3, 4],
                 ..Function::default()
             },

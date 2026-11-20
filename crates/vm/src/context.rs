@@ -27,6 +27,38 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn set_protocol_property(
+        &mut self,
+        object: &phera_value::Object,
+        name: &str,
+        value: Value,
+    ) -> Result<Option<phera_value::ArrayKey>, NativeError> {
+        let property = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+            .and_then(|class| {
+                class.defaults.iter().rev().find(|property| {
+                    property.name == name
+                        && (property.visibility != phera_bytecode::Visibility::Private
+                            || property.declaring == class.name)
+                })
+            });
+        let key = property.map_or_else(|| phera_value::ArrayKey::str(name), |p| p.key.clone());
+        if property.is_none() && object.get(&key).is_none() {
+            return Ok(None);
+        }
+        let value = if let Some(property) = property
+            && let Some(ty) = &property.ty
+        {
+            self.coerce_property_in_mode(value, property, ty, Some(true))?
+        } else {
+            value
+        };
+        crate::property_storage::write(object, key.clone(), value);
+        Ok(Some(key))
+    }
+
     fn extension_value(&self, key: &'static str) -> Option<Value> {
         self.extension_values.get(key).cloned()
     }
@@ -94,6 +126,10 @@ impl Context for Vm {
         Box::pin(self.fiber_inspect(object, inspection))
     }
 
+    fn iconv_converter(&self) -> Option<phera_extension_api::IconvConverter> {
+        self.registry.iconv_converter()
+    }
+
     fn ini_get(&self, name: &[u8]) -> Option<phera_value::PhpString> {
         Vm::ini_get(self, name)
     }
@@ -140,6 +176,10 @@ impl Context for Vm {
         Vm::include_path(self)
     }
 
+    fn set_include_wrappers(&mut self, enabled: bool) {
+        self.include_state.stream_wrappers = enabled;
+    }
+
     fn source_location(&self) -> Option<(String, usize)> {
         let location = self.location();
         Some((location.file, location.line))
@@ -165,6 +205,18 @@ impl Context for Vm {
         self.state_mut()
             .get_or_default::<crate::request_callbacks::ResourceFinalizers>()
             .register(key, callback);
+    }
+
+    fn resource_release(
+        &self,
+        kind: &'static str,
+        id: i64,
+    ) -> Option<phera_value::ResourceRelease> {
+        Some(phera_value::ResourceRelease::new(
+            &self.object_ids,
+            kind,
+            id,
+        ))
     }
 
     fn script_path(&self) -> Option<std::path::PathBuf> {

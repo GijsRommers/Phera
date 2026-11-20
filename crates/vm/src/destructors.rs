@@ -39,7 +39,7 @@ use std::rc::Rc;
 
 use phera_bytecode::Visibility;
 use phera_extension_api::NativeError;
-use phera_value::Object;
+use phera_value::{Doomed, Object};
 
 use crate::Vm;
 use crate::exceptions::Thrown;
@@ -66,8 +66,19 @@ impl Vm {
             if doomed.is_empty() {
                 break;
             }
-            for object in doomed {
-                if let Err(error) = self.destruct(object).await {
+            for released in doomed {
+                let result = match released {
+                    Doomed::Object(object) => self.destruct(object).await,
+                    Doomed::Resource(resource) => {
+                        match self.registry.resource_release(resource.kind) {
+                            Some(close) => close(self, resource.id).await,
+                            None => Err(NativeError::error(
+                                "Resource release callback is unavailable",
+                            )),
+                        }
+                    }
+                };
+                if let Err(error) = result {
                     failure = Some(match failure {
                         Some(earlier) => self.chain_exceptions(earlier, error),
                         None => error,
@@ -139,6 +150,9 @@ impl Vm {
         let Some(class) = self.classes.for_object(&object) else {
             return Ok(());
         };
+        if let Some(release) = class.hooks.as_ref().and_then(|hooks| hooks.release) {
+            release(self, &object).await;
+        }
         let Some(method) = class
             .magic
             .as_ref()

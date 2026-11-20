@@ -35,6 +35,9 @@ impl Vm {
         if mode == FetchMode::Read && self.fetch_property_site(&place, destination)? {
             return Ok(None);
         }
+        if mode != FetchMode::Destructure {
+            self.prepare_element_site(&place)?;
+        }
         if self.classes.has_dimensions && self.prepare_dimension(&place)? {
             return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
                 dst: destination,

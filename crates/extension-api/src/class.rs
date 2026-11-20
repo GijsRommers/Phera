@@ -107,6 +107,7 @@ pub struct MethodEntry {
     pub direct: Option<DirectMethod>,
     pub visibility: Visibility,
     pub is_static: bool,
+    pub uses_instance_receiver: bool,
     /// Subclasses may not override it.
     pub is_final: bool,
     /// PHP's compatibility contract for an internal method.
@@ -136,6 +137,7 @@ impl MethodEntry {
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
+            uses_instance_receiver: false,
             is_final: false,
             return_type: None,
         }
@@ -157,6 +159,7 @@ impl MethodEntry {
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
+            uses_instance_receiver: false,
             is_final: false,
             return_type: None,
         }
@@ -175,6 +178,7 @@ impl MethodEntry {
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
+            uses_instance_receiver: false,
             is_final: false,
             return_type: None,
         }
@@ -190,6 +194,7 @@ impl MethodEntry {
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
+            uses_instance_receiver: false,
             is_final: false,
             return_type: None,
         }
@@ -222,6 +227,12 @@ impl MethodEntry {
 
     pub const fn static_(mut self) -> Self {
         self.is_static = true;
+        self
+    }
+
+    /// A legacy static method can also initialize the object it is called on.
+    pub const fn with_instance_receiver(mut self) -> Self {
+        self.uses_instance_receiver = true;
         self
     }
 

@@ -49,6 +49,9 @@ use std::rc::Rc;
 
 use crate::object::{Object, ObjectIds};
 
+mod resource_release;
+pub use resource_release::{ReleasedResource, ResourceRelease};
+
 /// Where an object stands with its destructor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Destruction {
@@ -61,10 +64,17 @@ pub enum Destruction {
     Done,
 }
 
-/// The objects of a request whose destructor is due, oldest first.
+/// A PHP callback due after releasing the last owner of a value.
+#[derive(Debug)]
+pub enum Doomed {
+    Object(Rc<Object>),
+    Resource(Box<ReleasedResource>),
+}
+
+/// The values of a request whose release callback is due, oldest first.
 #[derive(Debug, Default)]
 pub(crate) struct DoomedObjects {
-    queue: RefCell<Vec<Rc<Object>>>,
+    queue: RefCell<Vec<Doomed>>,
     /// Set while the queue holds something: the interpreter tests this
     /// after instructions, so it is a plain flag rather than a borrow.
     waiting: Cell<bool>,
@@ -77,11 +87,11 @@ pub(crate) struct DoomedObjects {
 }
 
 impl DoomedObjects {
-    fn push(&self, object: Rc<Object>) {
+    fn push(&self, released: Doomed) {
         // The queue is only ever borrowed for a push or a `take`, neither of
         // which can drop an object, so this borrow cannot be taken already.
         if let Ok(mut queue) = self.queue.try_borrow_mut() {
-            queue.push(object);
+            queue.push(released);
             self.waiting.set(true);
         }
     }
@@ -128,14 +138,17 @@ impl Object {
 
     /// The contents of an object being dropped, moved into a new object
     /// that waits in the queue for its destructor.
+    #[cold]
+    #[inline(never)]
     fn hand_over(&mut self) {
         self.no_longer_due();
-        let Some(hold) = self.pool.take_if(|pool| !pool.doomed.closed.get()) else {
+        let Some(mut hold) = self.pool.take_if(|pool| !pool.doomed.closed.get()) else {
             return;
         };
         // The hold moves with the contents: the id goes back when the new
-        // object is freed.
-        let pool = hold.0.clone();
+        // object is freed, and the new object unregisters itself then.
+        hold.incarnated = true;
+        let pool = hold.pool.clone();
         let origin = self.address();
         let doomed = Rc::new(Object {
             id: self.id,
@@ -145,25 +158,23 @@ impl Object {
             destruction: Cell::new(Destruction::Done),
             attachments: Cell::new(self.attachments.take()),
             pool: Some(hold),
-            incarnated: true,
         });
         if let Ok(mut incarnations) = pool.incarnations.try_borrow_mut() {
             incarnations.insert(self.id, (origin, Rc::downgrade(&doomed)));
         }
-        pool.doomed.push(doomed);
+        pool.doomed.push(Doomed::Object(doomed));
     }
 }
 
 impl Drop for Object {
     /// An object without a destructor is simply freed (its property table
     /// frees nested values without recursion, see `array::drop`), and its
-    /// id goes back to the pool after that (see `PoolHold`).
+    /// id goes back to the pool after that, when its last field, the
+    /// `PoolHold`, is dropped.
+    #[inline]
     fn drop(&mut self) {
         if self.destruction.get() == Destruction::Due {
             self.hand_over();
-        }
-        if let Some(pool) = &self.pool {
-            pool.begin_release(self.id, self.incarnated);
         }
     }
 }
@@ -191,7 +202,7 @@ impl ObjectIds {
 
     /// The objects waiting for their destructor, in the order they were
     /// released, leaving the queue empty.
-    pub fn take_doomed(&self) -> Vec<Rc<Object>> {
+    pub fn take_doomed(&self) -> Vec<Doomed> {
         self.doomed.waiting.set(false);
         self.doomed
             .queue
@@ -202,9 +213,19 @@ impl ObjectIds {
 
     /// The request is over: from now on objects are freed without their
     /// destructor. Returns what was still queued, for the caller to free.
-    pub fn close(&self) -> Vec<Rc<Object>> {
+    pub fn close(&self) -> Vec<Doomed> {
         self.doomed.closed.set(true);
         self.take_doomed()
+    }
+}
+
+#[cfg(test)]
+impl Doomed {
+    pub(crate) fn object(&self) -> &Rc<Object> {
+        let Self::Object(object) = self else {
+            panic!("expected an object")
+        };
+        object
     }
 }
 
@@ -247,10 +268,10 @@ mod tests {
         let doomed = ids.take_doomed();
         assert!(!ids.has_doomed());
         assert_eq!(doomed.len(), 1);
-        assert_eq!(doomed[0].id, 1);
-        assert_eq!(doomed[0].destruction(), Destruction::Done);
+        assert_eq!(doomed[0].object().id, 1);
+        assert_eq!(doomed[0].object().destruction(), Destruction::Done);
         assert_eq!(
-            doomed[0].get(&ArrayKey::str("name")),
+            doomed[0].object().get(&ArrayKey::str("name")),
             Some(Value::from("lock"))
         );
         drop(doomed);
@@ -264,7 +285,11 @@ mod tests {
         let (first, second) = (guard(&ids), guard(&ids));
         drop(second);
         drop(first);
-        let order: Vec<u32> = ids.take_doomed().iter().map(|object| object.id).collect();
+        let order: Vec<u32> = ids
+            .take_doomed()
+            .iter()
+            .map(|item| item.object().id)
+            .collect();
         assert_eq!(order, vec![2, 1]);
     }
 

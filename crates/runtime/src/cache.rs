@@ -258,6 +258,35 @@ impl CodeCache {
 
 /// An include uses the same native inventory as the file that includes it.
 impl phera_vm::CodeLoader for CodeCache {
+    fn wraps_include(&self, context: &mut dyn phera_extension_api::Context, path: &[u8]) -> bool {
+        phera_ext_streams::wraps_include(context, path)
+    }
+
+    fn load_stream<'a>(
+        &'a self,
+        context: &'a mut dyn phera_extension_api::Context,
+        path: &'a [u8],
+        operation: &'a str,
+        once: bool,
+    ) -> phera_extension_api::LocalFuture<
+        'a,
+        Result<phera_vm::StreamInclude, phera_extension_api::NativeError>,
+    > {
+        use phera_ext_streams::IncludeSource;
+        use phera_vm::StreamInclude;
+        Box::pin(async move {
+            let source = phera_ext_streams::include_source(context, path, operation, once).await?;
+            Ok(match source {
+                None => StreamInclude::LocalFile,
+                Some(IncludeSource::Unavailable) => StreamInclude::Unavailable,
+                Some(IncludeSource::AlreadyIncluded) => StreamInclude::AlreadyIncluded,
+                Some(IncludeSource::Source { name, bytes }) => StreamInclude::Compiled(
+                    self.compile_source(&bytes, &name, CompileStack::Dedicated),
+                ),
+            })
+        })
+    }
+
     fn load(
         &self,
         path: PathBuf,

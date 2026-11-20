@@ -86,6 +86,7 @@ mod execution_time;
 mod extract;
 mod failed_construction;
 mod fast;
+mod fast_values;
 mod fibers;
 mod finally;
 mod function_facts;
@@ -184,6 +185,7 @@ mod unsupported_items;
 
 pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
+    StreamInclude,
 };
 
 /// Receives each PHP output write while Vm also retains its output buffer.

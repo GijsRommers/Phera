@@ -75,6 +75,10 @@ phera-ext-gmp = { path = "crates/extensions/gmp" }
 phera-ext-bcmath = { path = "crates/extensions/bcmath" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
 phera-ext-dom = { path = "crates/extensions/dom" }
+phera-ext-simplexml = { path = "crates/extensions/simplexml" }
+phera-ext-xml = { path = "crates/extensions/xml" }
+phera-ext-xmlreader = { path = "crates/extensions/xmlreader" }
+phera-ext-xmlwriter = { path = "crates/extensions/xmlwriter" }
 quick-xml = "0.42"
 html5ever = "0.40"
 phera-ext-curl = { path = "crates/extensions/curl" }

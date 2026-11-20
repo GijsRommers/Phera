@@ -82,8 +82,8 @@ impl Object {
     /// contents for its destructor has the identity of the one it took
     /// over from.
     pub fn identity(&self) -> usize {
-        if self.incarnated
-            && let Some(pool) = &self.pool
+        if let Some(pool) = &self.pool
+            && pool.incarnated
             && let Ok(incarnations) = pool.incarnations.try_borrow()
             && let Some((origin, _)) = incarnations.get(&self.id)
         {
@@ -134,8 +134,8 @@ mod tests {
         drop(target);
         let doomed = ids.take_doomed();
         let seen = weak.upgrade().expect("still alive while queued");
-        assert!(Rc::ptr_eq(&seen, &doomed[0]));
-        assert!(weak.refers_to(&doomed[0]));
+        assert!(Rc::ptr_eq(&seen, doomed[0].object()));
+        assert!(weak.refers_to(doomed[0].object()));
         drop((seen, doomed));
         assert!(!weak.is_alive());
     }
@@ -153,7 +153,7 @@ mod tests {
         let doomed = ids.take_doomed();
         assert_eq!(doomed.len(), 1);
         assert!(weak.upgrade().is_none());
-        assert!(!weak.refers_to(&doomed[0]));
+        assert!(!weak.refers_to(doomed[0].object()));
     }
 
     #[test]

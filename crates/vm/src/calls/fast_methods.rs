@@ -9,7 +9,8 @@
 //!
 //! The method is found in the class's [`MethodTable`] by the interned name
 //! the compiler wrote. Only the plain cases are taken here: a public method
-//! (or a private one called from its own class), written in PHP, where
+//! (or a private one called from its own class, or a protected one from a
+//! related class), written in PHP, where
 //! nothing else could shadow it. The call is one record and a window whose
 //! first register holds `$this`. Everything else answers [`Step::Slow`]
 //! without having changed anything, and `Vm::execute` applies every rule.
@@ -56,7 +57,8 @@ impl Machine<'_> {
         }
         match method.body {
             MethodBody::User(function) => {
-                if !self.may_call(&found) || self.caller_has_other_private(key, method) {
+                let scope = self.running_scope();
+                if !may_call(&found, scope) || self.shadowed_by_private(scope, key, method) {
                     return Step::Slow;
                 }
                 let receiver = Some(object.clone());
@@ -66,7 +68,7 @@ impl Machine<'_> {
                 if entry.direct.is_some()
                     && method.visibility == Visibility::Public
                     && (!self.classes.has_lazy_objects || object.lazy().is_none())
-                    && !self.caller_has_other_private(key, method) =>
+                    && !self.shadowed_by_private(self.running_scope(), key, method) =>
             {
                 let Some(class) = class.identity.upgrade() else {
                     return Step::Slow;
@@ -128,15 +130,20 @@ impl Machine<'_> {
             (false, true) => context.and_then(|context| context.this()).cloned(),
             (false, false) => return Step::Slow,
         };
-        if !self.may_call(&found)
+        if !may_call(&found, scope)
             || (!found.method.is_static && receiver.is_none())
-            || self.caller_has_other_private(key, found.method)
+            || self.shadowed_by_private(scope, key, found.method)
         {
             return Step::Slow;
         }
-        let called = match (binding, context) {
-            (ClassBinding::Forward, Some(context)) => context.called().map(|called| called.index),
-            _ => Some(class.index),
+        // A call with `$this` takes its called class from `$this`; only a
+        // static call needs it worked out here.
+        let called = match (receiver.is_some(), binding, context) {
+            (true, _, _) => None,
+            (false, ClassBinding::Forward, Some(context)) => context
+                .called_index()
+                .or_else(|| context.called().map(|called| called.index)),
+            (false, _, _) => Some(class.index),
         };
         let MethodBody::User(function) = found.method.body else {
             return Step::Slow;
@@ -169,23 +176,9 @@ impl Machine<'_> {
         Step::Done(ip)
     }
 
-    /// Whether the running frame may call the method without the general
-    /// visibility check: it is public, or private and called from inside
-    /// the class that declares it. Protected methods take the general path.
-    fn may_call(&self, found: &FoundMethod<'_>) -> bool {
-        match found.method.visibility {
-            Visibility::Public => true,
-            Visibility::Private => {
-                let scope = self
-                    .current_context()
-                    .and_then(|context| context.scope_index());
-                found
-                    .scope
-                    .upgrade()
-                    .is_some_and(|declaring| Some(declaring.index) == scope)
-            }
-            Visibility::Protected => false,
-        }
+    /// The class scope of the running frame (`self::`), if it has one.
+    fn running_scope(&self) -> Option<&Rc<Class>> {
+        self.current_context().and_then(|context| context.scope())
     }
 
     /// The class a named class symbol was linked to, once some earlier
@@ -196,7 +189,7 @@ impl Machine<'_> {
     }
 
     /// The window of the running frame, if it is a method or closure.
-    fn current_context(&self) -> Option<WindowContext<'_>> {
+    pub(super) fn current_context(&self) -> Option<WindowContext<'_>> {
         let frame = self.stack.current()?;
         if frame.kind() == CallKind::Function {
             return None;
@@ -212,17 +205,55 @@ impl Machine<'_> {
         })
     }
 
-    /// Whether the running method's class has a different, private method
-    /// of this name, which a call from inside that class could reach instead.
-    fn caller_has_other_private(&self, key: NameKey, method: &Rc<crate::classes::Method>) -> bool {
-        let Some(scope) = self.current_context().and_then(|context| context.scope()) else {
-            return false;
-        };
-        self.classes
-            .method_table(scope, self.code)
-            .get(key)
-            .is_some_and(|found| {
-                found.method.visibility == Visibility::Private && !Rc::ptr_eq(found.method, method)
-            })
+    /// Whether the class scope has a different, private method of this
+    /// name, which a call from inside that class reaches instead.
+    fn shadowed_by_private(
+        &self,
+        scope: Option<&Rc<Class>>,
+        key: NameKey,
+        method: &Rc<crate::classes::Method>,
+    ) -> bool {
+        scope.is_some_and(|scope| {
+            self.classes
+                .method_table(scope, self.code)
+                .private(key)
+                .is_some_and(|found| !Rc::ptr_eq(found.method, method))
+        })
     }
+}
+
+/// Whether a frame with this class scope may call the method without the
+/// general visibility check: it is public; or private and called from
+/// inside the class that declares it; or protected and called from the
+/// declaring class, one of its parents or one of its descendants. PHP
+/// allows a protected call in a few more cases (through the method's
+/// prototype); those take the general path, which applies every rule.
+fn may_call(found: &FoundMethod<'_>, scope: Option<&Rc<Class>>) -> bool {
+    match found.method.visibility {
+        Visibility::Public => true,
+        Visibility::Private => {
+            let scope = scope.map(|scope| scope.index);
+            found
+                .scope
+                .upgrade()
+                .is_some_and(|declaring| Some(declaring.index) == scope)
+        }
+        Visibility::Protected => scope.is_some_and(|scope| {
+            found.scope.upgrade().is_some_and(|declaring| {
+                descends_from(scope, &declaring) || descends_from(&declaring, scope)
+            })
+        }),
+    }
+}
+
+/// Whether `class` is `ancestor` or extends it, following parent classes.
+fn descends_from(class: &Rc<Class>, ancestor: &Class) -> bool {
+    let mut current = Some(class);
+    while let Some(candidate) = current {
+        if candidate.index == ancestor.index {
+            return true;
+        }
+        current = candidate.parent.as_ref();
+    }
+    false
 }

@@ -51,13 +51,25 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                 let Value::Resource(resource) = value.deref().clone() else {
                     continue;
                 };
+                let user = crate::user_file::resource_file(&resource);
+                let descriptor_resource = if let Some(file) = &user {
+                    let Some(real) = file.cast_for_select(context, resource.id).await? else {
+                        continue;
+                    };
+                    real
+                } else {
+                    resource.clone()
+                };
                 let Ok((descriptor, buffered, is_child, wrapper)) =
-                    with_stream(&resource, |stream| {
+                    with_stream(&descriptor_resource, |stream| {
                         (
                             stream.descriptor().and_then(|file| {
                                 file.try_clone().ok().map(|copy| (file.as_raw_fd(), copy))
                             }),
-                            stream.unread() > 0,
+                            user.as_ref().map_or_else(
+                                || stream.unread() > 0,
+                                |file| !file.buffer.borrow().is_empty(),
+                            ),
                             stream.child_pipe.is_some(),
                             stream.wrapper,
                         )

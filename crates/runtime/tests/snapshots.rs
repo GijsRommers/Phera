@@ -13,6 +13,10 @@ use std::process::Command;
 
 use phera_runtime::{BootReport, HttpRequest, Runtime, WebWorker};
 
+mod snapshots {
+    mod streams;
+}
+
 /// A directory of PHP files that is removed when the test ends.
 struct Site {
     root: PathBuf,
@@ -160,6 +164,50 @@ async fn boot_and_answer(
             Ok(answers)
         })
         .await
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn xml_snapshots_copy_memory_and_keep_simplexml_views_together() {
+    let plain = r#"["boot","boot","item","pending","<r><item>boot<\/item><\/r>",["R","ITEM"],"boot resolver",false,false,false]"#;
+    let changed = r#"["changed","changed","item","pending","<r><item>changed<\/item><\/r>",["R","ITEM"],"boot resolver",false,false,true]"#;
+    let responses = boot_and_answer(
+        "xml-family",
+        include_str!("snapshots/xml_family.php"),
+        &["/index.php", "/index.php?mutate=1", "/index.php"],
+    )
+    .await
+    .expect("an XML snapshot made of plain data");
+    assert_eq!(responses, [plain, changed, plain]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn xml_snapshots_refuse_open_io() {
+    for (name, script, class) in [
+        (
+            "xmlreader-stream",
+            r#"<?php
+                $stream = fopen('php://memory', 'r+');
+                $reader = XMLReader::fromStream($stream);
+                unset($stream);
+                Phera\snapshot();
+            "#,
+            "XMLReader",
+        ),
+        (
+            "xmlwriter-uri",
+            r#"<?php
+                $writer = XMLWriter::toUri(__DIR__ . '/output.xml');
+                Phera\snapshot();
+            "#,
+            "XMLWriter",
+        ),
+    ] {
+        let error = boot_and_answer(name, script, &[])
+            .await
+            .expect_err("an open XML handle");
+        assert!(error.contains(&format!("cannot keep {class}")), "{error}");
+        assert!(error.contains("belongs to one request"), "{error}");
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
