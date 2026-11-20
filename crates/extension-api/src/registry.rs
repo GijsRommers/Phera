@@ -337,8 +337,13 @@ impl Registry {
         params: &'static [crate::Param],
         handler: crate::AsyncFn,
     ) {
-        self.function(FunctionEntry::asynchronous(name, params, handler));
-        self.callback_frames.insert(name);
+        self.function_with_native_frame(FunctionEntry::asynchronous(name, params, handler));
+    }
+
+    /// Keep this function in PHP exception traces when its async body throws or calls PHP.
+    pub fn function_with_native_frame(&mut self, entry: FunctionEntry) {
+        self.function(entry);
+        self.callback_frames.insert(entry.name);
     }
 
     pub fn has_callback_frame(&self, name: &str) -> bool {

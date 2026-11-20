@@ -355,7 +355,24 @@ pub enum FunctionTarget {
     ClosureInvoke(Weak<Object>),
 }
 
-pub type ParameterDefault = AttributeValue;
+#[derive(Clone)]
+pub enum ParameterDefault {
+    Literal(Value),
+    Expression(Initializer),
+    NativeEnumCase {
+        class: &'static str,
+        case: &'static str,
+    },
+}
+
+impl From<AttributeValue> for ParameterDefault {
+    fn from(value: AttributeValue) -> Self {
+        match value {
+            AttributeValue::Literal(value) => Self::Literal(value),
+            AttributeValue::Expression(initializer) => Self::Expression(initializer),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct ParameterInfo {
@@ -368,6 +385,8 @@ pub struct ParameterInfo {
     pub promoted: bool,
     pub default: Option<ParameterDefault>,
     pub default_constant: Option<String>,
+    pub default_display: Option<String>,
+    pub internal: bool,
     pub attributes: Vec<Rc<AttributeInfo>>,
 }
 

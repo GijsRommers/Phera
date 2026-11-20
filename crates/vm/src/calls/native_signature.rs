@@ -51,7 +51,7 @@ pub(super) fn exact_types(parameter: &Param) -> TypeMask {
         P::Mixed => T::MIXED.union(RESOURCE),
         P::Class(_) | P::Callable | P::ReflectedObject | P::RecursiveOrAggregate => T::default(),
     };
-    if parameter.nullable {
+    if parameter.accepts_null() {
         mask.union(T::NULL)
     } else {
         mask

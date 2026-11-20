@@ -96,6 +96,11 @@ Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
   `Dom\DtdNamedNodeMap`, `Dom\HTMLCollection`, `Dom\TokenList`, `Dom\XPath`.
 - `Dom\ParentNode` and `Dom\ChildNode` expose their shared operations.
 
+Named arguments to built-ins use PHP’s declared defaults for skipped parameters.
+For example, `json_decode($json, flags: JSON_THROW_ON_ERROR)` uses the default
+depth. Reflection reads the same defaults, and native errors include the
+function or method that raised them in the exception trace.
+
 Unix scripts can launch programs with `shell_exec()`, backticks, and the process
 functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
 launching for web requests, run `phera serve --no-process public`.

@@ -16,6 +16,10 @@ mod http;
 mod ini_tests;
 mod preload;
 #[cfg(test)]
+mod native_parameter_tests;
+#[cfg(test)]
+mod native_trace_tests;
+#[cfg(test)]
 mod process_oracle_tests;
 mod worker_code_cache;
 
