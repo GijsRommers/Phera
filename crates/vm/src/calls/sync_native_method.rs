@@ -167,13 +167,14 @@ impl Vm {
             named,
             extra_named,
         } = taken;
-        // A method's window keeps `$this` below its first register; another
-        // shape cannot be rebuilt here, and reports the missing class.
-        let (Some(called), 1) = (called, call.kind.prefix()) else {
+        // A native method's receiver travels in its context; a window that
+        // also keeps `$this` below its first register gets it back there.
+        // Another shape cannot be rebuilt here, and reports the missing class.
+        let (Some(called), slots @ (0 | 1)) = (called, call.kind.prefix()) else {
             return crate::autoload::ClassMiss::take(error)
                 .map_or_else(|error| error, crate::autoload::ClassMiss::error);
         };
-        let prefix = [receiver.clone().map(Value::Object), None];
+        let this = receiver.clone().filter(|_| slots == 1).map(Value::Object);
         let details = CallDetails {
             callee: Some(Callee {
                 argument_binding,
@@ -192,7 +193,7 @@ impl Vm {
             named,
             extra_named,
         };
-        self.restore_native_call((call, Some(details)), prefix, arguments);
+        self.restore_native_call((call, Some(details)), [this, None], arguments);
         error
     }
 }
