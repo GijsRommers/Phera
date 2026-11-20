@@ -271,7 +271,10 @@ where it was found; the worker then serves the application from the top.
 A changed file boots the worker again in the background, following
 `opcache.validate_timestamps` and `opcache.revalidate_freq`. The boot's
 objects are never destroyed; each request's copies are destroyed at its end,
-as PHP-FPM destroys a request's objects. `--no-snapshot` turns all of it off.
+as PHP-FPM destroys a request's objects. Snapshots are the only mode and
+cannot be turned off; a request that has to run from the top (its boot was
+refused) is logged as a defect and counted in the `--health` answer's
+`Phera-From-The-Top` header.
 
 A Laravel API request took 525 million instructions run from the top, and
 102 million as a fork (PHP 8.5 with opcache: 48 million). The design is in

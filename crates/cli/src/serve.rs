@@ -56,11 +56,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         }
     };
     loaded.paths.extend(settings.path);
-    let adapter = if options.no_snapshot {
-        Adapter::Off
-    } else {
-        Adapter::detect(&site, &mut loaded.environment)
-    };
+    let adapter = Adapter::detect(&site, &mut loaded.environment);
     site.exclude_files(loaded.paths);
     let site = Arc::new(site);
     let trusted_proxies = match options
@@ -151,9 +147,6 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
 /// Which framework adapter `phera serve` uses (see `phera_runtime::adapters`).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Adapter {
-    /// `--no-snapshot`: nothing boots, not even a script that calls
-    /// `Phera\snapshot()` itself.
-    Off,
     None,
     /// The front controller runs Phera's Laravel entry script.
     Laravel,
@@ -218,13 +211,10 @@ struct SiteHandlerFactory {
 impl HandlerFactory for SiteHandlerFactory {
     fn create(&self, worker_index: usize) -> Rc<dyn Handler> {
         Rc::new(SiteHandler {
-            runtime: match self.adapter {
-                Adapter::Off => self.runtime.web_worker(worker_index),
-                _ => self
-                    .runtime
-                    .web_worker(worker_index)
-                    .with_background_boots(),
-            },
+            runtime: self
+                .runtime
+                .web_worker(worker_index)
+                .with_background_boots(),
             adapter: self.adapter,
             site: self.site.clone(),
             compress: self.compress,
@@ -263,10 +253,8 @@ impl SiteHandler {
         let Some(script) = self.site.front_controller() else {
             return;
         };
-        match self.adapter {
-            Adapter::Off => return,
-            Adapter::None if !phera_runtime::snapshot_remembered(script) => return,
-            _ => {}
+        if self.adapter == Adapter::None && !phera_runtime::snapshot_remembered(script) {
+            return;
         }
         let worker = self.runtime.index();
         match self.runtime.boot(script, self.site.document_root()).await {
@@ -280,7 +268,7 @@ impl SiteHandler {
                 script.display()
             ),
             phera_runtime::BootReport::Failed(message) => eprintln!(
-                "Worker {worker}: booting {} failed, requests run from the top until a boot succeeds: {message}",
+                "Worker {worker}: DEFECT: {} cannot be snapshotted, its requests run from the top until a boot succeeds: {message}",
                 script.display()
             ),
         }
@@ -291,7 +279,12 @@ impl SiteHandler {
         // must not depend on the application, its database or a free worker
         // slot in PHP.
         if self.health_path.as_deref() == Some(request.path.as_str()) {
-            return Response::text(200, "ok\n").with_header("Cache-Control", "no-store");
+            // How many requests ran from the top because a snapshot could
+            // not be kept or copied: each one is a defect to fix.
+            let from_the_top = phera_runtime::requests_from_the_top().to_string();
+            return Response::text(200, "ok\n")
+                .with_header("Cache-Control", "no-store")
+                .with_header("Phera-From-The-Top", from_the_top);
         }
         let site = self.site.clone();
         let path = request.path.clone();
