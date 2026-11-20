@@ -2,16 +2,16 @@
 //!
 //! PHP proxies expose `_composer_autoload_path` and `_composer_bin_dir` globals.
 
-use crate::{Package, Project, php, project::strings};
+use crate::{InstallPaths, Package, Project, php, project::strings};
 use anyhow::{Context, Result};
 use std::fs;
 
-pub(crate) fn write(project: &Project, packages: &[Package]) -> Result<()> {
+pub(crate) fn write(project: &Project, packages: &[Package], paths: &InstallPaths) -> Result<()> {
     let vendor = project.vendor_dir()?;
     let bin_dir = project.bin_dir()?;
     for package in packages {
         for bin in strings(package.field("bin")) {
-            let package_dir = package.install_path(&vendor)?;
+            let package_dir = paths.installed(package)?;
             let source = crate::paths::inside(&package_dir, bin)?;
             if !source.is_file() {
                 continue;

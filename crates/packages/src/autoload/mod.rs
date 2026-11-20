@@ -8,7 +8,7 @@ mod order;
 mod platform;
 mod scan;
 
-use crate::{Options, Package, Project, project::strings};
+use crate::{InstallPaths, Options, Package, Project, project::strings};
 use anyhow::{Result, bail};
 use md5::{Digest, Md5};
 use serde_json::Value;
@@ -24,7 +24,12 @@ pub(super) struct Maps {
     include_paths: Vec<PathBuf>,
 }
 
-pub(crate) fn generate(project: &Project, packages: &[Package], options: &Options) -> Result<()> {
+pub(crate) fn generate(
+    project: &Project,
+    packages: &[Package],
+    options: &Options,
+    paths: &InstallPaths,
+) -> Result<()> {
     project.validate_output_paths()?;
     let vendor = project.vendor_dir()?;
     std::fs::create_dir_all(vendor.join("composer"))?;
@@ -45,7 +50,7 @@ pub(crate) fn generate(project: &Project, packages: &[Package], options: &Option
         let base = if std::ptr::eq(*package, &root) {
             project.directory.clone()
         } else {
-            vendor.join(&package.name)
+            paths.destination(package)?.to_path_buf()
         };
         let mut autoloads = vec![package.field("autoload")];
         if std::ptr::eq(*package, &root) && !options.no_dev {
@@ -103,7 +108,7 @@ pub(crate) fn generate(project: &Project, packages: &[Package], options: &Option
         let base = if std::ptr::eq(package, &root) {
             &project.directory
         } else {
-            &vendor.join(&package.name)
+            paths.destination(package)?
         };
         for path in strings(package.field("include-path")) {
             let path = crate::paths::inside(base, &legacy_path(package, base, path))?;

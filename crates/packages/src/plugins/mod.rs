@@ -2,11 +2,14 @@
 //!
 //! Hooks consume package data after resolution. They never load Composer plugin PHP.
 
+pub(crate) mod layout;
 mod runtime;
 
 use crate::{Options, Package, Project};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
+
+const NATIVE: &[&str] = &[runtime::NAME, layout::INSTALLERS, layout::WORDPRESS_CORE];
 
 pub(crate) fn allowed(project: &Project, name: &str) -> Result<Option<bool>> {
     let rules = &project.data["config"]["allow-plugins"];
@@ -51,7 +54,9 @@ pub(crate) fn active(
 }
 
 pub(crate) fn validate(project: &Project, options: &Options, packages: &[Package]) -> Result<()> {
-    active(project, options, packages, runtime::NAME)?;
+    for name in NATIVE {
+        active(project, options, packages, name)?;
+    }
     Ok(())
 }
 
@@ -74,7 +79,7 @@ pub(crate) fn report(project: &Project, options: &Options, packages: &[Package])
         if options.no_plugins || allowed(project, &package.name)? == Some(false) {
             continue;
         }
-        if package.name != runtime::NAME {
+        if !NATIVE.contains(&package.name.as_str()) {
             eprintln!(
                 "Skipped Composer plugin {}. Phera cannot apply its install changes yet.",
                 package.name

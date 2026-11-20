@@ -8,6 +8,7 @@ mod binaries;
 mod cleanup;
 mod commands;
 mod content_hash;
+mod install_paths;
 mod installed;
 mod lock_writer;
 mod network;
@@ -27,6 +28,7 @@ pub use commands::{add, outdated, remove, why};
 pub use project::{Lock, Options, Package, Project};
 
 use anyhow::{Context, Result, bail};
+use install_paths::InstallPaths;
 use rayon::prelude::*;
 use std::fs;
 use std::path::Path;
@@ -59,16 +61,18 @@ fn install_locked(
     project.validate_output_paths()?;
     let packages = lock.packages(options.no_dev);
     plugins::validate(&project, options, &packages)?;
+    let paths = InstallPaths::new(&project, options, &packages)?;
+    let previous = cleanup::previous(&project)?;
+    paths.validate_replacement(&project, &packages, &previous)?;
     if !updating {
         runner.event(&project, options, "pre-install-cmd")?;
     }
-    let previous = cleanup::previous(&project)?;
-    materialise_packages(&project, &packages, options)?;
-    cleanup::remove_stale(&project, &previous, &packages)?;
-    installed::write(&project, &lock, options)?;
-    binaries::write(&project, &packages)?;
+    materialise_packages(&project, &packages, options, &paths)?;
+    cleanup::remove_stale(&project, &previous, &paths)?;
+    installed::write(&project, &lock, options, &paths)?;
+    binaries::write(&project, &packages, &paths)?;
     runner.event(&project, options, "pre-autoload-dump")?;
-    autoload::generate(&project, &packages, options)
+    autoload::generate(&project, &packages, options, &paths)
         .context("Could not generate autoload files; correct the reported PHP file and retry.")?;
     plugins::post_autoload(&project, options, &packages)?;
     runner.event(&project, options, "post-autoload-dump")?;
@@ -90,10 +94,12 @@ fn install_locked(
     Ok(())
 }
 
-fn materialise_packages(project: &Project, packages: &[Package], options: &Options) -> Result<()> {
-    for package in packages {
-        package.validate()?;
-    }
+fn materialise_packages(
+    project: &Project,
+    packages: &[Package],
+    options: &Options,
+    paths: &InstallPaths,
+) -> Result<()> {
     if packages.windows(2).any(|pair| pair[0].name == pair[1].name) {
         bail!("composer.lock contains duplicate package names. Run `phera update`.");
     }
@@ -120,11 +126,11 @@ fn materialise_packages(project: &Project, packages: &[Package], options: &Optio
     fs::create_dir_all(&vendor)?;
     pool.install(|| {
         prepared.par_iter().try_for_each(|(package, source)| {
-            let destination = path_install::destination(&vendor, package)?;
-            let method = if path_install::link(project, package, &destination)? {
+            let destination = paths.destination(package)?;
+            let method = if path_install::link(project, package, destination)? {
                 "live path repository link"
             } else {
-                store::materialise(source, &destination, package.field("target-dir").as_str())?
+                store::materialise(source, destination, package.field("target-dir").as_str())?
             };
             if options.verbose {
                 eprintln!("  {} {}: {method}", package.name, package.version);
@@ -163,8 +169,9 @@ pub fn dump_autoload(directory: &Path, options: &Options) -> Result<()> {
     let mut runner = scripts::Runner::default();
     let packages = lock.packages(options.no_dev);
     plugins::validate(&project, &options, &packages)?;
+    let paths = InstallPaths::new(&project, &options, &packages)?;
     runner.event(&project, &options, "pre-autoload-dump")?;
-    autoload::generate(&project, &packages, &options)?;
+    autoload::generate(&project, &packages, &options, &paths)?;
     plugins::post_autoload(&project, &options, &packages)?;
     runner.event(&project, &options, "post-autoload-dump")
 }

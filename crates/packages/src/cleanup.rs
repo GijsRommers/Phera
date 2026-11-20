@@ -2,7 +2,7 @@
 //!
 //! Switching to `phera install --no-dev` removes previously installed dev packages.
 
-use crate::{Package, Project, project::strings};
+use crate::{InstallPaths, Package, Project, php, project::strings};
 use anyhow::Result;
 use serde_json::Value;
 use std::fs;
@@ -19,14 +19,22 @@ pub(crate) fn previous(project: &Project) -> Result<Vec<Package>> {
 pub(crate) fn remove_stale(
     project: &Project,
     previous: &[Package],
-    current: &[Package],
+    current: &InstallPaths,
 ) -> Result<()> {
     let vendor = project.vendor_dir()?;
     let bin = project.bin_dir()?;
     for package in previous {
         package.validate()?;
-        if !current.iter().any(|new| new.name == package.name) {
-            crate::path_install::remove(&crate::path_install::destination(&vendor, package)?)?;
+        let vendor_path = crate::path_install::destination(&vendor, package)?;
+        let installed = package.install_path(&vendor)?;
+        let expected = php::relative(&vendor.join("composer"), &installed);
+        if package
+            .field("install-path")
+            .as_str()
+            .is_some_and(|path| path.strip_prefix("./").unwrap_or(path) == expected)
+            && current.destination(package).ok() != Some(vendor_path.as_path())
+        {
+            crate::path_install::remove(&vendor_path)?;
         }
         for path in strings(package.field("bin")) {
             let path = crate::paths::relative(path)?;

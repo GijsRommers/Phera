@@ -2,13 +2,18 @@
 //!
 //! `Composer\InstalledVersions::getPrettyVersion('psr/log')` works under plain PHP.
 
-use crate::{Lock, Options, Package, Project, php};
+use crate::{InstallPaths, Lock, Options, Package, Project, php};
 use anyhow::Result;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::{fs, path::Path};
 
-pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result<()> {
+pub(crate) fn write(
+    project: &Project,
+    lock: &Lock,
+    options: &Options,
+    paths: &InstallPaths,
+) -> Result<()> {
     project.validate_output_paths()?;
     let vendor = project.vendor_dir()?;
     let directory = vendor.join("composer");
@@ -43,7 +48,7 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
             value["install-path"] = if package.kind() == "metapackage" {
                 Value::Null
             } else {
-                relative_install_path(&directory, &package.install_path(&vendor)?).into()
+                relative_install_path(&directory, &paths.installed(package)?).into()
             };
             Ok(value)
         })
@@ -165,7 +170,7 @@ pub(crate) fn write(project: &Project, lock: &Lock, options: &Options) -> Result
             Some(if package.kind() == "metapackage" {
                 "null".into()
             } else {
-                let relative = relative_install_path(&directory, &package.install_path(&vendor)?);
+                let relative = relative_install_path(&directory, &paths.installed(package)?);
                 format!("__DIR__ . {}", php::quote(&format!("/{relative}")))
             })
         } else {

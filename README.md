@@ -61,8 +61,9 @@ from a warm cache, `--no-dev` to omit development dependencies, or
 and current gaps.
 
 When `config.allow-plugins` enables Symfony Runtime, the installer also
-generates its runtime bootstrap from the installed package. Use `--no-plugins`
-to skip native plugin hooks.
+generates its runtime bootstrap from the installed package. Approved Drupal
+and WordPress installers use the project's custom package paths.
+Use `--no-plugins` to skip native plugin hooks.
 
 ### Serving a site
 
