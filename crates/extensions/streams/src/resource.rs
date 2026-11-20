@@ -61,12 +61,16 @@ pub fn stream_argument<'a>(
             "{function}(): Argument {argument} must be an open stream resource"
         )));
     }
-    // Directory handles have the same PHP resource kind but different operations.
-    with_stream(resource, |_| ()).map_err(|_| {
-        NativeError::type_error(format!(
+    // Directory handles share the PHP label, but have different operations.
+    let valid = resource.data.borrow().as_ref().is_some_and(|data| {
+        data.is::<Stream>()
+            || data.is::<crate::user_resource::UserHandle<crate::user_file::UserFile>>()
+    });
+    if !valid {
+        return Err(NativeError::type_error(format!(
             "{function}(): Argument {argument} must be an open stream resource"
-        ))
-    })?;
+        )));
+    }
     Ok(resource)
 }
 

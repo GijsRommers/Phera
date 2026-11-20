@@ -30,18 +30,11 @@
 use std::collections::HashMap;
 
 use iconv_native::ConvertError;
+pub(super) use phera_extension_api::IconvFailure as Failure;
 use phera_extension_api::{Context, NativeError};
 
 use crate::codec::{self, BAD};
 use crate::encoding::{ByteOrder, Encoding, Family, read_u32};
-
-/// Why a conversion failed, as PHP reports it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Failure {
-    UnknownConversion,
-    IncompleteCharacter,
-    IllegalCharacter,
-}
 
 /// The code points iconv works through, which every platform converts to
 /// and from.

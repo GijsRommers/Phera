@@ -53,6 +53,7 @@ impl NativeIterator for Cursor {
     fn read_input<'a>(
         &'a mut self,
         context: &'a mut dyn Context,
+        _: IteratorStep,
     ) -> LocalFuture<'a, Result<(), NativeError>> {
         Box::pin(async move {
             if !super::stream::load(context, &self.object, false, "mysqli_result::fetch_assoc")
