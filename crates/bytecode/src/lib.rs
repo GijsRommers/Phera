@@ -36,6 +36,7 @@
 
 mod builtin;
 mod class;
+mod code;
 mod display;
 mod function;
 mod ids;
@@ -54,6 +55,7 @@ pub use class::{
     MethodDeclaration, PropertyDeclaration, PropertyHook, PropertyHooks, TRAIT_CLASS_NAME,
     TraitAdaptation, TraitUse, Visibility,
 };
+pub use code::Code;
 pub use function::{ArgumentLayout, Function, Handler, Parameter, Path, PathBase, Step};
 pub use ids::{
     ClassId, ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId, Target, TypeId,

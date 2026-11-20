@@ -110,7 +110,7 @@ impl Vm {
             .ok_or_else(|| internal_error!("namespace call frame"))?;
         let site = frame
             .cache()
-            .site(frame.function_id(), frame.ip())
+            .site(frame.code.facts(frame.frame.function), frame.ip())
             .ok_or_else(|| internal_error!("namespace call site"))?;
         if let CachedSite::Function(callee) = &*site.borrow() {
             return Ok((**callee).clone());

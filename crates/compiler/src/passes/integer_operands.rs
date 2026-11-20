@@ -142,11 +142,21 @@ pub(crate) fn dead_after(function: &Function, index: usize, register: phera_byte
                         break;
                     }
                 }
-                Instruction::Echo { src } | Instruction::SendValue { src } => {
+                Instruction::Echo { src }
+                | Instruction::SendValue { src }
+                | Instruction::SendLocal { local: src } => {
                     if src == register {
                         return false;
                     }
                 }
+                Instruction::JumpIfNull { value, target }
+                | Instruction::JumpIfNotNull { value, target } => {
+                    if value == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::ReturnNull => break,
                 Instruction::AssignOp { src, local, .. } => {
                     if src == register || local == register {
                         return false;
