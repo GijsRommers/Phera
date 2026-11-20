@@ -296,6 +296,27 @@ impl Vm {
         else {
             return Ok(());
         };
+        self.prepare_site_for(place, name)
+    }
+
+    /// Records the property's site for a compound assignment of a declared
+    /// property or of an element held in one (`$this->count += $n`,
+    /// `$totals->sums[$key] -= $amount`), as [`Vm::prepare_element_site`]
+    /// does for reads, so that the loop can make the next one itself (see
+    /// `calls::fast_compound_assignments`).
+    pub(crate) fn prepare_update_site(&mut self, place: &AccessPath) -> Result<(), NativeError> {
+        let mut steps = place.steps()?;
+        let Some(Step::Property(name)) = steps.next() else {
+            return Ok(());
+        };
+        if !matches!(steps.next(), None | Some(Step::Index(_))) {
+            return Ok(());
+        }
+        self.prepare_site_for(place, name)
+    }
+
+    /// The site of property `name` of the object at the start of `place`.
+    fn prepare_site_for(&mut self, place: &AccessPath, name: NameId) -> Result<(), NativeError> {
         let object = match place.base()? {
             phera_bytecode::PathBase::This { .. } => {
                 self.current().and_then(|frame| frame.this().cloned())

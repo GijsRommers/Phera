@@ -97,6 +97,9 @@ impl Machine<'_> {
             Instruction::AssignPathFromLocal { path, src, dst } => {
                 self.assign_element::<GUARDED>(position, path, (src, Some(dst)))
             }
+            Instruction::AssignOpPath { op, dst, path, src } => {
+                self.assign_operation::<GUARDED>(position, (op, dst), path, src)
+            }
             Instruction::IncDecPath { mode, dst, path } => {
                 self.increment_property::<GUARDED>(position, (mode, dst), path)
             }

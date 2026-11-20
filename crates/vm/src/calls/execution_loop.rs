@@ -380,6 +380,7 @@ impl Machine<'_> {
             | Instruction::Fetch { .. }
             | Instruction::AssignPath { .. }
             | Instruction::AssignPathFromLocal { .. }
+            | Instruction::AssignOpPath { .. }
             | Instruction::IncDecPath { .. }
             | Instruction::InitCall { .. }
             | Instruction::FetchClassName { .. }

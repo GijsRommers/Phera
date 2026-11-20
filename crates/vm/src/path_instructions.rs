@@ -99,6 +99,9 @@ impl Vm {
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?
         {
+            // The loop updates the next such property itself (see
+            // `calls::fast_compound_assignments`).
+            self.prepare_update_site(&place)?;
             return Ok(Some(BatchExit::Instruction(Instruction::AssignOpPath {
                 op: operator,
                 dst: destination,

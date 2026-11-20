@@ -28,6 +28,7 @@ pub(crate) mod execution_loop;
 mod fast_arguments;
 mod fast_calls;
 mod fast_class_names;
+mod fast_compound_assignments;
 mod fast_dimensions;
 mod fast_element_writes;
 mod fast_foreach;

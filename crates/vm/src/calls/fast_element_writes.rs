@@ -26,13 +26,13 @@ use crate::element_writes::{MOST_KEYS, writable, write};
 use crate::fast::store;
 
 /// The keys of a write, read from their registers.
-struct Keys {
+pub(super) struct Keys {
     keys: [ArrayKey; MOST_KEYS],
     count: usize,
 }
 
 impl Keys {
-    fn as_slice(&self) -> &[ArrayKey] {
+    pub(super) fn as_slice(&self) -> &[ArrayKey] {
         self.keys.get(..self.count).unwrap_or_default()
     }
 }
@@ -109,7 +109,7 @@ impl Machine<'_> {
 
     /// The keys of `steps`, when they are one to three `[$key]` steps with
     /// integer or string keys.
-    fn write_keys(&self, position: Position, steps: &[PathStep]) -> Option<Keys> {
+    pub(super) fn write_keys(&self, position: Position, steps: &[PathStep]) -> Option<Keys> {
         if steps.is_empty() || steps.len() > MOST_KEYS {
             return None;
         }
