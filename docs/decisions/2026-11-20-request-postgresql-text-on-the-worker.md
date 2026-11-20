@@ -25,8 +25,7 @@ statements, streaming results, portals, COPY, notices, notifications and
 error fields. Combine Parse, Bind, Describe, Execute and Sync wherever PHP's
 observable prepare and execution behavior permits it. Preserve cursors and
 existing refusal cases. A request interrupted with messages in flight
-closes the socket. An explicit protocol cancellation uses a separate
-connection and its backend cancellation key.
+closes the socket, as it did with the pool's interrupted-connection policy.
 
 Reuse Phera's TLS policy. A DSN that requires TLS fails when encryption is
 unavailable. Use the protocol crate to verify the SCRAM server-final

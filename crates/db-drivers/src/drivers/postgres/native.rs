@@ -4,20 +4,15 @@ mod copy;
 mod extended;
 mod lob_file;
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::collections::HashSet;
 
-use futures_util::TryStreamExt;
-use tokio_postgres::types::Type;
-use tokio_postgres::{Notification, SimpleQueryMessage};
+use postgres_protocol::message::backend::Message;
 
-use super::{
-    Postgres, error,
-    observations::{Header, Observations},
-};
+use super::wire::rows::Cells;
+use super::{Postgres, affected, values, wire};
 use crate::drivers::connection_error;
 use crate::errors::DbError;
+use crate::parameters::BoundValue;
 
 #[derive(Clone)]
 pub struct NativeColumn {
@@ -30,17 +25,7 @@ pub struct NativeColumn {
 
 impl NativeColumn {
     pub fn kind(oid: u32) -> String {
-        Type::from_oid(oid).map_or_else(|| oid.to_string(), |kind| kind.name().into())
-    }
-
-    fn unknown(name: &str) -> Self {
-        Self {
-            name: name.to_owned(),
-            oid: 0,
-            table: 0,
-            size: -1,
-            kind: String::new(),
-        }
+        values::type_name(oid)
     }
 }
 
@@ -70,45 +55,26 @@ impl NativeResult {
 
 pub type NativeSequence = Vec<NativeResult>;
 
+#[derive(Default)]
 pub(super) struct State {
-    observations: Arc<Observations>,
-    statements: HashMap<String, extended::NativeStatement>,
-    copy: Option<std::pin::Pin<Box<tokio_postgres::CopyInSink<bytes::Bytes>>>>,
+    statements: HashSet<String>,
+    copy: bool,
 }
 
 impl State {
-    pub fn new(observations: Arc<Observations>) -> Self {
-        Self {
-            observations,
-            statements: HashMap::new(),
-            copy: None,
-        }
-    }
-
     pub fn reset(&mut self) {
         self.statements.clear();
-        self.copy = None;
-        self.observations.reset();
+        self.copy = false;
+    }
+
+    pub fn copying(&self) -> bool {
+        self.copy
     }
 }
 
 impl Postgres {
     pub fn can_cancel_native_query(sql: &str) -> bool {
         !copy::is_copy_from_stdin(sql)
-    }
-
-    async fn recover_capture(&self, observations: &Observations) -> Result<(), DbError> {
-        if observations.is_capturing() {
-            // A dropped caller no longer receives its rows. The connection
-            // still drains them. A barrier keeps its headers out of the next
-            // caller's result, including after a failed transaction.
-            self.client
-                .batch_execute("")
-                .await
-                .map_err(|cause| error(cause, ""))?;
-            observations.finish();
-        }
-        Ok(())
     }
 
     fn native(&self) -> Result<&State, DbError> {
@@ -124,28 +90,30 @@ impl Postgres {
     }
 
     pub fn pid(&self) -> i32 {
-        self.native
-            .as_ref()
-            .map_or(0, |state| state.observations.pid())
+        self.client.pid()
     }
 
-    pub fn notices(&self, clear: bool) -> Vec<String> {
-        self.native
-            .as_ref()
-            .map_or_else(Vec::new, |state| state.observations.notices(clear))
+    pub fn notices(&mut self, clear: bool) -> Vec<String> {
+        self.client.notices(clear)
     }
 
-    pub fn notification(&self) -> Option<Notification> {
-        self.native
-            .as_ref()
-            .and_then(|state| state.observations.notification())
+    pub async fn notification(&mut self) -> Result<Option<wire::Notification>, DbError> {
+        self.consume_input().await?;
+        Ok(self.client.notification())
+    }
+
+    pub async fn consume_input(&mut self) -> Result<(), DbError> {
+        if self.lazy.is_none() && !self.native()?.copy {
+            self.client.consume_input().await?;
+        }
+        Ok(())
     }
 
     pub fn transaction_status(&self) -> i64 {
         if self.is_broken() {
             return 4;
         }
-        match self.transaction.load(Ordering::Acquire) {
+        match self.client.status() {
             b'T' => 2,
             b'E' => 3,
             _ => 0,
@@ -153,11 +121,9 @@ impl Postgres {
     }
 
     pub async fn native_query(&mut self, sql: &str) -> Result<NativeSequence, DbError> {
-        if self.native()?.copy.is_some() {
+        if self.native()?.copy {
             return Err(DbError::general("COPY is in progress"));
         }
-        let observations = self.native()?.observations.clone();
-        self.recover_capture(&observations).await?;
         if !Self::can_cancel_native_query(sql) {
             self.begin_copy(sql).await?;
             return Ok(vec![NativeResult {
@@ -165,77 +131,113 @@ impl Postgres {
                 ..NativeResult::default()
             }]);
         }
-        observations.capture();
-        let result = self.read_simple_query(sql, &observations).await;
-        observations.finish();
-        match result {
-            Ok(results) => Ok(results),
-            Err(error) => Ok(vec![NativeResult {
-                error: Some(error),
-                ..NativeResult::default()
-            }]),
-        }
+        self.client.simple(sql).await?;
+        self.collect_native(sql, false).await
     }
 
-    async fn read_simple_query(
-        &self,
+    async fn collect_native(
+        &mut self,
         sql: &str,
-        observations: &Observations,
+        context: bool,
     ) -> Result<NativeSequence, DbError> {
-        let response = self
-            .client
-            .simple_query_raw(sql)
-            .await
-            .map_err(|cause| error(cause, sql))?;
-        let mut response = std::pin::pin!(response);
-        let mut finished = Vec::new();
+        let mut completed = Vec::new();
         let mut result = NativeResult::default();
-        while let Some(message) = response
-            .try_next()
-            .await
-            .map_err(|cause| error(cause, sql))?
-        {
-            match message {
-                SimpleQueryMessage::RowDescription(columns) => {
-                    result.columns = match observations.next() {
-                        Some(Header::Columns(columns)) => columns,
-                        _ => columns
-                            .iter()
-                            .map(|column| NativeColumn::unknown(column.name()))
-                            .collect(),
-                    };
+        loop {
+            match self.client.next().await? {
+                Message::RowDescription(body) => {
+                    result.columns = wire::rows::fields(&body)
+                        .map_err(|error| self.client.invalid(error))?
+                        .into_iter()
+                        .map(|field| NativeColumn {
+                            name: field.name,
+                            oid: field.oid,
+                            table: field.table,
+                            size: field.size,
+                            kind: NativeColumn::kind(field.oid),
+                        })
+                        .collect();
                 }
-                SimpleQueryMessage::Row(row) => {
-                    let mut values = Vec::with_capacity(row.len());
-                    for index in 0..row.len() {
-                        let text = row.try_get(index).map_err(|e| error(e, sql))?;
-                        values.push(text.map(|text| text.as_bytes().to_vec()));
+                Message::DataRow(body) => {
+                    let mut cells = Cells::new(&body);
+                    if cells.len() != result.columns.len() {
+                        return Err(self
+                            .client
+                            .invalid("PostgreSQL row width differs from its description"));
                     }
-                    result.values.push(values);
+                    let row = (0..cells.len())
+                        .map(|_| cells.next().map(|value| value.map(<[u8]>::to_vec)))
+                        .collect::<Result<_, _>>()
+                        .map_err(|error| self.client.invalid(error))?;
+                    cells.finish().map_err(|error| self.client.invalid(error))?;
+                    result.values.push(row);
                 }
-                SimpleQueryMessage::CommandComplete(count) => {
-                    result.affected = count;
-                    result.command = match observations.next() {
-                        Some(Header::Command(tag)) => tag,
-                        _ => String::new(),
-                    };
-                    finished.push(std::mem::take(&mut result));
+                Message::CommandComplete(command) => {
+                    let tag = command.tag().map_err(|error| self.client.invalid(error))?;
+                    result.affected = affected(tag);
+                    result.command = tag.into();
+                    completed.push(std::mem::take(&mut result));
                 }
-                _ => {}
+                Message::EmptyQueryResponse => completed.push(NativeResult::default()),
+                Message::ReadyForQuery(_) => {
+                    if completed.is_empty() {
+                        completed.push(result);
+                    }
+                    return Ok(completed);
+                }
+                Message::ErrorResponse(error) => {
+                    let error = self.client.failure(error, sql, context).await;
+                    completed.push(NativeResult {
+                        error: Some(error),
+                        ..NativeResult::default()
+                    });
+                    return Ok(completed);
+                }
+                Message::ParseComplete
+                | Message::BindComplete
+                | Message::CloseComplete
+                | Message::NoData => {}
+                _ => return Err(self.client.invalid("unexpected PostgreSQL result response")),
             }
         }
-        if finished.is_empty() {
-            finished.push(result);
-        }
-        Ok(finished)
     }
 
-    pub async fn parameter_status(&self, name: &str) -> Result<Option<String>, DbError> {
+    /// A one-shot statement used by internal catalog and large-object calls.
+    pub(super) async fn single_row(
+        &mut self,
+        sql: &str,
+        params: &[BoundValue],
+    ) -> Result<Vec<Option<Vec<u8>>>, DbError> {
+        self.client.extended("", Some(sql), params, &[]).await?;
+        let mut result = self
+            .collect_native(sql, false)
+            .await?
+            .pop()
+            .unwrap_or_default();
+        if let Some(error) = result.error {
+            return Err(error);
+        }
+        if result.values.len() != 1 {
+            return Err(connection_error(
+                "PostgreSQL did not return exactly one row",
+            ));
+        }
+        Ok(result.values.pop().unwrap_or_default())
+    }
+
+    pub async fn parameter_status(&mut self, name: &str) -> Result<Option<String>, DbError> {
+        if let Some(value) = self.client.parameter(name) {
+            return Ok(Some(value.to_owned()));
+        }
         let row = self
-            .client
-            .query_one("SELECT pg_catalog.current_setting($1, true)", &[&name])
-            .await
-            .map_err(|cause| error(cause, ""))?;
-        row.try_get(0).map_err(|cause| error(cause, ""))
+            .single_row(
+                "SELECT pg_catalog.current_setting($1, true)",
+                &[BoundValue::String(name.as_bytes().to_vec())],
+            )
+            .await?;
+        Ok(row
+            .into_iter()
+            .next()
+            .flatten()
+            .map(|value| String::from_utf8_lossy(&value).into_owned()))
     }
 }

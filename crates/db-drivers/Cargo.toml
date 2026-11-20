@@ -10,10 +10,9 @@ phera-sqlite.workspace = true
 phera-io-pool.workspace = true
 phera-extension-api.workspace = true
 tokio.workspace = true
-tokio-postgres.workspace = true
+postgres-types.workspace = true
 mysql_async.workspace = true
 bytes.workspace = true
-chrono.workspace = true
 rustls.workspace = true
 tokio-rustls.workspace = true
 futures-core.workspace = true
@@ -24,7 +23,9 @@ percent-encoding.workspace = true
 url.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
 rcgen.workspace = true
+ring = "0.17"
 tempfile.workspace = true
 rsa.workspace = true
 sha1_011.workspace = true

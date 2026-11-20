@@ -2,30 +2,19 @@
 //! A server that answers `N` can still accept the same socket in plaintext.
 
 use std::io;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU8;
 use std::time::Duration;
 
 use tokio::net::{TcpStream, UnixStream};
-use tokio_postgres::{Client, Config, Connection, NoTls, SimpleQueryMessage, tls::NoTlsStream};
 
-use super::stream::ObservedStream;
+use super::stream::Socket;
 use super::tls::{Mode, negotiate};
-use super::{IDLE, Postgres, error};
-use super::{native, observations::Observations};
+use super::wire::{Client, Transport, startup};
+use super::{Postgres, native};
 use crate::drivers::connection_error;
 use crate::dsn::Dsn;
 use crate::errors::DbError;
 
-type Connected = (Client, Connection<ObservedStream, NoTlsStream>);
-
-pub(super) async fn open(
-    dsn: &Dsn,
-    user: &str,
-    password: &str,
-    status: Arc<AtomicU8>,
-    observations: Option<Arc<Observations>>,
-) -> Result<Connected, DbError> {
+async fn open(dsn: &Dsn, user: &str, password: &str) -> Result<Client, DbError> {
     let system_roots = dsn.get("sslrootcert", "") == "system";
     let default_mode = if system_roots {
         "verify-full"
@@ -42,53 +31,40 @@ pub(super) async fn open(
     }
     let host = dsn.get("host", "localhost");
     let port = dsn.port()?;
-    let mut config = Config::new();
-    config
-        .dbname(dsn.get("dbname", user))
-        .user(user)
-        .password(password)
-        .ssl_mode(tokio_postgres::config::SslMode::Disable);
-    if let Some(options) = dsn.fields.get("options") {
-        config.options(options);
-    }
-    if let Some(name) = dsn.fields.get("application_name") {
-        config.application_name(name);
+    let mut parameters = vec![
+        ("database", dsn.get("dbname", user)),
+        ("user", user),
+        ("client_encoding", "UTF8"),
+    ];
+    for key in ["options", "application_name"] {
+        if let Some(value) = dsn.fields.get(key) {
+            parameters.push((key, value));
+        }
     }
     let connect = async {
         if host.starts_with('/') {
-            let path = format!("{host}/.s.PGSQL.{port}");
-            let socket = UnixStream::connect(&path).await.map_err(connection_error)?;
-            return startup(
-                &config,
-                ObservedStream::new(Box::new(socket), status, observations),
-                host,
-                port,
-            )
-            .await
-            .map_err(|(error, _)| error);
-        }
-        let address = dsn.get("hostaddr", host);
-        let socket = tcp(address, port).await?;
-        let socket = negotiate(socket, dsn, host, port, mode).await?;
-        match startup(
-            &config,
-            ObservedStream::new(socket, status.clone(), observations.clone()),
-            host,
-            port,
-        )
-        .await
-        {
-            Err((_, true)) if mode == Mode::Allow => {
-                let socket = tcp(address, port).await?;
-                let socket = negotiate(socket, dsn, host, port, Mode::Require).await?;
-                startup(
-                    &config,
-                    ObservedStream::new(socket, status, observations),
+            if matches!(mode, Mode::Require | Mode::VerifyCa | Mode::VerifyFull) {
+                return Err(failed(
                     host,
                     port,
-                )
+                    "SSL is unavailable over a Unix-domain socket",
+                ));
+            }
+            let path = format!("{host}/.s.PGSQL.{port}");
+            let socket = UnixStream::connect(&path).await.map_err(connection_error)?;
+            return start(Box::new(socket), &parameters, user, password, host, port)
                 .await
-                .map_err(|(error, _)| error)
+                .map_err(|(error, _)| error);
+        }
+        let address = dsn.get("hostaddr", host);
+        let socket = negotiate(tcp(address, port).await?, dsn, host, port, mode).await?;
+        match start(socket, &parameters, user, password, host, port).await {
+            Err((_, true)) if mode == Mode::Allow => {
+                let socket =
+                    negotiate(tcp(address, port).await?, dsn, host, port, Mode::Require).await?;
+                start(socket, &parameters, user, password, host, port)
+                    .await
+                    .map_err(|(error, _)| error)
             }
             result => result.map_err(|(error, _)| error),
         }
@@ -112,19 +88,20 @@ async fn tcp(address: &str, port: u16) -> Result<TcpStream, DbError> {
     Ok(socket)
 }
 
-async fn startup(
-    config: &Config,
-    stream: ObservedStream,
+async fn start(
+    socket: Box<dyn Socket>,
+    parameters: &[(&str, &str)],
+    user: &str,
+    password: &str,
     host: &str,
     port: u16,
-) -> Result<Connected, (DbError, bool)> {
-    config.connect_raw(stream, NoTls).await.map_err(|error| {
-        let detail = match error.as_db_error() {
-            Some(database) => format!("{}:  {}", database.severity(), database.message()),
-            None => error.to_string(),
-        };
-        (failed(host, port, detail), error.as_db_error().is_some())
-    })
+) -> Result<Client, (DbError, bool)> {
+    let mut transport = Transport::new(socket);
+    match startup::start(&mut transport, parameters, user, password.as_bytes()).await {
+        Ok(session) => Ok(Client::new(transport, session)),
+        Err(startup::StartError::Transport(error)) => Err((failed(host, port, error), false)),
+        Err(startup::StartError::Server(error)) => Err((failed(host, port, error.detail), true)),
+    }
 }
 
 pub(super) fn failed(host: &str, port: u16, detail: impl std::fmt::Display) -> DbError {
@@ -181,56 +158,24 @@ impl Postgres {
                 Ok(())
             }
             Err(error) => {
-                self.task.abort();
-                let _ = (&mut self.task).await;
+                self.client.invalid("PostgreSQL reconnect failed");
                 Err(error)
             }
         }
     }
 
     pub async fn connect(dsn: &Dsn, user: &str, password: &str) -> Result<Self, DbError> {
-        let transaction = Arc::new(AtomicU8::new(IDLE));
-        let observations = dsn
-            .options
-            .postgres_native
-            .then(|| Arc::new(Observations::default()));
-        let (client, connection) = open(
-            dsn,
-            user,
-            password,
-            transaction.clone(),
-            observations.clone(),
-        )
-        .await?;
-        let native = observations
-            .as_ref()
-            .map(|observations| native::State::new(observations.clone()));
-        let task = tokio::spawn(async move {
-            if let Some(observations) = observations {
-                Observations::listen(connection, &observations).await;
-            } else {
-                let _ = connection.await;
-            }
-        });
-        let mut driver = Self {
+        let client = open(dsn, user, password).await?;
+        let version = client
+            .parameter("server_version")
+            .unwrap_or_default()
+            .to_owned();
+        Ok(Self {
             client,
-            task,
-            version: String::new(),
-            transaction,
-            retire: false,
+            version,
             lazy: None,
-            native,
-        };
-        let messages = driver
-            .client
-            .simple_query("SHOW server_version")
-            .await
-            .map_err(|e| error(e, "SHOW server_version"))?;
-        for message in messages {
-            if let SimpleQueryMessage::Row(row) = message {
-                driver.version = row.get(0).unwrap_or_default().into();
-            }
-        }
-        Ok(driver)
+            native: dsn.options.postgres_native.then(native::State::default),
+            statements: Vec::new(),
+        })
     }
 }

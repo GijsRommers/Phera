@@ -1,8 +1,8 @@
 # PDO in Phera
 
 PHP's PDO with its PostgreSQL (`pgsql:`), MySQL (`mysql:`) and SQLite
-(`sqlite:`) drivers, written against `tokio-postgres`, `mysql_async` and
-`crates/sqlite`:
+(`sqlite:`) drivers. PostgreSQL uses Phera's `postgres-protocol` client,
+MySQL uses `mysql_async` and SQLite uses `crates/sqlite`.
 
 ```php
 $pdo = new PDO('pgsql:host=127.0.0.1;dbname=app', $user, $password);
@@ -30,14 +30,12 @@ connection options and credentials, including TLS settings.
 
 A PDO object borrows one connection for itself; its statements keep it
 borrowed after the PDO variable is gone. When the last of them is freed, the
-connection is reset in the background and lent again: PostgreSQL gets
-`ROLLBACK` and `DISCARD ALL`; MySQL gets its reset-connection command
+connection is reset in the background and lent again: PostgreSQL rolls back
+an open transaction and runs `DISCARD ALL`; MySQL gets its reset-connection command
 (change-user on older servers), then restores the database, charset, initial
 SQL and autocommit settings. A
 connection whose reset fails is closed. A connection interrupted halfway
-through a query is closed and the server rolls back its transaction. A PostgreSQL connection that
-prepared a custom type is closed rather than reset: tokio-postgres keeps
-type statements that `DISCARD ALL` invalidates and its API cannot forget.
+through a query is closed and the server rolls back its transaction.
 
 When every connection is busy, `new PDO` waits in arrival order, and after
 the wait time throws a PDOException that names the pool limit. A worker
@@ -89,7 +87,9 @@ negotiates from ring's default TLS 1.2 and 1.3 suites. The supplied list has
 no effect on negotiation.
 
 `PDO::ATTR_CLIENT_VERSION` identifies Phera's client as `mysql_async 0.37.1`
-or `tokio-postgres 0.7.18`.
+or `phera-postgres 3.0`. The PostgreSQL client accepts messages up to 64 MiB,
+including the four-byte length field, and closes the connection on invalid
+framing.
 
 ## What is not there
 

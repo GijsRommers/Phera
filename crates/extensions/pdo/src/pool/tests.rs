@@ -123,7 +123,7 @@ async fn process_pool_live_contract() {
         drop(second);
         drop(pool);
         if name == "pgsql" {
-            isolation::custom_types_retire_client().await;
+            isolation::reset_removes_custom_types().await;
         }
         threads::slow_query_yields_to_another_connection(name).await;
         let mut other_dsn = dsn(name);

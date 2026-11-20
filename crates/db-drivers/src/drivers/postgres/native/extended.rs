@@ -1,20 +1,8 @@
-//! `pg_query_params($db, 'SELECT $1::integer', ['42'])` binds PostgreSQL text parameters.
+//! `pg_query_params` and `pg_execute` get PostgreSQL's text in their original Bind.
 
-use tokio_postgres::Statement;
-use tokio_postgres::types::ToSql;
-
-use super::{NativeColumn, NativeResult, NativeSequence, Postgres, error};
-use crate::drivers::postgres::observations::Header;
-use crate::drivers::postgres::protocol::TextParameter;
-use crate::drivers::postgres::text;
+use super::{NativeResult, NativeSequence, Postgres};
 use crate::errors::DbError;
 use crate::parameters::BoundValue;
-
-#[derive(Clone)]
-pub(super) struct NativeStatement {
-    statement: Statement,
-    columns: Vec<NativeColumn>,
-}
 
 impl Postgres {
     pub async fn native_prepare(
@@ -22,17 +10,20 @@ impl Postgres {
         name: &str,
         sql: &str,
     ) -> Result<NativeSequence, DbError> {
-        if !name.is_empty() && self.native()?.statements.contains_key(name) {
+        let state = self.native()?;
+        if state.copy {
+            return Err(DbError::general("COPY is in progress"));
+        }
+        if !name.is_empty() && state.statements.contains(name) {
             return Err(DbError {
                 state: "42P05".into(),
                 code: None,
                 detail: format!("ERROR:  prepared statement \"{name}\" already exists"),
             });
         }
-        let statement = self.prepare_native_statement(sql).await?;
-        self.native_mut()?
-            .statements
-            .insert(name.to_string(), statement);
+        self.client.prepare(name, sql).await?;
+        self.finish(sql).await?;
+        self.native_mut()?.statements.insert(name.into());
         Ok(vec![NativeResult {
             command: "PREPARE".into(),
             ..NativeResult::default()
@@ -44,14 +35,7 @@ impl Postgres {
         name: &str,
         params: &[BoundValue],
     ) -> Result<NativeSequence, DbError> {
-        let Some(statement) = self.native()?.statements.get(name).cloned() else {
-            return Err(DbError {
-                state: "26000".into(),
-                code: None,
-                detail: format!("ERROR:  prepared statement \"{name}\" does not exist"),
-            });
-        };
-        self.native_bound(&statement, params).await
+        self.native_bound(name, None, params).await
     }
 
     pub async fn native_query_params(
@@ -59,88 +43,19 @@ impl Postgres {
         sql: &str,
         params: &[BoundValue],
     ) -> Result<NativeSequence, DbError> {
-        let statement = self.prepare_native_statement(sql).await?;
-        self.native_bound(&statement, params).await
-    }
-
-    async fn prepare_native_statement(&mut self, sql: &str) -> Result<NativeStatement, DbError> {
-        let observations = self.native()?.observations.clone();
-        self.recover_capture(&observations).await?;
-        observations.capture();
-        let prepared = self.prepare_query(sql).await;
-        let description = observations
-            .finish()
-            .into_iter()
-            .find_map(|header| match header {
-                Header::Columns(columns) => Some(columns),
-                Header::Command(_) => None,
-            });
-        let statement = prepared?;
-        let columns = description.unwrap_or_else(|| {
-            statement
-                .columns()
-                .iter()
-                .map(|column| {
-                    let kind = column.type_();
-                    NativeColumn {
-                        name: column.name().into(),
-                        table: column.table_oid().unwrap_or(0),
-                        oid: kind.oid(),
-                        size: -1,
-                        kind: kind.name().into(),
-                    }
-                })
-                .collect()
-        });
-        Ok(NativeStatement { statement, columns })
+        self.native_bound("", Some(sql), params).await
     }
 
     async fn native_bound(
         &mut self,
-        prepared: &NativeStatement,
+        name: &str,
+        sql: Option<&str>,
         params: &[BoundValue],
     ) -> Result<NativeSequence, DbError> {
-        let params: Vec<TextParameter> = params.iter().map(TextParameter::from).collect();
-        let refs: Vec<&(dyn ToSql + Sync)> = params
-            .iter()
-            .map(|value| value as &(dyn ToSql + Sync))
-            .collect();
-        let statement = &prepared.statement;
-        let observations = self.native()?.observations.clone();
-        self.recover_capture(&observations).await?;
-        observations.capture();
-        let mut result = NativeResult {
-            columns: prepared.columns.clone(),
-            ..NativeResult::default()
-        };
-        let response = if result.columns.is_empty() {
-            self.client
-                .execute(statement, &refs)
-                .await
-                .map(|affected| (Vec::new(), affected))
-        } else {
-            self.client.query(statement, &refs).await.map(|rows| {
-                let count = rows.len() as u64;
-                (rows, count)
-            })
-        };
-        if let Some(Header::Command(command)) = observations.finish().pop_back() {
-            result.command = command;
+        if self.native()?.copy {
+            return Err(DbError::general("COPY is in progress"));
         }
-        let (rows, affected) = response.map_err(|cause| {
-            let context = cause
-                .as_db_error()
-                .and_then(|e| e.where_())
-                .map(str::to_owned);
-            let mut error = error(cause, "");
-            if let Some(context) = context {
-                error.detail.push_str("\nCONTEXT:  ");
-                error.detail.push_str(&context);
-            }
-            error
-        })?;
-        result.affected = affected;
-        result.values = text::format_native(&self.client, &rows).await?;
-        Ok(vec![result])
+        self.client.extended(name, sql, params, &[]).await?;
+        self.collect_native(sql.unwrap_or(""), true).await
     }
 }
