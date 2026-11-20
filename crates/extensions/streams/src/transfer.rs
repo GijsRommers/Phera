@@ -205,46 +205,65 @@ pub async fn write_unfiltered(
             .map_or(Value::Bool(false), |count| Value::Int(count as i64)));
     }
     let length = data.len();
-    let (wrapper, policy, filtered) = with_stream(resource, |stream| {
-        (
-            stream.wrapper,
-            stream.write_policy(length as u64),
-            stream
+    let (wrapper, action) = with_stream(resource, |stream| {
+        let wrapper = stream.wrapper;
+        let action = if let Some(pipe) = stream.child_pipe.clone() {
+            WriteAction::Pipe(pipe)
+        } else if wrapper == Wrapper::Output
+            && stream
                 .filters
                 .as_ref()
-                .is_some_and(|filters| filters.write.active()),
-        )
-    })?;
-    if filtered && wrapper == Wrapper::Output {
-        let output = with_stream(resource, |stream| {
-            stream.filter_write(data, crate::filters::Flush::No)
-        })?;
-        return match output {
-            Ok(output) => {
-                context.write(&output);
-                Ok(Value::Int(length as i64))
-            }
-            Err(error) => {
-                context.warning(format!("{function}(): {error}"));
-                Ok(Value::Bool(false))
-            }
+                .is_some_and(|filters| filters.write.active())
+        {
+            WriteAction::Output(stream.filter_write(data, crate::filters::Flush::No))
+        } else if wrapper != Wrapper::Output
+            && matches!(
+                stream.write_policy(length as u64),
+                crate::io_policy::IoPolicy::Blocking
+            )
+        {
+            WriteAction::Blocking
+        } else {
+            WriteAction::Done(stream.write(data))
         };
-    }
-    let result = if let Some(pipe) = crate::child_pipe::of(resource)? {
-        crate::child_pipe::bounded(context, resource, pipe.write(resource, data)).await??
-    } else {
-        match policy {
-            crate::io_policy::IoPolicy::Inline => {
-                with_stream(resource, |stream| stream.write(data))?
-            }
-            policy if wrapper != Wrapper::Output => {
-                let data = data.to_vec();
-                operate(resource, policy, move |stream| write_bytes(stream, &data)).await?
-            }
-            _ => with_stream(resource, |stream| stream.write(data))?,
+        (wrapper, action)
+    })?;
+    let result = match action {
+        WriteAction::Pipe(pipe) => {
+            crate::child_pipe::wait_with_execution_limit(context, pipe.write(resource, data))
+                .await??
         }
+        WriteAction::Blocking => {
+            let data = data.to_vec();
+            operate(
+                resource,
+                crate::io_policy::IoPolicy::Blocking,
+                move |stream| write_bytes(stream, &data),
+            )
+            .await?
+        }
+        WriteAction::Output(output) => {
+            return match output {
+                Ok(output) => {
+                    context.write(&output);
+                    Ok(Value::Int(length as i64))
+                }
+                Err(error) => {
+                    context.warning(format!("{function}(): {error}"));
+                    Ok(Value::Bool(false))
+                }
+            };
+        }
+        WriteAction::Done(result) => result,
     };
     finish_write(context, wrapper, data, function, result)
+}
+
+enum WriteAction {
+    Pipe(crate::child_pipe::ChildPipe),
+    Blocking,
+    Output(io::Result<Vec<u8>>),
+    Done(io::Result<usize>),
 }
 
 pub fn finish_write(

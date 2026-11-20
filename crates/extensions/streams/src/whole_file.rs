@@ -88,18 +88,17 @@ fn file_get_contents(
         let offset = args::int(&arguments, 3).unwrap_or(0);
         let use_include = args::bool(&arguments, 1).unwrap_or(false);
         files(context).use_default_context(args::value(&arguments, 2));
-        if let Some(result) = user_contents(
-            context,
-            name,
-            function,
-            use_include,
-            args::value(&arguments, 2),
-            (offset, length),
-            true,
-        )
-        .await?
-        {
-            return Ok(result);
+        if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+            return user_contents(
+                context,
+                (wrapper, name),
+                function,
+                use_include,
+                args::value(&arguments, 2),
+                (offset, length),
+                true,
+            )
+            .await;
         }
         let Some(mut stream) = open(context, function, name, b"rb", use_include).await? else {
             return Ok(Value::Bool(false));
@@ -196,18 +195,18 @@ fn file(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
         }
         let use_path = flags & USE_PATH != 0;
         let use_default = flags & NO_DEFAULT_CONTEXT == 0;
-        let bytes = if let Some(result) = user_contents(
-            context,
-            name,
-            "file",
-            use_path,
-            args::value(&arguments, 2),
-            (0, None),
-            use_default,
-        )
-        .await?
-        {
-            match result {
+        let bytes = if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+            match user_contents(
+                context,
+                (wrapper, name),
+                "file",
+                use_path,
+                args::value(&arguments, 2),
+                (0, None),
+                use_default,
+            )
+            .await?
+            {
                 Value::String(bytes) => bytes,
                 other => return Ok(other),
             }
@@ -276,16 +275,13 @@ async fn collect(
 
 async fn user_contents(
     context: &mut dyn Context,
-    name: &[u8],
+    (wrapper, name): (crate::user_wrappers::UserWrapper, &[u8]),
     function: &str,
     use_include: bool,
     supplied_context: &Value,
     (offset, length): (i64, Option<u64>),
     use_default: bool,
-) -> Result<Option<Value>, NativeError> {
-    let Some(wrapper) = crate::user_wrappers::locate(context, name) else {
-        return Ok(None);
-    };
+) -> NativeResult {
     let flags = if use_include {
         crate::user_wrappers::USE_PATH
     } else {
@@ -307,7 +303,7 @@ async fn user_contents(
     )
     .await?
     else {
-        return Ok(Some(Value::Bool(false)));
+        return Ok(Value::Bool(false));
     };
     files(context).claim_id();
     let result = async {
@@ -329,7 +325,7 @@ async fn user_contents(
     let closed = file.close(context).await;
     let result = result?;
     closed?;
-    Ok(Some(result))
+    Ok(result)
 }
 
 async fn user_passthru(
