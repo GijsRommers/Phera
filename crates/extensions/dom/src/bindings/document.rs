@@ -9,6 +9,7 @@
 mod html_file;
 pub(super) mod io;
 mod node_class;
+mod schema;
 
 use phera_extension_api::{
     ClassEntry, ConstantValue as C, Context, MethodEntry as M, NativeError, NativeResult,
@@ -138,16 +139,16 @@ pub(super) fn register(registry: &mut Registry) {
                         .returning("void"),
                     M::public("validate", &[], |_, _, _| not_supported("validate"))
                         .tentative_return("bool"),
-                    M::public(
+                    M::public_async(
                         "schemaValidate",
                         const { &[FILE, P::new("flags", T::Int).with_default(C::Int(0))] },
-                        |_, _, _| not_supported("schemaValidate"),
+                        schema::file,
                     )
                     .tentative_return("bool"),
-                    M::public(
+                    M::public_async(
                         "schemaValidateSource",
                         const { &[SOURCE, P::new("flags", T::Int).with_default(C::Int(0))] },
-                        |_, _, _| not_supported("schemaValidateSource"),
+                        schema::source,
                     )
                     .tentative_return("bool"),
                     M::public("relaxNGValidate", &[FILE], |_, _, _| {

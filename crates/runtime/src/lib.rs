@@ -21,6 +21,7 @@ mod ini_tests;
 mod native_parameter_tests;
 #[cfg(test)]
 mod native_trace_tests;
+mod platform;
 mod preload;
 #[cfg(test)]
 mod process_oracle_tests;
@@ -45,6 +46,7 @@ use worker_code_cache::{RequestCodeCache, WorkerCodeCache};
 pub use boot::BootReport;
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse};
+pub use phera_extension_api::web_log::flush as flush_web_log;
 pub use phera_vm::OutputSink;
 pub use preload::PreloadSummary;
 pub use snapshots::remembered as snapshot_remembered;
@@ -164,6 +166,9 @@ impl Runtime {
         registry.load(&phera_ext_curl::Curl);
         registry.load(&phera_ext_dom::Libxml);
         registry.load(&phera_ext_dom::Dom);
+        registry.load(&phera_ext_xml::Xml);
+        registry.load(&phera_ext_xmlreader::XmlReader);
+        registry.load(&phera_ext_xmlwriter::XmlWriter);
         registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_intl::Intl);
         registry.load(&phera_ext_json::Json);
@@ -189,6 +194,7 @@ impl Runtime {
         Vm::register_fiber_classes(&mut registry);
         Vm::register_state_forks(&mut registry);
         registry.load(&phera_ext_spl::Spl);
+        registry.load(&phera_ext_simplexml::SimpleXml);
         registry.load(&phera_ext_session::Session);
         adapters::register(&mut registry);
         let mut web_registry = registry.clone();

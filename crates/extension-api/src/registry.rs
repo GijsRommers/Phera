@@ -60,6 +60,7 @@ impl From<&'static str> for ConstantValue {
 /// Built once at startup and then shared, read-only, by every worker thread.
 #[derive(Clone, Default)]
 pub struct Registry {
+    iconv_converter: Option<crate::IconvConverter>,
     /// Every native function, in registration order; a function's
     /// [`NativeId`](crate::NativeId) is its index here.
     functions: Vec<FunctionEntry>,
@@ -90,6 +91,7 @@ pub struct Registry {
     state_forks: HashMap<std::any::TypeId, crate::state::StateFork>,
     /// How a fork copies an open resource, by the resource's kind.
     resource_forks: HashMap<&'static str, ResourceFork>,
+    resource_releases: HashMap<&'static str, ResourceReleaseFn>,
     /// Classes Phera ships written in PHP, by lowercase name: the file name
     /// their code reports and its source.
     bundled_classes: HashMap<String, BundledSource>,
@@ -108,6 +110,11 @@ pub struct BundledSource {
 pub type ResourceFork =
     fn(&dyn std::any::Any, &mut phera_value::Fork<'_>) -> Result<Box<dyn std::any::Any>, String>;
 
+pub type ResourceReleaseFn = for<'a> fn(
+    &'a mut dyn crate::Context,
+    i64,
+) -> crate::LocalFuture<'a, Result<(), crate::NativeError>>;
+
 #[derive(Clone)]
 struct NativeConstant {
     value: ConstantValue,
@@ -118,6 +125,14 @@ struct NativeConstant {
 impl Registry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn set_iconv_converter(&mut self, converter: crate::IconvConverter) {
+        self.iconv_converter = Some(converter);
+    }
+
+    pub fn iconv_converter(&self) -> Option<crate::IconvConverter> {
+        self.iconv_converter
     }
 
     /// Says how a fork of a snapshot gets the request state of type `T`
@@ -147,6 +162,14 @@ impl Registry {
     /// How a fork copies a resource of this kind, if it can.
     pub fn resource_fork(&self, kind: &str) -> Option<ResourceFork> {
         self.resource_forks.get(kind).copied()
+    }
+
+    pub fn register_resource_release(&mut self, kind: &'static str, release: ResourceReleaseFn) {
+        self.resource_releases.insert(kind, release);
+    }
+
+    pub fn resource_release(&self, kind: &str) -> Option<ResourceReleaseFn> {
+        self.resource_releases.get(kind).copied()
     }
 
     /// The registered forks of request state, by type.

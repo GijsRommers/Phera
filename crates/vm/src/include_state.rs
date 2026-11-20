@@ -11,6 +11,7 @@ use crate::{CodeLoader, IncludeCachePolicy, code_table::FunctionIndex};
 pub(crate) struct IncludeState {
     loader: Option<Rc<dyn CodeLoader>>,
     pub(crate) policy: IncludeCachePolicy,
+    pub(crate) stream_wrappers: bool,
     included: IndexSet<String>,
     entry_script: Option<FunctionIndex>,
 }
@@ -20,6 +21,7 @@ impl IncludeState {
         Self {
             loader: None,
             policy: IncludeCachePolicy::default(),
+            stream_wrappers: false,
             included: IndexSet::new(),
             entry_script: None,
         }

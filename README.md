@@ -43,12 +43,64 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | `phera new shop` | Starts a project: a small JSON application, or Symfony's or Laravel's official one |
 | `phera check src` | Type-checks PHP with PHPStan's levels and identifiers; reads a PHPStan baseline |
 | `phera lint src` | Finds unused code and suspicious constructs; `--fix` applies the safe fixes |
+| `phera install` | Installs dependencies from `composer.lock` or resolves `composer.json` |
 | `phera upgrade` | Updates Phera. Use `--check` to see the available version or `--version X` to install a specific release |
 | `phera --dump file.php` | Prints the compiled bytecode |
 
-`phera <command> --help` lists the options. There is no formatter and no test
-runner yet. A package manager (`phera install`) and a step debugger are being
-built; until then packages are installed with Composer.
+`phera <command> --help` lists the options. The built-in package manager reads
+Composer manifests and locks. The formatter, test runner and step debugger
+are still in development.
+
+### Installing dependencies
+
+The package manager is in development. Try
+`phera install --locked --no-scripts` to install the versions in an existing
+Composer lock and generate `vendor/autoload.php`. Use `--offline` to install
+from a warm cache, `--no-dev` to omit development dependencies, or
+`-a` to generate an authoritative class map. See
+[package compatibility](crates/packages/README.md) for the supported commands
+and current gaps.
+
+When `config.allow-plugins` enables Symfony Runtime, the installer also
+generates its runtime bootstrap from the installed package. Approved Drupal
+and WordPress installers use the project's custom package paths.
+Drupal's scaffold hook copies missing entry points and other mapped files.
+The approved Symfony Flex hook can restore missing recipe files and create
+the initial bundle list and dotenv defaults.
+Use `--no-plugins` to skip native plugin hooks.
+In a terminal Phera can save a Composer plugin trust decision to composer.json.
+Use `--no-interaction` to require a decision already present in the project.
+Symfony console hooks run on Phera. The stock Symfony webapp's cache warmup
+still needs runtime fixes. See the
+[webapp test results](crates/packages/tests/DIFFERENCES.md#symfony-webapp-cache-failures).
+
+`phera new` fetches official framework templates through the package manager.
+Composer is the fallback when the native installer refuses a template or its
+dependency requirements. Use `--no-install` to fetch just the starter files.
+
+Use `phera update vendor/package` to update selected dependencies, or
+`--dry-run` to see what would change. `-W` also unlocks their dependencies.
+`phera update --lock` refreshes the content hash without resolving.
+`phera add` (also `phera require`) and `phera remove` accept several packages.
+
+`phera audit` checks installed packages against Packagist security advisories.
+Use `--locked` for composer.lock, `--no-dev` for production packages, and
+`--format json` for automation. Put reviewed advisory IDs in
+`config.audit.ignore` in composer.json. Installs and updates print a
+short advisory summary online unless you pass `--no-audit`.
+
+Projects can use Packagist, Composer, Git, path and artifact repositories.
+Git over HTTPS and SSH uses the system client. Put repository credentials in
+`auth.json` or `COMPOSER_AUTH`, keyed by the host that receives them.
+
+Use `phera show`, `phera licenses`, and `phera validate` to inspect an
+installation. `phera why-not vendor/package version` explains locked
+constraints, and `phera outdated --all` also includes transitive dependencies.
+`phera run-script name` runs a composer.json script. `phera run name` accepts
+the same script name when it is neither an existing file nor a PHP path.
+`phera exec name` runs a project binary from vendor/bin.
+The installer reports package progress in a terminal and prints elapsed time
+when it finishes.
 
 ### Serving a site
 
@@ -56,6 +108,10 @@ Run `phera serve public` to serve a document root. PHP diagnostics, including
 fatal backtraces, go to the server log by default. Use `phera serve --dev public`
 to display diagnostics in responses and check PHP files on each request during
 local development.
+
+The web SAPI queues stderr diagnostics and `error_log()` messages. When the
+queue fills or a record exceeds 64 KiB, it drops the record so the request can
+finish. Explicit file destinations keep their file write behavior.
 
 `--request-read-timeout SECONDS` sets the initial time budget for receiving
 headers and the body. It defaults to 60 seconds and gains one second for every
@@ -89,7 +145,25 @@ PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.
 
+Register an application stream wrapper with
+`stream_wrapper_register('virtual', VirtualFile::class)`. The registration
+belongs to the current request. `fopen()`, `file_get_contents()`, and
+`file_put_contents()` can use paths such as `virtual://report`. An included wrapper URL is resolved
+by the application during the current request.
+
+Wrapper and filter registrations made during a snapshot boot carry over to
+each fork. Open application wrapper handles and attached filters must be
+created after the snapshot.
+
+Use `php://filter` or `stream_filter_append()` to transform a stream.
+Register PHP filters with `stream_filter_register()` and combine them with
+built-in filters on native streams or application wrappers. Phera limits
+chains to 16 stages and intermediate buckets to 8 MiB.
+
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
+Legacy `DOMDocument` supports local XSD validation for common content models,
+including Symfony's service configuration. Complex type derivation and XSD
+identity constraints remain unsupported.
 
 - Documents and elements include `Dom\Document`, `Dom\HTMLDocument`,
   `Dom\XMLDocument`, `Dom\Element`, `Dom\HTMLElement`, `Dom\Attr`.
@@ -100,6 +174,12 @@ Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 - Collections and queries include `Dom\NodeList`, `Dom\NamedNodeMap`,
   `Dom\DtdNamedNodeMap`, `Dom\HTMLCollection`, `Dom\TokenList`, `Dom\XPath`.
 - `Dom\ParentNode` and `Dom\ChildNode` expose their shared operations.
+
+The XML extensions include `XMLWriter` for memory and URI output,
+`SimpleXMLElement` and `SimpleXMLIterator` for XML and DOM interoperability,
+`XMLReader` for forward traversal, and `XMLParser` for XML events.
+XML inputs use bounded entity expansion and keep external entity declarations inert.
+XMLReader schema validation remains incomplete.
 
 Named arguments to built-ins use PHP’s declared defaults for skipped parameters.
 For example, `json_decode($json, flags: JSON_THROW_ON_ERROR)` uses the default
@@ -141,7 +221,6 @@ read, written, sought, truncated and unlinked in the current transaction.
 Native function return types are visible through reflection. Compatibility
 testing is in progress. MySQL LOCAL INFILE is disabled.
 
-In progress: SimpleXML, XMLReader, XMLWriter.
 Not started: gd, fileinfo, zip, sockets.
 
 ### Sodium

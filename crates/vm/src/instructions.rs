@@ -270,18 +270,28 @@ impl Vm {
                 binding,
             } => self.make_closure(dst, function, binding)?,
             I::NewArray { dst, .. } => self.set(dst, Value::Array(PhpArray::new().into())),
-            I::ArrayPush { array, src } | I::ArrayPushReference { array, src } => {
-                self.array_write(array, None, src, ArrayWrite::Element)?
+            I::ArrayPush { array, src } => {
+                self.array_write(array, None, src, ArrayWrite::Element)?;
+            }
+            I::ArrayPushReference { array, src } => {
+                self.array_write(array, None, src, ArrayWrite::Reference)?;
             }
             I::ArraySet { array, key, src } | I::ArraySetReference { array, key, src } => {
-                self.array_write(array, Some(key), src, ArrayWrite::Element)?
+                let mode = if matches!(instruction, I::ArraySetReference { .. }) {
+                    ArrayWrite::Reference
+                } else {
+                    ArrayWrite::Element
+                };
+                if !self.array_write(array, Some(key), src, mode)? {
+                    return Ok(Some(BatchExit::Instruction(instruction)));
+                }
             }
             I::ArraySpread { array, src } => {
                 if matches!(&*self.operand(src), Value::Object(object) if object.class.is_traversable())
                 {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
-                self.array_write(array, None, src, ArrayWrite::Spread)?
+                self.array_write(array, None, src, ArrayWrite::Spread)?;
             }
 
             I::FetchConstant { dst, constant } => self.fetch_constant(dst, constant)?,

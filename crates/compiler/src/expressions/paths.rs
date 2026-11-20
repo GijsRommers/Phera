@@ -1,5 +1,6 @@
 //! Mixed array and property paths preserve evaluation order and shared object identity.
 
+use super::operand_order::is_superglobal;
 use crate::ir::PathStep as Step;
 use crate::ir::{Constant, Instruction, Place, PlaceScope};
 use crate::{CompileError, Compiler};
@@ -203,24 +204,10 @@ impl Compiler<'_> {
             ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name == "GLOBALS" => {
                 (self.allocate_register()?, PlaceScope::Globals)
             }
-            ast::ExpressionKind::Variable(ast::Variable::Named(name))
-                if matches!(
-                    name.as_str(),
-                    "_GET"
-                        | "_POST"
-                        | "_COOKIE"
-                        | "_SERVER"
-                        | "_REQUEST"
-                        | "_FILES"
-                        | "_ENV"
-                        | "_SESSION"
-                ) =>
-            {
-                (
-                    self.literal(Constant::Bytes(name.as_bytes().to_vec()), line)?,
-                    PlaceScope::Global(self.allocate_register()?),
-                )
-            }
+            ast::ExpressionKind::Variable(ast::Variable::Named(name)) if is_superglobal(name) => (
+                self.literal(Constant::Bytes(name.as_bytes().to_vec()), line)?,
+                PlaceScope::Global(self.allocate_register()?),
+            ),
             ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name != "this" => {
                 (self.local(name)?, PlaceScope::Local)
             }

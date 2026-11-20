@@ -38,7 +38,6 @@ pub(crate) enum LoopCleanup {
     Foreach {
         iterator: Reg,
         owned: crate::expressions::operand_release::Temporaries,
-        /// The loop's own copy of its subject, when that is a temporary.
         subject: Option<Reg>,
     },
     Switch(Reg),
@@ -85,7 +84,10 @@ impl Compiler<'_> {
                 iterator,
                 owned,
                 subject,
-            } => self.end_foreach(iterator, &owned, subject, line),
+            } => {
+                self.emit(Instruction::IterEnd(iterator), line);
+                self.clear_foreach_temporaries(&owned, subject, line);
+            }
             LoopCleanup::Switch(register) => {
                 self.emit(Instruction::Clear { register }, line);
             }

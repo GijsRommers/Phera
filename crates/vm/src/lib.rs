@@ -186,6 +186,7 @@ mod unsupported_items;
 
 pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
+    StreamInclude,
 };
 
 /// Receives each PHP output write while Vm also retains its output buffer.

@@ -3,6 +3,7 @@
 //! fetches a framework's official starting project.
 
 mod composer;
+mod native;
 mod plain;
 
 use std::fs;
@@ -71,13 +72,6 @@ impl Template {
             Template::Laravel => Some("Laravel"),
         }
     }
-
-    /// Phera does not run the frameworks yet: they need language features
-    /// that are still being built. Change this when that changes; the
-    /// message below then disappears.
-    fn runs_on_phera(self) -> bool {
-        self.framework().is_none()
-    }
 }
 
 /// The `--template` words, for messages.
@@ -108,35 +102,51 @@ fn create(options: &NewOptions, answers: &mut impl BufRead) -> Result<(), String
         None => ask_template(answers)?,
     };
 
-    let steps = composer::steps(template, &directory, options.install);
-    let mut needs_composer_install = !options.install;
+    let mut needs_install = !options.install;
     match template.framework() {
         None => {
             plain::write_files(&directory, &name)?;
-            // The files are there whatever Composer does next.
-            if let Err(failure) = composer::run(&steps, &directory) {
-                needs_composer_install = true;
-                println!("{}", explain(&failure));
+            if options.install
+                && let Err(error) = native::plain(&directory)
+            {
+                eprintln!("Phera could not install the starter dependencies. {error:#}");
+                let steps = composer::steps(template, &directory, true);
+                if let Err(failure) = composer::run(&steps, &directory) {
+                    needs_install = true;
+                    println!("{}", explain(&failure));
+                }
             }
         }
-        Some(framework) => composer::run(&steps, &directory).map_err(|failure| {
-            format!(
-                "a {framework} project is fetched with Composer. {}",
-                explain(&failure)
-            )
-        })?,
+        Some(framework) => match native::framework(template, &directory, options.install) {
+            Ok(()) => {
+                if options.install
+                    && let Err(error) = native::finish(&directory)
+                {
+                    eprintln!(
+                        "The project was created. A {framework} setup script failed. {error:#}"
+                    );
+                }
+            }
+            Err(error) => {
+                eprintln!("Phera could not create the {framework} project. {error:#}");
+                refuse_existing_files(&directory)?;
+                let steps = composer::steps(template, &directory, options.install);
+                composer::run(&steps, &directory).map_err(|failure| {
+                    format!("The Composer fallback failed. {}", explain(&failure))
+                })?;
+            }
+        },
     }
 
     println!("\nCreated {name}.\n\nNext:\n  cd {}", directory.display());
-    if needs_composer_install {
-        println!("  composer install        fetches packages and writes the class loader");
+    if needs_install {
+        println!("  phera install           fetches packages and writes the class loader");
+        println!("  composer install        fallback for projects requiring Composer");
     }
-    match template.framework() {
-        Some(framework) if !template.runs_on_phera() => println!(
-            "  php -S 127.0.0.1:8080 -t public\n\n\
-             Phera does not run {framework} applications yet. When it does, the last step is:\n  \
-             phera serve public"
-        ),
+    match template {
+        Template::SymfonyWebApp => {
+            println!("  Symfony webapp setup is pending Phera runtime support.");
+        }
         _ => println!("  phera serve public      then open http://127.0.0.1:8080/"),
     }
     Ok(())
