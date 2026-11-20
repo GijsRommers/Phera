@@ -71,6 +71,7 @@ fn install_locked(
     cleanup::remove_stale(&project, &previous, &paths)?;
     installed::write(&project, &lock, options, &paths)?;
     binaries::write(&project, &packages, &paths)?;
+    plugins::before_autoload(&project, options, &packages)?;
     runner.event(&project, options, "pre-autoload-dump")?;
     autoload::generate(&project, &packages, options, &paths)
         .context("Could not generate autoload files; correct the reported PHP file and retry.")?;

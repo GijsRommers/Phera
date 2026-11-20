@@ -69,9 +69,10 @@ exact generated-file differences, benchmarks and the readiness gate.
   forwarding these credentials into git source clones remain unfinished.
 - Root pre/post install, update and autoload-dump events run. Shell commands run in
   the project with vendor/bin on PATH; `@php` uses the current Phera binary.
-  PHP callable scripts use a generated bootstrap and still need Composer Event
-  objects and framework tests. Package events, aliases with arguments and PHP
-  `-r` forwarding are unfinished.
+  PHP callable scripts receive a Script Event with the event name, dev mode
+  and vendor directory. Laravel's post-autoload callback and artisan package
+  discovery use that interface. Package events, aliases with arguments,
+  Symfony Flex auto-scripts and PHP `-r` forwarding are unfinished.
 - The PHP 8.5 binary proxies expose Composer's globals. Older-PHP stream wrappers,
   PHPUnit process-isolation special cases, Windows batch proxies and bash-sourcing
   behavior have not been ported from Composer's proxy generator.
@@ -89,7 +90,7 @@ Other plugin effects need explicit project setup.
 | Plugin | Current coverage |
 | --- | --- |
 | `symfony/runtime` | Generates the runtime autoloader from the installed template after autoload generation. |
-| `symfony/flex` | Skipped. Apply and commit the required recipes and declare the framework packages in the project manifest. |
+| `symfony/flex` | Selects official recipes for locked packages and restores supported `symfony.lock` pins. Copies missing recipe files and creates initial bundle and dotenv files. Declare the framework packages in the manifest. Keep committed recipe edits and configure advanced recipe operations separately. |
 | `composer/installers` | Resolves Drupal and WordPress package types and project path overrides. Other framework types still need their Composer installer. |
 | `roots/wordpress-core-installer` | Uses the declared WordPress core directory. |
 | `drupal/core-composer-scaffold` | Copies missing mapped assets and creates the web-root loader references. Existing project files are preserved. |

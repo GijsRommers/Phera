@@ -22,7 +22,7 @@ impl Runner {
             .entry("COMPOSER_DEV_MODE".into())
             .or_insert_with(|| if options.no_dev { "0" } else { "1" }.into());
         for script in strings(&project.data["scripts"][name]) {
-            run(project, options, script, &mut self.environment, 0).with_context(|| {
+            run(project, options, name, script, &mut self.environment, 0).with_context(|| {
                 format!("Script for {name} failed. Fix it or use --no-scripts.")
             })?;
         }
@@ -33,6 +33,7 @@ impl Runner {
 fn run(
     project: &Project,
     options: &Options,
+    event: &str,
     script: &str,
     environment: &mut BTreeMap<String, String>,
     depth: usize,
@@ -59,7 +60,7 @@ fn run(
             bail!("Unknown Composer script alias @{alias}.");
         }
         for nested in strings(scripts) {
-            run(project, options, nested, environment, depth + 1)?;
+            run(project, options, alias, nested, environment, depth + 1)?;
         }
         return Ok(());
     } else if script.contains("::") && !script.contains(char::is_whitespace) {
@@ -70,8 +71,15 @@ fn run(
         let autoload = project.vendor_dir()?.join("autoload.php");
         write!(
             file,
-            "<?php\nrequire {};\ncall_user_func({});\n",
+            "<?php\n{}\nrequire {};\n\
+             $event = new \\Composer\\Script\\Event({}, {}, {});\n\
+             $result = call_user_func({}, $event);\n\
+             if (is_int($result)) {{ exit($result); }}\n",
+            include_str!("../resources/script_event.php.inc"),
             php::quote(&autoload.to_string_lossy()),
+            php::quote(event),
+            php::quote(&project.vendor_dir()?.to_string_lossy()),
+            !options.no_dev,
             php::quote(script)
         )?;
         let command = format!(

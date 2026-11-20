@@ -3,6 +3,7 @@
 //! Hooks consume package data after resolution. They never load Composer plugin PHP.
 
 mod drupal;
+mod flex;
 pub(crate) mod layout;
 mod runtime;
 
@@ -11,11 +12,23 @@ use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
 const NATIVE: &[&str] = &[
+    flex::NAME,
     runtime::NAME,
     layout::INSTALLERS,
     layout::WORDPRESS_CORE,
     drupal::NAME,
 ];
+
+pub(crate) fn before_autoload(
+    project: &Project,
+    options: &Options,
+    packages: &[Package],
+) -> Result<()> {
+    if active(project, options, packages, flex::NAME)? {
+        flex::apply(project, options, packages)?;
+    }
+    Ok(())
+}
 
 pub(crate) fn allowed(project: &Project, name: &str) -> Result<Option<bool>> {
     let rules = &project.data["config"]["allow-plugins"];

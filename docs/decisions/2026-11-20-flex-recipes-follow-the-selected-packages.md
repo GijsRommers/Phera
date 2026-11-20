@@ -6,11 +6,14 @@
 
 ## Decision
 
-Plan native Flex support as recipe data applied after dependency selection.
+Apply native Flex recipe data after dependency selection.
 Select the newest compatible recipe from the official index with the same
 package-version rule as Flex. Honor `symfony.lock` pins when replaying a recipe.
 For framework bootstrap, start with recipe file copies, bundle registration,
 configuration placeholders and dotenv configuration. Preserve project edits.
+Copy missing files and create the initial bundle list and dotenv defaults.
+Leave changes to existing recipe-managed files and advanced recipe operations
+to the project owner for now.
 
 ## Why
 

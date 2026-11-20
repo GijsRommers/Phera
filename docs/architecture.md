@@ -1541,6 +1541,8 @@ versions from Phera's runtime registry. The package crate handles resolution,
 archive downloads, the global store and Composer-compatible autoloader files.
 Downloads use the runtime's rustls and ring configuration. Locked installs
 prepare every archive before materializing packages into `vendor/`.
+The installer then applies approved native recipe and scaffold hooks, writes
+the Composer loader maps, and runs the project's supported scripts.
 See [package compatibility](../crates/packages/README.md) for implementation
 status. The list below describes the intended scope.
 

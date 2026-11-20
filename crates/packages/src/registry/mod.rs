@@ -2,7 +2,7 @@
 //!
 //! `psr/log` is fetched from `/p2/psr/log.json` and expanded before solving.
 
-mod cache;
+pub(crate) mod cache;
 mod local;
 
 use crate::{Options, Package, Project, network::Network, store::Store};
