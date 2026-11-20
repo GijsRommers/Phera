@@ -221,7 +221,18 @@ read, written, sought, truncated and unlinked in the current transaction.
 Native function return types are visible through reflection. Compatibility
 testing is in progress. MySQL LOCAL INFILE is disabled.
 
-Not started: gd, fileinfo, zip, sockets.
+Fileinfo is built in. Use `finfo` or `mime_content_type()` to identify common
+uploads from their contents. Fileinfo uses a bounded Rust classifier for images,
+documents, archives, media, fonts, and executables. It provides the MIME type,
+charset, known extensions, and a description. Custom magic databases and
+libmagic's complete signature catalog are outside this implementation.
+
+GD provides image buffers, PNG, JPEG, GIF, BMP and WebP codecs, drawing,
+thumbnail operations, filters, and the five built-in fonts. The same build
+includes `getimagesize()` and `exif_imagetype()`. Compatibility limits are
+listed in the [GD coverage notes](crates/extensions/gd/README.md).
+
+Not started: zip, sockets.
 
 ### Sodium
 
@@ -344,7 +355,9 @@ Laravel and Symfony applications get this with no change:
 The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
 are empty and `$_SERVER` holds the environment and the script's paths. Each
 request gets its own copy of every object, static property and global, so
-nothing one request does reaches another. What cannot be copied (an open
+nothing one request does reaches another. A boot `GdImage` copies its pixels,
+palette and rendering options into each request. A boot `finfo` object copies
+its flags. What cannot be copied (an open
 file or socket, a started session, a database transaction) makes
 `Phera\snapshot()` throw `Phera\SnapshotException`, naming the class and
 where it was found; the worker then serves the application from the top.

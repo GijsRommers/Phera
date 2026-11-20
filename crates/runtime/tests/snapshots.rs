@@ -309,6 +309,29 @@ async fn each_fork_destroys_its_own_copies_and_the_snapshot_keeps_its_objects() 
     assert_eq!(answers, ["request\nclosed\n", "request\nclosed\n"]);
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn a_fork_keeps_independent_images_and_fileinfo_flags() {
+    let answers = boot_and_answer(
+        "gd-fileinfo",
+        include_str!("snapshots/extension_state.php"),
+        &[
+            "/index.php?fork_probe=1",
+            "/index.php?fork_probe=1&mutate=1",
+            "/index.php?fork_probe=1",
+        ],
+    )
+    .await
+    .expect("GD and fileinfo boot state supports a snapshot");
+    assert_eq!(
+        answers,
+        [
+            "40203040 0 text/plain\n",
+            "20224466 1 us-ascii\n",
+            "40203040 0 text/plain\n",
+        ]
+    );
+}
+
 #[test]
 fn on_the_command_line_the_call_returns_false_and_keeps_nothing() {
     let site = Site::new("cli");
