@@ -51,6 +51,9 @@ impl Drop for Generator {
                 item: self.item.take(),
                 closure: self.closure.take(),
             });
+            if let Some(pool) = self.pool.upgrade() {
+                pool.wake_interpreter();
+            }
         }
     }
 }
@@ -65,6 +68,32 @@ impl Vm {
         self.generator_releases
             .as_ref()
             .is_some_and(|queue| !self.draining_generators && !queue.0.borrow().is_empty())
+    }
+
+    /// A generator still alive in the last destructor phase of the request:
+    /// PHP destroys it there, which runs its pending `finally` blocks, as a
+    /// release would. Afterwards it counts as finished.
+    ///
+    /// ```php
+    /// function gen() { try { yield; } finally { echo "closed\n"; } }
+    /// $keep = new Holder(gen());   // still alive when the script ends
+    /// ```
+    pub(crate) async fn close_live_generator(
+        &mut self,
+        object: &Object,
+    ) -> Result<(), NativeError> {
+        let Ok(released) = super::state(object, |generator| Released::Owners {
+            state: std::mem::replace(&mut generator.state, State::Returned(Value::Null)),
+            item: generator.item.take(),
+            closure: generator.closure.take(),
+        }) else {
+            return Ok(());
+        };
+        let Some(queue) = self.generator_releases.clone() else {
+            return Ok(());
+        };
+        queue.0.borrow_mut().push(released);
+        self.drain_generator_releases().await
     }
 
     pub(crate) fn force_closing_generator(&self) -> bool {
