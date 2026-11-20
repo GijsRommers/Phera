@@ -236,6 +236,7 @@ pub(crate) mod calls;
 pub(crate) mod chains;
 pub(crate) mod conditionals;
 mod generators;
+mod match_constants;
 pub(crate) mod matching;
 pub(crate) mod nullsafe;
 pub(crate) mod objects;

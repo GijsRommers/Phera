@@ -2,9 +2,11 @@
 
 use phera_ast as ast;
 use phera_bytecode::Reg;
+use phera_value::Value;
 
-use crate::ir::{Binary, Constant, Instruction, Target};
-use crate::{CompileError, Compiler, constant};
+use super::match_constants::match_constant;
+use crate::ir::{Binary, Instruction, Target};
+use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
     /// Compare conditions strictly and evaluate only the selected arm body.
@@ -33,9 +35,11 @@ impl Compiler<'_> {
                     let rhs = self.compile_expression(condition)?;
                     let test = self.allocate_register()?;
                     let test_line = if Some(subject) == local {
-                        let folded = checking_jump_table.then(|| constant(condition)).flatten();
+                        let folded = checking_jump_table
+                            .then(|| match_constant(condition))
+                            .flatten();
                         checking_jump_table =
-                            matches!(folded, Some(Constant::Int(_) | Constant::Bytes(_)));
+                            matches!(folded, Some(Value::Int(_) | Value::String(_)));
                         // The jump-table probe folds constants with the subject's
                         // line. PHP's scalar literal nodes keep their own lines.
                         if folded.is_some()
@@ -127,8 +131,8 @@ fn has_jump_table(expression: &ast::Match) -> bool {
         .flatten()
     {
         if !matches!(
-            constant(condition),
-            Some(Constant::Int(_) | Constant::Bytes(_))
+            match_constant(condition),
+            Some(Value::Int(_) | Value::String(_))
         ) {
             return false;
         }

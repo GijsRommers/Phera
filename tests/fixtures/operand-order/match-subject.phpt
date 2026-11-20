@@ -17,6 +17,12 @@ set_error_handler(static function ($level, $message) {
 var_dump(match ($missing) { default => 'only' });
 var_dump(match ($missing) { 2 => 'two', 3 => 'three', default => 'integers' });
 var_dump(match ($missing) { true => 'true', null => 'null', default => 'other' });
+set_error_handler(static function ($level, $message) {
+    echo $message, "\n";
+    $GLOBALS['foldedSubject'] = 4;
+    return true;
+});
+var_dump(match ($foldedSubject) { 1 + 2 => 'three', 4 => 'four', default => 'default' });
 --EXPECT--
 string(3) "new"
 string(3) "old"
@@ -26,3 +32,5 @@ string(8) "integers"
 Undefined variable $missing
 Undefined variable $missing
 string(4) "null"
+Undefined variable $foldedSubject
+string(7) "default"

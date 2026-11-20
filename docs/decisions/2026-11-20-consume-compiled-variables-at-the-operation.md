@@ -12,6 +12,11 @@ use the same rule. Array dimensions, property access and other value
 expressions still fetch where they occur. Short-circuit branches and
 argument sends consume their operands at their existing boundaries.
 
+Read a match subject once when all conditions qualify for Zend's jump
+table, including scalar operations folded into integer or string keys.
+Use the value layer to classify these conditions and leave expressions
+that emit diagnostics to runtime evaluation.
+
 ## Why
 
 Zend keeps an ordinary local, static local or local bound by `global`
