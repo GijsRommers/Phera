@@ -1,0 +1,17 @@
+[package]
+name = "phera-ext-gd"
+description = "PHP GD pixel operations for Phera"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ab_glyph.workspace = true
+gif.workspace = true
+image.workspace = true
+phera-extension-api.workspace = true
+phera-ext-streams.workspace = true
+png.workspace = true
+
+[lints]
+workspace = true

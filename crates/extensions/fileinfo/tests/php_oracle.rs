@@ -1,5 +1,6 @@
 //! Compare uploaded content and the fileinfo API with real PHP.
 
+use std::io::BufRead;
 use std::path::Path;
 
 use phera_extension_api::testing::{oracle::PHP_PREAMBLE, scripts::Comparison};

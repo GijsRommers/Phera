@@ -51,6 +51,10 @@ phera-ext-redis = { path = "crates/extensions/redis" }
 phera-db-drivers = { path = "crates/db-drivers" }
 phera-io-pool = { path = "crates/io-pool" }
 phera-dotenv = { path = "crates/dotenv" }
+ab_glyph = "0.2.32"
+gif = "0.14.2"
+image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "webp"] }
+png = "0.18.1"
 indexmap = "2"
 itoa = "1"
 regex = "1"
@@ -69,6 +73,7 @@ phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
 phera-ext-core = { path = "crates/extensions/core" }
 phera-ext-zlib = { path = "crates/extensions/zlib" }
+phera-ext-gd = { path = "crates/extensions/gd" }
 phera-ext-gmp = { path = "crates/extensions/gmp" }
 phera-ext-bcmath = { path = "crates/extensions/bcmath" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }

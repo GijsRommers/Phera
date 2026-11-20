@@ -135,8 +135,13 @@ documents, archives, media, fonts, and executables. It provides the MIME type,
 charset, known extensions, and a description. Custom magic databases and
 libmagic's complete signature catalog are outside this implementation.
 
+GD provides image buffers, PNG, JPEG, GIF, BMP and WebP codecs, drawing,
+thumbnail operations, filters, and the five built-in fonts. The same build
+includes `getimagesize()` and `exif_imagetype()`. Compatibility limits are
+listed in the [GD coverage notes](crates/extensions/gd/README.md).
+
 In progress: SimpleXML, XMLReader, XMLWriter.
-Not started: gd, zip, sockets.
+Not started: zip, sockets.
 
 ### Sodium
 

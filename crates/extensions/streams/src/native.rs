@@ -298,3 +298,29 @@ fn inspect(
 }
 
 pub use crate::context_options::validate as validate_stream_context;
+
+/// Write bytes to a named PHP stream and finish the handle.
+pub async fn write_path(
+    context: &mut dyn Context,
+    function: &str,
+    name: &[u8],
+    bytes: Vec<u8>,
+) -> NativeResult {
+    let Some(mut stream) = crate::wrapper::open(context, function, name, b"wb", false).await?
+    else {
+        return Ok(Value::Bool(false));
+    };
+    let operation = crate::file_io::blocking(move || {
+        let count = crate::transfer::write_bytes(&mut stream, &bytes)?;
+        stream.finish()?;
+        Ok::<_, std::io::Error>(count == bytes.len())
+    })
+    .await?;
+    match operation {
+        Ok(complete) => Ok(Value::Bool(complete)),
+        Err(error) => {
+            context.warning(format!("{function}(): {}", reason(&error)));
+            Ok(Value::Bool(false))
+        }
+    }
+}

@@ -122,12 +122,17 @@ fn jpeg_segment(out: &mut String, kind: u8, data: &[u8], length: u16) {
             let y = u16::from_be_bytes([*y1, *y2]);
             let _ = write!(
                 out,
-                ", JFIF standard {major}.{minor:02}, {units}, density {x}x{y},                       segment length {length}"
+                ", JFIF standard {major}.{minor:02}, {units}, density {x}x{y},"
             );
+            let _ = write!(out, " segment length {length}");
         }
         (0xe1, [b'E', b'x', b'i', b'f', 0, 0, ..]) => out.push_str(", Exif standard"),
         (0xfe, _) => {
-            let comment = data.split(|byte| *byte == 0).next().unwrap_or_default();
+            let comment = data
+                .split(|byte| *byte == 0)
+                .next()
+                .unwrap_or_default()
+                .trim_ascii_end();
             let _ = write!(out, ", comment: \"{}\"", String::from_utf8_lossy(comment));
         }
         (0xc0..=0xcf, [precision, h1, h2, w1, w2, count, ..])
