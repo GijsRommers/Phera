@@ -5,6 +5,7 @@ use crate::names::Names;
 use phera_ast::{Attribute, UseKind};
 
 pub(crate) mod doctrine;
+pub(crate) mod symfony;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AttributeUse {

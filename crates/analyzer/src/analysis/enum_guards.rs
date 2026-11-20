@@ -66,8 +66,16 @@ impl Analyzer<'_> {
         if cases.next().is_some() || (&case.name != first && &case.name != second) {
             return None;
         }
+        let place = Place::of(tested)?;
+        if place
+            .members
+            .iter()
+            .any(|member| matches!(member, crate::scope::AccessStep::VariableOffset(_)))
+        {
+            return None;
+        }
         let key = GuardKey::EnumCase {
-            place: Place::of(tested)?,
+            place,
             class: enumeration.name.clone(),
             case: first.clone(),
         };

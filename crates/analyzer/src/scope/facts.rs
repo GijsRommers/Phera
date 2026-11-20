@@ -21,6 +21,7 @@ pub enum AccessStep {
     Method(String),
     IntegerOffset(i64),
     StringOffset(Vec<u8>),
+    VariableOffset(String),
 }
 
 impl Place {
@@ -55,6 +56,9 @@ impl Place {
                         }
                         ExpressionKind::Literal(phera_ast::Literal::String(key)) => {
                             AccessStep::StringOffset(key.clone())
+                        }
+                        ExpressionKind::Variable(Variable::Named(key)) => {
+                            AccessStep::VariableOffset(key.clone())
                         }
                         _ => return None,
                     };
@@ -94,6 +98,13 @@ impl Place {
             members: Vec::new(),
         }
     }
+
+    pub fn refers_to(&self, name: &str) -> bool {
+        self.root == name
+            || self.members.iter().any(
+                |step| matches!(step, AccessStep::VariableOffset(variable) if variable == name),
+            )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -128,7 +139,7 @@ impl Facts {
     }
 
     pub fn forget_variable(&mut self, name: &str) {
-        self.types.retain(|place, _| place.root != name);
+        self.types.retain(|place, _| !place.refers_to(name));
         self.non_null_pairs
             .retain(|(left, right)| left != name && right != name);
     }

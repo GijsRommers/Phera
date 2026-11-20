@@ -24,6 +24,8 @@ pub struct Options {
     pub treat_phpdoc_types_as_certain: bool,
     pub check_missing_typehints: Option<bool>,
     pub unnecessary_null_coalesce: bool,
+    pub internal_tag: bool,
+    pub symfony_stubs: bool,
     pub config_notices: BTreeSet<String>,
     pub phpstan_ignores: Vec<Ignore>,
 }
@@ -45,6 +47,8 @@ impl Default for Options {
             treat_phpdoc_types_as_certain: true,
             check_missing_typehints: None,
             unnecessary_null_coalesce: false,
+            internal_tag: false,
+            symfony_stubs: false,
             config_notices: BTreeSet::new(),
             phpstan_ignores: Vec::new(),
         }
@@ -133,6 +137,7 @@ impl Options {
         match key {
             "level" if !array => self.level = level(scalar()?)?,
             "strict" if !array => self.strict = boolean("strict", scalar()?)?,
+            "internal_tag" if !array => self.internal_tag = boolean(key, scalar()?)?,
             "treat_phpdoc_types_as_certain" if !array => {
                 self.treat_phpdoc_types_as_certain = boolean(key, scalar()?)?;
             }

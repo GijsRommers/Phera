@@ -91,6 +91,7 @@ impl Analyzer<'_> {
             self.report(Finding::NotSupported(item), span);
         } else {
             self.validate_method(class, &method.name, signature.as_ref(), span, access);
+            self.check_internal_method(class, &method.name, span);
         }
         // The engine synthesizes Closure::__invoke from each actual closure. The stub
         // placeholder has no usable parameter list; inferred closures use their own signature.
@@ -164,7 +165,14 @@ impl Analyzer<'_> {
             } else {
                 ValueType::Mixed
             };
-            let returns = if self.level >= 9 {
+            let returns = if self.options.symfony_stubs
+                && crate::framework_knowledge::symfony::unresolved_result(
+                    self.index,
+                    class,
+                    &method.name,
+                ) {
+                ValueType::Mixed
+            } else if self.level >= 9 {
                 crate::framework_knowledge::doctrine::unresolved_result(
                     self.index,
                     class,

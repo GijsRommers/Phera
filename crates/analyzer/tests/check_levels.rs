@@ -99,3 +99,31 @@ fn strict_loop_initializers_do_not_guarantee_later_overwrites() {
     .unwrap();
     assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
 }
+
+#[test]
+fn internal_methods_respect_root_namespaces_and_levels() {
+    // PHPStan 2.3.7 with the bleeding-edge internalTag feature.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/internal_methods.php");
+    for level in [0, 1, 2, 5] {
+        let report = check(&Options {
+            level,
+            internal_tag: true,
+            paths: vec![path.to_string_lossy().into_owned()],
+            ..Options::default()
+        })
+        .unwrap();
+        if level < 2 {
+            assert!(report.diagnostics.is_empty());
+        } else {
+            assert_eq!(report.diagnostics.len(), 1);
+            let finding = &report.diagnostics[0];
+            assert_eq!(finding.line, 19);
+            assert_eq!(finding.identifier, "method.internalClass");
+            assert_eq!(
+                finding.message,
+                "Call to method run() of internal class Library\\InternalService \
+                 from outside its root namespace Library."
+            );
+        }
+    }
+}

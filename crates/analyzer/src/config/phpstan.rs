@@ -83,9 +83,14 @@ fn include_visit(
     if let Some(package) = composer_package(path) {
         match package.as_str() {
             "phpstan/phpstan-strict-rules" if path.ends_with("rules.neon") => options.strict = true,
-            "phpstan/phpstan-doctrine" | "phpstan/phpstan-symfony" => {}
+            "phpstan/phpstan-doctrine" => {}
+            "phpstan/phpstan-symfony" if path.ends_with("extension.neon") => {
+                options.symfony_stubs = true;
+            }
+            "phpstan/phpstan-symfony" => {}
             "phpstan/phpstan" if path.ends_with("bleedingEdge.neon") => {
                 options.unnecessary_null_coalesce = true;
+                options.internal_tag = true;
                 notice(options, "remaining bleeding-edge features");
             }
             _ => notice(options, &package),
@@ -178,8 +183,12 @@ fn parameters(
             }
             "featureToggles" => {
                 for (line, _) in blocks(children) {
-                    if let Some(("unnecessaryNullCoalesce", value)) = key_value(line) {
-                        options.unnecessary_null_coalesce = value == "true";
+                    match key_value(line) {
+                        Some(("unnecessaryNullCoalesce", value)) => {
+                            options.unnecessary_null_coalesce = value == "true";
+                        }
+                        Some(("internalTag", value)) => options.internal_tag = value == "true",
+                        _ => {}
                     }
                 }
             }

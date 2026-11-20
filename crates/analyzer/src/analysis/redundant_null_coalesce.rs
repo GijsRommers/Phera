@@ -49,6 +49,7 @@ impl Analyzer<'_> {
             let key = match step {
                 AccessStep::IntegerOffset(key) => ValueType::IntLiteral(*key),
                 AccessStep::StringOffset(key) => ValueType::StringLiteral(key.as_slice().into()),
+                AccessStep::VariableOffset(key) => scope.get(key).ty,
                 AccessStep::Property(name) => {
                     let property = self.index.property(ty.class_name()?, name)?;
                     if property.default == crate::index::PropertyDefault::Other {

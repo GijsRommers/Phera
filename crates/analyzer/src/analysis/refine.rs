@@ -101,7 +101,10 @@ impl Analyzer<'_> {
                         scope.define(name, ValueType::Class(class));
                     }
                 }
-                _ if truth && self.level >= 7 => self.refine_truthy_place(expression, scope),
+                _ if truth && self.level >= 7 => {
+                    self.refine_nullsafe_receivers(expression, scope);
+                    self.refine_truthy_place(expression, scope);
+                }
                 _ => {}
             }
         }

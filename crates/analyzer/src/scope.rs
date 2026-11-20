@@ -230,7 +230,7 @@ pub enum Symbol {
 
 impl Symbol {
     fn refers_to(&self, receiver: &str) -> bool {
-        matches!(self, Self::Property(place, _) | Self::Method(place, _) if place.root == receiver)
+        matches!(self, Self::Property(place, _) | Self::Method(place, _) if place.refers_to(receiver))
     }
 
     pub fn constant_name(name: &str) -> String {

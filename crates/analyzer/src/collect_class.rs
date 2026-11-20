@@ -14,6 +14,7 @@ pub fn class_info(
     read_docs: bool,
 ) -> ClassInfo {
     let resolve = |n: &Name| names.resolve(n, UseKind::Class)[0].clone();
+    let class_doc = crate::phpdoc::text(source, class.doc_comment);
     let mut info = ClassInfo {
         name: names.declaration(class.name.as_ref().map_or("@anonymous", |n| &n.name)),
         kind: class.kind,
@@ -28,11 +29,12 @@ pub fn class_info(
         enum_cases: Default::default(),
         location: location(class.span.start),
         open_properties: false,
+        internal: class_doc.is_some_and(crate::phpdoc::internal),
         mapped_repository: crate::framework_knowledge::doctrine::mapped_repository(
             &class.attributes,
             names,
         ),
-        documented: crate::phpdoc::text(source, class.doc_comment)
+        documented: class_doc
             .map_or_else(Default::default, |doc| crate::phpdoc::members(doc, names)),
     };
     if read_docs && class.doc_comment.is_some() {

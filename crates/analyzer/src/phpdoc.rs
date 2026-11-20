@@ -43,6 +43,16 @@ fn tags(doc: &str) -> impl Iterator<Item = (&str, &str)> {
     })
 }
 
+pub fn internal(doc: &str) -> bool {
+    doc.lines().any(|line| {
+        line.trim_start()
+            .trim_start_matches('*')
+            .split_whitespace()
+            .next()
+            == Some("@internal")
+    })
+}
+
 pub fn members(doc: &str, names: &Names) -> Members {
     let mut members = Members::default();
     for (tag, rest) in tags(doc) {

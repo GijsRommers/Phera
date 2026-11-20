@@ -80,6 +80,7 @@ fn class(f: &[&str]) -> ClassInfo {
         enum_cases: Default::default(),
         location: location(f[9]),
         open_properties: f[8] == "true",
+        internal: false,
         mapped_repository: None,
         documented: Default::default(),
     }
@@ -105,6 +106,7 @@ fn signature(f: &[&str]) -> Signature {
         .collect();
     Signature {
         pure: false,
+        internal: false,
         closure_object: true,
         returns_reference: false,
         parameters,

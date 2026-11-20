@@ -337,8 +337,12 @@ pub fn declaration_refinement(native: &ValueType, documented: ValueType) -> Valu
     let documented = if native.without_null() == ValueType::Iterable
         && let ValueType::Collection(collection) = &documented
         && collection.kind == CollectionKind::Array
-        && collection.key == ValueType::Int.join(&ValueType::String)
-    {
+        && matches!(
+            &collection.key,
+            ValueType::Union(keys) | ValueType::BenevolentUnion(keys)
+                if matches!(keys.as_ref(),
+                    [ValueType::Int, ValueType::String] | [ValueType::String, ValueType::Int])
+        ) {
         // `@param Row[] $rows` on `iterable $rows` describes the value
         // yielded by either an array or a Traversable.
         let mut iterable = (**collection).clone();

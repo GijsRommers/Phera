@@ -18,6 +18,9 @@ impl Analyzer<'_> {
             ExpressionKind::Assign { target, .. } => target.as_ref(),
             _ => place,
         };
+        if against == ValueType::Null && !truth || truth && against.excludes_null() {
+            self.refine_nullsafe_receivers(place, scope);
+        }
         let Some(place) = Place::of(place) else {
             return;
         };
@@ -109,6 +112,10 @@ impl Analyzer<'_> {
                 AccessStep::StringOffset(key) => {
                     let key = ValueType::StringLiteral(key.as_slice().into());
                     ty = super::arrays::offset_type(&ty, &key);
+                    continue;
+                }
+                AccessStep::VariableOffset(key) => {
+                    ty = super::arrays::offset_type(&ty, &scope.get(key).ty);
                     continue;
                 }
                 AccessStep::Property(name) | AccessStep::Method(name) => name,

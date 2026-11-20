@@ -51,6 +51,8 @@ uses entity class strings to infer Doctrine repository, find, and reference
 results. It recognizes Doctrine lifecycle callbacks and Symfony service injection,
 command, route, listener, and scheduled-task attributes.
 Doctrine query projections that need metadata remain unresolved.
+The Symfony PHPStan include also leaves interface-declared denormalizer
+results open, as the extension does.
 
 The checker reads `phpstan.neon`, `phpstan.neon.dist`, or `phpstan.dist.neon`
 in that order. It uses analysis paths, exclusions, levels, included baselines,
@@ -69,7 +71,8 @@ constructs, for-loop overwrites, strict function calls, switch condition
 types, and dynamic member and variable access. The PHPUnit and PHPStan
 deprecation-rule packages also produce a notice until their rules are
 implemented. The bleeding-edge include enables the redundant `?? null` rule
-for required array fields and initialized properties. The checker reports
+for required array fields and initialized properties, and checks calls to
+`@internal` methods and classes from other root namespaces. The checker reports
 an informational notice for remaining bleeding-edge features.
 
 `phera <command> --help` lists the options. There is no formatter and no test
