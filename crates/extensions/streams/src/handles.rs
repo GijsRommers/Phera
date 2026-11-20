@@ -99,6 +99,7 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
             });
         }
         let stream = if let Target::Gzip(filename) = Target::parse(name)
+            && !crate::user_wrappers::protocol_disabled(context, b"compress.zlib")
             && let Some(level) = crate::context_options::option(stream_context, "zlib", "level")
         {
             let level = phera_extension_api::value::to_int(&level, context.diagnostics())?;
@@ -179,7 +180,8 @@ pub(crate) async fn close_arguments(
         })
         .await?;
         match result {
-            Ok(output) => context.write(&output),
+            Ok(output) if !output.is_empty() => context.write(&output),
+            Ok(_) => (),
             Err(error) => context.warning(format!("{function}(): {error}")),
         }
         with_stream(resource, |stream| stream.filters = None)?;
@@ -202,6 +204,11 @@ pub(crate) async fn close_arguments(
 fn feof(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let resource = stream_arg(&arguments, "feof")?;
+        if crate::filters::user::lookup(context, resource.id)
+            .is_some_and(|chain| chain.has_buffered())
+        {
+            return Ok(Value::Bool(false));
+        }
         if let Some(file) = crate::user_file::resource_file(resource) {
             return Ok(Value::Bool(file.at_end(context, "feof").await?));
         }
@@ -371,7 +378,9 @@ impl Flush {
         .await?;
         match result {
             Ok(output) => {
-                context.write(&output);
+                if !output.is_empty() {
+                    context.write(&output);
+                }
                 Ok(Value::Bool(true))
             }
             Err(error) => {

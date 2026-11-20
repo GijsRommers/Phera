@@ -186,7 +186,7 @@ impl UserFile {
         context: &mut dyn Context,
         function: &str,
         data: &[u8],
-    ) -> Result<usize, NativeError> {
+    ) -> Result<Option<usize>, NativeError> {
         if !data.is_empty() && !self.buffer.borrow().is_empty() {
             self.seek(context, function, self.position.get(), 0).await?;
         }
@@ -199,12 +199,15 @@ impl UserFile {
             let count = match value {
                 None => {
                     missing(context, &self.object, function, "stream_write", "");
-                    break;
+                    return Ok((written > 0).then_some(written));
                 }
-                Some(Value::Bool(false)) => break,
+                Some(Value::Bool(false)) => return Ok((written > 0).then_some(written)),
                 Some(value) => to_int(&value, context.diagnostics())?,
             };
-            if count <= 0 {
+            if count < 0 {
+                return Ok((written > 0).then_some(written));
+            }
+            if count == 0 {
                 break;
             }
             let count = usize::try_from(count).unwrap_or(usize::MAX);
@@ -220,7 +223,7 @@ impl UserFile {
                 .set(self.position.get().saturating_add(count as i64));
             written += count;
         }
-        Ok(written)
+        Ok(Some(written))
     }
 
     pub async fn flush(&self, context: &mut dyn Context) -> Result<bool, NativeError> {

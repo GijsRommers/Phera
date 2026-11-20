@@ -141,6 +141,10 @@ impl Chains {
         !self.write.borrow().is_empty()
     }
 
+    pub(crate) fn has_buffered(&self) -> bool {
+        !self.buffered.borrow().is_empty()
+    }
+
     pub(crate) fn is_busy(&self) -> bool {
         self.busy.get()
     }
@@ -182,9 +186,13 @@ impl Chains {
                 Err(error) => return Ok(Err(error)),
             };
             let closing = block.is_empty();
-            let output = self
+            let Some(output) = self
                 .apply(context, &stages, function, block, closing)
-                .await?;
+                .await?
+            else {
+                self.exhausted.set(true);
+                return Ok(Err(io::ErrorKind::Other.into()));
+            };
             self.exhausted.set(closing);
             self.buffered.borrow_mut().extend(output);
         }
@@ -202,9 +210,16 @@ impl Chains {
         let stages = self.write.borrow().clone();
         let mut count = 0;
         for chunk in bytes.chunks(crate::io_policy::CHUNK) {
-            let transformed = self
+            let Some(transformed) = self
                 .apply(context, &stages, function, chunk.to_vec(), false)
-                .await?;
+                .await?
+            else {
+                return Ok(if count == 0 {
+                    Value::Bool(false)
+                } else {
+                    Value::Int(count as i64)
+                });
+            };
             match crate::transfer::write_unfiltered(context, resource, &transformed, function)
                 .await?
             {
@@ -222,10 +237,10 @@ impl Chains {
         function: &str,
         mut data: Vec<u8>,
         closing: bool,
-    ) -> Result<Vec<u8>, NativeError> {
+    ) -> Result<Option<Vec<u8>>, NativeError> {
         for (index, stage) in stages.iter().enumerate() {
             let stream = self.stream.borrow().upgrade();
-            data = run(
+            let Some(output) = run(
                 context,
                 &stage.filter,
                 stream,
@@ -234,14 +249,18 @@ impl Chains {
                 closing,
                 index == 0 && !closing,
             )
-            .await?;
+            .await?
+            else {
+                return Ok(None);
+            };
+            data = output;
         }
         let total = self.produced.get().saturating_add(data.len());
         if total > MAX_OUTPUT {
             return Err(NativeError::error(super::super::limit().to_string()));
         }
         self.produced.set(total);
-        Ok(data)
+        Ok(Some(data))
     }
 
     fn enter(&self) -> Result<Busy<'_>, NativeError> {
@@ -268,7 +287,7 @@ async fn run(
     data: Vec<u8>,
     closing: bool,
     initial: bool,
-) -> Result<Vec<u8>, NativeError> {
+) -> Result<Option<Vec<u8>>, NativeError> {
     bounded(data.len()).map_err(|error| NativeError::error(error.to_string()))?;
     let input = buckets::brigade(context, data);
     let output = buckets::brigade(context, Vec::new());
@@ -302,11 +321,14 @@ async fn run(
     let out = buckets::finish(&output);
     match result? {
         Some(value) => match to_int(&value, context.diagnostics())? {
-            PASS => Ok(out.map_or_else(Vec::new, |out| out.bytes())),
-            FEED => Ok(Vec::new()),
-            _ => Err(NativeError::error("Stream filter reported a fatal error")),
+            PASS => Ok(Some(out.map_or_else(Vec::new, |out| out.bytes()))),
+            FEED => Ok(Some(Vec::new())),
+            _ => Ok(None),
         },
-        _ => Err(NativeError::error("Failed to call filter function")),
+        _ => {
+            context.warning(format!("{function}(): Failed to call filter function"));
+            Ok(None)
+        }
     }
 }
 
@@ -336,9 +358,10 @@ pub(crate) async fn close(
         .apply(context, &stages, "fclose", Vec::new(), true)
         .await;
     let result = match output {
-        Ok(data) => crate::transfer::write_unfiltered(context, resource, &data, "fclose")
+        Ok(Some(data)) => crate::transfer::write_unfiltered(context, resource, &data, "fclose")
             .await
             .map(|_| ()),
+        Ok(None) => Ok(()),
         Err(error) => Err(error),
     };
     let mut close_error = None;
@@ -384,7 +407,7 @@ pub(crate) async fn remove(
         };
         let stage = &remaining[index];
         let function = "stream_filter_remove";
-        let out = run(
+        let Some(out) = run(
             context,
             &stage.filter,
             stream.clone(),
@@ -393,10 +416,16 @@ pub(crate) async fn remove(
             true,
             false,
         )
-        .await?;
-        let out = chains
+        .await?
+        else {
+            return Ok(Some(Value::Bool(false)));
+        };
+        let Some(out) = chains
             .apply(context, &remaining[index + 1..], function, out, false)
-            .await?;
+            .await?
+        else {
+            return Ok(Some(Value::Bool(false)));
+        };
         if read {
             let mut buffer = chains.buffered.borrow_mut();
             bounded(buffer.len() + out.len())

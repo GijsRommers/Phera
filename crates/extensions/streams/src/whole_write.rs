@@ -117,7 +117,12 @@ pub fn file_put_contents(
             }
         }
         let bytes = if let Some(resource) = source {
-            match read(resource, None).await? {
+            let input = if let Some(file) = crate::user_file::resource_file(resource) {
+                Ok(file.collect(context, function, None).await?)
+            } else {
+                read(resource, None).await?
+            };
+            match input {
                 Ok(bytes) => bytes,
                 Err(error) => {
                     read_notice(context, function, &error, CHUNK as u64);
@@ -228,7 +233,9 @@ async fn write_user(
         };
         bytes
     };
-    let count = file.write(context, function, &bytes).await?;
+    let Some(count) = file.write(context, function, &bytes).await? else {
+        return Ok(Value::Bool(false));
+    };
     if count == bytes.len() {
         Ok(Value::Int(count as i64))
     } else {

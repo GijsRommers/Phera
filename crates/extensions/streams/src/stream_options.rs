@@ -39,6 +39,12 @@ pub fn register(registry: &mut Registry) {
 fn is_local(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let value = args::value(arguments, 0);
     if let Value::Resource(resource) = value {
+        if let Some(dir) = crate::user_directory::of(resource) {
+            return Ok(Value::Bool(!dir.remote));
+        }
+        if crate::directory::is_open(resource) {
+            return Ok(Value::Bool(true));
+        }
         if let Some(file) = crate::user_file::resource_file(resource) {
             return Ok(Value::Bool(!file.remote));
         }
@@ -107,6 +113,23 @@ fn get_meta_data(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let resource = argument_resource(args::value(arguments, 0), name, "#1 ($stream)")?;
     if crate::directory::is_open(resource) {
         let mut data = PhpArray::new();
+        let user = crate::user_directory::of(resource);
+        if let Some(dir) = &user {
+            for (key, value) in [
+                ("timed_out", Value::Bool(false)),
+                ("blocked", Value::Bool(true)),
+                ("eof", Value::Bool(false)),
+                ("wrapper_data", Value::Object(dir.object.clone())),
+                ("wrapper_type", Value::from("user-space")),
+                ("stream_type", Value::from("user-space-dir")),
+                ("mode", Value::from("r")),
+                ("unread_bytes", Value::Int(0)),
+                ("seekable", Value::Bool(true)),
+            ] {
+                data.insert(ArrayKey::str(key), value);
+            }
+            return Ok(Value::from(data));
+        }
         for (key, value) in [
             ("timed_out", Value::Bool(false)),
             ("blocked", Value::Bool(true)),

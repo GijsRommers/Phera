@@ -199,9 +199,10 @@ pub async fn write_unfiltered(
     function: &str,
 ) -> NativeResult {
     if let Some(file) = crate::user_file::resource_file(resource) {
-        return Ok(Value::Int(
-            file.write(context, function, data).await? as i64,
-        ));
+        return Ok(file
+            .write(context, function, data)
+            .await?
+            .map_or(Value::Bool(false), |count| Value::Int(count as i64)));
     }
     let length = data.len();
     let (wrapper, policy, filtered) = with_stream(resource, |stream| {

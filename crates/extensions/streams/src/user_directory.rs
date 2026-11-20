@@ -11,7 +11,8 @@ use crate::user_file::{invoke, missing};
 use crate::user_wrappers::UserWrapper;
 
 pub(crate) struct UserDirectory {
-    object: Rc<Object>,
+    pub object: Rc<Object>,
+    pub remote: bool,
     busy: Cell<bool>,
 }
 
@@ -39,6 +40,7 @@ pub(crate) async fn open(
     Ok(opened.filter(to_bool).map(|_| {
         Rc::new(UserDirectory {
             object,
+            remote: wrapper.remote,
             busy: Cell::new(false),
         })
     }))

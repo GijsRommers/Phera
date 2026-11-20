@@ -121,9 +121,9 @@ async fn add(context: &mut dyn Context, arguments: Vec<Value>, function: &str) -
             "{function}(): Argument #2 ($class) must be a valid class name, {class} given"
         )));
     };
-    let wrappers = files(context)
-        .wrappers
-        .get_or_insert_with(Wrappers::default);
+    let files = files(context);
+    files.claim_id();
+    let wrappers = files.wrappers.get_or_insert_with(Wrappers::default);
     let scheme = String::from_utf8_lossy(protocol);
     if wrappers.get(protocol).is_some() {
         context.warning(format!(
@@ -182,6 +182,39 @@ pub(crate) fn locate(context: &mut dyn Context, path: &[u8]) -> Option<UserWrapp
         Handler::Builtin => None,
         Handler::User(wrapper) => Some(wrapper.clone()),
     }
+}
+
+pub(crate) fn disabled_scheme<'a>(context: &mut dyn Context, path: &'a [u8]) -> Option<&'a [u8]> {
+    let wrappers = context
+        .state()
+        .get::<crate::request::Files>()?
+        .wrappers
+        .as_ref()?;
+    let scheme = protocol(path)?;
+    if scheme.eq_ignore_ascii_case(b"file") {
+        return None;
+    }
+    BUILTINS
+        .iter()
+        .any(|builtin| builtin.eq_ignore_ascii_case(scheme))
+        .then_some(scheme)
+        .filter(|scheme| {
+            wrappers.get(scheme).is_none() && wrappers.get(&scheme.to_ascii_lowercase()).is_none()
+        })
+}
+
+pub(crate) fn protocol_disabled(context: &mut dyn Context, name: &[u8]) -> bool {
+    context
+        .state()
+        .get::<crate::request::Files>()
+        .and_then(|files| files.wrappers.as_ref())
+        .is_some_and(|wrappers| {
+            BUILTINS
+                .iter()
+                .any(|builtin| builtin.eq_ignore_ascii_case(name))
+                && wrappers.get(name).is_none()
+                && wrappers.get(&name.to_ascii_lowercase()).is_none()
+        })
 }
 
 pub(crate) fn file_disabled(context: &mut dyn Context) -> bool {

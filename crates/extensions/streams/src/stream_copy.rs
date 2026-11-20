@@ -57,14 +57,12 @@ fn get_contents(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture
                 .and_then(|length| usize::try_from(length).ok())
                 .unwrap_or(usize::MAX);
             chains.read(context, resource, name, size, false).await?
+        } else if let Some(file) = crate::user_file::resource_file(resource) {
+            Ok(file.collect(context, name, length).await?)
         } else if let Some(pipe) = crate::child_pipe::of(resource)? {
             crate::child_pipe::bounded(context, resource, pipe.contents(resource, length)).await??
         } else {
-            if let Some(file) = crate::user_file::resource_file(resource) {
-                Ok(file.collect(context, name, length).await?)
-            } else {
-                read(resource, length).await?
-            }
+            read(resource, length).await?
         };
         match result {
             Ok(data) => Ok(Value::from(data)),

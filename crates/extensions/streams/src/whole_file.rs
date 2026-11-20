@@ -310,20 +310,22 @@ async fn user_contents(
         return Ok(Some(Value::Bool(false)));
     };
     files(context).claim_id();
-    let result = if offset != 0
-        && !file
-            .seek(context, function, offset, if offset < 0 { 2 } else { 0 })
-            .await?
-    {
-        warn_false(
-            context,
-            format!("{function}(): Failed to seek to position {offset} in the stream"),
-        )
-    } else {
+    let result = async {
+        if offset != 0
+            && !file
+                .seek(context, function, offset, if offset < 0 { 2 } else { 0 })
+                .await?
+        {
+            return warn_false(
+                context,
+                format!("{function}(): Failed to seek to position {offset} in the stream"),
+            );
+        }
         file.collect(context, function, length)
             .await
             .map(Value::from)
-    };
+    }
+    .await;
     let closed = file.close(context).await;
     let result = result?;
     closed?;

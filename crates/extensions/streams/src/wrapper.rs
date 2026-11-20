@@ -124,15 +124,21 @@ pub(crate) async fn open_with_errors(
     nonempty_path(name)?;
     // The PHP mode parser takes a C string and keeps at most 15 bytes in metadata.
     let mode = mode.split(|byte| *byte == 0).next().unwrap_or_default();
-    let filter = match crate::filters::FilterUri::parse(name) {
-        Ok(filter) => filter,
-        Err(message) => return Err(NativeError::error(message)),
+    let disabled = crate::user_wrappers::disabled_scheme(context, name);
+    let filter = if disabled.is_some() {
+        None
+    } else {
+        match crate::filters::FilterUri::parse(name) {
+            Ok(filter) => filter,
+            Err(message) => return Err(NativeError::error(message)),
+        }
     };
     let target_name = filter.as_ref().map_or(name, |filter| filter.path);
     if filter.is_some() {
         nonempty_path(target_name)?;
     }
-    let (result, warning) = match Target::parse(target_name) {
+    let target = disabled.map_or_else(|| Target::parse(target_name), Target::Unavailable);
+    let (result, warning) = match target {
         Target::Gzip(filename) => {
             let opened = open_gzip(
                 context,
