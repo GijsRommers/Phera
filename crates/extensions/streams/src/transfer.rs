@@ -126,10 +126,51 @@ pub async fn read_unfiltered(
             .unwrap_or(usize::MAX);
         return file.read(context, function, length, by_line).await;
     }
+    let action = with_stream(resource, |stream| {
+        if let Some(pipe) = stream.child_pipe.clone() {
+            ReadAction::Pipe(pipe)
+        } else if matches!(
+            stream.read_policy(length),
+            crate::io_policy::IoPolicy::Inline
+        ) {
+            ReadAction::Done(read_native(stream, length, by_line))
+        } else {
+            ReadAction::Blocking
+        }
+    })?;
+    match action {
+        ReadAction::Pipe(pipe) => {
+            if by_line {
+                crate::child_pipe::wait_with_execution_limit(context, pipe.line(resource, length))
+                    .await?
+            } else {
+                crate::child_pipe::wait_with_execution_limit(context, pipe.read(resource, length))
+                    .await?
+            }
+        }
+        ReadAction::Blocking => {
+            operate(
+                resource,
+                crate::io_policy::IoPolicy::Blocking,
+                move |stream| read_native(stream, length, by_line),
+            )
+            .await
+        }
+        ReadAction::Done(result) => Ok(result),
+    }
+}
+
+enum ReadAction {
+    Pipe(crate::child_pipe::ChildPipe),
+    Blocking,
+    Done(io::Result<Vec<u8>>),
+}
+
+fn read_native(stream: &mut Stream, length: Option<u64>, by_line: bool) -> io::Result<Vec<u8>> {
     if by_line {
-        crate::child_pipe::bounded(context, resource, line(resource, length)).await?
+        stream.line(length)
     } else {
-        crate::child_pipe::bounded(context, resource, read(resource, length)).await?
+        stream.read(length)
     }
 }
 

@@ -288,12 +288,24 @@ pub(crate) async fn rewind_arguments(
     if let Some(file) = crate::user_file::resource_file(resource) {
         return Ok(Value::Bool(file.seek(context, function, 0, 0).await?));
     }
-    let policy = with_stream(resource, |stream| stream.seek_policy())?;
-    let result = operate(resource, policy, |stream| stream.seek(SeekFrom::Start(0))).await?;
-    if !with_stream(resource, |stream| stream.seekable)? {
+    let (seekable, immediate) = with_stream(resource, |stream| {
+        let seekable = stream.seekable;
+        let result = matches!(stream.seek_policy(), IoPolicy::Inline)
+            .then(|| stream.seek(SeekFrom::Start(0)).is_ok());
+        (seekable, result)
+    })?;
+    let success = match immediate {
+        Some(result) => result,
+        None => operate(resource, IoPolicy::Blocking, |stream| {
+            stream.seek(SeekFrom::Start(0))
+        })
+        .await?
+        .is_ok(),
+    };
+    if !seekable {
         context.warning(format!("{function}(): Stream does not support seeking"));
     }
-    Ok(Value::Bool(result.is_ok()))
+    Ok(Value::Bool(success))
 }
 
 fn ftruncate(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {

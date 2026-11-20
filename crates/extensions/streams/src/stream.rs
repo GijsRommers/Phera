@@ -202,16 +202,25 @@ impl Stream {
     }
 
     fn read_bytes(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        if let Some(mut filters) = self.filters.take() {
-            let result = if filters.read.active() || !filters.buffered.is_empty() {
-                self.read_filtered(&mut filters, buffer)
-            } else {
-                self.read_raw(buffer)
-            };
-            self.filters = Some(filters);
-            return result;
+        if self.filters.is_some() {
+            self.read_with_filters(buffer)
+        } else {
+            self.read_raw(buffer)
         }
-        self.read_raw(buffer)
+    }
+
+    #[cold]
+    fn read_with_filters(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let Some(mut filters) = self.filters.take() else {
+            return self.read_raw(buffer);
+        };
+        let result = if filters.read.active() || !filters.buffered.is_empty() {
+            self.read_filtered(&mut filters, buffer)
+        } else {
+            self.read_raw(buffer)
+        };
+        self.filters = Some(filters);
+        result
     }
 
     fn read_filtered(&mut self, filters: &mut Filters, result: &mut [u8]) -> io::Result<usize> {
