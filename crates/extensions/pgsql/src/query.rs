@@ -159,9 +159,10 @@ pub(crate) fn execute_named<'a, const OP: usize, const SEND: bool>(
                 return Ok(Value::Bool(false));
             }
             state.last_error.clear();
-            state.busy = Some(connection::start(&lease, |driver| {
-                Box::pin(command.run(driver))
-            }));
+            state.busy = Some(
+                connection::start(&lease, |driver| Box::pin(command.run(driver)))
+                    .map_err(|error| NativeError::error(error.detail))?,
+            );
             return Ok(Value::Bool(true));
         }
         finish(&state).await?;
@@ -197,8 +198,7 @@ async fn finish(state: &Handle) -> Result<(), NativeError> {
     if let Some(pending) = pending {
         let result = pending
             .await
-            .map_err(|error| NativeError::error(error.to_string()))?
-            .map_err(NativeError::error)?;
+            .map_err(|error| NativeError::error(error.to_string()))?;
         match result {
             Ok(results) => state.borrow_mut().results.extend(results),
             Err(e) => state.borrow_mut().results.push_back(Rows {

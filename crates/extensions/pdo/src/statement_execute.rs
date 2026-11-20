@@ -91,7 +91,7 @@ pub fn execute_named<'a>(
             .mysql_stream
             .clone()
             .or_else(|| execution.postgres_stream.clone());
-        let mut driver = connection.driver.lock().await;
+        let driver = &connection.driver;
         if let Some(owner) = stream_owner
             && let Err(error) = driver.close_stream(owner).await
         {
@@ -112,15 +112,13 @@ pub fn execute_named<'a>(
         if let Some(active) = driver.observed_transaction_state() {
             connection.transaction.set(active);
         }
-        drop(driver);
         match result {
             Ok(rows) => {
                 let mut statement = state.borrow_mut();
                 if !rows.columns.is_empty() {
                     statement.stream_owner = new_owner;
                 }
-                statement.rows = rows;
-                statement.cursor = 0;
+                statement.set_rows(rows);
                 statement.error = ErrorState::Success;
                 Ok(Value::Bool(true))
             }
@@ -162,8 +160,7 @@ pub fn fail(
         if error.state != "HY093" {
             *statement.connection.last_error.borrow_mut() = Some(error.clone());
         }
-        statement.rows = Rows::default();
-        statement.cursor = 0;
+        statement.set_rows(Rows::default());
         statement.connection.attributes.borrow().errors
     };
     error.report(context, mode, method)

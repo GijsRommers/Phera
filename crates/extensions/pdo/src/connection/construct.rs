@@ -11,7 +11,6 @@ use std::rc::Rc;
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, Value, args,
 };
-use tokio::sync::Mutex;
 
 use super::Session;
 use crate::attributes::{self, AttributeCall, Attributes};
@@ -102,7 +101,7 @@ pub(super) fn construct_with_call<'a>(
         };
         let version = driver.version().to_owned();
         let connection = Rc::new(Session {
-            driver: Mutex::new(driver),
+            driver,
             name: dsn.driver,
             version,
             attributes: RefCell::new(attributes),

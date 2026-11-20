@@ -2930,7 +2930,6 @@ dependencies = [
  "mysql_async",
  "phera-db-drivers",
  "phera-extension-api",
- "phera-io-pool",
 ]
 
 [[package]]
@@ -3003,7 +3002,6 @@ version = "0.1.0"
 dependencies = [
  "phera-db-drivers",
  "phera-extension-api",
- "phera-io-pool",
  "tokio",
 ]
 

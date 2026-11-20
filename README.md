@@ -221,6 +221,18 @@ read, written, sought, truncated and unlinked in the current transaction.
 Native function return types are visible through reflection. Compatibility
 testing is in progress. MySQL LOCAL INFILE is disabled.
 
+### Database connection pool
+
+MySQL and PostgreSQL sockets stay on the worker that opens them.
+`PHERA_PDO_POOL_SIZE` (20 by default) limits pooled sockets to each database
+across the process. An idle worker can close one of its sockets when
+another worker is waiting for a turn. `PHERA_PDO_POOL_IDLE_SECONDS` (60),
+`PHERA_PDO_POOL_LIFETIME_SECONDS` (1800) and
+`PHERA_PDO_POOL_WAIT_SECONDS` (30) control the pool's timeouts.
+`PHERA_PDO_IO_THREADS` is accepted for compatibility and has no effect.
+Unpooled connections, including PDO with `PHERA_ATTR_POOL => false`
+and nonpersistent mysqli and pgsql connections, are outside the pool limit.
+
 Not started: gd, fileinfo, zip, sockets.
 
 ### Sodium

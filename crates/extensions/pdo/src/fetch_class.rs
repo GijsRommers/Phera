@@ -4,18 +4,14 @@
 use std::rc::Rc;
 
 use phera_extension_api::reflection::{ClassSelector, MemberKind};
-use phera_extension_api::{
-    ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, Value, args,
-};
+use phera_extension_api::{Context, NativeError, NativeResult, Object, PhpArray, Value, args};
 
-use crate::attributes::Attributes;
 use crate::constants::{
     FETCH_CLASS, FETCH_CLASSTYPE, FETCH_GROUPING, FETCH_KNOWN_BITS, FETCH_MODE_BITS,
     FETCH_PROPS_LATE, FETCH_SERIALIZE,
 };
-use crate::drivers::Column;
-use crate::fetch::{column_name, stringify};
-use crate::statement::state;
+use crate::fetch::{ValueOptions, stringify};
+use crate::statement::{Statement, state};
 
 #[derive(Clone, Copy)]
 enum HydrationOrder {
@@ -150,32 +146,33 @@ impl RowClass {
 
     pub async fn next(&self, context: &mut dyn Context, this: Option<&Rc<Object>>) -> NativeResult {
         let state = state(this)?;
-        let (row, columns, attributes) = {
+        let fields = {
             let mut statement = state.borrow_mut();
-            let Some(row) = statement.rows.values.get(statement.cursor).cloned() else {
+            let Statement {
+                rows,
+                keys,
+                cursor,
+                connection,
+                ..
+            } = &mut *statement;
+            let Some(row) = rows.values.get_mut(*cursor) else {
                 return Ok(Value::Bool(false));
             };
-            statement.cursor += 1;
-            let attributes = statement.connection.attributes.borrow().clone();
-            (row, statement.rows.columns.clone(), attributes)
+            *cursor += 1;
+            let attributes = ValueOptions::from(&*connection.attributes.borrow());
+            let mut fields = PhpArray::with_capacity(row.len());
+            for (value, key) in row.iter_mut().zip(keys.get(&rows.columns)) {
+                fields.insert(
+                    key.property.clone(),
+                    stringify(context, std::mem::take(value), attributes)?,
+                );
+            }
+            fields
         };
-        self.hydrate(context, row, &columns, &attributes).await
+        self.hydrate(context, fields).await
     }
 
-    async fn hydrate(
-        &self,
-        context: &mut dyn Context,
-        row: Vec<Value>,
-        columns: &[Column],
-        attributes: &Attributes,
-    ) -> NativeResult {
-        let mut fields = PhpArray::with_capacity(row.len());
-        for (value, column) in row.into_iter().zip(columns) {
-            fields.insert(
-                ArrayKey::str(column_name(column, attributes)),
-                stringify(context, value, attributes)?,
-            );
-        }
+    async fn hydrate(&self, context: &mut dyn Context, fields: PhpArray) -> NativeResult {
         let (early, late) = match self.order {
             HydrationOrder::PropertiesFirst => (fields, None),
             HydrationOrder::ConstructorFirst => (PhpArray::new(), Some(fields)),
@@ -196,7 +193,12 @@ impl RowClass {
     }
 
     pub async fn all(&self, context: &mut dyn Context, this: Option<&Rc<Object>>) -> NativeResult {
-        let mut rows = PhpArray::new();
+        let remaining = {
+            let state = state(this)?;
+            let statement = state.borrow();
+            statement.rows.values.len().saturating_sub(statement.cursor)
+        };
+        let mut rows = PhpArray::with_capacity(remaining);
         loop {
             let row = self.next(context, this).await?;
             if matches!(row, Value::Bool(false)) {

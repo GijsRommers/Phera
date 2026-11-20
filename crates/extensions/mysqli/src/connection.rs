@@ -14,11 +14,10 @@ use phera_db_drivers::drivers::mysql::{Mysql, Outcome, Reply};
 use phera_db_drivers::drivers::{Driver, connection_error};
 use phera_db_drivers::dsn::{DriverName, Dsn};
 use phera_db_drivers::errors::DbError;
-use phera_db_drivers::pool::{self, Policy};
+use phera_db_drivers::pool::{self, Lease, Operation, Policy};
 use phera_extension_api::{
     Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
-use phera_io_pool::{Lease, Operation};
 
 use crate::{errors, options};
 
@@ -46,7 +45,7 @@ pub struct Connection {
 enum Status {
     #[default]
     Initialized,
-    Open(Lease<Driver>),
+    Open(Lease),
     Closed,
 }
 
@@ -55,7 +54,7 @@ impl Connection {
         matches!(self.status, Status::Open(_))
     }
 
-    pub fn lease(&self) -> Result<Lease<Driver>, NativeError> {
+    pub fn lease(&self) -> Result<Lease, NativeError> {
         match &self.status {
             Status::Open(lease) => Ok(lease.clone()),
             Status::Initialized => {
@@ -119,16 +118,16 @@ pub fn init(context: &mut dyn Context, _: &[Value]) -> NativeResult {
     Ok(value)
 }
 
-pub async fn run<T, F>(lease: &Lease<Driver>, operation: F) -> Result<T, DbError>
+pub async fn run<T, F>(lease: &Lease, operation: F) -> Result<T, DbError>
 where
-    T: Send + 'static,
-    F: for<'a> FnOnce(&'a mut Mysql) -> Operation<'a, Result<T, DbError>> + Send + 'static,
+    F: for<'a> FnOnce(&'a mut Mysql) -> Operation<'a, Result<T, DbError>>,
 {
-    pool::run(lease, |driver| match driver {
-        Driver::Mysql(mysql) => operation(mysql),
-        _ => Box::pin(async { Err(connection_error("Mismatched database driver")) }),
-    })
-    .await
+    lease
+        .run(async move |driver| match driver {
+            Driver::Mysql(mysql) => operation(mysql).await,
+            _ => Err(connection_error("Mismatched database driver")),
+        })
+        .await
 }
 
 pub fn construct<'a>(

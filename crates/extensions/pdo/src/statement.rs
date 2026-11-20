@@ -9,6 +9,7 @@ use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
 
+use crate::column_keys::ColumnKeys;
 use crate::connection::{Session, session};
 use crate::constants::PARAM_STR;
 use crate::drivers::{Prepared, Rows};
@@ -28,6 +29,7 @@ pub struct Statement {
     pub sql: Sql,
     pub bindings: HashMap<String, Binding>,
     pub rows: Rows,
+    pub keys: ColumnKeys,
     pub cursor: usize,
     pub fetch: FetchMode,
     pub column: usize,
@@ -37,6 +39,15 @@ pub struct Statement {
     /// SQLite: whether the statement ran since it was prepared or its
     /// cursor closed, which `getColumnMeta()` needs.
     pub sqlite_executed: bool,
+}
+
+impl Statement {
+    pub fn set_rows(&mut self, rows: Rows) {
+        self.keys
+            .describe(&rows.columns, &self.connection.attributes.borrow());
+        self.rows = rows;
+        self.cursor = 0;
+    }
 }
 
 pub fn state(this: Option<&Rc<Object>>) -> Result<Rc<RefCell<Statement>>, NativeError> {
@@ -150,7 +161,7 @@ async fn create(
         connection.statement_sequence.set(number);
         Prepared::PostgresDeferred { number }
     } else {
-        let result = connection.driver.lock().await.prepare(&sql, 0).await;
+        let result = connection.driver.prepare(&sql, 0).await;
         match result {
             Ok(prepared) => prepared,
             Err(error) => return connection.fail(context, error, method),
@@ -183,6 +194,7 @@ async fn create(
         stream_owner: None,
         bindings: HashMap::new(),
         rows: Rows::default(),
+        keys: ColumnKeys::default(),
         cursor: 0,
         fetch: configuration.mode,
         column: configuration.column,

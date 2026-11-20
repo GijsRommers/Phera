@@ -1,6 +1,6 @@
 //! SQLite owns parameter numbering: `prepare('SELECT ?2, :name, @other')`.
 
-use crate::drivers::{Column, Prepared, Rows};
+use crate::drivers::{Column, Prepared, RowBuffer, Rows};
 use crate::errors::{DbError, ErrorState};
 use crate::parameters;
 use crate::statement::Statement;
@@ -63,7 +63,7 @@ pub async fn execute(
     match handle.execute(bindings).await {
         Ok(execution) => {
             let mut statement = state.borrow_mut();
-            let columns = execution
+            let columns: Vec<_> = execution
                 .description
                 .columns
                 .into_iter()
@@ -75,7 +75,8 @@ pub async fn execute(
                         execution
                             .first
                             .as_ref()
-                            .map_or(kind::NULL, |row| row[index].kind()),
+                            .and_then(|row| row.get(index))
+                            .map_or(kind::NULL, Cell::kind),
                     ),
                 })
                 .collect();
@@ -84,17 +85,16 @@ pub async fn execute(
             } else {
                 execution.changes
             };
-            statement.rows = Rows {
+            let mut values = RowBuffer::with_capacity(columns.len(), 1);
+            if let Some(row) = execution.first {
+                values.push(row.into_iter().map(value));
+            }
+            statement.set_rows(Rows {
                 columns,
-                values: execution
-                    .first
-                    .into_iter()
-                    .map(|row| row.into_iter().map(value).collect())
-                    .collect(),
+                values,
                 affected,
-            };
+            });
             statement.sqlite_executed = true;
-            statement.cursor = 0;
             statement.error = ErrorState::Success;
             Ok(Value::Bool(true))
         }

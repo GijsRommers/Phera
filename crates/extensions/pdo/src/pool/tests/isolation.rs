@@ -98,7 +98,7 @@ pub async fn clean(driver: &mut Lease, name: &str) {
         );
         assert_eq!(driver.last_id(None).await.unwrap(), "0");
     }
-    assert_eq!(rows(driver, "SELECT 1").await.values[0][0], Value::Int(1));
+    assert_eq!(scalar(driver, "SELECT 1").await, Value::Int(1));
 }
 
 /// A clean connection survives being reset many times in a row.
@@ -106,7 +106,7 @@ pub async fn reset_repeatedly(driver: &mut Lease) {
     for _ in 0..100 {
         driver.reset().await.unwrap();
     }
-    assert_eq!(rows(driver, "SELECT 1").await.values[0][0], Value::Int(1));
+    assert_eq!(scalar(driver, "SELECT 1").await, Value::Int(1));
 }
 
 /// Private tokio-postgres type-info statements cannot survive DISCARD ALL.

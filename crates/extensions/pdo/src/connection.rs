@@ -16,7 +16,6 @@ use std::rc::Rc;
 use phera_extension_api::{
     Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
-use tokio::sync::Mutex;
 
 use crate::attributes::{AttributeCall, Attributes};
 use crate::constants::{
@@ -27,7 +26,7 @@ use crate::errors::{DbError, ErrorMode, ErrorState, unsupported};
 use crate::pool::Lease;
 
 pub struct Session {
-    pub driver: Mutex<Lease>,
+    pub driver: Lease,
     pub name: DriverName,
     pub version: String,
     pub attributes: RefCell<Attributes>,
@@ -133,12 +132,11 @@ pub fn exec<'a>(
                 "PDO::exec(): Argument #1 ($statement) must not be empty",
             ));
         }
-        let mut driver = session.driver.lock().await;
+        let driver = &session.driver;
         let result = driver.exec(&sql).await;
         if let Some(active) = driver.observed_transaction_state() {
             session.transaction.set(active);
         }
-        drop(driver);
         match result {
             Ok(rows) => {
                 session.success();
@@ -179,7 +177,7 @@ pub fn quote<'a>(
         if std::str::from_utf8(bytes).is_err() {
             return Err(unsupported("Quoting non-UTF-8 strings"));
         }
-        let result = session.driver.lock().await.quote(bytes).await;
+        let result = session.driver.quote(bytes).await;
         match result {
             Ok(quoted) => {
                 let prefix = if session.name != DriverName::Mysql {
@@ -212,7 +210,7 @@ pub fn last_id<'a>(
     Box::pin(async move {
         let session = session(this.as_ref())?;
         let name = args::string(&arguments, 0).map(|s| s.to_string_lossy());
-        let result = session.driver.lock().await.last_id(name.as_deref()).await;
+        let result = session.driver.last_id(name.as_deref()).await;
         match result {
             Ok(id) => {
                 session.success();

@@ -1,4 +1,4 @@
-//! PDO connections come from a process-wide pool, shared by every worker:
+//! PDO borrows connections open on the current worker:
 //!
 //! ```php
 //! $pdo = new PDO($dsn, $user, $password);          // borrows a pooled connection
@@ -9,13 +9,11 @@
 //!
 //! A PDO object and its statements share one lease. After the last of them is
 //! gone, the connection is reset in the background (the driver's `reset`)
-//! and lent to the next `new PDO` with the same settings. How the pool works,
-//! and how a query travels to the I/O threads and back, is described in the
-//! `phera-io-pool` crate. The limits are environment settings, read once:
+//! and lent to the next `new PDO` with the same settings on this worker.
+//! Workers share the admission limit. The limits are read once:
 //! `PHERA_PDO_POOL_SIZE` (20), `PHERA_PDO_POOL_IDLE_SECONDS` (60),
 //! `PHERA_PDO_POOL_LIFETIME_SECONDS` (1800), `PHERA_PDO_POOL_WAIT_SECONDS`
-//! (30) and `PHERA_PDO_IO_THREADS` (2). `PDO::ATTR_PERSISTENT` is accepted
-//! and changes nothing.
+//! (30). `PDO::ATTR_PERSISTENT` is reported separately from the pool policy.
 
 mod lease;
 
@@ -27,11 +25,7 @@ use phera_extension_api::{ArrayKey, PhpArray};
 pub use phera_db_drivers::pool::Policy;
 
 #[cfg(test)]
-use crate::drivers::Driver;
-#[cfg(test)]
-use phera_db_drivers::pool::{Key, POOL, RUNTIME};
-#[cfg(test)]
-use phera_io_pool::Pool;
+use phera_db_drivers::pool::Pool;
 
 use crate::dsn::Dsn;
 use crate::errors::DbError;
@@ -63,19 +57,18 @@ pub async fn acquire(
     password: &str,
     policy: Policy,
 ) -> Result<Lease, DbError> {
-    Lease::new(phera_db_drivers::pool::acquire(dsn, username, password, policy).await?).await
+    Lease::new(phera_db_drivers::pool::acquire(dsn, username, password, policy).await?)
 }
 
 #[cfg(test)]
 async fn acquire_from(
-    pool: &Pool<Key, Driver>,
+    pool: &Pool,
     dsn: &Dsn,
     username: &str,
     password: &str,
     policy: Policy,
 ) -> Result<Lease, DbError> {
-    Lease::new(phera_db_drivers::pool::acquire_from(pool, dsn, username, password, policy).await?)
-        .await
+    Lease::new(pool.acquire(dsn, username, password, policy).await?)
 }
 
 #[cfg(test)]
