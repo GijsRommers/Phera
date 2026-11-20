@@ -112,8 +112,12 @@ impl Runtime {
         registry.load(&phera_ext_streams::Streams);
         registry.load(&phera_ext_process::Process);
         registry.load(&phera_ext_process::Posix);
+        registry.load(&phera_ext_zlib::Zlib);
+        registry.load(&phera_ext_bcmath::BcMath);
+        registry.load(&phera_ext_gmp::Gmp);
         registry.load(&phera_ext_ctype::Ctype);
         registry.load(&phera_ext_date::Date);
+        registry.load(&phera_ext_curl::Curl);
         registry.load(&phera_ext_dom::Libxml);
         registry.load(&phera_ext_dom::Dom);
         registry.load(&phera_ext_filter::Filter);
@@ -131,6 +135,7 @@ impl Runtime {
         http::register_request_parse_body(&mut registry);
         registry.load(&phera_ext_hash::Hash);
         registry.load(&phera_ext_openssl::OpenSsl);
+        registry.load(&phera_ext_sodium::Sodium);
         registry.load(&phera_ext_random::Random);
         registry.load(&phera_ext_reflection::Reflection);
         registry.load(&phera_ext_serialize::Serialize);

@@ -73,6 +73,16 @@ pub trait Context {
         None
     }
 
+    /// Try the native overload of an operator, for built-ins such as pow().
+    fn native_binary(
+        &mut self,
+        _operator: crate::NativeBinaryOp,
+        _left: &Value,
+        _right: &Value,
+    ) -> Result<Option<Value>, NativeError> {
+        Ok(None)
+    }
+
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
 

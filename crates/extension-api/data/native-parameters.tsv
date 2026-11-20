@@ -146,6 +146,37 @@ base64_decode	ext/standard/basic_functions.stub.php:1912	string	r--		-	strict	o-
 base64_encode	ext/standard/basic_functions.stub.php:1906	string	r--		-
 base_convert	ext/standard/basic_functions.stub.php:3239	num	r--		-	from_base	r--		-	to_base	r--		-
 basename	ext/standard/basic_functions.stub.php:2357	path	r--		-	suffix	o--	""	s
+bcadd	ext/bcmath/bcmath.stub.php:8	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcceil	ext/bcmath/bcmath.stub.php:45	num	r--		-
+bccomp	ext/bcmath/bcmath.stub.php:37	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcdiv	ext/bcmath/bcmath.stub.php:17	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcdivmod	ext/bcmath/bcmath.stub.php:26	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcfloor	ext/bcmath/bcmath.stub.php:42	num	r--		-
+bcmath\number::__construct	ext/bcmath/bcmath.stub.php:61	num	r--		-
+bcmath\number::__serialize	ext/bcmath/bcmath.stub.php:92
+bcmath\number::__tostring	ext/bcmath/bcmath.stub.php:90
+bcmath\number::__unserialize	ext/bcmath/bcmath.stub.php:94	data	r--		-
+bcmath\number::add	ext/bcmath/bcmath.stub.php:63	num	r--		-	scale	o--	null	n
+bcmath\number::ceil	ext/bcmath/bcmath.stub.php:84
+bcmath\number::compare	ext/bcmath/bcmath.stub.php:88	num	r--		-	scale	o--	null	n
+bcmath\number::div	ext/bcmath/bcmath.stub.php:69	num	r--		-	scale	o--	null	n
+bcmath\number::divmod	ext/bcmath/bcmath.stub.php:74	num	r--		-	scale	o--	null	n
+bcmath\number::floor	ext/bcmath/bcmath.stub.php:82
+bcmath\number::mod	ext/bcmath/bcmath.stub.php:71	num	r--		-	scale	o--	null	n
+bcmath\number::mul	ext/bcmath/bcmath.stub.php:67	num	r--		-	scale	o--	null	n
+bcmath\number::pow	ext/bcmath/bcmath.stub.php:78	exponent	r--		-	scale	o--	null	n
+bcmath\number::powmod	ext/bcmath/bcmath.stub.php:76	exponent	r--		-	modulus	r--		-	scale	o--	null	n
+bcmath\number::round	ext/bcmath/bcmath.stub.php:86	precision	o--	0	i0	mode	o--	\RoundingMode::HalfAwayFromZero	eRoundingMode::HalfAwayFromZero
+bcmath\number::sqrt	ext/bcmath/bcmath.stub.php:80	scale	o--	null	n
+bcmath\number::sub	ext/bcmath/bcmath.stub.php:65	num	r--		-	scale	o--	null	n
+bcmod	ext/bcmath/bcmath.stub.php:20	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcmul	ext/bcmath/bcmath.stub.php:14	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcpow	ext/bcmath/bcmath.stub.php:32	num	r--		-	exponent	r--		-	scale	o--	null	n
+bcpowmod	ext/bcmath/bcmath.stub.php:29	num	r--		-	exponent	r--		-	modulus	r--		-	scale	o--	null	n
+bcround	ext/bcmath/bcmath.stub.php:48	num	r--		-	precision	o--	0	i0	mode	o--	RoundingMode::HalfAwayFromZero	eRoundingMode::HalfAwayFromZero
+bcscale	ext/bcmath/bcmath.stub.php:39	scale	o--	null	n
+bcsqrt	ext/bcmath/bcmath.stub.php:35	num	r--		-	scale	o--	null	n
+bcsub	ext/bcmath/bcmath.stub.php:11	num1	r--		-	num2	r--		-	scale	o--	null	n
 bin2hex	ext/standard/basic_functions.stub.php:2277	string	r--		-
 bindec	ext/standard/basic_functions.stub.php:3208	binary_string	r--		-
 boolval	ext/standard/basic_functions.stub.php:3600	value	r--		-
@@ -221,6 +252,48 @@ ctype_punct	ext/ctype/ctype.stub.php:19	text	r--		-
 ctype_space	ext/ctype/ctype.stub.php:21	text	r--		-
 ctype_upper	ext/ctype/ctype.stub.php:23	text	r--		-
 ctype_xdigit	ext/ctype/ctype.stub.php:25	text	r--		-
+curl_close	ext/curl/curl.stub.php:3744	handle	r--		-
+curl_copy_handle	ext/curl/curl.stub.php:3747	handle	r--		-
+curl_errno	ext/curl/curl.stub.php:3749	handle	r--		-
+curl_error	ext/curl/curl.stub.php:3752	handle	r--		-
+curl_escape	ext/curl/curl.stub.php:3755	handle	r--		-	string	r--		-
+curl_exec	ext/curl/curl.stub.php:3762	handle	r--		-
+curl_file_create	ext/curl/curl.stub.php:3765	filename	r--		-	mime_type	o--	null	n	posted_filename	o--	null	n
+curl_getinfo	ext/curl/curl.stub.php:3767	handle	r--		-	option	o--	null	n
+curl_init	ext/curl/curl.stub.php:3770	url	o--	null	n
+curl_multi_add_handle	ext/curl/curl.stub.php:3776	multi_handle	r--		-	handle	r--		-
+curl_multi_close	ext/curl/curl.stub.php:3780	multi_handle	r--		-
+curl_multi_errno	ext/curl/curl.stub.php:3782	multi_handle	r--		-
+curl_multi_exec	ext/curl/curl.stub.php:3785	multi_handle	r--		-	still_running	r-&		-
+curl_multi_get_handles	ext/curl/curl.stub.php:3778	multi_handle	r--		-
+curl_multi_getcontent	ext/curl/curl.stub.php:3787	handle	r--		-
+curl_multi_info_read	ext/curl/curl.stub.php:3794	multi_handle	r--		-	queued_messages	o-&	null	n
+curl_multi_init	ext/curl/curl.stub.php:3797
+curl_multi_remove_handle	ext/curl/curl.stub.php:3799	multi_handle	r--		-	handle	r--		-
+curl_multi_select	ext/curl/curl.stub.php:3801	multi_handle	r--		-	timeout	o--	1.0	d1.0
+curl_multi_setopt	ext/curl/curl.stub.php:3760	multi_handle	r--		-	option	r--		-	value	r--		-
+curl_multi_strerror	ext/curl/curl.stub.php:3804	error_code	r--		-
+curl_pause	ext/curl/curl.stub.php:3806	handle	r--		-	flags	r--		-
+curl_reset	ext/curl/curl.stub.php:3808	handle	r--		-
+curl_setopt	ext/curl/curl.stub.php:3812	handle	r--		-	option	r--		-	value	r--		-
+curl_setopt_array	ext/curl/curl.stub.php:3810	handle	r--		-	options	r--		-
+curl_share_close	ext/curl/curl.stub.php:3815	share_handle	r--		-
+curl_share_errno	ext/curl/curl.stub.php:3817	share_handle	r--		-
+curl_share_init	ext/curl/curl.stub.php:3820
+curl_share_init_persistent	ext/curl/curl.stub.php:3828	share_options	r--		-
+curl_share_setopt	ext/curl/curl.stub.php:3822	share_handle	r--		-	option	r--		-	value	r--		-
+curl_share_strerror	ext/curl/curl.stub.php:3825	error_code	r--		-
+curl_strerror	ext/curl/curl.stub.php:3831	error_code	r--		-
+curl_unescape	ext/curl/curl.stub.php:3758	handle	r--		-	string	r--		-
+curl_upkeep	ext/curl/curl.stub.php:3773	handle	r--		-
+curl_version	ext/curl/curl.stub.php:3837
+curlfile::__construct	ext/curl/curl_file.stub.php:12	filename	r--		-	mime_type	o--	null	n	posted_filename	o--	null	n
+curlfile::getfilename	ext/curl/curl_file.stub.php:15
+curlfile::getmimetype	ext/curl/curl_file.stub.php:18
+curlfile::getpostfilename	ext/curl/curl_file.stub.php:21
+curlfile::setmimetype	ext/curl/curl_file.stub.php:24	mime_type	r--		-
+curlfile::setpostfilename	ext/curl/curl_file.stub.php:27	posted_filename	r--		-
+curlstringfile::__construct	ext/curl/curl_file.stub.php:36	data	r--		-	postname	r--		-	mime	o--	"application/octet-stream"	s6170706c69636174696f6e2f6f637465742d73747265616d
 current	ext/standard/basic_functions.stub.php:1590	array	r--		-
 date	ext/date/php_date.stub.php:96	format	r--		-	timestamp	o--	null	n
 date_add	ext/date/php_date.stub.php:177	object	r--		-	interval	r--		-
@@ -346,6 +419,8 @@ dechex	ext/standard/basic_functions.stub.php:3233	num	r--		-
 decoct	ext/standard/basic_functions.stub.php:3226	num	r--		-
 define	Zend/zend_builtin_functions.stub.php:44	constant_name	r--		-	value	r--		-	case_insensitive	o--	false	f
 defined	Zend/zend_builtin_functions.stub.php:46	constant_name	r--		-
+deflate_add	ext/zlib/zlib.stub.php:275	context	r--		-	data	r--		-	flush_mode	o--	ZLIB_SYNC_FLUSH	i2
+deflate_init	ext/zlib/zlib.stub.php:273	encoding	r--		-	options	o--	[]	a
 deg2rad	ext/standard/basic_functions.stub.php:3202	num	r--		-
 deprecated::__construct	Zend/zend_attributes.stub.php:87	message	o--	null	n	since	o--	null	n
 die	Zend/zend_builtin_functions.stub.php:16	status	o--	0	i0
@@ -884,7 +959,80 @@ globiterator::__construct	ext/spl/spl_directory.stub.php:212	pattern	r--		-	flag
 globiterator::count	ext/spl/spl_directory.stub.php:215
 gmdate	ext/date/php_date.stub.php:101	format	r--		-	timestamp	o--	null	n
 gmmktime	ext/date/php_date.stub.php:107	hour	r--		-	minute	o--	null	n	second	o--	null	n	month	o--	null	n	day	o--	null	n	year	o--	null	n
+gmp::__construct	ext/gmp/gmp.stub.php:62	num	o--	0	i0	base	o--	0	i0
+gmp::__serialize	ext/gmp/gmp.stub.php:64
+gmp::__unserialize	ext/gmp/gmp.stub.php:66	data	r--		-
+gmp_abs	ext/gmp/gmp.stub.php:104	num	r--		-
+gmp_add	ext/gmp/gmp.stub.php:79	num1	r--		-	num2	r--		-
+gmp_and	ext/gmp/gmp.stub.php:162	num1	r--		-	num2	r--		-
+gmp_binomial	ext/gmp/gmp.stub.php:186	n	r--		-	k	r--		-
+gmp_clrbit	ext/gmp/gmp.stub.php:172	num	r--		-	index	r--		-
+gmp_cmp	ext/gmp/gmp.stub.php:152	num1	r--		-	num2	r--		-
+gmp_com	ext/gmp/gmp.stub.php:166	num	r--		-
+gmp_div	ext/gmp/gmp.stub.php:96	num1	r--		-	num2	r--		-	rounding_mode	o--	GMP_ROUND_ZERO	i0
+gmp_div_q	ext/gmp/gmp.stub.php:91	num1	r--		-	num2	r--		-	rounding_mode	o--	GMP_ROUND_ZERO	i0
+gmp_div_qr	ext/gmp/gmp.stub.php:89	num1	r--		-	num2	r--		-	rounding_mode	o--	GMP_ROUND_ZERO	i0
+gmp_div_r	ext/gmp/gmp.stub.php:93	num1	r--		-	num2	r--		-	rounding_mode	o--	GMP_ROUND_ZERO	i0
+gmp_divexact	ext/gmp/gmp.stub.php:100	num1	r--		-	num2	r--		-
+gmp_export	ext/gmp/gmp.stub.php:73	num	r--		-	word_size	o--	1	i1	flags	o--	GMP_MSW_FIRST | GMP_NATIVE_ENDIAN	i17
+gmp_fact	ext/gmp/gmp.stub.php:106	num	r--		-
+gmp_gcd	ext/gmp/gmp.stub.php:134	num1	r--		-	num2	r--		-
+gmp_gcdext	ext/gmp/gmp.stub.php:140	num1	r--		-	num2	r--		-
+gmp_hamdist	ext/gmp/gmp.stub.php:182	num1	r--		-	num2	r--		-
+gmp_import	ext/gmp/gmp.stub.php:71	data	r--		-	word_size	o--	1	i1	flags	o--	GMP_MSW_FIRST | GMP_NATIVE_ENDIAN	i17
+gmp_init	ext/gmp/gmp.stub.php:69	num	r--		-	base	o--	0	i0
+gmp_intval	ext/gmp/gmp.stub.php:75	num	r--		-
+gmp_invert	ext/gmp/gmp.stub.php:144	num1	r--		-	num2	r--		-
+gmp_jacobi	ext/gmp/gmp.stub.php:146	num1	r--		-	num2	r--		-
+gmp_kronecker	ext/gmp/gmp.stub.php:150	num1	r--		-	num2	r--		-
+gmp_lcm	ext/gmp/gmp.stub.php:142	num1	r--		-	num2	r--		-
+gmp_legendre	ext/gmp/gmp.stub.php:148	num1	r--		-	num2	r--		-
+gmp_mod	ext/gmp/gmp.stub.php:98	num1	r--		-	num2	r--		-
+gmp_mul	ext/gmp/gmp.stub.php:83	num1	r--		-	num2	r--		-
+gmp_neg	ext/gmp/gmp.stub.php:102	num	r--		-
+gmp_nextprime	ext/gmp/gmp.stub.php:184	num	r--		-
+gmp_or	ext/gmp/gmp.stub.php:164	num1	r--		-	num2	r--		-
+gmp_perfect_power	ext/gmp/gmp.stub.php:130	num	r--		-
+gmp_perfect_square	ext/gmp/gmp.stub.php:128	num	r--		-
+gmp_popcount	ext/gmp/gmp.stub.php:180	num	r--		-
+gmp_pow	ext/gmp/gmp.stub.php:124	num	r--		-	exponent	r--		-
+gmp_powm	ext/gmp/gmp.stub.php:126	num	r--		-	exponent	r--		-	modulus	r--		-
+gmp_prob_prime	ext/gmp/gmp.stub.php:132	num	r--		-	repetitions	o--	10	i10
+gmp_random_bits	ext/gmp/gmp.stub.php:158	bits	r--		-
+gmp_random_range	ext/gmp/gmp.stub.php:160	min	r--		-	max	r--		-
+gmp_random_seed	ext/gmp/gmp.stub.php:156	seed	r--		-
+gmp_root	ext/gmp/gmp.stub.php:116	num	r--		-	nth	r--		-
+gmp_rootrem	ext/gmp/gmp.stub.php:122	num	r--		-	nth	r--		-
+gmp_scan0	ext/gmp/gmp.stub.php:176	num1	r--		-	start	r--		-
+gmp_scan1	ext/gmp/gmp.stub.php:178	num1	r--		-	start	r--		-
+gmp_setbit	ext/gmp/gmp.stub.php:170	num	r--		-	index	r--		-	value	o--	true	t
+gmp_sign	ext/gmp/gmp.stub.php:154	num	r--		-
+gmp_sqrt	ext/gmp/gmp.stub.php:108	num	r--		-
+gmp_sqrtrem	ext/gmp/gmp.stub.php:114	num	r--		-
+gmp_strval	ext/gmp/gmp.stub.php:77	num	r--		-	base	o--	10	i10
+gmp_sub	ext/gmp/gmp.stub.php:81	num1	r--		-	num2	r--		-
+gmp_testbit	ext/gmp/gmp.stub.php:174	num	r--		-	index	r--		-
+gmp_xor	ext/gmp/gmp.stub.php:168	num1	r--		-	num2	r--		-
 gmstrftime	ext/date/php_date.stub.php:123	format	r--		-	timestamp	o--	null	n
+gzclose	ext/zlib/zlib.stub.php:229	stream	r--		-
+gzcompress	ext/zlib/zlib.stub.php:195	data	r--		-	level	o--	-1	i-1	encoding	o--	ZLIB_ENCODING_DEFLATE	i15
+gzdecode	ext/zlib/zlib.stub.php:201	data	r--		-	max_length	o--	0	i0
+gzdeflate	ext/zlib/zlib.stub.php:189	data	r--		-	level	o--	-1	i-1	encoding	o--	ZLIB_ENCODING_RAW	i-15
+gzencode	ext/zlib/zlib.stub.php:192	data	r--		-	level	o--	-1	i-1	encoding	o--	ZLIB_ENCODING_GZIP	i31
+gzeof	ext/zlib/zlib.stub.php:235	stream	r--		-
+gzfile	ext/zlib/zlib.stub.php:172	filename	r--		-	use_include_path	o--	false	f
+gzgetc	ext/zlib/zlib.stub.php:241	stream	r--		-
+gzgets	ext/zlib/zlib.stub.php:271	stream	r--		-	length	o--	null	n
+gzinflate	ext/zlib/zlib.stub.php:198	data	r--		-	max_length	o--	0	i0
+gzopen	ext/zlib/zlib.stub.php:178	filename	r--		-	mode	r--		-	use_include_path	o--	false	f
+gzpassthru	ext/zlib/zlib.stub.php:247	stream	r--		-
+gzputs	ext/zlib/zlib.stub.php:217	stream	r--		-	data	r--		-	length	o--	null	n
+gzread	ext/zlib/zlib.stub.php:265	stream	r--		-	length	r--		-
+gzrewind	ext/zlib/zlib.stub.php:223	stream	r--		-
+gzseek	ext/zlib/zlib.stub.php:253	stream	r--		-	offset	r--		-	whence	o--	SEEK_SET	i0
+gztell	ext/zlib/zlib.stub.php:259	stream	r--		-
+gzuncompress	ext/zlib/zlib.stub.php:204	data	r--		-	max_length	o--	0	i0
+gzwrite	ext/zlib/zlib.stub.php:210	stream	r--		-	data	r--		-	length	o--	null	n
 hash	ext/hash/hash.stub.php:12	algo	r--		-	data	r--		-	binary	o--	false	f	options	o--	[]	a
 hash_algos	ext/hash/hash.stub.php:51
 hash_copy	ext/hash/hash.stub.php:44	context	r--		-
@@ -944,6 +1092,10 @@ inet_ntop	ext/standard/basic_functions.stub.php:2211	ip	r--		-
 inet_pton	ext/standard/basic_functions.stub.php:2214	ip	r--		-
 infiniteiterator::__construct	ext/spl/spl_iterators.stub.php:337	iterator	r--		-
 infiniteiterator::next	ext/spl/spl_iterators.stub.php:340
+inflate_add	ext/zlib/zlib.stub.php:279	context	r--		-	data	r--		-	flush_mode	o--	ZLIB_SYNC_FLUSH	i2
+inflate_get_read_len	ext/zlib/zlib.stub.php:283	context	r--		-
+inflate_get_status	ext/zlib/zlib.stub.php:281	context	r--		-
+inflate_init	ext/zlib/zlib.stub.php:277	encoding	r--		-	options	o--	[]	a
 ini_alter	ext/standard/basic_functions.stub.php:2005	option	r--		-	value	r--		-
 ini_get	ext/standard/basic_functions.stub.php:1994	option	r--		-
 ini_get_all	ext/standard/basic_functions.stub.php:2000	extension	o--	null	n	details	o--	true	t
@@ -1171,6 +1323,7 @@ ob_get_flush	ext/standard/basic_functions.stub.php:1510
 ob_get_length	ext/standard/basic_functions.stub.php:1519
 ob_get_level	ext/standard/basic_functions.stub.php:1517
 ob_get_status	ext/standard/basic_functions.stub.php:1531	full_status	o--	false	f
+ob_gzhandler	ext/zlib/zlib.stub.php:163	data	r--		-	flags	r--		-
 ob_implicit_flush	ext/standard/basic_functions.stub.php:1533	enable	o--	true	t
 ob_list_handlers	ext/standard/basic_functions.stub.php:1525
 ob_start	ext/standard/basic_functions.stub.php:1499	callback	o--	null	n	chunk_size	o--	0	i0	flags	o--	PHP_OUTPUT_HANDLER_STDFLAGS	i112
@@ -1567,6 +1720,7 @@ rawurldecode	ext/standard/basic_functions.stub.php:3718	string	r--		-
 rawurlencode	ext/standard/basic_functions.stub.php:3712	string	r--		-
 readdir	ext/standard/basic_functions.stub.php:2666	dir_handle	o--	null	n
 readfile	ext/standard/basic_functions.stub.php:2735	filename	r--		-	use_include_path	o--	false	f	context	o--	null	n
+readgzfile	ext/zlib/zlib.stub.php:180	filename	r--		-	use_include_path	o--	false	f
 readlink	ext/standard/basic_functions.stub.php:3085	path	r--		-
 realpath	ext/standard/basic_functions.stub.php:2865	path	r--		-
 realpath_cache_get	ext/standard/basic_functions.stub.php:2953
@@ -2286,6 +2440,116 @@ sleep	ext/standard/basic_functions.stub.php:1942	seconds	r--		-
 socket_get_status	ext/standard/basic_functions.stub.php:3521	stream	r--		-
 socket_set_blocking	ext/standard/basic_functions.stub.php:3508	stream	r--		-	enable	r--		-
 socket_set_timeout	ext/standard/basic_functions.stub.php:3567	stream	r--		-	seconds	r--		-	microseconds	o--	0	i0
+sodium_add	ext/sodium/libsodium.stub.php:775	string1	r-&		-	string2	r--		-
+sodium_base642bin	ext/sodium/libsodium.stub.php:796	string	r--		-	id	r--		-	ignore	o--	""	s
+sodium_bin2base64	ext/sodium/libsodium.stub.php:794	string	r--		-	id	r--		-
+sodium_bin2hex	ext/sodium/libsodium.stub.php:789	string	r--		-
+sodium_compare	ext/sodium/libsodium.stub.php:777	string1	r--		-	string2	r--		-
+sodium_crypto_aead_aegis128l_decrypt	ext/sodium/libsodium.stub.php:557	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis128l_encrypt	ext/sodium/libsodium.stub.php:559	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis128l_keygen	ext/sodium/libsodium.stub.php:561
+sodium_crypto_aead_aegis256_decrypt	ext/sodium/libsodium.stub.php:565	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis256_encrypt	ext/sodium/libsodium.stub.php:567	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis256_keygen	ext/sodium/libsodium.stub.php:569
+sodium_crypto_aead_aes256gcm_decrypt	ext/sodium/libsodium.stub.php:549	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aes256gcm_encrypt	ext/sodium/libsodium.stub.php:551	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aes256gcm_is_available	ext/sodium/libsodium.stub.php:546
+sodium_crypto_aead_aes256gcm_keygen	ext/sodium/libsodium.stub.php:553
+sodium_crypto_aead_chacha20poly1305_decrypt	ext/sodium/libsodium.stub.php:572	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_encrypt	ext/sodium/libsodium.stub.php:574	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_ietf_decrypt	ext/sodium/libsodium.stub.php:578	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_ietf_encrypt	ext/sodium/libsodium.stub.php:580	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_ietf_keygen	ext/sodium/libsodium.stub.php:582
+sodium_crypto_aead_chacha20poly1305_keygen	ext/sodium/libsodium.stub.php:576
+sodium_crypto_aead_xchacha20poly1305_ietf_decrypt	ext/sodium/libsodium.stub.php:585	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_xchacha20poly1305_ietf_encrypt	ext/sodium/libsodium.stub.php:589	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_xchacha20poly1305_ietf_keygen	ext/sodium/libsodium.stub.php:587
+sodium_crypto_auth	ext/sodium/libsodium.stub.php:592	message	r--		-	key	r--		-
+sodium_crypto_auth_keygen	ext/sodium/libsodium.stub.php:594
+sodium_crypto_auth_verify	ext/sodium/libsodium.stub.php:596	mac	r--		-	message	r--		-	key	r--		-
+sodium_crypto_box	ext/sodium/libsodium.stub.php:598	message	r--		-	nonce	r--		-	key_pair	r--		-
+sodium_crypto_box_keypair	ext/sodium/libsodium.stub.php:600
+sodium_crypto_box_keypair_from_secretkey_and_publickey	ext/sodium/libsodium.stub.php:604	secret_key	r--		-	public_key	r--		-
+sodium_crypto_box_open	ext/sodium/libsodium.stub.php:606	ciphertext	r--		-	nonce	r--		-	key_pair	r--		-
+sodium_crypto_box_publickey	ext/sodium/libsodium.stub.php:608	key_pair	r--		-
+sodium_crypto_box_publickey_from_secretkey	ext/sodium/libsodium.stub.php:610	secret_key	r--		-
+sodium_crypto_box_seal	ext/sodium/libsodium.stub.php:612	message	r--		-	public_key	r--		-
+sodium_crypto_box_seal_open	ext/sodium/libsodium.stub.php:614	ciphertext	r--		-	key_pair	r--		-
+sodium_crypto_box_secretkey	ext/sodium/libsodium.stub.php:616	key_pair	r--		-
+sodium_crypto_box_seed_keypair	ext/sodium/libsodium.stub.php:602	seed	r--		-
+sodium_crypto_core_ristretto255_add	ext/sodium/libsodium.stub.php:619	p	r--		-	q	r--		-
+sodium_crypto_core_ristretto255_from_hash	ext/sodium/libsodium.stub.php:621	s	r--		-
+sodium_crypto_core_ristretto255_is_valid_point	ext/sodium/libsodium.stub.php:623	s	r--		-
+sodium_crypto_core_ristretto255_random	ext/sodium/libsodium.stub.php:625
+sodium_crypto_core_ristretto255_scalar_add	ext/sodium/libsodium.stub.php:627	x	r--		-	y	r--		-
+sodium_crypto_core_ristretto255_scalar_complement	ext/sodium/libsodium.stub.php:629	s	r--		-
+sodium_crypto_core_ristretto255_scalar_invert	ext/sodium/libsodium.stub.php:631	s	r--		-
+sodium_crypto_core_ristretto255_scalar_mul	ext/sodium/libsodium.stub.php:633	x	r--		-	y	r--		-
+sodium_crypto_core_ristretto255_scalar_negate	ext/sodium/libsodium.stub.php:635	s	r--		-
+sodium_crypto_core_ristretto255_scalar_random	ext/sodium/libsodium.stub.php:637
+sodium_crypto_core_ristretto255_scalar_reduce	ext/sodium/libsodium.stub.php:639	s	r--		-
+sodium_crypto_core_ristretto255_scalar_sub	ext/sodium/libsodium.stub.php:641	x	r--		-	y	r--		-
+sodium_crypto_core_ristretto255_sub	ext/sodium/libsodium.stub.php:643	p	r--		-	q	r--		-
+sodium_crypto_generichash	ext/sodium/libsodium.stub.php:665	message	r--		-	key	o--	""	s	length	o--	SODIUM_CRYPTO_GENERICHASH_BYTES	i32
+sodium_crypto_generichash_final	ext/sodium/libsodium.stub.php:673	state	r-&		-	length	o--	SODIUM_CRYPTO_GENERICHASH_BYTES	i32
+sodium_crypto_generichash_init	ext/sodium/libsodium.stub.php:669	key	o--	""	s	length	o--	SODIUM_CRYPTO_GENERICHASH_BYTES	i32
+sodium_crypto_generichash_keygen	ext/sodium/libsodium.stub.php:667
+sodium_crypto_generichash_update	ext/sodium/libsodium.stub.php:671	state	r-&		-	message	r--		-
+sodium_crypto_kdf_derive_from_key	ext/sodium/libsodium.stub.php:675	subkey_length	r--		-	subkey_id	r--		-	context	r--		-	key	r--		-
+sodium_crypto_kdf_keygen	ext/sodium/libsodium.stub.php:677
+sodium_crypto_kx_client_session_keys	ext/sodium/libsodium.stub.php:657	client_key_pair	r--		-	server_key	r--		-
+sodium_crypto_kx_keypair	ext/sodium/libsodium.stub.php:646
+sodium_crypto_kx_publickey	ext/sodium/libsodium.stub.php:648	key_pair	r--		-
+sodium_crypto_kx_secretkey	ext/sodium/libsodium.stub.php:650	key_pair	r--		-
+sodium_crypto_kx_seed_keypair	ext/sodium/libsodium.stub.php:652	seed	r--		-
+sodium_crypto_kx_server_session_keys	ext/sodium/libsodium.stub.php:663	server_key_pair	r--		-	client_key	r--		-
+sodium_crypto_pwhash	ext/sodium/libsodium.stub.php:680	length	r--		-	password	r--		-	salt	r--		-	opslimit	r--		-	memlimit	r--		-	algo	o--	SODIUM_CRYPTO_PWHASH_ALG_DEFAULT	i2
+sodium_crypto_pwhash_scryptsalsa208sha256	ext/sodium/libsodium.stub.php:692	length	r--		-	password	r--		-	salt	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_scryptsalsa208sha256_str	ext/sodium/libsodium.stub.php:694	password	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_scryptsalsa208sha256_str_verify	ext/sodium/libsodium.stub.php:696	hash	r--		-	password	r--		-
+sodium_crypto_pwhash_str	ext/sodium/libsodium.stub.php:682	password	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_str_needs_rehash	ext/sodium/libsodium.stub.php:688	password	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_str_verify	ext/sodium/libsodium.stub.php:684	hash	r--		-	password	r--		-
+sodium_crypto_scalarmult	ext/sodium/libsodium.stub.php:699	n	r--		-	p	r--		-
+sodium_crypto_scalarmult_base	ext/sodium/libsodium.stub.php:802	secret_key	r--		-
+sodium_crypto_scalarmult_ristretto255	ext/sodium/libsodium.stub.php:702	n	r--		-	p	r--		-
+sodium_crypto_scalarmult_ristretto255_base	ext/sodium/libsodium.stub.php:704	n	r--		-
+sodium_crypto_secretbox	ext/sodium/libsodium.stub.php:707	message	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_secretbox_keygen	ext/sodium/libsodium.stub.php:709
+sodium_crypto_secretbox_open	ext/sodium/libsodium.stub.php:711	ciphertext	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_secretstream_xchacha20poly1305_init_pull	ext/sodium/libsodium.stub.php:723	header	r--		-	key	r--		-
+sodium_crypto_secretstream_xchacha20poly1305_init_push	ext/sodium/libsodium.stub.php:719	key	r--		-
+sodium_crypto_secretstream_xchacha20poly1305_keygen	ext/sodium/libsodium.stub.php:714
+sodium_crypto_secretstream_xchacha20poly1305_pull	ext/sodium/libsodium.stub.php:726	state	r-&		-	ciphertext	r--		-	additional_data	o--	""	s
+sodium_crypto_secretstream_xchacha20poly1305_push	ext/sodium/libsodium.stub.php:721	state	r-&		-	message	r--		-	additional_data	o--	""	s	tag	o--	SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_MESSAGE	i0
+sodium_crypto_secretstream_xchacha20poly1305_rekey	ext/sodium/libsodium.stub.php:728	state	r-&		-
+sodium_crypto_shorthash	ext/sodium/libsodium.stub.php:731	message	r--		-	key	r--		-
+sodium_crypto_shorthash_keygen	ext/sodium/libsodium.stub.php:733
+sodium_crypto_sign	ext/sodium/libsodium.stub.php:735	message	r--		-	secret_key	r--		-
+sodium_crypto_sign_detached	ext/sodium/libsodium.stub.php:737	message	r--		-	secret_key	r--		-
+sodium_crypto_sign_ed25519_pk_to_curve25519	ext/sodium/libsodium.stub.php:739	public_key	r--		-
+sodium_crypto_sign_ed25519_sk_to_curve25519	ext/sodium/libsodium.stub.php:741	secret_key	r--		-
+sodium_crypto_sign_keypair	ext/sodium/libsodium.stub.php:743
+sodium_crypto_sign_keypair_from_secretkey_and_publickey	ext/sodium/libsodium.stub.php:745	secret_key	r--		-	public_key	r--		-
+sodium_crypto_sign_open	ext/sodium/libsodium.stub.php:747	signed_message	r--		-	public_key	r--		-
+sodium_crypto_sign_publickey	ext/sodium/libsodium.stub.php:749	key_pair	r--		-
+sodium_crypto_sign_publickey_from_secretkey	ext/sodium/libsodium.stub.php:753	secret_key	r--		-
+sodium_crypto_sign_secretkey	ext/sodium/libsodium.stub.php:751	key_pair	r--		-
+sodium_crypto_sign_seed_keypair	ext/sodium/libsodium.stub.php:755	seed	r--		-
+sodium_crypto_sign_verify_detached	ext/sodium/libsodium.stub.php:757	signature	r--		-	message	r--		-	public_key	r--		-
+sodium_crypto_stream	ext/sodium/libsodium.stub.php:759	length	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_stream_keygen	ext/sodium/libsodium.stub.php:761
+sodium_crypto_stream_xchacha20	ext/sodium/libsodium.stub.php:766	length	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_stream_xchacha20_keygen	ext/sodium/libsodium.stub.php:768
+sodium_crypto_stream_xchacha20_xor	ext/sodium/libsodium.stub.php:770	message	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_stream_xchacha20_xor_ic	ext/sodium/libsodium.stub.php:772	message	r--		-	nonce	r--		-	counter	r--		-	key	r--		-
+sodium_crypto_stream_xor	ext/sodium/libsodium.stub.php:763	message	r--		-	nonce	r--		-	key	r--		-
+sodium_hex2bin	ext/sodium/libsodium.stub.php:791	string	r--		-	ignore	o--	""	s
+sodium_increment	ext/sodium/libsodium.stub.php:779	string	r-&		-
+sodium_memcmp	ext/sodium/libsodium.stub.php:781	string1	r--		-	string2	r--		-
+sodium_memzero	ext/sodium/libsodium.stub.php:783	string	r-&		-
+sodium_pad	ext/sodium/libsodium.stub.php:785	string	r--		-	block_size	r--		-
+sodium_unpad	ext/sodium/libsodium.stub.php:787	string	r--		-	block_size	r--		-
 sort	ext/standard/basic_functions.stub.php:1572	array	r-&		-	flags	o--	SORT_REGULAR	i0
 soundex	ext/standard/basic_functions.stub.php:3361	string	r--		-
 spl_autoload	ext/spl/php_spl.stub.php:26	class	r--		-	file_extensions	o--	null	n
@@ -2685,3 +2949,6 @@ weakreference::get	Zend/zend_weakrefs.stub.php:15
 wordwrap	ext/standard/basic_functions.stub.php:2322	string	r--		-	width	o--	75	i75	break	o--	"\n"	s0a	cut_long_words	o--	false	f
 zend_thread_id	Zend/zend_builtin_functions.stub.php:202
 zend_version	Zend/zend_builtin_functions.stub.php:19
+zlib_decode	ext/zlib/zlib.stub.php:186	data	r--		-	max_length	o--	0	i0
+zlib_encode	ext/zlib/zlib.stub.php:183	data	r--		-	encoding	r--		-	level	o--	-1	i-1
+zlib_get_coding_type	ext/zlib/zlib.stub.php:166

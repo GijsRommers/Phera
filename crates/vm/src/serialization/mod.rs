@@ -76,6 +76,13 @@ impl Vm {
         }
         let mut current = Some(class);
         while let Some(class) = current {
+            if class
+                .hooks
+                .as_ref()
+                .is_some_and(|hooks| hooks.forbid_serialization)
+            {
+                return true;
+            }
             if class.origin == crate::classes::class::ClassOrigin::Native
                 && matches!(
                     class.name.as_str(),

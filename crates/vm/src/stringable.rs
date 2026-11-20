@@ -14,6 +14,12 @@ impl Vm {
         let Value::Object(object) = &*value.deref() else {
             return false;
         };
+        if matches!(
+            object.class.cast(object, phera_value::ObjectCast::String),
+            Some(Value::String(_))
+        ) {
+            return true;
+        }
         object
             .class
             .as_any()
@@ -29,6 +35,11 @@ impl Vm {
         let Value::Object(object) = value.deref().clone() else {
             return Ok(None);
         };
+        if let Some(Value::String(text)) =
+            object.class.cast(&object, phera_value::ObjectCast::String)
+        {
+            return Ok(Some(text));
+        }
         let Some(class) = self.classes.for_object(&object) else {
             return Ok(None);
         };
@@ -99,6 +110,9 @@ impl Vm {
         mut left: Value,
         mut right: Value,
     ) -> NativeResult {
+        if let Some(value) = self.native_binary(op, &left, &right)? {
+            return Ok(value);
+        }
         if op == BinaryOp::Concat {
             let lhs = self.stringify_value(&left).await?;
             let rhs = self.stringify_value(&right).await?;

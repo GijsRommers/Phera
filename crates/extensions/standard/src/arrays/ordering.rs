@@ -14,9 +14,7 @@ use crate::natural::natural_compare;
 pub(super) fn can_invoke_string_comparison(left: &Value, right: &Value) -> bool {
     matches!(
         (&*left.deref(), &*right.deref()),
-        (Value::Object(_), Value::Object(_) | Value::String(_))
-            | (Value::String(_), Value::Object(_))
-            | (Value::Array(_), Value::Array(_))
+        (Value::Object(_), _) | (_, Value::Object(_)) | (Value::Array(_), Value::Array(_))
     )
 }
 

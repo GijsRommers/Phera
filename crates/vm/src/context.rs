@@ -251,6 +251,15 @@ impl Context for Vm {
         self.exception_with_previous(error, previous)
     }
 
+    fn native_binary(
+        &mut self,
+        operator: phera_extension_api::NativeBinaryOp,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Option<Value>, NativeError> {
+        Vm::native_binary(self, operator, left, right)
+    }
+
     fn compare<'a>(
         &'a mut self,
         left: &'a Value,

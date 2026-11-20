@@ -65,7 +65,7 @@ fn flock(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeRe
             Err(Errno::NOTSUP)
         } else {
             operate(resource, policy, move |stream: &mut Stream| {
-                let file = stream.descriptor().ok_or(Errno::NOTSUP)?;
+                let file = stream.lock_descriptor().ok_or(Errno::NOTSUP)?;
                 rustix::fs::flock(file, operation)
             })
             .await?

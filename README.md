@@ -62,10 +62,12 @@ and closes the connection.
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
-date, dom (`DOMDocument`, `DOMNode`, `DOMElement`, `DOMXPath`), filter,
-hash, json, mbstring, openssl, pcre, PDO
-(SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
-session, SPL, sqlite3, streams, tokenizer, Unix process functions, and POSIX queries.
+[curl](crates/extensions/curl/README.md) (HTTP and HTTPS, including HTTP/2,
+connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`,
+`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, json, mbstring, openssl, pcre,
+PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
+session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
+functions, and POSIX queries.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 
@@ -91,8 +93,30 @@ and `mb_send_mail()` pipe the message to the command in `sendmail_path`.
 including `mail()` and `mb_send_mail()`.
 The standard library retains PHP’s deprecated `utf8_encode()` Latin-1 conversion.
 
-In progress: bcmath, curl, gmp, intl, mysqli, pgsql, sodium, zlib.
-Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
+BCMath provides arbitrary-precision decimal functions and the immutable
+`BcMath\Number` class. Set the default procedural scale with `bcmath.scale`
+or `bcscale()`.
+
+GMP provides arbitrary-precision integer functions, binary import and export,
+and the `GMP` class with arithmetic, bitwise operators, and scalar casts.
+
+zlib provides string compression, incremental deflate and inflate contexts,
+gzip file functions, and the `compress.zlib://` wrapper. The
+`zlib.output_compression` directive stores its value. Use `ob_gzhandler` for
+PHP output-buffer compression or `phera serve --compress` for server compression.
+
+In progress: intl, mysqli, pgsql, SimpleXML, XMLReader, XMLWriter.
+Not started: gd, fileinfo, zip, sockets.
+
+### Sodium
+
+Phera implements PHP's `sodium` module in Rust. It supports NaCl secret boxes
+and sealed boxes, Ed25519 signatures, X25519 and Ristretto255, ChaCha20-Poly1305
+and AES-256-GCM, BLAKE2b (including streaming) and SipHash, XChaCha20-Poly1305
+secretstream, key derivation and exchange, Argon2 and scrypt passwords, binary
+encodings, and ISO/IEC 7816-4 padding. The six AEGIS-128L and AEGIS-256 functions are
+absent pending a published audit of a pure Rust backend. Ed25519 signing
+rejects secret keys whose embedded public half cannot be decoded as a point.
 
 ## ✨ Goals
 
