@@ -18,11 +18,12 @@ fn xml_event_matrix() {
 }
 
 const MATRIX: &str = r#"<?php
+$internalEntity = '<!DOCTYPE r [<!ENTITY local "safe">]><r>&local;</r>';
 $examples = [
     '<root><item id="one">hello</item><item id="two"/></root>',
     '<r xmlns:p="urn:p"><p:tag p:attr="a">é</p:tag><child /></r>',
     '<feed>before&amp;after<item/><![CDATA[<&]]><?p data?><!--comment-->text</feed>',
-    '<!DOCTYPE r [<!ENTITY local "safe">]><r>&local;</r>',
+    $internalEntity,
 ];
 foreach ($examples as $xml) {
     foreach ([false, true] as $namespace) {
@@ -52,9 +53,21 @@ foreach ($examples as $xml) {
                         break;
                     }
                 }
+                $column = xml_get_current_column_number($parser);
+                if ($xml === $internalEntity) {
+                    // libxml 2.15.2 advances past the opening entity-value quote
+                    // without incrementing the column. Check both raw conventions
+                    // before comparing the rest of the trace.
+                    $legacy = strlen($xml) + 1;
+                    $expected = LIBXML_LOADED_VERSION === '21502' ? $legacy - 1 : $legacy;
+                    if ($column !== $expected) {
+                        throw new RuntimeException("Expected entity column $expected, got $column");
+                    }
+                    $column += $legacy - $expected;
+                }
                 echo json_encode([
                     $status, $events, xml_get_error_code($parser),
-                    xml_get_current_line_number($parser), xml_get_current_column_number($parser),
+                    xml_get_current_line_number($parser), $column,
                     xml_get_current_byte_index($parser),
                 ]), "\n";
             }
