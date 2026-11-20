@@ -25,6 +25,7 @@ pub(crate) fn build(project: &Project, options: &Options, packages: &[Package]) 
         }
     }
     let dump = |package: &Package| -> Result<Value> {
+        package.validate()?;
         let mut value = serde_json::to_value(package)?;
         if let Some(map) = value.as_object_mut() {
             for field in [

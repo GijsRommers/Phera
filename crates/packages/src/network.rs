@@ -7,43 +7,24 @@ use crate::Project;
 use anyhow::{Context, Result, bail};
 use reqwest::Url;
 use reqwest::blocking::{Client, Response};
-use reqwest::header::{AUTHORIZATION, HeaderValue, IF_MODIFIED_SINCE, IF_NONE_MATCH};
+use reqwest::header::{IF_MODIFIED_SINCE, IF_NONE_MATCH};
 use serde_json::Value;
-use std::fs;
 use std::io::Read;
 use std::time::Duration;
 
-const MAX_DOWNLOAD: u64 = 512 * 1024 * 1024;
+mod auth;
+
+pub(crate) const MAX_DOWNLOAD: u64 = 512 * 1024 * 1024;
 
 pub(crate) struct Network {
     client: Client,
-    auth: Value,
+    auth: auth::Credentials,
     secure_http: bool,
 }
 
 impl Network {
     pub(crate) fn new(project: &Project) -> Result<Self> {
-        let mut auth = Value::Object(Default::default());
-        let file = project.directory.join("auth.json");
-        if file.is_file() {
-            auth = serde_json::from_slice(&fs::read(file)?)
-                .context("Invalid project auth.json; correct its JSON syntax.")?;
-        }
-        if let Ok(environment) = std::env::var("COMPOSER_AUTH") {
-            let extra: Value = serde_json::from_str(&environment)
-                .map_err(|_| anyhow::anyhow!("Invalid COMPOSER_AUTH JSON."))?;
-            if let (Some(target), Some(extra)) = (auth.as_object_mut(), extra.as_object()) {
-                for (kind, values) in extra {
-                    let hosts = target
-                        .entry(kind)
-                        .or_insert_with(|| Value::Object(Default::default()));
-                    if let (Some(hosts), Some(values)) = (hosts.as_object_mut(), values.as_object())
-                    {
-                        hosts.extend(values.clone());
-                    }
-                }
-            }
-        }
+        let auth = auth::Credentials::read(project)?;
         let client = Client::builder()
             .use_preconfigured_tls((*phera_io_pool::tls::webpki_client()?).clone())
             .user_agent("Phera/0.1 Composer-compatible")
@@ -79,17 +60,10 @@ impl Network {
                 );
             }
             let mut request = self.client.get(url.clone());
-            if url.scheme() == "https" && url.origin() == original_origin {
-                let credentials = &self.auth["http-basic"][host];
-                if let Some(username) = credentials["username"].as_str() {
-                    request = request.basic_auth(username, credentials["password"].as_str());
-                }
-                if let Some(token) = self.auth["bearer"][host].as_str() {
-                    let mut header = HeaderValue::from_str(&format!("Bearer {token}"))
-                        .map_err(|_| anyhow::anyhow!("Invalid bearer credential for {host}."))?;
-                    header.set_sensitive(true);
-                    request = request.header(AUTHORIZATION, header);
-                }
+            if url.origin() == original_origin
+                && let Some((name, value)) = self.auth.header(&url, false)?
+            {
+                request = request.header(name, value);
             }
             if let Some(value) = etag {
                 request = request.header(IF_NONE_MATCH, value);
@@ -117,6 +91,22 @@ impl Network {
             return Ok(response);
         }
         bail!("Too many download redirects; check the package repository.")
+    }
+
+    pub(crate) fn git_header(&self, url: &Url) -> Result<Option<String>> {
+        self.auth
+            .header(url, true)?
+            .map(|(name, value)| {
+                let value = value
+                    .to_str()
+                    .context("Invalid Git authentication header.")?;
+                Ok(format!("{name}: {value}"))
+            })
+            .transpose()
+    }
+
+    pub(crate) fn allows_http(&self) -> bool {
+        !self.secure_http
     }
 
     pub(crate) fn bytes(&self, url: &str) -> Result<Vec<u8>> {

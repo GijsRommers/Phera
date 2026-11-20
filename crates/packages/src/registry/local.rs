@@ -2,7 +2,7 @@
 //!
 //! `{ "type": "path", "url": "packages/*" }` loads each package's composer.json.
 
-use crate::{Package, Project, network::Network, store::Store};
+use crate::{Package, Project, store::Store};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::fs;
@@ -11,7 +11,6 @@ pub(super) fn packages(
     project: &Project,
     repository: &Value,
     store: &Store,
-    network: &Network,
 ) -> Result<Vec<Package>> {
     let url = repository["url"]
         .as_str()
@@ -81,7 +80,6 @@ pub(super) fn packages(
             }
         }
     }
-    let _ = network;
     Ok(packages)
 }
 

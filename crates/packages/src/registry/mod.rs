@@ -4,6 +4,9 @@
 
 pub(crate) mod cache;
 mod local;
+mod source;
+
+use source::{Repository, Source};
 
 use crate::{Options, Package, Project, network::Network, store::Store};
 use anyhow::{Context, Result, bail};
@@ -11,18 +14,6 @@ use rayon::prelude::*;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Mutex;
-
-enum Repository {
-    Composer {
-        base: String,
-        index: Value,
-        canonical: bool,
-    },
-    Local {
-        packages: Vec<Package>,
-        canonical: bool,
-    },
-}
 
 pub(crate) struct Registry {
     repositories: Vec<Repository>,
@@ -61,8 +52,7 @@ impl Registry {
             if configuration == &Value::Bool(false) {
                 continue;
             }
-            let canonical = configuration["canonical"].as_bool().unwrap_or(true);
-            match configuration["type"].as_str() {
+            let source = match configuration["type"].as_str() {
                 Some("package") => {
                     let entries = match &configuration["package"] {
                         Value::Array(items) => items.clone(),
@@ -72,15 +62,11 @@ impl Registry {
                         .into_iter()
                         .map(serde_json::from_value)
                         .collect::<std::result::Result<Vec<Package>, _>>()?;
-                    repositories.push(Repository::Local {
-                        packages,
-                        canonical,
-                    });
+                    Source::Local(packages)
                 }
-                Some("path" | "artifact") => repositories.push(Repository::Local {
-                    packages: local::packages(project, configuration, &store, &network)?,
-                    canonical,
-                }),
+                Some("path" | "artifact") => {
+                    Source::Local(local::packages(project, configuration, &store)?)
+                }
                 Some("composer") => {
                     let base = configuration["url"]
                         .as_str()
@@ -93,27 +79,33 @@ impl Registry {
                         &format!("{base}/packages.json"),
                         options.offline,
                     )?;
-                    repositories.push(Repository::Composer {
-                        base,
-                        index,
-                        canonical,
-                    });
+                    Source::Composer { base, index }
                 }
                 Some("vcs" | "git" | "github") => {
-                    bail!(
-                        "VCS repositories are not supported yet; use a Composer or path repository."
-                    );
+                    let url = configuration["url"]
+                        .as_str()
+                        .context("Git repository needs a URL.")?;
+                    Source::Local(crate::git::packages(
+                        project,
+                        url,
+                        &store,
+                        &network,
+                        options.offline,
+                    )?)
                 }
                 Some(kind) => bail!("Unsupported repository type {kind:?}."),
-                None => {}
-            }
+                None => continue,
+            };
+            repositories.push(Repository::new(source, configuration)?);
         }
         if packagist {
-            repositories.push(Repository::Composer {
-                base: "https://repo.packagist.org".into(),
-                index: serde_json::json!({"metadata-url": "/p2/%package%.json"}),
-                canonical: true,
-            });
+            repositories.push(Repository::new(
+                Source::Composer {
+                    base: "https://repo.packagist.org".into(),
+                    index: serde_json::json!({"metadata-url": "/p2/%package%.json"}),
+                },
+                &Value::Null,
+            )?);
         }
         let dev = project.data["minimum-stability"]
             .as_str()
@@ -155,23 +147,16 @@ impl Registry {
         }
         let mut packages = Vec::new();
         for repository in &self.repositories {
-            let (found, canonical) = match repository {
-                Repository::Local {
-                    packages,
-                    canonical,
-                } => (
-                    packages
-                        .iter()
-                        .filter(|package| package.name == name)
-                        .cloned()
-                        .collect(),
-                    canonical,
-                ),
-                Repository::Composer {
-                    base,
-                    index,
-                    canonical,
-                } => {
+            if !repository.accepts(name) {
+                continue;
+            }
+            let found = match &repository.source {
+                Source::Local(packages) => packages
+                    .iter()
+                    .filter(|package| package.name == name)
+                    .cloned()
+                    .collect(),
+                Source::Composer { base, index } => {
                     let mut found = Vec::new();
                     if let Some(template) = index["metadata-url"].as_str() {
                         let mut names = vec![name.to_owned()];
@@ -194,12 +179,12 @@ impl Registry {
                     } else {
                         found.extend(expand(index, name)?);
                     }
-                    (found, canonical)
+                    found
                 }
             };
             let found_any = !found.is_empty();
             packages.extend(found);
-            if found_any && *canonical {
+            if found_any && repository.canonical {
                 break;
             }
         }
@@ -226,7 +211,7 @@ impl Registry {
     }
 
     pub(crate) fn providers(&self, name: &str) -> Result<Vec<Package>> {
-        let mut all: Vec<Package> = self
+        let mut names: std::collections::BTreeSet<String> = self
             .known
             .lock()
             .map_err(|_| anyhow::anyhow!("Registry lock failed."))?
@@ -237,30 +222,32 @@ impl Registry {
                     .iter()
                     .any(|key| package.field(key).get(name).is_some())
             })
-            .cloned()
+            .map(|package| package.name.clone())
             .collect();
         for repository in &self.repositories {
-            if let Repository::Local { packages, .. } = repository {
-                all.extend(
+            if let Source::Local(packages) = &repository.source {
+                names.extend(
                     packages
                         .iter()
                         .filter(|package| {
-                            ["provide", "replace"]
-                                .iter()
-                                .any(|key| package.field(key).get(name).is_some())
+                            repository.accepts(&package.name)
+                                && ["provide", "replace"]
+                                    .iter()
+                                    .any(|key| package.field(key).get(name).is_some())
                         })
-                        .cloned(),
+                        .map(|package| package.name.clone()),
                 );
             }
         }
-        Ok(all
-            .into_iter()
-            .filter(|package| {
+        let mut all = Vec::new();
+        for provider in names {
+            all.extend(self.packages(&provider)?.into_iter().filter(|package| {
                 ["provide", "replace"]
                     .iter()
                     .any(|key| package.field(key).get(name).is_some())
-            })
-            .collect())
+            }));
+        }
+        Ok(all)
     }
 }
 

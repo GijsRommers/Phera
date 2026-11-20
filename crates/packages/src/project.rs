@@ -205,6 +205,18 @@ impl Package {
                 self.name
             );
         }
+        for field in ["source", "dist"] {
+            if let Some(address) = self.field(field)["url"].as_str()
+                && let Ok(url) = reqwest::Url::parse(address)
+                && (url.password().is_some()
+                    || matches!(url.scheme(), "http" | "https") && !url.username().is_empty())
+            {
+                bail!(
+                    "{} has credentials in its {field} URL. Use auth.json instead.",
+                    self.name
+                );
+            }
+        }
         Ok(())
     }
 }

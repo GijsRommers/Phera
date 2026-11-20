@@ -62,11 +62,16 @@ Read [tests/DIFFERENCES.md](tests/DIFFERENCES.md) for the measured fixture matri
 exact generated-file differences, benchmarks and the readiness gate.
 
 - Composer HTTP(S) v2 metadata, static `packages` repositories, inline `package`,
-  path and artifact repositories are implemented. Legacy provider/include protocols,
-  VCS repositories and complete Composer repository filtering remain unsupported.
-- Project `auth.json` and `COMPOSER_AUTH` support host-scoped HTTP Basic and bearer
-  credentials. Global Composer authentication files, OAuth-specific helpers and
-  forwarding these credentials into git source clones remain unfinished.
+  path, artifact and Git repositories are implemented. Use `canonical`, `only`
+  and `exclude` to control selection. Legacy provider/include protocols remain
+  unsupported.
+- Put HTTP Basic, bearer, GitHub and GitLab credentials in `auth.json` under the
+  project, in `$COMPOSER_HOME/auth.json`, or in `COMPOSER_AUTH`. Each credential
+  applies to its configured HTTPS host, so GitHub API and Git repository hosts
+  use separate entries. Git over SSH uses the system client's SSH configuration.
+- Git repositories use cached bare mirrors and pinned commit IDs. Phera exports
+  an archive of the commit, honoring Git's export attributes. Submodule
+  checkouts and VCS types other than Git remain unsupported.
 - Root pre/post install, update and autoload-dump events run. Shell commands run in
   the project with vendor/bin on PATH; `@php` uses the current Phera binary.
   PHP callable scripts receive a Script Event with the event name, arguments,

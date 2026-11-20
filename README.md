@@ -81,6 +81,10 @@ Use `--locked` for composer.lock, `--no-dev` for production packages, and
 `config.audit.ignore` in composer.json. Installs and updates print a
 short advisory summary online unless you pass `--no-audit`.
 
+Projects can use Packagist, Composer, Git, path and artifact repositories.
+Git over HTTPS and SSH uses the system client. Put repository credentials in
+`auth.json` or `COMPOSER_AUTH`, keyed by the host that receives them.
+
 ### Serving a site
 
 Run `phera serve public` to serve a document root. PHP diagnostics, including

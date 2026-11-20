@@ -8,7 +8,6 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 mod inventory;
 
@@ -34,7 +33,7 @@ impl Store {
             };
             PathBuf::from(home).join(suffix)
         };
-        for child in ["objects", "index", "locks", "staging", "metadata"] {
+        for child in ["objects", "index", "locks", "staging", "metadata", "git"] {
             fs::create_dir_all(directory.join(child))?;
         }
         Ok(Self {
@@ -83,7 +82,8 @@ impl Store {
         {
             return Ok(object);
         }
-        if offline {
+        let source_only = package.field("dist").is_null() && source["type"] == "git";
+        if offline && !source_only {
             bail!(
                 "Offline store is missing {} {}. Install it online once.",
                 package.name,
@@ -131,7 +131,7 @@ impl Store {
                 format!("{:x}", Sha256::digest(&bytes))
             }
         } else {
-            clone_source(package, &extracted)?;
+            crate::git::export(package, project, self, network, offline, &extracted)?;
             tree_digest(&extracted)?
         };
         let mut children = fs::read_dir(&extracted)?.collect::<std::io::Result<Vec<_>>>()?;
@@ -155,47 +155,6 @@ impl Store {
         }
         inventory::publish(&self.directory, &source, &index, &digest)
     }
-}
-
-fn clone_source(package: &Package, target: &Path) -> Result<()> {
-    let source = package.field("source");
-    if source["type"] != "git" {
-        bail!("{} has no dist or supported git source.", package.name);
-    }
-    let url = source["url"]
-        .as_str()
-        .context("Git source is missing its URL.")?;
-    let reference = source["reference"]
-        .as_str()
-        .context("Git source is missing its reference.")?;
-    if !url.starts_with("https://") || url.contains('@') || reference.starts_with('-') {
-        bail!("Use an HTTPS git source without credentials embedded in the URL.");
-    }
-    let success = Command::new("git")
-        .args(["clone", "--no-checkout", "--", url])
-        .arg(target)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()?
-        .success();
-    if !success
-        || !Command::new("git")
-            .arg("-C")
-            .arg(target)
-            .args(["checkout", "--detach", reference])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()?
-            .success()
-    {
-        bail!(
-            "Cannot check out git source for {}; check access and reference.",
-            package.name
-        );
-    }
-    fs::remove_dir_all(target.join(".git"))?;
-    Ok(())
 }
 
 pub(crate) fn materialise(

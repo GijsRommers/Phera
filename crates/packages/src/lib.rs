@@ -9,6 +9,7 @@ mod binaries;
 mod cleanup;
 mod commands;
 mod content_hash;
+mod git;
 mod install_paths;
 mod installed;
 mod lock_writer;
