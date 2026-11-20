@@ -1,4 +1,5 @@
-//! Zend consumes a compiled variable at its use, as in `$a + ($a = 5)`.
+//! A plain variable is read when its operator runs, not where it is written:
+//! `$a + ($a = 5)` is 10 in PHP.
 
 use phera_ast::{Arguments, Expression, ExpressionKind as E, Variable};
 use phera_bytecode::Reg;
