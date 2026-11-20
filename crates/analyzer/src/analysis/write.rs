@@ -96,17 +96,23 @@ impl Analyzer<'_> {
                     if expected == ValueType::Never {
                         return Evaluation::Never;
                     }
-                    if given_property {
-                        self.check_property_assignment(target, &expected, &ty);
-                    }
                     let place = if self.level >= 2 && given_property {
                         crate::scope::Place::of(target)
                     } else {
                         None
                     };
+                    if given_property {
+                        self.check_property_assignment(
+                            target,
+                            place.as_ref(),
+                            &expected,
+                            &ty,
+                            scope,
+                        );
+                    }
                     let ty = place
                         .as_ref()
-                        .and_then(|place| self.coerced_property_value(place, &ty, scope))
+                        .and_then(|place| self.stored_property_value(place, &ty, scope))
                         .unwrap_or(ty);
                     if self.level >= 2 {
                         scope.forget_member_write(target);

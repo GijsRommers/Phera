@@ -1,5 +1,6 @@
 //! With weak typing, `$object->text = false` stores a string in a native
 //! string property. A PHPDoc-only string property does not perform coercion.
+//! A nullable assignment to a native non-null property cannot store null.
 
 use super::*;
 use crate::{
@@ -29,24 +30,37 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn coerced_property_value(
+    pub(super) fn stored_property_value(
         &self,
         place: &Place,
         value: &ValueType,
         scope: &Scope,
     ) -> Option<ValueType> {
-        if self.level < 7 || self.strict_types {
+        if self.level < 7 {
             return None;
         }
         let native = &self.resolved_property(place, scope)?.1.ty;
-        if matches!(
-            native,
-            ValueType::String | ValueType::Int | ValueType::Float | ValueType::Bool
-        ) && native.accepts(value, self.index, TypePolicy::Documentation)
-            != Compatibility::Accepts
-            && native.accepts(value, self.index, TypePolicy::Coercive) == Compatibility::Accepts
+        let stored = if native.excludes_null() {
+            value.without_null()
+        } else {
+            value.clone()
+        };
+        if !self.strict_types
+            && matches!(
+                native,
+                ValueType::String | ValueType::Int | ValueType::Float | ValueType::Bool
+            )
+            && native.accepts(&stored, self.index, TypePolicy::Documentation)
+                != Compatibility::Accepts
+            && native.accepts(&stored, self.index, TypePolicy::Coercive) == Compatibility::Accepts
         {
             Some(native.clone())
+        } else if stored != *value {
+            Some(if stored == ValueType::Never {
+                native.clone()
+            } else {
+                stored
+            })
         } else {
             None
         }

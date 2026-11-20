@@ -179,15 +179,28 @@ fn infer_templates(
                     ) && arm.accepts(&given, index, TypePolicy::Documentation)
                         != Compatibility::Rejects
                 });
-                pending.extend(
-                    arms.iter()
-                        .filter(|arm| {
-                            (!precise || !matches!(arm, T::Template(_)))
-                                && arm.accepts(&given, index, TypePolicy::Documentation)
-                                    != Compatibility::Rejects
-                        })
-                        .map(|arm| (arm, given.clone())),
-                );
+                for arm in arms.iter() {
+                    let candidate = if matches!(arm, T::Template(_)) {
+                        if precise {
+                            continue;
+                        }
+                        // In `T|null`, null matches its own arm and does not
+                        // become part of the inferred T.
+                        if arms.contains(&T::Null) {
+                            given.without_null()
+                        } else {
+                            given.clone()
+                        }
+                    } else {
+                        given.clone()
+                    };
+                    if candidate != T::Never
+                        && arm.accepts(&candidate, index, TypePolicy::Documentation)
+                            != Compatibility::Rejects
+                    {
+                        pending.push((arm, candidate));
+                    }
+                }
             }
             (T::Template(template), _)
                 if variables.contains(&template.name)

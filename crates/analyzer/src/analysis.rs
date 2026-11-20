@@ -16,6 +16,7 @@ use phera_source::Span;
 
 mod argument_contracts;
 mod arguments;
+mod array_sum;
 mod arrays;
 mod assignments;
 mod atoms;

@@ -81,7 +81,11 @@ impl Analyzer<'_> {
             {
                 against.clone()
             } else if let (Some(_), Some(_)) = (arm.class_name(), against.class_name()) {
-                ValueType::intersection(arm, &against)
+                if self.disjoint_classes(arm, &against) {
+                    ValueType::Never
+                } else {
+                    ValueType::intersection(arm, &against)
+                }
             } else {
                 ValueType::Never
             };
@@ -99,6 +103,19 @@ impl Analyzer<'_> {
                 scope.facts.record(place, narrowed, Some(span));
             }
         }
+    }
+
+    // The subtype checks have already ruled out either direction. PHP's
+    // single inheritance makes an intersection of unrelated classes empty.
+    fn disjoint_classes(&self, left: &ValueType, right: &ValueType) -> bool {
+        [left, right].iter().all(|ty| {
+            ty.class_name().is_some_and(|name| {
+                self.index.class(name).is_some_and(|class| {
+                    matches!(class.kind, ClassKind::Class | ClassKind::Enum)
+                        && self.index.complete(name)
+                })
+            })
+        })
     }
 
     pub(super) fn place_type(&self, place: &Place, scope: &Scope) -> ValueType {
@@ -133,7 +150,7 @@ impl Analyzer<'_> {
                     ty = super::arrays::offset_type(&ty, &scope.get(key).ty);
                     continue;
                 }
-                AccessStep::Property(name) | AccessStep::Method(name) => name,
+                AccessStep::Property(name) | AccessStep::Method(name, _) => name,
             };
             let Some(class) = ty.class_name() else {
                 return ValueType::Mixed;

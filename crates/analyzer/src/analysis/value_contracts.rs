@@ -120,8 +120,10 @@ impl Analyzer<'_> {
     pub fn check_property_assignment(
         &mut self,
         target: &Expression,
+        place: Option<&crate::scope::Place>,
         expected: &ValueType,
         given: &ValueType,
+        scope: &Scope,
     ) {
         if self.level >= 3 && self.incompatible(expected, given, self.value_policy()) {
             let name = match &target.kind {
@@ -136,10 +138,18 @@ impl Analyzer<'_> {
                 _ => None,
             };
             if let Some(name) = name {
+                let property = place
+                    .and_then(|place| self.resolved_property(place, scope))
+                    .map_or_else(
+                        || format!("${name}"),
+                        |(class, _)| format!("{}::${name}", class.name),
+                    );
+                let expected = super::member_checks::receiver_name(expected);
+                let given = super::member_checks::receiver_name(given);
                 self.diagnose(
                     "assign.propertyType",
                     target.span,
-                    format!("Property ${name} ({expected}) does not accept {given}."),
+                    format!("Property {property} ({expected}) does not accept {given}."),
                 );
             }
         }

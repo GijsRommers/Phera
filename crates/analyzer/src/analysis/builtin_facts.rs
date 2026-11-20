@@ -110,6 +110,7 @@ impl Analyzer<'_> {
                     collection(key, value)
                 }
             }
+            "array_sum" if self.level >= 7 => super::array_sum::result(first?)?,
             "array_column" => {
                 let (_, row) = array_parts();
                 let column = types.get(1)?;

@@ -1,11 +1,19 @@
 //! `/** @param User $u */ function f($u)` makes $u a User inside f.
 //! A valid annotation refines its native type. Diagnostics point at the tag or declaration.
+//! `/** @var list<Row> */ return $query->getResult();` types the returned expression.
 
 use super::*;
 use crate::{
     phpdoc::{Annotation, Documentation},
     types::{Compatibility, TypePolicy},
 };
+use std::collections::BTreeMap;
+
+#[derive(Default)]
+pub(super) struct StatementAnnotations {
+    pub assignments: BTreeMap<String, ValueType>,
+    pub returned: Option<ValueType>,
+}
 
 impl Analyzer<'_> {
     pub fn function_documentation(
@@ -220,11 +228,11 @@ pub(super) fn statement_comments(source: &str) -> std::collections::BTreeMap<usi
 }
 
 impl Analyzer<'_> {
-    pub fn statement_var_annotations(
+    pub(super) fn statement_var_annotations(
         &mut self,
         statement: &Statement,
         scope: &mut Scope,
-    ) -> std::collections::BTreeMap<String, ValueType> {
+    ) -> StatementAnnotations {
         let Some(doc) = self.statement_docs.get(&statement.span.start).copied() else {
             return Default::default();
         };
@@ -239,16 +247,18 @@ impl Analyzer<'_> {
             _ => None,
         };
         let docs = self.read_documentation(Some(doc));
-        let mut after = std::collections::BTreeMap::new();
+        let mut annotations = StatementAnnotations::default();
         for (name, annotation) in docs.variables {
-            if let Some(name) = name.as_deref().or(assigned) {
+            if name.is_none() && matches!(statement.kind, StatementKind::Return(Some(_))) {
+                annotations.returned = Some(annotation.ty);
+            } else if let Some(name) = name.as_deref().or(assigned) {
                 if assigned == Some(name) {
-                    after.insert(name.into(), annotation.ty);
+                    annotations.assignments.insert(name.into(), annotation.ty);
                 } else if scope.get(name).definition == Definition::Definite {
                     scope.define(name, annotation.ty);
                 }
             }
         }
-        after
+        annotations
     }
 }

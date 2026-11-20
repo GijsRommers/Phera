@@ -1,8 +1,11 @@
 //! `if ($this->service instanceof Resettable)` refines that property on the true path.
+//! `$bag->get('name') !== null` refines another lookup of the same key.
 //! Reassigning the root or replacing the property invalidates its facts.
 
 use super::{Scope, ValueType};
-use phera_ast::{Arguments, Expression, ExpressionKind, MemberName, Variable};
+use phera_ast::{
+    Argument, Arguments, Expression, ExpressionKind, Literal, MemberName, NameKind, Variable,
+};
 use phera_source::Span;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,10 +21,64 @@ pub struct Place {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AccessStep {
     Property(String),
-    Method(String),
+    Method(String, Vec<CallArgument>),
     IntegerOffset(i64),
     StringOffset(Vec<u8>),
     VariableOffset(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CallArgument {
+    name: Option<String>,
+    value: ArgumentValue,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum ArgumentValue {
+    Variable(String),
+    Integer(i64),
+    String(Vec<u8>),
+    Boolean(bool),
+    Null,
+    ClassConstant(String, String),
+}
+
+impl CallArgument {
+    fn of(argument: &Argument) -> Option<Self> {
+        if argument.spread {
+            return None;
+        }
+        let value = match &argument.value.kind {
+            ExpressionKind::Variable(Variable::Named(name)) => {
+                ArgumentValue::Variable(name.clone())
+            }
+            ExpressionKind::Literal(Literal::Int(value)) => ArgumentValue::Integer(*value),
+            ExpressionKind::Literal(Literal::String(value)) => ArgumentValue::String(value.clone()),
+            ExpressionKind::Literal(Literal::Bool(value)) => ArgumentValue::Boolean(*value),
+            ExpressionKind::Literal(Literal::Null) => ArgumentValue::Null,
+            ExpressionKind::ClassConstant {
+                class,
+                name: MemberName::Identifier(constant),
+                ..
+            } => {
+                let ExpressionKind::Name(class) = &class.kind else {
+                    return None;
+                };
+                let prefix = match class.kind {
+                    NameKind::FullyQualified => "\\",
+                    NameKind::Relative => "namespace\\",
+                    _ => "",
+                };
+                let class = format!("{prefix}{}", class.text.to_ascii_lowercase());
+                ArgumentValue::ClassConstant(class, constant.name.clone())
+            }
+            _ => return None,
+        };
+        Some(Self {
+            name: argument.name.as_ref().map(|name| name.name.clone()),
+            value,
+        })
+    }
 }
 
 impl Place {
@@ -42,8 +99,15 @@ impl Place {
                     name: MemberName::Identifier(name),
                     arguments: Arguments::List(arguments),
                     nullsafe: false,
-                } if arguments.is_empty() => {
-                    members.push(AccessStep::Method(name.name.to_ascii_lowercase()));
+                } => {
+                    let arguments = arguments
+                        .iter()
+                        .map(CallArgument::of)
+                        .collect::<Option<_>>()?;
+                    members.push(AccessStep::Method(
+                        name.name.to_ascii_lowercase(),
+                        arguments,
+                    ));
                     expression = target;
                 }
                 ExpressionKind::Index {
@@ -101,9 +165,15 @@ impl Place {
 
     pub fn refers_to(&self, name: &str) -> bool {
         self.root == name
-            || self.members.iter().any(
-                |step| matches!(step, AccessStep::VariableOffset(variable) if variable == name),
-            )
+            || self.members.iter().any(|step| {
+                match step {
+                AccessStep::VariableOffset(variable) => variable == name,
+                AccessStep::Method(_, arguments) => arguments.iter().any(|argument| {
+                    matches!(&argument.value, ArgumentValue::Variable(variable) if variable == name)
+                }),
+                _ => false,
+            }
+            })
     }
 }
 
@@ -261,6 +331,6 @@ pub fn affected_by_write(place: &Place, target: Option<&Place>) -> bool {
                 && place
                     .members
                     .iter()
-                    .any(|step| matches!(step, AccessStep::Method(_)))
+                    .any(|step| matches!(step, AccessStep::Method(..)))
         })
 }

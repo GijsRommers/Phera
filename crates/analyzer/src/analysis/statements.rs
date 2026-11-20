@@ -67,8 +67,12 @@ impl Analyzer<'_> {
         let previous = self.context.known.clone();
         self.context.known.extend(scope.known.iter().cloned());
         let annotations = self.statement_var_annotations(statement, scope);
-        let flow = self.statement_kind(statement, scope);
-        for (name, ty) in annotations {
+        let flow = if let StatementKind::Return(value) = &statement.kind {
+            self.return_statement(value.as_ref(), annotations.returned, statement.span, scope)
+        } else {
+            self.statement_kind(statement, scope)
+        };
+        for (name, ty) in annotations.assignments {
             if scope.get(&name).definition == Definition::Definite {
                 scope.define(&name, ty);
             }
@@ -121,9 +125,6 @@ impl Analyzer<'_> {
                 if self.expression_statement(expression, scope) == ValueType::Never {
                     return Flow::Terminal;
                 }
-            }
-            StatementKind::Return(value) => {
-                return self.return_statement(value.as_ref(), statement.span, scope);
             }
             StatementKind::If {
                 condition,
@@ -186,6 +187,7 @@ impl Analyzer<'_> {
     fn return_statement(
         &mut self,
         value: Option<&Expression>,
+        annotation: Option<ValueType>,
         span: Span,
         scope: &mut Scope,
     ) -> Flow {
@@ -194,6 +196,11 @@ impl Analyzer<'_> {
                 self.ensure_reference(value, scope);
             }
             let given = self.expression(value, scope, false);
+            let given = if given == ValueType::Never {
+                given
+            } else {
+                annotation.unwrap_or(given)
+            };
             if let Some(inferred) = &mut self.context.inferred_return {
                 *inferred = inferred.join(&given);
             }
