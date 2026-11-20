@@ -155,7 +155,10 @@ async fn attach(
             "Stream filter resource allocation failed",
         ));
     };
-    if user_stream.is_some() || super::user::lookup(context, stream.id).is_some() {
+    if user_stream.is_some()
+        || super::user::lookup(context, stream.id).is_some()
+        || crate::socket::Io::for_resource(stream).is_some()
+    {
         for stage in read_filter.iter_mut().chain(&mut write_filter) {
             stage.id = filter.id;
         }

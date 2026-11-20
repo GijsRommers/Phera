@@ -29,6 +29,7 @@ pub enum Wrapper {
     Process,
     ProcessSocket,
     Socket,
+    Http,
     Memory,
     Temp,
     Data,

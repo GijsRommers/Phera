@@ -122,6 +122,9 @@ pub(crate) async fn open_resource(
             None => Value::Bool(false),
         });
     }
+    if crate::socket::http::is_url(name) {
+        return crate::socket::http::fopen(context, function, name, mode, stream_context).await;
+    }
     let stream = if let Target::Gzip(filename) = Target::parse(name)
         && !crate::user_wrappers::protocol_disabled(context, b"compress.zlib")
         && let Some(level) = crate::context_options::option(stream_context, "zlib", "level")

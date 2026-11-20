@@ -166,6 +166,8 @@ PHP programs can open a client or listener, wait for readiness with
 TCP clients can start TLS when connecting or upgrade an existing connection.
 Certificate and host-name verification are enabled by default. A live socket
 held by the boot prevents `Phera\snapshot()` from creating a snapshot.
+`fopen()` supports buffered HTTP and HTTPS responses, including for
+Guzzle's stream handler. `pfsockopen()` opens a request-owned connection.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 Legacy `DOMDocument` supports local XSD validation for common content models,

@@ -17,6 +17,7 @@ mod html;
 mod metaphone;
 mod number_format;
 mod padding;
+mod quoted_printable;
 mod replace;
 mod search;
 mod similarity;
@@ -34,6 +35,7 @@ pub(crate) mod url;
 pub(crate) const MAX_STRING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.function(quoted_printable::ENCODE);
     for entry in [
         base64::FUNCTIONS,
         case::FUNCTIONS,

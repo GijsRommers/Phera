@@ -4,6 +4,7 @@ mod address;
 mod client;
 mod datagram;
 mod functions;
+pub(crate) mod http;
 mod io;
 mod line;
 mod server;

@@ -75,3 +75,18 @@ async fn snapshots_name_the_open_wrapper_or_filter() {
         assert!(failure.contains(reason), "{failure}");
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn snapshots_refuse_live_stream_sockets() {
+    let failure = boot_and_answer(
+        "stream-socket",
+        r#"<?php
+$listener = stream_socket_server('tcp://127.0.0.1:0');
+Phera\snapshot();
+"#,
+        &[],
+    )
+    .await
+    .expect_err("snapshot must refuse a live socket");
+    assert!(failure.contains("open stream socket"), "{failure}");
+}

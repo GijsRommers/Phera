@@ -60,7 +60,11 @@ fn is_local(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             |stream| {
                 Value::Bool(!matches!(
                     stream.wrapper,
-                    Wrapper::Data | Wrapper::GzipDirect | Wrapper::Gzip | Wrapper::Socket
+                    Wrapper::Data
+                        | Wrapper::GzipDirect
+                        | Wrapper::Gzip
+                        | Wrapper::Socket
+                        | Wrapper::Http
                 ))
             },
         );
@@ -200,6 +204,7 @@ fn metadata(stream: &Stream) -> PhpArray {
     }
     let (wrapper, kind) = match stream.wrapper {
         Wrapper::File => ("plainfile", "STDIO"),
+        Wrapper::Http => ("http", "tcp_socket/ssl"),
         Wrapper::Gzip | Wrapper::GzipDirect => ("ZLIB", "ZLIB"),
         Wrapper::Standard => ("PHP", "STDIO"),
         Wrapper::Process => ("plainfile", "STDIO"),
@@ -210,6 +215,15 @@ fn metadata(stream: &Stream) -> PhpArray {
         Wrapper::Input => ("PHP", "Input"),
         Wrapper::Output => ("PHP", "Output"),
     };
+    if stream.wrapper == Wrapper::Http {
+        let mut headers = PhpArray::new();
+        if let Some(lines) = &stream.data_header {
+            for line in lines.split(|byte| *byte == b'\n') {
+                let _ = headers.push(Value::from(line.to_vec()));
+            }
+        }
+        insert("wrapper_data", Value::from(headers));
+    }
     if stream.wrapper != Wrapper::GzipDirect && stream.child_pipe.is_none() {
         insert("wrapper_type", Value::from(wrapper));
     }
