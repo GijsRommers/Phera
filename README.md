@@ -113,7 +113,8 @@ includes it. The Zend-specific `opcache.preload` directive is unsupported.
 Built in, each checked call by call against real PHP: core, standard, ctype,
 [curl](crates/extensions/curl/README.md) (HTTP and HTTPS, including HTTP/2,
 connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`,
-`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, intl, json, mbstring, openssl, pcre,
+`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, intl, json, mbstring, openssl, pcre
+(`MARK` in match arrays, including Symfony's compiled route patterns),
 PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.
@@ -135,9 +136,18 @@ For example, `json_decode($json, flags: JSON_THROW_ON_ERROR)` uses the default
 depth. Reflection reads the same defaults, and native errors include the
 function or method that raised them in the exception trace.
 
+`min()`, `max()`, and loose array searches use native object comparisons,
+including comparisons inside nested arrays. `range()` accepts Stringable
+endpoints in weak mode.
+`array_multisort()` sorts parallel arrays by their columns and accepts sort
+flags as literals. Writable arguments receive the sorted arrays.
+
 Unix scripts can launch programs with `shell_exec()`, backticks, and the process
-functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
-launching for web requests, run `phera serve --no-process public`.
+functions. Backticks emit PHP 8.5's compile-time deprecation. On Unix, `mail()`
+and `mb_send_mail()` pipe the message to the command in `sendmail_path`.
+`phera serve --no-process public` disables program launches for web requests,
+including `mail()` and `mb_send_mail()`.
+The standard library retains PHP’s deprecated `utf8_encode()` Latin-1 conversion.
 
 BCMath provides arbitrary-precision decimal functions and the immutable
 `BcMath\Number` class. Set the default procedural scale with `bcmath.scale`
@@ -177,10 +187,15 @@ rejects secret keys whose embedded public half cannot be decoded as a point.
 ### intl
 
 The intl extension includes ICU4X normalization, grapheme operations, IDNA,
-locale queries, number and date formatting, collation, list and message
-formatting, transliteration, break iteration, resource bundles, and calendar
-and timezone objects. See the [intl coverage notes](crates/extensions/intl/README.md) for
-the APIs that still differ from PHP.
+locale queries, number formatting including significant digits and English
+spellout and ordinals, date formatting including relative days and skeletons,
+collation, list and message formatting, transliteration with category-filtered
+accent removal, break iteration, Unicode character names, UTF and single-byte
+conversion, resource bundles, and calendar and timezone objects. Character-name
+lookup and the standalone hour patterns covered by the oracle follow PHP
+8.5.13 with ICU 78.2. See the
+[intl coverage notes](crates/extensions/intl/README.md) for the APIs that still
+differ from PHP.
 
 ## ✨ Goals
 

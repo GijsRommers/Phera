@@ -2819,6 +2819,7 @@ dependencies = [
  "icu_time",
  "idna",
  "phera-ext-date",
+ "phera-ext-mbstring",
  "phera-ext-standard",
  "phera-extension-api",
  "phera-value",
@@ -2840,6 +2841,7 @@ dependencies = [
  "base64 0.22.1",
  "encoding_rs",
  "iconv-native",
+ "phera-ext-process",
  "phera-extension-api",
  "tokio",
 ]

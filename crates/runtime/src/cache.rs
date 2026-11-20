@@ -181,10 +181,24 @@ impl CodeCache {
                         .then_some(phera_compiler::NativeFunction::General);
                 };
                 Some(match entry.handler {
+                    phera_extension_api::NativeFn::DeprecatedSync(_) => {
+                        phera_compiler::NativeFunction::General
+                    }
                     phera_extension_api::NativeFn::Async(_)
                         if self.registry.sync_selector(entry.name).is_none() =>
                     {
                         phera_compiler::NativeFunction::General
+                    }
+                    phera_extension_api::NativeFn::Async(_)
+                        if entry
+                            .params
+                            .last()
+                            .is_some_and(|parameter| parameter.variadic)
+                            && entry.params.iter().all(|parameter| !parameter.by_ref) =>
+                    {
+                        phera_compiler::NativeFunction::Direct {
+                            positional_by_value: 4,
+                        }
                     }
                     _ => phera_compiler::NativeFunction::Direct {
                         positional_by_value: entry

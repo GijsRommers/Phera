@@ -3,7 +3,7 @@
 use phera_extension_api::{ArrayKey, PhpArray, Value};
 use phera_extension_api::{ClassEntry, ConstantValue, MethodEntry, Param, ParamType, Registry};
 
-use super::{CLASS, Op, invoke};
+use super::{CLASS, Op, invoke, names, property_names};
 use crate::unsupported;
 
 const CODE: Param = Param::new("codepoint", ParamType::IntOrString);
@@ -43,6 +43,11 @@ const CONSTANTS: &[(&str, ConstantValue)] = &[
     ("CODEPOINT_MAX", ConstantValue::Int(1114111)),
     ("NO_NUMERIC_VALUE", ConstantValue::Float(-123456789.0)),
     ("UNICODE_CHAR_NAME", ConstantValue::Int(0)),
+    ("UNICODE_10_CHAR_NAME", ConstantValue::Int(1)),
+    ("EXTENDED_CHAR_NAME", ConstantValue::Int(2)),
+    ("CHAR_NAME_ALIAS", ConstantValue::Int(3)),
+    ("CHAR_NAME_CHOICE_COUNT", ConstantValue::Int(4)),
+    ("SHORT_PROPERTY_NAME", ConstantValue::Int(0)),
     ("LONG_PROPERTY_NAME", ConstantValue::Int(1)),
     ("PROPERTY_ALPHABETIC", ConstantValue::Int(0)),
     ("PROPERTY_ASCII_HEX_DIGIT", ConstantValue::Int(1)),
@@ -324,20 +329,20 @@ const METHODS: &[MethodEntry] = &[
         Err(unsupported::item("IntlChar::charDirection"))
     })
     .static_(),
-    MethodEntry::public("charFromName", &[NAME, NAME_TYPE], |_, _, _| {
-        Err(unsupported::item("IntlChar::charFromName"))
+    MethodEntry::public("charFromName", &[NAME, NAME_TYPE], |context, _, args| {
+        names::from_name(context, args)
     })
     .static_(),
     MethodEntry::public("charMirror", CODEPOINT, |_, _, _| {
         Err(unsupported::item("IntlChar::charMirror"))
     })
     .static_(),
-    MethodEntry::public("charName", &[CODE, NAME_TYPE], |_, _, _| {
-        Err(unsupported::item("IntlChar::charName"))
+    MethodEntry::public("charName", &[CODE, NAME_TYPE], |context, _, args| {
+        names::name(context, args)
     })
     .static_(),
-    MethodEntry::public("enumCharNames", CHARACTER_RANGE, |_, _, _| {
-        Err(unsupported::item("IntlChar::enumCharNames"))
+    MethodEntry::public_async("enumCharNames", CHARACTER_RANGE, |context, _, args| {
+        names::enumerate(context, args)
     })
     .static_(),
     MethodEntry::public("enumCharTypes", &[CALLBACK], |_, _, _| {
@@ -374,9 +379,11 @@ const METHODS: &[MethodEntry] = &[
         |_, _, _| Err(unsupported::item("IntlChar::getPropertyEnum")),
     )
     .static_(),
-    MethodEntry::public("getPropertyName", &[PROPERTY_ID, NAME_TYPE], |_, _, _| {
-        Err(unsupported::item("IntlChar::getPropertyName"))
-    })
+    MethodEntry::public(
+        "getPropertyName",
+        &[PROPERTY_ID, NAME_TYPE],
+        |context, _, args| property_names::name(context, args),
+    )
     .static_(),
     MethodEntry::public("getPropertyValueEnum", &[PROPERTY_ID, NAME], |_, _, _| {
         Err(unsupported::item("IntlChar::getPropertyValueEnum"))
@@ -385,7 +392,7 @@ const METHODS: &[MethodEntry] = &[
     MethodEntry::public(
         "getPropertyValueName",
         &[PROPERTY_ID, Param::new("value", ParamType::Int), NAME_TYPE],
-        |_, _, _| Err(unsupported::item("IntlChar::getPropertyValueName")),
+        |context, _, args| property_names::value_name(context, args),
     )
     .static_(),
 ];

@@ -4,11 +4,9 @@
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::rc::Rc;
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
-    Value, args,
+    Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray, Value, args,
 };
 
 use super::ordering::SortFlags;
@@ -240,7 +238,9 @@ async fn unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
     let flags = SortFlags::from_flags(flags);
     let entries: Vec<_> = array.iter().collect();
     let order = zend_sort::order_async(entries.len(), async |left, right| {
-        unique_comparison(flags, context, entries[left].1, entries[right].1).await
+        flags
+            .compare_unstable(context, entries[left].1, entries[right].1)
+            .await
     })
     .await?;
     // Walk the sorted entries; of a run of equal values, the one that came
@@ -249,7 +249,9 @@ async fn unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
     let mut kept: Option<usize> = None;
     for index in order {
         if let Some(last) = kept
-            && unique_comparison(flags, context, entries[last].1, entries[index].1).await?
+            && flags
+                .compare_unstable(context, entries[last].1, entries[index].1)
+                .await?
                 == Ordering::Equal
         {
             if last > index {
@@ -263,25 +265,4 @@ async fn unique(context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
         kept = Some(index);
     }
     Ok(Value::from(result))
-}
-
-/// PHP groups enum cases by object identity for `array_unique(..., SORT_REGULAR)`.
-async fn unique_comparison(
-    flags: SortFlags,
-    context: &mut dyn Context,
-    left: &Value,
-    right: &Value,
-) -> Result<Ordering, NativeError> {
-    let order = flags.compare_with_objects(context, left, right).await?;
-    if matches!(flags, SortFlags::Regular)
-        && order == Ordering::Greater
-        && let Value::Object(right) = &*right.deref()
-        && right.class.is_enum()
-    {
-        return Ok(match &*left.deref() {
-            Value::Object(left) if left.class.is_enum() => Rc::as_ptr(left).cmp(&Rc::as_ptr(right)),
-            _ => Ordering::Less,
-        });
-    }
-    Ok(order)
 }

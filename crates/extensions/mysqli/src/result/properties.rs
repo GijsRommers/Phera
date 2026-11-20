@@ -7,7 +7,7 @@ use phera_extension_api::{
 
 use super::{closed, handle};
 
-pub static ACCESS: NativePropertyAccess = NativePropertyAccess { read, mutate };
+pub static ACCESS: NativePropertyAccess = NativePropertyAccess::new(read, mutate);
 
 fn read(
     context: &mut dyn Context,

@@ -31,12 +31,16 @@ struct State {
 }
 
 fn create(context: &mut dyn Context, values: &[Value], site: &str) -> NativeResult {
-    let id = String::from_utf8_lossy(args::bytes(values, 0));
+    let supplied = String::from_utf8_lossy(args::bytes(values, 0));
     let direction = args::int(values, 1).unwrap_or(0);
     error::clear(context);
+    let inverse;
     let id = match direction {
-        0 => id.split(';').map(str::trim).collect::<Vec<_>>().join(";"),
-        1 => inverse_id(&id),
+        0 => supplied.as_ref(),
+        1 => {
+            inverse = inverse_id(&supplied);
+            &inverse
+        }
         _ => {
             return Err(NativeError::value_error(format!(
                 "{site}(): Argument #2 ($direction) must be either Transliterator::FORWARD or \
@@ -44,8 +48,8 @@ fn create(context: &mut dyn Context, values: &[Value], site: &str) -> NativeResu
             )));
         }
     };
-    let Some(state) = load(&id) else {
-        let detail = format!("unable to open ICU transliterator with id \"{id}\"");
+    let Some(state) = load(id) else {
+        let detail = format!("unable to open ICU transliterator with id \"{supplied}\"");
         return error::fail(context, site, 65569, &detail, Value::Null);
     };
     let mut properties = PhpArray::new();
@@ -58,19 +62,30 @@ fn create(context: &mut dyn Context, values: &[Value], site: &str) -> NativeResu
 }
 
 fn load(id: &str) -> Option<State> {
-    let steps = id
-        .split(';')
-        .map(|step| Step::load(step.trim()))
-        .collect::<Option<Vec<_>>>()?;
+    let id = compound_id(id).split(';').map(str::trim);
+    let steps = id.clone().map(Step::load).collect::<Option<Vec<_>>>()?;
+    let id = id
+        .map(|step| match step.split_once(":]") {
+            Some((filter, name)) => format!("{filter}:]{}", name.trim_start()),
+            None => step.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(";");
     Some(State {
-        id: id.to_owned(),
+        id,
         steps,
         error: (0, None),
     })
 }
 
+fn compound_id(id: &str) -> &str {
+    let id = id.trim();
+    id.strip_suffix(';').unwrap_or(id).trim_end()
+}
+
 fn inverse_id(id: &str) -> String {
-    id.split(';')
+    compound_id(id)
+        .split(';')
         .rev()
         .map(|step| {
             let step = step.trim();

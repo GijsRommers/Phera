@@ -93,14 +93,8 @@ fn invoke<'a>(
     arguments: Vec<Value>,
     operation: Operation,
     method: &'static str,
-    replacement: Option<&'static str>,
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
-        if let Some(replacement) = replacement {
-            context.diagnostics().deprecated(format!(
-                "Method {CLASS}::{method}() is deprecated since 8.5, use method {CLASS}::{replacement}() instead"
-            ));
-        }
         let storage = receiver(this.as_ref())?;
         let mut arguments = arguments.into_iter();
         let object = object(arguments.next().unwrap_or(Value::Null), method)?;
@@ -130,7 +124,7 @@ pub(super) fn offset_set(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(context, this, args, Operation::Set, "offsetSet", None)
+    invoke(context, this, args, Operation::Set, "offsetSet")
 }
 
 pub(super) fn offset_get(
@@ -138,7 +132,7 @@ pub(super) fn offset_get(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(context, this, args, Operation::Get, "offsetGet", None)
+    invoke(context, this, args, Operation::Get, "offsetGet")
 }
 
 pub(super) fn offset_exists(
@@ -146,7 +140,7 @@ pub(super) fn offset_exists(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(context, this, args, Operation::Exists, "offsetExists", None)
+    invoke(context, this, args, Operation::Exists, "offsetExists")
 }
 
 pub(super) fn offset_unset(
@@ -154,7 +148,7 @@ pub(super) fn offset_unset(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(context, this, args, Operation::Unset, "offsetUnset", None)
+    invoke(context, this, args, Operation::Unset, "offsetUnset")
 }
 
 pub(super) fn attach_old(
@@ -162,14 +156,7 @@ pub(super) fn attach_old(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(
-        context,
-        this,
-        args,
-        Operation::Set,
-        "attach",
-        Some("offsetSet"),
-    )
+    invoke(context, this, args, Operation::Set, "attach")
 }
 
 pub(super) fn detach_old(
@@ -177,14 +164,7 @@ pub(super) fn detach_old(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(
-        context,
-        this,
-        args,
-        Operation::Unset,
-        "detach",
-        Some("offsetUnset"),
-    )
+    invoke(context, this, args, Operation::Unset, "detach")
 }
 
 pub(super) fn contains_old(
@@ -192,12 +172,5 @@ pub(super) fn contains_old(
     this: Option<Rc<Object>>,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    invoke(
-        context,
-        this,
-        args,
-        Operation::Exists,
-        "contains",
-        Some("offsetExists"),
-    )
+    invoke(context, this, args, Operation::Exists, "contains")
 }

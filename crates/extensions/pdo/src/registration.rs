@@ -5,7 +5,7 @@ use phera_extension_api::{
     ParamType, PropertyEntry, Registry, Visibility,
 };
 
-use crate::{attributes, connection, constants, fetch, statement, transactions};
+use crate::{attributes, connection, constants, statement, transactions};
 
 static UNCOPYABLE_CONNECTION: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
@@ -272,13 +272,13 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         &[Param::new("column", ParamType::Int).optional()],
         crate::drivers::sqlite::fetch::column,
     ),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "setFetchMode",
         &[
             Param::new("mode", ParamType::Int),
             Param::new("args", ParamType::Mixed).variadic(),
         ],
-        fetch::set_mode,
+        crate::drivers::sqlite::fetch::set_mode,
     ),
     MethodEntry::public_async("closeCursor", &[], crate::drivers::sqlite::fetch::close),
     MethodEntry::public("columnCount", &[], statement::column_count),

@@ -380,6 +380,7 @@ pub struct ParameterInfo {
     pub position: usize,
     pub declared_type: Option<String>,
     pub by_reference: bool,
+    pub can_pass_by_value: bool,
     pub variadic: bool,
     pub optional: bool,
     pub promoted: bool,

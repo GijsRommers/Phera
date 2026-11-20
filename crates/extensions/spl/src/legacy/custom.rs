@@ -3,8 +3,8 @@
 use std::rc::Rc;
 
 use phera_extension_api::serialization::{
-    ActiveUnserializePolicy, INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME, LegacyUnserializeState,
-    resolve_unserialize_class,
+    ActiveLegacyUnserialize, ActiveUnserializePolicy, INCOMPLETE_CLASS, INCOMPLETE_CLASS_NAME,
+    LegacyUnserializeState, invoke_legacy_payload, resolve_unserialize_class,
 };
 use phera_extension_api::{ArrayKey, Context, NativeError, Object, Value};
 
@@ -47,19 +47,23 @@ pub(super) async fn custom_object(
     if !has_unserializer {
         return Ok((object, None));
     }
-    if !context.is_user_method(&object, "unserialize")
+    let native = info.as_ref().and_then(|info| info.legacy_native);
+    if native.is_some()
         && let Some(kind) = PayloadKind::of(&object)
     {
         return Ok((object, Some(kind)));
     }
     let previous = ActiveUnserializePolicy::replace(context, Some(custom.policy.clone()));
-    let result = context
-        .call_serialization_method(
-            object.clone(),
-            "unserialize",
-            vec![Value::from(custom.payload)],
-        )
-        .await;
+    let result = if native.is_some() {
+        let slots = ActiveLegacyUnserialize::replace(context, Some(std::mem::take(references)));
+        let result = invoke_legacy_payload(context, object.clone(), custom.payload, native).await;
+        if let Some(restored) = ActiveLegacyUnserialize::replace(context, slots) {
+            *references = restored;
+        }
+        result
+    } else {
+        invoke_legacy_payload(context, object.clone(), custom.payload, None).await
+    };
     ActiveUnserializePolicy::replace(context, previous);
     result?;
     Ok((object, None))

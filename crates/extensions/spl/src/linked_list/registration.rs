@@ -20,6 +20,7 @@ const DATA: Param = Param::new("data", ParamType::Array);
 const STRING_DATA: Param = Param::new("data", ParamType::String);
 
 const HOOKS: ClassHooks = ClassHooks {
+    legacy_unserialize: Some(methods::decode_legacy_payload),
     clone: Some(NativeClone::Copy(methods::clone_list)),
     properties: Some(methods::view),
     iterator: Some(cursor::create),

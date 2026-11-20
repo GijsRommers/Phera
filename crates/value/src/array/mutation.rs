@@ -39,6 +39,12 @@ impl PhpArray {
         }
     }
 
+    /// `array_multisort()` starts appending at the row count, even for arrays
+    /// that retained string keys.
+    pub fn set_next_append_index_to_len(&mut self) {
+        self.next_free = Some(self.len() as i64);
+    }
+
     /// Appends an entry whose key is not in the array. A list stays a list
     /// only when the key is the next position: a key that fills a hole or
     /// skips ahead goes at the end in PHP, so the list becomes a map.

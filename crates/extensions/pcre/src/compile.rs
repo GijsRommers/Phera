@@ -9,8 +9,9 @@
 //! The source PCRE2 compiles is the pattern body after `transform`, with
 //! PHP's match limits put in front of it as `(*LIMIT_...)` directives.
 
-use crate::pattern;
+use crate::mark::Marks;
 use crate::transform::{self, Source};
+use crate::{mark_pattern, pattern};
 use pcre2::bytes::{CaptureLocations, Regex, RegexBuilder};
 use pcre2_sys::{
     PCRE2_ERROR_BAD_SUBPATTERN_REFERENCE, PCRE2_ERROR_CLASS_RANGE_ORDER,
@@ -80,6 +81,7 @@ const REPORTED_ONE_BYTE_LATER: [u32; 9] = [
 
 pub(crate) struct Compiled {
     pub regex: Regex,
+    pub marks: Option<Box<Marks>>,
     /// Whether the subject is UTF-8: `/u`, or `(*UTF)` in the pattern.
     pub utf: bool,
     /// The pattern for the retry after an empty match (see `scan.rs`),
@@ -165,8 +167,18 @@ pub(crate) fn compile(bytes: &[u8], settings: Settings) -> Result<Compiled, Stri
     } else {
         regex
     };
+    let marks = mark_pattern::insert(&source, startup, parsed.body, options).map(|probe| {
+        Box::new(Marks::new(
+            builder.clone(),
+            probe,
+            &prefix,
+            source.closing,
+            options.anchored,
+        ))
+    });
     Ok(Compiled {
         regex,
+        marks,
         utf: options.utf || source.text[..startup].contains("(*UTF"),
         retry_source: format!("(*NOTEMPTY_ATSTART){anchored}"),
         retry_regex: OnceCell::new(),

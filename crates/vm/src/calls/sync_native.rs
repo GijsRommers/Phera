@@ -39,17 +39,34 @@ impl NativeLink {
     fn new(entry: FunctionEntry, registry: &phera_extension_api::Registry) -> Option<Self> {
         let handler = match entry.handler {
             NativeFn::Sync(handler) => Handler::Sync(handler),
+            NativeFn::DeprecatedSync(_) => return None,
             NativeFn::Async(_) => Handler::Select(registry.sync_selector(entry.name)?),
         };
         let mut masks = [TypeMask::default(); 4];
-        for (mask, parameter) in masks.iter_mut().zip(entry.params) {
-            *mask = exact_types(parameter);
+        // A selector can validate a positional window containing variadic
+        // arguments. The signature still rejects references and coercions.
+        let variadic = matches!(handler, Handler::Select(_))
+            .then(|| entry.params.last().filter(|parameter| parameter.variadic))
+            .flatten();
+        for (index, mask) in masks.iter_mut().enumerate() {
+            let Some(parameter) = entry.params.get(index).or(variadic) else {
+                break;
+            };
+            let mut parameter = *parameter;
+            if variadic.is_some() {
+                parameter.variadic = false;
+            }
+            *mask = exact_types(&parameter);
         }
         Some(Self {
             handler,
             name: entry.name,
             min: entry.min_args(),
-            max: entry.params.len().min(masks.len()),
+            max: if variadic.is_some() {
+                masks.len()
+            } else {
+                entry.params.len().min(masks.len())
+            },
             masks,
             object_handler: registry.object_handler(entry.name).is_some(),
         })
