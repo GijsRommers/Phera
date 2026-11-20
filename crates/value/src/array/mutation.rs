@@ -122,7 +122,19 @@ impl PhpArray {
             Storage::List(values) => (ArrayKey::Int(position as i64), values[position].take()),
             Storage::Map(map) => map.remove_at(position),
         };
-        self.dead += 1;
+        // The slot goes, with the holes after it, so that the next `$a[]`
+        // reuses it and a list stays a list. Not for a PHP reference: a
+        // by-reference `foreach` binds the element it stands on, and those
+        // it has visited, as references, and PHP's cursor on a removed slot
+        // goes past it, so that slot must stay a hole (an element `$a[]`
+        // adds then comes after it, where the loop still finds it).
+        if matches!(value, Some(Value::Reference(_))) {
+            self.dead += 1;
+        } else {
+            let holes_after = self.storage.len() - position - 1;
+            self.storage.truncate(position);
+            self.dead -= holes_after as u32;
+        }
         if let ArrayKey::Int(key) = key
             && self.next_free == Some(key.saturating_add(1))
         {
