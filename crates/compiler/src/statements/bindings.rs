@@ -54,6 +54,10 @@ impl Compiler<'_> {
         let key_register = key.as_ref().map(|_| self.allocate_register()).transpose()?;
         let value_register = self.allocate_register()?;
         let owned = self.temporaries_since(mark);
+        // A copy of a variable owns nothing the variable does not, as far as
+        // the subject expression goes, but the body may assign the variable
+        // (`$items = null;` inside the loop): then the copy is the last owner.
+        let subject_copy = (!self.locals.values().any(|local| *local == src)).then_some(src);
         let place = if reference_subject {
             Some(if crate::writable(subject) {
                 self.place(subject)?
@@ -127,6 +131,7 @@ impl Compiler<'_> {
             cleanup: Some(super::exits::LoopCleanup::Foreach {
                 iterator: id,
                 owned,
+                subject: subject_copy,
             }),
             breaks: vec![],
             continues: vec![],
@@ -135,12 +140,28 @@ impl Compiler<'_> {
         self.emit(Instruction::Jump(Target(start)), line);
         self.patch(jump, self.position());
         self.loop_end(start);
-        self.emit(Instruction::IterEnd(id), line);
-        // PHP frees the loop's own copy of the subject and of the last
-        // value when the loop ends (FE_FREE), so an object that only they
-        // held is destroyed here.
-        self.clear_owning_temporaries(&owned, line);
+        self.end_foreach(id, &owned, subject_copy, line);
 
         Ok(())
+    }
+
+    /// PHP frees the loop's own copy of the subject and of the last value
+    /// when the loop ends (FE_FREE), so an object that only they held is
+    /// destroyed here, on the way out at the end and at each `break`.
+    pub(crate) fn end_foreach(
+        &mut self,
+        iterator: phera_bytecode::Reg,
+        owned: &crate::expressions::operand_release::Temporaries,
+        subject: Option<phera_bytecode::Reg>,
+        line: usize,
+    ) {
+        self.emit(Instruction::IterEnd(iterator), line);
+        let mut owning = self.owning_temporaries(owned);
+        if let Some(subject) = subject
+            && !owning.contains(&subject)
+        {
+            owning.insert(0, subject);
+        }
+        self.clear_registers(&owning, line);
     }
 }
