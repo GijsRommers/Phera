@@ -13,6 +13,7 @@ use crate::{
     connection::{self, Handle},
     result,
 };
+use phera_db_drivers::session_log::SessionLog;
 
 pub const SIMPLE: usize = 0;
 pub const PARAMS: usize = 1;
@@ -151,7 +152,12 @@ pub(crate) fn execute_named<'a, const OP: usize, const SEND: bool>(
         };
         let command = Command::parse::<OP>(c, &a, usize::from(explicit), call)?;
         let state = connection::argument(c, conn, call)?;
-        let lease = state.borrow().lease()?;
+        let lease = connection::lease(&state).await?;
+        // A fork replays what the script changed about its session.
+        let noted = match &command {
+            Command::Simple(sql) if SessionLog::concerns(sql.as_bytes()) => Some(sql.clone()),
+            _ => None,
+        };
         if SEND {
             let mut state = state.borrow_mut();
             if state.busy.is_some() || !state.results.is_empty() {
@@ -162,6 +168,9 @@ pub(crate) fn execute_named<'a, const OP: usize, const SEND: bool>(
             state.busy = Some(connection::start(&lease, |driver| {
                 Box::pin(command.run(driver))
             }));
+            if let Some(sql) = noted {
+                state.log.ran(sql.as_bytes());
+            }
             return Ok(Value::Bool(true));
         }
         finish(&state).await?;
@@ -176,7 +185,12 @@ pub(crate) fn execute_named<'a, const OP: usize, const SEND: bool>(
         };
         match response.and_then(|mut rows| rows.pop().ok_or_else(|| DbError::general("No result")))
         {
-            Ok(rows) if rows.error.is_none() => result::create(c, rows, Some(&state)),
+            Ok(rows) if rows.error.is_none() => {
+                if let Some(sql) = noted {
+                    state.borrow_mut().log.ran(sql.as_bytes());
+                }
+                result::create(c, rows, Some(&state))
+            }
             Ok(rows) => {
                 let detail = rows.error.map(|error| error.detail).unwrap_or_default();
                 fail(c, &state, call, detail)
@@ -213,7 +227,7 @@ async fn finish(state: &Handle) -> Result<(), NativeError> {
 pub fn get(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let state = connection::argument(c, args::value(&a, 0), "pg_get_result")?;
-        state.borrow().lease()?;
+        state.borrow().ensure_open()?;
         finish(&state).await?;
         let result = state.borrow_mut().results.pop_front();
         if let Some(rows) = result {
@@ -230,7 +244,7 @@ pub fn get(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture<'_, NativeResult> 
 pub fn busy(c: &mut dyn Context, a: &[Value]) -> NativeResult {
     let state = connection::argument(c, args::value(a, 0), "pg_connection_busy")?;
     let state = state.borrow();
-    state.lease()?;
+    state.ensure_open()?;
     Ok(Value::Bool(
         state
             .busy
@@ -242,7 +256,10 @@ pub fn busy(c: &mut dyn Context, a: &[Value]) -> NativeResult {
 pub fn consume(c: &mut dyn Context, a: &[Value]) -> NativeResult {
     let state = connection::argument(c, args::value(a, 0), "pg_consume_input")?;
     let state = state.borrow();
-    let lease = state.lease()?;
+    state.ensure_open()?;
+    let Some(lease) = state.lease.clone() else {
+        return Ok(Value::Bool(true));
+    };
     Ok(Value::Bool(
         lease
             .try_inspect(|driver| match driver {

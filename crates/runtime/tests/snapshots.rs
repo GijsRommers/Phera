@@ -379,3 +379,31 @@ async fn mysql_connections_of_the_boot_get_a_session_of_their_own_in_each_fork()
     .expect("snapshot");
     assert_eq!(answers, ["mysqli,,latin1 pdo, 2", "mysqli,,latin1 pdo, 2"]);
 }
+
+/// A pgsql connection of the boot: each fork borrows its own session with
+/// the boot's `SET` replayed; what one fork sets is gone in the next.
+#[tokio::test(flavor = "current_thread")]
+async fn a_pgsql_connection_of_the_boot_gets_a_session_of_its_own_in_each_fork() {
+    let available = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:54329".parse().expect("address"),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok();
+    if !available {
+        eprintln!("SKIP: the test PostgreSQL on port 54329 is not running");
+        return;
+    }
+    let answers = boot_and_answer(
+        "pgsql",
+        "<?php $db = pg_connect('host=127.0.0.1 port=54329 dbname=phera_test user=phera password=phera');
+         pg_query($db, \"SET application_name = 'boot'\");
+         Phera\\snapshot();
+         echo pg_fetch_result(pg_query($db, 'SHOW application_name'), 0, 0), ' ';
+         echo pg_fetch_result(pg_query($db, \"SELECT current_setting('phera.fork', true)\"), 0, 0) ?? 'unset';
+         pg_query($db, \"SET phera.fork = 'set'\");",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["boot unset", "boot unset"]);
+}
