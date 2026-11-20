@@ -150,9 +150,9 @@ impl Vm {
             .rev()
             .find(|property| property.name == name)
             .ok_or_else(|| internal_error!("static property"))?;
-        let storage = property
-            .static_storage
-            .as_ref()
+        let storage = self
+            .class_states
+            .static_property(property)
             .ok_or_else(|| internal_error!("static storage"))?;
         storage.track(&self.property_references, property);
         Ok(())
@@ -176,9 +176,9 @@ impl Vm {
             .rev()
             .find(|property| property.name == name)
             .ok_or_else(|| internal_error!("static property"))?;
-        let storage = property
-            .static_storage
-            .as_ref()
+        let storage = self
+            .class_states
+            .static_property(property)
             .ok_or_else(|| internal_error!("static storage"))?;
         let reference = match value {
             Value::Reference(reference) => reference,

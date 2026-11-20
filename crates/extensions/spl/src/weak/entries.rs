@@ -23,7 +23,7 @@ use phera_extension_api::value::WeakObject;
 use phera_extension_api::{Object, Value};
 
 /// The entries of one WeakMap.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Entries {
     keys: IndexMap<u32, WeakObject>,
     /// The identity of the WeakMap (`Object::identity`): the tag of its values on the keys.
@@ -136,5 +136,20 @@ impl Drop for Entries {
             }
         }
         drop(released);
+    }
+}
+
+/// A `WeakMap` in a fork holds the fork's copies of its keys; its values
+/// are on those keys, tagged with the fork's copy of the map.
+impl crate::native_state::ForkValues for Entries {
+    fn fork_values(
+        &mut self,
+        fork: &mut phera_extension_api::value::Fork<'_>,
+    ) -> Result<(), String> {
+        for key in self.keys.values_mut() {
+            *key = fork.weak(key);
+        }
+        self.owner = fork.identity(self.owner).unwrap_or(self.owner);
+        Ok(())
     }
 }

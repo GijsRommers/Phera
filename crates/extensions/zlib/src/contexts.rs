@@ -54,6 +54,7 @@ pub(crate) const FUNCTIONS: &[(FunctionEntry, &str)] = &[
 
 const CONTEXT_HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    fork: Some(phera_extension_api::fork_refused_handle),
     forbid_serialization: true,
     ..ClassHooks::EMPTY
 };

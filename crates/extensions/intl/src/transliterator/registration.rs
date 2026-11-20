@@ -26,6 +26,7 @@ const FN_APPLY: &[Param] = &[
 const INSTANCE: &[Param] = &[OBJECT];
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::copy::<State>()),
+    fork: Some(phera_extension_api::fork_clone::<State>),
     ..ClassHooks::EMPTY
 };
 const PROPERTIES: &[PropertyEntry] =

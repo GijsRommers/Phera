@@ -22,6 +22,7 @@ const INSTANCE: &[Param] = &[OBJECT];
 const ITEM: &str = "ResourceBundle|array|string|int|null";
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::copy::<State>()),
+    fork: Some(phera_extension_api::fork_clone::<State>),
     iterator: Some(make_cursor),
     count: Some(count),
     dimensions: Some(NativeDimensions {

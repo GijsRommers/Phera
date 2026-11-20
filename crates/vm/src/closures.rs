@@ -151,6 +151,19 @@ impl Vm {
     }
 }
 
+/// The variables a closure object captured, for describing where a value
+/// was found (see `crate::snapshot`); empty for any other object.
+pub(crate) fn captured_values(object: &phera_value::Object) -> Vec<Value> {
+    let Ok(native) = object.native_payload() else {
+        return Vec::new();
+    };
+    native
+        .as_ref()
+        .and_then(|state| state.downcast_ref::<ClosureState>())
+        .map(|state| state.captures.iter().flatten().cloned().collect())
+        .unwrap_or_default()
+}
+
 impl ClosureState {
     /// PHP clone and bind copy the current static values into independent reference cells.
     pub(crate) fn duplicate(&self) -> Self {

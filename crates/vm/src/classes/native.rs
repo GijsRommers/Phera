@@ -161,8 +161,6 @@ impl ClassDefinitions {
                     initializer: None,
                     ty: property.ty.map(property_type),
                     is_readonly: property.is_readonly,
-                    static_initialized: Rc::new(std::cell::Cell::new(true)),
-                    value_initialized: Rc::new(std::cell::Cell::new(property.default.is_some())),
                     hooks: None,
                 };
                 if let Some(slot) = inherited {

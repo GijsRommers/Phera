@@ -30,6 +30,8 @@ impl Extension for Gmp {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this request state: a seed set before the snapshot is not kept: each fork seeds its own.
+        registry.fork_state::<crate::random::Random>(phera_extension_api::fresh_state);
         for (name, value) in [
             ("GMP_ROUND_ZERO", 0),
             ("GMP_ROUND_PLUSINF", 1),

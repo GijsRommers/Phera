@@ -197,3 +197,52 @@ impl Object {
         }
     }
 }
+
+/// A lazy object's state in a fork (see `crate::fork`): the initializer and
+/// the real instance are copied like any value, and the state the class
+/// itself keeps (and the prepared call) through the class's fork hook.
+/// `None` when `state` is not a lazy object's.
+pub(crate) fn fork_storage(
+    object: &Object,
+    state: &dyn Any,
+    fork: &mut crate::Fork<'_>,
+) -> Option<Option<Box<dyn Any>>> {
+    let storage = state.downcast_ref::<LazyStorage>()?;
+    let lazy = match storage.lazy.as_deref() {
+        None => None,
+        Some(LazyObject::Initializing) => {
+            fork.refuse(object, "a lazy object is being initialized");
+            return Some(None);
+        }
+        Some(LazyObject::Proxy(instance)) => Some(LazyObject::Proxy(fork.object(instance))),
+        Some(LazyObject::Pending {
+            strategy,
+            initializer,
+            prepared,
+            properties,
+            skip_serialization,
+        }) => {
+            let Some(prepared) = fork.native(object, prepared.as_ref()) else {
+                return Some(None);
+            };
+            Some(LazyObject::Pending {
+                strategy: *strategy,
+                initializer: fork.value(initializer),
+                prepared,
+                properties: properties.clone(),
+                skip_serialization: *skip_serialization,
+            })
+        }
+    };
+    let payload = match storage.payload.as_deref() {
+        Some(payload) => match fork.native(object, payload) {
+            Some(copy) => Some(copy),
+            None => return Some(None),
+        },
+        None => None,
+    };
+    Some(Some(Box::new(LazyStorage {
+        lazy: lazy.map(Box::new),
+        payload,
+    })))
+}

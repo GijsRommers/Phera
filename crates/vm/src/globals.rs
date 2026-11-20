@@ -80,3 +80,11 @@ impl Globals {
 fn sole_object_owner(value: &Value) -> bool {
     matches!(value, Value::Object(object) if Rc::strong_count(object) == 1)
 }
+
+impl crate::snapshot::ForkCopy for Globals {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        Globals {
+            values: self.values.fork_copy(fork),
+        }
+    }
+}

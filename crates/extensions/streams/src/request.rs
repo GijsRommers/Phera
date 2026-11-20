@@ -159,3 +159,28 @@ pub fn canonical(path: &Path) -> io::Result<PathBuf> {
     }
     path.canonicalize()
 }
+
+/// A fork of a snapshot keeps the umask and the resource numbering. An
+/// open directory handle or a default stream context belongs to the boot,
+/// and is refused; the request body (`php://input`) is the fork's own.
+pub(crate) fn fork_files(
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Option<Box<dyn std::any::Any>> {
+    let files = state.downcast_ref::<Files>()?;
+    if files
+        .directory
+        .as_ref()
+        .is_some_and(|directory| !directory.is_closed())
+        || !files.stream_contexts.is_empty()
+    {
+        fork.refuse_state(
+            "streams",
+            "a directory handle or stream context opened before the call belongs to one request",
+        );
+    }
+    let mut copy = Files::default();
+    copy.mask = files.mask;
+    copy.next_id = files.next_id;
+    Some(Box::new(copy))
+}

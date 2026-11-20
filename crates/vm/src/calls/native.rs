@@ -101,6 +101,9 @@ impl Vm {
                     Err(error) => Err(error),
                 }
             }
+            CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Snapshot) => {
+                self.snapshot_intrinsic(destination, arguments).map(Some)
+            }
             CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Clone)
                 if let Some(destination) = destination =>
             {

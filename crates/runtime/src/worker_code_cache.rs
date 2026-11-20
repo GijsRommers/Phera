@@ -156,6 +156,20 @@ impl CodeLoader for RequestCodeCache {
             .load_stream(context, path, operation, once)
     }
 
+    /// Shipped PHP (a bundled class) compiles once per process, with the
+    /// same built-ins as files.
+    fn load_bundled(
+        &self,
+        source: phera_extension_api::BundledSource,
+    ) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
+        Box::pin(async move {
+            self.worker
+                .shared
+                .compile_shipped(source.source, source.file)
+                .map_err(include_error)
+        })
+    }
+
     fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
         Box::pin(async move {
             self.entry(&path, IncludeCachePolicy::default())

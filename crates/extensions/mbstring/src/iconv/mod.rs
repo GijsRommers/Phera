@@ -21,7 +21,7 @@
 
 mod convert;
 mod mime;
-mod settings;
+pub(crate) mod settings;
 
 use phera_extension_api::{
     Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,

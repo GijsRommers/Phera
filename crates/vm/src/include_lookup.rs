@@ -186,6 +186,19 @@ pub trait CodeLoader {
             Err(last)
         }))
     }
+
+    /// Compiles PHP source that Phera ships (see
+    /// `phera_extension_api::BundledSource`), once.
+    fn load_bundled(
+        &self,
+        source: phera_extension_api::BundledSource,
+    ) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
+        Box::pin(async move {
+            phera_compiler::compile(source.source, source.file)
+                .map(Arc::new)
+                .map_err(CodeLoadError::Compile)
+        })
+    }
 }
 
 pub enum StreamInclude {
@@ -241,5 +254,12 @@ impl<T: CodeLoader + ?Sized> CodeLoader for Arc<T> {
         policy: IncludeCachePolicy,
     ) -> IncludeLoad<'a> {
         self.as_ref().load_include(lookup, policy)
+    }
+
+    fn load_bundled(
+        &self,
+        source: phera_extension_api::BundledSource,
+    ) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
+        self.as_ref().load_bundled(source)
     }
 }

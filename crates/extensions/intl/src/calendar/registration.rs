@@ -22,6 +22,7 @@ use queries::{keywords, locales, now};
 
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::copy::<State>()),
+    fork: Some(phera_extension_api::fork_clone::<State>),
     ..ClassHooks::EMPTY
 };
 

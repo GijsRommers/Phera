@@ -15,6 +15,7 @@ use crate::resource::{argument_resource, given, with_stream};
 
 pub const OPTIONAL_CONTEXT: Param = Param::new("context", ParamType::Mixed).optional();
 
+#[derive(Clone)]
 struct Options(PhpArray);
 
 pub fn register(registry: &mut Registry) {
@@ -235,4 +236,20 @@ pub(crate) fn option(value: &Value, wrapper: &str, key: &str) -> Option<Value> {
         return None;
     };
     options.get(&ArrayKey::str(key)).cloned()
+}
+
+/// A stream context holds options only (arrays of strings and numbers), so a
+/// fork of a snapshot gets a copy.
+pub(crate) fn fork_context(
+    data: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    let options = data
+        .downcast_ref::<Options>()
+        .ok_or("an unknown stream context")?;
+    let mut copy = options.0.clone();
+    for (_, value) in copy.iter_mut() {
+        *value = fork.value(value);
+    }
+    Ok(Box::new(Options(copy)))
 }
