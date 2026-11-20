@@ -290,3 +290,92 @@ fn on_the_command_line_the_call_returns_false_and_keeps_nothing() {
         "bool(false)\nafter"
     );
 }
+
+/// A PDO connection the boot made reconnects in each fork, with what the
+/// boot changed about its session, and a fork's own change stays its own.
+#[tokio::test(flavor = "current_thread")]
+async fn a_pdo_connection_of_the_boot_reconnects_in_each_fork() {
+    let answers = boot_and_answer(
+        "pdo-sqlite",
+        "<?php $pdo = new PDO('sqlite:' . __DIR__ . '/data.sqlite');
+         $pdo->exec('CREATE TABLE IF NOT EXISTS t (id INTEGER)');
+         $pdo->exec('PRAGMA cache_size = 1234');
+         Phera\\snapshot();
+         echo $pdo->query('PRAGMA cache_size')->fetchColumn();
+         if (isset($_GET['change'])) { $pdo->exec('PRAGMA cache_size = 99'); }
+         echo ' ', $pdo->query('SELECT COUNT(*) FROM t')->fetchColumn();",
+        &["/?change=1", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["1234 0", "1234 0"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_in_memory_sqlite_database_refuses_the_snapshot() {
+    let error = boot_and_answer(
+        "pdo-memory",
+        "<?php $pdo = new PDO('sqlite::memory:'); Phera\\snapshot();",
+        &[],
+    )
+    .await
+    .expect_err("refused");
+    assert!(error.contains("in-memory SQLite database"), "{error}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_open_transaction_refuses_the_snapshot() {
+    let error = boot_and_answer(
+        "pdo-transaction",
+        "<?php $pdo = new PDO('sqlite:' . __DIR__ . '/data.sqlite');
+         $pdo->beginTransaction(); Phera\\snapshot();",
+        &[],
+    )
+    .await
+    .expect_err("refused");
+    assert!(error.contains("a transaction is open"), "{error}");
+}
+
+/// Whether the test MySQL of `crates/extensions/pdo/README.md` answers.
+fn mysql_available() -> bool {
+    let available = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:33069".parse().expect("address"),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok();
+    if !available {
+        eprintln!("SKIP: the test MySQL on port 33069 is not running");
+    }
+    available
+}
+
+/// mysqli and PDO connections of the boot: each fork has its own session,
+/// with the boot's settings replayed, and what one fork sets is gone in
+/// the next.
+#[tokio::test(flavor = "current_thread")]
+async fn mysql_connections_of_the_boot_get_a_session_of_their_own_in_each_fork() {
+    if !mysql_available() {
+        return;
+    }
+    let answers = boot_and_answer(
+        "mysql",
+        "<?php $db = new mysqli('127.0.0.1', 'phera', 'phera', 'phera_test', 33069);
+         $db->set_charset('latin1');
+         $db->query(\"SET @boot = 'mysqli'\");
+         $pdo = new PDO('mysql:host=127.0.0.1;port=33069;dbname=phera_test', 'phera', 'phera');
+         $pdo->exec(\"SET @boot = 'pdo'\");
+         $stored = $db->query('SELECT 1 UNION SELECT 2');
+         $stored->fetch_row();
+         Phera\\snapshot();
+         $row = $db->query('SELECT @boot, @fork, @@character_set_client')->fetch_row();
+         echo implode(',', array_map('strval', $row)), ' ';
+         echo implode(',', array_map('strval', $pdo->query('SELECT @boot, @fork')->fetch(PDO::FETCH_NUM))), ' ';
+         echo $stored->fetch_row()[0];
+         $db->query(\"SET @fork = 'set'\");
+         $pdo->exec(\"SET @fork = 'set'\");",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["mysqli,,latin1 pdo, 2", "mysqli,,latin1 pdo, 2"]);
+}

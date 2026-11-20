@@ -7,7 +7,13 @@ use phera_extension_api::{
 
 use crate::{attributes, connection, constants, statement, transactions};
 
-static UNCOPYABLE_CONNECTION: ClassHooks = ClassHooks {
+static CONNECTION: ClassHooks = ClassHooks {
+    clone: Some(NativeClone::Forbidden),
+    fork: Some(connection::fork_session),
+    ..ClassHooks::EMPTY
+};
+
+static STATEMENT: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
     fork: Some(refuse_fork),
     ..ClassHooks::EMPTY
@@ -29,7 +35,7 @@ pub fn register(registry: &mut Registry) {
         constants: constants::CONSTANTS,
         deprecated_constants: constants::DRIVER_DEPRECATED,
         methods: PDO_METHODS,
-        hooks: Some(&UNCOPYABLE_CONNECTION),
+        hooks: Some(&CONNECTION),
         ..ClassEntry::class("PDO")
     });
     for (name, constants) in [
@@ -57,7 +63,7 @@ pub fn register(registry: &mut Registry) {
             )]
         },
         methods: STATEMENT_METHODS,
-        hooks: Some(&UNCOPYABLE_CONNECTION),
+        hooks: Some(&STATEMENT),
         ..ClassEntry::class("PDOStatement")
     });
     registry.function(FunctionEntry::sync("pdo_drivers", &[], connection::drivers));
@@ -334,13 +340,12 @@ const SQLITE_METHODS: &[MethodEntry] = &[MethodEntry::public(
     crate::drivers::sqlite::methods::load,
 )];
 
-/// A connection (and its statements) belongs to the request that opened it:
-/// a fork of a snapshot cannot share one. Laravel and Doctrine connect on
-/// first use, after `Phera\snapshot()`.
+/// A statement belongs to the session that prepared it, and a fork has a
+/// session of its own: prepare it again after `Phera\snapshot()`.
 fn refuse_fork(
     _object: &phera_extension_api::Object,
     _state: &dyn std::any::Any,
     _fork: &mut phera_extension_api::value::Fork<'_>,
 ) -> Result<Box<dyn std::any::Any>, String> {
-    Err("a database connection opened before the call belongs to one request; connect after Phera\\snapshot()".into())
+    Err("a prepared statement belongs to the session of one request; prepare it after Phera\\snapshot()".into())
 }
