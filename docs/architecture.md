@@ -482,6 +482,53 @@ PHP with opcache. Built-in classes fork through `ClassHooks::fork` (SPL,
 dates, closures, reflection, WeakMap and WeakReference, OpenSSL keys);
 generators, fibers, PDO and Redis handles and DOM documents refuse for now.
 
+**Step 1 again, at the cause: linked code as data of the process.** A fork
+skips the boot; it does not make loading and linking a class cheap. That
+cost stays wherever code still loads a class: in every fork for the classes
+the boot never touched, in each boot (and again after every edit under
+`--dev`), on the command line, and in the first request. Measured on
+2026-11-20 with `crates/runtime/examples/engine_cost.rs` (one worker):
+
+| | boot, first worker | boot, later worker | from the top | forked |
+| --- | ---: | ---: | ---: | ---: |
+| Laravel production `/api/hello` | 2,628M | 296M | 325M | 76M |
+| Laravel production `/api/posts` | | | 492M | 246M |
+| Symfony prod `/api/products` | 646M | 73M | 208M | 153M |
+
+In the forked Symfony request about 37% of the time is spent under class
+autoloading: the autoloader's PHP code, path checks, `CodeTable::load` (about
+11%, half of it numbering every name of every file again) and linking (about
+8%). The design, by the rules of 10.1 (flat tables addressed by number, no
+cache in front of a slow structure):
+
+| Structure | Was | Becomes |
+| --- | --- | --- |
+| Name keys | a SipHash map from every lowercased name to a number, built per request and copied per fork | numbered once per process when a file is compiled (`phera_bytecode::name_keys`); the file carries its key arrays; done |
+| Finding a loaded file | a linear scan over the request's files | a flat array indexed by the file revision's process number (`UnitMetadata::id`); done |
+| Function numbering | per request: files numbered in the order the request loads them | per file revision: a function is (file number, local number), so the same function has the same number in every request |
+| Function facts | a vector per request, copied per fork | one immutable array per file revision, shared; a request keeps only what it adds (trait imports, declaring class) |
+| Linked classes | an `Rc` graph per worker (methods in a `HashMap<String, Rc<Method>>`, ancestors in a `HashSet<String>`), linked again by each request that declares the class after the boot | an immutable entry in a table of the process, linked once per file revision and dependency key; a request holds the entry's number |
+| A request's declared classes | a map from name to `Rc<Class>` | a bitset over the process table plus the name's slot |
+
+The key of a linked class is that of opcache's inheritance cache
+(`zend_inheritance_cache_get`): the unlinked declaration (file revision and
+class number) and the exact classes its parent, interfaces and traits
+resolved to, plus every class a variance check looked up by name (opcache
+records those in `track_class_dependency`). Two differences: the
+dependencies are numbers of the same table, compared as integers, where
+opcache compares class-entry pointers and looks the names up again; and an
+entry is made for a declaration whatever the request had declared, since
+a conditional declaration or a `class_alias` only changes which entry a
+name resolves to, which is the dependency key itself. Warnings that linking
+emits are recorded with the entry and emitted again, as opcache does.
+
+What is still in the way of the table being the process's rather than each
+worker's: a linked class holds PHP values (default property values,
+constant literals, the class name as a `Value`), and values are `Rc`, which
+cannot cross threads. The process table therefore holds the declaration's
+literal values in the compiled file's own form, and each worker makes its
+`Value`s from them once per entry. Native hooks are `&'static` already.
+
 **Code caches and snapshots: one design.** Three layers hold code, from the
 widest to the narrowest:
 
