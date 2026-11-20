@@ -238,7 +238,35 @@ The script/IO APIs, binary-proxy edge cases, repository/authentication protocols
 and platform-provider handling listed in the package README are still required
 before claiming the entire requested first version is done.
 
-## Measurements
+## Batch 18 locked-install timings
+
+The optimized Phera build includes batch 18 at `9f1fc190`. The runs used
+Composer 2.11.2 with PHP 8.5.12 on arm64 macOS. Each tool started with its own
+empty cache and a fresh vendor tree. The warm run used the same cache and
+another fresh vendor tree. Both tools used optimized class maps and disabled
+plugins, scripts, audits and platform checks. This measures dependency
+installation, so the Symfony webapp's console hook was disabled.
+
+Each cell gives wall seconds / billions of retired instructions / billions of
+elapsed CPU cycles, one run per cell. macOS `time -l` measured the main process
+and the Git, tar and unzip subprocesses. The first Phera webapp cold run
+stopped on an HTTP 503 for an archive. The table uses the complete second pair.
+
+| Project | Composer cold | Phera cold | Composer warm | Phera warm |
+| --- | ---: | ---: | ---: | ---: |
+| Symfony skeleton 8.1 | 20.122 / 87.90 / 20.40 | 14.771 / 10.65 / 4.98 | 5.537 / 17.24 / 6.10 | 0.761 / 5.09 / 2.24 |
+| Laravel skeleton | 15.144 / 34.69 / 16.45 | 6.191 / 53.69 / 21.37 | 7.302 / 32.38 / 13.69 | 2.838 / 26.94 / 10.77 |
+| Roots Bedrock | 9.752 / 32.60 / 14.56 | 6.071 / 35.96 / 14.28 | 6.017 / 29.51 / 12.88 | 1.893 / 17.32 / 6.64 |
+| Drupal recommended project | 21.602 / 108.24 / 37.16 | 18.593 / 105.37 / 37.69 | 16.785 / 84.84 / 29.44 | 5.910 / 59.75 / 19.57 |
+| Copied Laravel app | 8.059 / 35.26 / 16.08 | 5.844 / 53.79 / 21.89 | 3.568 / 34.15 / 13.46 | 1.321 / 27.17 / 11.29 |
+| Copied Symfony app | 4.017 / 19.37 / 7.87 | 2.569 / 23.52 / 10.16 | 2.252 / 17.71 / 7.04 | 0.553 / 11.79 / 5.37 |
+| Symfony webapp 8.1 | 8.266 / 42.49 / 17.99 | 7.104 / 60.97 / 27.50 | 4.960 / 39.86 / 16.74 | 3.639 / 32.19 / 16.00 |
+
+On warm installs, Composer retired 1.20–3.39 times as many instructions
+and used 1.05–2.72 times as many cycles as Phera. Phera used fewer cycles in
+two of seven cold installs. Cold wall time includes archive server latency.
+
+## Historical measurements at `c99758c`
 
 Release code `c99758c86e02e5a38298ebcec3e9097edfc38f70`, macOS arm64, 10 logical CPUs,
 Composer 2.11.2 and PHP 8.5.12. These are complete CLI process measurements on a
