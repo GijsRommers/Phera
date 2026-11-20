@@ -134,6 +134,31 @@ Composer's generated class map and files autoload list. The start line gives
 the count and elapsed time. PHP still runs each file when the application
 includes it. The Zend-specific `opcache.preload` directive is unsupported.
 
+Use `flush()` to stream PHP output before the request ends. If you started
+an output buffer, use `ob_flush()` or `ob_end_flush()` to release its contents.
+An outer buffer can still hold the bytes. `ob_implicit_flush()` sends each
+write that reaches the response. Output uses chunks on HTTP/1.1 and DATA
+frames on cleartext HTTP/2. Configure any reverse proxy to forward chunks
+as they arrive. Phera's `--compress` applies to buffered PHP responses.
+
+```php
+header('Content-Type: text/plain');
+echo "Starting\n";
+flush();
+do_work();
+echo "Done\n";
+```
+
+Call `fastcgi_finish_request()` (also available as
+`litespeed_finish_request()`) to complete the response and continue running
+PHP. Further output is discarded. The request timeout still applies, and
+resources such as session locks are released at their usual points.
+If a client leaves while the response is still buffered, PHP keeps
+running and the server discards the response at request end. PHP observes
+a disconnected client when a transport write fails. Its shutdown
+functions and destructors still run. `ignore_user_abort(true)` also
+lets the script continue after the failed write.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,

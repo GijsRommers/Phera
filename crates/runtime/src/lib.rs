@@ -34,7 +34,7 @@ use std::sync::Arc;
 
 use phera_bytecode::CompiledUnit;
 use phera_dotenv::Environment;
-use phera_ext_http::{RequestHeaders, ResponseHead, Sapi, UploadedFiles};
+use phera_ext_http::{RequestHeaders, Sapi, UploadedFiles};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
 use phera_extension_api::Registry;
 use phera_value::{PhpArray, Value};
@@ -45,7 +45,8 @@ use worker_code_cache::{RequestCodeCache, WorkerCodeCache};
 
 pub use boot::BootReport;
 pub use error::RuntimeError;
-pub use http::{HttpRequest, HttpResponse};
+pub use http::{HttpRequest, HttpResponse, web_output::WebOutput};
+pub use phera_ext_http::ResponseHead;
 pub use phera_extension_api::web_log::flush as flush_web_log;
 pub use phera_vm::OutputSink;
 pub use preload::PreloadSummary;
@@ -84,6 +85,7 @@ pub struct WebWorker {
     /// the background (`phera serve`); see [`WebWorker::with_background_boots`].
     background_boots: bool,
     code: Rc<WorkerCodeCache>,
+    output_factory: Option<Rc<dyn phera_vm::WebOutputFactory>>,
 }
 
 impl WebWorker {
@@ -98,6 +100,16 @@ impl WebWorker {
     /// The worker's number.
     pub fn index(&self) -> usize {
         self.index
+    }
+
+    /// Give scripts a way to open a transport if they flush or finish early.
+    pub fn with_web_output<F, T>(mut self, factory: F) -> Self
+    where
+        F: Fn(Option<&[u8]>) -> Option<T> + 'static,
+        T: WebOutput + 'static,
+    {
+        self.output_factory = Some(Rc::new(http::web_output::TransportFactory(factory)));
+        self
     }
 
     pub async fn handle_request(
@@ -337,6 +349,7 @@ impl Runtime {
             snapshots: Default::default(),
             background_boots: false,
             code: Rc::new(WorkerCodeCache::new(self.web_cache.clone())),
+            output_factory: None,
         }
     }
 
@@ -430,6 +443,9 @@ impl Runtime {
             protocol: request.protocol,
         };
         vm.prepare_web_headers_with(ResponseHead::prepare, ResponseHead::set_error_status);
+        if let Some(factory) = &worker.output_factory {
+            vm.set_web_output_factory(factory.clone());
+        }
         vm.configure_web_diagnostics(self.web_development, RequestHeaders::request_line);
         *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);
         phera_ext_streams::set_request(

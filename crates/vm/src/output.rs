@@ -1,9 +1,12 @@
 //! PHP output instruction handlers, separate from dispatch.
 
+use std::rc::Rc;
+
 use phera_bytecode::Reg;
 use phera_extension_api::{NativeError, RequestState};
 use phera_value::to_php_string;
 
+use crate::web_output::{ResponseOutput, WebOutputFactory};
 use crate::{OutputSink, Vm, diagnostics::SourceLocation, output_buffer::Buffers};
 
 impl Vm {
@@ -19,7 +22,9 @@ impl Vm {
 
 /// Output forwarding is separate from the public capture buffer required by embedders.
 pub(crate) struct Output {
-    sink: Option<Box<dyn OutputSink>>,
+    destination: Destination,
+    pub(crate) factory: Option<Rc<dyn WebOutputFactory>>,
+    pub(crate) response_pending: bool,
     pub(crate) buffers: Buffers,
     implicit_flush: bool,
     prepare_headers: Option<fn(&mut RequestState)>,
@@ -32,10 +37,19 @@ pub(crate) struct Output {
     queued: Vec<u8>,
 }
 
+enum Destination {
+    Capture,
+    Implicit,
+    Terminal(Box<dyn OutputSink>),
+    Web(ResponseOutput),
+}
+
 impl Output {
     pub(crate) fn new() -> Self {
         Self {
-            sink: None,
+            destination: Destination::Capture,
+            factory: None,
+            response_pending: false,
             buffers: Buffers::default(),
             implicit_flush: false,
             prepare_headers: None,
@@ -50,19 +64,73 @@ impl Output {
     }
 
     pub(crate) fn set_sink(&mut self, sink: Box<dyn OutputSink>) {
-        self.sink = Some(sink);
+        self.destination = Destination::Terminal(sink);
+    }
+
+    pub(crate) fn set_response(&mut self, response: ResponseOutput) {
+        self.destination = Destination::Web(response);
+    }
+
+    pub(crate) fn response(&self) -> Option<&ResponseOutput> {
+        match &self.destination {
+            Destination::Web(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn response_mut(&mut self) -> Option<&mut ResponseOutput> {
+        match &mut self.destination {
+            Destination::Web(response) => Some(response),
+            _ => None,
+        }
     }
 
     pub(crate) fn set_implicit_flush(&mut self, enable: bool) {
         self.implicit_flush = enable;
+        if matches!(
+            self.destination,
+            Destination::Capture | Destination::Implicit
+        ) {
+            self.destination = if enable && self.factory.is_some() {
+                Destination::Implicit
+            } else {
+                Destination::Capture
+            };
+        }
+    }
+
+    pub(crate) fn set_factory(&mut self, factory: Rc<dyn WebOutputFactory>) {
+        self.factory = Some(factory);
+        if self.implicit_flush {
+            self.set_implicit_flush(true);
+        }
+    }
+
+    pub(crate) fn flushes_writes(&self) -> bool {
+        match &self.destination {
+            Destination::Implicit => true,
+            Destination::Web(response) => {
+                !response.is_ended() && (self.implicit_flush || response.is_streaming())
+            }
+            _ => false,
+        }
     }
 
     /// Forward first, then retain the bytes, matching the existing sink observation order.
-    pub(crate) fn write(&mut self, captured: &mut Vec<u8>, bytes: &[u8]) {
-        if let Some(sink) = &mut self.sink {
-            sink.write(bytes);
-            if self.implicit_flush {
-                sink.flush();
+    fn write(&mut self, captured: &mut Vec<u8>, pending_callbacks: &mut bool, bytes: &[u8]) {
+        match &mut self.destination {
+            Destination::Capture => {}
+            Destination::Terminal(sink) => {
+                sink.write(bytes);
+                if self.implicit_flush {
+                    sink.flush();
+                }
+            }
+            Destination::Web(response) if response.is_ended() => return,
+            Destination::Web(response) if !response.is_streaming() && !self.implicit_flush => {}
+            Destination::Implicit | Destination::Web(_) => {
+                self.response_pending = true;
+                *pending_callbacks = true;
             }
         }
         captured.extend_from_slice(bytes);
@@ -117,8 +185,13 @@ impl Vm {
         if self.output_writer.origin.is_none() {
             self.begin_output(bytes);
         } else {
-            self.output_writer.write(&mut self.output, bytes);
+            self.write_output(bytes);
         }
+    }
+
+    fn write_output(&mut self, bytes: &[u8]) {
+        self.output_writer
+            .write(&mut self.output, &mut self.pending_callbacks, bytes);
     }
 
     #[cold]
@@ -132,12 +205,14 @@ impl Vm {
         } else {
             self.prepare_response_headers();
             self.output_writer.origin = Some(self.location());
-            self.output_writer.write(&mut self.output, bytes);
+            self.write_output(bytes);
         }
     }
 
     pub(crate) fn output_pending(&self) -> bool {
-        self.headers_pending() || self.output_writer.buffers.pending.is_some()
+        self.headers_pending()
+            || self.output_writer.buffers.pending.is_some()
+            || self.output_writer.response_pending
     }
 
     pub(crate) fn headers_pending(&self) -> bool {
@@ -145,6 +220,14 @@ impl Vm {
     }
 
     pub(crate) async fn flush_transport(&mut self) -> Result<(), NativeError> {
+        self.commit_response_headers().await?;
+        if let Destination::Terminal(sink) = &mut self.output_writer.destination {
+            sink.flush();
+        }
+        self.flush_response_body().await
+    }
+
+    pub(crate) async fn commit_response_headers(&mut self) -> Result<(), NativeError> {
         if self.output_writer.web && self.output_writer.origin.is_none() {
             if self.output_writer.queued_origin.is_none() {
                 self.output_writer.queued_origin = Some(SourceLocation {
@@ -153,9 +236,6 @@ impl Vm {
                 });
             }
             self.finish_headers().await?;
-        }
-        if let Some(sink) = &mut self.output_writer.sink {
-            sink.flush();
         }
         Ok(())
     }
@@ -215,7 +295,7 @@ impl Vm {
             self.output_writer.origin = origin.or_else(|| Some(self.location()));
         }
         if !bytes.is_empty() {
-            self.output_writer.write(&mut self.output, bytes);
+            self.write_output(bytes);
         }
     }
 }

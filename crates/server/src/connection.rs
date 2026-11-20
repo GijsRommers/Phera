@@ -1,116 +1,148 @@
-//! Per-connection HTTP/1.1 handling.
+//! Per-connection HTTP handling. A PHP `flush()` becomes an HTTP/1.1 chunk
+//! or HTTP/2 DATA.
 
+use std::future::Future;
 use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Duration;
 
 use http_body_util::BodyExt;
-use hyper::body::Incoming;
+use hyper::body::{Body as HyperBody, Bytes, Incoming};
 use hyper::header::{HeaderName, HeaderValue};
-use hyper::server::conn::http1;
+use hyper::server::conn::{http1, http2};
 use hyper::service::service_fn;
 use hyper::{Request as HyperRequest, Response as HyperResponse};
-use hyper_util::rt::TokioIo;
-use hyper_util::server::graceful::Watcher;
+use hyper_util::rt::{TokioIo, TokioTimer};
+use hyper_util::server::graceful::GracefulConnection;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use tokio::sync::watch;
 use tokio::time::Instant;
 
 use crate::config::ConnectionLimits;
 use crate::file_body::WireBody;
 use crate::handler::Handler;
+use crate::protocol::{self, Protocol};
 use crate::receive_timeout::{HeadTimer, TimeoutStream};
 use crate::request::{HttpVersion, Request};
-use crate::response::{Body, Response};
+use crate::response::Response;
+use crate::response_task::{ConnectionWork, answer};
 
 /// Serve one connection. Runs until the client or the server closes it; a
 /// shutdown watcher finishes in-flight requests and stops new ones.
 pub(super) async fn handle_connection(
-    stream: TcpStream,
+    mut stream: TcpStream,
     peer: SocketAddr,
     local_addr: SocketAddr,
     handler: Rc<dyn Handler>,
-    graceful: Watcher,
+    mut shutdown: watch::Receiver<()>,
     limits: ConnectionLimits,
+    work: Rc<ConnectionWork>,
 ) {
-    let timer = HeadTimer::default();
+    let accepted = Instant::now();
+    let read_limit = limits.idle_timeout.min(limits.request_read_timeout);
+    let detected = tokio::select! {
+        biased;
+        _ = shutdown.changed() => return,
+        result = tokio::time::timeout_at(accepted + read_limit, protocol::detect(&mut stream)) => result,
+    };
+    let (protocol, read_ahead) = match detected {
+        Ok(Ok(protocol)) => protocol,
+        Ok(Err(_)) => return,
+        Err(_) => {
+            if limits.request_read_timeout <= limits.idle_timeout {
+                reply_to_head_timeout(&mut stream).await;
+            }
+            return;
+        }
+    };
+    let timer = HeadTimer::new(accepted);
     let head_timer = timer.clone();
     let service = service_fn(move |hyper_request: HyperRequest<Incoming>| {
         let handler = handler.clone();
-        let started = head_timer.started();
+        let work = work.clone();
+        let started = (!hyper_request.body().is_end_stream()).then(|| head_timer.started());
         async move {
-            let response =
-                match to_request(hyper_request, peer, local_addr, limits, started).await {
-                    Ok(request) => answer(handler, request, limits.request_timeout).await,
-                    Err(BodyError::TooLarge) => Response::text(413, "request body too large\n"),
-                    Err(BodyError::Read) => Response::text(400, "malformed request body\n"),
-                    // Part of the body is still on its way, or never comes:
-                    // the connection cannot carry another request.
-                    Err(BodyError::Stalled) => Response::text(408, "request read timeout\n")
-                        .with_header("connection", "close"),
-                };
+            let http2 = hyper_request.version() == hyper::Version::HTTP_2;
+            let response = match to_request(hyper_request, peer, local_addr, limits, started).await
+            {
+                Ok(request) => answer(handler, request, limits.request_timeout, work).await,
+                Err(BodyError::TooLarge) => Response::text(413, "request body too large\n"),
+                Err(BodyError::Read) => Response::text(400, "malformed request body\n"),
+                // Part of the body is still on its way, or never comes:
+                // the connection cannot carry another request.
+                Err(BodyError::Stalled) => {
+                    let response = Response::text(408, "request read timeout\n");
+                    if http2 {
+                        response
+                    } else {
+                        response.with_header("connection", "close")
+                    }
+                }
+            };
             Ok::<_, std::convert::Infallible>(to_hyper_response(response))
         }
     });
-    let mut stream = TimeoutStream::new(stream);
-    let connection = http1::Builder::new()
-        // Hyper starts the head timer again for every new request. The
-        // time already spent here counts against the body's budget too.
-        .header_read_timeout(limits.idle_timeout.min(limits.request_read_timeout))
-        .timer(timer)
-        .serve_connection(TokioIo::new(stream.clone()), service);
-    if let Err(error) = graceful.watch(connection).await {
-        if error.is_timeout() && limits.request_read_timeout <= limits.idle_timeout {
-            // There was no complete request to dispatch to the HTTP service.
-            const TIMEOUT: &[u8] =
-                b"HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
-            let _ = tokio::time::timeout(Duration::from_secs(1), stream.write_all(TIMEOUT)).await;
-        } else if !is_ordinary_end(&error) {
-            eprintln!("phera-server: connection error: {error}");
-        }
-    }
-}
-
-/// A connection that sat idle until its time was up, or whose client left
-/// in the middle of a request, is everyday traffic and not worth a log line.
-fn is_ordinary_end(error: &hyper::Error) -> bool {
-    error.is_timeout() || error.is_incomplete_message()
-}
-
-/// When the connection goes away, dropping its service also stops the request.
-struct AbortRequest(tokio::task::AbortHandle);
-
-impl Drop for AbortRequest {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
-/// Runs the handler for one request, for at most `time_limit`.
-async fn answer(
-    handler: Rc<dyn Handler>,
-    request: Request,
-    time_limit: Option<Duration>,
-) -> Response {
-    // The handler runs on its own task so that a panic becomes a 500
-    // instead of tearing down the connection task or the worker.
-    let mut task = tokio::task::spawn_local(async move { handler.handle(request).await });
-    let _request = AbortRequest(task.abort_handle());
-    let finished = match time_limit {
-        None => (&mut task).await,
-        Some(limit) => match tokio::time::timeout(limit, &mut task).await {
-            Ok(finished) => finished,
-            Err(_too_long) => {
-                // Stopping the task drops everything the request held. It
-                // takes effect the next time the handler waits or yields,
-                // which a running PHP script does regularly.
-                task.abort();
-                let _ = task.await;
-                return Response::text(504, "the request took too long\n");
+    let mut stream = TimeoutStream::new(stream, read_ahead);
+    let io = TokioIo::new(stream.clone());
+    let result = match protocol {
+        Protocol::Http1 => {
+            let connection = http1::Builder::new()
+                .header_read_timeout(read_limit)
+                .timer(timer)
+                .serve_connection(io, service);
+            let result = until_shutdown(connection, shutdown).await;
+            if result.as_ref().is_err_and(hyper::Error::is_timeout)
+                && limits.request_read_timeout <= limits.idle_timeout
+            {
+                reply_to_head_timeout(&mut stream).await;
             }
-        },
+            result
+        }
+        Protocol::Http2 => {
+            let connection = http2::Builder::new(LocalExecutor)
+                .timer(TokioTimer::new())
+                .keep_alive_interval(Some(limits.idle_timeout))
+                .serve_connection(io, service);
+            until_shutdown(connection, shutdown).await
+        }
     };
-    finished.unwrap_or_else(|_| Response::text(500, "internal server error\n"))
+    if let Err(error) = result
+        && !error.is_timeout()
+        && !error.is_incomplete_message()
+    {
+        eprintln!("phera-server: connection error: {error}");
+    }
+}
+
+async fn reply_to_head_timeout(stream: &mut (impl tokio::io::AsyncWrite + Unpin)) {
+    const TIMEOUT: &[u8] =
+        b"HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+    let _ = tokio::time::timeout(Duration::from_secs(1), stream.write_all(TIMEOUT)).await;
+}
+
+async fn until_shutdown<C: GracefulConnection>(
+    connection: C,
+    mut shutdown: watch::Receiver<()>,
+) -> Result<(), C::Error> {
+    let mut connection = std::pin::pin!(connection);
+    tokio::select! {
+        biased;
+        _ = shutdown.changed() => {
+            connection.as_mut().graceful_shutdown();
+            connection.await
+        }
+        result = connection.as_mut() => result,
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LocalExecutor;
+
+impl<F: Future<Output = ()> + 'static> hyper::rt::Executor<F> for LocalExecutor {
+    fn execute(&self, future: F) {
+        tokio::task::spawn_local(future);
+    }
 }
 
 /// Turn a hyper request into a [`Request`] for the handler, buffering the
@@ -120,11 +152,12 @@ async fn to_request(
     peer: SocketAddr,
     local_addr: SocketAddr,
     limits: ConnectionLimits,
-    started: Instant,
+    started: Option<Instant>,
 ) -> Result<Request, BodyError> {
     let (parts, body) = request.into_parts();
     let version = match parts.version {
         hyper::Version::HTTP_10 => HttpVersion::Http10,
+        hyper::Version::HTTP_2 => HttpVersion::Http2,
         _ => HttpVersion::Http11,
     };
     let path = parts.uri.path().to_string();
@@ -134,12 +167,21 @@ async fn to_request(
         .uri
         .path_and_query()
         .map_or_else(|| path.clone(), |target| target.as_str().to_string());
-    let headers = parts
+    let mut headers: Vec<_> = parts
         .headers
         .iter()
         .map(|(name, value)| (name.as_str().to_string(), value.as_bytes().to_vec()))
         .collect();
-    let body = read_body(body, limits, started).await?;
+    if version == HttpVersion::Http2
+        && let Some(authority) = parts.uri.authority()
+        && !parts.headers.contains_key(hyper::header::HOST)
+    {
+        headers.push(("host".into(), authority.as_str().as_bytes().to_vec()));
+    }
+    let body = match started {
+        Some(started) => read_body(body, limits, started).await?,
+        None => Vec::new(),
+    };
     Ok(Request {
         method: parts.method.as_str().to_string(),
         target,
@@ -155,13 +197,13 @@ async fn to_request(
 
 /// Turn a handler's [`Response`] into a hyper response.
 fn to_hyper_response(response: Response) -> HyperResponse<WireBody> {
-    let status = hyper::StatusCode::from_u16(response.status)
+    let mut wire = HyperResponse::new(WireBody::from(response.body));
+    *wire.status_mut() = hyper::StatusCode::from_u16(response.status)
         .unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR);
-    let mut builder = HyperResponse::builder().status(status);
-    for (name, value) in &response.headers {
+    for (name, value) in response.headers {
         if let (Ok(name), Ok(value)) = (
             HeaderName::try_from(name.as_str()),
-            HeaderValue::from_bytes(value),
+            HeaderValue::from_maybe_shared(Bytes::from(value)),
         ) {
             // The server alone says where a response ends. A handler (a PHP
             // script calling `header('Content-Length: 5')`) could otherwise
@@ -171,12 +213,10 @@ fn to_hyper_response(response: Response) -> HyperResponse<WireBody> {
             if name == hyper::header::CONTENT_LENGTH || name == hyper::header::TRANSFER_ENCODING {
                 continue;
             }
-            builder = builder.header(name, value);
+            wire.headers_mut().append(name, value);
         }
     }
-    builder
-        .body(WireBody::from(response.body))
-        .unwrap_or_else(|_| HyperResponse::new(WireBody::from(Body::default())))
+    wire
 }
 
 enum BodyError {

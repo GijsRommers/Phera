@@ -2,6 +2,7 @@
 
 mod web_support;
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use phera_extension_api::testing::{oracle, serve::Server};
@@ -111,7 +112,7 @@ fn compare(body: &str, name: &str, targets: &[&str], headers: &[(&str, &str)]) -
         let mut output = String::new();
         for target in targets {
             let response = web_support::request(server, runtime, "GET", target, headers, &[]);
-            output.push_str(response_body(runtime, target, &response));
+            output.push_str(&response_body(runtime, target, &response));
             output.push('\n');
         }
         output
@@ -122,15 +123,33 @@ fn compare(body: &str, name: &str, targets: &[&str], headers: &[(&str, &str)]) -
     (expected, actual)
 }
 
-fn response_body<'a>(runtime: &str, target: &str, response: &'a str) -> &'a str {
-    let (headers, body) = response
+fn response_body<'a>(runtime: &str, target: &str, response: &'a str) -> Cow<'a, str> {
+    let (headers, mut body) = response
         .split_once("\r\n\r\n")
         .unwrap_or_else(|| panic!("{runtime} {target} returned incomplete HTTP: {response:?}"));
     assert!(
         headers.starts_with("HTTP/1.1 200"),
         "{runtime} {target}: {response}"
     );
-    body
+    if !headers
+        .lines()
+        .any(|line| line.eq_ignore_ascii_case("transfer-encoding: chunked"))
+    {
+        return Cow::Borrowed(body);
+    }
+
+    let mut decoded = String::new();
+    loop {
+        let (size, rest) = body.split_once("\r\n").expect("chunk header");
+        let size = usize::from_str_radix(size, 16).expect("chunk length");
+        if size == 0 {
+            assert_eq!(rest, "\r\n", "end of the chunked response");
+            return Cow::Owned(decoded);
+        }
+        let (chunk, ending) = rest.split_at(size);
+        decoded.push_str(chunk);
+        body = ending.strip_prefix("\r\n").expect("chunk terminator");
+    }
 }
 
 #[test]

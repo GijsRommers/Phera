@@ -10,6 +10,7 @@ mod query;
 mod request_parse_body;
 mod superglobals;
 mod uploads;
+pub(crate) mod web_output;
 
 use std::net::SocketAddr;
 

@@ -3,9 +3,9 @@
 
 use std::io;
 use std::net::{SocketAddr, TcpListener as StdListener};
+use std::rc::Rc;
 use std::sync::Arc;
 
-use hyper_util::server::graceful::GracefulShutdown;
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpListener;
 use tokio::sync::{Semaphore, watch};
@@ -13,6 +13,8 @@ use tokio::sync::{Semaphore, watch};
 use crate::config::{ConnectionLimits, ServerConfig};
 use crate::connection::handle_connection;
 use crate::handler::HandlerFactory;
+use crate::response_stream::ResponseSlot;
+use crate::response_task::{ConnectionWork, DetachedRequests};
 
 const BACKLOG: i32 = 1024;
 const ACCEPT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
@@ -105,8 +107,10 @@ pub(super) fn run(
             .local_addr()
             .expect("listening socket has an address");
         let limits = ConnectionLimits::from(&config);
-        let free_slots = Arc::new(Semaphore::new(config.max_connections_per_worker.max(1)));
-        let graceful = GracefulShutdown::new();
+        let connection_limit = config.max_connections_per_worker.max(1);
+        let free_slots = Arc::new(Semaphore::new(connection_limit));
+        let (stop_connections, _) = watch::channel(());
+        let detached = Rc::new(DetachedRequests::new(connection_limit));
         loop {
             // A slot first, then a connection: beyond the limit, clients
             // wait in the operating system's queue instead of being
@@ -121,11 +125,15 @@ pub(super) fn run(
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
                         let handler = handler.clone();
-                        let watcher = graceful.watcher();
+                        let watcher = stop_connections.subscribe();
+                        let work = Rc::new(ConnectionWork {
+                            _slot: slot,
+                            detached: detached.clone(),
+                            response: ResponseSlot::new(),
+                        });
                         tokio::task::spawn_local(async move {
-                            handle_connection(stream, peer, local_addr, handler, watcher, limits)
+                            handle_connection(stream, peer, local_addr, handler, watcher, limits, work)
                                 .await;
-                            drop(slot);
                         });
                     }
                     // A client that hung up before we accepted it is normal.
@@ -142,6 +150,12 @@ pub(super) fn run(
         drop(listener);
         // Finish in-flight requests and close idle keep-alive connections;
         // give up if something (a stuck upload) refuses to leave in time.
-        let _ = tokio::time::timeout(config.shutdown_timeout, graceful.shutdown()).await;
+        let _ = tokio::time::timeout(config.shutdown_timeout, async {
+            let _ = stop_connections.send(());
+            stop_connections.closed().await;
+            detached.drain().await;
+        })
+        .await;
+        detached.stop();
     }));
 }

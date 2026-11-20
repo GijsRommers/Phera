@@ -44,7 +44,6 @@ engine behavior. A directive is visible only when its owning module is loaded.
 - `iconv.output_encoding`
 - `ignore_repeated_errors`
 - `ignore_repeated_source`
-- `implicit_flush`
 - `input_encoding`
 - `max_input_nesting_level`
 - `max_input_time`

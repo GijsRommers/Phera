@@ -99,6 +99,21 @@ fn small_answers_and_images_are_left_alone() {
 }
 
 #[test]
+fn a_buffered_early_response_keeps_compression() {
+    let served = site("compress-early", &["--compress"]);
+    std::fs::write(
+        served.root.join("finish.php"),
+        format!("{PAGE} fastcgi_finish_request(); echo 'discarded';"),
+    )
+    .unwrap();
+    let plain = fetch(&served, "GET", "/page.php", &[]);
+    let early = fetch(&served, "GET", "/finish.php", &["Accept-Encoding: gzip"]);
+    assert_eq!(early.header("content-encoding"), "gzip");
+    assert_eq!(early.header("vary"), "Accept-Encoding");
+    assert_eq!(decoded(&early), plain.body);
+}
+
+#[test]
 fn a_static_file_is_compressed_and_cached_under_its_own_tag() {
     let served = site("compress-static", &["--compress"]);
     let styles = stylesheet();
