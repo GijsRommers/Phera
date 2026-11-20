@@ -77,8 +77,93 @@ impl Vm {
         index: ClassId,
         key: String,
     ) -> Result<(), NativeError> {
-        self.link_class_body(unit, unit_first, index, key)
-            .map_err(|error| super::declaration_errors::link_failure(unit, index, error))
+        if let Some(entry) = self.reusable_entry(unit, index) {
+            self.declare_linked(&entry, unit, unit_first, index);
+            return Ok(());
+        }
+        self.classes.begin_link();
+        self.code.begin_imports();
+        let raised = self.diagnostic_reporter.raised;
+        let linked = self.link_class_body(unit, unit_first, index, key.clone());
+        let (dependencies, position) = self.classes.end_link();
+        let imports = self.code.end_imports();
+        linked.map_err(|error| super::declaration_errors::link_failure(unit, index, error))?;
+        let declaration = &unit.classes[index.index()];
+        // A class whose linking raised a diagnostic is linked by each request
+        // that declares it, so that each sees the diagnostic (and runs its
+        // handler); an enum's cases and an anonymous class are the request's.
+        let shared = raised == self.diagnostic_reporter.raised
+            && !matches!(declaration.kind, ClassKind::Enum | ClassKind::Anonymous);
+        if shared
+            && let Some(position) = position
+            && let Some(class) = self.classes.at_position(position)
+        {
+            for (number, _, _) in &imports {
+                self.code.keep_import(*number);
+            }
+            self.classes.worker().add(
+                unit,
+                index.index() as u32,
+                position,
+                super::worker_classes::EntryFacts {
+                    class,
+                    lowercase_name: key,
+                    dependencies,
+                    imports,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// A class another request of the worker linked from this declaration,
+    /// usable here: every class name its linking looked up is the same class
+    /// (or no class) in this request.
+    fn reusable_entry(
+        &self,
+        unit: &Arc<CompiledUnit>,
+        index: ClassId,
+    ) -> Option<Rc<super::worker_classes::EntryFacts>> {
+        self.classes
+            .worker()
+            .candidates(unit, index.index() as u32)
+            .into_iter()
+            .find(|entry| {
+                entry
+                    .dependencies
+                    .iter()
+                    .all(|(name, number)| self.classes.resolve_number(name) == *number)
+            })
+    }
+
+    /// Declares a class another request linked: what linking records in the
+    /// request (its methods' class scope, its composed trait methods) is
+    /// written again, and the class is declared under its name.
+    fn declare_linked(
+        &mut self,
+        entry: &super::worker_classes::EntryFacts,
+        unit: &Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
+        index: ClassId,
+    ) {
+        let class = entry.class.clone();
+        let declaration = &unit.classes[index.index()];
+        for method in &declaration.methods {
+            let function = self.code.declared(unit_first, method.function.index());
+            self.code.set_declaring_class(function, class.index);
+        }
+        for property in &declaration.properties {
+            if let Some(hooks) = &property.hooks {
+                for hook in hooks.get.iter().chain(&hooks.set) {
+                    let function = self.code.declared(unit_first, hook.function.index());
+                    self.code.set_declaring_class(function, class.index);
+                }
+            }
+        }
+        for import in &entry.imports {
+            self.code.write_import(import, class.index);
+        }
+        self.classes.declare_entry(&entry.lowercase_name, class);
     }
 
     /// Structural declaration failures are fatal; missing dependencies remain catchable Errors.

@@ -74,6 +74,8 @@ pub(crate) struct CodeTable {
     /// request has not loaded it.
     slots: Vec<u32>,
     trait_method_names: std::collections::HashMap<FunctionIndex, String>,
+    /// While a class links: the trait methods composed into it.
+    imports: Option<Vec<crate::classes::worker_classes::Import>>,
 }
 
 impl Default for CodeTable {
@@ -93,7 +95,40 @@ impl CodeTable {
             leases: vec![crate::worker_code::Leases::new(worker)],
             slots: Vec::new(),
             trait_method_names: Default::default(),
+            imports: None,
         }
+    }
+
+    /// Starts recording the trait methods composed into a class being linked.
+    pub(crate) fn begin_imports(&mut self) {
+        self.imports = Some(Vec::new());
+    }
+
+    /// The trait methods composed since [`CodeTable::begin_imports`].
+    pub(crate) fn end_imports(&mut self) -> Vec<crate::classes::worker_classes::Import> {
+        self.imports.take().unwrap_or_default()
+    }
+
+    /// Keeps the number of a composed trait method for every request of the
+    /// worker, instead of giving it back with this request.
+    pub(crate) fn keep_import(&self, number: u32) {
+        self.own_leases().keep(number);
+    }
+
+    /// Writes the facts of a trait method another request composed into a
+    /// class this request now declares.
+    pub(crate) fn write_import(
+        &mut self,
+        (number, source, name): &crate::classes::worker_classes::Import,
+        scope: crate::classes::ClassIndex,
+    ) {
+        let mut facts = self.facts(FunctionIndex(*source)).clone();
+        facts.class = Some(scope);
+        let index = *number as usize;
+        self.cover(index + 1);
+        self.functions[index] = facts;
+        self.trait_method_names
+            .insert(FunctionIndex(*number), name.clone());
     }
 
     /// The worker's numbering this table uses.
@@ -282,6 +317,9 @@ impl CodeTable {
         name: String,
     ) -> FunctionIndex {
         let function = self.import_trait_body(source, scope);
+        if let Some(imports) = &mut self.imports {
+            imports.push((function.0, source.0, name.clone()));
+        }
         self.trait_method_names.insert(function, name);
         function
     }
@@ -407,6 +445,7 @@ impl crate::snapshot::ForkCopy for CodeTable {
                 .collect(),
             slots: self.slots.clone(),
             trait_method_names: self.trait_method_names.clone(),
+            imports: None,
         }
     }
 }

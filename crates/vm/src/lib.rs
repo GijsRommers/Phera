@@ -290,7 +290,7 @@ impl Vm {
 
     /// Start a fresh request with the worker's already linked built-ins.
     pub fn with_native_tables(native: &NativeTables) -> Self {
-        let classes = classes::ClassTable::new(native.classes.clone());
+        let classes = classes::ClassTable::new(native.classes.clone(), native.linked.clone());
         let object_ids = classes.ids_handle();
         Self {
             enum_cases: classes::enums::EnumCases::default(),

@@ -67,6 +67,16 @@ impl Leases {
     }
 }
 
+impl Leases {
+    /// Keeps `number` given out for the life of the worker: a trait method
+    /// composed into a class that every request of the worker shares.
+    pub(crate) fn keep(&self, number: u32) {
+        self.ranges
+            .borrow_mut()
+            .retain(|range| *range != (number, 1));
+    }
+}
+
 impl Drop for Leases {
     fn drop(&mut self) {
         let mut numbering = self.worker.numbering.borrow_mut();
