@@ -10,7 +10,10 @@ pub(super) mod input;
 mod parse;
 mod pattern;
 mod registration;
+mod relative;
 mod render;
+mod skeleton;
+mod skeleton_fields;
 
 use std::rc::Rc;
 
@@ -21,12 +24,14 @@ use phera_extension_api::{Value, args};
 
 use crate::{error, locale, locale_id, number};
 use pattern::Style;
+use relative::Relative;
 use render::Renderer;
 
 const CLASS: &str = "IntlDateFormatter";
 
 pub fn register(registry: &mut Registry) {
     registration::register(registry);
+    skeleton::register(registry);
 }
 
 pub fn render_pattern(
@@ -70,6 +75,7 @@ pub fn parse_message(
         calendar: 1,
         lenient: true,
         pattern,
+        relative: None,
         error: (0, None),
     };
     let (parsed, _) = parse::fields(&state, input);
@@ -106,6 +112,7 @@ struct Formatter {
     calendar: i64,
     lenient: bool,
     pattern: String,
+    relative: Option<Relative>,
     render: Renderer,
     error: (i32, Option<String>),
 }
@@ -119,9 +126,24 @@ fn init(
     site: &str,
 ) -> NativeResult {
     error::clear(context);
+    if args::bytes(values, 0).len() > locale::MAX_LEN {
+        return locale::too_long_for(context, site, object.is_some());
+    }
     let requested = locale::effective(context, args::bytes(values, 0));
     let date_type = args::int(values, 1).unwrap_or(0);
     let time_type = args::int(values, 2).unwrap_or(0);
+    if date_type == -2 && time_type != -2 {
+        return fail_creation(
+            context,
+            object,
+            site,
+            1,
+            concat!(
+                "datefmt_create: time format must be IntlDateFormatter::PATTERN ",
+                "if date format is IntlDateFormatter::PATTERN"
+            ),
+        );
+    }
     let modern = locale_id::cldr(&requested);
     if modern.id.language.is_unknown() || !number::known_language(modern.id.language.as_str()) {
         return Err(NativeError::value_error(format!(
@@ -134,26 +156,26 @@ fn init(
     };
     let calendar_input = args::value(values, 4);
     let timezone_input = args::value(values, 3);
-    let implicit_zone = match (&*timezone_input.deref(), &*calendar_input.deref()) {
+    let zone = match (&*timezone_input.deref(), &*calendar_input.deref()) {
         (Value::Null, Value::Object(calendar)) if calendar.class.is_instance_of("IntlCalendar") => {
-            Some(crate::calendar::calendar_zone(calendar)?)
+            crate::calendar::calendar_zone(calendar)?
         }
-        _ => None,
-    };
-    let zone = if let Some(zone) = implicit_zone {
-        Some(zone)
-    } else {
-        input::timezone(context, timezone_input, site, 4)?
-    };
-    let Some(zone) = zone else {
-        return fail_creation(context, object, site, 1, "No such time zone");
+        _ => input::timezone(context, timezone_input, site, 4)?,
     };
     let Some(calendar) = input::calendar(calendar_input, site, 5)? else {
         return fail_creation(context, object, site, 1, input::CALENDAR_ERROR);
     };
+    let relative = Relative::new(&modern, date_type, time_style);
     let text = match std::str::from_utf8(args::bytes(values, 5)) {
-        Ok("") => pattern::select(&modern, date_style, time_style),
-        Ok(text) => text.to_owned(),
+        Ok(text) => {
+            if let Some(relative) = &relative {
+                relative.pattern(&modern, date_style, time_style)
+            } else if text.is_empty() {
+                pattern::select(&modern, date_style, time_style)
+            } else {
+                text.to_owned()
+            }
+        }
         Err(_) => {
             return fail_creation(
                 context,
@@ -176,6 +198,7 @@ fn init(
         calendar,
         lenient: true,
         pattern: text,
+        relative,
         render,
         error: (0, None),
     };
@@ -295,11 +318,7 @@ fn dispatch(
             Value::Null
         }
         Operation::SetTimeZone => {
-            let Some(zone) = input::timezone(context, args::value(arguments, 0), site, argument)?
-            else {
-                return fail(context, state, site, 1, "No such time zone");
-            };
-            state.zone = zone;
+            state.zone = input::timezone(context, args::value(arguments, 0), site, argument)?;
             Value::Bool(true)
         }
         Operation::SetCalendar => {
@@ -329,6 +348,9 @@ fn dispatch(
                     "Error converting pattern to UTF-16",
                 );
             };
+            if state.relative.is_some() {
+                return Ok(Value::Bool(true));
+            }
             let Some(render) = Renderer::new(&state.locale, pattern, state.calendar) else {
                 return fail(context, state, site, 3, "Error setting pattern");
             };

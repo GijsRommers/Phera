@@ -1,0 +1,657 @@
+ady	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+ady-JO	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+ady-TR	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+af	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:eergister	-1:gister	0:vandag	1:môre	2:oormôre
+af-NA	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:eergister	-1:gister	0:vandag	1:môre	2:oormôre
+agq	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ā zūɛɛ	0:nɛ	1:tsʉtsʉ
+ak	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:nnora	0:ɛnnɛ	1:Ɔkyena
+am	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:ከትናንት ወዲያ	-1:ትናንት	0:ዛሬ	1:ነገ	2:ከነገ ወዲያ
+ar	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-AE	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-BH	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-DJ	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-DZ	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-EG	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-EH	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-ER	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-IL	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-IQ	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-JO	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-KM	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-KW	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-LB	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-LY	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-MA	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-MR	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-OM	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-PS	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-QA	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-SA	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-SD	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-SO	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-SS	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-SY	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-TD	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-TN	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+ar-YE	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-2:أول أمس	-1:أمس	0:اليوم	1:غدًا	2:بعد الغد
+as	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:পৰহি	-1:কালি	0:আজি	1:কাইলৈ	2:পৰহিলৈ
+asa	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ighuo	0:Iyoo	1:Yavo
+ast	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:antayeri	-1:ayeri	0:güei	1:mañana	2:pasao mañana
+az	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:dünən	0:bu gün	1:sabah
+az-Cyrl	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+az-Latn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:dünən	0:bu gün	1:sabah
+ba	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:кисә	0:бөгөн	1:иртәгә
+bal-Latn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:zi	0:maróchi	1:bándá
+bas	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yààni	0:lɛ̀n	1:yàni
+be	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:пазаўчора	-1:учора	0:сёння	1:заўтра	2:паслязаўтра
+be-tarask	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:пазаўчора	-1:учора	0:сёння	1:заўтра	2:паслязаўтра
+bem	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:Lelo	1:tomorrow
+bez	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Igolo	0:Neng’u ni	1:Hilawu
+bg	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:онзи ден	-1:вчера	0:днес	1:утре	2:вдругиден
+bgc	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:काह्ल (बित्या होड)	0:आज	1:काह्ल (आण आला)
+bho	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+blo	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:galaɩ	0:ʊrɔŋ	1:gacǝŋ
+bm	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:kunu	0:bi	1:sini
+bn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:গত পরশু	-1:গতকাল	0:আজ	1:আগামীকাল	2:আগামী পরশু
+bn-IN	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:গত পরশু	-1:গতকাল	0:আজ	1:আগামীকাল	2:আগামী পরশু
+bo	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:ཁས་ཉིན་	-1:ཁས་ས་	0:དེ་རིང་	1:སང་ཉིན་	2:གནངས་ཉིན་
+bo-IN	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:ཁས་ཉིན་	-1:ཁས་ས་	0:དེ་རིང་	1:སང་ཉིན་	2:གནངས་ཉིན་
+br	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:dercʼhent-decʼh	-1:decʼh	0:hiziv	1:warcʼhoazh
+brx	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:मैया	0:दिनै	1:गाबोन
+bs	{1}, {0}	{1}, {0}	{1} {0}	{1} {0}	-2:prekjučer	-1:jučer	0:danas	1:sutra	2:prekosutra
+bs-Cyrl	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:прекјуче	-1:јуче	0:данас	1:сутра	2:прекосутра
+bs-Latn	{1}, {0}	{1}, {0}	{1} {0}	{1} {0}	-2:prekjučer	-1:jučer	0:danas	1:sutra	2:prekosutra
+bua	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:үсэгэлдэр	0:мүнөө	1:үглөөдэр
+ca	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:abans-d’ahir	-1:ahir	0:avui	1:demà	2:demà passat
+ca-AD	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:abans-d’ahir	-1:ahir	0:avui	1:demà	2:demà passat
+ca-ES-valencia	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:abans-d’ahir	-1:ahir	0:avui	1:demà	2:demà passat
+ca-FR	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:abans-d’ahir	-1:ahir	0:avui	1:demà	2:demà passat
+ca-IT	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:abans-d’ahir	-1:ahir	0:avui	1:demà	2:demà passat
+ccp	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:𑄉𑄬𑄣𑄧𑄘𑄬 𑄛𑄧𑄢𑄴𑄥𑄪	-1:𑄉𑄬𑄣𑄴𑄣𑄳𑄠𑄇𑄬𑄣𑄳𑄠𑄬	0:𑄃𑄬𑄌𑄴𑄥𑄳𑄠	1:𑄃𑄬𑄎𑄬𑄖𑄴𑄖𑄳𑄠𑄇𑄬𑄣𑄳𑄠𑄬	2:𑄃𑄬𑄎𑄬𑄖𑄴𑄖𑄳𑄠𑄬 𑄛𑄧𑄢𑄴𑄥𑄪
+ccp-IN	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:𑄉𑄬𑄣𑄧𑄘𑄬 𑄛𑄧𑄢𑄴𑄥𑄪	-1:𑄉𑄬𑄣𑄴𑄣𑄳𑄠𑄇𑄬𑄣𑄳𑄠𑄬	0:𑄃𑄬𑄌𑄴𑄥𑄳𑄠	1:𑄃𑄬𑄎𑄬𑄖𑄴𑄖𑄳𑄠𑄇𑄬𑄣𑄳𑄠𑄬	2:𑄃𑄬𑄎𑄬𑄖𑄴𑄖𑄳𑄠𑄬 𑄛𑄧𑄢𑄴𑄥𑄪
+ce	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:селхана	0:тахана	1:кхана
+ceb	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:gahapon	0:karong adlawa	1:ugma
+cgg	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Nyomwabazyo	0:Erizooba	1:Nyenkyakare
+chr	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:ᏒᎯ	0:ᎪᎯ ᎢᎦ	1:ᏌᎾᎴᎢ
+ckb	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+ckb-IR	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+cop	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:ⲥⲁϥ	0:ⲫⲟⲟⲩ	1:ⲣⲁⲥϯ
+cs	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:předevčírem	-1:včera	0:dnes	1:zítra	2:pozítří
+csw	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ᐅᑖᑯᓯᕽ	0:ᐊᓄᐦᐨ	1:ᐚᐸᐦᑫ
+cv	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:ӗнер	0:паян	1:ыран
+cy	{1}, {0}	{1}, {0}	{1} {0}	{1} {0}	-2:echdoe	-1:ddoe	0:heddiw	1:yfory	2:drennydd
+da	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:i forgårs	-1:i går	0:i dag	1:i morgen	2:i overmorgen
+da-GL	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:i forgårs	-1:i går	0:i dag	1:i morgen	2:i overmorgen
+dav	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Iguo	0:Idime	1:Kesho
+de	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:vorgestern	-1:gestern	0:heute	1:morgen	2:übermorgen
+de-AT	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:vorgestern	-1:gestern	0:heute	1:morgen	2:übermorgen
+de-BE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:vorgestern	-1:gestern	0:heute	1:morgen	2:übermorgen
+de-CH	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:vorgestern	-1:gestern	0:heute	1:morgen	2:übermorgen
+de-IT	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:vorgestern	-1:gestern	0:heute	1:morgen	2:übermorgen
+de-LI	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:vorgestern	-1:gestern	0:heute	1:morgen	2:übermorgen
+de-LU	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:vorgestern	-1:gestern	0:heute	1:morgen	2:übermorgen
+dje	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Bi	0:Hõo	1:Suba
+doi	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:जंदा कल	0:अज्ज	1:औंदे कल
+dsb	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:cora	0:źinsa	1:witśe
+dua	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:kíɛlɛ nítómb́í	0:wɛ́ŋgɛ̄	1:kíɛlɛ
+dyo	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Fucen	0:Jaat	1:Kajom
+dz	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:ཁ་ཉིམ	-1:ཁ་ཙ་	0:ད་རིས་	1:ནངས་པ་	2:གནངས་ཚེ
+ebu	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ĩgoro	0:Ũmũnthĩ	1:Rũciũ
+ee	{0} {1}	{0} {1}	{0} {1}	{0} {1}	-2:nyitsɔ si va yi	-1:etsɔ si va yi	0:egbe	1:etsɔ si gbɔna	2:nyitsɔ si gbɔna
+ee-TG	{0} {1}	{0} {1}	{0} {1}	{0} {1}	-2:nyitsɔ si va yi	-1:etsɔ si va yi	0:egbe	1:etsɔ si gbɔna	2:nyitsɔ si gbɔna
+el	{1} - {0}	{1} - {0}	{1}, {0}	{1}, {0}	-2:προχθές	-1:χθες	0:σήμερα	1:αύριο	2:μεθαύριο
+el-CY	{1} - {0}	{1} - {0}	{1}, {0}	{1}, {0}	-2:προχθές	-1:χθες	0:σήμερα	1:αύριο	2:μεθαύριο
+el-polyton	{1} - {0}	{1} - {0}	{1}, {0}	{1}, {0}	-2:προχθές	-1:χθες	0:σήμερα	1:αύριο	2:μεθαύριο
+en	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-001	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-150	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-AE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-AG	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-AI	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-AS	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-AT	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-AU	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-BB	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-BE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-BI	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-BM	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-BS	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-BW	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-BZ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-CA	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-CC	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-CH	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-CK	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-CM	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-CX	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-CY	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-CZ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-DE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-DG	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-DK	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-DM	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-EE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-ER	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-ES	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-FI	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-FJ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-FK	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-FM	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-FR	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-GB	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-GD	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-GE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-GG	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-GH	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-GI	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-GM	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-GS	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-GU	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-GY	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-HK	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-HU	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-ID	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-IE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-IL	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-IM	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-IN	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-IO	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-IT	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-JE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-JM	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-JP	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-KE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-KI	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-KN	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-KY	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-LC	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-LR	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-LS	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-LT	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-LV	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-MG	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-MH	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-MO	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-MP	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-MS	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-MT	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-MU	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-MV	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+en-MW	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-MY	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-NA	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-NF	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-NG	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-NL	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-NO	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-NR	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-NU	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-NZ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-PG	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-PH	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-PK	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-PL	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-PN	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-PR	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-PT	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-PW	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-RO	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-RW	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SB	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SC	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SD	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SG	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SH	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SI	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SK	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SL	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SS	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SX	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-SZ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-TC	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-TK	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-TO	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-TT	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-TV	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-TZ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-UA	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-UG	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-UM	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-VC	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-VG	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-VI	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-VU	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-WS	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-ZA	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-ZM	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+en-ZW	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+eo	{1} {0}	{1} {0}	{1}, {0}	{1} {0}	-1:hieraŭ	0:hodiaŭ	1:morgaŭ
+es	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-419	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-AR	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-BO	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-BR	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-BZ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-CL	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-CO	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-CR	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-CU	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-DO	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-EA	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-EC	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-GQ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-GT	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-HN	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-IC	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-MX	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-NI	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-PA	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-PE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-PH	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-PR	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-PY	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-SV	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:antier	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-US	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-UY	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+es-VE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteayer	-1:ayer	0:hoy	1:mañana	2:pasado mañana
+et	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:üleeile	-1:eile	0:täna	1:homme	2:ülehomme
+eu	{1} ({0})	{1} ({0})	{1} ({0})	{1} ({0})	-2:herenegun	-1:atzo	0:gaur	1:bihar	2:etzi
+ewo	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Angogé	0:Aná	1:Okírí
+fa	{1}، ساعت {0}	{1}، ساعت {0}	{1}،‏ {0}	{1}،‏ {0}	-2:پریروز	-1:دیروز	0:امروز	1:فردا	2:پس‌فردا
+fa-AF	{1}، ساعت {0}	{1}، ساعت {0}	{1}،‏ {0}	{1}،‏ {0}	-2:پریروز	-1:دیروز	0:امروز	1:فردا	2:پس‌فردا
+ff	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Adlm	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Adlm-BF	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Adlm-CM	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Adlm-GH	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Adlm-GM	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Adlm-GW	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Adlm-LR	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Adlm-MR	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Adlm-NE	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Adlm-NG	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Adlm-SL	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Adlm-SN	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:𞤸𞤢𞤲𞤳𞤭	0:𞤸𞤢𞤲𞤣𞤫	1:𞤶𞤢𞤲𞤺𞤮
+ff-Latn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Latn-BF	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Latn-CM	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Latn-GH	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Latn-GM	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Latn-GN	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Latn-GW	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Latn-LR	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Latn-MR	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Latn-NE	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Latn-NG	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+ff-Latn-SL	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Haŋki	0:Hannde	1:Jaŋngo
+fi	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:toissa päivänä	-1:eilen	0:tänään	1:huomenna	2:ylihuomenna
+fil	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:Araw bago ang kahapon	-1:kahapon	0:ngayong araw	1:bukas	2:Samakalawa
+fo	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:fyrradagin	-1:í gjár	0:í dag	1:í morgin	2:í ovurmorgin
+fo-DK	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:fyrradagin	-1:í gjár	0:í dag	1:í morgin	2:í ovurmorgin
+fr	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-BE	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-BF	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-BI	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-BJ	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-BL	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-CA	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-CD	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-CF	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-CG	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-CH	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-CI	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-CM	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-DJ	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-DZ	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-GA	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-GF	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-GN	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-GP	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-GQ	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-HT	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-KM	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-LU	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-MA	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-MC	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-MF	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-MG	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-ML	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-MQ	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-MR	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-MU	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-NC	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-NE	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-PF	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-PM	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-RE	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-RW	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-SC	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-SN	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-SY	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-TD	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-TG	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-TN	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-VU	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-WF	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fr-YT	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:avant-hier	-1:hier	0:aujourd’hui	1:demain	2:après-demain
+fur	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:îr l’altri	-1:îr	0:vuê	1:doman	2:passantdoman
+fy	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:eergisteren	-1:gisteren	0:vandaag	1:morgen	2:Oermorgen
+ga	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:arú inné	-1:inné	0:inniu	1:amárach	2:arú amárach
+ga-GB	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:arú inné	-1:inné	0:inniu	1:amárach	2:arú amárach
+gaa	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+gd	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:a-bhòin-dè	-1:an-dè	0:an-diugh	1:a-màireach	2:an-earar	3:an-eararais
+gl	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:antonte	-1:onte	0:hoxe	1:mañá	2:pasadomañá
+gsw	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:vorgeschter	-1:geschter	0:hüt	1:moorn	2:übermoorn
+gsw-FR	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:vorgeschter	-1:geschter	0:hüt	1:moorn	2:übermoorn
+gsw-LI	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:vorgeschter	-1:geschter	0:hüt	1:moorn	2:übermoorn
+gu	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:ગયા પરમદિવસે	-1:ગઈકાલે	0:આજે	1:આવતીકાલે	2:પરમદિવસે
+guz	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Igoro	0:Rero	1:Mambia
+gv	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+ha	{1} {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:jiya	0:yau	1:gobe
+ha-GH	{1} {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:jiya	0:yau	1:gobe
+ha-NE	{1} {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:jiya	0:yau	1:gobe
+haw	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+he	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:שלשום	-1:אתמול	0:היום	1:מחר	2:מחרתיים
+hi	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:परसों	-1:कल	0:आज	1:कल	2:परसों
+hi-Latn	{1}, {0}	{1}, {0}	{1} {0}	{1} {0}	-2:parson	-1:kal	0:aaj	1:aane wala kal	2:aane wala parson
+hr	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:prekjučer	-1:jučer	0:danas	1:sutra	2:prekosutra
+hr-BA	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:prekjučer	-1:jučer	0:danas	1:sutra	2:prekosutra
+hsb	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:wčera	0:dźensa	1:jutře
+hu	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:tegnapelőtt	-1:tegnap	0:ma	1:holnap	2:holnapután
+hy	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:նախանցյալ օրը	-1:երեկ	0:այսօր	1:վաղը	2:վաղը չէ մյուս օրը
+ia	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:heri	0:hodie	1:deman
+id	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:kemarin dulu	-1:kemarin	0:hari ini	1:besok	2:lusa
+ie	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:anteyer	-1:yer	0:hodie	1:deman	2:posdeman
+ig	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:ụnyaahụ	0:taa	1:echi
+ii	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:ꎴꂿꋍꑍ	-1:ꀋꅔꉇ	0:ꀃꑍ	1:ꃆꏂꑍ	2:ꌕꀿꑍ
+is	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:í fyrradag	-1:í gær	0:í dag	1:á morgun	2:eftir tvo daga
+it	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:l’altro ieri	-1:ieri	0:oggi	1:domani	2:dopodomani
+it-CH	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:l’altro ieri	-1:ieri	0:oggi	1:domani	2:dopodomani
+it-SM	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:l’altro ieri	-1:ieri	0:oggi	1:domani	2:dopodomani
+it-VA	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:l’altro ieri	-1:ieri	0:oggi	1:domani	2:dopodomani
+ja	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:一昨日	-1:昨日	0:今日	1:明日	2:明後日
+jgo	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:lɔꞋɔ	1:tomorrow
+jmc	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ukou	0:Inu	1:Ngama
+jv	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-1:wingi	0:dina iki	1:sesuk
+ka	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:გუშინწინ	-1:გუშინ	0:დღეს	1:ხვალ	2:ზეგ
+kab	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Iḍelli	0:Ass-a	1:Azekka
+kam	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ĩyoo	0:Ũmũnthĩ	1:Ũnĩ
+kbd	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+kbd-TR	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+kde	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Lido	0:Nelo	1:Nundu
+kea	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:onti	0:oji	1:manhan
+kek	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ewer	0:anaqwan	1:hulaj
+kgp	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:rãké ũn tá	-1:rãketá	0:uri	1:vajkỹ	2:vaj ũn ka
+khq	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Bi	0:Hõo	1:Suba
+ki	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ira	0:Ũmũthĩ	1:Rũciũ
+kk	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:алдыңгүні	-1:кеше	0:бүгін	1:ертең	2:бүрсігүні
+kk-Arab	{1}، {0}	{1}، {0}	{1}, {0}	{1}, {0}	-1:كەشە	0:بۇگىن	1:ەرتەڭ
+kk-Cyrl	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:алдыңгүні	-1:кеше	0:бүгін	1:ертең	2:бүрсігүні
+kk-KZ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:алдыңгүні	-1:кеше	0:бүгін	1:ертең	2:бүрсігүні
+kkj	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:kwey	0:muka	1:nɛmɛnɔ
+kl	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+kln	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Amut	0:Raini	1:Mutai
+km	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:ម្សិល​ម៉្ងៃ	-1:ម្សិលមិញ	0:ថ្ងៃ​នេះ	1:ថ្ងៃ​ស្អែក	2:​ខាន​ស្អែក
+kn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:ಮೊನ್ನೆ	-1:ನಿನ್ನೆ	0:ಇಂದು	1:ನಾಳೆ	2:ನಾಡಿದ್ದು
+ko	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:그저께	-1:어제	0:오늘	1:내일	2:모레
+ko-CN	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:그저께	-1:어제	0:오늘	1:내일	2:모레
+ko-KP	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:그저께	-1:어제	0:오늘	1:내일	2:모레
+kok	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:काल	0:आयज	1:फाल्यां
+kok-Deva	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:काल	0:आयज	1:फाल्यां
+kok-Latn	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:kal	0:aiz	1:faleam
+ks	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:راتھ	0:اَز	1:پگاہ
+ks-Arab	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:راتھ	0:اَز	1:پگاہ
+ks-Deva	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:राथ	0:अज़	1:पगाह
+ksb	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ghuo	0:Evi eo	1:Keloi
+ksf	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Rinkɔɔ́	0:Gɛ́ɛnǝ	1:Ridúrǝ́
+ksh	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:vörjestere	-1:jestere	0:hück	1:morje	2:övvermorje
+ku	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:duh	0:îro	1:sibê
+ku-Latn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:duh	0:îro	1:sibê
+ku-Latn-IQ	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:duh	0:îro	1:sibê
+ku-Latn-SY	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:duh	0:îro	1:sibê
+ku-TR	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:duh	0:îro	1:sibê
+kw	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+kxv	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:raaala	0:inju	1:vie
+kxv-Deva	{1} आँ {0}	{1} आँ {0}	{1}, {0}	{1}, {0}	-1:रा-आला	0:इञ्जु	1:वि-ए
+kxv-Latn	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:raaala	0:inju	1:vie
+kxv-Orya	{1} ଆଁ {0}	{1} ଆଁ {0}	{1}, {0}	{1}, {0}	-1:ରାଆଲା	0:ଇଞ୍ଜୁ	1:ୱି ଏ
+kxv-Telu	{1} త {0}	{1} త {0}	{1}, {0}	{1}, {0}	-1:నిన్న	0:ఈ రోజు	1:రేపు
+ky	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:мурдагы күнү	-1:кечээ	0:бүгүн	1:эртең	2:бүрсүгүнү
+lag	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Niijo	0:Isikʉ	1:Lamʉtoondo
+lb	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:gëschter	0:haut	1:muer
+lg	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ggulo	0:Lwaleero	1:Nkya
+lij	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+lkt	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ȟtálehaŋ	0:Lé aŋpétu kiŋ	1:Híŋhaŋni kiŋháŋ
+lld	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-1:inier	0:incö	1:indoman
+lmo	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+ln	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Lóbi elékí	0:Lɛlɔ́	1:Lóbi ekoyâ
+ln-AO	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Lóbi elékí	0:Lɛlɔ́	1:Lóbi ekoyâ
+ln-CF	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Lóbi elékí	0:Lɛlɔ́	1:Lóbi ekoyâ
+ln-CG	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Lóbi elékí	0:Lɛlɔ́	1:Lóbi ekoyâ
+lo	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:ມື້ກ່ອນ	-1:ມື້ວານ	0:ມື້ນີ້	1:ມື້ອື່ນ	2:ມື້ຮື
+lrc	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:دیروٙز	0:أمروٙ	1:شوٙصوٙ
+lrc-IQ	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:دیروٙز	0:أمروٙ	1:شوٙصوٙ
+lt	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:užvakar	-1:vakar	0:šiandien	1:rytoj	2:poryt
+lu	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Makelela	0:Lelu	1:Malaba
+luo	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:nyoro	0:kawuono	1:kiny
+luy	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Mgorova	0:Lero	1:Mgamba
+lv	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:aizvakar	-1:vakar	0:šodien	1:rīt	2:parīt
+mai	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:काल्हिक दिन	0:आजुक दिन	1:काल्हिक दिन
+mas	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ŋolé	0:Táatá	1:Tááisérè
+mas-TZ	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ŋolé	0:Táatá	1:Tááisérè
+mer	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ĩgoro	0:Narua	1:Rũjũ
+mfe	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Yer	0:Zordi	1:Demin
+mg	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Omaly	0:Anio	1:Rahampitso
+mgh	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:n’chana	0:lel’lo	1:me’llo
+mgo	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ikwiri	0:tèchɔ̀ŋ	1:isu	2:isu ywi
+mi	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:inanahi	0:i tēnei rā	1:āpōpō
+mk	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:завчера	-1:вчера	0:денес	1:утре	2:задутре
+ml	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:മിനിഞ്ഞാന്ന്	-1:ഇന്നലെ	0:ഇന്ന്	1:നാളെ	2:മറ്റന്നാൾ
+mn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:уржигдар	-1:өчигдөр	0:өнөөдөр	1:маргааш	2:нөгөөдөр
+mni	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:ঙরাং	0:ঙসি	1:হয়েং
+mni-Beng	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:ঙরাং	0:ঙসি	1:হয়েং
+mr	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:काल	0:आज	1:उद्या
+ms	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:kelmarin	-1:semalam	0:hari ini	1:esok	2:lusa
+ms-BN	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:kelmarin	-1:semalam	0:hari ini	1:esok	2:lusa
+ms-ID	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:kelmarin	-1:semalam	0:hari ini	1:esok	2:lusa
+ms-SG	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:kelmarin	-1:semalam	0:hari ini	1:esok	2:lusa
+mt	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:lbieraħ	0:illum	1:għada
+mua	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Tǝsoo	0:Tǝ’nahko	1:Tǝ’nane
+my	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:တစ်နေ့က	-1:မနေ့က	0:ယနေ့	1:မနက်ဖြန်	2:သန်ဘက်ခါ
+mzn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:دیروز	0:اَمروز	1:فِردا
+naq	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:Neetsee	1:tomorrow
+nb	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:i forgårs	-1:i går	0:i dag	1:i morgen	2:i overmorgen
+nb-SJ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:i forgårs	-1:i går	0:i dag	1:i morgen	2:i overmorgen
+nd	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Izolo	0:Lamuhla	1:Kusasa
+nds	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+nds-NL	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+ne	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:अस्ति	-1:हिजो	0:आज	1:भोलि	2:पर्सि
+ne-IN	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:अस्ति	-1:हिजो	0:आज	1:भोलि	2:पर्सि
+nl	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:eergisteren	-1:gisteren	0:vandaag	1:morgen	2:overmorgen
+nl-AW	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:eergisteren	-1:gisteren	0:vandaag	1:morgen	2:overmorgen
+nl-BE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:eergisteren	-1:gisteren	0:vandaag	1:morgen	2:overmorgen
+nl-BQ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:eergisteren	-1:gisteren	0:vandaag	1:morgen	2:overmorgen
+nl-CW	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:eergisteren	-1:gisteren	0:vandaag	1:morgen	2:overmorgen
+nl-SR	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:eergisteren	-1:gisteren	0:vandaag	1:morgen	2:overmorgen
+nl-SX	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:eergisteren	-1:gisteren	0:vandaag	1:morgen	2:overmorgen
+nmg	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Nakugú	0:Dɔl	1:Namáná
+nn	{1} {0}	{1} 'kl'. {0}	{1}, {0}	{1}, {0}	-2:i førgår	-1:i går	0:i dag	1:i morgon	2:i overmorgon
+nnh	{1},{0}	{1}, {0}	{1} {0}	{1} {0}	-1:jǔɔ gẅie à ka tɔ̌g	0:lyɛ̌ʼɔɔn	1:jǔɔ gẅie à ne ntóo
+no	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:i forgårs	-1:i går	0:i dag	1:i morgen	2:i overmorgen
+nqo	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ߞߎߣߎ߲߬	0:ߓߌ߬	1:ߛߌߣߌ߲߫
+nso	{1} 'ka' {0}	{1} 'ka' {0}	{1}, {0}	{1}, {0}	-1:maabane	0:lehono	1:gosasa
+nus	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Pan	0:Walɛ	1:Ruun
+nyn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Nyomwabazyo	0:Erizooba	1:Nyenkyakare
+oc	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+oc-ES	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+om	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:kaleessa	0:har’a	1:boru
+om-KE	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:kaleessa	0:har’a	1:boru
+or	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:ଗତକାଲି	0:ଆଜି	1:ଆସନ୍ତାକାଲି
+os	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:Ӕндӕрӕбон	-1:Знон	0:Абон	1:Сом	2:Иннӕбон
+os-RU	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:Ӕндӕрӕбон	-1:Знон	0:Абон	1:Сом	2:Иннӕбон
+pa	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-1:ਬੀਤਿਆ ਕੱਲ੍ਹ	0:ਅੱਜ	1:ਭਲਕੇ
+pa-Arab	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+pa-Guru	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-1:ਬੀਤਿਆ ਕੱਲ੍ਹ	0:ਅੱਜ	1:ਭਲਕੇ
+pcm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:Yẹ́stadè	0:Todè	1:Tumọ́ro
+pl	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:przedwczoraj	-1:wczoraj	0:dzisiaj	1:jutro	2:pojutrze
+pms	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+prg	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+ps	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:پرون	0:نن	1:سبا
+ps-PK	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:پرون	0:نن	1:سبا
+pt	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+pt-AO	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+pt-CH	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+pt-CV	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+pt-GQ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+pt-GW	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+pt-LU	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+pt-MO	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+pt-MZ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+pt-PT	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+pt-ST	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+pt-TL	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:anteontem	-1:ontem	0:hoje	1:amanhã	2:depois de amanhã
+qu	{1} {0}	{0} {1}	{1} {0}	{1} {0}	-1:qayna punchaw	0:kunan punchaw	1:paqarin
+qu-BO	{1} {0}	{0} {1}	{1} {0}	{1} {0}	-1:qayna punchaw	0:kunan punchaw	1:paqarin
+qu-EC	{1} {0}	{0} {1}	{1} {0}	{1} {0}	-1:qayna punchaw	0:kunan punchaw	1:paqarin
+quc	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+raj	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:काल	0:आज	1:काल
+rm	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:stersas	-1:ier	0:oz	1:damaun	2:puschmaun
+rn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ejo (haheze)	0:Uyu musi	1:Ejo (hazoza)
+ro	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:alaltăieri	-1:ieri	0:azi	1:mâine	2:poimâine
+ro-MD	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:alaltăieri	-1:ieri	0:azi	1:mâine	2:poimâine
+rof	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Hiyo	0:Linu	1:Ng’ama
+ru	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:позавчера	-1:вчера	0:сегодня	1:завтра	2:послезавтра
+ru-BY	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:позавчера	-1:вчера	0:сегодня	1:завтра	2:послезавтра
+ru-KG	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:позавчера	-1:вчера	0:сегодня	1:завтра	2:послезавтра
+ru-KZ	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:позавчера	-1:вчера	0:сегодня	1:завтра	2:послезавтра
+ru-MD	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:позавчера	-1:вчера	0:сегодня	1:завтра	2:послезавтра
+ru-UA	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:позавчера	-1:вчера	0:сегодня	1:завтра	2:послезавтра
+rw	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ejo	0:uyu munsi	1:ejo
+rwk	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ukou	0:Inu	1:Ngama
+sa	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:गतदिनम्	0:अद्य	1:श्वः
+sah	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:Иллэрээ күн	-1:Бэҕэһээ	0:Бүгүн	1:Сарсын	2:Өйүүн
+saq	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ng’ole	0:Duo	1:Taisere
+sat	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ᱦᱚᱞᱟ	0:ᱛᱮᱦᱮᱧ	1:ᱜᱟᱯᱟ
+sat-Olck	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ᱦᱚᱞᱟ	0:ᱛᱮᱦᱮᱧ	1:ᱜᱟᱯᱟ
+sbp	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Imehe	0:Ineng’uni	1:Pamulaawu
+sc	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:eris	0:oe	1:cras
+scn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ajeri	0:oji	1:dumani
+sd	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ڪل	0:اڄ	1:سڀاڻي
+sd-Arab	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ڪل	0:اڄ	1:سڀاڻي
+sd-Deva	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:कल	0:अॼु	1:सुभाणे
+se	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:oovdebpeivvi	-1:ikte	0:odne	1:ihttin	2:paijeelittáá
+se-FI	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:ovddet beaivvi	-1:ikte	0:odne	1:ihttin	2:don beaivve
+se-SE	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:oovdebpeivvi	-1:ikte	0:odne	1:ihttin	2:paijeelittáá
+seh	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Zuro	0:Lero	1:Manguana
+ses	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Bi	0:Hõo	1:Suba
+sg	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Bîrï	0:Lâsô	1:Kêkerêke
+shi	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ⵉⴹⵍⵍⵉ	0:ⴰⵙⵙⴰ	1:ⴰⵙⴽⴽⴰ
+shi-Latn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:iḍlli	0:assa	1:askka
+shi-Tfng	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ⵉⴹⵍⵍⵉ	0:ⴰⵙⵙⴰ	1:ⴰⵙⴽⴽⴰ
+shn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:မိူဝ်ႈဝႃး	0:မိူဝ်ႈၼႆႉ	1:မိူဝ်ႈၽုၵ်ႈ
+shn-TH	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:မိူဝ်ႈဝႃး	0:မိူဝ်ႈၼႆႉ	1:မိူဝ်ႈၽုၵ်ႈ
+si	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:පෙරේදා	-1:ඊයේ	0:අද	1:හෙට	2:අනිද්දා
+sk	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:predvčerom	-1:včera	0:dnes	1:zajtra	2:pozajtra
+sl	{1} {0}	{1} {0}	{1}, {0}	{1}, {0}	-2:predvčerajšnjim	-1:včeraj	0:danes	1:jutri	2:pojutrišnjem
+smn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+sn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Nezuro	0:Nhasi	1:Mangwana
+so	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Shalay	0:Maanta	1:Berri
+so-DJ	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Shalay	0:Maanta	1:Berri
+so-ET	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Shalay	0:Maanta	1:Berri
+so-KE	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Shalay	0:Maanta	1:Berri
+sq	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:dje	0:sot	1:nesër
+sq-MK	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:dje	0:sot	1:nesër
+sq-XK	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:dje	0:sot	1:nesër
+sr	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:прекјуче	-1:јуче	0:данас	1:сутра	2:прекосутра
+sr-Cyrl	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:прекјуче	-1:јуче	0:данас	1:сутра	2:прекосутра
+sr-Cyrl-BA	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:прекјуче	-1:јуче	0:данас	1:сутра	2:прекосутра
+sr-Cyrl-ME	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:прекјуче	-1:јуче	0:данас	1:сутра	2:прекосутра
+sr-Cyrl-XK	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:прекјуче	-1:јуче	0:данас	1:сутра	2:прекосутра
+sr-Latn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:prekjuče	-1:juče	0:danas	1:sutra	2:prekosutra
+sr-Latn-BA	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:prekjuče	-1:juče	0:danas	1:sutra	2:prekosutra
+sr-Latn-ME	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:prekjuče	-1:juče	0:danas	1:sutra	2:prekosutra
+sr-Latn-XK	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:prekjuče	-1:juče	0:danas	1:sutra	2:prekosutra
+st	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+st-LS	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+su	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:kamari	0:dinten ieu	1:énjing
+su-Latn	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:kamari	0:dinten ieu	1:énjing
+suz-Sunu	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+sv	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:i förrgår	-1:i går	0:i dag	1:i morgon	2:i övermorgon
+sv-AX	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:i förrgår	-1:i går	0:i dag	1:i morgon	2:i övermorgon
+sv-FI	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:i förrgår	-1:i går	0:i dag	1:i morgon	2:i övermorgon
+sw	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:juzi	-1:jana	0:leo	1:kesho	2:kesho kutwa
+sw-CD	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:juzi	-1:jana	0:leo	1:kesho	2:kesho kutwa
+sw-KE	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:juzi	-1:jana	0:leo	1:kesho	2:kesho kutwa
+sw-UG	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:juzi	-1:jana	0:leo	1:kesho	2:kesho kutwa
+syr	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-1:ܐܬܡܠܝ	0:ܐܕܝܘܡ	1:ܩܘܕܡܐ
+syr-SY	{1}، {0}	{1}، {0}	{1}، {0}	{1}، {0}	-1:ܐܬܡܠܝ	0:ܐܕܝܘܡ	1:ܩܘܕܡܐ
+szl	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+ta	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:நேற்று முன்தினம்	-1:நேற்று	0:இன்று	1:நாளை	2:நாளை மறுநாள்
+ta-LK	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:நேற்று முன்தினம்	-1:நேற்று	0:இன்று	1:நாளை	2:நாளை மறுநாள்
+ta-MY	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:நேற்று முன்தினம்	-1:நேற்று	0:இன்று	1:நாளை	2:நாளை மறுநாள்
+ta-SG	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:நேற்று முன்தினம்	-1:நேற்று	0:இன்று	1:நாளை	2:நாளை மறுநாள்
+te	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:మొన్న	-1:నిన్న	0:ఈ రోజు	1:రేపు	2:ఎల్లుండి
+teo	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Jaan	0:Lolo	1:Moi
+teo-KE	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Jaan	0:Lolo	1:Moi
+tg	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:дирӯз	0:имрӯз	1:фардо
+th	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:เมื่อวานซืน	-1:เมื่อวาน	0:วันนี้	1:พรุ่งนี้	2:มะรืนนี้
+ti	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ትማሊ	0:ሎሚ	1:ጽባሕ
+ti-ER	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ትማሊ	0:ሎሚ	1:ጽባሕ
+tk	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:düýn	0:şu gün	1:ertir
+tn	{1} 'ka' {0}	{1} 'ka' {0}	{1}, {0}	{1}, {0}	-1:maabane	0:gompieno	1:kamoso
+tn-BW	{1} 'ka' {0}	{1} 'ka' {0}	{1}, {0}	{1}, {0}	-1:maabane	0:gompieno	1:kamoso
+to	{1}, {0}	{1}, {0}	{1}, {0}	{1} {0}	-2:ʻaneheafi	-1:ʻaneafi	0:ʻahó ni	1:ʻapongipongi	2:ʻahepongipongi
+tok	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:tenpo suno pini	0:tenpo suno ni	1:tenpo suno kama
+tr	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:evvelsi gün	-1:dün	0:bugün	1:yarın	2:öbür gün
+tr-CY	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:evvelsi gün	-1:dün	0:bugün	1:yarın	2:öbür gün
+tt	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:кичә	0:бүген	1:иртәгә
+twq	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Bi	0:Hõo	1:Suba
+tyv	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:yesterday	0:today	1:tomorrow
+tzm	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Assenaṭ	0:Assa	1:Asekka
+ug	{1} {0}	{1} {0}	{1}، {0}	{1}، {0}	-1:تۈنۈگۈن	0:بۈگۈن	1:ئەتە
+uk	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-2:позавчора	-1:учора	0:сьогодні	1:завтра	2:післязавтра
+und	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+ur	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:گزشتہ پرسوں	-1:کل	0:آج	1:آئندہ کل	2:آنے والا پرسوں
+ur-IN	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:گزشتہ پرسوں	-1:کل	0:آج	1:آئندہ کل	2:آنے والا پرسوں
+uz	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:kecha	0:bugun	1:ertaga
+uz-Arab	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+uz-Cyrl	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:кеча	0:бугун	1:эртага
+uz-Latn	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:kecha	0:bugun	1:ertaga
+vai	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ꖴꖸ	0:ꗦꗷ	1:ꔻꕯ
+vai-Latn	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:kunu	0:wɛlɛ	1:sina
+vai-Vaii	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ꖴꖸ	0:ꗦꗷ	1:ꔻꕯ
+vec	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:jeri	0:uncó	1:doman
+vi	{0} {1}	{0} {1}	{0} {1}	{0} {1}	-2:hôm kia	-1:hôm qua	0:hôm nay	1:ngày mai	2:ngày kia
+vmw	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+vun	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Ukou	0:Inu	1:Ngama
+wae	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:Vorgešter	-1:Gešter	0:Hitte	1:Móre	2:Ubermóre
+wo	{1} - {0}	{1} - {0}	{1} - {0}	{1} - {0}	-1:démb	0:tay	1:suba
+xh	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:izolo	0:namhlanje	1:ngomso
+xnr	{1}, {0}	{1}, {0}	{1}, {0}	{1}, {0}	-1:पिछला कल	0:अज्ज	1:अगले कल
+xog	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:Edho	0:Olwaleelo (leelo)	1:Enkyo
+yav	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:púyoó	0:ínaan	1:nakinyám
+yi	{1} {0}	{1} {0}	{1}, {0}	{1} {0}	-1:נעכטן	0:היינט	1:מארגן
+yo	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:íjẹta	-1:Àná	0:Òní	1:Ọ̀la	2:òtúùnla
+yo-BJ	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:íjɛta	-1:Àná	0:Òní	1:Ɔ̀la	2:òtúùnla
+yrl	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:amũ kuesê	-1:kuesê	0:wií	1:wirãdé	2:wirãdé ariré
+yrl-CO	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:amũ kuesê	-1:kuesê	0:wií	1:wirãdé	2:wirãdé ariré
+yrl-VE	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:amũ kuesê	-1:kuesê	0:wií	1:wirãdé	2:wirãdé ariré
+yue	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:尋日	0:今日	1:聽日	2:後天
+yue-Hans	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:寻日	0:今日	1:听日	2:后天
+yue-Hant	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:尋日	0:今日	1:聽日	2:後天
+yue-Hant-CN	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:尋日	0:今日	1:聽日	2:後天
+yue-Hant-MO	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:尋日	0:今日	1:聽日	2:後天
+za	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:yesterday	0:today	1:tomorrow
+zgh	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-1:ⵉⴹⵍⵍⵉ	0:ⴰⵙⵙⴰ	1:ⴰⵙⴽⴽⴰ
+zh	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:昨天	0:今天	1:明天	2:后天
+zh-Hans	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:昨天	0:今天	1:明天	2:后天
+zh-Hans-HK	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:昨天	0:今天	1:明天	2:后天
+zh-Hans-MO	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:昨天	0:今天	1:明天	2:后天
+zh-Hans-MY	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:昨天	0:今天	1:明天	2:后天
+zh-Hans-SG	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:昨天	0:今天	1:明天	2:后天
+zh-Hant	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:昨天	0:今天	1:明天	2:後天
+zh-Hant-HK	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前日	-1:昨日	0:今日	1:明日	2:後日
+zh-Hant-MO	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前日	-1:昨日	0:今日	1:明日	2:後日
+zh-Hant-MY	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:前天	-1:昨天	0:今天	1:明天	2:後天
+zu	{1} {0}	{1} {0}	{1} {0}	{1} {0}	-2:usuku olwandulela olwayizolo	-1:izolo	0:namhlanje	1:kusasa	2:usuku olulandela olwakusasa
