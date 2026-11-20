@@ -219,6 +219,11 @@ impl Mysql {
 
     async fn backslash_escapes(&mut self) -> Result<bool, DbError> {
         self.check_pending().await?;
+        if let Some(enabled) = self.observed_backslashes() {
+            return Ok(enabled);
+        }
+        // An error packet has no status flags, and the client discards the
+        // previous OK packet. Ask for the mode before quoting again.
         let mode: Option<String> = self
             .connection()?
             .query_first("SELECT @@SESSION.sql_mode")
