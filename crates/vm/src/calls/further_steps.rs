@@ -25,7 +25,10 @@ use crate::fast::{ScalarStep, store};
 use crate::fast_values::value_step;
 
 impl Machine<'_> {
-    /// Runs `instruction` if it is one of the cases above.
+    /// Runs `instruction` if it is one of the cases above. Marked cold so
+    /// that the loop's own code is laid out as if this branch were rare,
+    /// which keeps tight loops that never take it as they were.
+    #[cold]
     #[inline(never)]
     pub(super) fn further_step<const GUARDED: bool>(
         &mut self,
