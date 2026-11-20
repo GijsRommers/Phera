@@ -56,7 +56,7 @@ impl OutputCallbacks {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct ResourceFinalizers(Vec<(&'static str, AsyncFn)>);
 
 impl ResourceFinalizers {

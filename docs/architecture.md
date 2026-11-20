@@ -354,14 +354,27 @@ $response = $kernel->handle(Request::createFromGlobals());   // runs per request
 $response->send();
 ```
 
-The first request of a worker runs the script from the top. At
-`Phera\snapshot()` the worker freezes the whole state of the VM: globals,
-static properties, the call stack with its registers, the tables of step 1, and
-what the script registered (autoloaders, error and exception handlers, shutdown
-functions, output handlers, stream wrappers, INI values). Every later request
+`phera serve` boots such a script once per worker, at start-up, before the
+worker accepts connections, and without a request: `$_GET`, `$_POST`,
+`$_COOKIE` and `$_FILES` are empty, `$_SERVER` holds the environment and the
+script's paths, `php://input` is empty, and the boot's output is discarded.
+The boot run stops at `Phera\snapshot()`: the whole state of the VM at the
+call is kept (globals, static properties, the call stack with its registers,
+the tables of step 1, and what the script registered: autoloaders, error and
+exception handlers, shutdown functions, output handlers, INI values), and
+nothing after the call runs in the boot. Every request, the first included,
 starts as a copy of that state and continues after the call, with its own
-superglobals. The frozen state is never executed again, so no request can
-change it.
+superglobals; what the boot wrote into the superglobals is written again on
+top of them, as it would be under PHP-FPM. A script known to snapshot is one
+an adapter applies to, or one that an earlier start saw reach the call (for
+a plain script the first start cannot know, so its first request runs from
+the top, notices the call, and the worker boots it in the background). A
+boot that ends without the call makes the script classic until one of its
+files changes; a boot that fails is logged with the worker's number, the
+worker answers from the top, and the boot is tried again. A changed file
+starts a new boot in the background; requests keep forking the old snapshot
+until it is replaced. The frozen state is never executed again, so no
+request can change it.
 
 - What a fork copies: every object that can be reached from the frozen state,
   once each, so that sharing and cycles stay as they were, and every reference
@@ -381,9 +394,10 @@ change it.
 - What is reset in every fork: the superglobals, the request time, the time
   limit, the header list, the seeds of `rand()` and `mt_rand()`. Output written
   before the snapshot is not sent again.
-- A value read from `$_SERVER` or `$_GET` before the snapshot is the value of the
-  request that booted the worker. In `--dev`, Phera warns when a request field
-  was read before the snapshot.
+- The boot has no request, so a value read from `$_GET` or from a request
+  key of `$_SERVER` before the snapshot is empty or missing: no request's value
+  can reach the state every request starts from. (`--dev` does not warn about
+  such reads; see `docs/decisions/`.)
 - The snapshot remembers the files it included. When one changes (same policy as
   step 1) the worker drops the snapshot and boots again. If booting fails, the
   request is answered the classic way and the next one tries again.
@@ -447,7 +461,7 @@ The three ways to run an application, side by side:
 
 | | Classic | Snapshot and fork | Worker mode |
 | --- | --- | --- | --- |
-| Boot work per request | all of it (step 1 removes the linking) | none after the first request of a worker | none |
+| Boot work per request | all of it (step 1 removes the linking) | none: each worker boots once, at start | none |
 | Requests isolated from each other | yes | yes | no: the application must reset itself |
 | Works for | every application | an application with a boot phase and a snapshot point | an application written for long-running use |
 | Change to the application | none | none with an adapter, one line otherwise | none if it already supports FrankenPHP or Octane |
@@ -456,6 +470,17 @@ Order: steps 1 to 3 first (shared linked code, the snapshot, the adapters).
 Worker mode (step 5) is built only if a forked application still falls short
 of what long-running applications need; see `docs/decisions/`. They follow the destructors work
 (9.1), which changes the same object lifetime code.
+
+**Status (2026-11-20).** Steps 2 and 3 are built (`crates/vm/src/snapshot/`,
+`crates/value/src/fork/`, `crates/runtime/src/boot.rs`,
+`crates/runtime/src/adapters/`). Step 1 is built as far as forks need it:
+linked classes hold no request state (`classes/class_state.rs`), so a
+snapshot and its forks share them; classic requests do not share linked
+classes yet (see `docs/decisions/`). Measured on a Laravel 13 API request:
+525 million instructions from the top, 102 million as a fork, 48 million on
+PHP with opcache. Built-in classes fork through `ClassHooks::fork` (SPL,
+dates, closures, reflection, WeakMap and WeakReference, OpenSSL keys);
+generators, fibers, PDO and Redis handles and DOM documents refuse for now.
 
 ### 5.5 Child processes
 

@@ -18,7 +18,8 @@ Seeing the silent reads (`$_SERVER['HTTP_HOST'] ?? 'localhost'`)
 needs a test on every array read, or superglobals that are objects during
 the boot (`is_array()` would then differ between the boot and a request).
 The first costs every script; the second changes what the boot computes.
-`phera serve` has no `--dev` mode on this base to hang it on either.
+`phera serve --dev` (display of errors for local development) therefore
+does not warn about these reads either.
 
 ## Turned down
 

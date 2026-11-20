@@ -56,7 +56,7 @@ impl Extension for Posix {
 }
 
 #[derive(Default)]
-struct LastError(i64);
+pub(crate) struct LastError(i64);
 
 fn fail(context: &mut dyn Context, error: Errno) -> Value {
     context.state().get_or_default::<LastError>().0 = i64::from(error as i32);

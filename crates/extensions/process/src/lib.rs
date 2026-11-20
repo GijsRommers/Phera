@@ -33,10 +33,14 @@ impl Extension for Process {
         proc::register(registry);
         shell::register(registry);
         shell::popen::register(registry);
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<Policy>(phera_extension_api::copy_state::<Policy>);
+        registry.fork_state::<posix::LastError>(phera_extension_api::fresh_state);
+        shell::popen::register_fork(registry);
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Policy {
     web: bool,
     disabled: bool,
