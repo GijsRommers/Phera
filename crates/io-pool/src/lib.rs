@@ -116,12 +116,11 @@ impl Options {
         prefix: &str,
         defaults: Options,
     ) -> Result<Options, String> {
-        let number = |suffix, default| number(prefix, suffix, default);
         let seconds = |suffix: &str, default: Duration| {
-            number(suffix, default.as_secs()).map(Duration::from_secs)
+            number(prefix, suffix, default.as_secs()).map(Duration::from_secs)
         };
         Ok(Options {
-            size: number("POOL_SIZE", defaults.size as u64)? as usize,
+            size: number(prefix, "POOL_SIZE", defaults.size as u64)? as usize,
             idle: seconds("POOL_IDLE_SECONDS", defaults.idle)?,
             lifetime: seconds("POOL_LIFETIME_SECONDS", defaults.lifetime)?,
             wait: seconds("POOL_WAIT_SECONDS", defaults.wait)?,
