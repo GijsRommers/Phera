@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use http_body_util::BodyExt;
-use hyper::body::Incoming;
+use hyper::body::{Body as HyperBody, Bytes, Incoming};
 use hyper::header::{HeaderName, HeaderValue};
 use hyper::service::service_fn;
 use hyper::{Request as HyperRequest, Response as HyperResponse};
@@ -24,7 +24,7 @@ use crate::file_body::WireBody;
 use crate::handler::Handler;
 use crate::receive_timeout::{HeadTimer, PrefaceTimeout, TimeoutStream};
 use crate::request::{HttpVersion, Request};
-use crate::response::{Body, Response};
+use crate::response::Response;
 use crate::response_task::{ConnectionWork, answer};
 
 /// Serve one connection. Runs until the client or the server closes it; a
@@ -44,7 +44,7 @@ pub(super) async fn handle_connection(
     let service = service_fn(move |hyper_request: HyperRequest<Incoming>| {
         let handler = handler.clone();
         let work = work.clone();
-        let started = head_timer.started();
+        let started = (!hyper_request.body().is_end_stream()).then(|| head_timer.started());
         async move {
             let http2 = hyper_request.version() == hyper::Version::HTTP_2;
             let response = match to_request(hyper_request, peer, local_addr, limits, started).await
@@ -119,7 +119,7 @@ async fn to_request(
     peer: SocketAddr,
     local_addr: SocketAddr,
     limits: ConnectionLimits,
-    started: Instant,
+    started: Option<Instant>,
 ) -> Result<Request, BodyError> {
     let (parts, body) = request.into_parts();
     let version = match parts.version {
@@ -145,7 +145,10 @@ async fn to_request(
     {
         headers.push(("host".into(), authority.as_str().as_bytes().to_vec()));
     }
-    let body = read_body(body, limits, started).await?;
+    let body = match started {
+        Some(started) => read_body(body, limits, started).await?,
+        None => Vec::new(),
+    };
     Ok(Request {
         method: parts.method.as_str().to_string(),
         target,
@@ -161,13 +164,13 @@ async fn to_request(
 
 /// Turn a handler's [`Response`] into a hyper response.
 fn to_hyper_response(response: Response) -> HyperResponse<WireBody> {
-    let status = hyper::StatusCode::from_u16(response.status)
+    let mut wire = HyperResponse::new(WireBody::from(response.body));
+    *wire.status_mut() = hyper::StatusCode::from_u16(response.status)
         .unwrap_or(hyper::StatusCode::INTERNAL_SERVER_ERROR);
-    let mut builder = HyperResponse::builder().status(status);
-    for (name, value) in &response.headers {
+    for (name, value) in response.headers {
         if let (Ok(name), Ok(value)) = (
             HeaderName::try_from(name.as_str()),
-            HeaderValue::from_bytes(value),
+            HeaderValue::from_maybe_shared(Bytes::from(value)),
         ) {
             // The server alone says where a response ends. A handler (a PHP
             // script calling `header('Content-Length: 5')`) could otherwise
@@ -177,12 +180,10 @@ fn to_hyper_response(response: Response) -> HyperResponse<WireBody> {
             if name == hyper::header::CONTENT_LENGTH || name == hyper::header::TRANSFER_ENCODING {
                 continue;
             }
-            builder = builder.header(name, value);
+            wire.headers_mut().append(name, value);
         }
     }
-    builder
-        .body(WireBody::from(response.body))
-        .unwrap_or_else(|_| HyperResponse::new(WireBody::from(Body::default())))
+    wire
 }
 
 enum BodyError {

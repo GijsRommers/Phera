@@ -29,7 +29,7 @@ enum Phase {
 
 pub(crate) struct ResponseSlot {
     phase: Cell<Phase>,
-    response: Cell<Option<Response>>,
+    response: Cell<Option<Box<Response>>>,
 }
 
 impl ResponseSlot {
@@ -41,7 +41,7 @@ impl ResponseSlot {
     }
 
     pub(crate) fn take(&self) -> Option<Response> {
-        self.response.take()
+        self.response.take().map(|response| *response)
     }
 
     /// PHP still gets to observe a disconnect at its next write.
@@ -102,7 +102,7 @@ impl ResponseWriter {
     fn publish(&self, response: Response) -> bool {
         if matches!(self.slot.phase.get(), Phase::Waiting | Phase::Watching) {
             self.slot.phase.set(Phase::Published);
-            self.slot.response.set(Some(response));
+            self.slot.response.set(Some(Box::new(response)));
             true
         } else {
             false

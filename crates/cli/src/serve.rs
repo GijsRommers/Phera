@@ -305,22 +305,27 @@ impl SiteHandler {
             return Response::text(200, "ok\n").with_header("Cache-Control", "no-store");
         }
         let site = self.site.clone();
-        let path = request.path.clone();
-        let conditions = Conditions::of(&request, self.compress);
-        let accept_encoding = request
-            .header("accept-encoding")
-            .filter(|_| self.compress)
-            .map(|value| Rc::<str>::from(String::from_utf8_lossy(value).as_ref()));
+        let compress = self.compress;
         // Looking at the file system blocks, so it runs off the worker
         // thread, which must stay free for other requests.
-        let found = tokio::task::spawn_blocking(move || match site.resolve(&path) {
-            Resolved::Script(script) => Found::Script(script),
-            Resolved::File(file) => Found::Answer(static_file::answer(&site, &file, &conditions)),
+        let found = tokio::task::spawn_blocking(move || match site.resolve(&request.path) {
+            Resolved::Script(script) => Found::Script(script, request),
+            Resolved::File(file) => {
+                let conditions = Conditions::of(&request, compress);
+                Found::Answer(static_file::answer(&site, &file, &conditions))
+            }
             Resolved::NotFound => Found::Answer(Response::text(404, "Not Found\n")),
         })
         .await;
         match found {
-            Ok(Found::Script(script)) => {
+            Ok(Found::Script(script, request)) => {
+                let accept_encoding = if compress {
+                    request
+                        .header("accept-encoding")
+                        .map(|value| Rc::<str>::from(String::from_utf8_lossy(value).as_ref()))
+                } else {
+                    None
+                };
                 let request = to_runtime(request, &self.trusted_proxies);
                 let root = self.site.document_root();
                 let response = match writer {
@@ -356,7 +361,7 @@ impl SiteHandler {
 /// What looking up a request path on disk led to.
 enum Found {
     /// A PHP file to run.
-    Script(std::path::PathBuf),
+    Script(std::path::PathBuf, Request),
     /// A response that is ready: a static file, or "not found".
     Answer(Response),
 }
@@ -399,9 +404,9 @@ fn to_runtime(mut request: Request, trusted_proxies: &TrustedProxies) -> HttpReq
 }
 
 fn from_runtime(response: HttpResponse) -> Response {
-    let mut converted = Response::new(response.status).with_body(response.body);
-    for (name, value) in response.headers {
-        converted = converted.with_header(name, value);
+    Response {
+        status: response.status,
+        headers: response.headers,
+        body: phera_server::Body::Bytes(response.body),
     }
-    converted
 }
