@@ -2,14 +2,16 @@
 //! For partially known arrays, retain a common value type without guessing a key.
 
 use super::*;
-use crate::types::{Field, Shape, ShapeKey, ShapeKind};
+use crate::types::{CollectionKind, Field, Shape, ShapeKey, ShapeKind};
 use std::sync::Arc;
 
 impl Analyzer<'_> {
     pub fn array_literal(&mut self, items: &[ArrayItem], scope: &mut Scope) -> ValueType {
         // Large literals still evaluate every element. Limit the precise shape
         // so repeatedly joining a scope with a large lookup table stays cheap.
-        let mut fields = (self.level >= 2 && items.len() <= 32).then(Vec::new);
+        let mut fields = (items.len() <= 32
+            && (self.level >= 2 || self.level >= 1 && self.options.unnecessary_null_coalesce))
+            .then(Vec::new);
         let mut next_key = Some(0i64);
         for item in items {
             let key = if let Some(key) = &item.key {
@@ -108,7 +110,7 @@ pub fn offset_type(target: &ValueType, key: &ValueType) -> ValueType {
             ValueType::String | ValueType::StringLiteral(_) | ValueType::StringRefinement(_) => {
                 ValueType::String
             }
-            ValueType::Union(types) => {
+            ValueType::Union(types) | ValueType::BenevolentUnion(types) => {
                 pending.extend(types.iter());
                 continue;
             }
@@ -127,7 +129,7 @@ pub fn offset_type(target: &ValueType, key: &ValueType) -> ValueType {
     }
 }
 
-fn shape_key(ty: &ValueType) -> Option<ShapeKey> {
+pub(super) fn shape_key(ty: &ValueType) -> Option<ShapeKey> {
     match ty {
         ValueType::IntLiteral(value) => Some(ShapeKey::Integer(*value)),
         ValueType::BoolLiteral(value) => Some(ShapeKey::Integer(i64::from(*value))),
@@ -169,7 +171,9 @@ pub fn iteration_types(ty: &ValueType) -> (ValueType, ValueType) {
                     values = values.join(&rest.value);
                 }
             }
-            ValueType::Union(arms) => pending.extend(arms.iter()),
+            ValueType::Union(arms) | ValueType::BenevolentUnion(arms) => {
+                pending.extend(arms.iter())
+            }
             ValueType::Template(template) => pending.push(&template.bound),
             _ => return (ValueType::Mixed, ValueType::Mixed),
         }
@@ -178,5 +182,30 @@ pub fn iteration_types(ty: &ValueType) -> (ValueType, ValueType) {
         (ValueType::Mixed, ValueType::Mixed)
     } else {
         (keys, values)
+    }
+}
+
+pub(super) fn nonempty_array(ty: &ValueType) -> bool {
+    match ty {
+        ValueType::Collection(collection) => {
+            collection.kind != CollectionKind::Iterable && collection.non_empty
+        }
+        ValueType::Shape(shape) => {
+            shape.kind != ShapeKind::Object && shape.fields.iter().any(|field| !field.optional)
+        }
+        _ => false,
+    }
+}
+
+pub(super) fn when_truthy(ty: ValueType) -> ValueType {
+    match ty {
+        ValueType::Collection(collection)
+            if collection.kind != CollectionKind::Iterable && !collection.non_empty =>
+        {
+            let mut collection = (*collection).clone();
+            collection.non_empty = true;
+            ValueType::Collection(std::sync::Arc::new(collection))
+        }
+        _ => ty,
     }
 }

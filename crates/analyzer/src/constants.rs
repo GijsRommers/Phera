@@ -9,6 +9,7 @@ pub enum ConstantValue {
     Int(i64),
     Bool(bool),
     Null,
+    EmptyArray,
 }
 
 impl ConstantValue {
@@ -16,7 +17,7 @@ impl ConstantValue {
         match self {
             Self::Int(n) => *n != 0,
             Self::Bool(b) => *b,
-            Self::Null => false,
+            Self::Null | Self::EmptyArray => false,
         }
     }
 }
@@ -33,6 +34,7 @@ fn evaluate(expression: &Expression, scope: &Scope, depth: usize) -> Option<Cons
         ExpressionKind::Literal(Literal::Int(n)) => Some(ConstantValue::Int(*n)),
         ExpressionKind::Literal(Literal::Bool(b)) => Some(ConstantValue::Bool(*b)),
         ExpressionKind::Literal(Literal::Null) => Some(ConstantValue::Null),
+        ExpressionKind::Array(items) if items.is_empty() => Some(ConstantValue::EmptyArray),
         ExpressionKind::Variable(Variable::Named(name)) => scope.values.get(name).cloned(),
         ExpressionKind::Unary {
             operator: UnaryOperator::Not,

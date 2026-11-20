@@ -1,7 +1,7 @@
 //! A generated message such as `'#^Function foo not found\.$#'` is a
 //! quoted literal, so checking a baseline requires no regex engine.
 
-pub(super) fn string(value: &str) -> Option<String> {
+pub(crate) fn string(value: &str) -> Option<String> {
     if let Some(quoted) = value.strip_prefix('\'') {
         let inner = quoted.strip_suffix('\'')?;
         let mut output = String::new();
