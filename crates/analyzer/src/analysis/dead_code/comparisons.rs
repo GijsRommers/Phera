@@ -2,6 +2,7 @@
 //! Ordering uses interval endpoints only when both operands are integers.
 
 use super::*;
+use crate::constant_types::int_bounds;
 use BinaryOperator as Op;
 use ValueType as T;
 
@@ -58,7 +59,7 @@ impl Analyzer<'_> {
 }
 
 fn compare(operator: Op, left: &T, right: &T) -> Option<bool> {
-    if let (Some((a, b)), Some((c, d))) = (interval(left), interval(right)) {
+    if let (Some((a, b)), Some((c, d))) = (int_bounds(left), int_bounds(right)) {
         return match operator {
             Op::Identical | Op::Equal if b < c || d < a => Some(false),
             Op::NotIdentical | Op::NotEqual if b < c || d < a => Some(true),
@@ -83,15 +84,6 @@ fn certain(yes: bool, no: bool) -> Option<bool> {
     match (yes, no) {
         (true, false) => Some(true),
         (false, true) => Some(false),
-        _ => None,
-    }
-}
-
-fn interval(ty: &T) -> Option<(i64, i64)> {
-    match ty {
-        T::Int => Some((i64::MIN, i64::MAX)),
-        T::IntRange(min, max) => Some((*min, *max)),
-        T::IntLiteral(value) => Some((*value, *value)),
         _ => None,
     }
 }

@@ -82,3 +82,12 @@ pub fn infer(
         _ => ValueType::Mixed,
     }
 }
+
+pub(crate) fn int_bounds(ty: &ValueType) -> Option<(i64, i64)> {
+    match ty {
+        ValueType::Int => Some((i64::MIN, i64::MAX)),
+        ValueType::IntRange(min, max) => Some((*min, *max)),
+        ValueType::IntLiteral(value) => Some((*value, *value)),
+        _ => None,
+    }
+}

@@ -102,6 +102,17 @@ impl Analyzer<'_> {
             if self.strict_mixed(ty) && !super::strict_mixed::accepts_mixed(expected) {
                 return true;
             }
+            if self.level >= 7
+                && matches!((expected, ty), (ValueType::ClassString(bound), ValueType::ClassString(actual))
+                    if bound.class_name().is_some() && **actual == ValueType::Object)
+            {
+                return true;
+            }
+            if self.level >= 7
+                && super::integer_range_contracts::range_excludes_values(expected, ty)
+            {
+                return true;
+            }
             expected.accepts(ty, self.index, policy) == Compatibility::Rejects
         };
         if self.level >= 7 {

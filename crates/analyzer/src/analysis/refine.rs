@@ -151,6 +151,16 @@ impl Analyzer<'_> {
         if self.level >= 2 {
             self.refine_type(expression, ValueType::Null, scope, false, expression.span);
         }
+        if self.level >= 7
+            && matches!(expression.kind, ExpressionKind::Index { .. })
+            && let Some(place) = crate::scope::Place::of(expression)
+            && scope.facts.get(&place).is_none()
+        {
+            let ty = self.place_type(&place, scope).without_null();
+            if ty != ValueType::Never {
+                scope.facts.record(place, ty, None);
+            }
+        }
         let mut root = expression;
         while let ExpressionKind::Index { target, .. } | ExpressionKind::Property { target, .. } =
             &root.kind
@@ -227,6 +237,21 @@ impl Analyzer<'_> {
         }
         if !truth {
             return;
+        }
+        if self.level >= 7
+            && function == "class_exists"
+            && let Some(place) = crate::scope::Place::of(&argument.value)
+        {
+            self.refine_place(
+                place,
+                ValueType::ClassString(std::sync::Arc::new(ValueType::Object)),
+                scope,
+                true,
+                None,
+            );
+        }
+        if self.level >= 7 && function == "array_key_exists" {
+            self.refine_array_key_exists(arguments, scope);
         }
         let symbol = match function.as_str() {
             "class_exists" | "interface_exists" | "trait_exists" | "enum_exists" => {

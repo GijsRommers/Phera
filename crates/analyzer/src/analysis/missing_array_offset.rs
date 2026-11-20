@@ -16,7 +16,7 @@ impl Analyzer<'_> {
         if self.level < 3 || quiet {
             return;
         }
-        let missing = match array {
+        let absent = match array {
             ValueType::Shape(shape)
                 if shape.kind != ShapeKind::Object && shape.remainder.is_none() =>
             {
@@ -38,12 +38,41 @@ impl Analyzer<'_> {
             }
             _ => false,
         };
-        if missing && !scope.facts.has_expression(expression) {
+        let perhaps_absent = self.level >= 7 && possible_missing_offset(array, key);
+        if (absent || perhaps_absent) && !scope.facts.has_expression(expression) {
+            let verb = if absent { "does" } else { "might" };
             self.diagnose(
                 "offsetAccess.notFound",
                 expression.span,
-                format!("Offset {key} does not exist on {array}."),
+                format!("Offset {key} {verb} not exist on {array}."),
             );
         }
     }
+}
+
+fn possible_missing_offset(array: &ValueType, key: &ValueType) -> bool {
+    let Some(key) = super::arrays::shape_key(key) else {
+        return false;
+    };
+    let alternatives = match array {
+        ValueType::Union(arms) => arms.as_ref(),
+        other => std::slice::from_ref(other),
+    };
+    let mut may_exist = false;
+    let mut may_be_missing = false;
+    for alternative in alternatives {
+        let ValueType::Shape(shape) = alternative else {
+            return false;
+        };
+        if shape.kind == ShapeKind::Object || shape.remainder.is_some() {
+            return false;
+        }
+        if let Some(field) = shape.fields.iter().find(|field| field.key == key) {
+            may_exist = true;
+            may_be_missing |= field.optional;
+        } else {
+            may_be_missing = true;
+        }
+    }
+    may_exist && may_be_missing
 }

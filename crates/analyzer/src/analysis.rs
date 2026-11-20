@@ -16,6 +16,7 @@ use phera_source::Span;
 
 mod argument_contracts;
 mod arguments;
+mod array_key_guards;
 mod array_merge;
 mod array_property_append;
 mod array_size;
@@ -54,6 +55,7 @@ mod if_ladder;
 mod implicit_mixed;
 mod in_array_guards;
 mod inherited_parameters;
+mod integer_range_contracts;
 mod internal_methods;
 mod interpolated_mixed;
 mod intrinsics;
