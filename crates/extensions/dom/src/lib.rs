@@ -15,6 +15,7 @@ pub use bindings::{Dom, Libxml};
 
 pub mod document;
 pub mod html;
+mod schema;
 pub mod serialize;
 pub mod tree;
 pub mod xml;

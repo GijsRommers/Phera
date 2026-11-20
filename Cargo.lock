@@ -2736,8 +2736,11 @@ dependencies = [
  "phera-extension-api",
  "precomputed-hash",
  "quick-xml",
+ "regex",
+ "rustix",
  "selectors",
  "tokio",
+ "url",
 ]
 
 [[package]]

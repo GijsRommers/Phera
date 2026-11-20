@@ -90,6 +90,9 @@ session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix proce
 functions, and POSIX queries.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
+Legacy `DOMDocument` supports local XSD validation for common content models,
+including Symfony's service configuration. Complex type derivation and XSD
+identity constraints remain unsupported.
 
 - Documents and elements include `Dom\Document`, `Dom\HTMLDocument`,
   `Dom\XMLDocument`, `Dom\Element`, `Dom\HTMLElement`, `Dom\Attr`.

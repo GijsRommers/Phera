@@ -84,6 +84,20 @@ pub(super) fn publish_with_source(
     }
 }
 
+pub(super) fn publish_schema(
+    context: &mut dyn Context,
+    function: &str,
+    source: &str,
+    errors: Vec<ParseError>,
+) {
+    for mut error in errors {
+        error.file = source.to_owned();
+        if record(context, &error) {
+            context.warning(format!("{function}(): {}", error.message.trim_end()));
+        }
+    }
+}
+
 fn record(context: &mut dyn Context, error: &ParseError) -> bool {
     let state = context.state().get_or_default::<Errors>();
     state.last = Some(error.clone());
