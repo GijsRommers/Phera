@@ -7,8 +7,6 @@
 //! runs every request from the top, so each fork must print exactly what
 //! PHP prints for one run of the file: the oracle is real PHP.
 
-mod extension_state;
-
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -261,6 +259,25 @@ async fn each_fork_destroys_its_own_copies_and_the_snapshot_keeps_its_objects() 
     .await
     .expect("snapshot");
     assert_eq!(answers, ["request\nclosed\n", "request\nclosed\n"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_fork_keeps_independent_images_and_fileinfo_flags() {
+    let answers = boot_and_answer(
+        "gd-fileinfo",
+        include_str!("snapshots/extension_state.php"),
+        &["/index.php", "/index.php?mutate=1", "/index.php"],
+    )
+    .await
+    .expect("GD and fileinfo boot state supports a snapshot");
+    assert_eq!(
+        answers,
+        [
+            "40203040 0 text/plain\n",
+            "20224466 1 us-ascii\n",
+            "40203040 0 text/plain\n",
+        ]
+    );
 }
 
 #[test]
