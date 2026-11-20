@@ -186,6 +186,7 @@ mod web_output;
 
 pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
+    StreamInclude,
 };
 pub use web_output::WebOutput;
 

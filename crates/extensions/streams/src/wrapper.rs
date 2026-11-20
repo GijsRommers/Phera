@@ -124,9 +124,35 @@ pub(crate) async fn open_with_errors(
     nonempty_path(name)?;
     // The PHP mode parser takes a C string and keeps at most 15 bytes in metadata.
     let mode = mode.split(|byte| *byte == 0).next().unwrap_or_default();
-    let (result, warning) = match Target::parse(name) {
+    let original = Target::parse(name);
+    let disabled = match original {
+        Target::Php(_) | Target::Data(_) | Target::Gzip(_) => {
+            crate::user_wrappers::disabled_scheme(context, name)
+        }
+        _ => None,
+    };
+    let filter = if matches!(original, Target::Php(_)) && disabled.is_none() {
+        match crate::filters::FilterUri::parse(name) {
+            Ok(filter) => filter,
+            Err(message) => return Err(NativeError::error(message)),
+        }
+    } else {
+        None
+    };
+    let target_name = filter.as_ref().map_or(name, |filter| filter.path);
+    if filter.is_some() {
+        nonempty_path(target_name)?;
+    }
+    let target = if let Some(scheme) = disabled {
+        Target::Unavailable(scheme)
+    } else if filter.is_some() {
+        Target::parse(target_name)
+    } else {
+        original
+    };
+    let (result, warning) = match target {
         Target::Gzip(filename) => {
-            return open_gzip(
+            let opened = open_gzip(
                 context,
                 function,
                 filename,
@@ -138,12 +164,29 @@ pub(crate) async fn open_with_errors(
                     wrapper: Wrapper::Gzip,
                 },
             )
-            .await;
+            .await?;
+            return Ok(opened.map(|stream| attach_filters(context, stream, filter, function)));
         }
-        Target::File(filename) => (
-            open_file(context, filename, name, mode, include_path).await?,
-            None,
-        ),
+        Target::File(filename) => {
+            let files = files(context);
+            let disabled = files
+                .wrappers
+                .as_ref()
+                .is_some_and(|wrappers| wrappers.get(b"file").is_none());
+            let mask = files.mask;
+            let result = if disabled {
+                errors.report(
+                    context,
+                    format!(
+                        "{function}(): file:// wrapper is disabled in the server configuration"
+                    ),
+                )?;
+                Err(OpenFailure::new("no suitable wrapper could be found"))
+            } else {
+                open_file(context, filename, target_name, mode, include_path, mask).await?
+            };
+            (result, None)
+        }
         Target::RemoteFile => (
             Err(OpenFailure::new("no suitable wrapper could be found")),
             Some(format!(
@@ -152,7 +195,7 @@ pub(crate) async fn open_with_errors(
             )),
         ),
         Target::Php(target) => {
-            match open_php(target, mode, name, files(context).input.clone()).await? {
+            match open_php(target, mode, target_name, files(context).input.clone()).await? {
                 Some(result) => (
                     result.map_err(|error| OpenFailure::new(reason(&error))),
                     None,
@@ -164,7 +207,7 @@ pub(crate) async fn open_with_errors(
             }
         }
         Target::Data(data) => (
-            crate::data_uri::open(data, mode, name).map_err(OpenFailure::new),
+            crate::data_uri::open(data, mode, target_name).map_err(OpenFailure::new),
             None,
         ),
         Target::Unavailable(scheme) => {
@@ -172,14 +215,18 @@ pub(crate) async fn open_with_errors(
                 errors.report(context, wrapper_message(function, scheme))?;
             }
             wrapper_warning(context, function, scheme);
-            (open_file(context, name, name, mode, false).await?, None)
+            let mask = files(context).mask;
+            (
+                open_file(context, target_name, name, mode, false, mask).await?,
+                None,
+            )
         }
     };
     if let Some(warning) = warning {
         errors.report(context, warning)?;
     }
     match result {
-        Ok(stream) => Ok(Some(stream)),
+        Ok(stream) => Ok(Some(attach_filters(context, stream, filter, function))),
         Err(failure) => {
             let uri = failure
                 .resolved
@@ -203,6 +250,7 @@ async fn open_file(
     uri: &[u8],
     mode: &[u8],
     include_path: bool,
+    mask: u32,
 ) -> Result<Result<Stream, OpenFailure>, NativeError> {
     let Some(parsed) = Mode::parse(mode) else {
         return Ok(Err(OpenFailure::new(
@@ -210,7 +258,6 @@ async fn open_file(
         )));
     };
     let include = include_path.then(|| (context.include_path(), context.script_path()));
-    let mask = files(context).mask;
     let directory = directory(context);
     let found = include
         .and_then(|(include, script)| search(directory, filename, &include, script.as_deref()));
@@ -340,4 +387,16 @@ pub fn resolve_file(context: &mut dyn Context, name: &[u8]) -> io::Result<std::p
         Target::File(bytes) => directory(context).resolve(path(bytes)),
         _ => Err(io::ErrorKind::Unsupported.into()),
     }
+}
+
+fn attach_filters(
+    context: &mut dyn Context,
+    mut stream: Stream,
+    filter: Option<crate::filters::FilterUri<'_>>,
+    function: &str,
+) -> Stream {
+    if let Some(filter) = filter {
+        stream.filters = Some(Box::new(filter.build(context, function, &stream.mode)));
+    }
+    stream
 }

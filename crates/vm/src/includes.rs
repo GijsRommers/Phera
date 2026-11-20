@@ -6,7 +6,9 @@ use phera_bytecode::{IncludeKind, Reg};
 use phera_extension_api::{NativeError, WorkingDirectory};
 use phera_value::Value;
 
-use crate::include_lookup::{IncludeDirectory, IncludeLookup, RelativeInclude, path_spelling};
+use crate::include_lookup::{
+    IncludeDirectory, IncludeLookup, RelativeInclude, StreamInclude, path_spelling,
+};
 use crate::{CodeLoadError, Vm, diagnostics::SourceLocation};
 
 impl Vm {
@@ -19,12 +21,62 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let once = matches!(kind, IncludeKind::IncludeOnce | IncludeKind::RequireOnce);
         let name = self.stringify_value(&self.get(path)).await?;
+        if self.include_state.stream_wrappers
+            && Box::pin(self.include_stream(destination, &name, kind, once)).await?
+        {
+            return Ok(());
+        }
         let unit = match self.load_include(name.as_bytes()).await? {
             Ok(unit) => unit,
             Err(reason) => {
-                return self.failed_include(destination, &name.to_string_lossy(), kind, &reason);
+                return self.failed_include(
+                    destination,
+                    &name.to_string_lossy(),
+                    kind,
+                    Some(&reason),
+                );
             }
         };
+        self.enter_include(destination, unit, once)
+    }
+
+    #[cold]
+    async fn include_stream(
+        &mut self,
+        destination: Reg,
+        name: &phera_value::PhpString,
+        kind: IncludeKind,
+        once: bool,
+    ) -> Result<bool, NativeError> {
+        let Some(loader) = self.include_state.loader() else {
+            return Ok(false);
+        };
+        if !loader.wraps_include(self, name.as_bytes()) {
+            return Ok(false);
+        }
+        match loader
+            .load_stream(self, name.as_bytes(), include_name(kind), once)
+            .await?
+        {
+            StreamInclude::LocalFile => return Ok(false),
+            StreamInclude::AlreadyIncluded => self.set(destination, Value::Bool(true)),
+            StreamInclude::Unavailable => {
+                self.failed_include(destination, &name.to_string_lossy(), kind, None)?
+            }
+            StreamInclude::Compiled(Ok(unit)) => self.enter_include(destination, unit, once)?,
+            StreamInclude::Compiled(Err(error)) => {
+                return Err(self.dynamic_compile_failure(error).await);
+            }
+        }
+        Ok(true)
+    }
+
+    fn enter_include(
+        &mut self,
+        destination: Reg,
+        unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
+        once: bool,
+    ) -> Result<(), NativeError> {
         if once && self.include_state.contains(&unit.file) {
             self.set(destination, Value::Bool(true));
             return Ok(());
@@ -41,23 +93,20 @@ impl Vm {
         destination: Reg,
         name: &str,
         kind: IncludeKind,
-        reason: &str,
+        reason: Option<&str>,
     ) -> Result<(), NativeError> {
-        let construct = match kind {
-            IncludeKind::Include => "include",
-            IncludeKind::IncludeOnce => "include_once",
-            IncludeKind::Require => "require",
-            IncludeKind::RequireOnce => "require_once",
-        };
-        let display_name = Path::new(name)
-            .canonicalize()
-            .ok()
-            .filter(|path| path.is_dir() || reason == "Permission denied")
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_else(|| name.to_owned());
-        self.warn(format!(
-            "{construct}({display_name}): Failed to open stream: {reason}"
-        ));
+        let construct = include_name(kind);
+        if let Some(reason) = reason {
+            let display_name = Path::new(name)
+                .canonicalize()
+                .ok()
+                .filter(|path| path.is_dir() || reason == "Permission denied")
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|| name.to_owned());
+            self.warn(format!(
+                "{construct}({display_name}): Failed to open stream: {reason}"
+            ));
+        }
         if matches!(kind, IncludeKind::Require | IncludeKind::RequireOnce) {
             return Err(NativeError::error(format!(
                 "Failed opening required '{name}' (include_path='{}')",
@@ -153,5 +202,14 @@ impl Vm {
             }
         }
         Ok(())
+    }
+}
+
+fn include_name(kind: IncludeKind) -> &'static str {
+    match kind {
+        IncludeKind::Include => "include",
+        IncludeKind::IncludeOnce => "include_once",
+        IncludeKind::Require => "require",
+        IncludeKind::RequireOnce => "require_once",
     }
 }
