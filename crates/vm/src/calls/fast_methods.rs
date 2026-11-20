@@ -136,11 +136,14 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
-        let called = match (binding, context) {
-            (ClassBinding::Forward, Some(context)) => context
+        // A call with `$this` takes its called class from `$this`; only a
+        // static call needs it worked out here.
+        let called = match (receiver.is_some(), binding, context) {
+            (true, _, _) => None,
+            (false, ClassBinding::Forward, Some(context)) => context
                 .called_index()
                 .or_else(|| context.called().map(|called| called.index)),
-            _ => Some(class.index),
+            (false, _, _) => Some(class.index),
         };
         let MethodBody::User(function) = found.method.body else {
             return Step::Slow;
