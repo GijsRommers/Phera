@@ -2,7 +2,7 @@
 
 - Date: 2026-11-20
 - Area: Server and requests
-- Decided by: Codex
+- Decided by: Design
 
 ## Decision
 
