@@ -271,32 +271,49 @@ impl UserFile {
             } else if whence == 0 && offset < 0 {
                 return Ok(false);
             }
-            let value = self
-                .invoke(
-                    context,
-                    "stream_seek",
-                    vec![Value::Int(offset), Value::Int(whence)],
-                )
-                .await?;
-            if let Some(value) = value {
-                self.buffer.borrow_mut().clear();
-                if to_bool(&value) {
-                    match self.invoke(context, "stream_tell", Vec::new()).await? {
-                        Some(Value::Int(position)) => {
-                            self.position.set(position);
-                            self.eof.set(false);
-                            return Ok(true);
-                        }
-                        None => missing(context, &self.object, function, "stream_tell", ""),
-                        _ => (),
-                    }
-                }
-                return Ok(false);
+            if let Some(seeked) = self
+                .seek_callback(context, function, offset, whence)
+                .await?
+            {
+                return Ok(seeked);
             }
             self.seekable.set(false);
         }
         context.warning(format!("{function}(): Stream does not support seeking"));
         Ok(false)
+    }
+
+    /// Append mode asks for SEEK_CUR directly to learn the wrapper's starting position.
+    pub(super) async fn seek_callback(
+        &self,
+        context: &mut dyn Context,
+        function: &str,
+        offset: i64,
+        whence: i64,
+    ) -> Result<Option<bool>, NativeError> {
+        let Some(value) = self
+            .invoke(
+                context,
+                "stream_seek",
+                vec![Value::Int(offset), Value::Int(whence)],
+            )
+            .await?
+        else {
+            return Ok(None);
+        };
+        self.buffer.borrow_mut().clear();
+        if to_bool(&value) {
+            match self.invoke(context, "stream_tell", Vec::new()).await? {
+                Some(Value::Int(position)) => {
+                    self.position.set(position);
+                    self.eof.set(false);
+                    return Ok(Some(true));
+                }
+                None => missing(context, &self.object, function, "stream_tell", ""),
+                _ => (),
+            }
+        }
+        Ok(Some(false))
     }
 
     pub async fn stat(

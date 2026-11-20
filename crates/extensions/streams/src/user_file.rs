@@ -166,7 +166,7 @@ pub(crate) async fn open(
         Value::String(path) => Some(path.as_bytes().to_vec()),
         _ => None,
     };
-    Ok(Some(Rc::new(UserFile {
+    let file = Rc::new(UserFile {
         object,
         context: stream_context,
         opened_path,
@@ -180,7 +180,11 @@ pub(crate) async fn open(
         buffer: RefCell::new(std::collections::VecDeque::new()),
         writing: Cell::new(false),
         busy: Cell::new(false),
-    })))
+    });
+    if mode.first() == Some(&b'a') {
+        file.seek_callback(context, function, 0, 1).await?;
+    }
+    Ok(Some(file))
 }
 
 pub(crate) fn enabled(context: &dyn Context, directive: &[u8], default: bool) -> bool {
