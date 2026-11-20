@@ -1,4 +1,4 @@
-# curl is built on `hyper` and rustls, not on libcurl
+# Curl uses the Rust HTTP stack
 
 - Date: 2026-11-19
 - Area: Safety and dependencies
@@ -6,12 +6,17 @@
 
 ## Decision
 
-curl is built on `hyper` and rustls, not on libcurl. Only `http` and `https` exist; other protocols are refused with libcurl's error.
+Curl uses Hyper for HTTP/1.1 and HTTP/2, Tokio for asynchronous I/O, and rustls
+for TLS. It supports `http` and `https` and refuses other schemes with libcurl's
+unsupported-protocol error.
 
 ## Why
 
-Same reason as DOM. Refusing `file://`, `gopher://` and the like also closes a class of request-forgery problems.
+The runtime's scheduler handles socket, timer, and PHP callback waits. Refusing
+`file://`, `gopher://`, and similar protocols removes a class of request-forgery
+paths.
 
 ## Turned down
 
-Binding libcurl.
+Binding libcurl with a separate event loop and PHP callback bridge, and
+enabling non-HTTP protocols.

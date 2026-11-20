@@ -72,6 +72,7 @@ phera-ext-ctype = { path = "crates/extensions/ctype" }
 phera-ext-dom = { path = "crates/extensions/dom" }
 quick-xml = "0.42"
 html5ever = "0.40"
+phera-ext-curl = { path = "crates/extensions/curl" }
 phera-ext-date = { path = "crates/extensions/date" }
 phera-ext-filter = { path = "crates/extensions/filter" }
 phera-ext-hash = { path = "crates/extensions/hash" }
@@ -146,6 +147,11 @@ rustix = { version = "1", features = ["fs", "param", "process", "system", "termi
 rustix-libc-wrappers = { version = "0.1.1", features = ["process"] }
 sysinfo = { version = "0.39.3", default-features = false, features = ["system"] }
 tempfile = "3"
+async-compression = { version = "0.4", features = ["tokio", "gzip", "zlib", "deflate", "brotli"] }
+cookie_store = { version = "0.22", default-features = false, features = ["preserve_order"] }
+psl = "2"
+tokio-util = { version = "0.7", features = ["io"] }
+tower-service = "0.3"
 memchr = "2"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }

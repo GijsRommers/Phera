@@ -355,7 +355,7 @@ pub fn to_int(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, OpError> {
             None => 0,
         }),
         Value::Array(a) => Ok(i64::from(!a.is_empty())),
-        // Casting an object warns and gives 1; only arithmetic on one throws.
+        // Casting an ordinary object warns and gives 1; only arithmetic on one throws.
         Value::Object(o) => {
             if let Some(Value::Int(value)) = o.class.cast(o, ObjectCast::Int) {
                 return Ok(value);

@@ -117,6 +117,7 @@ impl Runtime {
         registry.load(&phera_ext_gmp::Gmp);
         registry.load(&phera_ext_ctype::Ctype);
         registry.load(&phera_ext_date::Date);
+        registry.load(&phera_ext_curl::Curl);
         registry.load(&phera_ext_dom::Libxml);
         registry.load(&phera_ext_dom::Dom);
         registry.load(&phera_ext_filter::Filter);
