@@ -37,7 +37,7 @@ fn selected_update_unlocks_only_the_requested_package_and_optional_dependencies(
     let root = directory.path();
     let mut options = options(root);
     let mut packages = vec![
-        package("test/a", "1.0.0", json!({"test/b": "^1"})),
+        package("test/a", "1.0.0", json!({})),
         package("test/b", "1.0.0", json!({})),
         package("test/c", "1.0.0", json!({})),
     ];
@@ -84,10 +84,7 @@ fn dry_run_and_failed_edits_preserve_files_and_hash_refresh_preserves_packages()
     options.dry_run = false;
     add_many(root, &specs, true, &options).unwrap();
     let mut data = load(&manifest_path);
-    assert_eq!(
-        data["require-dev"],
-        json!({"test/a":"^1.0.0", "test/b":"^2"})
-    );
+    assert_eq!(data["require-dev"], json!({"test/a":"^1.0", "test/b":"^2"}));
     let lock_before = fs::read(&lock_path).unwrap();
     let impossible = ["test/a:^99".to_owned()];
     let edit_before = fs::read(&manifest_path).unwrap();

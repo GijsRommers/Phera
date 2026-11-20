@@ -1,6 +1,10 @@
 //! Keep unrelated packages fixed during `phera update vendor/package`.
 
-use crate::{Lock, Package};
+use crate::{
+    Lock, Package, Project,
+    registry::Registry,
+    version::{Constraint, Version},
+};
 use anyhow::{Result, bail};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,7 +17,7 @@ impl Locked {
     pub(crate) fn select(
         previous: Option<&Lock>,
         requested: &[String],
-        dependencies: bool,
+        transitive: Option<(&Project, &Registry)>,
     ) -> Result<Self> {
         if requested.is_empty() {
             return Ok(Self::default());
@@ -23,23 +27,48 @@ impl Locked {
             .flat_map(|lock| lock.packages(false))
             .map(|package| (package.name.clone(), package))
             .collect();
-        let mut pending = requested.to_vec();
+        let mut pending: Vec<(String, String)> = requested
+            .iter()
+            .map(|name| (name.clone(), "*".into()))
+            .collect();
         let mut seen = BTreeSet::new();
-        while let Some(name) = pending.pop() {
-            if !seen.insert(name.clone()) {
+        while !packages.is_empty()
+            && let Some((name, wanted)) = pending.pop()
+        {
+            if super::is_platform(&name) || !seen.insert((name.clone(), wanted.clone())) {
                 continue;
             }
-            let package = packages.remove(&name);
-            if dependencies && let Some(package) = package {
-                for requirement in package.field("require").as_object().into_iter().flatten() {
-                    let (name, _) = requirement;
-                    pending.push(name.clone());
-                    pending.extend(
-                        packages
-                            .values()
-                            .filter(|package| offers(package, name))
-                            .map(|package| package.name.clone()),
-                    );
+            packages.remove(&name);
+            let Some((project, registry)) = transitive else {
+                continue;
+            };
+            pending.extend(
+                packages
+                    .values()
+                    .filter(|package| offers(package, &name))
+                    .map(|package| (package.name.clone(), "*".into())),
+            );
+            let wanted = Constraint::parse(&wanted)?;
+            let root = project.data["require-dev"][&name]
+                .as_str()
+                .or_else(|| project.data["require"][&name].as_str())
+                .map(Constraint::parse)
+                .transpose()?;
+            for package in registry.packages(&name)? {
+                if !matches_candidate(&package, &wanted)
+                    || root
+                        .as_ref()
+                        .is_some_and(|root| !matches_candidate(&package, root))
+                {
+                    continue;
+                }
+                for (name, wanted) in package.field("require").as_object().into_iter().flatten() {
+                    if let Some(wanted) = wanted.as_str() {
+                        pending.push((name.clone(), wanted.to_owned()));
+                    }
+                }
+                for (name, _) in package.field("replace").as_object().into_iter().flatten() {
+                    packages.remove(name);
                 }
             }
         }
@@ -55,6 +84,16 @@ impl Locked {
             .values()
             .filter(move |package| offers(package, name))
     }
+}
+
+fn matches_candidate(package: &Package, wanted: &Constraint) -> bool {
+    let Ok(version) = Version::parse(&package.version) else {
+        return false;
+    };
+    let alias = package.field("extra")["branch-alias"][&package.version]
+        .as_str()
+        .and_then(|alias| Version::branch_alias(alias).ok());
+    wanted.matches(&version) || alias.is_some_and(|alias| wanted.matches(&alias))
 }
 
 pub(crate) fn validate_request(names: &[String], previous: Option<&Lock>) -> Result<()> {

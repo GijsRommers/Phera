@@ -1,7 +1,13 @@
 //! Solve updates and publish matching composer.json and composer.lock files.
 
 use crate::{Lock, Options, Package, Project, content_hash, lock_writer, platform, plugins};
-use crate::{install_locked, registry::Registry, scripts::Runner, solver, version::Constraint};
+use crate::{
+    install_locked,
+    registry::Registry,
+    scripts::Runner,
+    solver,
+    version::{Stability, Version},
+};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,13 +44,15 @@ pub(crate) fn run(
     if edit.is_none() && !names.is_empty() {
         solver::locked::validate_request(names, previous.as_ref())?;
     }
-    let pinned =
-        solver::locked::Locked::select(previous.as_ref(), names, options.with_all_dependencies)?;
     let mut runner = Runner::default();
     if !options.dry_run && edit.is_none() {
         runner.event(&project, options, "pre-update-cmd")?;
     }
     let registry = Registry::new(&project, options)?;
+    let transitive = options
+        .with_all_dependencies
+        .then_some((&project, &registry));
+    let pinned = solver::locked::Locked::select(previous.as_ref(), names, transitive)?;
     let packages = solver::solve(&project, options, &registry, &pinned)?;
     if let Some(edit) = &edit {
         for (section, name) in &edit.inferred {
@@ -52,16 +60,7 @@ pub(crate) fn run(
                 .iter()
                 .find(|package| package.name == *name)
                 .with_context(|| format!("Pass a version constraint for {name}."))?;
-            let mut constraint = found.version.clone();
-            if crate::version::Version::parse(&constraint)?.stability()
-                == crate::version::Stability::Stable
-            {
-                let caret = format!("^{}", constraint.trim_start_matches('v'));
-                if Constraint::parse(&caret).is_ok() {
-                    constraint = caret;
-                }
-            }
-            project.data[section][name] = constraint.into();
+            project.data[section][name] = recommended(found)?.into();
         }
     }
     let lock = lock_writer::build(&project, options, &packages)?;
@@ -93,6 +92,36 @@ pub(crate) fn run(
         return Ok(());
     }
     install_locked(&project.directory, options, true, &mut runner)
+}
+
+fn recommended(package: &Package) -> Result<String> {
+    let version = Version::parse(&package.version)?;
+    let stability = version.stability();
+    let normalized = if stability == Stability::Dev {
+        let Some(alias) = package.field("extra")["branch-alias"][&package.version]
+            .as_str()
+            .and_then(|alias| Version::branch_alias(alias).ok())
+        else {
+            return Ok(package.version.clone());
+        };
+        alias.normalized().replace("9999999", "0")
+    } else {
+        version.normalized().into()
+    };
+    let numeric = normalized.split('-').next().unwrap_or_default();
+    let parts: Vec<_> = numeric.split('.').collect();
+    if parts.len() != 4 {
+        return Ok(package.version.clone());
+    }
+    let count = if parts[0] == "0" { 3 } else { 2 };
+    let flag = match stability {
+        Stability::Stable => "",
+        Stability::Rc => "@RC",
+        Stability::Beta => "@beta",
+        Stability::Alpha => "@alpha",
+        Stability::Dev => "@dev",
+    };
+    Ok(format!("^{}{flag}", parts[..count].join(".")))
 }
 
 fn refresh_hash(project: &Project, path: &Path, previous: Option<Value>, dry: bool) -> Result<()> {
