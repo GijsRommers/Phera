@@ -32,52 +32,60 @@ pub fn register(registry: &mut Registry) {
         registry.constant(name, value);
     }
     registry.class(ClassEntry {
-        methods: &[
-            M::public_async("__construct", &[DEFAULT_FLAGS, DATABASE], construct),
-            M::public_async("file", &[FILENAME, DEFAULT_FLAGS, CONTEXT], method_file)
-                .tentative_return("string|false"),
-            M::public("buffer", &[BUFFER, DEFAULT_FLAGS, CONTEXT], method_buffer)
-                .tentative_return("string|false"),
-            M::public("set_flags", &[FLAGS], method_set_flags).tentative_return("true"),
-        ],
+        methods: const {
+            &[
+                M::public_async("__construct", &[DEFAULT_FLAGS, DATABASE], construct),
+                M::public_async("file", &[FILENAME, DEFAULT_FLAGS, CONTEXT], method_file)
+                    .tentative_return("string|false"),
+                M::public("buffer", &[BUFFER, DEFAULT_FLAGS, CONTEXT], method_buffer)
+                    .tentative_return("string|false"),
+                M::public("set_flags", &[FLAGS], method_set_flags).tentative_return("true"),
+            ]
+        },
         hooks: Some(&ClassHooks {
-            clone: Some(reject_clone),
+            clone: Some(phera_extension_api::NativeClone::Forbidden),
             forbid_serialization: true,
             ..ClassHooks::EMPTY
         }),
         ..ClassEntry::class(CLASS)
     });
-    for (entry, result) in [
-        (
-            F::asynchronous("finfo_open", &[DEFAULT_FLAGS, DATABASE], open),
-            "finfo|false",
-        ),
-        (F::sync("finfo_close", &[FINFO], close), "true"),
-        (
-            F::sync("finfo_set_flags", &[FINFO, FLAGS], set_flags),
-            "true",
-        ),
-        (
-            F::sync(
-                "finfo_buffer",
-                &[FINFO, BUFFER, DEFAULT_FLAGS, CONTEXT],
-                buffer,
+    for (entry, result) in const {
+        [
+            (
+                F::asynchronous("finfo_open", &[DEFAULT_FLAGS, DATABASE], open),
+                "finfo|false",
             ),
-            "string|false",
-        ),
-        (
-            F::asynchronous(
-                "finfo_file",
-                &[FINFO, FILENAME, DEFAULT_FLAGS, CONTEXT],
-                file,
+            (F::sync("finfo_close", &[FINFO], close), "true"),
+            (
+                F::sync("finfo_set_flags", &[FINFO, FLAGS], set_flags),
+                "true",
             ),
-            "string|false",
-        ),
-        (
-            F::asynchronous("mime_content_type", &[P::new("filename", T::Untyped)], mime),
-            "string|false",
-        ),
-    ] {
+            (
+                F::sync(
+                    "finfo_buffer",
+                    &[FINFO, BUFFER, DEFAULT_FLAGS, CONTEXT],
+                    buffer,
+                ),
+                "string|false",
+            ),
+            (
+                F::asynchronous(
+                    "finfo_file",
+                    &[FINFO, FILENAME, DEFAULT_FLAGS, CONTEXT],
+                    file,
+                ),
+                "string|false",
+            ),
+            (
+                F::asynchronous(
+                    "mime_content_type",
+                    const { &[P::new("filename", T::Untyped)] },
+                    mime,
+                ),
+                "string|false",
+            ),
+        ]
+    } {
         registry.function(entry);
         registry.describe_function(entry.name, result, None);
     }
@@ -85,13 +93,6 @@ pub fn register(registry: &mut Registry) {
 
 fn object_error() -> NativeError {
     NativeError::error("Invalid finfo object")
-}
-
-fn reject_clone(object: &Rc<Object>, _: &Object) -> Result<(), NativeError> {
-    Err(NativeError::error(format!(
-        "Trying to clone an uncloneable object of class {}",
-        object.class.name()
-    )))
 }
 
 fn install(object: &Object, arguments: &[Value]) {
