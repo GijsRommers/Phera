@@ -20,7 +20,7 @@ use phera_value::Value;
 
 use crate::Vm;
 use crate::calls::call_stack::CallStack;
-use crate::calls::frame::{Frame, TraversalMode};
+use crate::calls::frame::Frame;
 use crate::calls::registers::Registers;
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
@@ -329,20 +329,37 @@ impl Machine<'_> {
                 }
             }
             Instruction::IterNextKeyed {
-                iter, key, value, ..
+                iter,
+                key,
+                value,
+                end,
             } if position.frame.has_extras() => {
                 let Some(extras) = self.stack.current_extras_present() else {
                     return Step::Slow;
                 };
                 let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
-                if iterators.get_mut(iter.0).is_some_and(|state| {
-                    state.traversal_mode == TraversalMode::Value
-                        && crate::iteration::native_step(state, Some(key), value, slots)
-                }) {
-                    Step::Done(ip)
-                } else {
-                    Step::Slow
+                // In the guarded loop, overwriting the variables could let go
+                // of an object whose destructor must run at once.
+                if GUARDED
+                    && [key, value].iter().any(|register| {
+                        slots
+                            .get(register.index())
+                            .is_none_or(crate::fast::owns_heap_values)
+                    })
+                {
+                    return Step::Slow;
+                }
+                match crate::iteration::keyed_step(
+                    iter,
+                    (key, value),
+                    end,
+                    iterators,
+                    slots,
+                    &mut ip,
+                ) {
+                    true => Step::Done(ip),
+                    false => Step::Slow,
                 }
             }
             Instruction::AppendLocal { local, src } => {
