@@ -11,7 +11,9 @@ use crate::constants::{
 };
 use crate::natural::natural_compare;
 
-pub(super) fn can_invoke_string_comparison(left: &Value, right: &Value) -> bool {
+/// Native comparisons can also involve a scalar and an object. Two arrays
+/// may reach an object comparison at any depth.
+pub(super) fn needs_context_comparison(left: &Value, right: &Value) -> bool {
     matches!(
         (&*left.deref(), &*right.deref()),
         (Value::Object(_), _) | (_, Value::Object(_)) | (Value::Array(_), Value::Array(_))
@@ -56,7 +58,7 @@ impl SortFlags {
         right: &Value,
     ) -> Result<Ordering, NativeError> {
         match self {
-            Self::Regular if can_invoke_string_comparison(left, right) => {
+            Self::Regular if needs_context_comparison(left, right) => {
                 Ok(context.compare(left, right).await?.cmp(&0))
             }
             Self::String { .. } | Self::Natural { .. } if left.is_object() || right.is_object() => {

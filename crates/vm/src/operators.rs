@@ -92,7 +92,7 @@ impl Vm {
                     &left,
                     &right,
                     self.diagnostic_reporter.operator(),
-                    &mut crate::object_comparison::compare_objects,
+                    &mut crate::object_comparison::compare_objects_without_context,
                 );
                 match step {
                     Ok(StringComparisonStep::Complete(order)) => {

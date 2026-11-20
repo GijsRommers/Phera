@@ -73,6 +73,17 @@ impl CodeCache {
                     {
                         phera_compiler::NativeFunction::General
                     }
+                    phera_extension_api::NativeFn::Async(_)
+                        if entry
+                            .params
+                            .last()
+                            .is_some_and(|parameter| parameter.variadic)
+                            && entry.params.iter().all(|parameter| !parameter.by_ref) =>
+                    {
+                        phera_compiler::NativeFunction::Direct {
+                            positional_by_value: 4,
+                        }
+                    }
                     _ => phera_compiler::NativeFunction::Direct {
                         positional_by_value: entry
                             .params

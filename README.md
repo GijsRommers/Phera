@@ -86,6 +86,10 @@ For example, `json_decode($json, flags: JSON_THROW_ON_ERROR)` uses the default
 depth. Reflection reads the same defaults, and native errors include the
 function or method that raised them in the exception trace.
 
+`min()`, `max()`, and loose array searches use native object comparisons,
+including comparisons inside nested arrays. `range()` accepts Stringable
+endpoints in weak mode.
+
 Unix scripts can launch programs with `shell_exec()`, backticks, and the process
 functions. Backticks emit PHP 8.5's compile-time deprecation. On Unix, `mail()`
 and `mb_send_mail()` pipe the message to the command in `sendmail_path`.

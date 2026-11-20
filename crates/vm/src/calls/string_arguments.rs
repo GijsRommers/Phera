@@ -159,6 +159,7 @@ fn native_string_param(parameters: &[Param], index: usize, value: &Value) -> boo
                 ParamType::String
                     | ParamType::ArrayOrString
                     | ParamType::IntOrString
+                    | ParamType::StringOrNumber
                     | ParamType::CertificateOrString
             )
         })

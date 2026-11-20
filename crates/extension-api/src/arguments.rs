@@ -19,7 +19,7 @@
 //! guarantees.
 
 use phera_value::{
-    NumVal, PhpString, Value, cast_to_bool, float_repr, parse_numeric, to_php_string,
+    NumVal, ObjectCast, PhpString, Value, cast_to_bool, float_repr, parse_numeric, to_php_string,
 };
 
 use crate::{Context, FunctionEntry, NativeError, Param, ParamType};
@@ -318,6 +318,7 @@ fn convert(
         ParamType::StringOrNumber => match value {
             Value::String(_) | Value::Int(_) | Value::Float(_) => Some(None),
             _ if strict => None,
+            Value::Object(object) => object.class.cast(object, ObjectCast::String).map(Some),
             _ => to_number(value, site, context).map(Some),
         },
         ParamType::ArrayOrNumber => match value {
