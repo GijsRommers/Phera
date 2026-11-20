@@ -9,11 +9,13 @@
 //! mask for a one-bit check of an argument), parameter 2 by reference, the
 //! return type `float`, how many registers a frame needs. It is made once,
 //! when the file is loaded, and read on every call, so it is kept small.
+//! It also holds the function's instructions, shared with the compiled
+//! file, so that a call or a return reaches them from here.
 
 use std::sync::Arc;
 
 pub(crate) use phera_bytecode::FunctionShape;
-use phera_bytecode::{FunctionSignature, TypeMask};
+use phera_bytecode::{Code, FunctionSignature, TypeMask};
 
 use crate::code_table::{FunctionIndex, UnitIndex};
 
@@ -21,6 +23,8 @@ use crate::code_table::{FunctionIndex, UnitIndex};
 /// call, so it is kept small and next to nothing else.
 #[derive(Clone)]
 pub(crate) struct FunctionFacts {
+    /// The function's instructions, which the interpreter loop runs.
+    pub(crate) instructions: Code,
     pub(crate) unit: UnitIndex,
     /// `None` for a file's top-level code, else its number within the file.
     pub(crate) local: Option<u32>,
@@ -72,8 +76,10 @@ impl FunctionFacts {
     pub(crate) fn bind(
         (unit, unit_first, local): (UnitIndex, FunctionIndex, Option<u32>),
         signature: FunctionSignature,
+        instructions: Code,
     ) -> Self {
         Self {
+            instructions,
             unit,
             local,
             unit_first,
