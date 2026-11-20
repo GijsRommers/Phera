@@ -13,6 +13,7 @@ use crate::context_options::{OPTIONAL_CONTEXT, validate};
 use crate::errors::{check_path, nonnegative, warn_false};
 use crate::handles::{FILENAME, INCLUDE_PATH, LENGTH, read_notice};
 use crate::io_policy::CHUNK;
+use crate::request::files;
 use crate::stream::Stream;
 use crate::whole_write::file_put_contents;
 use crate::wrapper::open;
@@ -86,9 +87,11 @@ fn file_get_contents(
             .transpose()?;
         let offset = args::int(&arguments, 3).unwrap_or(0);
         let use_include = args::bool(&arguments, 1).unwrap_or(false);
+        files(context).use_default_context(args::value(&arguments, 2));
         let Some(mut stream) = open(context, function, name, b"rb", use_include).await? else {
             return Ok(Value::Bool(false));
         };
+        files(context).claim_id();
         if offset != 0 {
             let seek = if offset > 0 {
                 SeekFrom::Start(offset as u64)
@@ -116,9 +119,11 @@ fn readfile(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
         let function = "readfile";
         let name = name(&arguments, function, 2)?;
         let use_include = args::bool(&arguments, 1).unwrap_or(false);
+        files(context).use_default_context(args::value(&arguments, 2));
         let Some(stream) = open(context, function, name, b"rb", use_include).await? else {
             return Ok(Value::Bool(false));
         };
+        files(context).claim_id();
         let result = stream
             .read_policy(None)
             .run(move || {
@@ -148,9 +153,13 @@ fn file(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
                 "file(): Argument #2 ($flags) must be a valid flag value",
             ));
         }
+        if flags & NO_DEFAULT_CONTEXT == 0 {
+            files(context).use_default_context(args::value(&arguments, 2));
+        }
         let Some(stream) = open(context, "file", name, b"rb", flags & USE_PATH != 0).await? else {
             return Ok(Value::Bool(false));
         };
+        files(context).claim_id();
         let bytes = collect(context, stream, "file", None).await?;
         let mut lines = PhpArray::new();
         for mut line in bytes.split_inclusive(|&byte| byte == b'\n') {

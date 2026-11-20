@@ -105,8 +105,17 @@ fn install(
         validate_on_parse: previous.validate_on_parse,
         ..document.settings
     };
-    original.shared.borrow_mut().wrappers.remove(&original.id);
-    Location::new(document, true, Arena::DOCUMENT).bind(object);
+    let location = Location::new(document, true, Arena::DOCUMENT);
+    {
+        let mut state = original.shared.borrow_mut();
+        state.wrappers.remove(&original.id);
+        location
+            .shared
+            .borrow_mut()
+            .node_classes
+            .clone_from(&state.node_classes);
+    }
+    location.bind(object);
     Ok(Value::Bool(true))
 }
 
@@ -182,6 +191,14 @@ fn load_from_file<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let (name, path) = filename(context, &arguments, function)?;
+        let limit = if cfg!(target_os = "linux") {
+            4096
+        } else {
+            1024
+        };
+        if name.len() >= limit || path.as_os_str().len() >= limit {
+            return Ok(Value::Bool(false));
+        }
         let flags = args::int(&arguments, 1).unwrap_or_default();
         match tokio::fs::read(&path).await {
             Ok(bytes) => {
@@ -200,16 +217,23 @@ fn load_from_file<'a>(
                 )
             }
             Err(_) => {
-                context.warning(format!(
-                    "{function}(): I/O warning : failed to load external entity \"{name}\""
-                ));
+                let display = if format.html() {
+                    name
+                } else {
+                    path.to_string_lossy().into_owned()
+                };
+                libxml::file_failure(context, function, &display);
                 Ok(Value::Bool(false))
             }
         }
     })
 }
 
-pub(super) fn save_xml(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
+pub(in crate::bindings) fn save_xml(
+    _: &mut dyn Context,
+    this: This<'_>,
+    arguments: &[Value],
+) -> NativeResult {
     Ok(Value::from(serialized(
         this,
         args::object(arguments, 0),
@@ -218,7 +242,11 @@ pub(super) fn save_xml(_: &mut dyn Context, this: This<'_>, arguments: &[Value])
     )?))
 }
 
-pub(super) fn save_html(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
+pub(in crate::bindings) fn save_html(
+    _: &mut dyn Context,
+    this: This<'_>,
+    arguments: &[Value],
+) -> NativeResult {
     Ok(Value::from(serialized(
         this,
         args::object(arguments, 0),
@@ -252,7 +280,7 @@ fn serialized(
     ))
 }
 
-pub(super) fn save_file<'a>(
+pub(in crate::bindings) fn save_file<'a>(
     context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
@@ -260,7 +288,7 @@ pub(super) fn save_file<'a>(
     save_to_file(context, this, args, Format::Xml, "DOMDocument::save")
 }
 
-pub(super) fn save_html_file<'a>(
+pub(in crate::bindings) fn save_html_file<'a>(
     context: &'a mut dyn Context,
     this: Option<Rc<Object>>,
     args: Vec<Value>,
@@ -283,6 +311,13 @@ fn save_to_file<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let (name, path) = filename(context, &arguments, function)?;
+        if format.html() {
+            let target = this_node(this.as_ref())?;
+            let mut state = target.shared.borrow_mut();
+            if !state.document.settings.modern {
+                super::html_file::ensure_content_type(&mut state.document.arena);
+            }
+        }
         let bytes = serialized(
             this.as_ref(),
             None,

@@ -7,6 +7,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::document::ParseError;
+use crate::tree::{Kind, Name, Node};
 
 use super::encoding::xml_char;
 
@@ -19,6 +20,44 @@ pub(super) struct Entities {
     definitions: HashMap<String, Option<String>>,
     bytes: usize,
     steps: usize,
+}
+
+pub(super) struct AttributeValue {
+    pub(super) text: String,
+    references: Vec<(usize, usize, String)>,
+}
+
+impl AttributeValue {
+    pub(super) fn parts(&self) -> Vec<Node> {
+        let mut nodes = Vec::new();
+        if self.references.is_empty() {
+            return nodes;
+        }
+        let mut tail = 0;
+        for &(start, end, ref name) in &self.references {
+            if start > tail {
+                nodes.push(Node::new(
+                    Kind::Text,
+                    Name::new("#text"),
+                    &self.text[tail..start],
+                ));
+            }
+            nodes.push(Node::new(
+                Kind::EntityReference,
+                Name::new(name),
+                &self.text[start..end],
+            ));
+            tail = end;
+        }
+        if tail < self.text.len() {
+            nodes.push(Node::new(
+                Kind::Text,
+                Name::new("#text"),
+                &self.text[tail..],
+            ));
+        }
+        nodes
+    }
 }
 
 impl Entities {
@@ -36,6 +75,14 @@ impl Entities {
     }
 
     pub(super) fn resolve(&mut self, name: &str) -> Result<(String, bool), ParseError> {
+        self.expand(name, false)
+    }
+
+    pub(super) fn replacement(&mut self, name: &str) -> Result<(String, bool), ParseError> {
+        self.expand(name, true)
+    }
+
+    fn expand(&mut self, name: &str, preserve_named: bool) -> Result<(String, bool), ParseError> {
         if let Some(value) = special(name)? {
             return Ok((value, false));
         }
@@ -66,7 +113,13 @@ impl Entities {
                 .ok_or_else(|| ParseError::fatal(23, "EntityRef: expecting ';'"))?;
             *rest = after;
             if let Some(value) = special(reference)? {
-                append(&mut self.bytes, &mut output, &value)?;
+                if preserve_named && !reference.starts_with('#') {
+                    append(&mut self.bytes, &mut output, "&")?;
+                    append(&mut self.bytes, &mut output, reference)?;
+                    append(&mut self.bytes, &mut output, ";")?;
+                } else {
+                    append(&mut self.bytes, &mut output, &value)?;
+                }
             } else {
                 match self.definitions.get(reference) {
                     Some(Some(value)) => {
@@ -83,22 +136,39 @@ impl Entities {
         Ok((output, true))
     }
 
-    pub(super) fn attribute(&mut self, mut input: &str) -> Result<String, ParseError> {
-        let mut value = String::new();
+    pub(super) fn attribute(
+        &mut self,
+        mut input: &str,
+        substitute: bool,
+    ) -> Result<AttributeValue, ParseError> {
+        let mut value = AttributeValue {
+            text: String::new(),
+            references: Vec::new(),
+        };
+        if !input.contains(['&', '\r', '\n', '\t']) {
+            value.text = input.to_owned();
+            return Ok(value);
+        }
         while let Some((text, rest)) = input.split_once('&') {
-            value.extend(text.chars().map(attribute_space));
+            value.text.extend(text.chars().map(attribute_space));
             let (name, after) = rest
                 .split_once(';')
                 .ok_or_else(|| ParseError::fatal(23, "EntityRef: expecting ';'"))?;
             let (replacement, is_entity) = self.resolve(name)?;
             if is_entity {
-                value.extend(replacement.chars().map(attribute_space));
+                let start = value.text.len();
+                value.text.extend(replacement.chars().map(attribute_space));
+                if !substitute {
+                    value
+                        .references
+                        .push((start, value.text.len(), name.to_owned()));
+                }
             } else {
-                value.push_str(&replacement);
+                value.text.push_str(&replacement);
             }
             input = after;
         }
-        value.extend(input.chars().map(attribute_space));
+        value.text.extend(input.chars().map(attribute_space));
         Ok(value)
     }
 }
@@ -119,13 +189,22 @@ pub(super) fn quoted(input: &str) -> Option<(&str, &str)> {
     }
 }
 
+pub(super) fn predefined(name: &str) -> Option<&'static str> {
+    match name {
+        "lt" => Some("<"),
+        "gt" => Some(">"),
+        "amp" => Some("&"),
+        "apos" => Some("'"),
+        "quot" => Some("\""),
+        _ => None,
+    }
+}
+
 fn special(name: &str) -> Result<Option<String>, ParseError> {
+    if let Some(value) = predefined(name) {
+        return Ok(Some(value.to_owned()));
+    }
     let character = match name {
-        "lt" => '<',
-        "gt" => '>',
-        "amp" => '&',
-        "apos" => '\'',
-        "quot" => '"',
         reference if reference.starts_with('#') => {
             let number = match reference.strip_prefix("#x") {
                 Some(hex) => u32::from_str_radix(hex, 16),

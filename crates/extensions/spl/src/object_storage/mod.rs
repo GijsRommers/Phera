@@ -93,3 +93,13 @@ fn detach(storage: &Object, key: &Key, rewind: bool) -> Result<(), NativeError> 
         }
     })
 }
+
+pub(crate) async fn legacy_attach(
+    context: &mut dyn Context,
+    storage: &Rc<Object>,
+    item: Rc<Object>,
+    info: Value,
+) -> Result<(), NativeError> {
+    let key = hash(context, storage, &item).await?;
+    attach(storage, key, item, info)
+}

@@ -16,6 +16,7 @@ mod sorting;
 mod state;
 
 pub(crate) use registration::register;
+pub(crate) use serialization::{legacy_check_mutable, legacy_set_storage, legacy_uses_properties};
 
 const OBJECT: &str = "ArrayObject";
 const ITERATOR: &str = "ArrayIterator";

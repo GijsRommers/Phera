@@ -8,21 +8,25 @@
 mod attributes;
 mod characters;
 mod collection;
+mod detached;
 mod document;
 mod factory;
 mod libxml;
+mod modern;
 mod mutation;
 mod namespace;
 mod node;
 mod properties;
 mod xpath;
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use phera_extension_api::{
-    ClassEntry, Context, Extension, NativeError, NativeResult, Object, PhpArray, Registry, Value,
+    ClassEntry, ConstantValue, Context, Extension, NativeError, NativeResult, Object, PhpArray,
+    PropertyEntry, Registry, Value, Visibility,
 };
 
 use crate::document::Document;
@@ -44,6 +48,13 @@ impl Extension for Dom {
         registry.class(ClassEntry {
             parent: Some("Exception"),
             kind: phera_extension_api::ClassKind::FinalClass,
+            properties: const {
+                &[PropertyEntry::new(
+                    "code",
+                    ConstantValue::Int(0),
+                    Visibility::Public,
+                )]
+            },
             ..ClassEntry::class("DOMException")
         });
         libxml::register_dom_constants(registry);
@@ -53,6 +64,7 @@ impl Extension for Dom {
         factory::register(registry);
         collection::register(registry);
         xpath::register(registry);
+        modern::register(registry);
     }
 }
 
@@ -72,12 +84,24 @@ struct DomState {
     document: Document,
     owned: bool,
     wrappers: HashMap<NodeId, Weak<Object>>,
+    node_classes: HashMap<String, String>,
+    class_lists: HashMap<NodeId, Weak<Object>>,
+    detached: detached::Detached,
 }
 
 #[derive(Clone)]
 struct Location {
     shared: Shared,
     id: NodeId,
+}
+
+#[derive(Clone)]
+struct NodeHandle(Rc<RefCell<Location>>);
+
+impl NodeHandle {
+    fn current(&self) -> Location {
+        self.0.borrow().clone()
+    }
 }
 
 impl Location {
@@ -87,6 +111,9 @@ impl Location {
                 document,
                 owned,
                 wrappers: HashMap::new(),
+                node_classes: HashMap::new(),
+                class_lists: HashMap::new(),
+                detached: detached::Detached::default(),
             })),
             id,
         }
@@ -104,11 +131,24 @@ impl Location {
     }
 
     fn bind(self, object: &Rc<Object>) {
+        let handle = native::<NodeHandle>(object);
+        if let Some(handle) = &handle {
+            let previous = handle.current();
+            if (!previous.same_document(&self) || previous.id != self.id)
+                && let Ok(mut state) = previous.shared.try_borrow_mut()
+            {
+                state.wrappers.remove(&previous.id);
+            }
+        }
         self.shared
             .borrow_mut()
             .wrappers
             .insert(self.id, Rc::downgrade(object));
-        *object.native.borrow_mut() = Some(Box::new(self));
+        if let Some(handle) = handle {
+            *handle.0.borrow_mut() = self;
+        } else {
+            *object.native.borrow_mut() = Some(Box::new(NodeHandle(Rc::new(RefCell::new(self)))));
+        }
     }
 
     fn wrap(self, context: &mut dyn Context) -> NativeResult {
@@ -117,20 +157,33 @@ impl Location {
             if let Some(object) = state.wrappers.get(&self.id).and_then(Weak::upgrade) {
                 return Ok(Value::Object(object));
             }
-            match state.document.arena[self.id].kind {
-                Kind::Element => "DOMElement",
-                Kind::Attribute => "DOMAttr",
-                Kind::Text => "DOMText",
-                Kind::Cdata => "DOMCdataSection",
-                Kind::Comment => "DOMComment",
-                Kind::ProcessingInstruction => "DOMProcessingInstruction",
-                Kind::Document => "DOMDocument",
-                Kind::Doctype => "DOMDocumentType",
-                Kind::Fragment => "DOMDocumentFragment",
-                Kind::EntityReference => "DOMEntityReference",
-            }
+            let entry = &state.document.arena[self.id];
+            let class = if state.document.settings.modern {
+                modern::class(entry, state.document.settings.html)
+            } else {
+                match entry.kind {
+                    Kind::Element => "DOMElement",
+                    Kind::Attribute => "DOMAttr",
+                    Kind::Namespace => "DOMNameSpaceNode",
+                    Kind::Text => "DOMText",
+                    Kind::Cdata => "DOMCdataSection",
+                    Kind::Comment => "DOMComment",
+                    Kind::ProcessingInstruction => "DOMProcessingInstruction",
+                    Kind::Document => "DOMDocument",
+                    Kind::Doctype => "DOMDocumentType",
+                    Kind::Fragment => "DOMDocumentFragment",
+                    Kind::EntityReference => "DOMEntityReference",
+                    Kind::Entity => "DOMEntity",
+                    Kind::Notation => "DOMNotation",
+                }
+            };
+            state
+                .node_classes
+                .get(class)
+                .cloned()
+                .map_or(Cow::Borrowed(class), Cow::Owned)
         };
-        let value = context.create_object(class, PhpArray::new())?;
+        let value = context.create_object(&class, PhpArray::new())?;
         if let Value::Object(object) = &value {
             self.bind(object);
         }
@@ -155,9 +208,12 @@ fn native<T: Clone + 'static>(object: &Object) -> Option<T> {
 }
 
 fn location(object: &Object) -> Result<Location, NativeError> {
-    native(object).ok_or_else(|| {
-        NativeError::error(format!("{} object is uninitialized", object.class.name()))
-    })
+    let handle: NodeHandle = native(object).ok_or_else(|| dom_error(11, "Invalid State Error"))?;
+    let location = handle.current();
+    if let Ok(mut state) = location.shared.try_borrow_mut() {
+        state.release_detached();
+    }
+    Ok(location)
 }
 
 fn receiver(this: This<'_>) -> Result<&Rc<Object>, NativeError> {
@@ -180,15 +236,24 @@ fn text(arena: &Arena, id: NodeId) -> String {
     match arena[id].kind {
         Kind::Element | Kind::Fragment | Kind::Document => {
             let mut text = String::new();
-            for child in arena.descendants(id) {
+            for child in arena.content_descendants(id) {
                 let node = &arena[child];
-                if matches!(node.kind, Kind::Text | Kind::Cdata | Kind::EntityReference) {
-                    text.push_str(&node.value);
+                match node.kind {
+                    Kind::EntityReference => text.push_str(arena.reference_text(child)),
+                    Kind::Text | Kind::Cdata
+                        if node
+                            .parent()
+                            .is_none_or(|id| arena[id].kind != Kind::Entity) =>
+                    {
+                        text.push_str(&node.value);
+                    }
+                    _ => {}
                 }
             }
             text
         }
-        Kind::Doctype => String::new(),
+        Kind::Doctype | Kind::Entity | Kind::Notation => String::new(),
+        Kind::EntityReference => arena.reference_text(id).to_owned(),
         _ => arena[id].value.clone(),
     }
 }

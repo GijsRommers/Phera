@@ -29,9 +29,7 @@ and `LICENSE-MT19937`.
 
 ## Differences from PHP
 
-- **`Random\IntervalBoundary`** does not exist, because Phera has no enums
-  yet. `getFloat()` works with its default boundary (closed at the low end,
-  open at the high end); passing any `$boundary` is a `TypeError`.
+
 - **Engines written in PHP** cannot be used: a Randomizer takes the four
   built-in engines only.
 - **`Randomizer::$engine`** is an ordinary public property, not readonly.

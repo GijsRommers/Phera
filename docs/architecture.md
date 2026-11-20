@@ -22,6 +22,7 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 | `phera-vm` | Executes bytecode: frames, classes, exceptions, generators | bytecode, value |
 | `phera-extension-api` | What native functions and classes see | value |
 | `phera-extensions/*` | Native functions grouped like PHP extensions | extension-api |
+| `phera-io-pool` | Shared PDO and Redis connection pools and TLS policy | tokio, rustls |
 | `phera-runtime` | Code cache, includes, autoload, superglobals, request lifecycle | compiler, vm, extensions |
 | `phera-server` | HTTP on Tokio, one worker thread per core | |
 | `phera-cli` | `phera run file.php`, `phera serve` | runtime, server |
@@ -46,6 +47,16 @@ to its input without a limit:
 
 Dependencies point one way. The VM never sees the AST, and the server never sees
 the VM: it talks to a `Handler` trait that the runtime implements.
+
+PDO and Redis share the client TLS policy in `phera-io-pool::tls`, where
+their pooled connections already share an I/O runtime abstraction. Rustls
+uses ring's default cipher suites with TLS 1.2 and 1.3. Ring builds its C and
+assembly with the platform toolchain. Phera's crates use the safe Rust API.
+PDO uses platform trust roots with WebPKI fallback and supports driver-specific
+trust and client certificate options. Redis uses the bundled WebPKI roots and
+verifies the server name. PostgreSQL and Redis receive the policy explicitly.
+`mysql_async` builds its own rustls configuration, so the runtime registers
+ring once at startup and PDO supplies the selected roots through its options.
 
 ## 2. Concurrency: M:N on Tokio, thread per core
 
@@ -141,7 +152,7 @@ names in Hyper's header map. Preserving client spelling would require
 `crates/server` to capture the original names at HTTP/1 parsing and pass them
 alongside the normalized headers to the runtime.
 
-Phase 2 is snapshot and fork. A worker boots the application once (autoloader,
+Phase 2 is snapshot and fork (the design is in 5.4). A worker boots the application once (autoloader,
 container, routes), freezes that heap as a snapshot, and gives each request a
 fork of it. Arrays and strings are already copy-on-write, so a fork copies only
 objects and references, lazily where possible. Rules that make this safe:
@@ -163,14 +174,23 @@ change:
 
 | Limit | Default | Where it is enforced | Built |
 | --- | --- | --- | --- |
-| Whole request, waiting included (`--request-timeout`) | 60 s | a timer around the request's task. The task is stopped at its next wait or hand-over point and the client gets 504 | yes |
-| A silent connection: before its first request, between two requests, and while a request head arrives | 75 s | hyper's header read timer, which covers all three. Longer than the 60 s after which proxies commonly drop idle connections, so that Phera is never the side that closes a connection the proxy is about to reuse | yes |
+| Running a complete request (`--request-timeout`) | 60 s | a timer around the request's task. The task is stopped at its next wait or hand-over point and the client gets 504 | yes |
+| Receiving headers and body (`--request-read-timeout`) | 60 s plus one second per 16 KiB of body received | measured from when the server starts waiting for the request head. The server sends 408 and closes the connection on expiry | yes |
+| Waiting for a request head | 75 s | hyper's header read timer uses the lesser of this limit and the receive deadline | yes |
 | Pause between two pieces of a request body | 30 s | a timer on each read; 408 and the connection is closed | yes |
 | Size of a request body (`post_max_size`) | 8 MiB | while reading; 413 beyond it | yes |
 | Open connections per worker | 10,000 | a worker takes a free slot before it accepts; beyond the limit, connections wait in the operating system's queue | yes |
 | Running time of a script (`max_execution_time`, `set_time_limit()`) | 30 s under `serve`, none on the command line | the interpreter samples the request's CPU time at handoffs after 65,536 loop rounds or calls. Time spent suspended for I/O is excluded. A timeout ends the script with PHP's fatal diagnostic. | yes |
 | Memory of one request (`memory_limit`) | 128 MiB | to be decided | no |
 | Buffered response | 64 KiB, then it streams | output is handed to the connection in chunks once the buffer passes the threshold, and the script waits while the client is slow (so a slow reader costs a suspended task, not memory) | no; static files are sent in pieces already |
+
+The receive budget grows with the number of body bytes read, following
+[Apache's minimum-rate approach](https://httpd.apache.org/docs/current/mod/mod_reqtimeout.html).
+A steady upload can take longer than the initial 60 seconds. A trickle
+earns little additional time, and the body size cap bounds the maximum
+extension. The 30-second body idle limit also applies between reads, as in
+[nginx](https://nginx.org/en/docs/http/ngx_http_core_module.html#client_body_timeout)
+and [Caddy](https://caddyserver.com/docs/caddyfile/options#timeouts).
 
 The request timeout and PHP's own `max_execution_time` are two limits, as
 with nginx and PHP-FPM: the first counts everything, waiting for a database
@@ -248,6 +268,23 @@ an existing nginx `fastcgi_pass`. A proxy reaches Phera over HTTP like any
 other upstream. This can be revisited if someone needs to keep an nginx
 configuration unchanged.
 
+#### PHP diagnostics
+
+`phera serve` starts with `display_errors` off and `log_errors` on. Fatal
+errors and uncaught exceptions produce an empty 500 if the script has not
+sent output or chosen another status. The server's standard error includes
+the request line. Use `phera serve --dev` to turn display on in a local
+development server. Command-line scripts display errors by default.
+
+Both commands accept `-d NAME=VALUE` before the script or document root.
+`error_reporting` selects which diagnostics are displayed and logged.
+`html_errors` controls display formatting, `display_startup_errors` controls
+display during request startup, and `error_log` can direct logging to a
+file. On the command line, `display_errors=stderr` sends plain diagnostics
+to standard error. In the web server it displays them in the response.
+`fatal_error_backtraces` controls optional PHP fatal traces, which follow the
+same display and logging settings as their diagnostic.
+
 ### 5.3 PHP file sessions
 
 `session_start()` keeps its settings, handler, original payload and live
@@ -282,6 +319,167 @@ advisory lock. Like PHP's files handler, garbage collection can unlink a stale
 name while a request locks its descriptor. A request opening that name after
 collection may create a new inode.
 
+### 5.4 Snapshot and fork: the design
+
+Why now. Measured on the batch 9 build against PHP 8.5.12 without Xdebug: one
+Laravel API request costs about 150 ms and 2.1 billion instructions under
+`phera serve`, and 9 to 17 ms on PHP's built-in server. The interpreter alone
+explains at most a factor of 5 (section 10). The rest is work Phera repeats on
+every request and PHP with opcache does once per process: linking some 500
+classes, resolving includes, booting the framework.
+
+The work has five steps. Each is useful without the next.
+
+**Step 1: linked code is shared by all requests of a worker.** A class, function
+or constant that a file declares is linked once per worker thread and never
+changes afterwards. A request's class table points at the shared class. What a
+request can change moves out of the class into a table of the request, indexed
+by the class's number: static properties, static variables of functions and
+methods, and constant values that are objects (enum cases, `new` in
+initializers). This is what opcache's inheritance cache does for PHP. Include
+resolution (path to compiled unit) is cached per worker as well. Whether a
+changed file is noticed follows `opcache.validate_timestamps` and
+`opcache.revalidate_freq`; `phera serve --dev` checks on every request. Step 1
+needs no cooperation from the application, so it also helps applications that
+have no boot phase to snapshot, such as WordPress.
+
+**Step 2: a snapshot at a point the application names, and a fork per request.**
+
+```php
+// public/index.php
+$kernel = new Kernel('prod', false);
+$kernel->boot();              // runs once per worker
+Phera\snapshot();             // the worker keeps the state as it is here
+$response = $kernel->handle(Request::createFromGlobals());   // runs per request
+$response->send();
+```
+
+The first request of a worker runs the script from the top. At
+`Phera\snapshot()` the worker freezes the whole state of the VM: globals,
+static properties, the call stack with its registers, the tables of step 1, and
+what the script registered (autoloaders, error and exception handlers, shutdown
+functions, output handlers, stream wrappers, INI values). Every later request
+starts as a copy of that state and continues after the call, with its own
+superglobals. The frozen state is never executed again, so no request can
+change it.
+
+- What a fork copies: every object that can be reached from the frozen state,
+  once each, so that sharing and cycles stay as they were, and every reference
+  cell (`&`). Object ids stay the same. Strings are shared. An array is shared
+  (copy-on-write, as always) unless it holds an object or a reference somewhere
+  inside; then it is rebuilt with the copies.
+- Built-in classes with state of their own (`ArrayObject`, `SplObjectStorage`,
+  `WeakMap`, `Closure`, `DateTime`, ...) get a fork hook in the extension API. It
+  returns a copy of the state with the objects inside replaced by their copies,
+  or says that the object cannot be forked.
+- What cannot be in a snapshot: an open file, socket or process, a database
+  connection in the middle of a transaction, a started session, a running
+  generator or fiber that holds one of these. `Phera\snapshot()` then throws
+  `Phera\SnapshotException`, which names the class and the path from a global or
+  static property to the object. A pooled database handle is fine: it holds the
+  pool's key, and takes a connection again on first use.
+- What is reset in every fork: the superglobals, the request time, the time
+  limit, the header list, the seeds of `rand()` and `mt_rand()`. Output written
+  before the snapshot is not sent again.
+- A value read from `$_SERVER` or `$_GET` before the snapshot is the value of the
+  request that booted the worker. In `--dev`, Phera warns when a request field
+  was read before the snapshot.
+- The snapshot remembers the files it included. When one changes (same policy as
+  step 1) the worker drops the snapshot and boots again. If booting fails, the
+  request is answered the classic way and the next one tries again.
+- Destructors: a copied object is destroyed at the end of its request, as in
+  PHP-FPM, where every request has its own instance. Objects of the frozen state
+  are not destroyed while the worker lives.
+- The call must come from PHP frames only: not from inside a callback of a
+  built-in function.
+
+Each worker thread has its own snapshot, since values are not shared between
+threads. Memory per worker is measured before this ships.
+
+**Step 3: adapters, so that an application needs no change.** For Symfony, a
+runtime class that boots the kernel, takes the snapshot and then handles the
+request; `symfony/runtime` selects it through `APP_RUNTIME`, which `phera serve`
+sets when the application uses that component. For Laravel, an entry script
+that bootstraps the application and its providers before the snapshot; `phera
+new` writes it into new projects and `phera serve` uses it when it exists. Any
+other application calls `Phera\snapshot()` itself. Without an adapter or a call,
+step 1 still applies.
+
+**Step 4, only if a profile asks for it: copy on first write.** Objects are
+reached through a table of the request, and a fork copies an object only when
+the request first writes to it. A fork then costs nothing up front. This is a
+larger change to the value representation and waits until the copy of step 2
+shows up in measurements.
+
+**Step 5: worker mode, for applications written for it.** Laravel Octane,
+Symfony's runtime packages and FrankenPHP applications keep one booted
+application alive and pass it request after request. They are written so that
+nothing leaks from one request into the next (Symfony resets its services,
+Octane flushes its container bindings). Phera runs them unchanged by offering
+the interface they already use, FrankenPHP's:
+
+```php
+// a worker script, as FrankenPHP, Octane's FrankenPHP driver and
+// runtime/frankenphp-symfony write it
+$kernel->boot();
+while (frankenphp_handle_request(function () use ($kernel) {
+    $response = $kernel->handle(Request::createFromGlobals());
+    $response->send();
+    $kernel->terminate($request, $response);
+})) { gc_collect_cycles(); }
+```
+
+`frankenphp_handle_request()` waits for a request, fills the superglobals, runs
+the callback and sends the response; `$_SERVER['FRANKENPHP_WORKER']` is set, and
+`phera serve --worker public/index.php` (or `[server] worker` in `phera.toml`)
+names the script. PHP code cannot have two requests interleaved in one heap, so
+one running copy of the worker script answers one request at a time. Phera
+keeps many copies per worker thread instead of one: each copy is a task with
+its own VM, a request goes to an idle copy, and while that copy waits for the
+database another one runs. That keeps the many-requests-per-thread design. The
+number of copies grows with demand up to a limit and shrinks when idle; a copy
+is replaced after a configurable number of requests and when one of its files
+changes. Per request Phera resets what PHP resets: output buffers, the header
+list, the time limit, the last error; what the application keeps in memory is
+its own business, as on FrankenPHP.
+
+The three ways to run an application, side by side:
+
+| | Classic | Snapshot and fork | Worker mode |
+| --- | --- | --- | --- |
+| Boot work per request | all of it (step 1 removes the linking) | none after the first request of a worker | none |
+| Requests isolated from each other | yes | yes | no: the application must reset itself |
+| Works for | every application | an application with a boot phase and a snapshot point | an application written for long-running use |
+| Change to the application | none | none with an adapter, one line otherwise | none if it already supports FrankenPHP or Octane |
+
+Order: steps 1 to 3 first (shared linked code, the snapshot, the adapters).
+Worker mode (step 5) is built only if a forked application still falls short
+of what long-running applications need; see `docs/decisions/`. They follow the destructors work
+(9.1), which changes the same object lifetime code.
+
+### 5.5 Child processes
+
+PHP can start programs through `proc_open()`, `popen()`, `exec()`,
+`shell_exec()`, backticks, `system()` and `passthru()`. The array form of
+`proc_open()` passes an argument vector directly to the program. String
+commands run through `/bin/sh -c`. Children inherit the request's working
+directory and effective environment unless a call supplies replacements.
+Process pipes, socket pairs and terminal streams share the stream API.
+Tokio waits for a child or work on its pipes without blocking the worker.
+
+`phera serve --no-process` makes program-starting functions throw `Error`.
+Program execution is enabled by default. The PHP execution time limit also
+counts waits on children and their streams toward the request budget. The HTTP
+request timeout covers the whole handler and cancels any pending wait.
+At CLI shutdown an open `proc_open()` handle closes its pipes and checks
+child status without waiting. An open `popen()` stream closes its pipe and
+reaps the child before the CLI returns. Explicit closure waits asynchronously
+and returns the child's exit status.
+
+Phera gives each web child its own process group and terminates abandoned
+children at request cleanup while their leader is still tracked. Programs
+that explicitly detach can keep running. [Process decisions](decisions/README.md)
+
 ## 6. Scope
 
 In: the PHP that Symfony and Laravel and their dependencies run in production.
@@ -292,9 +490,10 @@ classes, interfaces, traits, enums, readonly, attributes, anonymous classes, lat
 static binding, magic methods, exceptions with `finally`, generators, `match`,
 nullsafe, destructuring, alternative control syntax, heredoc and nowdoc,
 `declare(strict_types=1)` with parameter and return type checks, `include` and
-autoloading, `eval`, property hooks, asymmetric visibility, the pipe operator.
+autoloading, `eval`, property hooks, asymmetric visibility, and the pipe operator.
+Backticks are supported and emit PHP 8.5's compile-time deprecation.
 
-**Language, left out:** backticks, `(real)`, short and
+**Language, left out:** `(real)`, short and
 ASP tags, `goto`, `declare(ticks)` and `__halt_compiler` data access.
 `assert()` is checked, as under `php -n`: a failed assertion throws
 `AssertionError` with the condition as written. A setting that compiles
@@ -302,9 +501,14 @@ assertions out, as PHP's production configuration does, comes with the
 configuration file.
 Fiber switching and request-local state are described in section 9.5.
 
-**Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl, posix, the C
-extension ABI, `dl()`, startup configuration from an INI file, and functions
-removed or deprecated before PHP 8.
+**Runtime, in scope:** Unix program execution, including `shell_exec()` and
+`popen()`, plus POSIX queries. The CLI exposes named `SIG*` constants and
+reports a `Phera\NotSupportedException` for `pcntl_fork()`, `pcntl_exec()`, and
+the `pcntl_wait*()` calls.
+
+**Runtime, left out:** opcache and JIT settings, FFI, phar, pcntl signal
+handlers and alarms, the C extension ABI, `dl()`, startup configuration from
+an INI file, and functions removed or deprecated before PHP 8.
 
 **Extensions, first wave:** standard (strings, arrays, math, output, variables,
 files, `sprintf`, `serialize`), spl, json, pcre (bound to PCRE2), ctype, mbstring,
@@ -387,8 +591,7 @@ silence:
   `function_exists()` and `class_exists()` answer false for these, so code
   that checks first takes its fallback. The list comes from the
   `#[\Deprecated]` attributes in PHP 8.5's own stub files, not from memory.
-- **Syntax** (the backtick operator): a compile error, "... is not
-  supported by Phera", with file and line.
+- **Removed syntax** such as `(real)` produces a compile error with file and line.
 - **Legacy package layouts** (PSR-0 autoloading, `target-dir`,
   `include-path`, PEAR-style trees): `phera install` stops and names the
   package and the field. Nothing is installed half.
