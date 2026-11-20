@@ -110,7 +110,15 @@ pub(crate) async fn load(input: Input<'_>) -> Result<Schema, Vec<ParseError>> {
             let Some(location) = attr(&arena, node, "schemaLocation") else {
                 continue;
             };
-            let path = local_path(&directory, location)
+            if matches!(referenced, Namespace::Include(_))
+                && location.bytes().any(|byte| byte.is_ascii_whitespace())
+            {
+                return Err(vec![
+                    issue(3069, 0, "Internal error: xmlSchemaParseIncludeOrRedefine, could not build an URI from the schemaLocation.".into()),
+                    issue(3069, 0, "Internal error: xmlSchemaParse, An internal error occurred.".into()),
+                ]);
+            }
+            let path = reference_path(&directory, location)
                 .ok_or_else(|| invalid("Schema resources must be local files."))?;
             if pending.len() >= MAX_FILES {
                 return Err(invalid("Schema resource limit exceeded."));
@@ -136,11 +144,25 @@ pub(crate) fn local_path(directory: &Path, location: &str) -> Option<PathBuf> {
         return None;
     }
     if let Ok(url) = url::Url::parse(location) {
-        return (url.scheme() == "file" && url.query().is_none() && url.fragment().is_none())
-            .then(|| url.to_file_path().ok())
-            .flatten();
+        return file_path(url);
     }
     Some(directory.join(location))
+}
+
+fn reference_path(directory: &Path, location: &str) -> Option<PathBuf> {
+    if location.is_empty() || location.contains('\0') {
+        return None;
+    }
+    let base = url::Url::from_directory_path(directory).ok()?;
+    file_path(base.join(location).ok()?)
+}
+
+fn file_path(url: url::Url) -> Option<PathBuf> {
+    if url.scheme() == "file" && url.query().is_none() && url.fragment().is_none() {
+        url.to_file_path().ok()
+    } else {
+        None
+    }
 }
 
 async fn read(path: &Path, remaining: usize) -> Result<Vec<u8>, Vec<ParseError>> {
