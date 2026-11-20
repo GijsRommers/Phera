@@ -41,6 +41,7 @@ Usage:
   phera --dump <file.php>                 print the compiled bytecode
   phera check [OPTIONS] <paths...>        type-check PHP (see check --help)
   phera lint [OPTIONS] [paths...]         lint PHP (see lint --help)
+  phera upgrade [OPTIONS]                 update Phera (see upgrade --help)
   phera --version
 
 ENV OPTIONS: --env-file PATH (repeatable) or --no-env-file";
@@ -61,6 +62,7 @@ pub(crate) enum Command {
     Check(phera_analyzer::config::Options),
     Lint(phera_analyzer::lint::Command),
     New(crate::new::NewOptions),
+    Upgrade(crate::upgrade::Options),
     Version,
 }
 
@@ -104,13 +106,13 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         }
         Some("check") => {
             arguments.next();
-            analyzer_command(arguments, crate::check::HELP, |args| {
+            command_with_help(arguments, crate::check::HELP, |args| {
                 phera_analyzer::config::Options::parse(args).map(Command::Check)
             })
         }
         Some("lint") => {
             arguments.next();
-            analyzer_command(arguments, crate::lint::HELP, |args| {
+            command_with_help(arguments, crate::lint::HELP, |args| {
                 phera_analyzer::lint::Options::parse(args).map(Command::Lint)
             })
         }
@@ -124,6 +126,12 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         Some("new") => {
             arguments.next();
             parse_new(arguments).map(Command::New)
+        }
+        Some("upgrade") => {
+            arguments.next();
+            command_with_help(arguments, crate::upgrade::HELP, |args| {
+                crate::upgrade::Options::parse(args).map(Command::Upgrade)
+            })
         }
         Some(_) => {
             // `phera run file.php` and `phera file.php` mean the same.
@@ -141,7 +149,7 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
     }
 }
 
-fn analyzer_command(
+fn command_with_help(
     arguments: impl Iterator<Item = String>,
     help: &'static str,
     parse: impl FnOnce(std::vec::IntoIter<String>) -> Result<Command, String>,
