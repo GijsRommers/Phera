@@ -101,7 +101,10 @@ impl Machine<'_> {
                 self.assign_operation::<GUARDED>(position, (op, dst), path, src)
             }
             Instruction::IncDecPath { mode, dst, path } => {
-                self.increment_property::<GUARDED>(position, (mode, dst), path)
+                match self.increment_property::<GUARDED>(position, (mode, dst), path) {
+                    Step::Slow => self.increment_element::<GUARDED>(position, (mode, dst), path),
+                    done => done,
+                }
             }
             Instruction::InitCall { function } => self.prepare_named_call(position, function),
             Instruction::FetchClassName { dst, class } => {

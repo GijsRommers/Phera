@@ -147,6 +147,7 @@ impl Vm {
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?
         {
+            self.prepare_update_site(&place)?;
             return Ok(Some(BatchExit::Instruction(Instruction::IncDecPath {
                 mode,
                 dst: destination,
