@@ -118,7 +118,12 @@ impl WorkerSnapshots {
     /// What to do for a request to `script`, and whether a boot should be
     /// started for it (the snapshot is out of date, a failed boot is due
     /// again, or a classic script's files changed).
-    pub(crate) fn plan(&self, script: &Path, policy: IncludeCachePolicy, stale: Stale) -> (Plan, bool) {
+    pub(crate) fn plan(
+        &self,
+        script: &Path,
+        policy: IncludeCachePolicy,
+        stale: Stale,
+    ) -> (Plan, bool) {
         let mut scripts = self.scripts.borrow_mut();
         let booting = self.booting.borrow().iter().any(|path| path == script);
         match scripts.get_mut(script) {

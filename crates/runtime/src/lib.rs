@@ -372,7 +372,10 @@ impl Runtime {
             http::Boundary::OtherMediaType => (None, None),
         };
 
-        let (plan, reboot) = worker.snapshots.plan(script, self.include_policy, self.stale_snapshots());
+        let (plan, reboot) =
+            worker
+                .snapshots
+                .plan(script, self.include_policy, self.stale_snapshots());
         if reboot {
             worker.boot_in_background(script, document_root);
         }
