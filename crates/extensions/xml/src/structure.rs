@@ -26,7 +26,7 @@ struct Row {
 
 impl Structure {
     /// Return whether this event crosses the PHP struct output depth limit.
-    pub fn observe(&mut self, event: &Emission, skip_white: bool) -> bool {
+    pub fn observe(&mut self, event: &Emission) -> bool {
         const MAX_LEVEL: usize = 255;
         match event.handler {
             Handler::Start if self.parents.len() == MAX_LEVEL => {
@@ -37,7 +37,7 @@ impl Structure {
             _ if self.over_depth > 0 => {}
             Handler::Start => self.start(event),
             Handler::End => self.end(event),
-            Handler::Text => self.text(event, skip_white),
+            Handler::Text => self.text(event),
             _ => {}
         }
         false
@@ -76,13 +76,10 @@ impl Structure {
         }
     }
 
-    fn text(&mut self, event: &Emission, skip_white: bool) {
+    fn text(&mut self, event: &Emission) {
         let Some(Value::String(text)) = event.data.first() else {
             return;
         };
-        if skip_white && text.as_bytes().iter().all(u8::is_ascii_whitespace) {
-            return;
-        }
         let Some(&start) = self.parents.last() else {
             return;
         };
@@ -107,10 +104,22 @@ impl Structure {
         }
     }
 
-    pub fn finish(self) -> (Value, Value) {
+    pub fn finish(self, skip_white: bool) -> (Value, Value) {
         let mut rows = PhpArray::new();
         let mut positions = indexmap::IndexMap::<PhpString, PhpArray>::new();
-        for (index, mut row) in self.values.into_iter().enumerate() {
+        for mut row in self.values {
+            if skip_white
+                && row
+                    .text
+                    .iter()
+                    .all(|byte| matches!(byte, b' ' | b'\n' | b'\r' | b'\t'))
+            {
+                if row.kind == "cdata" {
+                    continue;
+                }
+                row.text.clear();
+            }
+            let index = rows.len();
             let list = positions.entry(row.name.clone()).or_default();
             let _ = list.push(Value::Int(index as i64));
             let mut data = PhpArray::new();

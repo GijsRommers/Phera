@@ -72,6 +72,17 @@ impl Parser {
                 attributes.push((name, value));
             }
         }
+        if let Some(defaults) = self.attribute_defaults.get(&qualified) {
+            for (name, value) in defaults {
+                if name != "xmlns"
+                    && !name.starts_with("xmlns:")
+                    && !attributes.iter().any(|(explicit, _)| explicit == name)
+                {
+                    let value = self.entities.attribute(value).map_err(|error| error.code)?;
+                    attributes.push((name.clone(), value));
+                }
+            }
+        }
         let name = self.scoped(&qualified, false);
         let mut values = PhpArray::new();
         for (key, value) in attributes {

@@ -113,16 +113,32 @@ pub fn parse_into_struct(
         }
         let mut structure = Structure::default();
         let input = args::bytes(&arguments, 1);
+        let index_output = arguments.get(3).and_then(prepare_output);
+        let values_output = arguments.get(2).and_then(prepare_output);
         let status = execute(context, object, &state, input, true, Some(&mut structure)).await;
-        let (values, index) = structure.finish();
-        if let Some(Value::Reference(output)) = arguments.get(2) {
-            *output.borrow_mut() = values;
-        }
-        if let Some(Value::Reference(output)) = arguments.get(3) {
-            *output.borrow_mut() = index;
-        }
+        let (values, index) = structure.finish(state.parser.borrow().options.skip_white);
+        finish_output(arguments.get(2), values_output.as_ref(), values);
+        finish_output(arguments.get(3), index_output.as_ref(), index);
         status
     })
+}
+
+fn prepare_output(argument: &Value) -> Option<Rc<PhpArray>> {
+    let Value::Reference(output) = argument else {
+        return None;
+    };
+    let array = Rc::new(PhpArray::new());
+    *output.borrow_mut() = Value::Array(array.clone());
+    Some(array)
+}
+
+fn finish_output(argument: Option<&Value>, initial: Option<&Rc<PhpArray>>, value: Value) {
+    if let (Some(Value::Reference(output)), Some(initial)) = (argument, initial) {
+        let mut target = output.borrow_mut();
+        if matches!(&*target, Value::Array(current) if Rc::ptr_eq(initial, current)) {
+            *target = value;
+        }
+    }
 }
 
 struct Parsing<'a>(&'a Cell<bool>);
@@ -160,8 +176,7 @@ async fn execute(
         };
         for event in events {
             if let Some(structure) = &mut structure {
-                let skip_white = state.parser.borrow().options.skip_white;
-                if structure.observe(&event, skip_white) {
+                if structure.observe(&event) {
                     context.warning(
                         "xml_parse_into_struct(): Maximum depth exceeded - Results truncated"
                             .into(),

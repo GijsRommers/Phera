@@ -91,6 +91,8 @@ pub struct Parser {
     namespace_separator: Option<String>,
     entities: EntityResolver,
     external: HashMap<String, DtdEntry>,
+    attribute_defaults: HashMap<String, Vec<(String, String)>>,
+    bom: bool,
     root: bool,
     finished: bool,
 }
@@ -112,6 +114,8 @@ impl Parser {
             namespace_separator: separator,
             entities: EntityResolver::default(),
             external: HashMap::new(),
+            attribute_defaults: HashMap::new(),
+            bom: false,
             root: false,
             finished: false,
         }
@@ -139,6 +143,16 @@ impl Parser {
     ) -> Option<Result<Vec<Emission>, i64>> {
         if self.finished {
             return None;
+        }
+        const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
+        if self.cursor.offset == 0 {
+            if self.input.starts_with(UTF8_BOM) {
+                self.consumed += UTF8_BOM.len();
+                self.cursor.offset += UTF8_BOM.len();
+                self.bom = true;
+            } else if !final_chunk && UTF8_BOM.starts_with(&self.input) {
+                return None;
+            }
         }
         let remaining = &self.input[self.consumed..];
         if remaining.is_empty() {
@@ -279,7 +293,7 @@ impl Parser {
                 ));
             }
             Event::Decl(declaration) => {
-                if self.root || start.offset != 0 {
+                if self.root || start.offset != usize::from(self.bom) * 3 {
                     return Err(64);
                 }
                 if self.options.source.is_none()

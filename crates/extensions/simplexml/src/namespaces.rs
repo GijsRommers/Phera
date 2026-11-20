@@ -202,9 +202,11 @@ pub fn get_doc_namespaces(
     this: This<'_>,
     arguments: &[Value],
 ) -> NativeResult {
-    let Ok(state) = data(receiver(this)?) else {
+    let object = receiver(this)?;
+    if crate::load::recovered_without_root(object) {
         return Ok(Value::Bool(false));
-    };
+    }
+    let state = data(object)?;
     let recursive = args::bool(arguments, 0).unwrap_or(false);
     let from_root = args::bool(arguments, 1).unwrap_or(true);
     let Some(node) = state.selection.first() else {

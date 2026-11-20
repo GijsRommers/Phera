@@ -23,6 +23,20 @@ enum Loaded {
     Failed,
 }
 
+struct RecoveredWithoutRoot;
+
+pub(crate) fn recovered_without_root(object: &Object) -> bool {
+    object
+        .native
+        .borrow()
+        .as_ref()
+        .is_some_and(|state| state.is::<RecoveredWithoutRoot>())
+}
+
+fn install_recovered_document(object: &Object) {
+    *object.native.borrow_mut() = Some(Box::new(RecoveredWithoutRoot));
+}
+
 pub fn construct(
     context: &mut dyn Context,
     object: Option<Rc<Object>>,
@@ -52,7 +66,7 @@ pub fn construct(
                 );
             }
             Loaded::NoRoot => {
-                object.native.borrow_mut().take();
+                install_recovered_document(&object);
             }
             Loaded::Failed => {
                 return Err(NativeError::throw(
@@ -102,7 +116,13 @@ async fn load_function(
             let selection = Selection::node(node, selection_filter(&arguments, 3));
             wrap(context, &class, selection)
         }
-        Loaded::NoRoot => context.create_unserialized_object(&class),
+        Loaded::NoRoot => {
+            let value = context.create_unserialized_object(&class)?;
+            if let Value::Object(object) = &value {
+                install_recovered_document(object);
+            }
+            Ok(value)
+        }
         Loaded::Failed => Ok(Value::Bool(false)),
     }
 }

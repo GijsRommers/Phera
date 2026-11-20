@@ -25,6 +25,12 @@ impl Parser {
             return Err(61);
         };
         self.entities = EntityResolver::from_doctype(arena, doctype);
+        if self.namespace_separator.is_some()
+            && let Some(details) = &arena[doctype].doctype
+        {
+            self.attribute_defaults
+                .clone_from(&details.attribute_defaults);
+        }
         for entry in arena.children(doctype) {
             let node = &arena[entry];
             let Some(details) = &node.dtd_entry else {

@@ -48,7 +48,10 @@ fn handler(
             index + 1,
         )));
     }
-    if let Err(error) = context.validate_callback(function, index + 1, parameter, value) {
+    if context
+        .validate_callback(function, index + 1, parameter, value)
+        .is_err()
+    {
         if let Value::String(text) = value {
             context.deprecated(format!(
                 "{function}(): Passing non-callable strings is deprecated since 8.4"
@@ -62,7 +65,14 @@ fn handler(
                 index + 1,
             )));
         }
-        return Err(error);
+        let (index, parameter) = if function == "xml_set_element_handler" {
+            (2, "start_handler")
+        } else {
+            (index + 1, parameter)
+        };
+        return Err(NativeError::type_error(format!(
+            "{function}(): Argument #{index} (${parameter}) must be of type callable|string|null"
+        )));
     }
     Ok(Some(value.clone()))
 }

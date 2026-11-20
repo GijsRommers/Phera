@@ -13,7 +13,7 @@ fn xml_event_matrix() {
         .compare(&script, |_, _| {})
         .unwrap_or_else(|error| panic!("{error}; outputs in {}", oracle.artifacts.display()));
     let count = matched.stdout.split(|byte| *byte == b'\n').count() - 1;
-    assert_eq!(count, 170);
+    assert_eq!(count, 202);
     eprintln!("{count} XML parser results matched");
 }
 
@@ -67,5 +67,24 @@ foreach ($examples as $xml) {
 }
 foreach (range(-2, 103) as $number) {
     echo json_encode([$number, xml_error_string($number)]), "\n";
+}
+foreach (['', "\xEF\xBB\xBF"] as $bom) {
+    foreach (['', '<?xml version="1.0" encoding="utf-8"?>'] as $decl) {
+        foreach (['', '<!DOCTYPE r [<!ATTLIST r type (literal|pattern) "literal">]>'] as $dtd) {
+            foreach ([true, false] as $namespace) {
+                foreach ([true, false] as $skip) {
+                    $parser = $namespace ? xml_parser_create_ns('UTF-8') : xml_parser_create('UTF-8');
+                    xml_parser_set_option($parser, XML_OPTION_CASE_FOLDING, false);
+                    xml_parser_set_option($parser, XML_OPTION_SKIP_WHITE, $skip);
+                    $xml = $bom . $decl . $dtd . "<r><x>&lt;d&gt;\n &lt;e&gt;</x><![CDATA[  ]]></r>";
+                    $status = xml_parse_into_struct($parser, $xml, $values, $index);
+                    echo json_encode([
+                        $status, $values, $index, xml_get_error_code($parser),
+                        xml_get_current_byte_index($parser),
+                    ]), "\n";
+                }
+            }
+        }
+    }
 }
 "#;
