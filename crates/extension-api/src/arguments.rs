@@ -151,12 +151,17 @@ impl Site<'_> {
     /// deprecation, but only for native functions and only without
     /// `strict_types`.
     fn null_deprecated(&self, context: &mut dyn Context) {
+        // PHP names the declared type here, also where the class's own type
+        // error words it differently ("int, string, or BcMath\Number").
+        let expected = match self.param.ty {
+            ParamType::NativeNumeric(numeric) => format!("of type {}", numeric.declaration),
+            _ => expected(self.param),
+        };
         context.deprecated(format!(
-            "{}(): Passing null to parameter #{}{} {} is deprecated",
+            "{}(): Passing null to parameter #{}{} {expected} is deprecated",
             self.function,
             self.number,
             self.name(),
-            expected(self.param)
         ));
     }
 }
