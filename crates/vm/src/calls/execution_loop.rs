@@ -92,6 +92,10 @@ pub(super) struct Machine<'a> {
     pub(super) ids: &'a phera_value::ObjectIds,
     /// The native functions, for the parameters of a lean native call.
     pub(super) registry: &'a phera_extension_api::Registry,
+    /// What the function that native code called returned, when the loop
+    /// made that return itself (see `Machine::leave_to_native`); the loop
+    /// then leaves as if yielding.
+    pub(super) returned: Option<Value>,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -139,6 +143,7 @@ impl Vm {
                 frame_limit: self.frame_limit,
                 ids: &self.object_ids,
                 registry: &self.registry,
+                returned: None,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
@@ -153,7 +158,12 @@ impl Vm {
             self.executed_instructions += machine.executed;
             let instruction = match exit {
                 LoopExit::Slow(instruction) => instruction,
-                LoopExit::Yield => return Ok(BatchExit::Yield),
+                LoopExit::Yield => {
+                    return Ok(match machine.returned.take() {
+                        Some(value) => BatchExit::Returned(value),
+                        None => BatchExit::Yield,
+                    });
+                }
                 LoopExit::Destructors => return Ok(BatchExit::Destructors),
                 LoopExit::Invalid => return Err(internal_error!("invalid IP")),
             };

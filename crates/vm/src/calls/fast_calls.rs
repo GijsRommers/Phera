@@ -94,6 +94,8 @@ impl Machine<'_> {
         let Some(destination) = frame.destination() else {
             return if frame.discards_result() {
                 self.leave_discarded(frame, source)
+            } else if !GUARDED && self.stack.depth() == self.stop + 1 {
+                self.leave_to_native(frame, source)
             } else {
                 Step::Slow
             };
@@ -188,6 +190,54 @@ impl Machine<'_> {
             frame: caller,
             ip: caller.ip(),
         })
+    }
+
+    /// A plain return of the function native code called (a callback of
+    /// `array_map`, `usort`, a `Closure` called from native code), as the
+    /// VM makes it (`Vm::finish_return_value` at the boundary): the frame
+    /// goes, and the value is handed to the batch loop, which gives it back
+    /// to the native caller as `BatchExit::Returned`. Generators, includes,
+    /// functions returning by reference, frames with a pending call or side
+    /// state to release, references, and a value the declared type does not
+    /// take as it is stay with the VM.
+    #[cold]
+    #[inline(never)]
+    fn leave_to_native(&mut self, frame: Frame, source: Option<Reg>) -> Step {
+        let facts = self.code.facts(frame.function);
+        let depth = self.stack.depth();
+        let function = self.code.function(frame.function);
+        if facts.local.is_none()
+            || function.is_generator
+            || function.returns_reference
+            || (frame.has_extras() && !self.stack.extras(depth - 1).plain_return_can_release())
+            || self.stack.has_calls_from(frame.start())
+        {
+            return Step::Slow;
+        }
+        let kind = frame.kind();
+        let value = match (kind, source) {
+            (CallKind::Constructor, _) => match self.registers.window(frame.base() - 1, 1) {
+                [Some(value)] => value,
+                _ => return Step::Slow,
+            },
+            (_, Some(source)) => match self.registers.window(frame.base() + source.index(), 1) {
+                [Some(value)] if !value.is_reference() => value,
+                _ => return Step::Slow,
+            },
+            (_, None) => &Value::Null,
+        };
+        if kind != CallKind::Constructor
+            && facts
+                .return_mask
+                .is_some_and(|mask| !mask.intersects(crate::types::own_type(value)))
+        {
+            return Step::Slow;
+        }
+        let value = value.clone();
+        self.stack.pop();
+        self.registers.release_frame(frame.start(), frame.base());
+        self.returned = Some(value);
+        Step::Yield
     }
 
     /// A setter with no suspended caller action returns without publishing a result.
