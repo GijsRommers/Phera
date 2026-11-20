@@ -61,6 +61,9 @@ struct Attachment(Weak<Resource>);
 fn get_filters(context: &mut dyn Context, _: &[Value]) -> NativeResult {
     let mut names = PhpArray::new();
     for &name in BUILTINS {
+        if name == "convert.iconv.*" && context.iconv_converter().is_none() {
+            continue;
+        }
         names.push(Value::from(name))?;
     }
     super::user::names(context, &mut names)?;
@@ -134,8 +137,9 @@ async fn attach(
         ));
         return Ok(Value::Bool(false));
     }
-    let mut read_filter = read.then(|| Filter::new(0, name, params)).flatten();
-    let mut write_filter = write.then(|| Filter::new(0, name, params)).flatten();
+    let iconv = context.iconv_converter();
+    let mut read_filter = read.then(|| Filter::new(0, name, params, iconv)).flatten();
+    let mut write_filter = write.then(|| Filter::new(0, name, params, iconv)).flatten();
     if read && read_filter.is_none() || write && write_filter.is_none() {
         let name = String::from_utf8_lossy(name);
         context.warning(format!("{function}(): Unable to locate filter \"{name}\""));

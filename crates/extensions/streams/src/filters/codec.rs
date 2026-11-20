@@ -6,7 +6,7 @@ use base64::{
     Engine,
     engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
 };
-use phera_extension_api::{ArrayKey, Value};
+use phera_extension_api::{ArrayKey, IconvConverter, IconvFailure, Value};
 
 use super::{
     Flush, MAX_BUCKET, bounded,
@@ -30,7 +30,7 @@ pub(super) enum Codec {
 }
 
 impl Codec {
-    pub fn new(name: &[u8], params: &Value) -> Option<Self> {
+    pub fn new(name: &[u8], params: &Value, iconv: Option<IconvConverter>) -> Option<Self> {
         Some(match name {
             b"string.rot13" => Self::Rot13,
             b"string.toupper" => Self::Upper,
@@ -58,7 +58,7 @@ impl Codec {
             b"dechunk" => Self::Dechunk(Dechunk::default()),
             b"convert.quoted-printable-encode" => Self::QuotedEncode(QuotedEncode::new(params)),
             b"convert.quoted-printable-decode" => Self::QuotedDecode(QuotedDecode::new(params)),
-            name => Self::Iconv(Iconv::parse(name)?),
+            name => Self::Iconv(Iconv::parse(name, iconv?)?),
         })
     }
 
@@ -205,18 +205,20 @@ fn decode_base64(remainder: &mut Vec<u8>, data: Vec<u8>, flush: Flush) -> io::Re
 }
 
 pub(super) struct Iconv {
+    convert: IconvConverter,
     from: String,
     to: String,
     remainder: Vec<u8>,
 }
 
 impl Iconv {
-    fn parse(name: &[u8]) -> Option<Self> {
+    fn parse(name: &[u8], convert: IconvConverter) -> Option<Self> {
         let name = std::str::from_utf8(name.strip_prefix(b"convert.iconv.")?).ok()?;
         let split = name.find(['.', '/'])?;
         let (from, to) = (&name[..split], &name[split + 1..]);
-        phera_ext_mbstring::iconv_convert(b"", from, to).ok()?;
+        convert(b"", from, to).ok()?;
         Some(Self {
+            convert,
             from: from.into(),
             to: to.into(),
             remainder: Vec::new(),
@@ -227,16 +229,12 @@ impl Iconv {
         let mut bytes = std::mem::take(&mut self.remainder);
         bounded(bytes.len() + data.len())?;
         bytes.extend(data);
-        match phera_ext_mbstring::iconv_convert(&bytes, &self.from, &self.to) {
+        match (self.convert)(&bytes, &self.from, &self.to) {
             Ok(output) => Ok(output),
-            Err(phera_ext_mbstring::IconvFailure::IncompleteCharacter)
-                if flush != Flush::Closing =>
-            {
+            Err(IconvFailure::IncompleteCharacter) if flush != Flush::Closing => {
                 for retained in 1..=bytes.len().min(8) {
                     let boundary = bytes.len() - retained;
-                    if let Ok(output) =
-                        phera_ext_mbstring::iconv_convert(&bytes[..boundary], &self.from, &self.to)
-                    {
+                    if let Ok(output) = (self.convert)(&bytes[..boundary], &self.from, &self.to) {
                         self.remainder = bytes.split_off(boundary);
                         return Ok(output);
                     }

@@ -53,6 +53,7 @@ impl<'a> FilterUri<'a> {
 
     pub fn build(&self, context: &mut dyn Context, function: &str, mode: &[u8]) -> Filters {
         let mut filters = Filters::default();
+        let iconv = context.iconv_converter();
         let read = mode.contains(&b'r') || mode.contains(&b'+');
         let write = mode.contains(&b'+') || mode.first() != Some(&b'r');
         for (direction, bare, chain) in [
@@ -76,7 +77,7 @@ impl<'a> FilterUri<'a> {
                         .filter(|name| !name.is_empty())
                     {
                         let name = percent_decode(name).collect::<Vec<_>>();
-                        if let Some(filter) = Filter::new(0, &name, &Value::Null) {
+                        if let Some(filter) = Filter::new(0, &name, &Value::Null, iconv) {
                             chain.add(filter, false);
                         } else {
                             let name = String::from_utf8_lossy(&name);

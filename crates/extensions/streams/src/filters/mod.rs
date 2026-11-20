@@ -14,7 +14,7 @@ pub(crate) use uri::FilterUri;
 use std::collections::VecDeque;
 use std::io;
 
-use phera_extension_api::Value;
+use phera_extension_api::{IconvConverter, Value};
 
 use codec::Codec;
 
@@ -41,8 +41,13 @@ pub(crate) struct Filter {
 }
 
 impl Filter {
-    pub fn new(id: i64, name: &[u8], params: &Value) -> Option<Self> {
-        Codec::new(name, params).map(|codec| Self { id, codec })
+    pub fn new(
+        id: i64,
+        name: &[u8],
+        params: &Value,
+        iconv: Option<IconvConverter>,
+    ) -> Option<Self> {
+        Codec::new(name, params, iconv).map(|codec| Self { id, codec })
     }
 }
 
@@ -157,7 +162,7 @@ mod tests {
             Value::from(vec![b'_'; MAX_BUCKET]),
         );
         let mut chain = Chain::default();
-        let filter = Filter::new(1, b"convert.base64-encode", &Value::from(options)).unwrap();
+        let filter = Filter::new(1, b"convert.base64-encode", &Value::from(options), None).unwrap();
         chain.add(filter, false);
         assert!(chain.run(b"abcdef".to_vec(), Flush::No, 0).is_err());
         assert!(chain.run(Vec::new(), Flush::Closing, 0).is_err());

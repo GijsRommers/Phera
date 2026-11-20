@@ -94,6 +94,10 @@ impl Context for Vm {
         Box::pin(self.fiber_inspect(object, inspection))
     }
 
+    fn iconv_converter(&self) -> Option<phera_extension_api::IconvConverter> {
+        self.registry.iconv_converter()
+    }
+
     fn ini_get(&self, name: &[u8]) -> Option<phera_value::PhpString> {
         Vm::ini_get(self, name)
     }

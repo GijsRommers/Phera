@@ -153,6 +153,11 @@ pub trait Context {
         ".".into()
     }
 
+    /// The converter provided by the registered iconv module.
+    fn iconv_converter(&self) -> Option<crate::IconvConverter> {
+        None
+    }
+
     /// Return the current string value of a registered INI directive.
     fn ini_get(&self, _name: &[u8]) -> Option<PhpString> {
         None

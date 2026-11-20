@@ -20,7 +20,6 @@ mod cut;
 mod encoding;
 mod entities;
 mod iconv;
-pub use iconv::{IconvFailure, iconv_convert};
 mod ini;
 mod kana;
 mod mail;

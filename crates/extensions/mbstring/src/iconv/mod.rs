@@ -20,7 +20,6 @@
 //! blocking threads instead of the request's worker.
 
 mod convert;
-pub use convert::{Failure as IconvFailure, try_convert as iconv_convert};
 mod mime;
 mod settings;
 
@@ -34,6 +33,7 @@ use self::settings::encoding_argument;
 use crate::text::bounds;
 
 pub fn register(registry: &mut Registry) {
+    registry.set_iconv_converter(convert::try_convert);
     registry.function(FunctionEntry::asynchronous("iconv", ICONV, iconv));
     registry.function(FunctionEntry::asynchronous(
         "iconv_strlen",

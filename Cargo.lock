@@ -3068,7 +3068,6 @@ dependencies = [
  "flate2",
  "nix",
  "percent-encoding",
- "phera-ext-mbstring",
  "phera-ext-standard",
  "phera-extension-api",
  "phera-lexer",

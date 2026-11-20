@@ -60,6 +60,7 @@ impl From<&'static str> for ConstantValue {
 /// Built once at startup and then shared, read-only, by every worker thread.
 #[derive(Clone, Default)]
 pub struct Registry {
+    iconv_converter: Option<crate::IconvConverter>,
     /// Keyed by lowercase name: PHP function names are case-insensitive.
     functions: HashMap<String, FunctionEntry>,
     /// Only calls already holding a first-argument object need to check this table.
@@ -94,6 +95,14 @@ struct NativeConstant {
 impl Registry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn set_iconv_converter(&mut self, converter: crate::IconvConverter) {
+        self.iconv_converter = Some(converter);
+    }
+
+    pub fn iconv_converter(&self) -> Option<crate::IconvConverter> {
+        self.iconv_converter
     }
 
     /// Runs the extension's registration against this registry.
