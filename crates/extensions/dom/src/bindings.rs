@@ -17,6 +17,7 @@ mod mutation;
 mod namespace;
 mod node;
 mod properties;
+pub mod shared;
 mod xpath;
 
 use std::borrow::Cow;
