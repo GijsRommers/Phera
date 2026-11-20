@@ -87,6 +87,9 @@ pub struct Fork<'n> {
     /// Copies whose originals carry `WeakMap` values; filled once every
     /// map has its copy.
     pub(crate) unfilled_attachments: Vec<(Rc<Object>, Rc<Object>)>,
+    /// Copies of native data that several objects share (see
+    /// [`Fork::shared`]), by the address of the original.
+    shared: HashMap<usize, Box<dyn Any>>,
     refusal: Option<Refusal>,
 }
 
@@ -105,8 +108,30 @@ impl<'n> Fork<'n> {
             unfilled_objects: Vec::new(),
             unfilled_references: Vec::new(),
             unfilled_attachments: Vec::new(),
+            shared: HashMap::new(),
             refusal: None,
         }
+    }
+
+    /// The copy of native data that several objects share, made once per
+    /// fork by `copy`: the node objects of one DOM document share their
+    /// document, and each fork's nodes share the fork's copy.
+    pub fn shared<T: 'static>(
+        &mut self,
+        original: &Rc<T>,
+        copy: impl FnOnce(&T, &mut Self) -> T,
+    ) -> Rc<T> {
+        let address = Rc::as_ptr(original).cast::<()>() as usize;
+        if let Some(made) = self
+            .shared
+            .get(&address)
+            .and_then(|made| made.downcast_ref::<Rc<T>>())
+        {
+            return made.clone();
+        }
+        let made = Rc::new(copy(original, self));
+        self.shared.insert(address, Box::new(made.clone()));
+        made
     }
 
     /// The id pool of the copies.

@@ -17,7 +17,7 @@ pub(crate) fn register(registry: &mut Registry) {
         hooks: Some(&ClassHooks {
             cast: Some(object_id),
             clone: Some(NativeClone::Copy(clone_handle)),
-            fork: Some(phera_extension_api::fork_refused_handle),
+            fork: Some(crate::easy::fork_handle),
             forbid_serialization: true,
             ..ClassHooks::EMPTY
         }),

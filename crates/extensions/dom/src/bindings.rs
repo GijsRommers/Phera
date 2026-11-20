@@ -104,6 +104,60 @@ impl NodeHandle {
     }
 }
 
+/// The fork hook of the node classes: each fork's nodes point into the
+/// fork's own copy of their document, made once and shared by them, as
+/// the original nodes share the original document.
+///
+/// ```php
+/// $config = new DOMDocument(); $config->load('config.xml');
+/// Phera\snapshot();
+/// $config->documentElement->setAttribute('seen', '1');   // this request only
+/// ```
+pub(crate) fn fork_node(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    let handle = state
+        .downcast_ref::<NodeHandle>()
+        .ok_or("its built-in state is not initialized")?;
+    let location = handle.current().forked(fork);
+    Ok(Box::new(NodeHandle(Rc::new(RefCell::new(location)))) as Box<dyn std::any::Any>)
+}
+
+impl Location {
+    pub(super) fn forked(&self, fork: &mut phera_extension_api::value::Fork<'_>) -> Self {
+        Location {
+            shared: fork.shared(&self.shared, |state, fork| {
+                RefCell::new(state.borrow().forked(fork))
+            }),
+            id: self.id,
+        }
+    }
+}
+
+impl DomState {
+    fn forked(&self, fork: &mut phera_extension_api::value::Fork<'_>) -> Self {
+        let mut wrappers = |map: &HashMap<NodeId, Weak<Object>>| {
+            map.iter()
+                .filter_map(|(id, wrapper)| {
+                    let object = wrapper.upgrade()?;
+                    Some((*id, Rc::downgrade(&fork.object(&object))))
+                })
+                .collect::<HashMap<_, _>>()
+        };
+        let (node_wrappers, class_lists) = (wrappers(&self.wrappers), wrappers(&self.class_lists));
+        DomState {
+            document: self.document.clone(),
+            owned: self.owned,
+            wrappers: node_wrappers,
+            node_classes: self.node_classes.clone(),
+            class_lists,
+            detached: self.detached.forked(fork),
+        }
+    }
+}
+
 impl Location {
     fn new(document: Document, owned: bool, id: NodeId) -> Self {
         Self {

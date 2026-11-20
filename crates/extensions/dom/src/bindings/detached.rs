@@ -19,6 +19,24 @@ pub(super) struct Detached {
     pins: HashMap<NodeId, Weak<()>>,
 }
 
+impl Detached {
+    /// The copy for a fork: a pin that is alive becomes the fork's copy of
+    /// that pin, which the fork's copy of its holder shares.
+    pub(super) fn forked(&self, fork: &mut phera_extension_api::value::Fork<'_>) -> Self {
+        Detached {
+            roots: self.roots.clone(),
+            pins: self
+                .pins
+                .iter()
+                .filter_map(|(id, pin)| {
+                    let pin = pin.upgrade()?;
+                    Some((*id, Rc::downgrade(&fork.shared(&pin, |_, _| ()))))
+                })
+                .collect(),
+        }
+    }
+}
+
 impl DomState {
     pub(super) fn remove(&mut self, root: NodeId) {
         if self.document.arena[root].parent().is_none() {

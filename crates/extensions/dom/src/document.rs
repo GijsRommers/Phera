@@ -46,7 +46,7 @@ impl Default for Settings {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Document {
     pub arena: Arena,
     pub settings: Settings,

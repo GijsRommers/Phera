@@ -452,3 +452,28 @@ async fn a_redis_connection_of_the_boot_gets_a_socket_of_its_own_in_each_fork() 
     .expect("snapshot");
     assert_eq!(answers, ["boot 14", "boot 14"]);
 }
+
+/// A DOM document of the boot: each fork's nodes are its own, one copy of
+/// the document per fork shared by all of them, so a change through one
+/// node object is seen through another, in that fork only.
+#[tokio::test(flavor = "current_thread")]
+async fn a_dom_document_of_the_boot_is_each_forks_own() {
+    let answers = boot_and_answer(
+        "dom",
+        "<?php $d = new DOMDocument(); $d->loadXML('<a><b>x</b></a>');
+         $b = $d->getElementsByTagName('b')->item(0);
+         $hash = hash_init('sha256'); hash_update($hash, 'boot');
+         $curl = curl_init('http://127.0.0.1:1/'); curl_setopt($curl, CURLOPT_PRIVATE, 'boot');
+         Phera\\snapshot();
+         echo $d->saveXML($d->documentElement), ' ', $b === $d->documentElement->firstChild ? 'same' : 'other';
+         $b->nodeValue = 'changed'; $d->documentElement->setAttribute('fork', '1');
+         echo ' ', $d->saveXML($d->documentElement);
+         echo ' ', substr(hash_final($hash), 0, 8), ' ', curl_getinfo($curl, CURLINFO_PRIVATE);
+         curl_setopt($curl, CURLOPT_PRIVATE, 'fork');",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    let expected = "<a><b>x</b></a> same <a fork=\"1\"><b>changed</b></a> 4509beb0 boot";
+    assert_eq!(answers, [expected, expected]);
+}
