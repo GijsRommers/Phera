@@ -8,9 +8,9 @@ use std::{
 
 use phera_value::{Object, ObjectIds, PhpArray};
 
-use super::Class;
 use super::method_table::MethodTable;
 use super::operations::ClassOperations;
+use super::{Class, class::ClassOrigin};
 use crate::code_table::CodeTable;
 use crate::native_tables::NativeClasses;
 
@@ -52,7 +52,7 @@ impl ClassDefinitions {
             .hooks
             .as_ref()
             .is_some_and(|hooks| hooks.properties.is_some());
-        if class.origin == super::class::ClassOrigin::Closure {
+        if class.origin == ClassOrigin::Closure {
             self.closure = Some(class.index);
         }
         self.numbered.push(class.clone());
@@ -124,14 +124,14 @@ impl ClassTable {
         class: &'c Class,
         code: &CodeTable,
     ) -> &'c MethodTable {
-        let index = class.index.0 as usize;
-        let cell = if index < self.native_count() {
-            &self
-                .native_methods
-                .get()
-                .unwrap_or_else(|| self.allocate_native_method_tables())[index]
-        } else {
+        let cell = if class.origin == ClassOrigin::User {
             &class.method_table
+        } else {
+            self.native_methods
+                .get()
+                .unwrap_or_else(|| self.allocate_native_method_tables())
+                .get(class.index.0 as usize)
+                .unwrap_or(&class.method_table)
         };
         cell.get_or_init(|| MethodTable::build(class, code, |method| self.get(&method.declaring)))
     }
@@ -143,11 +143,13 @@ impl ClassTable {
     }
 
     pub(crate) fn cached_method_table<'c>(&'c self, class: &'c Class) -> Option<&'c MethodTable> {
-        let index = class.index.0 as usize;
-        if index < self.native_count() {
-            self.native_methods.get()?[index].get()
-        } else {
+        if class.origin == ClassOrigin::User {
             class.method_table.get()
+        } else {
+            self.native_methods
+                .get()?
+                .get(class.index.0 as usize)?
+                .get()
         }
     }
 
