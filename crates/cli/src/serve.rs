@@ -128,7 +128,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         server.local_addr()
     );
     let result = server.run();
-    phera_extension_api::web_log::flush();
+    phera_runtime::flush_web_log();
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
