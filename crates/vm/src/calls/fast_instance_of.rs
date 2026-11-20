@@ -14,7 +14,8 @@
 //! The loop leaves the instruction to the VM ([`Step::Slow`]) when the name
 //! is not linked yet (the VM links it), when the operand is undefined or a
 //! PHP reference, when the object's class is not a linked class, and when
-//! the interfaces to walk do not fit the walk's fixed stack.
+//! the interfaces to walk do not fit the walk's fixed stack, and in the
+//! guarded loop (some object has a destructor due).
 
 use std::rc::Rc;
 
@@ -40,6 +41,12 @@ impl Machine<'_> {
         source: Reg,
         symbol: SymbolId,
     ) -> Step {
+        // A `catch` clause is an `instanceof` of the thrown object, reached
+        // while the unwinding may have left destructors due; the VM's exit
+        // runs them before the clause's code, as PHP does.
+        if GUARDED {
+            return Step::Slow;
+        }
         let slot = position.frame.base() + source.index();
         let answer = match self.registers.window(slot, 1) {
             [Some(Value::Object(object))] => {
