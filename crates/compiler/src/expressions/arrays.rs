@@ -40,6 +40,10 @@ impl Compiler<'_> {
                     line,
                 );
                 dst
+            } else if local_key.is_some()
+                && let Some(value) = self.compiled_variable(&item.value)?
+            {
+                value
             } else {
                 self.compile_expression(&item.value)?
             };
@@ -49,6 +53,7 @@ impl Compiler<'_> {
                     key,
                     value,
                     spread: item.spread,
+                    by_reference: item.by_reference,
                 },
                 if local_key.is_some() {
                     self.operand_line(&item.value)

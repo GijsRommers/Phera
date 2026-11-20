@@ -104,6 +104,15 @@ impl Vm {
                 let value = self.binary_with_strings(op, left, right).await?;
                 self.set(dst, value);
             }
+            Instruction::ArraySet { array, key, src }
+            | Instruction::ArraySetReference { array, key, src } => {
+                let mode = if matches!(instruction, Instruction::ArraySetReference { .. }) {
+                    crate::arrays::ArrayWrite::Reference
+                } else {
+                    crate::arrays::ArrayWrite::Element
+                };
+                self.array_write_with_warning(array, key, src, mode).await?;
+            }
             Instruction::AssignOp { op, local, src } => {
                 // PHP reads the right side first, so when both are
                 // undefined its warning comes first.
