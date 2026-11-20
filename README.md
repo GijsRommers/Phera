@@ -85,6 +85,13 @@ Projects can use Packagist, Composer, Git, path and artifact repositories.
 Git over HTTPS and SSH uses the system client. Put repository credentials in
 `auth.json` or `COMPOSER_AUTH`, keyed by the host that receives them.
 
+Use `phera show`, `phera licenses`, and `phera validate` to inspect an
+installation. `phera why-not vendor/package version` explains locked
+constraints, and `phera outdated --all` also includes transitive dependencies.
+`phera run-script name` runs a composer.json script. `phera run name` accepts
+the same script name when it is neither an existing file nor a PHP path.
+`phera exec name` runs a project binary from vendor/bin.
+
 ### Serving a site
 
 Run `phera serve public` to serve a document root. PHP diagnostics, including

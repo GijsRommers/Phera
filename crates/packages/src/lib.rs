@@ -9,7 +9,9 @@ mod binaries;
 mod cleanup;
 mod commands;
 mod content_hash;
+mod exec;
 mod git;
+mod inspect;
 mod install_paths;
 mod installed;
 mod lock_writer;
@@ -25,11 +27,15 @@ mod scripts;
 mod solver;
 mod store;
 mod update;
+mod validate;
 pub mod version;
 
 pub use audit::{AuditReport, check as audit};
 pub use commands::{add, add_many, outdated, remove, remove_many, why};
+pub use exec::exec;
+pub use inspect::{licenses, show, why_not};
 pub use project::{Lock, Options, Package, Project};
+pub use validate::validate;
 
 use anyhow::{Context, Result, bail};
 use install_paths::InstallPaths;
@@ -155,6 +161,15 @@ pub fn update(directory: &Path, options: &Options) -> Result<()> {
 /// Resolve selected packages while keeping the other locked versions fixed.
 pub fn update_selected(directory: &Path, names: &[String], options: &Options) -> Result<()> {
     update::run(Project::read(directory)?, names, None, options)
+}
+
+/// Run a named root composer.json script.
+pub fn run_script(directory: &Path, name: &str, args: &[String], options: &Options) -> Result<()> {
+    let project = Project::read(directory)?;
+    if project.data["scripts"].get(name).is_none() {
+        bail!("No composer.json script named {name}.");
+    }
+    scripts::Runner::default().with_args(&project, options, name, args)
 }
 
 /// Rebuild the PHP autoloader from the installed lock file.

@@ -3,6 +3,7 @@
 //! Package operations live in `phera-packages`; the CLI only reports their outcome.
 
 use phera_packages::Options;
+use std::path::Path;
 use std::process::ExitCode;
 
 const INSTALL_HELP: &str = "\
@@ -61,6 +62,9 @@ pub(crate) fn run(arguments: Vec<String>) -> ExitCode {
 
 fn execute(arguments: &[String]) -> Result<ExitCode, String> {
     let command = arguments[0].as_str();
+    if matches!(command, "run-script" | "exec") {
+        return launch(command, &arguments[1..]);
+    }
     if arguments
         .iter()
         .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
@@ -105,6 +109,7 @@ fn execute(arguments: &[String]) -> Result<ExitCode, String> {
             {
                 options.with_all_dependencies = true;
             }
+            "--all" if command == "outdated" => options.outdated_all = true,
             "--prefer-lowest" => options.prefer_lowest = true,
             "--ignore-platform-reqs" => options.ignore_platform = true,
             "--ignore-platform-req" => {
@@ -129,7 +134,11 @@ fn execute(arguments: &[String]) -> Result<ExitCode, String> {
     }
     let directory = std::env::current_dir().map_err(|error| error.to_string())?;
     options.platform = phera_runtime::Runtime::new().platform_packages();
-    if !matches!(command, "update" | "add" | "require" | "remove" | "why") && !subjects.is_empty() {
+    if !matches!(
+        command,
+        "update" | "add" | "require" | "remove" | "why" | "why-not" | "show"
+    ) && !subjects.is_empty()
+    {
         return Err(format!("Unexpected positional argument for {command}."));
     }
     if command == "audit" {
@@ -164,15 +173,76 @@ fn execute(arguments: &[String]) -> Result<ExitCode, String> {
             };
             phera_packages::why(&directory, subject).map(|report| println!("{report}"))
         }
+        "why-not" => {
+            let [package, version] = subjects.as_slice() else {
+                return Err("Usage: phera why-not vendor/package version".into());
+            };
+            phera_packages::why_not(&directory, package, version, &options)
+                .map(|report| println!("{report}"))
+        }
         "outdated" => {
             phera_packages::outdated(&directory, &options).map(|report| println!("{report}"))
         }
         "dump-autoload" => phera_packages::dump_autoload(&directory, &options),
+        "show" => {
+            if subjects.len() > 1 {
+                return Err("Usage: phera show [vendor/package]".into());
+            }
+            phera_packages::show(&directory, subjects.first().map(String::as_str), &options)
+                .map(|report| println!("{report}"))
+        }
+        "licenses" => {
+            phera_packages::licenses(&directory, &options).map(|report| println!("{report}"))
+        }
+        "validate" => phera_packages::validate(&directory).map(|report| println!("{report}")),
         other => return Err(format!("Unknown package command: {other}")),
     };
     result
         .map(|()| ExitCode::SUCCESS)
         .map_err(|error| format!("Package operation failed: {error:#}"))
+}
+
+fn launch(command: &str, arguments: &[String]) -> Result<ExitCode, String> {
+    let Some((subject, args)) = arguments.split_first() else {
+        return Err(help(command).lines().next().unwrap_or_default().into());
+    };
+    if matches!(subject.as_str(), "--help" | "-h") {
+        print!("{}", help(command));
+        return Ok(ExitCode::SUCCESS);
+    }
+    let args = if args.first().is_some_and(|argument| argument == "--") {
+        &args[1..]
+    } else {
+        args
+    };
+    let directory = std::env::current_dir().map_err(|error| error.to_string())?;
+    let operation = if command == "exec" {
+        phera_packages::exec(&directory, subject, args).map(|status| {
+            ExitCode::from(
+                status
+                    .code()
+                    .and_then(|code| u8::try_from(code).ok())
+                    .unwrap_or(1),
+            )
+        })
+    } else {
+        phera_packages::run_script(&directory, subject, args, &Options::default())
+            .map(|()| ExitCode::SUCCESS)
+    };
+    operation.map_err(|error| format!("Package operation failed: {error:#}"))
+}
+
+pub(crate) fn is_script(name: &str) -> bool {
+    if name.is_empty()
+        || name.starts_with('-')
+        || name.contains(['/', '\\'])
+        || name.to_ascii_lowercase().ends_with(".php")
+        || Path::new(name).exists()
+    {
+        return false;
+    }
+    phera_packages::Project::read(Path::new("."))
+        .is_ok_and(|project| project.data["scripts"].get(name).is_some())
 }
 
 fn help(command: &str) -> &'static str {
@@ -190,7 +260,23 @@ fn help(command: &str) -> &'static str {
             Remove root dependencies and update the lock.\n"
         }
         "why" => "Usage: phera why vendor/package\n",
-        "outdated" => "Usage: phera outdated\n",
+        "why-not" => {
+            "Usage: phera why-not vendor/package version\n\nExplain what blocks the proposed version.\n"
+        }
+        "outdated" => {
+            "Usage: phera outdated [--all] [--no-dev]\n\n+            Show newer versions of direct dependencies, or all dependencies with --all.\n"
+        }
+        "show" => {
+            "Usage: phera show [vendor/package]\n\nList installed packages or show package details.\n"
+        }
+        "licenses" => {
+            "Usage: phera licenses [--no-dev]\n\nList the licenses of installed packages.\n"
+        }
+        "validate" => "Usage: phera validate\n\nCheck composer.json and the existing lock.\n",
+        "run-script" => {
+            "Usage: phera run-script name [arguments...]\n\nRun a named composer.json script.\n"
+        }
+        "exec" => "Usage: phera exec binary [arguments...]\n\nRun a binary from vendor/bin.\n",
         "dump-autoload" => "Usage: phera dump-autoload [-o] [-a] [--no-dev]\n",
         _ => crate::arguments::USAGE,
     }

@@ -4,12 +4,11 @@
 //! keeps a matching advisory visible without treating it as a failure.
 
 use crate::version::{Constraint, Version};
-use crate::{Lock, Options, Package, Project, network::Network, paths};
+use crate::{Lock, Options, Package, Project, installed, network::Network};
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fmt::Write;
-use std::fs;
 use std::path::Path;
 
 #[derive(Default)]
@@ -95,7 +94,8 @@ pub fn check(directory: &Path, options: &Options) -> Result<AuditReport> {
     let packages = if options.frozen {
         Lock::read(directory)?.packages(options.no_dev)
     } else {
-        installed(&project, options.no_dev)?
+        installed::read::packages(&project, options.no_dev)
+            .context("Use --locked to audit composer.lock.")?
     };
     query(&project, &packages)
 }
@@ -112,23 +112,6 @@ pub(crate) fn summary(project: &Project, options: &Options, packages: &[Package]
         Ok(report) => println!("{}", report.summary()),
         Err(error) => eprintln!("Security audit unavailable: {error:#}"),
     }
-}
-
-fn installed(project: &Project, no_dev: bool) -> Result<Vec<Package>> {
-    let vendor = project.vendor_dir()?;
-    let file = paths::inside(&vendor, "composer/installed.json")?;
-    let bytes =
-        fs::read(file).context("No installed packages. Run `phera install` or use --locked.")?;
-    let metadata: Value = serde_json::from_slice(&bytes).context("Invalid installed.json.")?;
-    let dev = crate::project::strings(&metadata["dev-package-names"]);
-    let packages = metadata["packages"]
-        .as_array()
-        .context("Missing installed package records.")?;
-    packages
-        .iter()
-        .filter(|package| !no_dev || !dev.contains(&field(package, "name")))
-        .map(|package| Ok(serde_json::from_value(package.clone())?))
-        .collect()
 }
 
 fn packagist_enabled(project: &Project) -> bool {

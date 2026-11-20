@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::{fs, path::Path};
 
+pub(crate) mod read;
+
 pub(crate) fn write(
     project: &Project,
     lock: &Lock,

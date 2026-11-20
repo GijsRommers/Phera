@@ -127,6 +127,11 @@ pub fn outdated(directory: &Path, options: &Options) -> Result<String> {
     let packages = lock.packages(options.no_dev);
     let mut lines: Vec<String> = packages
         .par_iter()
+        .filter(|package| {
+            options.outdated_all
+                || project.data["require"].get(&package.name).is_some()
+                || (!options.no_dev && project.data["require-dev"].get(&package.name).is_some())
+        })
         .map(|package| -> Result<Option<String>> {
             let current = Version::parse(&package.version)?;
             let latest = registry
