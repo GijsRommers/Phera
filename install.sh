@@ -31,15 +31,16 @@ fi
 download() {
     case "$1" in
         file://*) cp "${1#file://}" "$2" ;;
-        https://*|http://*)
+        https://*)
+            # HTTPS only, also after a redirect: the checksum comes from the same place.
             if command -v curl >/dev/null 2>&1; then
-                curl -q -fsSL -o "$2" "$1"
+                curl -q --proto '=https' --tlsv1.2 -fsSL -o "$2" "$1"
             elif command -v wget >/dev/null 2>&1; then
-                wget -q -O "$2" "$1"
+                wget -q --https-only -O "$2" "$1"
             else
                 fail 'Install curl or wget to download Phera.'
             fi ;;
-        *) fail 'Use an HTTPS, HTTP or file:// release base URL.' ;;
+        *) fail 'Use an HTTPS or file:// release base URL.' ;;
     esac
 }
 
