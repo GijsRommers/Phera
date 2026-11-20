@@ -28,6 +28,36 @@ jobs:
           toolchain: '1.99.1' # Keep in sync with rust-toolchain.toml.
           components: rustfmt
       - run: cargo fmt --all --check
+      - name: Check and test the installer with a local release
+        run: |
+          shellcheck install.sh
+          test_dir=$(mktemp -d)
+          trap 'rm -rf "$test_dir"' EXIT
+          fake="$test_dir/release"
+          archive=phera-1.2.3-linux-x86_64.tar.gz
+          assets="$fake/download/v1.2.3"
+          mkdir -p "$assets" "$test_dir/package"
+          printf '{"tag_name":"v1.2.3"}\n' > "$fake/latest"
+          printf '#!/bin/sh\nprintf "Phera 1.2.3\\n"\n' > "$test_dir/package/phera"
+          tar -czf "$assets/$archive" -C "$test_dir/package" phera
+          (cd "$assets" && sha256sum "$archive" > SHA256SUMS)
+          install_phera() {
+            env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" \
+              PHERA_INSTALL="$test_dir/install here" PHERA_RELEASE_BASE_URL="file://$fake" \
+              sh install.sh "$@"
+          }
+          install_phera | grep -Fx "export PATH='$test_dir/install here/bin':\"\$PATH\""
+          installed="$test_dir/install here/bin/phera"
+          test "$(env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" "$installed" --version)" = 'Phera 1.2.3'
+          rm "$fake/latest"
+          install_phera v1.2.3
+          printf 'corrupt' >> "$assets/$archive"
+          if install_phera 1.2.3 > "$test_dir/output" 2>&1; then
+            echo 'The installer accepted a corrupt archive.' >&2
+            exit 1
+          fi
+          grep -F 'SHA-256 verification failed' "$test_dir/output"
+          cmp "$installed" "$test_dir/package/phera"
 
   lint:
     name: Clippy
