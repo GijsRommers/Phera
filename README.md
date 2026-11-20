@@ -47,9 +47,9 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | `phera upgrade` | Updates Phera. Use `--check` to see the available version or `--version X` to install a specific release |
 | `phera --dump file.php` | Prints the compiled bytecode |
 
-`phera <command> --help` lists the options. There is no formatter and no test
-runner yet. A package manager (`phera install`) and a step debugger are being
-built; until then packages are installed with Composer.
+`phera <command> --help` lists the options. The built-in package manager reads
+Composer manifests and locks. The formatter, test runner and step debugger
+are still in development.
 
 ### Installing dependencies
 
@@ -70,6 +70,9 @@ the initial bundle list and dotenv defaults.
 Use `--no-plugins` to skip native plugin hooks.
 In a terminal Phera can save a Composer plugin trust decision to composer.json.
 Use `--no-interaction` to require a decision already present in the project.
+Symfony console hooks run on Phera. The stock Symfony webapp's cache warmup
+still needs runtime fixes. See the
+[webapp test results](crates/packages/tests/DIFFERENCES.md#symfony-webapp-cache-failures).
 
 `phera new` fetches official framework templates through the package manager.
 Composer is the fallback when the native installer refuses a template or its

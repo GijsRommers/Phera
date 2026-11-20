@@ -1621,17 +1621,17 @@ that a project can use either tool.
   plain sentences.
 - **A global store.** Every package version is downloaded and unpacked once
   per machine into a content-addressed store and placed into `vendor/` with
-  copy-on-write clones or hard links, so a second project with the same
-  dependency costs no download and almost no disk.
+  copy-on-write clones where supported. Other filesystems use private
+  copies to keep project writes out of the shared store.
 - **Parallel everywhere.** Metadata is fetched concurrently while the resolver
   runs, archives are downloaded and unpacked concurrently, and the autoloader's
   class map is built by scanning files on all cores with Phera's tokenizer.
 - **Installing from a lock file needs no resolution.** A warm store supports
   `--offline`. Online installs also show a Packagist advisory summary.
-- **Commands**: `phera install`, `phera update`, `phera add`, `phera remove`,
-  `phera why`, `phera outdated`, `phera audit` (security advisories from
-  Packagist), `phera dump-autoload`, and `phera exec bin-tool` to run a
-  package's binary.
+- **Commands.** Use `install`, `update`, `add` and `remove` to manage dependencies.
+  `why`, `why-not`, `outdated`, `show`, `licenses`, `audit` and `validate` inspect
+  them. `dump-autoload` rebuilds the loader, `run-script` runs project scripts,
+  and `exec` runs an installed package binary.
 - **What does not carry over**: Composer plugins (they are PHP code that
   hooks into Composer's internals). The few that matter are handled natively
   (the installers for framework-specific paths); `scripts` in `composer.json`
