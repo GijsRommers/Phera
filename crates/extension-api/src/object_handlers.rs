@@ -133,6 +133,8 @@ pub type MethodForwarder = fn(&Object) -> Result<Option<Rc<Object>>, NativeError
 
 #[derive(Clone, Copy, Default)]
 pub struct ClassHooks {
+    /// The error for script allocation of a factory-only native object.
+    pub construction_error: Option<&'static str>,
     pub clone: Option<NativeClone>,
     pub compare: Option<NativeCompare>,
     /// Whole-object enumeration, with the consuming operation supplied as a purpose.
@@ -152,6 +154,7 @@ pub struct ClassHooks {
 
 impl ClassHooks {
     pub const EMPTY: Self = Self {
+        construction_error: None,
         clone: None,
         compare: None,
         properties: None,

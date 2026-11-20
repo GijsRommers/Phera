@@ -610,6 +610,16 @@ pub trait Context {
         )))
     }
 
+    /// Invoke an allocated object's constructor in its declaring scope.
+    /// Factories may call this after hydrating properties, including for private constructors.
+    fn call_hydration_constructor(
+        &mut self,
+        _object: Rc<Object>,
+        _arguments: &PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(Ok(Value::Null)))
+    }
+
     /// Access to the runtime's cold reflection queries.
     fn reflection(&mut self) -> Option<&mut dyn crate::reflection::ReflectionContext> {
         None

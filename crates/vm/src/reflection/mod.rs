@@ -535,7 +535,10 @@ impl Vm {
             )));
         }
         let args = match args {
-            Some(args) => args,
+            Some(args) => {
+                Self::check_script_construction(&class)?;
+                args
+            }
             None => {
                 if class.has_native_layout && class.is_final {
                     return Err(exception(format!(
@@ -628,7 +631,7 @@ impl Vm {
         Ok(created)
     }
 
-    fn reflection_callee(
+    pub(crate) fn reflection_callee(
         &self,
         called: Rc<Class>,
         scope: Rc<Class>,

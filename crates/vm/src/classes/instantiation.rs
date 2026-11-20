@@ -142,6 +142,7 @@ impl Vm {
                 class.name
             )));
         }
+        Self::check_script_construction(&class)?;
         let properties = if let Some(template) = &class.property_template {
             template.clone()
         } else {
@@ -184,6 +185,17 @@ impl Vm {
             "__construct",
             super::Invocation::Constructor,
         )
+    }
+
+    pub(crate) fn check_script_construction(class: &super::Class) -> Result<(), NativeError> {
+        if let Some(message) = class
+            .hooks
+            .as_ref()
+            .and_then(|hooks| hooks.construction_error)
+        {
+            return Err(NativeError::error(message));
+        }
+        Ok(())
     }
 
     /// Unknown names simply fail membership tests rather than raising a missing-class error.

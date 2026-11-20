@@ -9,8 +9,8 @@ use phera_extension_api::{
 
 use crate::attributes::{Attributes, ColumnCase, NullHandling};
 use crate::constants::{
-    FETCH_ASSOC, FETCH_BOTH, FETCH_COLUMN, FETCH_DEFAULT, FETCH_KEY_PAIR, FETCH_NAMED, FETCH_NUM,
-    FETCH_OBJ,
+    FETCH_ASSOC, FETCH_BOTH, FETCH_CLASS, FETCH_COLUMN, FETCH_DEFAULT, FETCH_KEY_PAIR, FETCH_NAMED,
+    FETCH_NUM, FETCH_OBJ,
 };
 use crate::drivers::Column;
 use crate::errors::unsupported;
@@ -22,6 +22,7 @@ pub enum FetchMode {
     Num,
     Both,
     Object,
+    Class,
     Column,
     KeyPair,
     Named,
@@ -36,6 +37,7 @@ impl FetchMode {
             FETCH_NUM => Ok(Self::Num),
             FETCH_BOTH => Ok(Self::Both),
             FETCH_OBJ => Ok(Self::Object),
+            FETCH_CLASS => Ok(Self::Class),
             FETCH_COLUMN => Ok(Self::Column),
             FETCH_KEY_PAIR => Ok(Self::KeyPair),
             FETCH_NAMED => Ok(Self::Named),
@@ -48,6 +50,7 @@ impl FetchMode {
             Self::Num => FETCH_NUM,
             Self::Both => FETCH_BOTH,
             Self::Object => FETCH_OBJ,
+            Self::Class => FETCH_CLASS,
             Self::Column => FETCH_COLUMN,
             Self::KeyPair => FETCH_KEY_PAIR,
             Self::Named => FETCH_NAMED,
@@ -124,7 +127,7 @@ pub fn convert(
     }
 }
 
-fn column_name(column: &Column, attributes: &Attributes) -> String {
+pub(crate) fn column_name(column: &Column, attributes: &Attributes) -> String {
     let name = match (&column.metadata, attributes.mysql_table_names) {
         (crate::metadata::Metadata::Mysql(mysql), true) => {
             format!("{}.{}", mysql.table_str(), column.name)
@@ -211,36 +214,36 @@ pub fn column(
     )
 }
 
-pub fn set_mode(
-    _: &mut dyn Context,
-    this: Option<&Rc<Object>>,
-    arguments: &[Value],
-) -> NativeResult {
-    let state = state(this)?;
-    let mut statement = state.borrow_mut();
-    let configuration = crate::fetch_options::validate(
-        crate::fetch_options::Method::SetMode,
-        arguments,
-        statement.fetch,
-        statement.column,
-        statement.fetch_flags,
-    )?;
-    statement.fetch = configuration.mode;
-    statement.column = configuration.column;
-    statement.fetch_flags = configuration.flags;
-    Ok(Value::Bool(true))
-}
-
-/// `fetchObject()` constructs stdClass; user-defined constructors need VM callback support.
-pub fn object(
+pub async fn set_mode(
     context: &mut dyn Context,
     this: Option<&Rc<Object>>,
     arguments: &[Value],
 ) -> NativeResult {
-    if args::string(arguments, 0).is_some_and(|name| name.to_string_lossy() != "stdClass")
-        || args::array(arguments, 1).is_some_and(|args| !args.is_empty())
-    {
-        return Err(unsupported("Fetching into a custom class"));
+    let state = state(this)?;
+    let (mode, column, flags) = {
+        let statement = state.borrow();
+        (statement.fetch, statement.column, statement.fetch_flags)
+    };
+    let configuration = crate::fetch_options::validate(
+        crate::fetch_options::Method::SetMode,
+        arguments,
+        mode,
+        column,
+        flags,
+    )?;
+    let class = crate::fetch_class::RowClass::configured(
+        context,
+        arguments,
+        0,
+        "PDOStatement::setFetchMode",
+    )
+    .await?;
+    let mut statement = state.borrow_mut();
+    statement.fetch = configuration.mode;
+    statement.column = configuration.column;
+    statement.fetch_flags = configuration.flags;
+    if let Some(class) = class {
+        statement.row_class = Some(class);
     }
-    fetch(context, this, &[Value::Int(FETCH_OBJ)])
+    Ok(Value::Bool(true))
 }

@@ -827,6 +827,27 @@ impl Context for Vm {
         Ok(value)
     }
 
+    fn call_hydration_constructor(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        arguments: &phera_value::PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        let callee = self
+            .classes
+            .for_object(&object)
+            .and_then(|class| class.constructor.clone().map(|method| (class, method)));
+        let Some((class, method)) = callee else {
+            return Box::pin(std::future::ready(Ok(Value::Null)));
+        };
+        let Some(scope) = self.classes.get(&method.declaring) else {
+            return Box::pin(std::future::ready(Err(internal_error!(
+                "hydration constructor scope"
+            ))));
+        };
+        let callee = self.reflection_callee(class, scope, method, Some(object));
+        self.invoke_array_callback(callee, arguments)
+    }
+
     fn ensure_instantiable(&self, name: &str) -> Result<(), phera_extension_api::NativeError> {
         self.factory_class(name).map(drop)
     }
