@@ -152,10 +152,12 @@ echo "Done\n";
 Call `fastcgi_finish_request()` (also available as
 `litespeed_finish_request()`) to complete the response and continue running
 PHP. Further output is discarded. The request timeout still applies, and
-resources such as session locks are released at their usual points. A
-client disconnect is visible through `connection_aborted()` and
-`connection_status()` when PHP next writes to the response.
-`ignore_user_abort(true)` lets the script continue after that write.
+resources such as session locks are released at their usual points.
+If a client leaves while the response is still buffered, PHP keeps
+running and the server discards the response at request end. PHP observes
+a disconnected client when a transport write fails. Its shutdown
+functions and destructors still run. `ignore_user_abort(true)` also
+lets the script continue after the failed write.
 
 ## 🧩 Extensions
 

@@ -85,6 +85,7 @@ pub struct WebWorker {
     /// the background (`phera serve`); see [`WebWorker::with_background_boots`].
     background_boots: bool,
     code: Rc<WorkerCodeCache>,
+    output_factory: Option<Rc<dyn phera_vm::WebOutputFactory>>,
 }
 
 impl WebWorker {
@@ -101,6 +102,16 @@ impl WebWorker {
         self.index
     }
 
+    /// Give scripts a way to open a transport if they flush or finish early.
+    pub fn with_web_output<F, T>(mut self, factory: F) -> Self
+    where
+        F: Fn(Option<&[u8]>) -> Option<T> + 'static,
+        T: WebOutput + 'static,
+    {
+        self.output_factory = Some(Rc::new(http::web_output::TransportFactory(factory)));
+        self
+    }
+
     pub async fn handle_request(
         &self,
         script: &Path,
@@ -108,21 +119,7 @@ impl WebWorker {
         request: HttpRequest,
     ) -> HttpResponse {
         self.runtime
-            .handle_web_request(self, script, document_root, request, None)
-            .await
-    }
-
-    /// Run a request with a transport that accepts an early response.
-    pub async fn handle_streaming_request(
-        &self,
-        script: &Path,
-        document_root: &Path,
-        request: HttpRequest,
-        output: impl WebOutput + 'static,
-    ) -> HttpResponse {
-        let transport = Box::new(http::web_output::Transport(output));
-        self.runtime
-            .handle_web_request(self, script, document_root, request, Some(transport))
+            .handle_web_request(self, script, document_root, request)
             .await
     }
 }
@@ -352,6 +349,7 @@ impl Runtime {
             snapshots: Default::default(),
             background_boots: false,
             code: Rc::new(WorkerCodeCache::new(self.web_cache.clone())),
+            output_factory: None,
         }
     }
 
@@ -373,7 +371,6 @@ impl Runtime {
         script: &Path,
         document_root: &Path,
         request: HttpRequest,
-        transport: Option<Box<dyn phera_vm::WebOutput>>,
     ) -> HttpResponse {
         let code = Rc::new(RequestCodeCache::new(worker.code.clone()));
         let compiled = match self.entry_unit(&code, script).await {
@@ -446,8 +443,8 @@ impl Runtime {
             protocol: request.protocol,
         };
         vm.prepare_web_headers_with(ResponseHead::prepare, ResponseHead::set_error_status);
-        if let Some(transport) = transport {
-            vm.set_web_output(transport);
+        if let Some(factory) = &worker.output_factory {
+            vm.set_web_output_factory(factory.clone());
         }
         vm.configure_web_diagnostics(self.web_development, RequestHeaders::request_line);
         *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);

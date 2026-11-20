@@ -278,10 +278,14 @@ one queued chunk of at most 64 KiB and waits asynchronously for room.
 The normal buffered path returns a body with its exact length.
 
 The connection polls PHP directly until the response starts. On an explicit
-handoff it moves pending PHP work into a task on the same worker. The task
-keeps its original deadline and takes part in graceful shutdown even if the
-socket has gone away. PHP sees a disconnect on the next transport write.
-With `ignore_user_abort(false)`, PHP stops and runs its shutdown functions.
+handoff it moves pending PHP work into a task on the same worker. Dropping
+the connection also detaches an unfinished request. It retains the
+connection slot and its original deadline, and takes part in graceful
+shutdown. The buffered path captures bytes without observing the socket,
+so PHP finishes its work and the server discards the buffered response if
+the client already left. An explicit or implicit flush opens the
+transport. With `ignore_user_abort(false)`, a failed transport write ends
+PHP's execution and runs its shutdown functions and destructors.
 `fastcgi_finish_request()` finalizes PHP's output buffers and ends the body
 while the task continues. Output after that point has no recipient.
 

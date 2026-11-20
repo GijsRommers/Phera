@@ -186,11 +186,7 @@ impl Vm {
         if self.headers_pending() {
             self.finish_headers().await?;
         }
-        if self
-            .output_writer
-            .response()
-            .is_some_and(|response| response.pending)
-        {
+        if self.output_writer.response_pending {
             self.flush_response_body().await?;
         }
         Ok(())

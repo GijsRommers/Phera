@@ -1,6 +1,8 @@
 //! `flush()` hands pending bytes to HTTP. An ordinary response stays buffered
 //! in the VM until the script and its shutdown functions have finished.
 
+use std::rc::Rc;
+
 use phera_extension_api::{LocalFuture, NativeError, NativeResult, RequestState, Unwind};
 use phera_value::Value;
 
@@ -24,6 +26,11 @@ pub trait WebOutput {
     fn finish_buffered(&mut self, state: &RequestState, bytes: Vec<u8>) -> LocalFuture<'_, bool>;
 }
 
+/// Opens an HTTP output transport only when PHP first needs to send bytes.
+pub trait WebOutputFactory {
+    fn open(&self, state: &RequestState) -> Option<Box<dyn WebOutput>>;
+}
+
 #[derive(PartialEq, Eq)]
 enum Phase {
     Buffered,
@@ -35,7 +42,6 @@ enum Phase {
 pub(crate) struct ResponseOutput {
     transport: Box<dyn WebOutput>,
     phase: Phase,
-    pub(crate) pending: bool,
 }
 
 impl ResponseOutput {
@@ -43,25 +49,36 @@ impl ResponseOutput {
         matches!(self.phase, Phase::Finished | Phase::Aborted)
     }
 
-    pub(crate) fn writes_immediately(&self) -> bool {
-        self.phase == Phase::Streaming || self.transport.is_disconnected()
+    pub(crate) fn is_streaming(&self) -> bool {
+        self.phase == Phase::Streaming
     }
 }
 
 impl Vm {
-    pub fn set_web_output(&mut self, transport: Box<dyn WebOutput>) {
-        self.output_writer.set_response(ResponseOutput {
-            transport,
-            phase: Phase::Buffered,
-            pending: false,
-        });
+    pub fn set_web_output_factory(&mut self, factory: Rc<dyn WebOutputFactory>) {
+        self.output_writer.set_factory(factory);
+    }
+
+    fn open_response_transport(&mut self) {
+        if self.output_writer.response().is_none()
+            && let Some(factory) = self.output_writer.factory.take()
+            && let Some(transport) = factory.open(&self.state)
+        {
+            self.output_writer.set_response(ResponseOutput {
+                transport,
+                phase: Phase::Buffered,
+            });
+        }
     }
 
     pub(crate) fn queue_response_flush(&mut self) {
-        if let Some(response) = self.output_writer.response_mut()
-            && !response.is_ended()
+        if self.output_writer.factory.is_some()
+            || self
+                .output_writer
+                .response()
+                .is_some_and(|response| !response.is_ended())
         {
-            response.pending = true;
+            self.output_writer.response_pending = true;
             self.pending_callbacks = true;
         }
     }
@@ -73,10 +90,11 @@ impl Vm {
     }
 
     pub(crate) async fn flush_response_body(&mut self) -> Result<(), NativeError> {
+        self.output_writer.response_pending = false;
+        self.open_response_transport();
         let Some(response) = self.output_writer.response_mut() else {
             return Ok(());
         };
-        response.pending = false;
         if response.is_ended() {
             return Ok(());
         }
@@ -105,13 +123,15 @@ impl Vm {
         if self.ini_enabled(b"ignore_user_abort") {
             Ok(())
         } else {
+            self.release_frames_for_exit();
             Err(NativeError::Unwind(Unwind(Box::new(
-                crate::request_end::FatalStop,
+                crate::request_end::Exit,
             ))))
         }
     }
 
     pub(crate) async fn finish_response_early(&mut self, function: &'static str) -> NativeResult {
+        self.open_response_transport();
         if self
             .output_writer
             .response()
@@ -166,7 +186,7 @@ impl Vm {
     fn is_streaming_response(&self) -> bool {
         self.output_writer
             .response()
-            .is_some_and(|response| response.phase == Phase::Streaming)
+            .is_some_and(ResponseOutput::is_streaming)
     }
 
     fn finish_stream(&mut self) {

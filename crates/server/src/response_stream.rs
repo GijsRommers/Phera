@@ -8,6 +8,7 @@
 //! ```
 
 use std::cell::Cell;
+use std::future::Future;
 use std::io;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -23,7 +24,6 @@ use crate::{Body, Response};
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Waiting,
-    Watching,
     Published,
     Disconnected,
 }
@@ -58,7 +58,7 @@ impl ResponseSlot {
 
     /// PHP still gets to observe a disconnect at its next write.
     pub(crate) fn disconnect(&self) -> bool {
-        if self.phase.get() == Phase::Watching {
+        if self.phase.get() == Phase::Waiting {
             self.phase.set(Phase::Disconnected);
             true
         } else {
@@ -103,6 +103,10 @@ pub struct ResponseWriter {
     head_only: bool,
 }
 
+tokio::task_local! {
+    static CURRENT_RESPONSE: Cell<Option<ResponseWriter>>;
+}
+
 impl ResponseWriter {
     pub(crate) fn new(exchange: ResponseExchange, head_only: bool) -> Self {
         Self {
@@ -111,12 +115,13 @@ impl ResponseWriter {
         }
     }
 
-    /// Keep the request alive after a disconnect, so the script can handle it.
-    pub fn watch_disconnect(&self) {
-        let slot = self.exchange.slot();
-        if self.exchange.generation == slot.generation.get() {
-            slot.phase.set(Phase::Watching);
-        }
+    pub(crate) fn scope<F: Future>(self, request: F) -> impl Future<Output = F::Output> {
+        CURRENT_RESPONSE.scope(Cell::new(Some(self)), request)
+    }
+
+    /// Claim the connection's writer on the first transport flush.
+    pub fn take_current() -> Option<Self> {
+        CURRENT_RESPONSE.try_with(Cell::take).ok().flatten()
     }
 
     pub fn is_disconnected(&self) -> bool {
@@ -149,9 +154,7 @@ impl ResponseWriter {
 
     fn publish(&self, response: Response) -> bool {
         let slot = self.exchange.slot();
-        if self.exchange.generation == slot.generation.get()
-            && matches!(slot.phase.get(), Phase::Waiting | Phase::Watching)
-        {
+        if self.exchange.generation == slot.generation.get() && slot.phase.get() == Phase::Waiting {
             slot.phase.set(Phase::Published);
             slot.response.set(Some(Box::new(response)));
             true

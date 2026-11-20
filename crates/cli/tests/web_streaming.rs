@@ -219,11 +219,22 @@ echo 'late output';
 }
 
 #[test]
-fn a_disconnected_client_is_observed_at_the_next_output() {
-    for (streaming, ignore) in [(true, false), (true, true), (false, false), (false, true)] {
+fn a_disconnected_client_is_observed_at_the_next_transport_write() {
+    for (streaming, flush_after_disconnect, ignore) in [
+        (true, false, false),
+        (true, false, true),
+        (false, false, false),
+        (false, true, false),
+    ] {
         let (root, server) = serve(&format!(
             r#"{WAIT_FOR_CLIENT}
 ignore_user_abort({ignore});
+class ConnectionProbe {{
+    function __destruct() {{
+        file_put_contents(__DIR__ . '/destructor', (string) connection_status());
+    }}
+}}
+$probe = new ConnectionProbe();
 register_shutdown_function(function () {{
     file_put_contents(__DIR__ . '/status', (string) connection_status());
 }});
@@ -236,6 +247,7 @@ wait_for_client();
 usleep(150000);
 file_put_contents(__DIR__ . '/before', (string) connection_status());
 echo 'after the client left';
+if ({flush_after_disconnect}) flush();
 file_put_contents(__DIR__ . '/after', (string) connection_aborted());
 "#
         ));
@@ -248,11 +260,14 @@ file_put_contents(__DIR__ . '/after', (string) connection_aborted());
         client.get_ref().shutdown(Shutdown::Both).unwrap();
         drop(client);
         std::fs::write(root.path().join("continue"), "").unwrap();
-        assert_eq!(wait_for_file(&root.path().join("status")), "1");
+        let aborted = streaming || flush_after_disconnect;
+        let status = if aborted { "1" } else { "0" };
+        assert_eq!(wait_for_file(&root.path().join("status")), status);
+        assert_eq!(wait_for_file(&root.path().join("destructor")), status);
         assert_eq!(wait_for_file(&root.path().join("before")), "0");
         let after = root.path().join("after");
-        if ignore {
-            assert_eq!(wait_for_file(&after), "1");
+        if ignore || !aborted {
+            assert_eq!(wait_for_file(&after), status);
         } else {
             assert!(!after.exists());
         }

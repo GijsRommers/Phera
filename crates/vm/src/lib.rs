@@ -188,7 +188,7 @@ pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
     StreamInclude,
 };
-pub use web_output::WebOutput;
+pub use web_output::{WebOutput, WebOutputFactory};
 
 /// Receives each PHP output write while Vm also retains its output buffer.
 pub trait OutputSink {

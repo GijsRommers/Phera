@@ -85,7 +85,7 @@ pub(crate) async fn answer(
     let exchange = ResponseExchange::new(connection, request.version);
     let writer = ResponseWriter::new(exchange.clone(), request.method == "HEAD");
     let future = Box::pin(async move {
-        let run = handler.handle_with_response(request, writer);
+        let run = writer.scope(handler.handle(request));
         match time_limit {
             None => run.await,
             Some(limit) => match tokio::time::timeout(limit, run).await {

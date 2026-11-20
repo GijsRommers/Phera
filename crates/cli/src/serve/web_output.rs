@@ -2,7 +2,6 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
 
 use phera_runtime::{ResponseHead, WebOutput};
 use phera_server::{Response, ResponseWriter, StreamWriter};
@@ -12,7 +11,7 @@ use super::compress;
 pub(super) struct HttpOutput {
     target: Target,
     compress: bool,
-    accept_encoding: Option<Rc<str>>,
+    accept_encoding: Option<String>,
 }
 
 enum Target {
@@ -25,9 +24,8 @@ impl HttpOutput {
     pub(super) fn new(
         response: ResponseWriter,
         compress: bool,
-        accept_encoding: Option<Rc<str>>,
+        accept_encoding: Option<String>,
     ) -> Self {
-        response.watch_disconnect();
         Self {
             target: Target::Buffered(response),
             compress,

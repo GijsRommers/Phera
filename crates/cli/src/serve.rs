@@ -222,14 +222,22 @@ struct SiteHandlerFactory {
 
 impl HandlerFactory for SiteHandlerFactory {
     fn create(&self, worker_index: usize) -> Rc<dyn Handler> {
+        let runtime = match self.adapter {
+            Adapter::Off => self.runtime.web_worker(worker_index),
+            _ => self
+                .runtime
+                .web_worker(worker_index)
+                .with_background_boots(),
+        };
+        let compress = self.compress;
         Rc::new(SiteHandler {
-            runtime: match self.adapter {
-                Adapter::Off => self.runtime.web_worker(worker_index),
-                _ => self
-                    .runtime
-                    .web_worker(worker_index)
-                    .with_background_boots(),
-            },
+            runtime: runtime.with_web_output(move |encoding| {
+                let writer = ResponseWriter::take_current()?;
+                let encoding = encoding
+                    .filter(|_| compress)
+                    .map(|value| String::from_utf8_lossy(value).into_owned());
+                Some(web_output::HttpOutput::new(writer, compress, encoding))
+            }),
             adapter: self.adapter,
             site: self.site.clone(),
             compress: self.compress,
@@ -253,15 +261,7 @@ struct SiteHandler {
 
 impl Handler for SiteHandler {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>> {
-        Box::pin(self.respond(request, None))
-    }
-
-    fn handle_with_response(
-        &self,
-        request: Request,
-        writer: ResponseWriter,
-    ) -> Pin<Box<dyn Future<Output = Response> + '_>> {
-        Box::pin(self.respond(request, Some(writer)))
+        Box::pin(self.respond(request))
     }
 
     fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
@@ -299,7 +299,7 @@ impl SiteHandler {
         }
     }
 
-    async fn respond(&self, request: Request, writer: Option<ResponseWriter>) -> Response {
+    async fn respond(&self, request: Request) -> Response {
         // A platform asks "are you alive?" every few seconds. The answer
         // must not depend on the application, its database or a free worker
         // slot in PHP.
@@ -324,29 +324,13 @@ impl SiteHandler {
                 let accept_encoding = if compress {
                     request
                         .header("accept-encoding")
-                        .map(|value| Rc::<str>::from(String::from_utf8_lossy(value).as_ref()))
+                        .map(|value| String::from_utf8_lossy(value).into_owned())
                 } else {
                     None
                 };
                 let request = to_runtime(request, &self.trusted_proxies);
                 let root = self.site.document_root();
-                let response = match writer {
-                    Some(writer) => {
-                        self.runtime
-                            .handle_streaming_request(
-                                &script,
-                                root,
-                                request,
-                                web_output::HttpOutput::new(
-                                    writer,
-                                    self.compress,
-                                    accept_encoding.clone(),
-                                ),
-                            )
-                            .await
-                    }
-                    None => self.runtime.handle_request(&script, root, request).await,
-                };
+                let response = self.runtime.handle_request(&script, root, request).await;
                 let response = from_runtime(response);
                 if self.compress {
                     compress::php_response(response, accept_encoding.as_deref()).await
