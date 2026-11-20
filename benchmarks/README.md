@@ -30,3 +30,5 @@ echo (hrtime(true) - $started) / 1e6, " ms\n";
 ```
 
 Whole-process time is still right for comparing two builds of Phera with each other. Figures quoted as "times PHP" in commit messages before that date are too favourable to Phera by a factor of two to four.
+
+`bench-framework-patterns.php` runs, inside methods, what framework code does on every request: elements of array properties read and tested (`isset($this->bindings[$id])`, `$this->items[$group][$key] ?? $default`), string comparison and concatenation, `??` on variables, `!`, `static::class`, protected calls between a class and its parent, and namespaced calls of built-in functions. On 20 November 2026 it ran at 9.7 times PHP's instructions before the interpreter's second round (architecture.md 10.9 and 10.10) and 4.4 times after it; the other scripts in this directory were then between 1 and 4 times, so this one stands for the framework gap that they do not show.

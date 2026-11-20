@@ -56,6 +56,7 @@ pub(crate) fn push_php_call(
 
 /// Prepare the call that `new` of a class without a constructor makes: its
 /// arguments are evaluated and dropped, and it gives the object.
+#[inline]
 pub(crate) fn push_constructed(
     (stack, registers): (&mut CallStack, &mut Registers),
     object: Rc<Object>,

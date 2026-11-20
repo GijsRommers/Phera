@@ -1,6 +1,6 @@
 //! A compiled function and the tables its instructions point into.
 
-use crate::{Instruction, NameId, Reg, Target, TypeId};
+use crate::{Code, NameId, Reg, Target, TypeId};
 
 /// The code of one PHP function, or of a file's top level.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -10,7 +10,7 @@ pub struct Function {
     pub name: String,
     /// Declaration location for parameter errors raised before the body executes.
     pub definition_line: u32,
-    pub instructions: Vec<Instruction>,
+    pub instructions: Code,
     /// The source line of each instruction, for error messages. Same length
     /// as `instructions`.
     pub lines: Vec<u32>,

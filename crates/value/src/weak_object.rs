@@ -82,8 +82,8 @@ impl Object {
     /// contents for its destructor has the identity of the one it took
     /// over from.
     pub fn identity(&self) -> usize {
-        if self.incarnated
-            && let Some(pool) = &self.pool
+        if let Some(pool) = &self.pool
+            && pool.incarnated
             && let Ok(incarnations) = pool.incarnations.try_borrow()
             && let Some((origin, _)) = incarnations.get(&self.id)
         {

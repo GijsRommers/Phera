@@ -48,6 +48,11 @@ impl Vm {
         lhs: Reg,
         rhs: Reg,
     ) -> Result<Option<BatchExit>, NativeError> {
+        // The compiler lets an operator read a variable directly
+        // (`$i < $n`); an unset one is null with PHP's warning, the left
+        // operand's first, as when it was copied into a temporary.
+        self.warn_if_unset(lhs);
+        self.warn_if_unset(rhs);
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("operator frame"))?;
@@ -131,6 +136,21 @@ impl Vm {
         }
         self.set(destination, result?);
         Ok(None)
+    }
+
+    /// Raises "Undefined variable" when `register` is a named variable
+    /// that holds nothing.
+    fn warn_if_unset(&mut self, register: Reg) {
+        let unset = self.current().is_some_and(|frame| {
+            register.index() < frame.function().locals.len()
+                && frame
+                    .slots(&self.registers)
+                    .get(register.index())
+                    .is_some_and(Option::is_none)
+        });
+        if unset {
+            self.read_local(register);
+        }
     }
 
     /// Append directly to strings, including referenced strings, to retain amortized growth.
