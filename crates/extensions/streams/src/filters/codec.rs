@@ -23,7 +23,7 @@ pub(super) enum Codec {
     Base64Decode(Vec<u8>),
     Iconv(Iconv),
     Zlib(Zlib),
-    Consumed,
+    Consumed { start: Option<u64>, count: u64 },
     Dechunk(Dechunk),
     QuotedEncode(QuotedEncode),
     QuotedDecode(QuotedDecode),
@@ -51,12 +51,26 @@ impl Codec {
                     window(params),
                 ))
             }
-            b"consumed" => Self::Consumed,
+            b"consumed" => Self::Consumed {
+                start: None,
+                count: 0,
+            },
             b"dechunk" => Self::Dechunk(Dechunk::default()),
             b"convert.quoted-printable-encode" => Self::QuotedEncode(QuotedEncode::new(params)),
             b"convert.quoted-printable-decode" => Self::QuotedDecode(QuotedDecode::new(params)),
             name => Self::Iconv(Iconv::parse(name)?),
         })
+    }
+
+    /// Consumed passes buckets through and puts the backing cursor after its input on close.
+    pub fn seek_after(&mut self, size: usize, flush: Flush, position: u64) -> Option<u64> {
+        let Self::Consumed { start, count } = self else {
+            return None;
+        };
+        let start = *start.get_or_insert(position);
+        let end = start.saturating_add(*count);
+        *count = count.saturating_add(size as u64);
+        (flush == Flush::Closing).then_some(end)
     }
 
     pub fn apply(&mut self, mut data: Vec<u8>, flush: Flush) -> io::Result<Vec<u8>> {
@@ -83,7 +97,7 @@ impl Codec {
             Self::Base64Decode(remainder) => decode_base64(remainder, data, flush),
             Self::Zlib(codec) => codec.run(&data, flush),
             Self::Iconv(codec) => codec.run(data, flush),
-            Self::Consumed => Ok(Vec::new()),
+            Self::Consumed { .. } => Ok(data),
             Self::Dechunk(codec) => Ok(codec.run(data, flush)),
             Self::QuotedEncode(codec) => codec.run(data, flush),
             Self::QuotedDecode(codec) => codec.run(data, flush),

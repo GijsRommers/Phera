@@ -59,6 +59,7 @@ pub(crate) struct Chain {
     stages: VecDeque<Filter>,
     output: usize,
     failed: bool,
+    seek_to: Option<u64>,
 }
 
 impl Chain {
@@ -78,26 +79,33 @@ impl Chain {
         }
     }
 
-    pub fn remove(&mut self, id: i64) -> io::Result<Option<Vec<u8>>> {
+    pub fn remove(&mut self, id: i64, position: u64) -> io::Result<Option<Vec<u8>>> {
         let Some(index) = self.stages.iter().position(|stage| stage.id == id) else {
             return Ok(None);
         };
+        self.seek_to = self.stages[index]
+            .codec
+            .seek_after(0, Flush::Closing, position);
         let mut data = self.stages[index].codec.apply(Vec::new(), Flush::Closing)?;
         self.stages.remove(index);
         for filter in self.stages.iter_mut().skip(index) {
+            filter.codec.seek_after(data.len(), Flush::No, position);
             data = filter.codec.apply(data, Flush::No)?;
         }
         self.account(data.len())?;
         Ok(Some(data))
     }
 
-    pub fn run(&mut self, mut data: Vec<u8>, flush: Flush) -> io::Result<Vec<u8>> {
+    pub fn run(&mut self, mut data: Vec<u8>, flush: Flush, position: u64) -> io::Result<Vec<u8>> {
         if self.failed {
             return Err(limit());
         }
         let result = (|| {
             bounded(data.len())?;
             for filter in &mut self.stages {
+                if let Some(position) = filter.codec.seek_after(data.len(), flush, position) {
+                    self.seek_to = Some(position);
+                }
                 data = filter.codec.apply(data, flush)?;
                 bounded(data.len())?;
             }
@@ -108,6 +116,10 @@ impl Chain {
             self.failed = true;
         }
         result
+    }
+
+    pub fn take_seek(&mut self) -> Option<u64> {
+        self.seek_to.take()
     }
 
     fn account(&mut self, size: usize) -> io::Result<()> {
@@ -147,7 +159,7 @@ mod tests {
         let mut chain = Chain::default();
         let filter = Filter::new(1, b"convert.base64-encode", &Value::from(options)).unwrap();
         chain.add(filter, false);
-        assert!(chain.run(b"abcdef".to_vec(), Flush::No).is_err());
-        assert!(chain.run(Vec::new(), Flush::Closing).is_err());
+        assert!(chain.run(b"abcdef".to_vec(), Flush::No, 0).is_err());
+        assert!(chain.run(Vec::new(), Flush::Closing, 0).is_err());
     }
 }

@@ -216,16 +216,24 @@ impl Stream {
 
     fn read_filtered(&mut self, filters: &mut Filters, result: &mut [u8]) -> io::Result<usize> {
         let mut block = [0; CHUNK];
-        while filters.buffered.is_empty() && !filters.read_closed {
-            let wanted = self.chunk_size.min(block.len());
+        let wanted = self.chunk_size.min(block.len());
+        while filters.buffered.len() < result.len().min(wanted) && !filters.read_closed {
             let count = self.read_raw(&mut block[..wanted])?;
             let flush = if count == 0 {
                 Flush::Closing
             } else {
                 Flush::No
             };
-            let bytes = filters.read.run(block[..count].to_vec(), flush)?;
+            let bytes = filters
+                .read
+                .run(block[..count].to_vec(), flush, self.position)?;
             filters.read_closed = count == 0;
+            if let Some(offset) = filters.read.take_seek()
+                && self.seek(SeekFrom::Start(offset)).is_ok()
+            {
+                filters.buffered.clear();
+            }
+            crate::filters::bounded(filters.buffered.len() + bytes.len())?;
             filters.buffered.extend(bytes);
         }
         let count = result.len().min(filters.buffered.len());
@@ -315,7 +323,9 @@ impl Stream {
         let result = (|| {
             let mut output = Vec::new();
             for chunk in bytes.chunks(CHUNK) {
-                let transformed = filters.write.run(chunk.to_vec(), Flush::No)?;
+                let transformed = filters
+                    .write
+                    .run(chunk.to_vec(), Flush::No, self.position)?;
                 self.write_filter_output(&transformed)?;
                 if self.wrapper == Wrapper::Output {
                     crate::filters::bounded(output.len() + transformed.len())?;
@@ -323,7 +333,10 @@ impl Stream {
                 }
             }
             if flush != Flush::No && filters.write.active() {
-                let transformed = filters.write.run(Vec::new(), flush)?;
+                let transformed = filters.write.run(Vec::new(), flush, self.position)?;
+                if let Some(offset) = filters.write.take_seek() {
+                    let _ = self.seek(SeekFrom::Start(offset));
+                }
                 self.write_filter_output(&transformed)?;
                 if self.wrapper == Wrapper::Output {
                     output.extend(transformed);

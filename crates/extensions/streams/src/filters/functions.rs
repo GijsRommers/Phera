@@ -200,11 +200,21 @@ fn remove(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                 let Some(filters) = &mut stream.filters else {
                     return Ok((wrapper, Vec::new()));
                 };
-                if let Some(buffer) = filters.read.remove(id)? {
+                if let Some(buffer) = filters.read.remove(id, stream.position)? {
                     super::bounded(filters.buffered.len() + buffer.len())?;
                     filters.buffered.extend(buffer);
                 }
-                let pending = filters.write.remove(id)?.unwrap_or_default();
+                let pending = filters
+                    .write
+                    .remove(id, stream.position)?
+                    .unwrap_or_default();
+                let seek = filters
+                    .write
+                    .take_seek()
+                    .or_else(|| filters.read.take_seek());
+                if let Some(offset) = seek {
+                    let _ = stream.seek(std::io::SeekFrom::Start(offset));
+                }
                 stream.write_filter_output(&pending)?;
                 Ok::<_, std::io::Error>((wrapper, pending))
             }
