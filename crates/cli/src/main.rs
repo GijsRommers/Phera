@@ -8,6 +8,7 @@ mod new;
 mod packages;
 mod run;
 mod serve;
+mod upgrade;
 
 use std::process::ExitCode;
 
@@ -39,6 +40,7 @@ fn main() -> ExitCode {
         Ok(Command::Lint(command)) => lint::command(command),
         Ok(Command::New(options)) => new::project(&options),
         Ok(Command::Packages(arguments)) => packages::run(arguments),
+        Ok(Command::Upgrade(options)) => upgrade::command(options),
         Ok(Command::Version) => {
             println!("Phera {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS

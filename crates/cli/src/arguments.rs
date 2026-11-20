@@ -49,6 +49,7 @@ Usage:
   phera why vendor/package
   phera outdated
   phera dump-autoload [-o] [--no-dev]
+  phera upgrade [OPTIONS]                 update Phera (see upgrade --help)
   phera --version
 
 ENV OPTIONS: --env-file PATH (repeatable) or --no-env-file";
@@ -70,6 +71,7 @@ pub(crate) enum Command {
     Check(phera_analyzer::config::Options),
     Lint(phera_analyzer::lint::Command),
     New(crate::new::NewOptions),
+    Upgrade(crate::upgrade::Options),
     Version,
 }
 
@@ -114,13 +116,13 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         }
         Some("check") => {
             arguments.next();
-            analyzer_command(arguments, crate::check::HELP, |args| {
+            command_with_help(arguments, crate::check::HELP, |args| {
                 phera_analyzer::config::Options::parse(args).map(Command::Check)
             })
         }
         Some("lint") => {
             arguments.next();
-            analyzer_command(arguments, crate::lint::HELP, |args| {
+            command_with_help(arguments, crate::lint::HELP, |args| {
                 phera_analyzer::lint::Options::parse(args).map(Command::Lint)
             })
         }
@@ -138,6 +140,12 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         Some("install" | "update" | "add" | "remove" | "why" | "outdated" | "dump-autoload") => {
             Ok(Command::Packages(arguments.collect()))
         }
+        Some("upgrade") => {
+            arguments.next();
+            command_with_help(arguments, crate::upgrade::HELP, |args| {
+                crate::upgrade::Options::parse(args).map(Command::Upgrade)
+            })
+        }
         Some(_) => {
             // `phera run file.php` and `phera file.php` mean the same.
             arguments.next_if(|argument| argument == "run");
@@ -154,7 +162,7 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
     }
 }
 
-fn analyzer_command(
+fn command_with_help(
     arguments: impl Iterator<Item = String>,
     help: &'static str,
     parse: impl FnOnce(std::vec::IntoIter<String>) -> Result<Command, String>,

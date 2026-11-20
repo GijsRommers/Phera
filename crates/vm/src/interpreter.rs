@@ -54,7 +54,7 @@ impl Vm {
                         } else {
                             error
                         };
-                        if let Err(error) = self.handle_exception(error, stop) {
+                        if let Err(error) = self.unwind_to_handler(error, stop).await {
                             return Err(if self.generator_releases_pending() {
                                 self.unwind_generator_releases(error).await
                             } else {
@@ -84,7 +84,7 @@ impl Vm {
             match exit {
                 BatchExit::Returned(value) => {
                     if self.generator_releases_pending() {
-                        self.drain_generator_releases().await?;
+                        self.drain_released_generators().await?;
                     }
                     return Ok(value);
                 }
@@ -94,13 +94,14 @@ impl Vm {
                         Box::pin(self.drain_pending_callbacks()).await?;
                     }
                     if self.generator_releases_pending() {
-                        self.drain_generator_releases().await?;
+                        self.drain_released_generators().await?;
                     }
                     self.generator_suspension = suspension;
                     return Ok(phera_value::Value::Null);
                 }
                 BatchExit::Yield => tokio::task::yield_now().await,
                 BatchExit::Handlers => {}
+                BatchExit::Destructors => self.run_destructors().await?,
                 BatchExit::GeneratorTracking => {}
                 BatchExit::Compare(pending) => {
                     Box::pin(self.continue_comparison(pending)).await?;
@@ -146,13 +147,27 @@ impl Vm {
                     }
                 }
             }
+            if self.destructors_due() {
+                self.run_destructors().await?;
+            }
             if self.pending_callbacks {
                 Box::pin(self.drain_pending_callbacks()).await?;
             }
             if self.generator_releases_pending() {
-                self.drain_generator_releases().await?;
+                self.drain_released_generators().await?;
             }
         }
+    }
+
+    /// Closes released generators, then runs the destructors that closing
+    /// them made due (the generators' variables), before the script goes
+    /// on: `unset($generator); echo ...;` destructs its locals first.
+    async fn drain_released_generators(&mut self) -> Result<(), NativeError> {
+        self.drain_generator_releases().await?;
+        if self.destructors_due() {
+            self.run_destructors().await?;
+        }
+        Ok(())
     }
 
     async fn drain_pending_callbacks(&mut self) -> Result<(), NativeError> {

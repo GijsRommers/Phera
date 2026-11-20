@@ -20,6 +20,18 @@ httpdate.workspace = true
 flate2.workspace = true
 brotli.workspace = true
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
+http-body-util.workspace = true
+hyper = { workspace = true, features = ["client"] }
+hyper-util.workspace = true
+phera-io-pool.workspace = true
+rustix.workspace = true
+semver = "1"
+serde_json = "1"
+sha2.workspace = true
+tar = { version = "0.4.46", default-features = false }
+tempfile.workspace = true
+tokio-rustls.workspace = true
+url.workspace = true
 # The system allocator on macOS is slow for the many small allocations an
 # interpreter makes (strings, arrays, objects).
 mimalloc.workspace = true
@@ -27,6 +39,7 @@ mimalloc.workspace = true
 [dev-dependencies]
 phera-extension-api.workspace = true
 phera-phpt.workspace = true
+rcgen.workspace = true
 
 # Selected PHP tests run during cargo test; unsupported features carry XFAIL reasons.
 [[test]]
