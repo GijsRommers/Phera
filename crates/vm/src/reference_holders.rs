@@ -59,6 +59,21 @@ impl StaticProperty {
         })
     }
 
+    pub(crate) fn release_value(&self) {
+        let reference = self
+            .reference
+            .try_borrow()
+            .ok()
+            .map(|reference| Rc::clone(&reference));
+        let value = reference.as_ref().and_then(|reference| {
+            reference
+                .try_borrow_mut()
+                .ok()
+                .map(|mut value| std::mem::take(&mut *value))
+        });
+        drop(value);
+    }
+
     pub(crate) fn track(&self, table: &Rc<RefCell<ReferenceHolders>>, property: &PropertyDefault) {
         if self.binding.borrow().is_none() {
             let binding = ReferenceHolders::bind(

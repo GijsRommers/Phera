@@ -205,6 +205,9 @@ core	zend.multibyte	bool	2	30
 core	zend.reserved_stack_size	quantity	4	30
 core	zend.script_encoding	string	7	-
 core	zend.signal_check	bool	4	30
+phera_server	opcache.revalidate_freq	int	7	32
+phera_server	opcache.revalidate_path	bool	7	30
+phera_server	opcache.validate_timestamps	bool	7	31
 
 bcmath	bcmath.scale	int	7	30
 zlib	zlib.output_compression	bool	7	30

@@ -6,6 +6,7 @@ use phera_bytecode::{IncludeKind, Reg};
 use phera_extension_api::{NativeError, WorkingDirectory};
 use phera_value::Value;
 
+use crate::include_lookup::{IncludeDirectory, IncludeLookup, RelativeInclude, path_spelling};
 use crate::{CodeLoadError, Vm, diagnostics::SourceLocation};
 
 impl Vm {
@@ -81,59 +82,45 @@ impl Vm {
             .include_state
             .loader()
             .ok_or_else(|| NativeError::error("Includes need a runtime code loader"))?;
-        let mut candidates = Vec::new();
-        let name_os = include_path_os(name);
-        let path = Path::new(&name_os);
-        if path.is_absolute() || name.starts_with(b"./") || name.starts_with(b"../") {
-            candidates.push(path.to_path_buf());
+        let spelling = path_spelling(name);
+        let lookup = if Path::new(&spelling).is_absolute() {
+            IncludeLookup::Absolute(&spelling)
         } else {
-            let include_path = include_path_os(self.include_path().as_bytes());
-            candidates.extend(std::env::split_paths(&include_path).map(|directory| {
-                if directory == Path::new(".") {
-                    path.to_path_buf()
-                } else {
-                    directory.join(path)
-                }
-            }));
-            let file = self.location().file;
-            if let Some(parent) = Path::new(&file).parent() {
-                let relative = parent.join(path);
-                if !candidates.contains(&relative) {
-                    candidates.push(relative);
-                }
-            }
-            if !candidates.iter().any(|candidate| candidate == path) {
-                candidates.push(path.to_path_buf());
-            }
-        }
-        let mut result = Err(String::new());
-        for candidate in candidates {
-            let candidate = if let Some(cwd) = self.state.get::<WorkingDirectory>() {
-                match cwd.resolve(&candidate) {
-                    Ok(path) => path,
-                    Err(error) => {
-                        result = Err(error.to_string());
-                        continue;
-                    }
-                }
-            } else {
-                candidate
+            let cwd = match self.state.get::<WorkingDirectory>() {
+                Some(cwd) => cwd.path().map_or(IncludeDirectory::Missing, |cwd| {
+                    IncludeDirectory::Known(cwd.to_path_buf())
+                }),
+                None => IncludeDirectory::Process,
             };
-            match loader.load(candidate).await {
-                Ok(unit) => return Ok(Ok(unit)),
-                Err(CodeLoadError::Unavailable(error)) => result = Err(error),
-                Err(CodeLoadError::Compile(error)) => {
-                    return Err(self.dynamic_compile_failure(error).await);
-                }
+            let (caller, include_path) = if name.starts_with(b"./") || name.starts_with(b"../") {
+                (None, None)
+            } else {
+                let file = self.location().file;
+                let include_path = self.include_path();
+                (
+                    Path::new(&file).parent().map(Path::to_path_buf),
+                    Some(path_spelling(include_path.as_bytes()).into_owned()),
+                )
+            };
+            IncludeLookup::Relative(RelativeInclude {
+                name: spelling.into_owned(),
+                cwd,
+                caller,
+                include_path,
+            })
+        };
+        let policy = self.include_state.policy;
+        match loader.load_include(lookup, policy).finish().await {
+            Ok(unit) => Ok(Ok(unit)),
+            Err(CodeLoadError::Compile(error)) => Err(self.dynamic_compile_failure(error).await),
+            Err(CodeLoadError::Unavailable(error)) => {
+                Ok(Err(if error.contains("Permission denied") {
+                    "Permission denied".into()
+                } else {
+                    "No such file or directory".into()
+                }))
             }
         }
-        Ok(result.map_err(|error| {
-            if error.contains("Permission denied") {
-                "Permission denied".into()
-            } else {
-                "No such file or directory".into()
-            }
-        }))
     }
 
     /// Included declarations reject names that already exist in this request.
@@ -167,15 +154,4 @@ impl Vm {
         }
         Ok(())
     }
-}
-
-#[cfg(unix)]
-fn include_path_os(bytes: &[u8]) -> std::ffi::OsString {
-    use std::os::unix::ffi::OsStrExt;
-    std::ffi::OsStr::from_bytes(bytes).to_owned()
-}
-
-#[cfg(not(unix))]
-fn include_path_os(bytes: &[u8]) -> std::ffi::OsString {
-    String::from_utf8_lossy(bytes).into_owned().into()
 }

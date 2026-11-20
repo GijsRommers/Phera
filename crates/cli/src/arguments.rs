@@ -14,6 +14,7 @@ Usage:
     --listen ADDRESS                      default 127.0.0.1:8080, or
                                           0.0.0.0:$PORT when PORT is set
     --workers N                           default: one per CPU core
+    --preload                             compile Composer files before listening
     --no-process                          forbid starting external programs
     --request-timeout SECONDS             stop a request after this long
                                           (default 60; 0: never)
@@ -22,7 +23,7 @@ Usage:
                                           one second per 16 KiB of body read
                                           so large uploads can keep going
     --dev                                 show PHP diagnostics in responses
-                                          (off by default, logged to stderr)
+                                          and check PHP files each request
     -d NAME=VALUE                         set a startup PHP INI value
     --compress                            gzip or brotli for clients that
                                           accept it
@@ -73,6 +74,7 @@ pub(crate) struct ServeOptions {
     pub listen: Option<SocketAddr>,
     /// `None` means one worker per CPU core.
     pub workers: Option<usize>,
+    pub preload: bool,
     /// `--compress`: gzip or brotli for clients that accept it. Off unless
     /// given, since the proxy in front usually compresses.
     pub compress: bool,
@@ -243,6 +245,7 @@ fn parse_serve(
         dev: false,
         listen: None,
         workers: None,
+        preload: false,
         compress: false,
         no_process: false,
         request_timeout: None,
@@ -274,6 +277,7 @@ fn parse_serve(
                 options.workers = Some(workers);
             }
             "--compress" => options.compress = true,
+            "--preload" => options.preload = true,
             "--dev" => options.dev = true,
             "--no-process" => options.no_process = true,
             "--trusted-proxies" => {

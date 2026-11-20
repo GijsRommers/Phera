@@ -196,6 +196,39 @@ fn server_hides_diagnostics_by_default_and_dev_can_display_them() {
 }
 
 #[test]
+fn entry_compile_diagnostics_use_the_response_or_log() {
+    let php = oracle::find_php().expect("PHP 8.5 required");
+    for flags in [
+        &["-d", "error_log=php.log"][..],
+        &["--dev", "-d", "html_errors=0", "-d", "log_errors=0"][..],
+    ] {
+        let site = Served::start_in(
+            "entry-compile-diagnostic",
+            1,
+            &[("index.php", "<?php echo ;")],
+            ".",
+            flags,
+        );
+        let (status, body) = site.get("/fallback");
+        if flags.contains(&"--dev") {
+            let expected = Command::new(&php)
+                .args(["-n", "-d", "display_errors=1", "-d", "log_errors=0"])
+                .arg(site.root.join("index.php").canonicalize().unwrap())
+                .output()
+                .expect("run PHP");
+            assert_eq!(expected.status.code(), Some(255));
+            assert_eq!(status, 200);
+            assert_eq!(body.as_bytes(), expected.stdout);
+        } else {
+            assert_eq!((status, body), (500, String::new()));
+            let log = std::fs::read_to_string(site.root.join("php.log")).unwrap();
+            assert!(log.contains("PHP Parse error:  syntax error, unexpected token"));
+            assert!(log.contains("index.php on line 1"));
+        }
+    }
+}
+
+#[test]
 fn the_startup_display_setting_and_rfc_boundary_limit_apply_before_php() {
     for setting in ["0", "1"] {
         let flag = format!("display_startup_errors={setting}");

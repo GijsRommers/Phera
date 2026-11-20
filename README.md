@@ -52,12 +52,29 @@ runner yet.
 
 Run `phera serve public` to serve a document root. PHP diagnostics, including
 fatal backtraces, go to the server log by default. Use `phera serve --dev public`
-to display diagnostics in responses during local development.
+to display diagnostics in responses and check PHP files on each request during
+local development.
 
 `--request-read-timeout SECONDS` sets the initial time budget for receiving
 headers and the body. It defaults to 60 seconds and gains one second for every
 16 KiB of body data received. If the budget runs out, the server returns HTTP 408
 and closes the connection.
+
+`phera serve` caches compiled PHP files and rechecks their paths and timestamps
+every two seconds by default. Set `-d opcache.revalidate_freq=0` to check on
+each request with production diagnostics, or `-d opcache.validate_timestamps=0`
+to keep cached code until the server restarts. `opcache.revalidate_path=1`
+checks the include search path on each lookup. `--dev` enables timestamp
+validation and sets the interval to zero.
+
+Request teardown releases circular arrays and objects held by their class's
+static properties or cached constant values.
+
+Use `phera serve --preload public` or set `preload = true` under `[server]`
+in the project's `phera.toml`. At startup Phera compiles the PHP files in
+Composer's generated class map and files autoload list. The start line gives
+the count and elapsed time. PHP still runs each file when the application
+includes it. The Zend-specific `opcache.preload` directive is unsupported.
 
 ## 🧩 Extensions
 
