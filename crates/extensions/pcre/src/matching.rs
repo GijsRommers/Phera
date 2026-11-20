@@ -87,16 +87,30 @@ fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> Na
     let names = compiled.regex.capture_names();
     let mut scanner = Scanner::new(&compiled, subject, position);
     let mut rows = Vec::new();
-    for found in scanner.by_ref().take(function.limit()) {
-        match found {
-            Ok(captures) => rows.push(captures),
-            Err(error) => {
-                errors::set(context, error);
-                let table = matches::table(subject, &rows, names, capture_flags, order);
-                matches::assign(arguments, 2, table);
-                return Ok(Value::Bool(false));
-            }
-        }
+    let mut marks = Vec::new();
+    let found = if let Some(probe) = compiled.marks.as_deref().filter(|_| arguments.len() >= 3) {
+        std::iter::from_fn(|| scanner.next_marked(probe))
+            .take(function.limit())
+            .try_for_each(|found| {
+                let (captures, mark) = found?;
+                rows.push(captures);
+                marks.push(mark);
+                Ok(())
+            })
+    } else {
+        scanner
+            .by_ref()
+            .take(function.limit())
+            .try_for_each(|found| {
+                rows.push(found?);
+                Ok(())
+            })
+    };
+    if let Err(error) = found {
+        errors::set(context, error);
+        let table = matches::table(subject, &rows, &marks, names, capture_flags, order);
+        matches::assign(arguments, 2, table);
+        return Ok(Value::Bool(false));
     }
     if function == Function::Match
         && arguments.len() < 3
@@ -105,7 +119,7 @@ fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> Na
         errors::set(context, error);
         return Ok(Value::Bool(false));
     }
-    let table = matches::table(subject, &rows, names, capture_flags, order);
+    let table = matches::table(subject, &rows, &marks, names, capture_flags, order);
     matches::assign(arguments, 2, table);
     Ok(Value::Int(rows.len() as i64))
 }
