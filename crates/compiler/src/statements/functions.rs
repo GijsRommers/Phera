@@ -76,11 +76,12 @@ impl<'ast> Compiler<'ast> {
             return Err(self.error(format!("Cannot redeclare function {name}()"), line));
         }
         let mut builder = self.function_builder(declaration, &name, captures, line)?;
-        if !declaration.name.contains("::") || declaration.name.starts_with("{closure:") {
-            let scope = TypeScope {
-                class: builder.class_scope.as_deref(),
-                trait_scope: builder.trait_scope.is_some(),
-                ..TypeScope::default()
+        let is_closure = declaration.name.starts_with("{closure:");
+        if !declaration.name.contains("::") || is_closure {
+            let scope = if is_closure {
+                TypeScope::Deferred
+            } else {
+                TypeScope::Global
             };
             for parameter in declaration.parameters {
                 if let Some(ty) = &parameter.ty {

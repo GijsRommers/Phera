@@ -10,6 +10,8 @@ Validate declaration types while the compiler has the written name, its
 namespace imports and the declaring class. For compound types, collect
 alternatives as ranges into a single list of bounds. Use resolved names to
 detect overlapping alternatives and retain the spelling needed in diagnostics.
+Relative names in closures and traits can acquire their class later.
+Leave those names unresolved when validating their declaration.
 
 ## Why
 

@@ -23,19 +23,14 @@ enum Bound {
     Intersection,
 }
 
-#[derive(Clone, Copy, Default)]
-pub(super) struct TypeScope<'a> {
-    pub(super) class: Option<&'a str>,
-    pub(super) parent: TypeParent<'a>,
-    pub(super) trait_scope: bool,
-}
-
-#[derive(Clone, Copy, Default)]
-pub(super) enum TypeParent<'a> {
-    Named(&'a str),
-    Absent,
-    #[default]
+#[derive(Clone, Copy)]
+pub(super) enum TypeScope<'a> {
+    Global,
     Deferred,
+    Class {
+        name: &'a str,
+        parent: Option<&'a str>,
+    },
 }
 
 pub(super) fn builtin_type(lower: &str) -> bool {
@@ -209,9 +204,25 @@ impl Compiler<'_> {
             )));
         }
         if name.kind == NameKind::Unqualified && relative {
-            let resolved = match (lower.as_ref(), scope.parent) {
-                ("self", _) if !scope.trait_scope => scope.class,
-                ("parent", TypeParent::Named(parent)) => Some(parent),
+            let resolved = match (scope, lower.as_ref()) {
+                (TypeScope::Global, _) => {
+                    return Err(error(format!(
+                        "Cannot use \"{lower}\" when no class scope is active"
+                    )));
+                }
+                (TypeScope::Class { name, .. }, "self") => Some(name),
+                (
+                    TypeScope::Class {
+                        parent: Some(parent),
+                        ..
+                    },
+                    "parent",
+                ) => Some(parent),
+                (TypeScope::Class { parent: None, .. }, "parent") => {
+                    return Err(error(
+                        "Cannot use \"parent\" when current class scope has no parent".into(),
+                    ));
+                }
                 _ => None,
             };
             if form == Bound::Intersection && resolved.is_none() {
@@ -219,16 +230,6 @@ impl Compiler<'_> {
                     "Type {} cannot be part of an intersection type",
                     name.text
                 )));
-            }
-            if scope.class.is_none() {
-                return Err(error(format!(
-                    "Cannot use \"{lower}\" when no class scope is active"
-                )));
-            }
-            if lower == "parent" && matches!(scope.parent, TypeParent::Absent) {
-                return Err(error(
-                    "Cannot use \"parent\" when current class scope has no parent".into(),
-                ));
             }
             return Ok(resolved.map_or(lower, Cow::Borrowed));
         }
