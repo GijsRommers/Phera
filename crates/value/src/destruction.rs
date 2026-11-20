@@ -128,14 +128,17 @@ impl Object {
 
     /// The contents of an object being dropped, moved into a new object
     /// that waits in the queue for its destructor.
+    #[cold]
+    #[inline(never)]
     fn hand_over(&mut self) {
         self.no_longer_due();
-        let Some(hold) = self.pool.take_if(|pool| !pool.doomed.closed.get()) else {
+        let Some(mut hold) = self.pool.take_if(|pool| !pool.doomed.closed.get()) else {
             return;
         };
         // The hold moves with the contents: the id goes back when the new
-        // object is freed.
-        let pool = hold.0.clone();
+        // object is freed, and the new object unregisters itself then.
+        hold.incarnated = true;
+        let pool = hold.pool.clone();
         let origin = self.address();
         let doomed = Rc::new(Object {
             id: self.id,
@@ -145,7 +148,6 @@ impl Object {
             destruction: Cell::new(Destruction::Done),
             attachments: Cell::new(self.attachments.take()),
             pool: Some(hold),
-            incarnated: true,
         });
         if let Ok(mut incarnations) = pool.incarnations.try_borrow_mut() {
             incarnations.insert(self.id, (origin, Rc::downgrade(&doomed)));
@@ -157,13 +159,12 @@ impl Object {
 impl Drop for Object {
     /// An object without a destructor is simply freed (its property table
     /// frees nested values without recursion, see `array::drop`), and its
-    /// id goes back to the pool after that (see `PoolHold`).
+    /// id goes back to the pool after that, when its last field, the
+    /// `PoolHold`, is dropped.
+    #[inline]
     fn drop(&mut self) {
         if self.destruction.get() == Destruction::Due {
             self.hand_over();
-        }
-        if let Some(pool) = &self.pool {
-            pool.begin_release(self.id, self.incarnated);
         }
     }
 }

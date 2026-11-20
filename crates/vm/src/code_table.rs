@@ -88,7 +88,10 @@ impl CodeTable {
                 .extend(metadata.functions.iter().cloned().enumerate().map(
                     |(offset, signature)| {
                         let local = offset.checked_sub(1).map(|local| local as u32);
-                        FunctionFacts::bind((index, first, local), signature)
+                        let instructions = body(unit, local.map(|local| local as usize))
+                            .instructions
+                            .clone();
+                        FunctionFacts::bind((index, first, local), signature, instructions)
                     },
                 ));
             let names = metadata
@@ -110,6 +113,7 @@ impl CodeTable {
                     FunctionFacts::bind(
                         (index, first, local),
                         FunctionSignature::new(body, &unit.types),
+                        body.instructions.clone(),
                     )
                 }));
             let names = unit
@@ -285,9 +289,11 @@ impl CodeTable {
     }
 
     /// The function's instructions, which the interpreter loop borrows.
+    /// They are read from the function's facts, not through its file, on
+    /// every call and return.
     #[inline]
     pub(crate) fn instructions(&self, function: FunctionIndex) -> &[Instruction] {
-        &self.function(function).instructions
+        &self.facts(function).instructions
     }
 }
 
