@@ -85,17 +85,24 @@ impl Machine<'_> {
                     Step::Slow
                 };
                 match written {
-                    Step::Slow => match self.assign_property::<GUARDED>(position, path, src) {
-                        Step::Slow => self.assign_element::<GUARDED>(position, path, (src, None)),
-                        done => done,
-                    },
+                    Step::Slow => {
+                        match self.assign_property::<GUARDED>(position, path, (src, None)) {
+                            Step::Slow => {
+                                self.assign_element::<GUARDED>(position, path, (src, None))
+                            }
+                            done => done,
+                        }
+                    }
                     done => done,
                 }
             }
             // Only arrays are written here, so an `ArrayAccess` object on
             // the path is left to the VM as well.
             Instruction::AssignPathFromLocal { path, src, dst } => {
-                self.assign_element::<GUARDED>(position, path, (src, Some(dst)))
+                match self.assign_property::<GUARDED>(position, path, (src, Some(dst))) {
+                    Step::Slow => self.assign_element::<GUARDED>(position, path, (src, Some(dst))),
+                    done => done,
+                }
             }
             Instruction::AssignOpPath { op, dst, path, src } => {
                 self.assign_operation::<GUARDED>(position, (op, dst), path, src)

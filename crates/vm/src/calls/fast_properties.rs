@@ -82,32 +82,39 @@ impl Machine<'_> {
         }
     }
 
-    /// `AssignPath` of a value to one declared property, outside the
-    /// guarded loop.
+    /// `AssignPath`, or with `result` `AssignPathFromLocal`, of a value to
+    /// one declared property, outside the guarded loop.
     #[inline(never)]
     pub(super) fn assign_property<const GUARDED: bool>(
         &mut self,
         position: Position,
         path: PathId,
-        source: Reg,
+        (source, result): (Reg, Option<Reg>),
     ) -> Step {
         if GUARDED {
             return Step::Slow;
         }
-        let value = match self
-            .registers
-            .window(position.frame.base() + source.index(), 1)
-        {
+        let base = position.frame.base();
+        // Once the property is written, the value must be stored.
+        if result.is_some_and(|result| self.registers.window(base + result.index(), 1).is_empty()) {
+            return Step::Slow;
+        }
+        let value = match self.registers.window(base + source.index(), 1) {
             [Some(value)] => value.deref().clone(),
             _ => return Step::Slow,
         };
         let written = self.with_site(position, (path, Shape::Write), |entry, object, scope| {
             entry.write_matching(object, scope, &value).then_some(())
         });
-        match written {
-            Some(()) => Step::Done(position.ip),
-            None => Step::Slow,
+        if written.is_none() {
+            return Step::Slow;
         }
+        if let Some(result) = result {
+            // Outside the guarded loop, into a register checked above, a
+            // store completes.
+            let _ = store::<false>(self.registers.tail_mut(base), result, value);
+        }
+        Step::Done(position.ip)
     }
 
     /// `IncDecPath` of one declared integer property.
