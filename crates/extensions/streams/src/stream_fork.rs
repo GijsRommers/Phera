@@ -15,7 +15,9 @@
 //! or truncated again, at the boot's position: the requests must not share
 //! one position and one descriptor. Refused: a file the boot holds a
 //! `flock()` on (the snapshot keeps that lock, so a fork could not take it),
-//! `php://input` (one request's body) and an open gzip file.
+//! `php://input` (one request's body), an open gzip file, a directory
+//! handle and a pipe to a process. A temporary file (`tmpfile()`, or
+//! `php://temp` past its memory limit) is copied into a new one per fork.
 
 use std::any::Any;
 use std::io::{BufReader, Cursor};
@@ -29,6 +31,7 @@ pub(crate) fn fork_stream(data: &dyn Any, _fork: &mut Fork<'_>) -> Result<Box<dy
     let stream = data
         .downcast_ref::<Stream>()
         .ok_or("a directory handle belongs to one request")?;
+    let mut temporary = None;
     let backing = match (&stream.backing, stream.wrapper) {
         (Backing::Output, _) => Backing::Output,
         (Backing::Memory(cursor), _) if stream.temporary_path.is_none() => {
@@ -36,7 +39,16 @@ pub(crate) fn fork_stream(data: &dyn Any, _fork: &mut Fork<'_>) -> Result<Box<dy
             copy.set_position(cursor.position());
             Backing::Memory(copy)
         }
+        (Backing::File(file), Wrapper::Temp) => copy_temporary(file.get_ref(), stream)?.0,
+        (Backing::File(file), Wrapper::File) if stream.temporary_path.is_some() => {
+            let (backing, path) = copy_temporary(file.get_ref(), stream)?;
+            temporary = path;
+            backing
+        }
         (Backing::File(_), Wrapper::File) => reopen(stream)?,
+        (Backing::File(_), Wrapper::Process | Wrapper::ProcessSocket) => {
+            return Err("a pipe to a process the boot started belongs to one request".into());
+        }
         (Backing::File(file), Wrapper::Standard) => {
             let file = file
                 .get_ref()
@@ -50,6 +62,7 @@ pub(crate) fn fork_stream(data: &dyn Any, _fork: &mut Fork<'_>) -> Result<Box<dy
     };
     let mut copy = Stream::new(backing, stream.wrapper, &stream.mode, &stream.uri);
     copy.path = stream.path.clone();
+    copy.temporary_path = temporary;
     copy.position = stream.position;
     copy.eof = stream.eof;
     copy.blocked = stream.blocked;
@@ -58,6 +71,46 @@ pub(crate) fn fork_stream(data: &dyn Any, _fork: &mut Fork<'_>) -> Result<Box<dy
     copy.spill_limit = stream.spill_limit;
     copy.data_header = stream.data_header.clone();
     Ok(Box::new(copy))
+}
+
+/// The fork's own copy of a temporary file (`tmpfile()`, or `php://temp`
+/// past its memory limit), at the same position: one fork's writes must not
+/// reach another's. A `tmpfile()` gets a new name of its own, removed when
+/// the fork's stream closes.
+fn copy_temporary(
+    original: &std::fs::File,
+    stream: &Stream,
+) -> Result<(Backing, Option<tempfile::TempPath>), String> {
+    use std::io::{Seek, SeekFrom, Write};
+    use std::os::unix::fs::FileExt;
+    let failed = |error: std::io::Error| format!("the temporary file could not be copied: {error}");
+    let (mut file, path) = if stream.temporary_path.is_some() {
+        let named = tempfile::Builder::new()
+            .prefix("php")
+            .rand_bytes(19)
+            .tempfile()
+            .map_err(failed)?;
+        let (file, path) = named.into_parts();
+        (file, Some(path))
+    } else {
+        (tempfile::tempfile().map_err(failed)?, None)
+    };
+    let mut buffer = vec![0; crate::io_policy::CHUNK];
+    let mut offset = 0;
+    loop {
+        let read = original.read_at(&mut buffer, offset).map_err(failed)?;
+        if read == 0 {
+            break;
+        }
+        file.write_all(&buffer[..read]).map_err(failed)?;
+        offset += read as u64;
+    }
+    file.seek(SeekFrom::Start(stream.position))
+        .map_err(failed)?;
+    Ok((
+        Backing::File(BufReader::with_capacity(crate::io_policy::CHUNK, file)),
+        path,
+    ))
 }
 
 /// The fork's own descriptor of the file a boot's stream opened.

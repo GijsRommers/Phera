@@ -166,10 +166,7 @@ pub(crate) fn fork_handle(
     {
         return Err("it is added to a CurlMultiHandle; remove it before Phera\\snapshot(), or add it after the call".into());
     }
-    if original.share.is_some() {
-        return Err("it uses a CurlShareHandle, whose cookies and DNS cache would be shared by every request; attach the share after Phera\\snapshot()".into());
-    }
-    let copy = Easy {
+    let mut copy = Easy {
         settings: original.settings.forked(fork),
         info: original.info.clone(),
         error: original.error.clone(),
@@ -180,6 +177,12 @@ pub(crate) fn fork_handle(
         cookie_jar: Rc::new(RefCell::new(original.cookie_jar.borrow().clone())),
         share: None,
     };
+    copy.attach_share(
+        original
+            .share
+            .as_ref()
+            .map(|share| crate::share::forked(share, fork)),
+    );
     Ok(Box::new(Rc::new(RefCell::new(copy))) as Box<dyn std::any::Any>)
 }
 

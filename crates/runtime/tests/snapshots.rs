@@ -503,3 +503,26 @@ async fn generators_and_fibers_of_the_boot_are_each_forks_own() {
         ["1[x]2 done 42 ok (closed)", "1[x]2 done 42 ok (closed)"]
     );
 }
+
+/// Temporary files, unused compression contexts and curl's multi and share
+/// handles of the boot: each fork has its own.
+#[tokio::test(flavor = "current_thread")]
+async fn temporary_files_and_unused_contexts_of_the_boot_are_each_forks_own() {
+    let answers = boot_and_answer(
+        "temporary",
+        "<?php $temp = fopen('php://temp/maxmemory:4', 'w+'); fwrite($temp, 'boot-data');
+         $file = tmpfile(); fwrite($file, 'tmp');
+         $deflate = deflate_init(ZLIB_ENCODING_DEFLATE);
+         $multi = curl_multi_init(); $share = curl_share_init();
+         Phera\\snapshot();
+         fwrite($temp, '+fork'); rewind($temp); echo stream_get_contents($temp), ' ';
+         fwrite($file, '+fork'); rewind($file); echo stream_get_contents($file), ' ';
+         echo bin2hex(gzuncompress(deflate_add($deflate, 'abc', ZLIB_FINISH))), ' ';
+         echo get_class($multi), ' ', get_class($share);",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    let expected = "boot-data+fork tmp+fork 616263 CurlMultiHandle CurlShareHandle";
+    assert_eq!(answers, [expected, expected]);
+}
