@@ -10,7 +10,7 @@ use crate::errors::wrapper_warning;
 use crate::handles::STREAM;
 use crate::io_policy::IoPolicy;
 use crate::resource::{argument_resource, operate, stream_arg, with_stream};
-use crate::stream::{Stream, Wrapper};
+use crate::stream::{Backing, Stream, Wrapper};
 use crate::wrapper::Target;
 
 pub fn register(registry: &mut Registry) {
@@ -28,6 +28,9 @@ pub fn register(registry: &mut Registry) {
         FunctionEntry::sync("stream_is_local", &[STREAM], is_local),
         FunctionEntry::sync("stream_isatty", &[STREAM], isatty),
         FunctionEntry::asynchronous("stream_set_blocking", BLOCK, set_blocking),
+        FunctionEntry::asynchronous("socket_set_blocking", BLOCK, set_blocking),
+        FunctionEntry::asynchronous("socket_set_timeout", TIMEOUT, set_timeout),
+        FunctionEntry::sync("socket_get_status", &[STREAM], get_meta_data),
         FunctionEntry::asynchronous("stream_set_timeout", TIMEOUT, set_timeout),
         FunctionEntry::asynchronous("stream_set_read_buffer", BUFFER, set_read_buffer),
         FunctionEntry::asynchronous("stream_set_write_buffer", BUFFER, set_write_buffer),
@@ -57,7 +60,7 @@ fn is_local(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             |stream| {
                 Value::Bool(!matches!(
                     stream.wrapper,
-                    Wrapper::Data | Wrapper::GzipDirect | Wrapper::Gzip
+                    Wrapper::Data | Wrapper::GzipDirect | Wrapper::Gzip | Wrapper::Socket
                 ))
             },
         );
@@ -156,6 +159,19 @@ fn metadata(stream: &Stream) -> PhpArray {
     let mut insert = |key: &str, value| {
         result.insert(ArrayKey::str(key), value);
     };
+    if let Backing::Socket(socket) = &stream.backing {
+        insert("timed_out", Value::Bool(socket.timed_out()));
+        insert("blocked", Value::Bool(stream.blocked));
+        insert("eof", Value::Bool(socket.eof()));
+        insert("stream_type", Value::from(socket.stream_type()));
+        insert("mode", Value::from("r+"));
+        insert("unread_bytes", Value::Int(socket.unread() as i64));
+        insert("seekable", Value::Bool(false));
+        if !stream.uri.is_empty() {
+            insert("uri", Value::from(stream.uri.clone()));
+        }
+        return result;
+    }
     match stream.wrapper {
         Wrapper::Data => {
             let header = stream.data_header.as_deref().unwrap_or_default();
@@ -187,7 +203,7 @@ fn metadata(stream: &Stream) -> PhpArray {
         Wrapper::Gzip | Wrapper::GzipDirect => ("ZLIB", "ZLIB"),
         Wrapper::Standard => ("PHP", "STDIO"),
         Wrapper::Process => ("plainfile", "STDIO"),
-        Wrapper::ProcessSocket => ("", "generic_socket"),
+        Wrapper::ProcessSocket | Wrapper::Socket => ("", "generic_socket"),
         Wrapper::Memory => ("PHP", "MEMORY"),
         Wrapper::Temp => ("PHP", "TEMP"),
         Wrapper::Data => ("RFC2397", "RFC2397"),
@@ -224,7 +240,7 @@ fn set_blocking(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture
             return Ok(Value::Bool(success));
         }
         let value = operate(resource, IoPolicy::Inline, move |stream| {
-            if stream.child_pipe.is_some() {
+            if stream.child_pipe.is_some() || stream.wrapper == Wrapper::Socket {
                 stream.blocked = enable;
                 return Ok(());
             }
@@ -289,12 +305,23 @@ fn set_timeout(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<
     Box::pin(async move {
         let function = "stream_set_timeout";
         let resource = stream_arg(&arguments, function)?;
-        let Some(file) = crate::user_file::resource_file(resource) else {
-            // Native non-socket streams do not support timeouts.
-            return Ok(Value::Bool(false));
-        };
         let seconds = args::int(&arguments, 1).unwrap_or_default();
         let microseconds = args::int(&arguments, 2).unwrap_or_default();
+        let Some(file) = crate::user_file::resource_file(resource) else {
+            return with_stream(resource, |stream| {
+                let Backing::Socket(socket) = &stream.backing else {
+                    return Value::Bool(false);
+                };
+                let micros = seconds
+                    .saturating_mul(1_000_000)
+                    .saturating_add(microseconds);
+                let timeout = u64::try_from(micros)
+                    .ok()
+                    .map(std::time::Duration::from_micros);
+                socket.set_timeout(timeout);
+                Value::Bool(true)
+            });
+        };
         Ok(Value::Bool(
             file.option(context, function, 4, seconds, Value::Int(microseconds))
                 .await?,

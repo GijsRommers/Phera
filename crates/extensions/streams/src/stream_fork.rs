@@ -57,6 +57,7 @@ pub(crate) fn fork_stream(data: &dyn Any, _fork: &mut Fork<'_>) -> Result<Box<dy
     let mut temporary = None;
     let backing = match (&stream.backing, stream.wrapper) {
         (Backing::Output, _) => Backing::Output,
+        (Backing::Socket(_), _) => return Err("an open stream socket belongs to the boot".into()),
         (Backing::Memory(cursor), _) if stream.temporary_path.is_none() => {
             let mut copy = Cursor::new(cursor.get_ref().clone());
             copy.set_position(cursor.position());

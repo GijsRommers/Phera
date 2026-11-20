@@ -234,7 +234,13 @@ fn feof(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
         if let Some(file) = crate::user_file::resource_file(resource) {
             return Ok(Value::Bool(file.at_end(context, "feof").await?));
         }
-        with_stream(resource, |stream| Value::Bool(stream.eof))
+        with_stream(resource, |stream| {
+            let eof = match &stream.backing {
+                crate::stream::Backing::Socket(socket) => socket.eof(),
+                _ => stream.eof,
+            };
+            Value::Bool(eof)
+        })
     })
 }
 
@@ -449,6 +455,9 @@ fn fdatasync(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
 }
 
 pub fn read_notice(context: &mut dyn Context, function: &str, error: &io::Error, amount: u64) {
+    if error.kind() == io::ErrorKind::TimedOut {
+        return;
+    }
     if error.kind() == io::ErrorKind::Other && error.get_ref().is_some() {
         context.warning(format!("{function}(): {error}"));
     } else if let Some(errno) = error.raw_os_error() {

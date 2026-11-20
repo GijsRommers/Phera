@@ -127,7 +127,9 @@ pub async fn read_unfiltered(
         return file.read(context, function, length, by_line).await;
     }
     let action = with_stream(resource, |stream| {
-        if let Some(pipe) = stream.child_pipe.clone() {
+        if let Some(socket) = crate::socket::Io::of(stream) {
+            ReadAction::Socket(socket)
+        } else if let Some(pipe) = stream.child_pipe.clone() {
             ReadAction::Pipe(pipe)
         } else if matches!(
             stream.read_policy(length),
@@ -139,6 +141,7 @@ pub async fn read_unfiltered(
         }
     })?;
     match action {
+        ReadAction::Socket(socket) => Ok(socket.read(length, by_line.then_some(b"\n")).await),
         ReadAction::Pipe(pipe) => {
             if by_line {
                 crate::child_pipe::wait_with_execution_limit(context, pipe.line(resource, length))
@@ -161,6 +164,7 @@ pub async fn read_unfiltered(
 }
 
 enum ReadAction {
+    Socket(crate::socket::Io),
     Pipe(crate::child_pipe::ChildPipe),
     Blocking,
     Done(io::Result<Vec<u8>>),
@@ -181,6 +185,9 @@ pub async fn line(
     if let Some(pipe) = crate::child_pipe::of(resource)? {
         return pipe.line(resource, length).await;
     }
+    if let Some(socket) = crate::socket::Io::for_resource(resource) {
+        return Ok(socket.read(length, Some(b"\n")).await);
+    }
     let policy = with_stream(resource, |stream| stream.read_policy(length))?;
     operate(resource, policy, move |stream| stream.line(length)).await
 }
@@ -191,6 +198,9 @@ pub async fn read(
 ) -> Result<io::Result<Vec<u8>>, phera_extension_api::NativeError> {
     if let Some(pipe) = crate::child_pipe::of(resource)? {
         return pipe.read(resource, length).await;
+    }
+    if let Some(socket) = crate::socket::Io::for_resource(resource) {
+        return Ok(socket.read(length, None).await);
     }
     let policy = with_stream(resource, |stream| stream.read_policy(length))?;
     operate(resource, policy, move |stream| stream.read(length)).await
@@ -248,7 +258,9 @@ pub async fn write_unfiltered(
     let length = data.len();
     let (wrapper, action) = with_stream(resource, |stream| {
         let wrapper = stream.wrapper;
-        let action = if let Some(pipe) = stream.child_pipe.clone() {
+        let action = if let Some(socket) = crate::socket::Io::of(stream) {
+            WriteAction::Socket(socket)
+        } else if let Some(pipe) = stream.child_pipe.clone() {
             WriteAction::Pipe(pipe)
         } else if wrapper == Wrapper::Output
             && stream
@@ -270,6 +282,7 @@ pub async fn write_unfiltered(
         (wrapper, action)
     })?;
     let result = match action {
+        WriteAction::Socket(socket) => socket.write(data).await,
         WriteAction::Pipe(pipe) => {
             crate::child_pipe::wait_with_execution_limit(context, pipe.write(resource, data))
                 .await??
@@ -301,6 +314,7 @@ pub async fn write_unfiltered(
 }
 
 enum WriteAction {
+    Socket(crate::socket::Io),
     Pipe(crate::child_pipe::ChildPipe),
     Blocking,
     Output(io::Result<Vec<u8>>),

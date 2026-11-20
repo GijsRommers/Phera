@@ -3301,10 +3301,14 @@ dependencies = [
  "percent-encoding",
  "phera-ext-standard",
  "phera-extension-api",
+ "phera-io-pool",
  "phera-lexer",
  "rustix",
+ "rustls",
+ "socket2",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "zlib-rs",
 ]
 

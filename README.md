@@ -160,6 +160,13 @@ Register PHP filters with `stream_filter_register()` and combine them with
 built-in filters on native streams or application wrappers. Phera limits
 chains to 16 stages and intermediate buckets to 8 MiB.
 
+Stream sockets use the worker's event loop for TCP, UDP and Unix connections.
+PHP programs can open a client or listener, wait for readiness with
+`stream_select()`, and use the regular read, write, and timeout functions.
+TCP clients can start TLS when connecting or upgrade an existing connection.
+Certificate and host-name verification are enabled by default. A live socket
+held by the boot prevents `Phera\snapshot()` from creating a snapshot.
+
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 Legacy `DOMDocument` supports local XSD validation for common content models,
 including Symfony's service configuration. Complex type derivation and XSD

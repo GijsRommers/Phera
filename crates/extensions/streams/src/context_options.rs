@@ -253,3 +253,17 @@ pub(crate) fn fork_context(
     }
     Ok(Box::new(Options(copy)))
 }
+
+pub(crate) fn for_wrapper(context: &Value, wrapper: &str) -> PhpArray {
+    let Value::Resource(resource) = &*context.deref() else {
+        return PhpArray::new();
+    };
+    let data = resource.data.borrow();
+    let options = data
+        .as_ref()
+        .and_then(|data| data.downcast_ref::<Options>());
+    match options.and_then(|options| options.0.get(&ArrayKey::str(wrapper))) {
+        Some(Value::Array(options)) => options.as_ref().clone(),
+        _ => PhpArray::new(),
+    }
+}
