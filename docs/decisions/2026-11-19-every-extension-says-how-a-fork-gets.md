@@ -27,3 +27,15 @@ makes a forgotten type visible the first time a snapshot holds it.
 
 A trait bound on every state type (changes every call site of
 `get_or_default`).
+
+## Batches 12 to 14
+
+Objects whose state is plain data (GMP, `BcMath\Number`, intl formatters,
+collators, calendars, time zones, iterators, transliterators, resource
+bundles) fork as clones (`fork_clone`). Objects that hold a connection, a
+transfer or a compression in progress (curl handles, multi and share
+handles, mysqli and its results and statements, pgsql, zlib contexts, gzip
+streams) refuse, as PDO does (`fork_refused_handle`). libxml, intl and zlib
+output state start fresh; gmp's random state starts fresh, so a seed set
+before the snapshot is not kept (as for `mt_rand`); intl's default locale is
+an INI value and is copied with the INI.

@@ -482,6 +482,33 @@ PHP with opcache. Built-in classes fork through `ClassHooks::fork` (SPL,
 dates, closures, reflection, WeakMap and WeakReference, OpenSSL keys);
 generators, fibers, PDO and Redis handles and DOM documents refuse for now.
 
+**Code caches and snapshots: one design.** Three layers hold code, from the
+widest to the narrowest:
+
+- *The process* compiles each file once (`CodeCache`, keyed by canonical
+  path, a revision kept until the file's stamp changes). PHP that Phera
+  ships (the Laravel entry, bundled classes such as `Phera\Symfony\Runtime`)
+  is compiled once beside it, under its name, with no file to check.
+- *A worker* keeps the include spellings it resolved (`WorkerCodeCache`) and
+  the snapshot of each entry script it booted (`WorkerSnapshots`). The
+  snapshot already holds the boot's loaded code (units numbered, classes
+  linked), so a fork resolves, loads and links nothing the boot did; the
+  worker cache serves only files a request includes after the snapshot.
+- *A request*, fork or classic, gets a fresh `RequestCodeCache` stamped with
+  its start time, which decides when an include it reaches is checked again.
+
+One policy governs every check: opcache's `validate_timestamps`,
+`revalidate_freq` and `revalidate_path` from the start-up INI. An include is
+checked as before; a snapshot is out of date when a file its boot included
+changed, and is booted again in the background while requests keep forking
+the old one. `--preload` compiles Composer's maps into the process cache
+before the workers start, so the boots compile nothing and files first used
+after the snapshot are ready; with a snapshot it no longer changes the work
+of a request for files the boot loaded. `--dev` checks on every request,
+both includes and a snapshot's files, and a changed file drops the snapshot
+at once: requests run from the top until the new boot is ready, so the
+request after an edit runs the edited code.
+
 ### 5.5 Child processes
 
 PHP can start programs through `proc_open()`, `popen()`, `exec()`,
