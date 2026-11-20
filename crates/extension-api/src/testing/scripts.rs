@@ -147,6 +147,63 @@ impl Comparison {
         self.check(&stem(script), &php, &phera)
     }
 
+    /// Checks a table of individually tagged calls and keeps every mismatch.
+    pub fn check_matrix(&self, script: &str, expected_calls: usize) {
+        use std::collections::BTreeMap;
+        use std::fmt::Write;
+
+        fn cases(data: &[u8]) -> BTreeMap<String, String> {
+            let mut cases = BTreeMap::new();
+            for line in String::from_utf8_lossy(data).lines() {
+                if let Some((label, value)) = line.split_once('=') {
+                    assert!(
+                        cases.insert(label.into(), value.into()).is_none(),
+                        "duplicate case label {label}"
+                    );
+                }
+            }
+            cases
+        }
+
+        let path = self.artifacts.join("matrix.php");
+        std::fs::write(&path, script).expect("write comparison matrix");
+        let php = self
+            .command(Runtime::Php, &path)
+            .output()
+            .expect("PHP oracle");
+        let phera = self.command(Runtime::Phera, &path).output().expect("Phera");
+        let outcome = self.check("matrix", &php, &phera);
+        let php_cases = cases(&php.stdout);
+        let phera_cases = cases(&phera.stdout);
+        let mut report = String::new();
+        let mut mismatches = 0;
+        for label in php_cases.keys().chain(
+            phera_cases
+                .keys()
+                .filter(|key| !php_cases.contains_key(*key)),
+        ) {
+            let left = php_cases.get(label);
+            let right = phera_cases.get(label);
+            if left != right {
+                mismatches += 1;
+                writeln!(report, "{label}\n  PHP: {left:?}\n  Phera: {right:?}").unwrap();
+            }
+        }
+        let report_path = self.artifacts.join("matrix.diff");
+        std::fs::write(&report_path, report).expect("write complete mismatch report");
+        assert!(
+            outcome.is_ok()
+                && php_cases.len() == expected_calls
+                && phera_cases.len() == expected_calls,
+            "{mismatches} mismatches across {} PHP and {} Phera cases (expected {expected_calls}), {}. Details in {}",
+            php_cases.len(),
+            phera_cases.len(),
+            outcome.err().unwrap_or_default(),
+            report_path.display(),
+        );
+        println!("{expected_calls} matched calls");
+    }
+
     /// Compares every script and panics with the list of those that differ.
     /// Returns what PHP printed for each, for tests that count cases. A script
     /// annotated `// PHERA_ORACLE_PHP_SINCE: 80513` requires PHP 8.5.13 or newer.

@@ -123,6 +123,13 @@ pub trait Context {
     /// Flushes an extension after user shutdown callbacks and output finalization.
     fn register_request_finalizer(&mut self, _callback: crate::AsyncFn) {}
 
+    /// Private per-request data owned by an extension.
+    fn extension_value(&self, _key: &'static str) -> Option<Value> {
+        None
+    }
+
+    fn set_extension_value(&mut self, _key: &'static str, _value: Value) {}
+
     /// Releases resources after output and extension finalizers have run.
     fn register_resource_finalizer(&mut self, _key: &'static str, _callback: crate::AsyncFn) {}
 

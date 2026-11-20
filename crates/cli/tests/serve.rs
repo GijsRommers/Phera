@@ -2,12 +2,14 @@
 //! over a socket, and check what comes back.
 
 mod scenarios {
+    mod code_cache;
     mod compression;
     mod diagnostics;
     mod environment;
     mod execution_time;
     mod limits;
     mod new_project;
+    mod preload;
     mod proxy;
     mod request_headers;
     mod request_parse_body;
@@ -28,6 +30,7 @@ struct Served {
     process: Child,
     address: String,
     root: PathBuf,
+    banner: String,
 }
 
 impl Served {
@@ -84,6 +87,7 @@ impl Served {
             process,
             address,
             root,
+            banner,
         }
     }
 

@@ -108,7 +108,7 @@ jobs:
         with:
           php-version: '8.5'
           extensions: >-
-            json, pcre, ctype, curl, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, sodium, libxml, dom, posix,
+            json, pcre, ctype, curl, pdo, pdo_pgsql, mysqlnd, mysqli, pgsql, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, sodium, libxml, dom, intl, posix,
             bcmath, gmp, zlib, timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
@@ -122,7 +122,7 @@ jobs:
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
           echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
-          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "curl", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "sodium", "libxml", "dom", "posix", "bcmath", "gmp", "zlib", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
+          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "curl", "pdo", "pdo_pgsql", "mysqlnd", "mysqli", "pgsql", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "sodium", "libxml", "dom", "intl", "posix", "bcmath", "gmp", "zlib", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
@@ -154,8 +154,7 @@ jobs:
     name: PDO end to end
     # The name is a required check in the branch protection, so it stays as it
     # is although the job now runs the SQLite and Redis comparisons too.
-    # Runs the comparison scripts of PDO, SQLite3 and Redis through the release
-    # binary; every one of them must match real PHP.
+    # Runs the database and Redis comparisons through the release binary.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -199,7 +198,7 @@ jobs:
         with:
           php-version: '8.5'
           extensions: >-
-            json, pcre, ctype, curl, pdo, pdo_pgsql, mysqlnd, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, sodium, libxml, dom, posix,
+            json, pcre, ctype, curl, pdo, pdo_pgsql, mysqlnd, mysqli, pgsql, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, sodium, libxml, dom, intl, posix,
             bcmath, gmp, zlib, timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
@@ -213,7 +212,7 @@ jobs:
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
           echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
-          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "curl", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "sodium", "libxml", "dom", "posix", "bcmath", "gmp", "zlib", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
+          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "curl", "pdo", "pdo_pgsql", "mysqlnd", "mysqli", "pgsql", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "sodium", "libxml", "dom", "intl", "posix", "bcmath", "gmp", "zlib", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
@@ -238,8 +237,8 @@ jobs:
         run: cargo test -p phera-ext-streams --test scripts --test concurrency --no-fail-fast
         env:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera
-      - name: Run PDO, SQLite3 and Redis tests through the release binary
-        run: cargo test -p phera-ext-pdo -p phera-ext-sqlite3 -p phera-ext-redis --no-fail-fast
+      - name: Compare PDO, mysqli, pgsql, SQLite3 and Redis against PHP
+        run: cargo test -p phera-db-drivers -p phera-ext-pdo -p phera-ext-mysqli -p phera-ext-pgsql -p phera-ext-sqlite3 -p phera-ext-redis --no-fail-fast
         env:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera
 

@@ -3,7 +3,7 @@
 set -eo pipefail
 real_php=${PHERA_PHP_REAL:-php}
 # CI computes this once; local invocations detect compiled-in modules as well.
-shared=${PHERA_PHP_SHARED_EXTENSIONS-$("$real_php" -n -r 'foreach (["json", "pcre", "ctype", "curl", "pdo", "pdo_pgsql", "mysqlnd", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "sodium", "libxml", "dom", "posix", "bcmath", "gmp", "zlib", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')}
+shared=${PHERA_PHP_SHARED_EXTENSIONS-$("$real_php" -n -r 'foreach (["json", "pcre", "ctype", "curl", "pdo", "pdo_pgsql", "mysqlnd", "mysqli", "pgsql", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "sodium", "libxml", "dom", "intl", "posix", "bcmath", "gmp", "zlib", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')}
 read -ra modules <<< "$shared"
 # Distribution PHP can use the host tzdata even with -n. Load PHP's pinned
 # embedded database when its built-in data differs from the date oracle.

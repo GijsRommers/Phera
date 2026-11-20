@@ -292,6 +292,15 @@ impl Vm {
             value = self.check_path_reference_assignment(&root, &keys, value)?;
         }
         self.validate_property_mutation(plain, &keys, &mut value, mutation)?;
+        if mutation == Mutation::Bind
+            && matches!(
+                keys.iter().last(),
+                Some(crate::path_update::PathKey::Index(_))
+            )
+            && let Value::Reference(reference) = &value
+        {
+            self.state.track_cycle_reference(reference);
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         crate::path_update::update(
             &mut root,

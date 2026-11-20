@@ -36,6 +36,9 @@ fn native_parameter_tables_match_php_stubs() {
             "OpenSSLAsymmetricKey::__construct",
             "OpenSSLCertificate::__construct",
             "OpenSSLCertificateSigningRequest::__construct",
+            "PgSql\\Connection::__construct",
+            "PgSql\\Lob::__construct",
+            "PgSql\\Result::__construct",
         ],
         "These private constructors have no declaration in PHP's stubs",
     );

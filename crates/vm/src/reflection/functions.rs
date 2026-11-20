@@ -335,14 +335,16 @@ fn native_parameters(name: &str, parameters: &[Param]) -> Vec<ParameterInfo> {
 
 fn native_parameter(position: usize, param: Param, stub: Option<StubParameter>) -> ParameterInfo {
     let name = param.ty.name();
-    let declared_type = if param.nullable && name != "mixed" {
-        if name.contains('|') {
+    let declared_type = if param.ty == phera_extension_api::ParamType::Untyped {
+        None
+    } else if param.nullable && name != "mixed" {
+        Some(if name.contains('|') {
             format!("{name}|null")
         } else {
             format!("?{name}")
-        }
+        })
     } else {
-        name.into()
+        Some(name.into())
     };
     let (default, default_constant, default_display) = match stub {
         Some(parameter) => (
@@ -367,7 +369,7 @@ fn native_parameter(position: usize, param: Param, stub: Option<StubParameter>) 
     ParameterInfo {
         name: stub.map_or(param.name, |parameter| parameter.name).into(),
         position,
-        declared_type: Some(declared_type),
+        declared_type,
         by_reference: stub.map_or(param.by_ref, |parameter| parameter.by_ref),
         variadic: stub.map_or(param.variadic, |parameter| parameter.variadic),
         optional: stub.map_or(param.optional, |parameter| parameter.optional),
