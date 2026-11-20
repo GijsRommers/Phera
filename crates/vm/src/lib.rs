@@ -322,7 +322,7 @@ impl Vm {
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::for_worker(&native.code),
-            class_states: Default::default(),
+            class_states: classes::class_state::ClassStates::for_worker(&native.slots),
             globals: globals::Globals::new(),
             extension_values: Default::default(),
             static_variables: static_variables::StaticVariables::new(),

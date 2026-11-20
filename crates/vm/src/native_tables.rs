@@ -18,6 +18,8 @@ pub struct NativeTables {
     pub(crate) constants: Rc<NativeConstants>,
     /// The worker's function numbers (see `crate::worker_code`).
     pub(crate) code: Rc<crate::worker_code::WorkerCode>,
+    /// The worker's static and constant slot numbers.
+    pub(crate) slots: Rc<crate::classes::class_state::SlotNumbers>,
 }
 
 impl NativeTables {
@@ -26,6 +28,7 @@ impl NativeTables {
             classes: Rc::new(ClassDefinitions::native(&registry)),
             constants: Rc::new(native_constants(&registry)),
             code: Rc::default(),
+            slots: Rc::default(),
             registry,
         }
     }
@@ -39,6 +42,7 @@ impl crate::Vm {
             classes: self.classes.native_definitions(),
             constants: self.constants.native_definitions(),
             code: self.code.worker(),
+            slots: self.class_states.numbers(),
         });
         child.execution_time = self.execution_time.clone();
         child
