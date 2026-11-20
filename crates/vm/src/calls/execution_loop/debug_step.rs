@@ -19,6 +19,8 @@ enum Progress {
 
 impl Vm {
     /// The request's debugger has already checked whether to stop at this instruction.
+    #[cold]
+    #[inline(never)]
     pub(crate) fn debug_instruction(
         &mut self,
         instruction: Instruction,

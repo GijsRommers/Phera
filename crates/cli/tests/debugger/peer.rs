@@ -19,6 +19,7 @@ pub(crate) fn clean(command: &mut Command) -> &mut Command {
 }
 
 pub(crate) struct Peer {
+    listener: TcpListener,
     socket: BufReader<TcpStream>,
     child: Script,
 }
@@ -35,32 +36,17 @@ impl Peer {
                 .spawn()?,
         );
 
-        let deadline = Instant::now() + WAIT;
-        loop {
-            match listener.accept() {
-                Ok((socket, _)) => {
-                    socket.set_nonblocking(false)?;
-                    socket.set_read_timeout(Some(WAIT))?;
-                    socket.set_write_timeout(Some(WAIT))?;
-                    return Ok(Self {
-                        socket: BufReader::new(socket),
-                        child,
-                    });
-                }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                    if let Some(status) = child.0.try_wait()? {
-                        return Err(io::Error::other(format!(
-                            "debuggee exited before init: {status}"
-                        )));
-                    }
-                    if Instant::now() >= deadline {
-                        return Err(io::ErrorKind::TimedOut.into());
-                    }
-                    thread::sleep(Duration::from_millis(5));
-                }
-                Err(error) => return Err(error),
-            }
-        }
+        let socket = accept(&listener, &mut child)?;
+        Ok(Self {
+            listener,
+            socket,
+            child,
+        })
+    }
+
+    pub(crate) fn reconnect(&mut self) -> io::Result<()> {
+        self.socket = accept(&self.listener, &mut self.child)?;
+        Ok(())
     }
 
     pub(crate) fn read(&mut self) -> io::Result<String> {
@@ -110,6 +96,32 @@ impl Peer {
         drop(self.socket);
         let output = self.child.finish()?;
         Ok((packets, output))
+    }
+}
+
+fn accept(listener: &TcpListener, child: &mut Script) -> io::Result<BufReader<TcpStream>> {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        match listener.accept() {
+            Ok((socket, _)) => {
+                socket.set_nonblocking(false)?;
+                socket.set_read_timeout(Some(WAIT))?;
+                socket.set_write_timeout(Some(WAIT))?;
+                return Ok(BufReader::new(socket));
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                if let Some(status) = child.0.try_wait()? {
+                    return Err(io::Error::other(format!(
+                        "debuggee exited before init: {status}"
+                    )));
+                }
+                if Instant::now() >= deadline {
+                    return Err(io::ErrorKind::TimedOut.into());
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => return Err(error),
+        }
     }
 }
 

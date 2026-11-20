@@ -2,6 +2,7 @@
 
 mod debugger {
     pub(super) mod peer;
+    pub(super) mod snapshot;
     pub(super) mod xml;
 }
 
@@ -13,10 +14,14 @@ use debugger::xml::Normalize;
 
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/debugger");
 
-fn phera(port: u16, script: &Path) -> Command {
-    let executable = std::env::var_os("PHERA_DEBUGGER_BIN")
+fn phera_executable() -> PathBuf {
+    std::env::var_os("PHERA_DEBUGGER_BIN")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_phera")));
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_phera")))
+}
+
+fn phera(port: u16, script: &Path) -> Command {
+    let executable = phera_executable();
     let mut command = Command::new(executable);
     command.args([
         "run",
