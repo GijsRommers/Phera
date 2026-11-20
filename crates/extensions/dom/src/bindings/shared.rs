@@ -49,6 +49,10 @@ impl SharedNode {
         self.location.id
     }
 
+    pub fn is_same_node(&self, other: &Self) -> bool {
+        self.id() == other.id() && self.location.same_document(&other.location)
+    }
+
     pub fn owns_document(&self) -> bool {
         self.location.shared.borrow().owned
     }

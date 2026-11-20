@@ -12,28 +12,10 @@ use phera_ext_dom::shared::SharedNode;
 use phera_ext_dom::tree::{Arena, Kind, NodeId};
 use phera_extension_api::{
     ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, PropertyPurpose, Value,
-    value::{NoDiagnostics, ObjectCast, to_float, to_int},
 };
 
 use crate::methods::{This, receiver};
 use crate::selection::{Selected, Selection, attributes, data, install, value, wrap};
-
-pub fn cast(object: &Object, kind: ObjectCast) -> Option<Value> {
-    let state = data(object).ok()?;
-    let selection = &state.selection;
-    match kind {
-        ObjectCast::String => Some(Value::from(selection.value())),
-        ObjectCast::Bool => Some(Value::Bool(selection.is_truthy())),
-        ObjectCast::Int => {
-            let text = Value::from(selection.value());
-            to_int(&text, &mut NoDiagnostics).ok().map(Value::Int)
-        }
-        ObjectCast::Number | ObjectCast::Float => {
-            let text = Value::from(selection.value());
-            to_float(&text, &mut NoDiagnostics).ok().map(Value::Float)
-        }
-    }
-}
 
 pub fn properties(
     context: &mut dyn Context,
@@ -50,14 +32,19 @@ pub fn properties(
     let selection = &state.selection;
     let mut result = PhpArray::new();
     match &selection.kind {
-        Selected::Attributes => {
-            insert_attrs(selection, selection.anchor.id(), &mut result);
+        Selected::Attributes(name) => {
+            insert_attrs(
+                selection,
+                selection.anchor.id(),
+                name.as_deref(),
+                &mut result,
+            );
         }
         Selected::Node | Selected::Children(Some(_)) => {
             let Some(node) = selection.first() else {
                 return Ok(result);
             };
-            insert_attrs(selection, node.id(), &mut result);
+            insert_attrs(selection, node.id(), None, &mut result);
             if named_list(selection, &node) {
                 for id in selection.items() {
                     let item = project_node(context, object, selection, id)?;
@@ -77,7 +64,7 @@ pub fn properties(
         }
         Selected::Children(None) => {
             if matches!(purpose, PropertyPurpose::Debug) {
-                insert_attrs(selection, selection.anchor.id(), &mut result);
+                insert_attrs(selection, selection.anchor.id(), None, &mut result);
             }
             let rows = selection
                 .anchor
@@ -105,10 +92,10 @@ fn named_list(selection: &Selection, node: &SharedNode) -> bool {
     })
 }
 
-fn insert_attrs(selection: &Selection, node: NodeId, result: &mut PhpArray) {
+fn insert_attrs(selection: &Selection, node: NodeId, name: Option<&str>, result: &mut PhpArray) {
     let data = selection.anchor.document(|doc| {
         let arena = &doc.arena;
-        attributes(arena, node, &selection.filter, None)
+        attributes(arena, node, &selection.filter, name)
             .into_iter()
             .map(|id| (arena[id].name.local.clone(), arena[id].value.clone()))
             .collect::<Vec<_>>()

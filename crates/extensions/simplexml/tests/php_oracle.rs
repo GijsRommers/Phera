@@ -17,6 +17,58 @@ fn simplexml_matrix() {
     eprintln!("{count} SimpleXML cases matched");
 }
 
+#[test]
+fn simplexml_mutation_and_lifetime_matrix() {
+    let Some(oracle) = Comparison::from_environment("simplexml-mutations") else {
+        return;
+    };
+    let script = oracle.artifacts.join("simplexml_mutations.php");
+    std::fs::write(&script, MUTATIONS).expect("write the XML fixture");
+    let matched = oracle
+        .compare(&script, |_, _| {})
+        .unwrap_or_else(|error| panic!("{error}; outputs in {}", oracle.artifacts.display()));
+    let count = matched.stdout.split(|byte| *byte == b'\n').count() - 1;
+    assert_eq!(count, 50);
+    eprintln!("{count} SimpleXML mutation and lifetime cases matched");
+}
+
+const MUTATIONS: &str = r#"<?php
+foreach (['0', '-4', '12txt', 'abc', '1.2', '1e4', '99999999999999999999', ''] as $text) {
+    foreach ([0, 2, -4, 1.2, 'x'] as $other) {
+        $x = simplexml_load_string("<r>$text</r>");
+        $add = null;
+        try { $add = $x + $other; } catch (TypeError $e) { $add = $e->getMessage(); }
+        echo json_encode([
+            (int) $x, (float) $x, array_sum([$x]), $add, -$x,
+            $x == $other, $x == $x[0], $x == simplexml_load_string("<r>$text</r>"),
+        ], JSON_PRESERVE_ZERO_FRACTION), "\n";
+    }
+}
+foreach (['<r/>', '<r><item>old</item></r>'] as $source) {
+    foreach (['nested', 'attribute', 'append', 'unset'] as $mode) {
+        $x = simplexml_load_string($source);
+        if ($mode === 'nested') $x->item->child->name = 'a';
+        if ($mode === 'attribute') $x->item['id'] = '7';
+        if ($mode === 'append') $x->item[]->child = 'b';
+        if ($mode === 'unset') unset($x->item->missing);
+        echo json_encode([$x->asXML(), isset($x->item->missing)]), "\n";
+    }
+}
+$x = simplexml_load_string('<r><i>a</i><i>b</i><i>c</i></r>');
+$view = $x->i;
+$str = '';
+foreach ($view as $node) {
+    $str .= (string) $node;
+    if ((string) $node === 'a') { unset($x->i[1]); $x->addChild('i', 'd'); }
+}
+unset($x);
+echo json_encode([$str, (string) $view[2], (string) $node]), "\n";
+$x = simplexml_load_string('<r xmlns:a="urn:test"/>');
+$kid = $x->addChild('other:kid', null, 'urn:test');
+$kid->child = 'yes';
+echo json_encode([$x->asXML(), (string) $x->children('a', true)->kid->child]), "\n";
+"#;
+
 const MATRIX: &str = r#"<?php
 $contents = ['', '0', '123', '-2.50', 'text', '&lt;value&gt;', '<![CDATA[cdata]]>', 'a<part/>b'];
 foreach (['x', 'title', 'article'] as $name) {

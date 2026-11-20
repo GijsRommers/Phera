@@ -17,6 +17,12 @@ use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Objec
 
 use crate::selection::{CLASS, Filter, Selection, data, install, wrap};
 
+enum Loaded {
+    Root(SharedNode),
+    NoRoot,
+    Failed,
+}
+
 pub fn construct(
     context: &mut dyn Context,
     object: Option<Rc<Object>>,
@@ -38,16 +44,23 @@ pub fn construct(
             ));
         }
         let is_file = args::bool(&arguments, 2).unwrap_or(false);
-        let Some(node) = load(context, function, source, flags, is_file).await? else {
-            return Err(NativeError::throw(
-                "Exception",
-                "String could not be parsed as XML",
-            ));
-        };
-        install(
-            &object,
-            Selection::node(node, selection_filter(&arguments, 3)),
-        );
+        match load(context, function, source, flags, is_file).await? {
+            Loaded::Root(node) => {
+                install(
+                    &object,
+                    Selection::node(node, selection_filter(&arguments, 3)),
+                );
+            }
+            Loaded::NoRoot => {
+                object.native.borrow_mut().take();
+            }
+            Loaded::Failed => {
+                return Err(NativeError::throw(
+                    "Exception",
+                    "String could not be parsed as XML",
+                ));
+            }
+        }
         Ok(Value::Null)
     })
 }
@@ -84,12 +97,13 @@ async fn load_function(
             "{name}(): Argument #3 ($options) is too large"
         )));
     }
-    let selection = load(context, name, source, flags, file)
-        .await?
-        .map(|node| Selection::node(node, selection_filter(&arguments, 3)));
-    match selection {
-        Some(selection) => wrap(context, &class, selection),
-        None => Ok(Value::Bool(false)),
+    match load(context, name, source, flags, file).await? {
+        Loaded::Root(node) => {
+            let selection = Selection::node(node, selection_filter(&arguments, 3));
+            wrap(context, &class, selection)
+        }
+        Loaded::NoRoot => context.create_unserialized_object(&class),
+        Loaded::Failed => Ok(Value::Bool(false)),
     }
 }
 
@@ -171,7 +185,7 @@ async fn load(
     input: &[u8],
     flags: i64,
     file: bool,
-) -> Result<Option<SharedNode>, NativeError> {
+) -> Result<Loaded, NativeError> {
     let display = String::from_utf8_lossy(input);
     let file_bytes;
     let (input, source) = if file {
@@ -187,7 +201,7 @@ async fn load(
         };
         let Some(bytes) = file_bytes.as_deref() else {
             publish_xml_file_error(context, function, &display);
-            return Ok(None);
+            return Ok(Loaded::Failed);
         };
         (bytes, display.as_ref())
     } else {
@@ -204,8 +218,18 @@ async fn load(
             huge: flags & 524288 != 0,
         },
     );
+    let recovered_without_root = flags & 1 != 0
+        && !input.is_empty()
+        && parsed
+            .diagnostics
+            .first()
+            .is_some_and(|error| error.code == 4);
     publish_xml_source_errors(context, function, source, input, parsed.diagnostics, flags);
-    Ok(parsed.document.and_then(SharedNode::root))
+    Ok(match parsed.document.and_then(SharedNode::root) {
+        Some(node) => Loaded::Root(node),
+        None if recovered_without_root => Loaded::NoRoot,
+        None => Loaded::Failed,
+    })
 }
 
 pub fn resolve_file(

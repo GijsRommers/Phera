@@ -47,7 +47,7 @@ impl Filter {
 pub enum Selected {
     Node,
     Children(Option<String>),
-    Attributes,
+    Attributes(Option<String>),
 }
 
 #[derive(Clone)]
@@ -71,7 +71,7 @@ impl Selection {
         match &self.kind {
             Selected::Node => vec![owner],
             Selected::Children(name) => children(arena, owner, &self.filter, name.as_deref()),
-            Selected::Attributes => attributes(arena, owner, &self.filter, None),
+            Selected::Attributes(name) => attributes(arena, owner, &self.filter, name.as_deref()),
         }
     }
 
@@ -92,9 +92,66 @@ impl Selection {
         })
     }
 
+    pub fn next_item(&self, previous: Option<&SharedNode>) -> Option<SharedNode> {
+        let id = self.anchor.document(|doc| {
+            let arena = &doc.arena;
+            let owner = self.anchor.id();
+            let previous = previous.map(SharedNode::id);
+            match &self.kind {
+                Selected::Attributes(expected) => {
+                    let attributes = arena[owner].attributes();
+                    let start = match previous {
+                        Some(id) => attributes.iter().position(|&attr| attr == id)? + 1,
+                        None => 0,
+                    };
+                    attributes[start..].iter().copied().find(|&attr| {
+                        let name = &arena[attr].name;
+                        name.namespace.as_deref() != Some(XMLNS)
+                            && self.filter.matches(name)
+                            && expected
+                                .as_ref()
+                                .is_none_or(|expected| name.local == *expected)
+                    })
+                }
+                kind => {
+                    let expected = match kind {
+                        Selected::Children(name) => name.as_deref(),
+                        _ => None,
+                    };
+                    let mut next = match previous {
+                        Some(id) if arena[id].parent() == Some(owner) => arena[id].next_sibling(),
+                        Some(_) => None,
+                        None => arena[owner].first_child(),
+                    };
+                    while let Some(id) = next {
+                        let entry = &arena[id];
+                        if entry.kind == Kind::Element
+                            && self.filter.matches(&entry.name)
+                            && expected.is_none_or(|name| entry.name.local == name)
+                        {
+                            return Some(id);
+                        }
+                        next = entry.next_sibling();
+                    }
+                    None
+                }
+            }
+        })?;
+        self.anchor.select(id)
+    }
+
     pub fn name(&self) -> String {
         self.first()
-            .map(|node| node.document(|doc| doc.arena[node.id()].name.local.clone()))
+            .map(|node| {
+                node.document(|doc| {
+                    let entry = &doc.arena[node.id()];
+                    if entry.kind == Kind::Comment {
+                        "comment".to_owned()
+                    } else {
+                        entry.name.local.clone()
+                    }
+                })
+            })
             .unwrap_or_default()
     }
 
@@ -106,14 +163,17 @@ impl Selection {
 
     pub fn attribute_owner(&self) -> Option<SharedNode> {
         match self.kind {
-            Selected::Attributes => Some(self.anchor.clone()),
+            Selected::Attributes(_) => Some(self.anchor.clone()),
             Selected::Children(None) => None,
             _ => self.first(),
         }
     }
 
     pub fn for_property(&self, name: String) -> Option<Self> {
-        let owner = self.first()?;
+        let owner = match self.kind {
+            Selected::Children(None) => self.anchor.clone(),
+            _ => self.first()?,
+        };
         if !owner.document(|doc| doc.arena[owner.id()].kind == Kind::Element) {
             return None;
         }
@@ -191,14 +251,9 @@ pub fn value(arena: &Arena, id: NodeId) -> String {
 
 pub struct State {
     pub selection: Selection,
+    pub materialize_on_mutation: bool,
     pub namespaces: RefCell<HashMap<String, String>>,
-    pub cursor: RefCell<Cursor>,
-}
-
-#[derive(Default)]
-pub struct Cursor {
-    pub nodes: Vec<NodeId>,
-    pub index: usize,
+    pub cursor: RefCell<Option<SharedNode>>,
 }
 
 pub fn data(object: &Object) -> Result<Rc<State>, NativeError> {
@@ -212,18 +267,40 @@ pub fn data(object: &Object) -> Result<Rc<State>, NativeError> {
 }
 
 pub fn install(object: &Object, selection: Selection) {
+    install_selection(object, selection, false);
+}
+
+fn install_selection(object: &Object, selection: Selection, materialize_on_mutation: bool) {
     *object.native.borrow_mut() = Some(Box::new(Rc::new(State {
         selection,
+        materialize_on_mutation,
         namespaces: RefCell::default(),
         cursor: RefCell::default(),
     })));
 }
 
 pub fn wrap(context: &mut dyn Context, class: &str, selection: Selection) -> NativeResult {
+    wrap_selection(context, class, selection, false)
+}
+
+pub fn wrap_for_mutation(
+    context: &mut dyn Context,
+    class: &str,
+    selection: Selection,
+) -> NativeResult {
+    wrap_selection(context, class, selection, true)
+}
+
+fn wrap_selection(
+    context: &mut dyn Context,
+    class: &str,
+    selection: Selection,
+    materialize_on_mutation: bool,
+) -> NativeResult {
     let value = context.create_unserialized_object(class)?;
     let Value::Object(ref object) = value else {
         return Err(NativeError::error("Could not create SimpleXMLElement"));
     };
-    install(object, selection);
+    install_selection(object, selection, materialize_on_mutation);
     Ok(value)
 }

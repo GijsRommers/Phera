@@ -48,7 +48,12 @@ pub fn children(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) 
 }
 
 pub fn attributes(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
-    select(context, receiver(this)?, arguments, Selected::Attributes)
+    select(
+        context,
+        receiver(this)?,
+        arguments,
+        Selected::Attributes(None),
+    )
 }
 
 fn select(
@@ -125,12 +130,17 @@ pub fn save(
 pub fn add_child(context: &mut dyn Context, this: This<'_>, args: &[Value]) -> NativeResult {
     let object = receiver(this)?;
     let state = data(object)?;
+    let name = qualified_name("addChild", args)?;
+    if matches!(state.selection.kind, Selected::Attributes(_)) {
+        context.warning("SimpleXMLElement::addChild(): Cannot add element to attributes".into());
+        return Ok(Value::Null);
+    }
     let Some(owner) = state.selection.first() else {
         context.warning("SimpleXMLElement::addChild(): Cannot add child. Parent is not a permanent member of the XML tree".into());
         return Ok(Value::Null);
     };
-    let name = qualified_name("addChild", args)?;
-    let id = owner.document_mut(|doc| {
+    let filter_result = name.prefix.is_some() || args::string(args, 2).is_some();
+    let result = owner.document_mut(|doc| {
         let arena = &mut doc.arena;
         if arena[owner.id()].kind != Kind::Element {
             return None;
@@ -140,11 +150,24 @@ pub fn add_child(context: &mut dyn Context, this: This<'_>, args: &[Value]) -> N
             let parent = &arena[owner.id()].name;
             name.namespace.clone_from(&parent.namespace);
             name.prefix.clone_from(&parent.prefix);
+        } else if let Some(uri) = &name.namespace
+            && let Some(prefix) = crate::namespaces::prefix_for_uri(arena, owner.id(), uri, false)
+        {
+            name.prefix = (!prefix.is_empty()).then_some(prefix);
+        } else if name.namespace.is_none() {
+            name.prefix = None;
         }
+        let prefix = name.prefix.clone().filter(|_| filter_result);
         let id = arena.allocate(Node::new(Kind::Element, name, ""));
-        arena.insert(owner.id(), id, None).ok().map(|_| id)
+        arena
+            .insert(owner.id(), id, None)
+            .ok()
+            .map(|_| (id, prefix))
     });
-    let Some(node) = id.and_then(|id| owner.select(id)) else {
+    let Some((id, prefix)) = result else {
+        return Ok(Value::Null);
+    };
+    let Some(node) = owner.select(id) else {
         return Ok(Value::Null);
     };
     declare_namespace(&node, &node);
@@ -154,7 +177,7 @@ pub fn add_child(context: &mut dyn Context, this: This<'_>, args: &[Value]) -> N
     wrap(
         context,
         object.class.name(),
-        Selection::node(node, Filter::Default),
+        Selection::node(node, Filter::new(prefix.as_deref(), true)),
     )
 }
 
@@ -173,6 +196,10 @@ pub fn add_attribute(context: &mut dyn Context, this: This<'_>, args: &[Value]) 
     }
     if name.namespace.is_none() {
         name.prefix = None;
+    } else if let Some(prefix) = owner.document(|doc| {
+        crate::namespaces::prefix_for_uri(&doc.arena, owner.id(), name.namespace.as_deref()?, true)
+    }) {
+        name.prefix = Some(prefix);
     }
     if owner.document(|doc| {
         let arena = &doc.arena;

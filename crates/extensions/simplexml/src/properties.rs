@@ -9,25 +9,14 @@
 use phera_ext_dom::shared::SharedNode;
 use phera_ext_dom::tree::{Kind, Name, Node, NodeId};
 use phera_extension_api::{
-    Context, NativeDimensions, NativeError, NativePropertyAccess, NativePropertyMutation,
-    NativePropertyRead, NativeResult, Object, Value,
+    Context, NativeError, NativePropertyAccess, NativePropertyMutation, NativePropertyRead, Object,
+    Value,
     value::{ArrayKey, to_php_string},
 };
 
-use crate::selection::{Filter, Selected, Selection, attributes, data, wrap};
+use crate::selection::{Filter, Selected, Selection, State, data, wrap, wrap_for_mutation};
 
 pub const ACCESS: NativePropertyAccess = NativePropertyAccess::new(read_property, mutate_property);
-
-pub const DIMENSIONS: NativeDimensions = NativeDimensions {
-    fallback_if_overridden: &[],
-    get: dimension,
-    exists: dimension_exists,
-    set: set_dimension,
-    unset: unset_dimension,
-    reference: None,
-    bind: None,
-    direct: None,
-};
 
 fn read_property(
     context: &mut dyn Context,
@@ -39,6 +28,19 @@ fn read_property(
         return Ok(None);
     }
     let state = data(object)?;
+    if matches!(mode, NativePropertyRead::Update) {
+        materialize(&state)?;
+    }
+    if matches!(state.selection.kind, Selected::Attributes(_)) {
+        let key = Value::from(name);
+        return match mode {
+            NativePropertyRead::Isset | NativePropertyRead::Exists => {
+                Ok(crate::dimensions::dimension_exists(context, object, key)?
+                    .then_some(Value::Bool(true)))
+            }
+            _ => Ok(Some(crate::dimensions::dimension(context, object, key)?)),
+        };
+    }
     let Some(selection) = state.selection.for_property(name.to_owned()) else {
         return Ok(
             if matches!(mode, NativePropertyRead::Exists | NativePropertyRead::Isset) {
@@ -50,6 +52,16 @@ fn read_property(
     };
     if matches!(mode, NativePropertyRead::Isset | NativePropertyRead::Exists) {
         return Ok(selection.first().map(|_| Value::Bool(true)));
+    }
+    if matches!(mode, NativePropertyRead::Quiet) && selection.first().is_none() {
+        return Ok(Some(Value::Null));
+    }
+    if matches!(mode, NativePropertyRead::Update) {
+        return Ok(Some(wrap_for_mutation(
+            context,
+            object.class.name(),
+            selection,
+        )?));
     }
     Ok(Some(wrap(context, object.class.name(), selection)?))
 }
@@ -64,8 +76,34 @@ fn mutate_property(
         return Ok(false);
     }
     let state = data(object)?;
+    if matches!(state.selection.kind, Selected::Attributes(_)) {
+        let key = Value::from(name);
+        return match mutation {
+            NativePropertyMutation::Assign(value) => {
+                crate::dimensions::set_dimension(context, object, key, value.clone())?;
+                Ok(true)
+            }
+            NativePropertyMutation::Unset => {
+                crate::dimensions::unset_dimension(context, object, key)?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        };
+    }
+    if matches!(
+        mutation,
+        NativePropertyMutation::Assign(_) | NativePropertyMutation::Unset
+    ) {
+        materialize(&state)?;
+    }
     match mutation {
         NativePropertyMutation::Assign(value) => {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(NativeError::value_error(
+                    "Cannot create element with an empty name",
+                ));
+            }
             if let Some(selection) = state.selection.for_property(name.to_owned()) {
                 let value = assigned_value(context, value, "properties")?;
                 assign_child(context, &selection, name, value)?;
@@ -85,6 +123,17 @@ fn mutate_property(
         }
         _ => Ok(false),
     }
+}
+
+pub fn materialize(state: &State) -> Result<(), NativeError> {
+    let selection = &state.selection;
+    if state.materialize_on_mutation
+        && let Selected::Children(Some(name)) = &selection.kind
+        && selection.first().is_none()
+    {
+        append_element(&selection.anchor, name, &selection.filter)?;
+    }
+    Ok(())
 }
 
 fn assign_child(
@@ -154,123 +203,6 @@ pub fn append_element(
         })
 }
 
-enum Offset {
-    Index(i64),
-    Append,
-    Name(String),
-}
-
-fn offset(context: &mut dyn Context, value: &Value) -> Result<Offset, NativeError> {
-    match &*value.deref() {
-        Value::Int(index) => Ok(Offset::Index(*index)),
-        Value::Null => Ok(Offset::Append),
-        value => Ok(Offset::Name(
-            to_php_string(value, context.diagnostics())?.to_string_lossy(),
-        )),
-    }
-}
-
-fn indexed(selection: &Selection, offset: Offset) -> Option<SharedNode> {
-    match offset {
-        Offset::Index(index) => {
-            let index = usize::try_from(index).ok()?;
-            let node = selection
-                .anchor
-                .document(|doc| selection.nodes_in(&doc.arena).get(index).copied())?;
-            selection.anchor.select(node)
-        }
-        Offset::Name(name) => {
-            let owner = selection.attribute_owner()?;
-            let node = owner.document(|doc| {
-                attributes(&doc.arena, owner.id(), &selection.filter, Some(&name))
-                    .first()
-                    .copied()
-            })?;
-            owner.select(node)
-        }
-        Offset::Append => None,
-    }
-}
-
-fn dimension(context: &mut dyn Context, object: &Object, key: Value) -> NativeResult {
-    let state = data(object)?;
-    let key = offset(context, &key)?;
-    match indexed(&state.selection, key) {
-        Some(node) => wrap(
-            context,
-            object.class.name(),
-            Selection::node(node, state.selection.filter.clone()),
-        ),
-        None => Ok(Value::Null),
-    }
-}
-
-fn dimension_exists(
-    context: &mut dyn Context,
-    object: &Object,
-    key: Value,
-) -> Result<bool, NativeError> {
-    let state = data(object)?;
-    Ok(indexed(&state.selection, offset(context, &key)?).is_some())
-}
-
-fn set_dimension(
-    context: &mut dyn Context,
-    object: &Object,
-    key: Value,
-    value: Value,
-) -> Result<(), NativeError> {
-    let state = data(object)?;
-    let selection = &state.selection;
-    let key = offset(context, &key)?;
-    let target = if matches!(key, Offset::Name(_)) {
-        "attributes"
-    } else {
-        "properties"
-    };
-    let value = assigned_value(context, &value, target)?;
-    match key {
-        Offset::Name(name) => {
-            if let Some(owner) = selection.attribute_owner() {
-                if let Some(attribute) = indexed(selection, Offset::Name(name.clone())) {
-                    attribute.assign_text(value);
-                } else {
-                    add_attribute(&owner, Name::new(name), value)?;
-                }
-            }
-        }
-        Offset::Index(index) => {
-            if let Some(node) = indexed(selection, Offset::Index(index)) {
-                node.assign_text(value);
-            } else if let Selected::Children(Some(name)) = &selection.kind
-                && i64::try_from(selection.items().len()).ok() == Some(index)
-            {
-                append_element(&selection.anchor, name, &selection.filter)?.assign_text(value);
-            }
-        }
-        Offset::Append => {
-            if let Selected::Children(Some(name)) = &selection.kind {
-                append_element(&selection.anchor, name, &selection.filter)?.assign_text(value);
-            } else {
-                return Err(NativeError::error("Cannot create unnamed attribute"));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn unset_dimension(
-    context: &mut dyn Context,
-    object: &Object,
-    key: Value,
-) -> Result<(), NativeError> {
-    let state = data(object)?;
-    if let Some(node) = indexed(&state.selection, offset(context, &key)?) {
-        node.remove(node.id());
-    }
-    Ok(())
-}
-
 pub fn add_attribute(
     owner: &SharedNode,
     name: Name,
@@ -296,7 +228,7 @@ pub fn add_attribute(
     Ok(node)
 }
 
-fn assigned_value(
+pub fn assigned_value(
     context: &mut dyn Context,
     value: &Value,
     target: &str,
@@ -306,7 +238,7 @@ fn assigned_value(
     {
         return Ok(data(object)?.selection.value());
     }
-    if value.is_object() || value.is_array() {
+    if value.is_object() || value.is_array() || matches!(&*value.deref(), Value::Resource(_)) {
         return Err(NativeError::type_error(format!(
             "It's not possible to assign a complex type to {target}, {} given",
             value.type_name(),

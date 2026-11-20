@@ -12,7 +12,7 @@ use phera_ext_dom::tree::{Arena, Kind, Name, NodeId};
 use phera_ext_dom::xpath;
 use phera_extension_api::{Context, NativeError, NativeResult, Object, PhpArray, Value, args};
 
-use crate::selection::{Filter, Selection, data, wrap};
+use crate::selection::{Filter, Selected, Selection, data, wrap};
 
 type This<'a> = Option<&'a Rc<Object>>;
 const XML: &str = "http://www.w3.org/XML/1998/namespace";
@@ -54,6 +54,21 @@ pub fn lookup(arena: &Arena, node: NodeId, prefix: &str) -> Option<String> {
         })
 }
 
+pub fn prefix_for_uri(arena: &Arena, node: NodeId, uri: &str, attribute: bool) -> Option<String> {
+    if uri == XML {
+        return Some("xml".to_owned());
+    }
+    let mut shadowed = std::collections::HashSet::new();
+    for owner in std::iter::once(node).chain(arena.ancestors(node)) {
+        for (prefix, value) in declarations(arena, owner) {
+            if shadowed.insert(prefix) && value == uri && (!attribute || !prefix.is_empty()) {
+                return Some(prefix.to_owned());
+            }
+        }
+    }
+    None
+}
+
 pub fn register_xpath(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
     let state = data(receiver(this)?)?;
     let prefix = String::from_utf8_lossy(args::bytes(arguments, 0));
@@ -73,6 +88,9 @@ pub fn register_xpath(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) 
 pub fn query(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
     let object = receiver(this)?;
     let state = data(object)?;
+    if matches!(state.selection.kind, Selected::Attributes(_)) {
+        return Ok(Value::Null);
+    }
     let Some(node) = state.selection.first() else {
         return Ok(Value::Null);
     };
@@ -111,13 +129,35 @@ pub fn query(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> 
     };
     let mut result = PhpArray::new();
     for item in items {
-        let Some(item) = node.select(item) else {
+        let selection = node.document(|doc| {
+            let entry = &doc.arena[item];
+            match entry.kind {
+                Kind::Text => Some((entry.parent()?, Selected::Node, Filter::Default)),
+                Kind::Attribute if entry.name.namespace.as_deref() != Some(XMLNS) => Some((
+                    entry.parent()?,
+                    Selected::Attributes(Some(entry.name.local.clone())),
+                    Filter::new(entry.name.namespace.as_deref(), false),
+                )),
+                Kind::Element | Kind::Comment | Kind::ProcessingInstruction => {
+                    Some((item, Selected::Node, Filter::Default))
+                }
+                _ => None,
+            }
+        });
+        let Some((id, kind, filter)) = selection else {
+            continue;
+        };
+        let Some(anchor) = node.select(id) else {
             continue;
         };
         let value = wrap(
             context,
             object.class.name(),
-            Selection::node(item, Filter::Default),
+            Selection {
+                anchor,
+                kind,
+                filter,
+            },
         )?;
         let _ = result.push(value);
     }
@@ -162,7 +202,9 @@ pub fn get_doc_namespaces(
     this: This<'_>,
     arguments: &[Value],
 ) -> NativeResult {
-    let state = data(receiver(this)?)?;
+    let Ok(state) = data(receiver(this)?) else {
+        return Ok(Value::Bool(false));
+    };
     let recursive = args::bool(arguments, 0).unwrap_or(false);
     let from_root = args::bool(arguments, 1).unwrap_or(true);
     let Some(node) = state.selection.first() else {

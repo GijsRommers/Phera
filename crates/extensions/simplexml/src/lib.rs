@@ -8,10 +8,12 @@
 //! Document strings use DOM's bounded entity processing and never load an
 //! external entity.
 
+mod dimensions;
 mod iteration;
 mod load;
 mod methods;
 mod namespaces;
+mod operators;
 mod projection;
 mod properties;
 mod selection;
@@ -53,12 +55,15 @@ impl Extension for SimpleXml {
 
 static HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Copy(projection::clone)),
-    cast: Some(projection::cast),
+    cast: Some(operators::cast),
+    compare: Some(operators::compare),
+    binary: Some(operators::binary),
+    unary: Some(operators::unary),
     properties: Some(projection::properties),
     property_access: Some(&properties::ACCESS),
     iterator: Some(iteration::iterator),
     iterator_by_reference: Some(iteration::refuse_by_reference),
-    dimensions: Some(properties::DIMENSIONS),
+    dimensions: Some(dimensions::ACCESS),
     ..ClassHooks::EMPTY
 };
 
