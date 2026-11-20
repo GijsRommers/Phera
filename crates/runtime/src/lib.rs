@@ -126,6 +126,7 @@ impl Runtime {
         registry.load(&phera_ext_dom::Libxml);
         registry.load(&phera_ext_dom::Dom);
         registry.load(&phera_ext_filter::Filter);
+        registry.load(&phera_ext_intl::Intl);
         registry.load(&phera_ext_json::Json);
         registry.load(&phera_ext_mbstring::Mbstring);
         registry.php_module("iconv");

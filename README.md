@@ -81,7 +81,7 @@ includes it. The Zend-specific `opcache.preload` directive is unsupported.
 Built in, each checked call by call against real PHP: core, standard, ctype,
 [curl](crates/extensions/curl/README.md) (HTTP and HTTPS, including HTTP/2,
 connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`,
-`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, json, mbstring, openssl, pcre,
+`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, intl, json, mbstring, openssl, pcre,
 PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.
@@ -129,7 +129,7 @@ read, written, sought, truncated and unlinked in the current transaction.
 Native function return types are visible through reflection. Compatibility
 testing is in progress. MySQL LOCAL INFILE is disabled.
 
-In progress: intl, SimpleXML, XMLReader, XMLWriter.
+In progress: SimpleXML, XMLReader, XMLWriter.
 Not started: gd, fileinfo, zip, sockets.
 
 ### Sodium
@@ -141,6 +141,14 @@ secretstream, key derivation and exchange, Argon2 and scrypt passwords, binary
 encodings, and ISO/IEC 7816-4 padding. The six AEGIS-128L and AEGIS-256 functions are
 absent pending a published audit of a pure Rust backend. Ed25519 signing
 rejects secret keys whose embedded public half cannot be decoded as a point.
+
+### intl
+
+The intl extension includes ICU4X normalization, grapheme operations, IDNA,
+locale queries, number and date formatting, collation, list and message
+formatting, transliteration, break iteration, resource bundles, and calendar
+and timezone objects. See the [intl coverage notes](crates/extensions/intl/README.md) for
+the APIs that still differ from PHP.
 
 ## ✨ Goals
 

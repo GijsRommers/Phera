@@ -60,6 +60,9 @@ core	implicit_flush	bool	7	31
 core	include_path	list	7	2e
 core	input_encoding	string	7	-
 core	internal_encoding	string	7	-
+intl	intl.default_locale	string	7	-
+intl	intl.error_level	int	7	30
+intl	intl.use_exceptions	bool	7	30
 core	log_errors	bool	7	30
 core	mail.add_x_header	bool	6	30
 core	mail.cr_lf_mode	string	6	63726c66

@@ -71,6 +71,10 @@ fn location_record(line: &'static str) -> Location {
 }
 
 impl Location {
+    pub fn country(&self) -> &'static str {
+        self.country
+    }
+
     pub fn find(name: &str) -> Option<&'static Self> {
         CATALOG
             .iter()
