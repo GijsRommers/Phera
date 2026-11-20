@@ -8,7 +8,7 @@ use super::entities::Entities;
 use crate::document::ParseError;
 use crate::tree::{Arena, Kind, NodeId};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct EntityResolver(Entities);
 
 impl EntityResolver {

@@ -6,13 +6,14 @@
 //! echo $items[0]->getName();
 //! ```
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use phera_ext_dom::shared::SharedNode;
 use phera_ext_dom::tree::{Arena, Kind, Name, NodeId};
-use phera_extension_api::{Context, NativeError, NativeResult, Object, Value};
+use phera_extension_api::{Context, NativeError, NativeResult, Object, Value, value::Fork};
 
 pub const CLASS: &str = "SimpleXMLElement";
 const XMLNS: &str = "http://www.w3.org/2000/xmlns/";
@@ -254,6 +255,24 @@ pub struct State {
     pub materialize_on_mutation: bool,
     pub namespaces: RefCell<HashMap<String, String>>,
     pub cursor: RefCell<Option<SharedNode>>,
+}
+
+pub fn fork(_: &Object, native: &dyn Any, fork: &mut Fork<'_>) -> Result<Box<dyn Any>, String> {
+    if native.is::<crate::load::RecoveredWithoutRoot>() {
+        return Ok(Box::new(crate::load::RecoveredWithoutRoot));
+    }
+    let source = native
+        .downcast_ref::<Rc<State>>()
+        .ok_or("its XML selection is not initialized")?;
+    let mut selection = source.selection.clone();
+    selection.anchor = source.selection.anchor.fork(fork);
+    let cursor = source.cursor.borrow().as_ref().map(|node| node.fork(fork));
+    Ok(Box::new(Rc::new(State {
+        selection,
+        materialize_on_mutation: source.materialize_on_mutation,
+        namespaces: RefCell::new(source.namespaces.borrow().clone()),
+        cursor: RefCell::new(cursor),
+    })))
 }
 
 pub fn data(object: &Object) -> Result<Rc<State>, NativeError> {

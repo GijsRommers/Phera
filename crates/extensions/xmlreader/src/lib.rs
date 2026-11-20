@@ -44,6 +44,7 @@ const HOOKS: ClassHooks = ClassHooks {
     property_access: Some(&properties::ACCESS),
     virtual_properties: true,
     properties: Some(properties::project),
+    fork: Some(state::fork),
     ..ClassHooks::EMPTY
 };
 

@@ -73,12 +73,14 @@ impl Position {
     }
 }
 
+#[derive(Clone)]
 struct Open {
     qualified: String,
     scoped: String,
     namespaces: Vec<(String, Option<String>)>,
 }
 
+#[derive(Clone)]
 pub struct Parser {
     pub options: Options,
     pub error: i64,

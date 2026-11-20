@@ -106,10 +106,12 @@ static HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
     release: Some(crate::output::release),
     forbid_serialization: true,
+    fork: Some(crate::output::fork),
     ..ClassHooks::EMPTY
 };
 
 pub fn register(registry: &mut Registry) {
+    crate::output::register_request_state(registry);
     registry.class(ClassEntry {
         methods: &METHODS,
         hooks: Some(&HOOKS),

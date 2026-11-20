@@ -23,7 +23,7 @@ enum Loaded {
     Failed,
 }
 
-struct RecoveredWithoutRoot;
+pub(crate) struct RecoveredWithoutRoot;
 
 pub(crate) fn recovered_without_root(object: &Object) -> bool {
     object

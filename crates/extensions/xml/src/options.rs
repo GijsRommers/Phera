@@ -53,6 +53,7 @@ impl Codec {
     }
 }
 
+#[derive(Clone)]
 pub struct Options {
     pub source: Option<Codec>,
     pub target: Codec,

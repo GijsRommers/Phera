@@ -10,7 +10,7 @@
 
 use crate::{bytes, dtd};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Writer {
     pub output: Vec<u8>,
     pub encoding: bytes::Encoding,
@@ -21,6 +21,7 @@ pub struct Writer {
     indent_close: bool,
 }
 
+#[derive(Clone)]
 pub enum Frame {
     Element(Element),
     Attribute,
@@ -38,6 +39,7 @@ pub enum Frame {
     },
 }
 
+#[derive(Clone)]
 pub struct Element {
     name: Vec<u8>,
     open: bool,

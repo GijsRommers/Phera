@@ -19,6 +19,15 @@ pub(super) struct Detached {
     pins: HashMap<NodeId, Weak<()>>,
 }
 
+impl Detached {
+    pub(super) fn fork(&self) -> Self {
+        Self {
+            roots: self.roots.clone(),
+            pins: HashMap::new(),
+        }
+    }
+}
+
 impl DomState {
     pub(super) fn remove(&mut self, root: NodeId) {
         if self.document.arena[root].parent().is_none() {

@@ -6,12 +6,14 @@
 //! xml_parse($parser, '<item/>', true);
 //! ```
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use phera_extension_api::{
-    Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args, value::to_bool,
+    Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
+    value::{Fork, to_bool},
 };
 
 use crate::events::{Handler, Parser, Position};
@@ -24,6 +26,26 @@ pub struct State {
     pub parser: RefCell<Parser>,
     pub handlers: RefCell<HashMap<Handler, Value>>,
     pub parsing: Cell<bool>,
+}
+
+pub fn fork(_: &Object, native: &dyn Any, fork: &mut Fork<'_>) -> Result<Box<dyn Any>, String> {
+    let source = native
+        .downcast_ref::<Rc<State>>()
+        .ok_or("its XML parser is not initialized")?;
+    if source.parsing.get() {
+        return Err("it is dispatching a callback; fork after parsing returns".into());
+    }
+    let handlers = source
+        .handlers
+        .borrow()
+        .iter()
+        .map(|(&handler, value)| (handler, fork.value(value)))
+        .collect();
+    Ok(Box::new(Rc::new(State {
+        parser: RefCell::new(source.parser.borrow().clone()),
+        handlers: RefCell::new(handlers),
+        parsing: Cell::new(false),
+    })))
 }
 
 fn state(object: &Object) -> Result<Rc<State>, NativeError> {

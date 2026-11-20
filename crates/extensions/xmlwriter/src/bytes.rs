@@ -8,7 +8,7 @@
 
 use encoding_rs::Encoding as LegacyEncoding;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub enum Encoding {
     #[default]
     Utf8,

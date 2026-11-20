@@ -6,17 +6,22 @@
 //! $reader->read();
 //! ```
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use phera_ext_dom::shared::{SharedNode, publish_xml_source_errors};
 use phera_ext_dom::xml::{self, Options};
-use phera_extension_api::{Context, NativeError, Object, Value, value::Resource};
+use phera_extension_api::{
+    Context, NativeError, Object, Value,
+    value::{Fork, Resource},
+};
 
 use crate::cursor::Position;
 
 pub type Reader = Rc<RefCell<State>>;
 
+#[derive(Clone)]
 pub enum Input {
     Bytes(Vec<u8>),
     Stream(Rc<Resource>),
@@ -43,6 +48,7 @@ impl Input {
     }
 }
 
+#[derive(Clone)]
 pub struct State {
     source: Option<Input>,
     source_name: String,
@@ -144,6 +150,25 @@ pub fn data(object: &Object) -> Option<Reader> {
         .as_ref()?
         .downcast_ref::<Reader>()
         .cloned()
+}
+
+pub fn fork(_: &Object, native: &dyn Any, fork: &mut Fork<'_>) -> Result<Box<dyn Any>, String> {
+    let reader = native
+        .downcast_ref::<Reader>()
+        .ok_or("its XML reader is not initialized")?;
+    let source = reader.borrow();
+    if source
+        .stream
+        .as_ref()
+        .is_some_and(|stream| !stream.is_closed())
+    {
+        return Err(
+            "its input stream belongs to one request; open it after Phera\\snapshot()".into(),
+        );
+    }
+    let mut copy = source.clone();
+    copy.tree = source.tree.as_ref().map(|node| node.fork(fork));
+    Ok(Box::new(Rc::new(RefCell::new(copy))))
 }
 
 pub fn install(object: &Object, reader: State) {

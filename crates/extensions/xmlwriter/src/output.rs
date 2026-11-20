@@ -6,11 +6,13 @@
 //! $bytesWritten = $writer->flush();
 //! ```
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 use phera_extension_api::{
-    Context, LocalFuture, NativeError, NativeResult, Object, Value, value::Resource,
+    Context, LocalFuture, NativeError, NativeResult, Object, Registry, Value,
+    value::{Fork, Resource},
 };
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
@@ -43,6 +45,10 @@ struct PendingOutputs {
     live: Vec<Weak<RefCell<State>>>,
     dropped: Closing,
     registered: bool,
+}
+
+pub fn register_request_state(registry: &mut Registry) {
+    registry.fork_state::<PendingOutputs>(phera_extension_api::fresh_state);
 }
 
 impl Drop for State {
@@ -129,6 +135,26 @@ pub fn state(object: &Object) -> Result<Shared, NativeError> {
 
 pub fn uninitialized() -> NativeError {
     NativeError::error("Invalid or uninitialized XMLWriter object")
+}
+
+pub fn fork(_: &Object, native: &dyn Any, _: &mut Fork<'_>) -> Result<Box<dyn Any>, String> {
+    let writer = native
+        .downcast_ref::<Shared>()
+        .ok_or("its XML writer is not initialized")?;
+    let source = writer.borrow();
+    if !matches!(source.target, Target::Memory) {
+        return Err(
+            "its output file or stream belongs to one request; open it after Phera\\snapshot()"
+                .into(),
+        );
+    }
+    Ok(Box::new(Rc::new(RefCell::new(State {
+        writer: source.writer.clone(),
+        target: Target::Memory,
+        memory: source.memory.clone(),
+        failed: source.failed,
+        closing: None,
+    }))))
 }
 
 pub async fn publish(context: &mut dyn Context, state: &Shared, function: &str) -> i64 {

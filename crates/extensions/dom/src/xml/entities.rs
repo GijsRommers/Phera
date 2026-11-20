@@ -15,7 +15,7 @@ const EXPANSION_BYTES: usize = 8 * 1024 * 1024;
 const EXPANSION_STEPS: usize = 100_000;
 const EXPANSION_DEPTH: usize = 32;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Entities {
     definitions: HashMap<String, Option<String>>,
     bytes: usize,

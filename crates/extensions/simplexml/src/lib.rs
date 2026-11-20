@@ -65,6 +65,7 @@ static HOOKS: ClassHooks = ClassHooks {
     iterator: Some(iteration::iterator),
     iterator_by_reference: Some(iteration::refuse_by_reference),
     dimensions: Some(dimensions::ACCESS),
+    fork: Some(selection::fork),
     ..ClassHooks::EMPTY
 };
 
