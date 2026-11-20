@@ -146,9 +146,7 @@ impl Compiler<'_> {
                 "Type contains both true and false, bool must be used instead".into(),
             ));
         }
-        if single.contains("object")
-            && (single.contains("iterable") || atoms.iter().any(|atom| !builtin_type(atom)))
-        {
+        if single.contains("object") && atoms.iter().any(|atom| !builtin_type(atom)) {
             let display = declaration_union(&atoms, &alternatives, nullable);
             return Err(error(format!(
                 "Type {display} contains both object and a class type, which is redundant"

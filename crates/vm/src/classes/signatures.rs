@@ -369,8 +369,8 @@ impl Vm {
         let Some(narrow) = narrow else {
             return wide == "mixed";
         };
-        let narrow = narrow.replace('?', "null|");
-        let wide = wide.replace('?', "null|");
+        let narrow = contract_alternatives(narrow);
+        let wide = contract_alternatives(wide);
         narrow.split('|').all(|source| {
             wide.split('|').any(|target| {
                 target.trim_matches(['(', ')']).split('&').all(|bound| {
@@ -411,14 +411,6 @@ impl Vm {
         if target == "bool" && matches!(source, "true" | "false") {
             return true;
         }
-        if target == "iterable" && source == "array" {
-            return true;
-        }
-        let target = if target == "iterable" {
-            "Traversable"
-        } else {
-            target
-        };
         if target == "callable" && source == "Closure" {
             return true;
         }
@@ -485,6 +477,17 @@ impl Vm {
                 .unwrap_or_else(|| name.to_owned()),
             _ => name.to_owned(),
         }
+    }
+}
+
+/// Traversable and array are separate alternatives in the contract of iterable.
+fn contract_alternatives(ty: &str) -> std::borrow::Cow<'_, str> {
+    if ty.split(['?', '|']).any(|member| member == "iterable") {
+        crate::types::expanded_iterable_display(ty).into()
+    } else if let Some(non_null) = ty.strip_prefix('?') {
+        format!("null|{non_null}").into()
+    } else {
+        ty.into()
     }
 }
 
