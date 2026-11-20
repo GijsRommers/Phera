@@ -6,7 +6,8 @@
 use std::borrow::Cow;
 
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Value, args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
+    Value, args,
 };
 
 use super::buffer;
@@ -14,7 +15,11 @@ use super::buffer;
 mod parser;
 mod value;
 
-pub(super) const FUNCTIONS: &[FunctionEntry] = &[SPRINTF, PRINTF, VSPRINTF, VPRINTF];
+pub(super) fn register(registry: &mut Registry) {
+    for entry in [SPRINTF, PRINTF, VSPRINTF, VPRINTF] {
+        registry.function_with_native_frame(entry);
+    }
+}
 
 /// Where the values come from: the arguments, or one array of them.
 #[derive(Clone, Copy, PartialEq, Eq)]

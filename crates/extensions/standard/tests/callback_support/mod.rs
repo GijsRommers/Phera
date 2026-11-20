@@ -76,7 +76,9 @@ impl Harness {
                 .ok_or_else(|| NativeError::error(format!("Unknown test function {name}")))?;
             prepare_arguments(&entry, &mut arguments, self)?;
             match entry.handler {
-                NativeFn::Sync(handler) => handler(self, &arguments),
+                NativeFn::Sync(handler) | NativeFn::DeprecatedSync(handler) => {
+                    handler(self, &arguments)
+                }
                 NativeFn::Async(handler) => handler(self, arguments).await,
             }
         })

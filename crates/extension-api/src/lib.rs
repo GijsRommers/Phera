@@ -9,6 +9,7 @@ mod class;
 mod context;
 mod error;
 mod function;
+pub mod native_parameters;
 mod object_handlers;
 mod registry;
 pub mod serialization;

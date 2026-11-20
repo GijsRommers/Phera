@@ -183,7 +183,7 @@ fn declared_charset(value: &[u8]) -> Option<&str> {
     let value = std::str::from_utf8(value).ok()?;
     let (_, parameter) = value.split_once(';')?;
     let mut words = parameter
-        .split(|ch: char| matches!(ch, '=' | ' ' | '"' | '\t'))
+        .split(['=', ' ', '"', '\t'])
         .filter(|part| !part.is_empty());
     if words.next()?.eq_ignore_ascii_case("charset") {
         words.next()

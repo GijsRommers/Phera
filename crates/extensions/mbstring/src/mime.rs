@@ -111,10 +111,10 @@ const LINE_LENGTH: usize = 74;
 const MB_ENCODE_MIMEHEADER: &[Param] = &[
     Param::new("string", ParamType::String),
     Param::new("charset", ParamType::String)
-        .nullable()
+        .coerce_nullable_scalar()
         .optional(),
     Param::new("transfer_encoding", ParamType::String)
-        .nullable()
+        .coerce_nullable_scalar()
         .optional(),
     Param::new("newline", ParamType::String).optional(),
     Param::new("indent", ParamType::Int).optional(),

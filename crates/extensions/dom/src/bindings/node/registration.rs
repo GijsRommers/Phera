@@ -32,12 +32,17 @@ pub(in crate::bindings) fn register_modern(registry: &mut Registry) {
                 M::public("hasChildNodes", &[], has_children).returning("bool"),
                 M::public("getLineNo", &[], line).returning("int"),
                 M::public("getNodePath", &[], node_path).returning("?string"),
-                M::public("getRootNode", &[], root).returning("Dom\\Node"),
+                M::public(
+                    "getRootNode",
+                    const { &[P::new("options", T::Array).with_default(C::EmptyArray)] },
+                    root,
+                )
+                .returning("Dom\\Node"),
                 M::public("appendChild", &[NEW], mutation::append_child).returning("Dom\\Node"),
                 M::public("removeChild", &[CHILD], mutation::remove_child).returning("Dom\\Node"),
                 M::public(
                     "insertBefore",
-                    const { &[NEW, CHILD.nullable().with_default(C::Null)] },
+                    const { &[NEW, CHILD.nullable()] },
                     mutation::insert_before,
                 )
                 .returning("Dom\\Node"),

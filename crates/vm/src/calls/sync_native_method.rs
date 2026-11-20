@@ -12,6 +12,7 @@ use phera_value::Value;
 use super::{call_state::CallTarget, execution_loop::BatchExit, prepared_call::PreparedCall};
 use crate::{
     Vm,
+    calls::native_frames::NativeFrame,
     classes::{Invocation, MethodBody},
 };
 
@@ -94,12 +95,11 @@ impl Vm {
                 )))
             }
             Err(error) => {
-                if matches!(&error, NativeError::Throw { .. }) {
-                    self.failed_native = Some(crate::error_traces::NativeTrace::method(
-                        &method,
-                        &arguments[..count],
-                    ));
-                }
+                self.record_native_failure(
+                    &error,
+                    NativeFrame::Method(&method),
+                    &arguments[..count],
+                );
                 Err(error)
             }
         }

@@ -1,3 +1,5 @@
+//! Native parameters keep PHP declarations such as `str_pad($string, $length)`.
+
 use phera_value::Value;
 
 use crate::{ConstantValue, Context, LocalFuture, NativeResult};
@@ -111,6 +113,8 @@ pub struct Param {
     pub name: &'static str,
     pub ty: ParamType,
     pub nullable: bool,
+    null_coercion: NullCoercion,
+    arity: ArgumentCount,
     pub rejects_nul: bool,
     pub optional: bool,
     /// Fills a skipped position when a later named argument is supplied.
@@ -123,12 +127,26 @@ pub struct Param {
     pub variadic: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NullCoercion {
+    Declared,
+    Scalar,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArgumentCount {
+    Parameters,
+    Handler,
+}
+
 impl Param {
     pub const fn new(name: &'static str, ty: ParamType) -> Self {
         Self {
             name,
             ty,
             nullable: false,
+            null_coercion: NullCoercion::Declared,
+            arity: ArgumentCount::Parameters,
             rejects_nul: false,
             optional: false,
             default: None,
@@ -148,6 +166,31 @@ impl Param {
     pub const fn nullable(mut self) -> Self {
         self.nullable = true;
         self
+    }
+
+    /// A native parser may coerce an explicit null despite a nullable declaration.
+    /// For example, `mb_encode_mimeheader($text, null)` coerces null to an empty charset.
+    pub const fn coerce_nullable_scalar(mut self) -> Self {
+        self.nullable = true;
+        self.null_coercion = NullCoercion::Scalar;
+        self
+    }
+
+    pub const fn accepts_null(self) -> bool {
+        self.nullable && matches!(self.null_coercion, NullCoercion::Declared)
+    }
+
+    /// On the first parameter, preserve a handler's own argument count checks.
+    ///
+    /// Some signatures have multiple call forms, such as `mt_rand()` and
+    /// `mt_rand($min, $max)`. The reflected parameters describe both forms.
+    pub const fn arity_checked_by_handler(mut self) -> Self {
+        self.arity = ArgumentCount::Handler;
+        self
+    }
+
+    pub(crate) const fn uses_parameter_arity(&self) -> bool {
+        matches!(self.arity, ArgumentCount::Parameters)
     }
 
     /// The parameter has a default; the function sees a shorter argument slice

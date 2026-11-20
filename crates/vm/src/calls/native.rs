@@ -1,184 +1,13 @@
 //! Native handlers keep the extension API while receiving window arguments.
 
+use super::native_frames::NativeFrame;
 use crate::Vm;
 use crate::calls::call_state::CallTarget;
 use crate::calls::call_view::CallView;
-use crate::calls::callback_binding::{ArgumentBinding, ArgumentOrigin};
 use crate::calls::prepared_call::PreparedCallee;
-use crate::classes::MethodBody;
 use phera_bytecode::Reg;
-use phera_extension_api::{NativeError, NativeFn, NativeResult};
+use phera_extension_api::{NativeError, NativeFn};
 use phera_value::Value;
-
-impl Vm {
-    /// Validate native arguments using the calling syntax or internal callback rules.
-    pub(crate) async fn native_entry_origin(
-        &mut self,
-        entry: phera_extension_api::FunctionEntry,
-        arguments: Vec<Value>,
-        origin: ArgumentOrigin,
-        binding: ArgumentBinding,
-    ) -> NativeResult {
-        if binding.has_native_frame()
-            && self.error_handlers.error.is_some()
-            && !self.error_handlers.active
-        {
-            self.native_entry_traced(entry, arguments, origin, binding)
-                .await
-        } else {
-            self.native_entry_body(entry, arguments, origin, binding)
-                .await
-        }
-    }
-
-    /// Handler-only state uses an erased future so ordinary native calls retain their small frame.
-    fn native_entry_traced(
-        &mut self,
-        entry: phera_extension_api::FunctionEntry,
-        arguments: Vec<Value>,
-        origin: crate::calls::callback_binding::ArgumentOrigin,
-        binding: ArgumentBinding,
-    ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
-        Box::pin(async move {
-            let trace = self.native_parameter_trace(entry.name, entry.params, &arguments);
-            let previous = self.error_handlers.native_site.replace(trace);
-            let result = self
-                .native_entry_body(entry, arguments, origin, binding)
-                .await;
-            self.error_handlers.native_site = previous;
-            result
-        })
-    }
-
-    /// Keep warning trace capture outside native execution when no handler is installed.
-    async fn native_entry_body(
-        &mut self,
-        entry: phera_extension_api::FunctionEntry,
-        mut arguments: Vec<Value>,
-        origin: crate::calls::callback_binding::ArgumentOrigin,
-        binding: ArgumentBinding,
-    ) -> NativeResult {
-        if matches!(entry.handler, NativeFn::DeprecatedSync(_))
-            && let Some(message) = phera_source::deprecations::kept_notice(
-                phera_source::deprecations::ItemKind::Function,
-                entry.name,
-            )
-        {
-            self.diagnostic("Deprecated", message.into());
-            self.drain_error_handlers().await?;
-        }
-        // Asked here, not inside the call: without a registered loader a
-        // native call must not even build the future that would look.
-        if !self.autoload.callbacks.is_empty() {
-            self.autoload_native_parameters(entry.params, &arguments)
-                .await?;
-        }
-        let previous = std::mem::replace(&mut self.argument_origin, origin);
-        let prepared =
-            self.prepare_call_recording(entry.name, entry.params, &mut arguments, binding);
-        self.argument_origin = previous;
-        if let Err(error) = prepared
-            && let Err(error) = self
-                .retry_native_strings(entry, &mut arguments, origin, binding, error)
-                .await
-        {
-            if binding.has_native_frame() {
-                self.failed_native =
-                    Some(self.native_parameter_trace(entry.name, entry.params, &arguments));
-            }
-            self.call_stack.recycle_native_arguments(arguments);
-            return Err(error);
-        }
-        if matches!(arguments.first(), Some(Value::Object(_)))
-            && let Some(handler) = self.registry.object_handler(entry.name)
-        {
-            return handler(self, arguments).await;
-        }
-        match entry.handler {
-            NativeFn::Sync(handler) | NativeFn::DeprecatedSync(handler) => {
-                let result = handler(self, &arguments);
-                if result.is_err() && binding.has_native_frame() {
-                    self.failed_native =
-                        Some(self.native_parameter_trace(entry.name, entry.params, &arguments));
-                }
-                self.call_stack.recycle_native_arguments(arguments);
-                result
-            }
-            NativeFn::Async(handler) if self.registry.has_callback_frame(entry.name) => {
-                self.native_callback_frame(entry.name, handler, arguments)
-                    .await
-            }
-            NativeFn::Async(handler) => handler(self, arguments).await,
-        }
-    }
-
-    /// The successful native call keeps the synchronous argument parser. Only
-    /// a failed parse can request an interpreter call for a string conversion.
-    #[cold]
-    fn retry_native_strings<'a>(
-        &'a mut self,
-        entry: phera_extension_api::FunctionEntry,
-        arguments: &'a mut [Value],
-        origin: crate::calls::callback_binding::ArgumentOrigin,
-        binding: ArgumentBinding,
-        original_error: NativeError,
-    ) -> phera_extension_api::LocalFuture<'a, Result<(), NativeError>> {
-        Box::pin(async move {
-            if !self.native_strings_needed(entry.params, arguments, origin) {
-                return Err(original_error);
-            }
-            // A conversion can enter PHP and suspend before the native body runs.
-            let traced = binding.has_native_frame();
-            if traced {
-                let trace = self.native_parameter_trace(entry.name, entry.params, arguments);
-                self.native_callback_sites
-                    .push(crate::error_traces::NativeCallbackSite {
-                        boundary: self.call_stack.depth(),
-                        native: crate::error_traces::NativeCaller::Saved(trace),
-                    });
-            }
-            let converted = self
-                .coerce_native_strings(entry.name, entry.params, arguments, origin)
-                .await;
-            if traced {
-                self.native_callback_sites.pop();
-            }
-            converted?;
-            self.with_argument_origin(origin, |vm| {
-                vm.prepare_call_recording(entry.name, entry.params, arguments, binding)
-            })
-        })
-    }
-
-    /// Publish the native frame while PHP callbacks are active, for Throwable::getTrace().
-    fn native_callback_frame(
-        &mut self,
-        name: &str,
-        handler: phera_extension_api::AsyncFn,
-        arguments: Vec<Value>,
-    ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
-        let native = self.native_function_trace(name, &arguments);
-        Box::pin(async move {
-            self.native_callback_sites
-                .push(crate::error_traces::NativeCallbackSite {
-                    boundary: self.call_stack.frames().len(),
-                    native: crate::error_traces::NativeCaller::Saved(native),
-                });
-            let result = handler(self, arguments).await;
-            let site = self.native_callback_sites.pop();
-            if let Err(error) = &result
-                && !matches!(error, NativeError::Unwind(_))
-                && self.failed_native.is_none()
-            {
-                self.failed_native = site.and_then(|site| match site.native {
-                    crate::error_traces::NativeCaller::Saved(trace) => Some(trace),
-                    _ => None,
-                });
-            }
-            result
-        })
-    }
-}
 
 impl Vm {
     /// The extension API owns Vec arguments; only this boundary materializes one.
@@ -232,37 +61,20 @@ impl Vm {
         let mut missing = None;
         for index in 0..call.sent as usize {
             let value = self.registers.window_mut(slots.slot(index), 1)[0].take();
-            let value = value.unwrap_or_else(|| match callee.target {
-                CallTarget::Intrinsic(intrinsic) => {
-                    if matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc) && index == 0
-                    {
-                        missing.get_or_insert(("call_user_func", 1, "callback"));
-                    }
-                    intrinsic.named_default(index)
+            let value = value.unwrap_or_else(|| match self.fill_native_gap(&callee, index) {
+                Ok(value) => value,
+                Err(error) => {
+                    missing.get_or_insert(error);
+                    Value::Null
                 }
-                CallTarget::Native(entry) => {
-                    if let Some(parameter) = entry.params.get(index)
-                        && !parameter.optional
-                    {
-                        missing.get_or_insert((entry.name, index + 1, parameter.name));
-                    }
-                    named_default(entry.params, index)
-                }
-                CallTarget::Method { ref method, .. } => match method.body {
-                    MethodBody::Native(entry) => named_default(entry.params, index),
-                    _ => Value::Null,
-                },
-                _ => Value::Null,
             });
             arguments.push(value);
         }
         self.registers.truncate(slots.base);
-        if let Some((function, number, parameter)) = missing {
-            self.failed_native = Some(self.native_function_trace(function, &arguments));
+        if let Some(error) = missing {
+            self.record_native_gap_error(&callee, &error, &arguments);
             self.call_stack.recycle_native_arguments(arguments);
-            return Err(NativeError::argument_count_error(format!(
-                "{function}(): Argument #{number} (${parameter}) not passed"
-            )));
+            return Err(error);
         }
         let origin = callee.argument_binding.origin(self.argument_origin);
         let named = &details.extra_named;
@@ -330,14 +142,28 @@ impl Vm {
                 if matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc)
                     && !named.is_empty()
                 {
-                    return Box::pin(self.invoke_named_user_callback(arguments, named))
-                        .await
+                    let retained = self.retain_native_arguments(&arguments);
+                    let result = Box::pin(self.invoke_named_user_callback(arguments, named)).await;
+                    return self
+                        .finish_native_future(result, NativeFrame::Function(&callee.name), retained)
                         .map(Some);
                 }
                 // Boxed: an intrinsic such as `eval` runs code, and its future
                 // must not make the future of every ordinary native call larger.
-                Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin))
-                    .await
+                if !callee.argument_binding.has_native_frame()
+                    || matches!(
+                        intrinsic,
+                        crate::intrinsics::Intrinsic::ArrayMap
+                            | crate::intrinsics::Intrinsic::ParentProperty(_)
+                    )
+                {
+                    return Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin))
+                        .await
+                        .map(Some);
+                }
+                let retained = self.retain_native_arguments(&arguments);
+                let result = Box::pin(self.intrinsic_origin(*intrinsic, arguments, origin)).await;
+                self.finish_native_future(result, NativeFrame::Function(&callee.name), retained)
                     .map(Some)
             }
             CallTarget::Method { method, context } => {
@@ -369,171 +195,4 @@ impl Vm {
             Err(error) => self.finish_reflected_hook(error, method, destination).await,
         }
     }
-
-    /// Native methods preserve constructor results and Closure wrapper argument naming.
-    pub(crate) async fn native_method_window(
-        &mut self,
-        method: &crate::classes::Method,
-        context: &crate::classes::MethodContext,
-        mut arguments: Vec<Value>,
-        named: &[(usize, phera_value::PhpString)],
-        origin: crate::calls::callback_binding::ArgumentOrigin,
-    ) -> Result<Value, NativeError> {
-        let result = match &method.body {
-            MethodBody::Enum(operation) => {
-                let name = format!("{}::{}", method.declaring, method.name);
-                let result = loop {
-                    let result = self.with_argument_origin(origin, |vm| {
-                        vm.call_enum_method(*operation, &name, &context.scope, &mut arguments)
-                    });
-                    let Err(error) = result else {
-                        break result;
-                    };
-                    let miss = match crate::autoload::ClassMiss::take(error) {
-                        Ok(miss) => miss,
-                        Err(error) => break Err(error),
-                    };
-                    match self
-                        .lookup_class_from(&miss.name, Some((&name, &arguments)))
-                        .await
-                    {
-                        Ok(Some(_)) => {}
-                        Ok(None) => break Err(miss.error()),
-                        Err(error) => break Err(error),
-                    }
-                };
-                if result.is_err() {
-                    self.failed_native =
-                        Some(crate::error_traces::NativeTrace::new(&name, &arguments));
-                }
-                self.call_stack.recycle_native_arguments(arguments);
-                result
-            }
-            MethodBody::Closure(operation) => {
-                self.closure_window(
-                    *operation,
-                    context.receiver.clone(),
-                    arguments,
-                    named,
-                    origin,
-                )
-                .await
-            }
-            MethodBody::Native(entry) => {
-                if !self.autoload.callbacks.is_empty() {
-                    self.autoload_native_parameters(entry.params, &arguments)
-                        .await?;
-                }
-                let preparation =
-                    self.with_argument_origin(origin, |vm| match entry.preparation {
-                        Some(prepare) => prepare(vm, entry.params, &mut arguments),
-                        None => Ok(phera_extension_api::MethodPreparation::Default),
-                    })?;
-                if matches!(preparation, phera_extension_api::MethodPreparation::Default) {
-                    let mut prepared = self.with_argument_origin(origin, |vm| {
-                        vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
-                    });
-                    if prepared.is_err()
-                        && self.native_strings_needed(entry.params, &arguments, origin)
-                    {
-                        let name = method.signature(&self.code).name.clone();
-                        self.failed_native = None;
-                        self.coerce_native_strings(&name, entry.params, &mut arguments, origin)
-                            .await?;
-                        prepared = self.with_argument_origin(origin, |vm| {
-                            vm.prepare_native_method_arguments(method, entry.params, &mut arguments)
-                        });
-                    }
-                    prepared?;
-                }
-                if let phera_extension_api::MethodPreparation::Return(value) = preparation {
-                    self.call_stack.recycle_native_arguments(arguments);
-                    return Ok(value);
-                }
-                let previous = self.native_called_class.take();
-                if method.is_static {
-                    self.native_called_class = Some(context.called.clone());
-                }
-                let result = match entry.handler {
-                    phera_extension_api::NativeMethod::Sync(handler) => {
-                        let track =
-                            self.error_handlers.error.is_some() && !self.error_handlers.active;
-                        let previous = if track {
-                            let operator = if method.is_static { "::" } else { "->" };
-                            self.error_handlers.native_site.replace(
-                                crate::error_traces::NativeTrace::new(
-                                    &format!("{}{operator}{}", method.declaring, method.name),
-                                    &arguments,
-                                ),
-                            )
-                        } else {
-                            None
-                        };
-                        let result = handler(self, context.receiver.as_ref(), &arguments);
-                        if track {
-                            self.error_handlers.native_site = previous;
-                        }
-                        if matches!(&result, Err(NativeError::Throw { .. })) {
-                            self.failed_native =
-                                Some(crate::error_traces::NativeTrace::method(method, &arguments));
-                        }
-                        self.call_stack.recycle_native_arguments(arguments);
-                        result
-                    }
-                    phera_extension_api::NativeMethod::Async(handler) => {
-                        handler(self, context.receiver.clone(), arguments).await
-                    }
-                    phera_extension_api::NativeMethod::Window(method) => {
-                        (method.run)(self, context.receiver.clone(), arguments).await
-                    }
-                    phera_extension_api::NativeMethod::AsyncNamed(handler) => {
-                        handler(self, context.receiver.clone(), arguments, named).await
-                    }
-                    phera_extension_api::NativeMethod::Abstract => {
-                        Err(NativeError::error("Cannot call abstract method"))
-                    }
-                };
-                self.native_called_class = previous;
-                result
-            }
-            MethodBody::User(_) => Err(internal_error!("user method in native call")),
-        }?;
-        if context.invocation == crate::classes::Invocation::Constructor {
-            return Ok(context
-                .receiver
-                .clone()
-                .map(Value::Object)
-                .unwrap_or_default());
-        }
-        if matches!(method.declaring.as_str(), "Exception" | "Error") {
-            return Ok(context
-                .receiver
-                .as_ref()
-                .and_then(|object| self.throwable_method_result(&method.name, object))
-                .unwrap_or(result));
-        }
-        Ok(result)
-    }
-    /// Closure wrappers forward named variadic keys to the underlying window protocol.
-    fn closure_window(
-        &mut self,
-        operation: crate::closure_methods::ClosureMethod,
-        receiver: Option<std::rc::Rc<phera_value::Object>>,
-        arguments: Vec<Value>,
-        named: &[(usize, phera_value::PhpString)],
-        origin: crate::calls::callback_binding::ArgumentOrigin,
-    ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
-        let names = named.iter().map(|(_, name)| name.clone()).collect();
-        let start = named.first().map_or(0, |(index, _)| *index);
-        Box::pin(self.closure_method_named(operation, receiver, arguments, start, names, origin))
-    }
-}
-
-// Omitted optional tail arguments still use the handler's usual defaults.
-fn named_default(parameters: &[phera_extension_api::Param], index: usize) -> Value {
-    parameters
-        .get(index)
-        .and_then(|parameter| parameter.default)
-        .map(|default| default.to_value())
-        .unwrap_or_default()
 }

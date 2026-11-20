@@ -283,7 +283,11 @@ impl Vm {
         binding: ArgumentBinding,
     ) -> Result<Option<BatchExit>, NativeError> {
         if binding.has_native_frame() {
-            self.failed_native = Some(self.native_function_trace(name, arguments));
+            self.record_native_failure(
+                &error,
+                super::native_frames::NativeFrame::Function(name),
+                arguments,
+            );
         }
         if matches!(&error, NativeError::Unwind(unwind) if unwind.0.is::<PropertyViewRequest>()) {
             Ok(Some(BatchExit::NativeView(destination, Box::new(error))))
