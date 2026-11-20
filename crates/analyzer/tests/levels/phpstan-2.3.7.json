@@ -38,6 +38,7 @@
     [8, 13, "argument.type", "Parameter #1 $value of function takeThing expects Thing, Thing|null given."]
   ],
   "strict_context.php": [],
+  "typed_overrides.php": [],
   "union.php": [
     [7, 12, "method.notFound", "Call to an undefined method Left|Right::label()."],
     [7, 13, "property.notFound", "Access to an undefined property Left|Right::$name."],

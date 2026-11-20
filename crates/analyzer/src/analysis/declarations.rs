@@ -255,6 +255,7 @@ impl Analyzer<'_> {
                 self.context.documented_return = Some(returns);
             }
         }
+        self.inherit_parameter_types(method, &mut scope);
         self.check_type(method.return_type.as_ref());
         self.method_hints(method);
         for parameter in &method.parameters {

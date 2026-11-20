@@ -106,12 +106,13 @@ impl Analyzer<'_> {
                     .iter()
                     .all(|arg| arg.name.is_none() && !arg.spread)
             {
-                self.pending_callback_types = super::callback_parameters::types(
+                self.pending_callback_types = self.callback_parameter_types(
                     label,
                     signature,
                     parameter,
                     types.as_deref().map_or(&[], Vec::as_slice),
                     arguments,
+                    scope,
                 );
             }
             let ty = self.expression(&argument.value, scope, signature.is_none());

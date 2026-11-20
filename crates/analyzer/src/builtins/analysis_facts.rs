@@ -38,6 +38,7 @@ pub fn refine(index: &mut Index) {
         "grapheme_stripos",
         "grapheme_strrpos",
         "grapheme_strripos",
+        "grapheme_extract",
         "grapheme_substr",
         "grapheme_strlen",
         "iconv_strlen",
