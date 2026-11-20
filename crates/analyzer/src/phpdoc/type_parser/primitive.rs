@@ -75,7 +75,17 @@ pub fn from_name(
         }
         _ if word.contains('-') => approximate(name),
         _ => {
-            if let Some(bound) = templates.get(word) {
+            if let Some(alias) = templates.aliases.get(word) {
+                return if templates.imported_aliases.contains(word) {
+                    alias.clone()
+                } else {
+                    T::Template(Arc::new(Template {
+                        name: word.into(),
+                        bound: alias.clone(),
+                    }))
+                };
+            }
+            if let Some(bound) = templates.parameters.get(word) {
                 return T::Template(Arc::new(Template {
                     name: word.into(),
                     bound: bound.clone(),

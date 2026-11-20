@@ -21,7 +21,12 @@ pub struct ParseError {
     pub expected: &'static str,
 }
 
-pub type Templates = std::collections::BTreeMap<String, ValueType>;
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Templates {
+    pub(super) parameters: std::collections::BTreeMap<String, ValueType>,
+    pub(super) aliases: std::collections::BTreeMap<String, ValueType>,
+    pub(super) imported_aliases: std::collections::BTreeSet<String>,
+}
 type Result<T> = std::result::Result<T, ParseError>;
 
 pub fn parse<'a>(source: &'a str, names: &Names, templates: &Templates) -> Result<Parsed<'a>> {

@@ -23,6 +23,7 @@ pub struct Documentation {
     pub templates: Templates,
     pub template_names: Vec<String>,
     pub(crate) template_variances: BTreeMap<String, super::Variance>,
+    pub(crate) type_imports: Vec<super::type_aliases::TypeImport>,
     pub bases: Vec<Annotation>,
     pub properties: BTreeMap<String, Annotation>,
     pub methods: BTreeMap<String, Annotation>,
@@ -65,10 +66,29 @@ pub fn read(
     let mut templates = inherited.clone();
     for tag in &tags {
         let (_, name) = tag_name(tag.name);
-        if (template_tag(name) || matches!(name, "type" | "import-type"))
-            && let Some(name) = tag.body.split_whitespace().next()
-        {
-            templates.insert(name.into(), ValueType::Mixed);
+        if let Some(identifier) = tag.body.split_whitespace().next() {
+            if template_tag(name) {
+                templates.aliases.remove(identifier);
+                templates.imported_aliases.remove(identifier);
+                templates
+                    .parameters
+                    .insert(identifier.into(), ValueType::Mixed);
+            } else if name == "type" {
+                templates.imported_aliases.remove(identifier);
+                templates.aliases.insert(
+                    identifier.into(),
+                    super::type_aliases::placeholder(identifier),
+                );
+            } else if name == "import-type"
+                && let Some(import) = super::type_aliases::TypeImport::parse(&tag.body, names)
+            {
+                templates.imported_aliases.insert(import.local.clone());
+                templates.aliases.insert(
+                    import.local.clone(),
+                    super::type_aliases::placeholder(&import.local),
+                );
+                documentation.type_imports.push(import);
+            }
         }
     }
     for tag in &tags {
@@ -101,7 +121,9 @@ pub fn read(
             documentation
                 .template_variances
                 .insert(name.into(), variance);
-            templates.insert(name.into(), bound.limit_complexity());
+            templates
+                .parameters
+                .insert(name.into(), bound.limit_complexity());
         }
     }
     for tag in &tags {
@@ -111,17 +133,9 @@ pub fn read(
         {
             let body = body.trim_start().trim_start_matches('=').trim_start();
             if let Ok(parsed) = parse(body, names, &templates) {
-                templates.insert(alias.into(), parsed.ty.limit_complexity());
-            }
-        }
-        if name == "import-type" {
-            let mut words = tag.body.split_whitespace();
-            if let Some(local) = words.next() {
-                let local = words
-                    .skip_while(|word| *word != "as")
-                    .nth(1)
-                    .unwrap_or(local);
-                templates.insert(local.into(), ValueType::Mixed);
+                templates
+                    .aliases
+                    .insert(alias.into(), parsed.ty.limit_complexity());
             }
         }
     }

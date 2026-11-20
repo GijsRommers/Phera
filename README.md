@@ -68,6 +68,8 @@ configuration files produce a notice.
 
 Generic arguments are checked using declaration-site covariance,
 contravariance, and invariance, including through documented inheritance.
+PHPDoc types can use `@phpstan-import-type` and `@psalm-import-type`
+to import aliases declared in another class, including from Composer dependencies.
 
 The PHPStan strict-rules include enables `foreach.keyOverwrite` and
 `foreach.valueOverwrite`. Use `strict = true` or `strict = false` under

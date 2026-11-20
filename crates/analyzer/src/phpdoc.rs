@@ -9,6 +9,7 @@ use phera_source::Span;
 mod annotations;
 pub(crate) mod assertions;
 mod token;
+pub(crate) mod type_aliases;
 mod type_parser;
 
 pub use annotations::{Annotation, Documentation, read};
@@ -31,6 +32,7 @@ pub struct Members {
     pub templates: Templates,
     pub template_names: Vec<String>,
     pub(crate) template_variances: std::collections::BTreeMap<String, Variance>,
+    pub(crate) type_imports: Vec<type_aliases::TypeImport>,
     pub method_types: std::collections::BTreeMap<String, std::sync::Arc<crate::index::Signature>>,
     pub property_types: std::collections::BTreeMap<String, crate::types::ValueType>,
     pub generic_bases: Vec<crate::types::ValueType>,

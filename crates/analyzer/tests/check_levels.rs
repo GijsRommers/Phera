@@ -138,6 +138,33 @@ fn phpstan_inherited_parameters_and_iterable_unions() {
 }
 
 #[test]
+fn phpstan_imports_type_aliases_across_files() {
+    // PHPStan 2.3.7 follows the renamed import in Packets and the Psalm
+    // import spelling in Reader. The type of the other field is a string.
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/aliases");
+    for level in [2, 3, 5, 10] {
+        let report = check(&Options {
+            level,
+            paths: vec![fixture.to_string_lossy().into_owned()],
+            ..Options::default()
+        })
+        .unwrap();
+        if level == 2 {
+            assert!(report.diagnostics.is_empty());
+        } else {
+            assert_eq!(report.diagnostics.len(), 1);
+            let finding = &report.diagnostics[0];
+            assert_eq!(finding.line, 13);
+            assert_eq!(finding.identifier, "return.type");
+            assert_eq!(
+                finding.message,
+                "Method AliasFixture\\Reader\\Reader::number() should return string but returns int."
+            );
+        }
+    }
+}
+
+#[test]
 fn phpstan_configured_rules() {
     // PHPStan 2.3.7 with strict-rules and bleedingEdge.neon.
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/configured_rules.php");
