@@ -32,6 +32,8 @@ impl Extension for OpenSsl {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::errors::ErrorQueue>(phera_extension_api::fresh_state);
         for entry in cipher::FUNCTIONS
             .iter()
             .chain(methods::FUNCTIONS)

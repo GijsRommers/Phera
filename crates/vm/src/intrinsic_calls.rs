@@ -38,6 +38,10 @@ impl Vm {
             }
             Intrinsic::Clone => diagnostics.vm.clone_intrinsic(arguments).await,
             Intrinsic::ArrayMap => Err(internal_error!("array map intrinsic routing")),
+            Intrinsic::Snapshot => {
+                drop(diagnostics);
+                self.snapshot_intrinsic(None, arguments)
+            }
             Intrinsic::Handler(function) => {
                 diagnostics
                     .vm

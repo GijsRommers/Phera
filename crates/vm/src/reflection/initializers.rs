@@ -12,7 +12,7 @@ use phera_value::Value;
 use crate::{Vm, code_table::FunctionIndex};
 
 #[derive(Default)]
-struct InitializerCode(HashMap<(u32, usize), CompiledInitializer>);
+pub(crate) struct InitializerCode(HashMap<(u32, usize), CompiledInitializer>);
 
 #[derive(Clone)]
 pub(super) enum CompiledInitializer {

@@ -13,7 +13,7 @@ use phera_extension_api::{
 use crate::{UNCLONEABLE, allocate, exception, load};
 
 #[derive(Default)]
-struct ReferenceIds {
+pub(crate) struct ReferenceIds {
     salt: RandomState,
     next: u64,
     entries: HashMap<*const RefCell<Value>, ReferenceIdentity>,

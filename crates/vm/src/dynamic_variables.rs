@@ -18,11 +18,13 @@ impl From<bool> for VariableScope {
 }
 
 /// Functions with static scope have no dynamic name table.
+#[derive(Clone)]
 pub(crate) struct DynamicVariables {
     names: Option<Box<DynamicNames>>,
 }
 
 /// The optional table keeps dynamic scope out of ordinary activation storage.
+#[derive(Clone)]
 struct DynamicNames {
     values: HashMap<String, Reg>,
 }

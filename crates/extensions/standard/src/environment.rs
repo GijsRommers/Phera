@@ -14,7 +14,7 @@ use phera_extension_api::{
     Registry, Value, args,
 };
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct RequestEnvironment {
     base: Arc<Environment>,
     // A tombstone also hides the original position after an unset and re-add.

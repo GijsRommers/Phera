@@ -23,7 +23,7 @@ mod callables;
 mod constants;
 mod functions;
 pub(crate) mod hook_calls;
-mod initializers;
+pub(crate) mod initializers;
 mod lazy;
 mod members;
 mod properties;
@@ -37,7 +37,7 @@ enum Construction {
 }
 
 #[derive(Default)]
-struct AttributeCallSite(Option<Rc<AttributeSite>>);
+pub(crate) struct AttributeCallSite(Option<Rc<AttributeSite>>);
 
 pub(super) fn exception(message: impl Into<String>) -> NativeError {
     NativeError::throw("ReflectionException", message)
