@@ -328,12 +328,13 @@ pub enum Instruction {
     Suppress(bool),
     /// Construct an empty array; emits NewArray.
     Array(Reg),
-    /// Insert, append, reference-bind, or unpack an array entry; emits ArraySetReference, ArrayPushReference, or ArraySpread.
+    /// Insert, append, reference-bind, or unpack an array entry.
     ArrayPush {
         array: Reg,
         key: Option<Reg>,
         value: Reg,
         spread: bool,
+        by_reference: bool,
     },
     /// Fetch a named PHP constant; emits FetchConstant.
     Constant {

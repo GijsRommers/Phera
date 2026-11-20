@@ -14,7 +14,7 @@
 //! [`LoopExit::Slow`]; the VM runs that one instruction through
 //! `Vm::execute` and starts the loop again where the frame now is.
 
-use phera_bytecode::{Instruction, Reg};
+use phera_bytecode::{BinaryOp, Instruction, Reg};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
@@ -50,6 +50,13 @@ pub(crate) enum BatchExit {
     BindCall(Reg),
     /// A comparison reached an object whose __toString must run.
     Compare(crate::string_comparison::PendingComparison),
+    /// An undefined operand can run PHP before the other operand is read.
+    UndefinedBinary {
+        op: BinaryOp,
+        dst: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
     /// The frame that native code called has returned this value.
     Returned(Value),
     /// A PHP yield published a suspension for the generator driver.
