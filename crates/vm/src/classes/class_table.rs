@@ -27,7 +27,7 @@ impl ClassIndex {
 }
 
 /// Definitions linked once per worker for built-ins, or per request for PHP classes.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct ClassDefinitions {
     /// Preserve registration/declaration order for get_declared_classes.
     pub(crate) order: Vec<String>,
@@ -59,15 +59,11 @@ impl ClassDefinitions {
     }
 }
 
-impl Drop for ClassDefinitions {
-    fn drop(&mut self) {
-        // A static singleton or a cached enum case can keep its own class
-        // alive. Release those PHP values before dropping the class owners.
-        for class in &self.numbered {
-            class.release_values();
-        }
-    }
-}
+// `Service::$instance = new Service` does not keep `Service` alive: the
+// static's value lives in the request's `ClassStates`, not in the class, so
+// no class owns an object that owns the class. That is also why dropping a
+// fork's definitions must not touch its classes: the snapshot and the other
+// forks share them.
 
 /// One request owns its class additions and objects. Built-ins keep their indices on the worker.
 pub(crate) struct ClassTable {
@@ -146,6 +142,18 @@ impl ClassTable {
         }
     }
 
+    /// Builds the method table of every class of this request that has
+    /// none yet. Taking a snapshot calls this: the classes are then shared
+    /// by every fork, and a table built later in one fork could use name
+    /// numbers that mean other names in another fork.
+    pub(crate) fn build_method_tables(&self, code: &CodeTable) {
+        for class in &self.local.numbered {
+            class.method_table.get_or_init(|| {
+                MethodTable::build(class, code, |method| self.get(&method.declaring))
+            });
+        }
+    }
+
     pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
         debug_assert_eq!(class.index, self.next_index());
         self.local.order.push(class.name.clone());
@@ -160,6 +168,11 @@ impl ClassTable {
         self.local.order.push(name.clone());
         self.local.entries.insert(name, class);
         true
+    }
+
+    /// The request's own classes, in declaration order.
+    pub(crate) fn local_classes(&self) -> impl Iterator<Item = &Rc<Class>> {
+        self.local.numbered.iter()
     }
 
     pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
@@ -320,6 +333,25 @@ impl Drop for ClassTable {
 }
 
 impl ClassTable {
+    /// The class table of a fork: the same classes (immutable, shared), the
+    /// method tables built so far (they use name numbers the fork shares),
+    /// and the fork's own objects and id pool.
+    pub(crate) fn forked(&self, ids: Rc<ObjectIds>, objects: Vec<Weak<Object>>) -> ClassTable {
+        ClassTable {
+            native: self.native.clone(),
+            local: self.local.clone(),
+            has_dimensions: self.has_dimensions,
+            has_property_views: self.has_property_views,
+            has_lazy_objects: self.has_lazy_objects,
+            native_count: self.native_count,
+            native_methods: self.native_methods.clone(),
+            objects,
+            ids,
+            allocations_before_collection: self.allocations_before_collection.clone(),
+            collection_requested: false,
+        }
+    }
+
     /// Mirrors name lookup for external handles, while linked VM classes carry
     /// a weak self identity whose owner is already kept alive by the object.
     pub(crate) fn for_object(&self, object: &Object) -> Option<Rc<Class>> {

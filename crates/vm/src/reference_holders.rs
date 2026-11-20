@@ -49,29 +49,33 @@ struct ObjectReferences {
 pub(crate) struct StaticProperty {
     pub(crate) reference: RefCell<Rc<RefCell<Value>>>,
     binding: RefCell<Option<PropertyBinding>>,
+    /// Whether the default's initializer expression has run in this request.
+    pub(crate) initialized: std::cell::Cell<bool>,
+    /// Whether the property holds a value: a typed static without a
+    /// default has none until the first write.
+    pub(crate) value_initialized: std::cell::Cell<bool>,
 }
 
 impl StaticProperty {
-    pub(crate) fn new(value: Value) -> Rc<Self> {
+    pub(crate) fn new(value: Value, initialized: bool, value_initialized: bool) -> Rc<Self> {
         Rc::new(Self {
             reference: RefCell::new(Rc::new(RefCell::new(value))),
             binding: RefCell::new(None),
+            initialized: std::cell::Cell::new(initialized),
+            value_initialized: std::cell::Cell::new(value_initialized),
         })
     }
 
-    pub(crate) fn release_value(&self) {
-        let reference = self
-            .reference
-            .try_borrow()
-            .ok()
-            .map(|reference| Rc::clone(&reference));
-        let value = reference.as_ref().and_then(|reference| {
-            reference
-                .try_borrow_mut()
-                .ok()
-                .map(|mut value| std::mem::take(&mut *value))
-        });
-        drop(value);
+    /// The fork's storage of a static property: its own cell, the same
+    /// flags. A typed static's reference bookkeeping is made again when the
+    /// fork first binds a reference to it.
+    pub(crate) fn forked(reference: Rc<RefCell<Value>>, original: &StaticProperty) -> Rc<Self> {
+        Rc::new(Self {
+            reference: RefCell::new(reference),
+            binding: RefCell::new(None),
+            initialized: original.initialized.clone(),
+            value_initialized: original.value_initialized.clone(),
+        })
     }
 
     pub(crate) fn track(&self, table: &Rc<RefCell<ReferenceHolders>>, property: &PropertyDefault) {
@@ -101,6 +105,19 @@ impl StaticProperty {
         *self.reference.borrow_mut() = reference;
         self.track(table, property);
     }
+}
+
+/// The properties bound to references, when an object's native state is
+/// that bookkeeping; a fork binds the same properties again in its own
+/// table (see `crate::snapshot`).
+pub(crate) fn bound_properties(state: &dyn std::any::Any) -> Option<Vec<ArrayKey>> {
+    let references = state.downcast_ref::<ObjectReferences>()?;
+    Some(references.slots.keys().cloned().collect())
+}
+
+/// Empty bookkeeping, for a fork's copy before it is bound again.
+pub(crate) fn empty_bookkeeping() -> Box<dyn std::any::Any> {
+    Box::new(ObjectReferences::default())
 }
 
 /// The property-reference bookkeeping also occupies the opaque object slot.

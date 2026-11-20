@@ -73,7 +73,7 @@ async fn a_worker_keeps_inherited_environment_separate_from_request_writes() {
     );
     let mut environment = phera_dotenv::Environment::default();
     environment.insert(b"APP_ENV".to_vec(), b"inherited".to_vec());
-    let worker = Runtime::with_environment(environment).web_worker();
+    let worker = Runtime::with_environment(environment).web_worker(0);
     let first = worker
         .handle_request(&script, &site.root, request("GET", "/index.php?change=1"))
         .await;

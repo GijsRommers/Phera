@@ -24,6 +24,7 @@ const FORMAT_MESSAGE: &[Param] = &[LOCALE, PATTERN, VALUES];
 const PARSE_MESSAGE: &[Param] = &[LOCALE, PATTERN, MESSAGE];
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::copy::<State>()),
+    fork: Some(phera_extension_api::fork_clone::<State>),
     ..ClassHooks::EMPTY
 };
 

@@ -59,7 +59,8 @@ impl Category {
 
 pub(super) const ALL_ID: i64 = if BSD_CATEGORIES { 0 } else { 6 };
 
-struct RequestLocale {
+#[derive(Clone)]
+pub(crate) struct RequestLocale {
     categories: [PhpString; Category::ALL.len()],
     /// LC_ALL also sets libc's additional categories on platforms that have them.
     all: PhpString,

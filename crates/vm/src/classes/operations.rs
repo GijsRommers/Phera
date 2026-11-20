@@ -122,6 +122,7 @@ pub(super) fn inherit_hooks(
         cast: own.cast.or(base.cast),
         forbid_serialization: own.forbid_serialization || base.forbid_serialization,
         redact_trace_arguments: own.redact_trace_arguments || base.redact_trace_arguments,
+        fork: own.fork.or(base.fork),
         properties: own.properties.or(base.properties),
         property_access: own.property_access.or(base.property_access),
         iterator: own.iterator.or(base.iterator),

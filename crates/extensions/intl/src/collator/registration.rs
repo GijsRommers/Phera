@@ -41,6 +41,7 @@ const FN_SORT_KEY: &[Param] = &[OBJECT, Param::new("string", ParamType::String)]
 const FN_NONE: &[Param] = &[OBJECT];
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::copy::<Collator>()),
+    fork: Some(phera_extension_api::fork_clone::<Collator>),
     ..ClassHooks::EMPTY
 };
 

@@ -1,6 +1,6 @@
 //! `enum State: int { case Ready = 1; }` links an implicit interface and static methods.
 
-use std::{cell::Cell, collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc};
 
 use phera_bytecode::{ClassDeclaration, ClassKind, CompiledUnit, EnumBacking, Visibility};
 use phera_extension_api::{ClassEntry, MethodEntry, NativeError, Param, ParamType};
@@ -285,8 +285,6 @@ pub(super) fn enum_property(class: &str, name: &str) -> PropertyDefault {
         initializer: None,
         ty: None,
         is_readonly: true,
-        static_initialized: Rc::new(Cell::new(false)),
-        value_initialized: Rc::new(Cell::new(true)),
         hooks: None,
     }
 }
