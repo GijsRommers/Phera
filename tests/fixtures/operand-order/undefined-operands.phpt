@@ -18,6 +18,10 @@ unset($right);
 var_dump($left + $right);
 unset($left, $right);
 var_dump($left + $right);
+unset($left, $right);
+var_dump($left > $right);
+unset($left, $right);
+var_dump($left >= $right);
 --EXPECT--
 right evaluated
 Undefined variable $left
@@ -26,3 +30,7 @@ Undefined variable $right
 int(10)
 Undefined variable $left
 int(20)
+Undefined variable $right
+bool(true)
+Undefined variable $right
+bool(true)

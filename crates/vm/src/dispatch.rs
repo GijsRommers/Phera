@@ -1,6 +1,6 @@
 //! Cold instruction dispatch delegates PHP behavior to concern-specific handlers.
 
-use phera_bytecode::Instruction;
+use phera_bytecode::{BinaryOp, Instruction};
 use phera_extension_api::{LocalFuture, NativeError};
 use phera_value::Value;
 
@@ -81,8 +81,16 @@ impl Vm {
                 }
             }
             Instruction::Binary { dst, op, lhs, rhs } => {
-                let left_missing = self.warn_missing_operand(lhs).await?;
-                let right_missing = self.warn_missing_operand(rhs).await?;
+                // Zend emits `right < left` for `left > right` after
+                // compiling both operand expressions in source order.
+                let (left_missing, right_missing) =
+                    if matches!(op, BinaryOp::Greater | BinaryOp::GreaterEqual) {
+                        let right = self.warn_missing_operand(rhs).await?;
+                        (self.warn_missing_operand(lhs).await?, right)
+                    } else {
+                        let left = self.warn_missing_operand(lhs).await?;
+                        (left, self.warn_missing_operand(rhs).await?)
+                    };
                 let left = if left_missing {
                     Value::Null
                 } else {
