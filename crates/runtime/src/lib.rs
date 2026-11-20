@@ -154,7 +154,18 @@ impl Runtime {
         arguments: &[String],
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
-        let compiled = self.cache.compile(path.as_ref().to_path_buf()).await;
+        let path = path.as_ref();
+        let compiled = self.cache.compile(path.to_path_buf()).await;
+        self.run_compiled_cli(compiled, path, arguments, sink).await
+    }
+
+    async fn run_compiled_cli(
+        &self,
+        compiled: Result<Arc<CompiledUnit>, RuntimeError>,
+        path: &Path,
+        arguments: &[String],
+        sink: Option<Box<dyn OutputSink>>,
+    ) -> Result<RunResult, RuntimeError> {
         let mut vm = self.new_cli_vm();
         if let Some(sink) = sink {
             vm.set_sink(sink);
@@ -172,8 +183,7 @@ impl Runtime {
             Err(error) => return Err(error),
         };
         vm.set_args(arguments);
-        let server =
-            environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
+        let server = environment::cli_server(php_array(self.environment.iter()), path, arguments);
         vm.set_global("_SERVER", Value::from(server));
         for (name, stream) in phera_ext_streams::standard_constants() {
             phera_ext_streams::track_standard(vm.state_mut(), &stream);
@@ -298,15 +308,19 @@ impl Runtime {
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
         let executor = single_threaded_executor()?;
+        let path = path.as_ref();
+        let compiled = self.cache.compile_cli_entry(path);
         // PHP values are not `Send`, so a script's future can only run on a
         // `LocalSet`, which keeps its tasks on this thread.
-        tokio::task::LocalSet::new().block_on(&executor, self.run_file(path, arguments, sink))
+        tokio::task::LocalSet::new().block_on(
+            &executor,
+            self.run_compiled_cli(compiled, path, arguments, sink),
+        )
     }
 
     /// The bytecode listing of a file, for `phera --dump`.
     pub fn dump_file_blocking(&self, path: impl AsRef<Path>) -> Result<String, RuntimeError> {
-        let unit = single_threaded_executor()?
-            .block_on(self.cache.compile(path.as_ref().to_path_buf()))?;
+        let unit = self.cache.compile_cli_entry(path.as_ref())?;
         Ok(unit.to_string())
     }
 
