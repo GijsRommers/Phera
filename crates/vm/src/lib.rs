@@ -54,9 +54,13 @@ mod constant_table;
 mod constants;
 mod context;
 mod control_flow;
+mod cycles;
 mod debug_info;
 mod declaration_diagnostics;
 mod default_autoload;
+#[cfg(test)]
+mod destructor_tests;
+mod destructors;
 mod diagnostic_output;
 mod diagnostic_reporter;
 mod diagnostics;
@@ -78,6 +82,7 @@ mod exception_unwind;
 mod exceptions;
 mod execution_time;
 mod extract;
+mod failed_construction;
 mod fast;
 mod fibers;
 mod finally;
@@ -155,6 +160,7 @@ mod reference_holders;
 mod references;
 mod reflection;
 mod request_callbacks;
+mod request_end;
 mod scope_intrinsics;
 mod sensitive_parameters;
 mod serialization;
@@ -163,7 +169,6 @@ mod static_variables;
 mod string_comparison;
 mod string_offsets;
 mod stringable;
-mod timeout_shutdown;
 mod traversable_foreach;
 mod traversable_unpack;
 mod traversal;
@@ -196,6 +201,9 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    /// The class table's id pool, held here as well so that the
+    /// interpreter loop can read it while it borrows the class table.
+    object_ids: Rc<phera_value::ObjectIds>,
     enum_cases: classes::enums::EnumCases,
     native_callback_sites: Vec<error_traces::NativeCallbackSite>,
     debug_objects: Vec<u32>,
@@ -250,9 +258,10 @@ pub struct Vm {
     reflection_cache: Option<Box<reflection::ReflectionCache>>,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
+    request_end: request_end::RequestEnd,
+    cycles: cycles::CycleCollector,
     ini_overrides: ini::IniOverrides,
     execution_time: Rc<execution_time::ExecutionTime>,
-    timed_out_objects: Option<Vec<std::rc::Weak<phera_value::Object>>>,
     active_fiber: Option<Box<fibers::Active>>,
     fiber_bailout: bool,
     suspended_fibers: fibers::SuspendedFibers,
@@ -271,13 +280,17 @@ impl Vm {
 
     /// Start a fresh request with the worker's already linked built-ins.
     pub fn with_native_tables(native: &NativeTables) -> Self {
+        let classes = classes::ClassTable::new(native.classes.clone());
+        let object_ids = classes.ids_handle();
         Self {
             enum_cases: classes::enums::EnumCases::default(),
-            classes: classes::ClassTable::new(native.classes.clone()),
+            object_ids,
+            classes,
+            request_end: Default::default(),
+            cycles: Default::default(),
             autoload: Default::default(),
             ini_overrides: Default::default(),
             execution_time: Default::default(),
-            timed_out_objects: None,
             active_fiber: None,
             fiber_bailout: false,
             suspended_fibers: Default::default(),
@@ -398,36 +411,36 @@ impl Vm {
         self.call_stack.push(Frame::new(main, 0, None));
         for (index, name) in unit.main.locals.iter().enumerate() {
             if let Some(name) = unit.names.get(name.index()) {
+                self.globals.declare(name);
                 self.registers.window_mut(index, 1)[0] = self.globals.take(name);
             }
         }
         self.publish_declaration_warnings(&unit);
-        if let Err(error) = self.hoist_classes(&unit, main) {
+        let end = if let Err(error) = self.hoist_classes(&unit, main) {
             self.unwind(error);
-        } else if let Err(error) = self.interpret(0).await {
-            let error = self.materialize_error(error);
-            self.report_uncaught(error).await;
-        }
+            request_end::ScriptEnd::Fatal
+        } else {
+            match self.interpret(0).await {
+                Ok(_) => request_end::ScriptEnd::Destructible,
+                Err(error) => {
+                    let mut error = self.materialize_error(error);
+                    // The frames the error left released their variables;
+                    // PHP runs those destructors before it reports the error.
+                    if let Err(failure) = self.run_destructors().await {
+                        error = self.materialize_error(failure);
+                    }
+                    let end = request_end::ScriptEnd::of(&error);
+                    self.report_uncaught(error).await;
+                    end
+                }
+            }
+        };
         if self.output_pending()
             && let Err(error) = self.drain_output().await
         {
             self.unwind(error);
         }
-        self.run_shutdown_callbacks().await;
-        if let Some(before) = self.timed_out_objects.take() {
-            self.destroy_objects_after_timeout(before).await;
-        }
-        if !self.suspended_fibers.is_empty() {
-            Box::pin(self.close_fibers()).await;
-        }
-        if self.generator_releases.is_some()
-            && !self.fiber_bailout
-            && let Err(error) = Box::pin(self.finish_request_generators()).await
-        {
-            let error = self.materialize_error(error);
-            self.report_uncaught(error).await;
-        }
-        self.finish_buffers().await;
+        self.finish_request(end).await;
         self.finish_request_headers().await;
         self.finish_resource_finalizers().await;
         self.status

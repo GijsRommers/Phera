@@ -37,7 +37,10 @@ use crate::calls::call_state::Callee;
 pub(crate) use stack::Active;
 pub(crate) use switch::GracefulClose;
 
-pub(crate) type SuspendedFibers = BTreeMap<u32, Rc<Object>>;
+/// The suspended fibers, by object id. They are held weakly: a fiber whose
+/// last reference goes is destroyed at that moment, like an object with a
+/// destructor (see `Vm::close_fiber`).
+pub(crate) type SuspendedFibers = BTreeMap<u32, Weak<Object>>;
 
 pub(crate) fn register(registry: &mut Registry) {
     registry.class_in_module("Core", class::FIBER);
@@ -61,9 +64,7 @@ enum State {
 }
 
 fn current(active: &Option<Box<Active>>) -> Option<Rc<Object>> {
-    active
-        .as_ref()
-        .and_then(|active| Weak::upgrade(&active.object))
+    active.as_ref().and_then(|active| active.object.upgrade())
 }
 
 fn with_state<T>(object: &Object, read: impl FnOnce(&mut Fiber) -> T) -> Result<T, NativeError> {

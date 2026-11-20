@@ -98,6 +98,7 @@ impl Vm {
                 usize::from(unit.main.registers) + index - static_count
             };
             let value = if global {
+                self.globals.declare(&name);
                 self.take_request_global(&name)
             } else {
                 self.share_include_local(&name)?

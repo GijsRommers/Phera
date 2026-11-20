@@ -50,7 +50,14 @@ impl Vm {
                 let result =
                     to_php_string(&diagnostics.vm.operand(register), &mut diagnostics.buffer);
                 drop(diagnostics);
-                return self.global_register(result?.to_string_lossy(), scratch, creation, missing);
+                let leaf = place.steps()?.next().is_none();
+                return self.global_register(
+                    result?.to_string_lossy(),
+                    scratch,
+                    creation,
+                    missing,
+                    leaf,
+                );
             }
             PathBase::Globals => return Err(internal_error!("global table has no register")),
         };

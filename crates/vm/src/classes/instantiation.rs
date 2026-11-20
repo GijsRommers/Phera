@@ -179,12 +179,18 @@ impl Vm {
             let invocation = super::Invocation::Constructor;
             return self.prepare_resolved_method(class, Some(object), resolved, invocation);
         }
-        self.prepare_method(
+        let prepared = self.prepare_method(
             class,
-            Some(object),
+            Some(object.clone()),
             "__construct",
             super::Invocation::Constructor,
-        )
+        );
+        // A constructor that may not be called leaves an object that was
+        // never constructed: PHP runs no destructor for it.
+        if prepared.is_err() {
+            object.mark_destructed();
+        }
+        prepared
     }
 
     pub(crate) fn check_script_construction(class: &super::Class) -> Result<(), NativeError> {

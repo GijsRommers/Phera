@@ -178,7 +178,10 @@ impl Vm {
                 .as_deref()
                 .and_then(crate::property_hook_continuation::HookContinuation::native_trace)
                 .is_some();
-            let internal = warning || callback.is_some() || suspended_native;
+            // At the end of the request PHP calls destructors from no code
+            // at all: "[internal function]".
+            let from_shutdown = self.request_end.shutting_down && depth == 1;
+            let internal = warning || callback.is_some() || suspended_native || from_shutdown;
             let include_parent =
                 depth > 1 && caller.is_some_and(|caller| caller.function_id().is_none());
             let mut entry = PhpArray::new();

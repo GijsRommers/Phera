@@ -85,6 +85,7 @@ impl Vm {
         scratch: Reg,
         creation: Creation,
         missing: Missing,
+        leaf: bool,
     ) -> Result<Option<Reg>, NativeError> {
         if self.request_global_value(&name).is_none() && creation == Creation::Existing {
             if missing == Missing::Warn {
@@ -97,8 +98,16 @@ impl Vm {
         {
             return Ok(Some(register));
         }
-        let reference = self.global_reference(name);
-        self.set(scratch, reference);
+        let value = if leaf {
+            // A direct access can read or replace the symbol without turning it
+            // into an alias. An explicit reference binding still promotes it.
+            self.request_global_value(&name)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            self.global_reference(name)
+        };
+        self.set(scratch, value);
         Ok(Some(scratch))
     }
 
@@ -178,6 +187,10 @@ impl Vm {
     }
 
     pub(crate) fn remove_global(&mut self, name: &str) {
-        self.take_request_global(name);
+        if let Some((base, register)) = self.global_slot(name) {
+            self.registers.take(base + register.index());
+        } else {
+            self.globals.remove(name);
+        }
     }
 }

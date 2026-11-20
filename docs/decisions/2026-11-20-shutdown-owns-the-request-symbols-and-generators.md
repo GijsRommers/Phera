@@ -1,4 +1,4 @@
-# Shutdown owns the request symbols and generators
+# Park request symbols in PHP order
 
 - Date: 2026-11-20
 - Area: Scope and compatibility
@@ -6,20 +6,21 @@
 
 ## Decision
 
-Publish the live file-scope registers when the request abandons its stack.
-Shutdown callbacks borrow the same global bindings that the file and its
-includes used. After callbacks, release sole-owned global generators in
-reverse symbol order and force-close the remaining live generators in
-object-store order. A fatal bailout skips generator finally blocks.
+Reserve each file-scope symbol's position when its scope is attached. Its
+value can move between a register and the request table without changing
+that position. Publish the bindings before releasing the file-scope stack.
+Shutdown functions and Batch 14's destructor phases use the same ordered
+symbols.
 
 ## Why
 
-File-scope registers are execution storage. The request still owns their
-values during shutdown, even after a fiber restores a parked caller and
-then reports a bailout. Keeping them alive for callbacks also means that
-generator closure can no longer rely on the file frame dropping them.
+PHP attaches compiled names to an ordered symbol table before executing
+file-level code. A fiber switch or include moves the values, and a shutdown
+callback can replace them. Teardown still visits sole-owned objects in
+reverse symbol order and runs the remaining object and generator
+destructors by ID.
 
 ## Turned down
 
-Copying timeout globals as a special case or dropping all globals before
-callbacks to trigger generator cleanup through reference counts.
+Retaining a second teardown pass for generators or rebuilding the symbol
+order when a file-scope frame is parked.

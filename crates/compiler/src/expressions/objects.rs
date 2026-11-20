@@ -106,7 +106,7 @@ impl Compiler<'_> {
                 arguments,
                 nullsafe: false,
             } => {
-                let receiver = self.compile_expression(target)?;
+                let receiver = self.compile_receiver(target)?;
                 let line = self.member_line(name);
                 match name {
                     ast::MemberName::Identifier(name) => self.emit(
@@ -252,5 +252,37 @@ impl Compiler<'_> {
             return Ok(name.text.to_ascii_lowercase());
         }
         Ok(self.resolve(name, NameKind::Class).0)
+    }
+}
+
+impl Compiler<'_> {
+    /// The register of a method call's receiver. `$object->method()` reads
+    /// `$object` when the call starts (`InitMethodCall` reads it then, with
+    /// the same warning for an undefined variable), so a plain local is
+    /// used as it is, without a copy that would then have to be released.
+    fn compile_receiver(&mut self, target: &ast::Expression) -> Result<Reg, CompileError> {
+        // In a long chain the receiver may be compiled already (see
+        // `expressions::chains`): it is taken from there.
+        if let ast::ExpressionKind::Variable(ast::Variable::Named(name)) = &target.kind
+            && name != "this"
+            && !self.is_compiled_operand(target)
+        {
+            let place = self.readable_place(target)?;
+            if place.scope == crate::ir::PlaceScope::Local && place.path.is_empty() {
+                return Ok(place.base);
+            }
+            let line = self.lines.line(target.span.start);
+            let destination = self.allocate_register()?;
+            self.emit(
+                Instruction::Read {
+                    destination,
+                    place,
+                    mode: phera_bytecode::FetchMode::Read,
+                },
+                line,
+            );
+            return Ok(destination);
+        }
+        self.compile_expression(target)
     }
 }

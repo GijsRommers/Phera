@@ -131,7 +131,7 @@ impl Vm {
                 (!(start <= target && target < end.index())).then_some(iterator)
             })
             .collect();
-        self.call_stack.abandon_calls_from(end);
+        self.abandon_calls_unconstructed(end);
         self.closure_captures.retain(|capture| capture.base < base);
         self.registers.truncate(end);
         for register in &handler.cleanup {
@@ -182,8 +182,9 @@ impl Vm {
         if let Some(frame) = self.call_stack.pop() {
             self.closure_captures
                 .retain(|capture| capture.base < frame.base());
-            self.registers.truncate(frame.start());
-            self.call_stack.abandon_calls_from(frame.start());
+            self.abandon_calls_unconstructed(frame.start());
+            self.mark_failed_constructor(&frame);
+            self.registers.release_frame(frame.start(), frame.base());
         }
         self.restore_lexical_silence(None);
         Ok(())

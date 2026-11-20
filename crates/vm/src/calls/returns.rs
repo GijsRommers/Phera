@@ -226,7 +226,7 @@ impl Vm {
         };
         self.call_stack.pop();
         self.call_stack.abandon_calls_from(frame.start());
-        self.registers.truncate(frame.start());
+        self.registers.release_frame(frame.start(), frame.base());
         if self.call_stack.depth() == stop {
             return Ok(Some(value));
         }

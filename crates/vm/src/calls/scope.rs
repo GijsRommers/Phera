@@ -18,6 +18,7 @@ impl Vm {
             .map_err(|_| NativeError::error("Phera register limit exceeded"))?);
         let insertion = frame.base() + count;
         let value = if self.in_global_scope() {
+            self.globals.declare(name);
             self.globals.take(name)
         } else {
             None
