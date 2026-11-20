@@ -21,6 +21,7 @@ mod ini_tests;
 mod native_parameter_tests;
 #[cfg(test)]
 mod native_trace_tests;
+mod platform;
 mod preload;
 #[cfg(test)]
 mod process_oracle_tests;
