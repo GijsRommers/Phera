@@ -146,6 +146,10 @@ fn insert(arguments: &[Value], function: &str, prepend: bool) -> NativeResult {
     };
     let data = data.as_bytes();
     use_brigade(arguments, function, |brigade| {
+        // Account for queue entries even when a filter appends empty buckets.
+        if brigade.0.len() >= super::super::MAX_BUCKET / std::mem::size_of::<Vec<u8>>() {
+            return Err(super::super::limit());
+        }
         let n = brigade
             .1
             .checked_add(data.len())

@@ -109,6 +109,13 @@ async fn attach(
             )
         })?
     };
+    let user_stages = super::user::lookup(context, stream.id).map_or(0, |chains| chains.len());
+    if stages + user_stages + usize::from(read) + usize::from(write) > MAX_STAGES {
+        context.warning(format!(
+            "{function}(): Stream filter chain exceeds Phera's limit of 16 filters"
+        ));
+        return Ok(Value::Bool(false));
+    }
     if let Some(class) = super::user::class(context, name) {
         return super::user::attach(
             context,
@@ -124,12 +131,6 @@ async fn attach(
     if user_stream.is_some() {
         context.warning(format!(
             "{function}(): Built-in filters on user wrappers are unsupported"
-        ));
-        return Ok(Value::Bool(false));
-    }
-    if stages + usize::from(read) + usize::from(write) > MAX_STAGES {
-        context.warning(format!(
-            "{function}(): Stream filter chain exceeds Phera's limit of 16 filters"
         ));
         return Ok(Value::Bool(false));
     }

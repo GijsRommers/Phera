@@ -133,6 +133,10 @@ pub(crate) async fn attach(
 }
 
 impl Chains {
+    pub(crate) fn len(&self) -> usize {
+        self.read.borrow().len() + self.write.borrow().len()
+    }
+
     pub(crate) fn reading(&self) -> bool {
         !self.read.borrow().is_empty() || !self.buffered.borrow().is_empty()
     }
