@@ -263,6 +263,7 @@ impl ObjectIds {
     /// An object is gone, with what it held: its id is free for reuse. An
     /// object that took over another's contents for its destructor is
     /// unregistered too.
+    #[inline]
     fn give_back(&self, id: u32, incarnated: bool) {
         // Nothing borrows the state across a call that could free an
         // object, so this cannot fail; if it ever did, the id would simply
@@ -321,6 +322,7 @@ impl std::ops::Deref for PoolHold {
 }
 
 impl Drop for PoolHold {
+    #[inline]
     fn drop(&mut self) {
         self.pool.give_back(self.id, self.incarnated);
     }
