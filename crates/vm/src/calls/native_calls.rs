@@ -17,12 +17,16 @@
 
 use phera_bytecode::{Instruction, Reg};
 use phera_extension_api::{FunctionEntry, NativeError, NativeFn, NativeId};
+use phera_value::Value;
 
 use crate::Vm;
 use crate::calls::call_state::{CallTarget, Callee, ParameterSpec};
 use crate::calls::callback_binding::ArgumentBinding;
 use crate::calls::execution_loop::BatchExit;
 use crate::calls::prepared_call::{CallDetails, PreparedCallee};
+
+/// Arguments a lean native call passes from an array on the Rust stack.
+const SHORT_ARGUMENTS: usize = 4;
 
 impl Vm {
     /// The description of a native function that the general path reads, as
@@ -111,8 +115,31 @@ impl Vm {
                 return self.call_native(destination);
             }
         };
-        // The values move to the reusable native buffer, so that the handler
-        // can borrow the whole VM.
+        // The values move out of the registers, so that the handler can
+        // borrow the whole VM: up to four into an array here, more into the
+        // reusable native buffer. `accepts_sync_call` has checked that every
+        // one of them is defined.
+        if count <= SHORT_ARGUMENTS {
+            let mut arguments = [const { Value::Null }; SHORT_ARGUMENTS];
+            for (argument, slot) in arguments
+                .iter_mut()
+                .zip(self.registers.window_mut(call.base(), count))
+            {
+                if let Some(value) = slot.take() {
+                    *argument = value;
+                }
+            }
+            self.call_stack.pop_call()?;
+            self.registers.truncate(call.start());
+            let arguments = arguments.get(..count).unwrap_or_default();
+            return self.invoke_sync_function(
+                entry.name,
+                handler,
+                arguments,
+                destination,
+                ArgumentBinding::Caller,
+            );
+        }
         let mut arguments = self.call_stack.native_arguments();
         arguments.reserve(count);
         for slot in self.registers.window_mut(call.base(), count) {
