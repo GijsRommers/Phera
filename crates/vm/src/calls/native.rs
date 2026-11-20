@@ -58,6 +58,15 @@ impl Vm {
         origin: crate::calls::callback_binding::ArgumentOrigin,
         binding: ArgumentBinding,
     ) -> NativeResult {
+        if matches!(entry.handler, NativeFn::DeprecatedSync(_))
+            && let Some(message) = phera_source::deprecations::kept_notice(
+                phera_source::deprecations::ItemKind::Function,
+                entry.name,
+            )
+        {
+            self.diagnostic("Deprecated", message.into());
+            self.drain_error_handlers().await?;
+        }
         // Asked here, not inside the call: without a registered loader a
         // native call must not even build the future that would look.
         if !self.autoload.callbacks.is_empty() {
@@ -86,7 +95,7 @@ impl Vm {
             return handler(self, arguments).await;
         }
         match entry.handler {
-            NativeFn::Sync(handler) => {
+            NativeFn::Sync(handler) | NativeFn::DeprecatedSync(handler) => {
                 let result = handler(self, &arguments);
                 if result.is_err() && binding.has_native_frame() {
                     self.failed_native =

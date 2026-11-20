@@ -20,7 +20,20 @@ pub type AsyncFn = for<'a> fn(&'a mut dyn Context, Vec<Value>) -> LocalFuture<'a
 #[derive(Clone, Copy)]
 pub enum NativeFn {
     Sync(SyncFn),
+    DeprecatedSync(SyncFn),
     Async(AsyncFn),
+}
+
+/// Emit an installed method's catalog notice before its argument binder runs.
+pub fn deprecated_method(
+    context: &mut dyn Context,
+    name: &str,
+) -> Result<crate::MethodPreparation, crate::NativeError> {
+    use phera_source::deprecations::{ItemKind, kept_notice};
+    if let Some(message) = kept_notice(ItemKind::Method, name) {
+        context.deprecated(message.into());
+    }
+    Ok(crate::MethodPreparation::Default)
 }
 
 /// The declared type of a parameter, used to coerce and check arguments before
@@ -193,6 +206,19 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Sync(handler),
+        }
+    }
+
+    /// A retained deprecated function dispatches its notice before argument parsing.
+    pub const fn deprecated_sync(
+        name: &'static str,
+        params: &'static [Param],
+        handler: SyncFn,
+    ) -> Self {
+        Self {
+            name,
+            params,
+            handler: NativeFn::DeprecatedSync(handler),
         }
     }
 

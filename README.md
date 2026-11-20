@@ -84,6 +84,7 @@ functions. Backticks emit PHP 8.5's compile-time deprecation. On Unix, `mail()`
 and `mb_send_mail()` pipe the message to the command in `sendmail_path`.
 `phera serve --no-process public` disables program launches for web requests,
 including `mail()` and `mb_send_mail()`.
+The standard library retains PHP’s deprecated `utf8_encode()` Latin-1 conversion.
 
 In progress: bcmath, curl, gmp, intl, mysqli, pgsql, sodium, zlib.
 Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.

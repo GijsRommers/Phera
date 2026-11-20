@@ -125,6 +125,8 @@ impl Vm {
                 self.reflect_user_signature(reflected, *function, scope, AttributeTarget::Function);
             }
             CallTarget::Native(entry) => {
+                use phera_source::deprecations::{ItemKind, kept_notice};
+                reflected.deprecated = kept_notice(ItemKind::Function, entry.name).is_some();
                 reflected.parameters = native_parameters(entry.params);
                 reflected.extension = self.registry.function_module(entry.name).map(str::to_owned);
                 reflected.return_type = self
@@ -177,6 +179,12 @@ impl Vm {
                 );
             }
             MethodBody::Native(entry) => {
+                use phera_source::deprecations::{ItemKind, kept_notice};
+                reflected.deprecated = kept_notice(
+                    ItemKind::Method,
+                    &format!("{}::{}", method.declaring, method.name),
+                )
+                .is_some();
                 reflected.parameters = native_parameters(entry.params);
                 reflected.extension = self
                     .reflection_class_module(&method.declaring)

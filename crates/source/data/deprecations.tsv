@@ -1,4 +1,4 @@
-# PHP stubs origin/PHP-8.5.12 (ef45c77f6ca856e9c023ba499e74207d436d5be3) and phpredis 6.3.0
+# PHP stubs php-8.5.13 (2e5288267a4e5e3235abb5f356cc6d2be02c2740) and phpredis 6.3.0
 # kind	name	since	message	policy
 class-constant	DateTimeInterface::RFC7231	8.5	as this format ignores the associated timezone and always uses GMT	keep
 class-constant	NumberFormatter::TYPE_CURRENCY	8.3		keep

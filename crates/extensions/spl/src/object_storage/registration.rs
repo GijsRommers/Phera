@@ -45,11 +45,20 @@ pub(crate) fn register(registry: &mut Registry) {
                     const { &[OFFSET, INFO.with_default(ConstantValue::Null)] },
                     dimensions::attach_old,
                 )
-                .tentative_return("void"),
+                .tentative_return("void")
+                .with_preparation(|c, _, _| {
+                    phera_extension_api::deprecated_method(c, "SplObjectStorage::attach")
+                }),
                 Method::public_async("detach", &[OFFSET], dimensions::detach_old)
-                    .tentative_return("void"),
+                    .tentative_return("void")
+                    .with_preparation(|c, _, _| {
+                        phera_extension_api::deprecated_method(c, "SplObjectStorage::detach")
+                    }),
                 Method::public_async("contains", &[OFFSET], dimensions::contains_old)
-                    .tentative_return("bool"),
+                    .tentative_return("bool")
+                    .with_preparation(|c, _, _| {
+                        phera_extension_api::deprecated_method(c, "SplObjectStorage::contains")
+                    }),
                 Method::public_async("addAll", &[STORAGE], iteration::add_all)
                     .tentative_return("int"),
                 Method::public_async("removeAll", &[STORAGE], iteration::remove_all)
