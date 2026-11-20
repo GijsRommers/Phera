@@ -48,10 +48,37 @@ The Drupal probe differs only by the Composer-only cache class above.
 
 With Flex auto-scripts active, the basic Symfony and copied Symfony projects
 also complete their native console hooks. Put the comparison route in place
-before installation so Symfony's cache warmup includes it. The webapp's
-stock `cache:clear` stops under Phera at the Finder string conversion error.
-The webapp comparison tree installed with `--no-scripts` serves the same
-parameterized route under PHP 8.5.
+before installation so Symfony's cache warmup includes it. The webapp
+comparison tree installed with `--no-scripts` serves the same parameterized
+route under PHP 8.5. Stock `cache:clear` still blocks the webapp gate.
+Symfony console hooks use Phera as required.
+
+### Symfony webapp cache failures
+
+Symfony's translator setup passes an SPL file object to `basename()`.
+
+```php
+<?php echo basename(new SplFileInfo('/a/b'));
+```
+
+PHP 8.5.12 prints `b`. Phera throws
+`Error: Object of class SplFileInfo could not be converted to string`.
+An explicit string cast of an SPL file object succeeds in both interpreters.
+
+Using `getBasename()` at that call site in a disposable fixture lets
+`cache:clear` reach the XLIFF validator.
+
+```php
+<?php
+$doc = new DOMDocument();
+$doc->loadXML('<r/>');
+var_dump($doc->schemaValidateSource(
+    '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"><xs:element name="r"/></xs:schema>'
+));
+```
+
+PHP 8.5.12 prints `bool(true)`. Phera throws
+`Phera\NotSupportedException: DOMDocument::schemaValidateSource() is not supported by Phera`.
 
 ## Fresh dependency resolution and audit
 
