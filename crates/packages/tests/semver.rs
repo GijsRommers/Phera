@@ -25,19 +25,31 @@ fn upstream_version_normalization() {
 #[test]
 fn upstream_constraint_matching() {
     let fixture: Value = serde_json::from_str(include_str!("fixtures/semver.json")).unwrap();
+    let versions = fixture["versions"].as_array().unwrap();
     let mut differences = Vec::new();
+    let mut comparisons = 0;
     for case in fixture["constraints"].as_array().unwrap() {
         let text = case["constraint"].as_str().unwrap();
         let constraint = Constraint::parse(text).unwrap_or_else(|error| panic!("{text}: {error}"));
-        for (version, expected) in case["matches"].as_object().unwrap() {
+        let matches = case["matches"].as_str().unwrap().bytes();
+        assert_eq!(matches.len(), versions.len(), "{text}");
+        for (version, expected) in versions.iter().zip(matches) {
+            let version = version.as_str().unwrap();
+            let expected = match expected {
+                b'0' => false,
+                b'1' => true,
+                _ => panic!("Bad oracle value for {text} / {version}"),
+            };
             let actual = constraint.matches(&Version::parse(version).unwrap());
-            if actual != expected.as_bool().unwrap() {
+            if actual != expected {
                 differences.push(format!(
                     "{text} / {version}: got {actual}, expected {expected}"
                 ));
             }
+            comparisons += 1;
         }
     }
+    assert_eq!(comparisons, 12_408);
     assert!(differences.is_empty(), "{}", differences.join("\n"));
 }
 

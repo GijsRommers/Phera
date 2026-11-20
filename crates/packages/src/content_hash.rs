@@ -93,30 +93,16 @@ mod tests {
 
     #[test]
     fn real_fixture_hashes_match_composer_locks() {
-        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-        let mut count = 0;
-        for fixture in std::fs::read_dir(directory).unwrap() {
-            let fixture = fixture.unwrap().path();
-            if !fixture.join("composer.lock").is_file() {
-                continue;
-            }
-            let manifest =
-                serde_json::from_slice(&std::fs::read(fixture.join("composer.json")).unwrap())
-                    .unwrap();
-            let lock: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(fixture.join("composer.lock")).unwrap())
-                    .unwrap();
+        let fixtures = include_str!("../tests/fixtures/content-hashes.json");
+        let fixtures: Vec<serde_json::Value> = serde_json::from_str(fixtures).unwrap();
+        assert_eq!(fixtures.len(), 25);
+        for fixture in fixtures {
             assert_eq!(
-                compute(&manifest).unwrap(),
-                lock["content-hash"].as_str().unwrap(),
+                compute(&fixture["input"]).unwrap(),
+                fixture["hash"].as_str().unwrap(),
                 "{}",
-                fixture.display()
+                fixture["input"]["name"]
             );
-            count += 1;
         }
-        assert!(
-            count >= 25,
-            "expected at least 25 real fixtures, got {count}"
-        );
     }
 }

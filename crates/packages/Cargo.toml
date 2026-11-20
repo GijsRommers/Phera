@@ -18,16 +18,18 @@ rayon = "1"
 sha1 = "0.10"
 sha2 = "0.10"
 md-5 = "0.10"
-zip = { version = "6", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9.8.1", default-features = false, features = ["deflate-flate2"] }
 tar = "0.4"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 reflink-copy = "0.1.33"
 tempfile = "3"
-fs4 = "0.13"
 walkdir = "2"
 glob = "0.3"
 regex = "1"
 pubgrub = "0.4"
+
+[dev-dependencies]
+phera-extension-api.workspace = true
 
 [lints]
 workspace = true

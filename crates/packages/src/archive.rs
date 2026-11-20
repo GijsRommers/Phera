@@ -74,7 +74,7 @@ fn unzip(bytes: &[u8], target: &Path) -> Result<()> {
     let mut links = Vec::new();
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index)?;
-        let destination = crate::paths::inside(target, entry.name())?;
+        let destination = crate::paths::inside(target, &entry.name()?)?;
         let mode = entry.unix_mode().unwrap_or(0o644);
         check_size(entry.size(), &mut total)?;
         if mode & 0o170000 == 0o120000 {

@@ -4,7 +4,6 @@
 //! a fresh object online or reports the package missing with `--offline`.
 
 use anyhow::Result;
-use fs4::fs_std::FileExt;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::Write;
@@ -51,7 +50,7 @@ pub(super) fn publish(cache: &Path, source: &Path, index: &Path, digest: &str) -
         .create(true)
         .truncate(false)
         .open(cache.join("locks").join(format!("object-{digest}")))?;
-    guard.lock_exclusive()?;
+    guard.lock()?;
     let entries = snapshot(source)?;
     let object = cache.join("objects").join(digest);
     if !snapshot(&object).is_ok_and(|stored| stored == entries) {

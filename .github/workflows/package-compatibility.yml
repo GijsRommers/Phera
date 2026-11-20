@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 40
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target/package-build
+      PHERA_PACKAGES_COMPARISON_DIR: ${{ runner.temp }}/phera-package-comparison
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
@@ -32,25 +33,23 @@ jobs:
       - uses: shivammathur/setup-php@d52fc211a0436f8839a587b3b5b8efddab4744ea # v2
         with:
           php-version: '8.5'
+          extensions: phar, iconv, ctype, curl, mbstring, zip, tokenizer, dom, xml, xmlwriter, simplexml
           coverage: none
       - name: Build Phera and fetch the current Composer oracle
         run: |
           cargo build --release -p phera-cli
-          curl -fsSL https://getcomposer.org/composer-stable.phar -o target/composer.phar
+          curl -fsSL https://getcomposer.org/composer-stable.phar -o "$RUNNER_TEMP/composer.phar"
       - name: Compare real registries separately from the offline gate
         run: cargo test -p phera-packages --test network -- --nocapture
         env:
           PHERA_PACKAGES_NETWORK: '1'
           PHERA_BIN: ${{ github.workspace }}/target/package-build/release/phera
-          PHERA_COMPOSER: ${{ github.workspace }}/target/composer.phar
-          PHERA_PHP: php
+          PHERA_COMPOSER: ${{ runner.temp }}/composer.phar
       - name: Preserve comparison diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: package-comparison-diagnostics
           path: |
-            target/package-comparison/*.log
-            target/package-comparison/*-result.json
-            target/package-comparison/*-autoload.json
-            target/package-comparison/results.json
+            ${{ runner.temp }}/phera-package-comparison/**/*.log
+            ${{ runner.temp }}/phera-package-comparison/results.json

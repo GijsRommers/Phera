@@ -1,4 +1,4 @@
-# Composer differential results
+# Historical Composer differential results from PR #15
 
 Oracle: Composer 2.11.2 under PHP 8.5.12 on macOS, 2026-11-17. The manifests
 come from the release references recorded in each fixture's provenance.json.
@@ -49,8 +49,9 @@ All 25 resolve to the same package versions, have equal parsed installed.json
 records, pass the PHP autoloader comparison, and can be installed by Composer
 from Phera's lock. There are no remaining equal-preference resolution differences
 in this matrix. This is evidence for these fixtures, not proof of all Composer behavior.
-The complete macOS observations are in [COMPARISON.json](COMPARISON.json).
-Linux CI also passes all 25 fixtures; see [COMPARISON.linux.json](COMPARISON.linux.json).
+See the archived [macOS comparison][macos] and [Linux comparison][linux] for the
+original records. The current test fetches those 25 pinned manifests and locks
+into a temporary directory and checks their upstream source revisions.
 
 ## CI cache isolation
 
@@ -162,4 +163,8 @@ Offline uses Phera `--offline` and Composer `COMPOSER_DISABLE_NETWORK=1`.
 Warm online installs are 2.24–3.09 times faster in this sample.
 The requested tenfold improvement is not reached. Update wall times are slower
 than Composer in these observations. Cold network results vary with the registry
-and archive hosts. Raw observations are in [BENCHMARKS.json](BENCHMARKS.json).
+and archive hosts. See the [original benchmark records][benchmarks].
+
+[macos]: https://github.com/GijsRommers/Phera/blob/79d628d99532c2b6b7267521cf0b2f801cebfbb0/crates/packages/tests/COMPARISON.json
+[linux]: https://github.com/GijsRommers/Phera/blob/79d628d99532c2b6b7267521cf0b2f801cebfbb0/crates/packages/tests/COMPARISON.linux.json
+[benchmarks]: https://github.com/GijsRommers/Phera/blob/79d628d99532c2b6b7267521cf0b2f801cebfbb0/crates/packages/tests/BENCHMARKS.json

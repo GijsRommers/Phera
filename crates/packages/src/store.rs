@@ -4,7 +4,6 @@
 
 use crate::{Package, network::Network};
 use anyhow::{Context, Result, bail};
-use fs4::fs_std::FileExt;
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
@@ -77,7 +76,7 @@ impl Store {
             .create(true)
             .truncate(false)
             .open(self.directory.join("locks").join(&key))?;
-        guard.lock_exclusive()?;
+        guard.lock()?;
         let index = self.directory.join("index").join(&key);
         if (!path_dist || offline)
             && let Some(object) = inventory::cached(&index, &self.directory.join("objects"))?

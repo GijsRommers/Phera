@@ -62,14 +62,9 @@ exact generated-file differences, benchmarks and the readiness gate.
   forwarding these credentials into git source clones remain unfinished.
 - Root pre/post install, update and autoload-dump events run. Shell commands run in
   the project with vendor/bin on PATH; `@php` uses the current Phera binary.
-  PHP callables are launched through a generated bootstrap, without Composer's
-  Event object. The current Phera runtime lacks `spl_autoload_register`, so that
-  bootstrap cannot yet load Composer's ClassLoader; callable scripts are blocked.
-  A CLI smoke test verified a simple `@php` echo script. Scripts using currently
-  absent runtime functions such as `file_put_contents` also fail. Complete Composer
-  event/IO APIs, package events, aliases with arguments and PHP `-r` forwarding
-  are unfinished. Use `--no-scripts` until the required runtime support exists.
-  Composer plugins are listed and skipped.
+  PHP callable scripts use a generated bootstrap and still need Composer Event
+  objects and framework tests. Package events, aliases with arguments and PHP
+  `-r` forwarding are unfinished. Composer plugins are listed and skipped.
 - The PHP 8.5 binary proxies expose Composer's globals. Older-PHP stream wrappers,
   PHPUnit process-isolation special cases, Windows batch proxies and bash-sourcing
   behavior have not been ported from Composer's proxy generator.
@@ -82,9 +77,11 @@ exact generated-file differences, benchmarks and the readiness gate.
 
 `cargo test -p phera-packages` uses only on-disk fixtures, loopback servers started
 inside tests, and the local PHP oracle. Network comparisons require
-`PHERA_PACKAGES_NETWORK=1`, `PHERA_BIN`, and `PHERA_COMPOSER`; their CI job is
-informational and does not affect the offline gate. All generated test directories
-are inside this checkout or its selected cache.
+`PHERA_PACKAGES_NETWORK=1`, `PHERA_BIN`, and `PHERA_COMPOSER`. The network test
+fetches the 25 original fixtures by commit and runs the pinned project sources
+with scripts and plugins disabled. Set `PHERA_PACKAGES_COMPARISON_DIR` to retain
+logs, result rows and caches outside the checkout. The registry CI job is
+informational.
 
 Composer's ClassLoader.php and InstalledVersions.php are included verbatim under
 their MIT license. See [resources/README.md](resources/README.md) for source commits
