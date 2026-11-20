@@ -21,6 +21,7 @@ mod pointer;
 mod range;
 mod range_endpoint;
 mod range_values;
+mod search;
 mod sets;
 mod slice;
 mod sort;
@@ -40,6 +41,7 @@ pub(crate) mod zend_sort;
 
 pub(crate) fn register(registry: &mut Registry) {
     multisort::register(registry);
+    search::register_sync_selectors(registry);
     let modules = [
         build::FUNCTIONS,
         callback_sets::FUNCTIONS,
