@@ -208,6 +208,7 @@ impl Analyzer<'_> {
         let nullish = self.nullish(left, &scope);
         let truth = self.condition_truth(left, &scope);
         let ty = self.expression(left, &mut scope, true);
+        self.check_nullsafe_coalesce(left, &ty);
         if ty == ValueType::Never {
             return (Condition::default(), None);
         }

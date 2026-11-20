@@ -212,6 +212,18 @@ impl Scope {
                 .map(|v| v.ty.clone())
                 .reduce(|a, b| a.join(&b))
                 .unwrap_or(ValueType::Mixed);
+            let ty = if definition == Definition::Definite
+                && ty == ValueType::Mixed
+                && values.iter().any(|value| {
+                    matches!(
+                        value.ty,
+                        ValueType::ExplicitMixed | ValueType::ImplicitMixed
+                    )
+                }) {
+                ValueType::ImplicitMixed
+            } else {
+                ty
+            };
             result
                 .variables
                 .insert(key, VariableInfo { definition, ty });

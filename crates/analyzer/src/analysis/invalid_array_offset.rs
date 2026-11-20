@@ -9,7 +9,13 @@ impl Analyzer<'_> {
             return;
         }
         use ValueType as T;
-        if super::operators::is_array(key)
+        if self.strict_mixed(key) {
+            self.diagnose(
+                "offsetAccess.invalidOffset",
+                span,
+                "Possibly invalid array key type mixed.".into(),
+            );
+        } else if super::operators::is_array(key)
             || matches!(
                 key,
                 T::Float | T::Null | T::Resource | T::Class(_) | T::Generic(_) | T::Object

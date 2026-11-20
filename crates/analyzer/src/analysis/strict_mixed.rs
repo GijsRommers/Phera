@@ -41,6 +41,7 @@ impl Analyzer<'_> {
         left: &ValueType,
         right: &ValueType,
         span: Span,
+        compound: bool,
     ) {
         if !self.strict_mixed(left) && !self.strict_mixed(right) {
             return;
@@ -61,13 +62,38 @@ impl Analyzer<'_> {
             Op::ShiftRight => ">>",
             _ => return,
         };
+        let (identifier, suffix) = if compound {
+            ("assignOp.invalid", "=")
+        } else {
+            ("binaryOp.invalid", "")
+        };
         self.diagnose(
-            "binaryOp.invalid",
+            identifier,
             span,
             format!(
-                "Binary operation \"{symbol}\" between {left} and {right} results in an error."
+                "Binary operation \"{symbol}{suffix}\" between {left} and {right} results in an error."
             ),
         );
+    }
+
+    pub(super) fn mixed_increment(
+        &mut self,
+        ty: &ValueType,
+        increment: bool,
+        prefix: bool,
+        span: Span,
+    ) {
+        if !self.strict_mixed(ty) {
+            return;
+        }
+        let identifier = match (increment, prefix) {
+            (true, true) => "preInc.type",
+            (true, false) => "postInc.type",
+            (false, true) => "preDec.type",
+            (false, false) => "postDec.type",
+        };
+        let operator = if increment { "++" } else { "--" };
+        self.diagnose(identifier, span, format!("Cannot use {operator} on mixed."));
     }
 }
 

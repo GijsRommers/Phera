@@ -105,7 +105,7 @@ impl Analyzer<'_> {
         if right_ty == ValueType::Never {
             return right_ty;
         }
-        self.mixed_binary(operator, &left_ty, &right_ty, operation.span);
+        self.mixed_binary(operator, &left_ty, &right_ty, operation.span, false);
         if matches!(
             operator,
             BinaryOperator::Divide | BinaryOperator::Modulo | BinaryOperator::Power

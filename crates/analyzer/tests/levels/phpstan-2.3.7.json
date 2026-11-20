@@ -60,6 +60,16 @@
   "known_offset_receivers.php": [
     [7, 6, "offsetAccess.nonOffsetAccessible", "Cannot access offset 0 on list<string>|false."]
   ],
+  "mixed_operators.php": [
+    [9, 5, "assignOp.invalid", "Binary operation \".=\" between string and mixed results in an error."],
+    [9, 6, "preInc.type", "Cannot use ++ on mixed."],
+    [9, 14, "offsetAccess.invalidOffset", "Possibly invalid array key type mixed."]
+  ],
+  "redundant_nullsafe.php": [
+    [4, 8, "nullsafe.neverNull", "Using nullsafe method call on non-nullable type First|Second. Use -> instead."],
+    [4, 13, "nullCoalesce.expr", "Expression on left side of ?? is not nullable."],
+    [4, 13, "nullsafe.neverNull", "Using nullsafe method call on non-nullable type First. Use -> instead."]
+  ],
   "class_string_guard.php": [
     [7, 9, "return.type", "Function rowClass() should return class-string<Row> but returns class-string."]
   ],

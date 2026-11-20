@@ -89,6 +89,7 @@ impl Analyzer<'_> {
                 if ty == ValueType::Never {
                     return ty;
                 }
+                self.mixed_binary(*operator, &previous, &ty, expression.span, true);
                 let ty = if self.level >= 3 {
                     super::operators::binary_type(*operator, &previous, &ty)
                 } else {
@@ -99,10 +100,16 @@ impl Analyzer<'_> {
                 }
                 self.assignment_result(target, scope, ty)
             }
-            ExpressionKind::IncDec { target, .. } => {
-                if self.expression(target, scope, quiet) == ValueType::Never {
+            ExpressionKind::IncDec {
+                target,
+                increment,
+                prefix,
+            } => {
+                let ty = self.expression(target, scope, quiet);
+                if ty == ValueType::Never {
                     return ValueType::Never;
                 }
+                self.mixed_increment(&ty, *increment, *prefix, expression.span);
                 if self.write(target, ValueType::Mixed, scope) == Evaluation::Never {
                     return ValueType::Never;
                 }

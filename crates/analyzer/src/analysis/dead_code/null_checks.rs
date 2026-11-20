@@ -10,6 +10,23 @@ pub enum NullCheck {
 }
 
 impl Analyzer<'_> {
+    pub fn check_nullsafe_coalesce(&mut self, expression: &Expression, ty: &ValueType) {
+        if self.level >= 4
+            && matches!(
+                expression.kind,
+                ExpressionKind::MethodCall { nullsafe: true, .. }
+            )
+            && ty.excludes_null()
+            && !matches!(ty, ValueType::Never | ValueType::Void)
+        {
+            self.diagnose_dead_code(
+                "nullCoalesce.expr",
+                expression.span,
+                "Expression on left side of ?? is not nullable.".into(),
+            );
+        }
+    }
+
     pub fn constant_null_check(
         &mut self,
         expression: &Expression,

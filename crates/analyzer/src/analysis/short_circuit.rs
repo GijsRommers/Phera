@@ -15,6 +15,7 @@ impl Analyzer<'_> {
         self.constant_null_check(left, scope, dead_code::NullCheck::Coalesce);
         let nullish = self.nullish(left, scope);
         let left_ty = self.expression(left, scope, true);
+        self.check_nullsafe_coalesce(left, &left_ty);
         if left_ty == ValueType::Never || nullish == Some(false) {
             return left_ty;
         }

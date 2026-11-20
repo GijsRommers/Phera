@@ -81,21 +81,13 @@ impl Analyzer<'_> {
         scope: &Scope,
         span: Span,
     ) {
-        if self.level >= 4
-            && ty.excludes_null()
-            && matches!(
-                ty,
-                ValueType::Object
-                    | ValueType::Class(_)
-                    | ValueType::Generic(_)
-                    | ValueType::Callable(_)
-            )
-        {
+        if self.level >= 4 && ty.excludes_null() && known_object_type(ty) {
             let span = match member {
                 MemberName::Identifier(name) => name.span,
                 MemberName::Expression(_) => span,
             };
             let provenance = self.narrowed_at(target, scope);
+            let ty = super::member_checks::receiver_name(ty);
             self.diagnose_dead_code(
                 "nullsafe.neverNull",
                 span,
@@ -105,6 +97,21 @@ impl Analyzer<'_> {
             );
         }
     }
+}
+
+fn known_object_type(ty: &ValueType) -> bool {
+    let mut types = vec![ty];
+    while let Some(ty) = types.pop() {
+        match ty {
+            ValueType::Union(arms) => types.extend(arms.iter()),
+            ValueType::Object
+            | ValueType::Class(_)
+            | ValueType::Generic(_)
+            | ValueType::Callable(_) => {}
+            _ => return false,
+        }
+    }
+    true
 }
 
 impl Analyzer<'_> {
