@@ -67,9 +67,13 @@ pub(crate) fn json_validate(context: &mut dyn Context, arguments: &[Value]) -> N
     }
     *context.state().get_or_default::<Error>() = Error::None;
     let depth = depth(args::int(arguments, 1).unwrap_or(512), "json_validate", 2)?;
-    let result = parser::parse(bytes, depth, DecodeFlags::from_bits(bits), None);
+    let result = validate(bytes, depth, bits);
     let error = result.as_ref().err().copied().unwrap_or_default();
     error::finish(context, error, false, Value::Bool(result.is_ok()))
+}
+
+pub(crate) fn validate(bytes: &[u8], depth: usize, bits: i64) -> Result<Value, Error> {
+    parser::parse(bytes, depth, DecodeFlags::from_bits(bits), None)
 }
 
 /// `$depth` must be from 1 to `i32::MAX`, PHP's C int.
