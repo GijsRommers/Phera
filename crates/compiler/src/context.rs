@@ -4,7 +4,7 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::Rc,
 };
 
@@ -71,6 +71,10 @@ pub(super) struct Compiler<'ast> {
     pub(super) uses_hook_backing: bool,
     pub(super) imports: Option<Imports>,
     pub(super) reflection: &'ast ReflectionInputs,
+    /// Temporaries cleared right after the call that consumed them (see
+    /// `expressions::operand_release`), which the statement's end need not
+    /// clear again until they are allocated anew.
+    pub(super) released: HashSet<u16>,
     pub(super) native_functions: Option<&'ast crate::NativeFunctions<'ast>>,
 }
 impl<'ast> Compiler<'ast> {
@@ -116,6 +120,7 @@ impl<'ast> Compiler<'ast> {
             uses_hook_backing: false,
             imports: None,
             reflection,
+            released: HashSet::new(),
             native_functions: None,
         }
     }
@@ -141,6 +146,7 @@ impl<'ast> Compiler<'ast> {
         self.next += 1;
         self.peak = self.peak.max(self.next);
         self.reach = self.reach.max(self.next);
+        self.released.remove(&index);
         Ok(Reg(index))
     }
 
