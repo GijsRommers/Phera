@@ -21,40 +21,62 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let once = matches!(kind, IncludeKind::IncludeOnce | IncludeKind::RequireOnce);
         let name = self.stringify_value(&self.get(path)).await?;
-        let operation = include_name(kind);
-        let loader = self.include_state.loader();
-        let stream = match loader {
-            Some(loader) if loader.wraps_include(self, name.as_bytes()) => {
-                loader
-                    .load_stream(self, name.as_bytes(), operation, once)
-                    .await?
+        if self.include_state.stream_wrappers
+            && Box::pin(self.include_stream(destination, &name, kind, once)).await?
+        {
+            return Ok(());
+        }
+        let unit = match self.load_include(name.as_bytes()).await? {
+            Ok(unit) => unit,
+            Err(reason) => {
+                return self.failed_include(
+                    destination,
+                    &name.to_string_lossy(),
+                    kind,
+                    Some(&reason),
+                );
             }
-            _ => StreamInclude::LocalFile,
         };
-        let unit = match stream {
-            StreamInclude::AlreadyIncluded => {
-                self.set(destination, Value::Bool(true));
-                return Ok(());
-            }
+        self.enter_include(destination, unit, once)
+    }
+
+    #[cold]
+    async fn include_stream(
+        &mut self,
+        destination: Reg,
+        name: &phera_value::PhpString,
+        kind: IncludeKind,
+        once: bool,
+    ) -> Result<bool, NativeError> {
+        let Some(loader) = self.include_state.loader() else {
+            return Ok(false);
+        };
+        if !loader.wraps_include(self, name.as_bytes()) {
+            return Ok(false);
+        }
+        match loader
+            .load_stream(self, name.as_bytes(), include_name(kind), once)
+            .await?
+        {
+            StreamInclude::LocalFile => return Ok(false),
+            StreamInclude::AlreadyIncluded => self.set(destination, Value::Bool(true)),
             StreamInclude::Unavailable => {
-                return self.failed_include(destination, &name.to_string_lossy(), kind, None);
+                self.failed_include(destination, &name.to_string_lossy(), kind, None)?
             }
-            StreamInclude::Compiled(Ok(unit)) => unit,
+            StreamInclude::Compiled(Ok(unit)) => self.enter_include(destination, unit, once)?,
             StreamInclude::Compiled(Err(error)) => {
                 return Err(self.dynamic_compile_failure(error).await);
             }
-            StreamInclude::LocalFile => match self.load_include(name.as_bytes()).await? {
-                Ok(unit) => unit,
-                Err(reason) => {
-                    return self.failed_include(
-                        destination,
-                        &name.to_string_lossy(),
-                        kind,
-                        Some(&reason),
-                    );
-                }
-            },
-        };
+        }
+        Ok(true)
+    }
+
+    fn enter_include(
+        &mut self,
+        destination: Reg,
+        unit: std::sync::Arc<phera_bytecode::CompiledUnit>,
+        once: bool,
+    ) -> Result<(), NativeError> {
         if once && self.include_state.contains(&unit.file) {
             self.set(destination, Value::Bool(true));
             return Ok(());

@@ -83,6 +83,13 @@ impl Default for Wrappers {
 }
 
 impl Wrappers {
+    fn intercepts_includes(&self) -> bool {
+        self.0
+            .iter()
+            .any(|(_, handler)| matches!(handler, Handler::User(_)))
+            || self.get(b"file").is_none()
+    }
+
     fn find(&self, name: &[u8]) -> Option<usize> {
         self.0.iter().position(|(scheme, _)| scheme == name)
     }
@@ -148,6 +155,7 @@ async fn add(context: &mut dyn Context, arguments: Vec<Value>, function: &str) -
             remote,
         }),
     ));
+    context.set_include_wrappers(true);
     Ok(Value::Bool(true))
 }
 
@@ -228,11 +236,12 @@ pub(crate) fn file_disabled(context: &mut dyn Context) -> bool {
 
 fn unregister(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let name = args::bytes(arguments, 0);
-    if files(context)
+    let wrappers = files(context)
         .wrappers
-        .get_or_insert_with(Wrappers::default)
-        .remove(name)
-    {
+        .get_or_insert_with(Wrappers::default);
+    if wrappers.remove(name) {
+        let intercepts = wrappers.intercepts_includes();
+        context.set_include_wrappers(intercepts);
         return Ok(Value::Bool(true));
     }
     let scheme = String::from_utf8_lossy(name);
@@ -261,6 +270,8 @@ fn restore(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     } else {
         wrappers.remove(name);
         wrappers.0.push((name.to_vec(), Handler::Builtin));
+        let intercepts = wrappers.intercepts_includes();
+        context.set_include_wrappers(intercepts);
     }
     Ok(Value::Bool(true))
 }

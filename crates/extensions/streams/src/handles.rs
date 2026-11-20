@@ -78,52 +78,75 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let include_path = args::bool(&arguments, 2).unwrap_or(false);
         let stream_context = args::value(&arguments, 3);
         validate(stream_context, "fopen", 4)?;
-        files(context).use_default_context(stream_context);
-        if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
-            let supplied = if stream_context.is_null() {
-                crate::context_options::default_for_wrapper(context)
-            } else {
-                stream_context.clone()
-            };
-            let flags = if include_path {
-                crate::user_wrappers::USE_PATH
-            } else {
-                0
-            };
-            let opened =
-                crate::user_file::open(context, wrapper, "fopen", name, mode, flags, supplied)
-                    .await?;
-            return Ok(match opened {
-                Some(stream) => crate::user_resource::make_file(context, stream),
-                None => Value::Bool(false),
-            });
-        }
-        let stream = if let Target::Gzip(filename) = Target::parse(name)
-            && !crate::user_wrappers::protocol_disabled(context, b"compress.zlib")
-            && let Some(level) = crate::context_options::option(stream_context, "zlib", "level")
-        {
-            let level = phera_extension_api::value::to_int(&level, context.diagnostics())?;
-            let level = u32::try_from(level).ok().filter(|level| *level <= 9);
-            crate::gzip::open_gzip(
+        if crate::filters::is_filter_uri(name)
+            && let Some(result) = Box::pin(crate::filters::open_request_filter(
                 context,
                 "fopen",
-                filename,
                 name,
                 mode,
-                crate::gzip::GzipOptions {
-                    include_path,
-                    level,
-                    wrapper: Wrapper::Gzip,
-                },
-            )
+                include_path,
+                stream_context,
+            ))
             .await?
+        {
+            return Ok(result);
+        }
+        open_resource(context, "fopen", name, mode, include_path, stream_context).await
+    })
+}
+
+pub(crate) async fn open_resource(
+    context: &mut dyn Context,
+    function: &str,
+    name: &[u8],
+    mode: &[u8],
+    include_path: bool,
+    stream_context: &Value,
+) -> NativeResult {
+    files(context).use_default_context(stream_context);
+    if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+        let supplied = if stream_context.is_null() {
+            crate::context_options::default_for_wrapper(context)
         } else {
-            open(context, "fopen", name, mode, include_path).await?
+            stream_context.clone()
         };
-        Ok(match stream {
-            Some(stream) => new_resource(context.state(), "stream", stream),
+        let flags = if include_path {
+            crate::user_wrappers::USE_PATH
+        } else {
+            0
+        };
+        let opened =
+            crate::user_file::open(context, wrapper, function, name, mode, flags, supplied).await?;
+        return Ok(match opened {
+            Some(stream) => crate::user_resource::make_file(context, stream),
             None => Value::Bool(false),
-        })
+        });
+    }
+    let stream = if let Target::Gzip(filename) = Target::parse(name)
+        && !crate::user_wrappers::protocol_disabled(context, b"compress.zlib")
+        && let Some(level) = crate::context_options::option(stream_context, "zlib", "level")
+    {
+        let level = phera_extension_api::value::to_int(&level, context.diagnostics())?;
+        let level = u32::try_from(level).ok().filter(|level| *level <= 9);
+        crate::gzip::open_gzip(
+            context,
+            function,
+            filename,
+            name,
+            mode,
+            crate::gzip::GzipOptions {
+                include_path,
+                level,
+                wrapper: Wrapper::Gzip,
+            },
+        )
+        .await?
+    } else {
+        open(context, function, name, mode, include_path).await?
+    };
+    Ok(match stream {
+        Some(stream) => new_resource(context.state(), "stream", stream),
+        None => Value::Bool(false),
     })
 }
 

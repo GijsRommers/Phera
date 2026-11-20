@@ -144,6 +144,10 @@ impl Context for Vm {
         Vm::include_path(self)
     }
 
+    fn set_include_wrappers(&mut self, enabled: bool) {
+        self.include_state.stream_wrappers = enabled;
+    }
+
     fn source_location(&self) -> Option<(String, usize)> {
         let location = self.location();
         Some((location.file, location.line))

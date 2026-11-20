@@ -8,14 +8,13 @@ use std::{
 };
 
 use phera_extension_api::{
-    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value,
-    value::{Resource, to_int},
+    ArrayKey, Context, LocalFuture, NativeError, NativeResult, PhpArray, Value, value::Resource,
 };
 
-use crate::{request::new_resource, user_file::invoke};
+use crate::{request::new_resource, resource::with_stream, user_file::invoke};
 
-use super::super::{MAX_STAGES, bounded};
-use super::{FEED, PASS, buckets};
+use super::super::{Filter, Flush, bounded, functions::Attachment};
+use super::stage::Stage;
 
 #[derive(Default)]
 struct Streams(HashMap<i64, Rc<Chains>>);
@@ -28,8 +27,8 @@ pub(super) fn register_fork(registry: &mut phera_extension_api::Registry) {
             let write = chains.write.borrow();
             if let Some(stage) = read.first().or_else(|| write.first()) {
                 fork.refuse_state(
-                    stage.filter.class.name(),
-                    "an attached user stream filter belongs to the boot",
+                    stage.name(),
+                    "an attached stream filter belongs to the boot",
                 );
                 break;
             }
@@ -52,42 +51,44 @@ pub(crate) struct Chains {
     stream: RefCell<Weak<Resource>>,
 }
 
-#[derive(Clone)]
-struct Stage {
-    id: i64,
-    filter: Rc<Object>,
-}
-
-struct Attachment(i64);
-
 pub(crate) fn lookup(context: &mut dyn Context, id: i64) -> Option<Rc<Chains>> {
     context.state().get::<Streams>()?.0.get(&id).cloned()
 }
 
-pub(crate) async fn attach(
+#[derive(Clone, Copy)]
+pub(in crate::filters) enum Placement {
+    Append,
+    Prepend,
+    Uri,
+}
+
+fn mixed(context: &mut dyn Context, stream: &Rc<Resource>) -> Rc<Chains> {
+    let chains = context
+        .state()
+        .get_or_default::<Streams>()
+        .0
+        .entry(stream.id)
+        .or_default()
+        .clone();
+    *chains.stream.borrow_mut() = Rc::downgrade(stream);
+    context.register_resource_finalizer("user stream filters", finish);
+    chains
+}
+
+pub(in crate::filters) async fn attach(
     context: &mut dyn Context,
     stream: &Rc<Resource>,
     function: &str,
     name: &[u8],
     class: &str,
     params: &Value,
-    ((read, write), prepend): ((bool, bool), bool),
+    ((read, write), placement): ((bool, bool), Placement),
 ) -> NativeResult {
-    let chains = lookup(context, stream.id).unwrap_or_default();
-    if chains.busy.get() {
-        return Err(NativeError::error("Stream is already executing a filter"));
-    }
-    if chains.read.borrow().len()
-        + chains.write.borrow().len()
-        + usize::from(read)
-        + usize::from(write)
-        > MAX_STAGES
-    {
-        context.warning(format!(
-            "{function}(): Stream filter chain exceeds Phera's limit of 16 filters"
-        ));
+    if !read && !write {
         return Ok(Value::Bool(false));
     }
+    let chains = mixed(context, stream);
+    let _busy = chains.enter()?;
     let Some(class_handle) = context.lookup_class(class).await? else {
         let name = String::from_utf8_lossy(name);
         context.warning(format!("{function}(): User-filter \"{name}\" requires class \"{class}\", but that class is not defined"));
@@ -122,38 +123,77 @@ pub(crate) async fn attach(
     if stream.is_closed() || objects.is_empty() {
         return Ok(Value::Bool(false));
     }
-    let attachment = new_resource(context.state(), "stream filter", Attachment(stream.id));
-    let Value::Resource(resource) = &attachment else {
-        return Err(NativeError::error(
-            "Stream filter resource allocation failed",
-        ));
+    let attachment = if matches!(placement, Placement::Uri) {
+        Value::Bool(true)
+    } else {
+        new_resource(
+            context.state(),
+            "stream filter",
+            Attachment(Rc::downgrade(stream)),
+        )
     };
+    let id = match &attachment {
+        Value::Resource(resource) => resource.id,
+        _ => 0,
+    };
+    chains.promote(stream)?;
     let mut objects = objects.into_iter();
     for (enabled, stages) in [(read, &chains.read), (write, &chains.write)] {
         if enabled && let Some(filter) = objects.next() {
-            let stage = Stage {
-                id: resource.id,
-                filter,
-            };
-            let mut stages = stages.borrow_mut();
-            if prepend {
-                stages.insert(0, stage);
-            } else {
-                stages.push(stage);
-            }
+            Chains::insert(stages, Stage::php(id, filter), placement);
         }
     }
-    *chains.stream.borrow_mut() = Rc::downgrade(stream);
-    context
-        .state()
-        .get_or_default::<Streams>()
-        .0
-        .insert(stream.id, chains);
-    context.register_resource_finalizer("user stream filters", finish);
     Ok(attachment)
 }
 
+pub(in crate::filters) fn attach_native(
+    context: &mut dyn Context,
+    stream: &Rc<Resource>,
+    read: Option<Filter>,
+    write: Option<Filter>,
+    placement: Placement,
+) -> Result<(), NativeError> {
+    let chains = mixed(context, stream);
+    let _busy = chains.enter()?;
+    chains.promote(stream)?;
+    if let Some(filter) = read {
+        Chains::insert(&chains.read, Stage::native(filter), placement);
+    }
+    if let Some(filter) = write {
+        Chains::insert(&chains.write, Stage::native(filter), placement);
+    }
+    Ok(())
+}
+
 impl Chains {
+    pub(in crate::filters) fn contains(&self, id: i64) -> bool {
+        self.read.borrow().iter().any(|stage| stage.id == id)
+            || self.write.borrow().iter().any(|stage| stage.id == id)
+    }
+    fn promote(&self, resource: &Resource) -> Result<(), NativeError> {
+        if crate::user_file::resource_file(resource).is_none()
+            && let Some(filters) = with_stream(resource, |stream| stream.filters.take())?
+        {
+            self.read
+                .borrow_mut()
+                .extend(filters.read.into_filters().into_iter().map(Stage::native));
+            self.write
+                .borrow_mut()
+                .extend(filters.write.into_filters().into_iter().map(Stage::native));
+            *self.buffered.borrow_mut() = filters.buffered;
+            self.exhausted.set(filters.read_closed);
+        }
+        Ok(())
+    }
+
+    fn insert(stages: &RefCell<Vec<Stage>>, stage: Stage, placement: Placement) {
+        let mut stages = stages.borrow_mut();
+        match placement {
+            Placement::Prepend => stages.insert(0, stage),
+            Placement::Append | Placement::Uri => stages.push(stage),
+        }
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.read.borrow().len() + self.write.borrow().len()
     }
@@ -212,7 +252,13 @@ impl Chains {
             };
             let closing = block.is_empty();
             let Some(output) = self
-                .apply(context, &stages, function, block, closing)
+                .apply(
+                    context,
+                    &stages,
+                    function,
+                    block,
+                    if closing { Flush::Closing } else { Flush::No },
+                )
                 .await?
             else {
                 self.exhausted.set(true);
@@ -236,7 +282,7 @@ impl Chains {
         let mut count = 0;
         for chunk in bytes.chunks(crate::io_policy::CHUNK) {
             let Some(transformed) = self
-                .apply(context, &stages, function, chunk.to_vec(), false)
+                .apply(context, &stages, function, chunk.to_vec(), Flush::No)
                 .await?
             else {
                 return Ok(if count == 0 {
@@ -261,20 +307,20 @@ impl Chains {
         stages: &[Stage],
         function: &str,
         mut data: Vec<u8>,
-        closing: bool,
+        flush: Flush,
     ) -> Result<Option<Vec<u8>>, NativeError> {
         for (index, stage) in stages.iter().enumerate() {
             let stream = self.stream.borrow().upgrade();
-            let Some(output) = run(
-                context,
-                &stage.filter,
-                stream,
-                function,
-                data,
-                closing,
-                index == 0 && !closing,
-            )
-            .await?
+            let Some(output) = stage
+                .apply(
+                    context,
+                    stream,
+                    function,
+                    data,
+                    flush,
+                    index == 0 && flush == Flush::No,
+                )
+                .await?
             else {
                 return Ok(None);
             };
@@ -299,72 +345,6 @@ impl Drop for Busy<'_> {
     }
 }
 
-async fn run(
-    context: &mut dyn Context,
-    object: &Rc<Object>,
-    stream: Option<Rc<Resource>>,
-    function: &str,
-    data: Vec<u8>,
-    closing: bool,
-    initial: bool,
-) -> Result<Option<Vec<u8>>, NativeError> {
-    bounded(data.len()).map_err(|error| NativeError::error(error.to_string()))?;
-    let input = buckets::brigade(context, data);
-    let output = buckets::brigade(context, Vec::new());
-    let consumed = Value::Reference(Rc::new(RefCell::new(if initial {
-        Value::Int(0)
-    } else {
-        Value::Null
-    })));
-    let key = ArrayKey::str("stream");
-    if object.get(&key).is_some() {
-        object.set(key.clone(), stream.map_or(Value::Null, Value::Resource));
-    }
-    let _reset = StreamProperty { object, key };
-    let result = invoke(
-        context,
-        object,
-        "filter",
-        vec![
-            input.clone(),
-            output.clone(),
-            consumed,
-            Value::Bool(closing),
-        ],
-    )
-    .await;
-    if buckets::finish(&input).is_some_and(|input| !input.empty()) && result.is_ok() {
-        context.warning(format!(
-            "{function}(): Unprocessed filter buckets remaining on input brigade"
-        ));
-    }
-    let out = buckets::finish(&output);
-    match result? {
-        Some(value) => match to_int(&value, context.diagnostics())? {
-            PASS => Ok(Some(out.map_or_else(Vec::new, |out| out.bytes()))),
-            FEED => Ok(Some(Vec::new())),
-            _ => Ok(None),
-        },
-        _ => {
-            context.warning(format!("{function}(): Failed to call filter function"));
-            Ok(None)
-        }
-    }
-}
-
-struct StreamProperty<'a> {
-    object: &'a Object,
-    key: ArrayKey,
-}
-
-impl Drop for StreamProperty<'_> {
-    fn drop(&mut self) {
-        if self.object.get(&self.key).is_some() {
-            self.object.set(self.key.clone(), Value::Null);
-        }
-    }
-}
-
 pub(crate) async fn close_released(
     context: &mut dyn Context,
     resource: &Rc<Resource>,
@@ -385,7 +365,7 @@ pub(crate) async fn close(
     let _busy = chains.enter()?;
     let stages = chains.write.take();
     let output = chains
-        .apply(context, &stages, "fclose", Vec::new(), true)
+        .apply(context, &stages, "fclose", Vec::new(), Flush::Closing)
         .await;
     let result = match output {
         Ok(Some(data)) => crate::transfer::write_unfiltered(context, resource, &data, "fclose")
@@ -396,7 +376,7 @@ pub(crate) async fn close(
     };
     let mut close_error = None;
     for stage in chains.read.take().into_iter().chain(stages) {
-        if let Err(error) = invoke(context, &stage.filter, "onclose", Vec::new()).await
+        if let Err(error) = stage.close(context).await
             && close_error.is_none()
         {
             close_error = Some(error);
@@ -410,24 +390,11 @@ pub(crate) async fn close(
     result.and(close_error.map_or(Ok(()), Err))
 }
 
-pub(crate) async fn remove(
+pub(in crate::filters) async fn remove(
     context: &mut dyn Context,
     resource: &Resource,
-) -> Result<Option<Value>, NativeError> {
-    let stream_id = resource
-        .data
-        .borrow()
-        .as_ref()
-        .and_then(|data| data.downcast_ref::<Attachment>())
-        .map(|attachment| attachment.0);
-    let Some(stream_id) = stream_id else {
-        return Ok(None);
-    };
-    let Some(chains) = lookup(context, stream_id) else {
-        return Err(NativeError::type_error(
-            "stream_filter_remove(): supplied resource is not a valid stream filter resource",
-        ));
-    };
+    chains: &Chains,
+) -> NativeResult {
     let _busy = chains.enter()?;
     let stream = chains.stream.borrow().upgrade();
     for (read, stages) in [(true, &chains.read), (false, &chains.write)] {
@@ -437,24 +404,24 @@ pub(crate) async fn remove(
         };
         let stage = &remaining[index];
         let function = "stream_filter_remove";
-        let Some(out) = run(
-            context,
-            &stage.filter,
-            stream.clone(),
-            function,
-            Vec::new(),
-            true,
-            false,
-        )
-        .await?
-        else {
-            return Ok(Some(Value::Bool(false)));
-        };
-        let Some(out) = chains
-            .apply(context, &remaining[index + 1..], function, out, false)
+        let Some(out) = stage
+            .apply(
+                context,
+                stream.clone(),
+                function,
+                Vec::new(),
+                Flush::Closing,
+                false,
+            )
             .await?
         else {
-            return Ok(Some(Value::Bool(false)));
+            return Ok(Value::Bool(false));
+        };
+        let Some(out) = chains
+            .apply(context, &remaining[index + 1..], function, out, Flush::No)
+            .await?
+        else {
+            return Ok(Value::Bool(false));
         };
         if read {
             let mut buffer = chains.buffered.borrow_mut();
@@ -465,10 +432,10 @@ pub(crate) async fn remove(
             crate::transfer::write_unfiltered(context, stream, &out, function).await?;
         }
         stages.borrow_mut().remove(index);
-        invoke(context, &stage.filter, "onclose", Vec::new()).await?;
+        stage.close(context).await?;
     }
     resource.data.borrow_mut().take();
-    Ok(Some(Value::Bool(true)))
+    Ok(Value::Bool(true))
 }
 
 fn finish(context: &mut dyn Context, _: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -483,7 +450,7 @@ fn finish(context: &mut dyn Context, _: Vec<Value>) -> LocalFuture<'_, NativeRes
                 close(context, &resource).await?;
             } else {
                 for stage in chains.read.take().into_iter().chain(chains.write.take()) {
-                    invoke(context, &stage.filter, "onclose", Vec::new()).await?;
+                    stage.close(context).await?;
                 }
             }
         }

@@ -2,8 +2,9 @@
 
 mod buckets;
 mod chain;
+mod stage;
 
-pub(super) use chain::{attach, remove};
+pub(super) use chain::{Placement, attach, attach_native, remove};
 pub(crate) use chain::{close, close_released, lookup};
 
 use phera_extension_api::{

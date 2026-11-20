@@ -9,7 +9,7 @@ mod uri;
 pub(crate) mod user;
 
 pub(crate) use functions::register;
-pub(crate) use uri::FilterUri;
+pub(crate) use uri::{FilterUri, is_filter_uri, open_request_filter};
 
 use std::collections::VecDeque;
 use std::io;
@@ -66,6 +66,10 @@ pub(crate) struct Chain {
 }
 
 impl Chain {
+    pub(super) fn into_filters(self) -> VecDeque<Filter> {
+        self.stages
+    }
+
     pub fn active(&self) -> bool {
         !self.stages.is_empty() || self.failed
     }

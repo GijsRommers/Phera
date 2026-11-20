@@ -1,5 +1,7 @@
 //! `require 'virtual://script'` reads PHP source from an application wrapper.
 
+use std::borrow::Cow;
+
 use phera_extension_api::{Context, NativeError, Value};
 
 use crate::errors::open_failure_message;
@@ -38,12 +40,22 @@ pub async fn include_source(
         }
         return Ok(None);
     };
-    let flags = USE_PATH | OPEN_FOR_INCLUDE | 0x0001_0000;
-    let Some(stream) = open(context, wrapper, function, path, b"rb", flags, Value::Null).await?
+    let (open_path, use_path) = resolved_path(context, path);
+    let flags = use_path | OPEN_FOR_INCLUDE | 0x0001_0000;
+    let Some(stream) = open(
+        context,
+        wrapper,
+        function,
+        &open_path,
+        b"rb",
+        flags,
+        Value::Null,
+    )
+    .await?
     else {
         return Ok(Some(IncludeSource::Unavailable));
     };
-    let name = stream.opened_path.as_deref().unwrap_or(path);
+    let name = stream.opened_path.as_deref().unwrap_or(&open_path);
     let result: Result<_, NativeError> = async {
         stream
             .option(context, function, 2, 0, Value::Int(platform_buffer_size()))
@@ -72,6 +84,22 @@ pub async fn include_source(
     let result = result?;
     close?;
     Ok(Some(result))
+}
+
+fn resolved_path<'a>(context: &mut dyn Context, path: &'a [u8]) -> (Cow<'a, [u8]>, i64) {
+    if let Target::File(filename) = Target::parse(path) {
+        let include_path = context.include_path();
+        let script = context.script_path();
+        if let Some(resolved) = crate::request::search(
+            crate::request::directory(context),
+            filename,
+            &include_path,
+            script.as_deref(),
+        ) {
+            return (Cow::Owned(crate::request::bytes(&resolved).to_vec()), 0);
+        }
+    }
+    (Cow::Borrowed(path), USE_PATH)
 }
 
 pub(crate) fn platform_buffer_size() -> i64 {

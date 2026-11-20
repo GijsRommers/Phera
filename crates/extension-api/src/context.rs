@@ -162,6 +162,9 @@ pub trait Context {
         ".".into()
     }
 
+    /// The request's wrapper table can intercept or disable an include.
+    fn set_include_wrappers(&mut self, _enabled: bool) {}
+
     /// The converter provided by the registered iconv module.
     fn iconv_converter(&self) -> Option<crate::IconvConverter> {
         None

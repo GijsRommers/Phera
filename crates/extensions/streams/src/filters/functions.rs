@@ -59,7 +59,7 @@ pub fn register(registry: &mut Registry) {
     }
 }
 
-struct Attachment(Weak<Resource>);
+pub(super) struct Attachment(pub(super) Weak<Resource>);
 
 fn get_filters(context: &mut dyn Context, _: &[Value]) -> NativeResult {
     let mut names = PhpArray::new();
@@ -123,6 +123,7 @@ async fn attach(
         return Ok(Value::Bool(false));
     }
     if let Some(class) = super::user::class(context, name) {
+        let placement = placement(prepend);
         return super::user::attach(
             context,
             stream,
@@ -130,22 +131,15 @@ async fn attach(
             name,
             &class,
             params,
-            ((read, write), prepend),
+            ((read, write), placement),
         )
         .await;
-    }
-    if user_stream.is_some() {
-        context.warning(format!(
-            "{function}(): Built-in filters on user wrappers are unsupported"
-        ));
-        return Ok(Value::Bool(false));
     }
     let iconv = context.iconv_converter();
     let mut read_filter = read.then(|| Filter::new(0, name, params, iconv)).flatten();
     let mut write_filter = write.then(|| Filter::new(0, name, params, iconv)).flatten();
     if read && read_filter.is_none() || write && write_filter.is_none() {
-        let name = String::from_utf8_lossy(name);
-        context.warning(format!("{function}(): Unable to locate filter \"{name}\""));
+        cannot_create(context, function, name);
         return Ok(Value::Bool(false));
     }
     if !read && !write {
@@ -161,6 +155,19 @@ async fn attach(
             "Stream filter resource allocation failed",
         ));
     };
+    if user_stream.is_some() || super::user::lookup(context, stream.id).is_some() {
+        for stage in read_filter.iter_mut().chain(&mut write_filter) {
+            stage.id = filter.id;
+        }
+        super::user::attach_native(
+            context,
+            stream,
+            read_filter,
+            write_filter,
+            placement(prepend),
+        )?;
+        return Ok(value);
+    }
     with_stream(stream, |stream| {
         let filters = stream
             .filters
@@ -178,6 +185,29 @@ async fn attach(
     Ok(value)
 }
 
+fn placement(prepend: bool) -> super::user::Placement {
+    if prepend {
+        super::user::Placement::Prepend
+    } else {
+        super::user::Placement::Append
+    }
+}
+
+pub(super) fn cannot_create(context: &mut dyn Context, function: &str, name: &[u8]) {
+    let known = BUILTINS.iter().any(|entry| {
+        let bytes = entry.as_bytes();
+        bytes == name
+            || bytes
+                .strip_suffix(b"*")
+                .is_some_and(|prefix| name.starts_with(prefix))
+    });
+    let message = if known { "create or locate" } else { "locate" };
+    let name = String::from_utf8_lossy(name);
+    context.warning(format!(
+        "{function}(): Unable to {message} filter \"{name}\""
+    ));
+}
+
 fn remove(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let resource = argument_resource(
@@ -185,9 +215,6 @@ fn remove(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
             "stream_filter_remove",
             "#1 ($stream_filter)",
         )?;
-        if let Some(result) = super::user::remove(context, resource).await? {
-            return Ok(result);
-        }
         let stream = resource
             .data
             .borrow()
@@ -200,6 +227,11 @@ fn remove(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                 "stream_filter_remove(): supplied resource is not a valid stream filter resource",
             ));
         };
+        if let Some(chains) = super::user::lookup(context, stream.id)
+            && chains.contains(resource.id)
+        {
+            return super::user::remove(context, resource, &chains).await;
+        }
         let result = crate::resource::operate(&stream, crate::io_policy::IoPolicy::Blocking, {
             let id = resource.id;
             move |stream| {

@@ -5,7 +5,7 @@ use phera_extension_api::{
 };
 use rustix::{
     fs::Access,
-    process::{Gid, getegid, geteuid, getgroups},
+    process::{Gid, getgid, getgroups, getuid},
 };
 
 use crate::metadata::{Query, STAT_NAMES, StatField, stat_array};
@@ -124,14 +124,11 @@ fn permits(access: Access, mode: i64, fields: [i64; 13]) -> bool {
     if access == Access::EXISTS {
         return true;
     }
-    let uid = geteuid().as_raw();
-    if uid == 0 {
-        return access != Access::EXEC_OK || mode & 0o111 != 0;
-    }
+    let uid = getuid().as_raw();
     let gid = fields[StatField::Gid as usize] as u32;
     let shift = if i64::from(uid) == fields[StatField::Uid as usize] {
         6
-    } else if getegid().as_raw() == gid
+    } else if getgid().as_raw() == gid
         || getgroups().is_ok_and(|groups| groups.contains(&Gid::from_raw(gid)))
     {
         3

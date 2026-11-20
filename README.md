@@ -99,10 +99,10 @@ Wrapper and filter registrations made during a snapshot boot carry over to
 each fork. Open application wrapper handles and attached filters must be
 created after the snapshot.
 
-Use `php://filter` or `stream_filter_append()` to transform a native stream
-with built-in filters. Register user filters with `stream_filter_register()` and
-attach them to a stream resource with `stream_filter_append()`. Phera limits the chain to 16 stages, intermediate
-buckets to 8 MiB.
+Use `php://filter` or `stream_filter_append()` to transform a stream.
+Register PHP filters with `stream_filter_register()` and combine them with
+built-in filters on native streams or application wrappers. Phera limits
+chains to 16 stages and intermediate buckets to 8 MiB.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 

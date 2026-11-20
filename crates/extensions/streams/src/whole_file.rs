@@ -87,6 +87,20 @@ fn file_get_contents(
             .transpose()?;
         let offset = args::int(&arguments, 3).unwrap_or(0);
         let use_include = args::bool(&arguments, 1).unwrap_or(false);
+        if crate::filters::is_filter_uri(name)
+            && let Some(stream) = Box::pin(crate::filters::open_request_filter(
+                context,
+                function,
+                name,
+                b"rb",
+                use_include,
+                args::value(&arguments, 2),
+            ))
+            .await?
+        {
+            return crate::filtered_files::contents(context, stream, function, offset, length)
+                .await;
+        }
         files(context).use_default_context(args::value(&arguments, 2));
         if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
             return user_contents(
@@ -131,6 +145,19 @@ fn readfile(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
         let function = "readfile";
         let name = name(&arguments, function, 2)?;
         let use_include = args::bool(&arguments, 1).unwrap_or(false);
+        if crate::filters::is_filter_uri(name)
+            && let Some(stream) = Box::pin(crate::filters::open_request_filter(
+                context,
+                function,
+                name,
+                b"rb",
+                use_include,
+                args::value(&arguments, 2),
+            ))
+            .await?
+        {
+            return crate::filtered_files::passthru(context, stream, function).await;
+        }
         files(context).use_default_context(args::value(&arguments, 2));
         if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
             let explicit = args::value(&arguments, 2);
@@ -195,7 +222,22 @@ fn file(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
         }
         let use_path = flags & USE_PATH != 0;
         let use_default = flags & NO_DEFAULT_CONTEXT == 0;
-        let bytes = if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+        let bytes = if crate::filters::is_filter_uri(name)
+            && let Some(stream) = Box::pin(crate::filters::open_request_filter(
+                context,
+                "file",
+                name,
+                b"rb",
+                use_path,
+                args::value(&arguments, 2),
+            ))
+            .await?
+        {
+            match crate::filtered_files::contents(context, stream, "file", 0, None).await? {
+                Value::String(bytes) => bytes,
+                other => return Ok(other),
+            }
+        } else if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
             match user_contents(
                 context,
                 (wrapper, name),

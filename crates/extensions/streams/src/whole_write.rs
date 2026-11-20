@@ -55,6 +55,26 @@ pub fn file_put_contents(
         } else {
             b"wb"
         };
+        if !lock
+            && let Some(stream) = crate::filters::open_request_filter(
+                context,
+                function,
+                name,
+                mode,
+                flags & USE_PATH != 0,
+                args::value(&arguments, 3),
+            )
+            .await?
+        {
+            return write_request_filter(
+                context,
+                stream,
+                function,
+                data,
+                source.map(|stream| stream.as_ref()),
+            )
+            .await;
+        }
         if flags & crate::whole_file::NO_DEFAULT_CONTEXT == 0 {
             files(context).use_default_context(args::value(&arguments, 3));
         }
@@ -170,6 +190,36 @@ pub fn file_put_contents(
         }
         finish_write(context, wrapper, &bytes, function, result)
     })
+}
+
+async fn write_request_filter(
+    context: &mut dyn Context,
+    stream: Value,
+    function: &str,
+    data: &Value,
+    source: Option<&phera_extension_api::value::Resource>,
+) -> NativeResult {
+    let Value::Resource(resource) = &stream else {
+        return Ok(stream);
+    };
+    let result = async {
+        let bytes = if let Some(source) = source {
+            match crate::transfer::read_context(context, source, function, None, false).await? {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    read_notice(context, function, &error, CHUNK as u64);
+                    return Ok(Value::Bool(false));
+                }
+            }
+        } else if let Some(bytes) = join_data(context, data)? {
+            bytes
+        } else {
+            return Ok(Value::Bool(false));
+        };
+        crate::transfer::write(context, resource, &bytes, function).await
+    }
+    .await;
+    crate::filtered_files::close_after(context, stream, function, result).await
 }
 
 /// Appends the bytes of `error_log($message, 3, $destination)` using the

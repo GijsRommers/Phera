@@ -17,6 +17,7 @@ mod directory_class;
 mod errors;
 mod file_attributes;
 pub mod file_io;
+mod filtered_files;
 mod filters;
 mod formatted;
 mod glob;
