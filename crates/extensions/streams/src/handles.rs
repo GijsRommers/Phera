@@ -13,7 +13,7 @@ use crate::io_policy::{CHUNK, IoPolicy};
 use crate::request::{files, new_resource};
 use crate::resource::{argument_resource, operate, stream_arg, with_stream};
 use crate::stream::Wrapper;
-use crate::wrapper::open;
+use crate::wrapper::{Target, open};
 
 pub const STREAM: Param = Param::new("stream", ParamType::Mixed);
 pub const FILENAME: Param = Param::new("filename", ParamType::String);
@@ -73,17 +73,33 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
     Box::pin(async move {
         let name = args::bytes(&arguments, 0);
         check_path("fopen", "#1 ($filename)", name)?;
+
+        let mode = args::bytes(&arguments, 1);
+        let include_path = args::bool(&arguments, 2).unwrap_or(false);
         let stream_context = args::value(&arguments, 3);
         validate(stream_context, "fopen", 4)?;
         files(context).use_default_context(stream_context);
-        let stream = open(
-            context,
-            "fopen",
-            name,
-            args::bytes(&arguments, 1),
-            args::bool(&arguments, 2).unwrap_or(false),
-        )
-        .await?;
+        let stream = if let Target::Gzip(filename) = Target::parse(name)
+            && let Some(level) = crate::context_options::option(stream_context, "zlib", "level")
+        {
+            let level = phera_extension_api::value::to_int(&level, context.diagnostics())?;
+            let level = u32::try_from(level).ok().filter(|level| *level <= 9);
+            crate::gzip::open_gzip(
+                context,
+                "fopen",
+                filename,
+                name,
+                mode,
+                crate::gzip::GzipOptions {
+                    include_path,
+                    level,
+                    wrapper: Wrapper::Gzip,
+                },
+            )
+            .await?
+        } else {
+            open(context, "fopen", name, mode, include_path).await?
+        };
         Ok(match stream {
             Some(stream) => new_resource(context.state(), "stream", stream),
             None => Value::Bool(false),
@@ -92,23 +108,36 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
 }
 
 fn fclose(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let candidate = argument_resource(args::value(&arguments, 0), "fclose", "#1 ($stream)")?;
-        if crate::directory::is_open(candidate) {
-            context.warning(
-                "fclose(): cannot close the provided stream, as it must not be manually closed"
-                    .into(),
-            );
-            return Ok(Value::Bool(false));
-        }
-        let resource = stream_arg(&arguments, "fclose")?;
-        let attachment = crate::child_pipe::take_attachment(resource)?;
-        files(context).stream_contexts.remove(&resource.id);
-        if let Some(attachment) = attachment {
-            attachment.close(context).await?;
-        }
-        Ok(Value::Bool(true))
-    })
+    Box::pin(close_arguments(context, arguments, "fclose"))
+}
+
+pub(crate) async fn close_arguments(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+) -> NativeResult {
+    let candidate = argument_resource(args::value(&arguments, 0), function, "#1 ($stream)")?;
+    if crate::directory::is_open(candidate) {
+        context.warning(format!(
+            "{function}(): cannot close the provided stream, as it must not be manually closed"
+        ));
+        return Ok(Value::Bool(false));
+    }
+    let resource = stream_arg(&arguments, function)?;
+    let gzip = with_stream(resource, |stream| stream.wrapper.is_gzip())?;
+    let success = if gzip {
+        operate(resource, IoPolicy::Blocking, |stream| stream.finish())
+            .await?
+            .is_ok()
+    } else {
+        true
+    };
+    let attachment = crate::child_pipe::take_attachment(resource)?;
+    files(context).stream_contexts.remove(&resource.id);
+    if let Some(attachment) = attachment {
+        attachment.close(context).await?;
+    }
+    Ok(Value::Bool(success))
 }
 
 fn feof(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -133,44 +162,59 @@ pub fn seek_from(offset: i64, whence: i64) -> Option<SeekFrom> {
 }
 
 fn fseek(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let offset = args::int(&arguments, 1).unwrap_or(0);
-        let whence = args::int(&arguments, 2).unwrap_or(0);
-        let candidate = argument_resource(args::value(&arguments, 0), "fseek", "#1 ($stream)")?;
-        if crate::directory::is_open(candidate) {
-            if offset == 0 && whence == 0 {
-                crate::directory::rewind(candidate).await?;
-                return Ok(Value::Int(0));
-            }
-            return Ok(Value::Int(-1));
+    Box::pin(seek_arguments(context, arguments, "fseek"))
+}
+
+pub(crate) async fn seek_arguments(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+) -> NativeResult {
+    let offset = args::int(&arguments, 1).unwrap_or(0);
+    let whence = args::int(&arguments, 2).unwrap_or(0);
+    let candidate = argument_resource(args::value(&arguments, 0), function, "#1 ($stream)")?;
+    if crate::directory::is_open(candidate) {
+        if offset == 0 && whence == 0 {
+            crate::directory::rewind(candidate).await?;
+            return Ok(Value::Int(0));
         }
-        let resource = stream_arg(&arguments, "fseek")?;
-        let seek = seek_from(offset, whence);
-        let success = match seek {
-            Some(seek) => operate(resource, IoPolicy::Inline, move |stream| stream.seek(seek))
-                .await?
-                .is_ok(),
-            None => false,
-        };
-        if !success && !with_stream(resource, |stream| stream.seekable)? {
-            context.warning("fseek(): Stream does not support seeking".into());
-        }
-        Ok(Value::Int(if success { 0 } else { -1 }))
-    })
+        return Ok(Value::Int(-1));
+    }
+    let resource = stream_arg(&arguments, function)?;
+    let policy = with_stream(resource, |stream| stream.seek_policy())?;
+    if whence == 2 && with_stream(resource, |stream| stream.wrapper.is_gzip())? {
+        context.warning(format!("{function}(): SEEK_END is not supported"));
+        return Ok(Value::Int(-1));
+    }
+    let seek = seek_from(offset, whence);
+    let success = match seek {
+        Some(seek) => operate(resource, policy, move |stream| stream.seek(seek))
+            .await?
+            .is_ok(),
+        None => false,
+    };
+    if !success && !with_stream(resource, |stream| stream.seekable)? {
+        context.warning(format!("{function}(): Stream does not support seeking"));
+    }
+    Ok(Value::Int(if success { 0 } else { -1 }))
 }
 
 fn rewind(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let resource = stream_arg(&arguments, "rewind")?;
-        let result = operate(resource, IoPolicy::Inline, |stream| {
-            stream.seek(SeekFrom::Start(0))
-        })
-        .await?;
-        if !with_stream(resource, |stream| stream.seekable)? {
-            context.warning("rewind(): Stream does not support seeking".into());
-        }
-        Ok(Value::Bool(result.is_ok()))
-    })
+    Box::pin(rewind_arguments(context, arguments, "rewind"))
+}
+
+pub(crate) async fn rewind_arguments(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+) -> NativeResult {
+    let resource = stream_arg(&arguments, function)?;
+    let policy = with_stream(resource, |stream| stream.seek_policy())?;
+    let result = operate(resource, policy, |stream| stream.seek(SeekFrom::Start(0))).await?;
+    if !with_stream(resource, |stream| stream.seekable)? {
+        context.warning(format!("{function}(): Stream does not support seeking"));
+    }
+    Ok(Value::Bool(result.is_ok()))
 }
 
 fn ftruncate(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -211,6 +255,13 @@ impl Flush {
     ) -> NativeResult {
         let stream = stream_arg(arguments, function)?;
         let result = operate(stream, IoPolicy::Blocking, move |stream| {
+            if let crate::stream::Backing::Gzip(gzip) = &mut stream.backing {
+                return if matches!(self, Self::Buffers) {
+                    gzip.flush()
+                } else {
+                    Err(io::ErrorKind::Unsupported.into())
+                };
+            }
             let Some(file) = stream.descriptor() else {
                 return match self {
                     Self::Buffers => Ok(()),

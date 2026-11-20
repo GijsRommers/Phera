@@ -65,10 +65,14 @@ phera-server = { path = "crates/server" }
 phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
 phera-ext-core = { path = "crates/extensions/core" }
+phera-ext-zlib = { path = "crates/extensions/zlib" }
+phera-ext-gmp = { path = "crates/extensions/gmp" }
+phera-ext-bcmath = { path = "crates/extensions/bcmath" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
 phera-ext-dom = { path = "crates/extensions/dom" }
 quick-xml = "0.42"
 html5ever = "0.40"
+phera-ext-curl = { path = "crates/extensions/curl" }
 phera-ext-date = { path = "crates/extensions/date" }
 phera-ext-filter = { path = "crates/extensions/filter" }
 phera-ext-hash = { path = "crates/extensions/hash" }
@@ -76,11 +80,13 @@ phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-mbstring = { path = "crates/extensions/mbstring" }
 iconv-native = "0.1"
 encoding_rs = "0.8.35"
+base16ct = { version = "1", features = ["alloc"] }
 cssparser = "0.38"
 precomputed-hash = "0.1"
 selectors = "0.41"
 base64 = "0.22"
 phera-ext-json = { path = "crates/extensions/json" }
+phera-ext-sodium = { path = "crates/extensions/sodium" }
 phera-ext-openssl = { path = "crates/extensions/openssl" }
 phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-sqlite = { path = "crates/sqlite" }
@@ -96,6 +102,18 @@ command-fds = "0.3.3"
 phera-ext-process = { path = "crates/extensions/process" }
 phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+blake2b_simd = "1"
+curve25519-dalek = "5"
+hmac = "0.12"
+siphasher = "1"
+poly1305 = { version = "0.9", features = ["zeroize"] }
+crypto-bigint = { version = "0.7", features = ["alloc", "zeroize"] }
+zeroize = "1.9"
+salsa20 = "0.11"
+chacha20 = { version = "0.10", features = ["legacy", "xchacha", "zeroize"] }
+scrypt = "0.12"
+block-padding = "0.4"
 aes = "0.9"
 aes-gcm = { version = "0.11", features = ["hazmat"] }
 cbc = "0.2"
@@ -143,6 +161,11 @@ rustix = { version = "1", features = ["fs", "param", "process", "system", "termi
 rustix-libc-wrappers = { version = "0.1.1", features = ["process"] }
 sysinfo = { version = "0.39.3", default-features = false, features = ["system"] }
 tempfile = "3"
+async-compression = { version = "0.4", features = ["tokio", "gzip", "zlib", "deflate", "brotli"] }
+cookie_store = { version = "0.22", default-features = false, features = ["preserve_order"] }
+psl = "2"
+tokio-util = { version = "0.7", features = ["io"] }
+tower-service = "0.3"
 memchr = "2"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }
@@ -156,6 +179,10 @@ httpdate = "1"
 # Compressing responses in `phera serve`. Both are Rust all the way down:
 # flate2 with its default miniz_oxide backend, and Dropbox's brotli.
 flate2 = "1"
+adler2 = "2"
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
 brotli = "9"
 fluent-uri = "0.4.1"
 url = "2.5"

@@ -238,6 +238,15 @@ const POW: FunctionEntry = FunctionEntry::sync(
 );
 
 fn pow(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    if (arguments[0].is_object() || arguments[1].is_object())
+        && let Some(result) = context.native_binary(
+            phera_extension_api::NativeBinaryOp::Power,
+            &arguments[0],
+            &arguments[1],
+        )?
+    {
+        return Ok(result);
+    }
     Ok(value::pow(
         &arguments[0],
         &arguments[1],

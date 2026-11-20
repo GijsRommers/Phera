@@ -53,7 +53,12 @@ impl Vm {
     }
 
     /// Frame entries point at the caller's call instruction and omit the main frame.
-    pub(crate) fn throwable_trace(&mut self, origin: crate::exceptions::TraceOrigin) -> Value {
+    pub(crate) fn throwable_trace(
+        &mut self,
+        origin: crate::exceptions::TraceOrigin,
+        redact: bool,
+    ) -> Value {
+        let arguments = !self.error_handlers.trace_ignore_args;
         let mut trace = PhpArray::new();
         if let Some(native) = matches!(origin, crate::exceptions::TraceOrigin::Engine)
             .then(|| self.failed_native.take())
@@ -70,12 +75,21 @@ impl Vm {
             } else {
                 entry.insert(ArrayKey::str("function"), Value::from(native.name));
             }
-            if !self.error_handlers.trace_ignore_args {
+            if arguments && !redact {
                 entry.insert(ArrayKey::str("args"), native.arguments);
             }
             let _ = trace.push(Value::Array(Rc::new(entry)));
         }
-        Value::from(self.capture_trace(trace, false, !self.error_handlers.trace_ignore_args, 0))
+        let mut trace = self.capture_trace(trace, false, arguments && !redact, 0);
+        if arguments && redact {
+            let empty = Value::from(PhpArray::new());
+            for (_, frame) in trace.iter_mut() {
+                if let Value::Array(frame) = frame {
+                    Rc::make_mut(frame).insert(ArrayKey::str("args"), empty.clone());
+                }
+            }
+        }
+        Value::from(trace)
     }
 
     /// Stop at the requested number of PHP-visible frames, including native callbacks.

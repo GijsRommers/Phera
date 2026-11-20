@@ -146,6 +146,11 @@ impl ClassHandle for Class {
             .is_some_and(|hooks| hooks.properties.is_some())
     }
 
+    #[cold]
+    fn cast(&self, object: &phera_value::Object, target: phera_value::ObjectCast) -> Option<Value> {
+        self.hooks.as_ref()?.cast?(object, target)
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

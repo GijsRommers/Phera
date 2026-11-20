@@ -83,6 +83,15 @@ impl Vm {
         target: Target,
     ) -> Result<(), NativeError> {
         let left = self.read_local(left);
+        if left.is_object()
+            && let Some(value) =
+                self.native_binary(operator, &left, &Value::Int(i64::from(right)))?
+        {
+            if !to_bool(&value) {
+                self.jump(target)?;
+            }
+            return Ok(());
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = crate::ops::binary(
             operator,

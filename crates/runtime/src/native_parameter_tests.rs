@@ -26,7 +26,13 @@ fn native_parameter_tables_match_php_stubs() {
     assert_eq!(
         audit.missing,
         [
+            "CurlHandle::__construct",
+            "CurlMultiHandle::__construct",
+            "CurlShareHandle::__construct",
+            "CurlSharePersistentHandle::__construct",
+            "DeflateContext::__construct",
             "Directory::__construct",
+            "InflateContext::__construct",
             "OpenSSLAsymmetricKey::__construct",
             "OpenSSLCertificate::__construct",
             "OpenSSLCertificateSigningRequest::__construct",
