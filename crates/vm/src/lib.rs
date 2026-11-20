@@ -539,9 +539,7 @@ impl Vm {
             .get_mut(register.index())
     }
 
-    // Always: the generator runner and the general handlers write results
-    // through it, and as a call it cost generators 2 percent.
-    #[inline(always)]
+    #[inline]
     fn set(&mut self, register: Reg, value: Value) {
         if let Some(frame) = self.current() {
             let (base, count) = (frame.base(), frame.count());
