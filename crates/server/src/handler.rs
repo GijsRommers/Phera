@@ -14,6 +14,13 @@ use crate::response::Response;
 /// returned future borrows the handler and is polled on that same thread.
 pub trait Handler: 'static {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>>;
+
+    /// Runs once on the worker's thread before it accepts connections, for
+    /// work no request should wait for (booting an application). Clients
+    /// that connect meanwhile wait in the operating system's queue.
+    fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+        Box::pin(async {})
+    }
 }
 
 /// Creates a handler per worker thread.

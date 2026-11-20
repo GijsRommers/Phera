@@ -270,6 +270,7 @@ const INFO: Param = Param::new("info", ParamType::IntOrString)
     .with_default(ConstantValue::Null);
 
 const HOOKS: ClassHooks = ClassHooks {
+    fork: Some(crate::native_state::fork_spl),
     clone: Some(NativeClone::Copy(clone_iterators)),
     compare: Some(compare),
     properties: Some(view),
@@ -316,3 +317,18 @@ pub(crate) fn register(registry: &mut Registry) {
         ..ClassEntry::class(CLASS)
     });
 }
+
+impl crate::native_state::ForkValues for Multiple {
+    fn fork_values(
+        &mut self,
+        fork: &mut phera_extension_api::value::Fork<'_>,
+    ) -> Result<(), String> {
+        for entry in self.entries.values_mut() {
+            crate::native_state::fork_value(&mut entry.iterator, fork);
+            crate::native_state::fork_value(&mut entry.label, fork);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) const FORK: crate::native_state::StoredFork = crate::native_state::fork_as::<Multiple>;

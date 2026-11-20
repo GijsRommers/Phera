@@ -68,7 +68,7 @@ echo '|', (int) function_exists('getallheaders'), '|', ini_get('default_charset'
     let cli = runtime.run_file(&entry, &[], None).await.unwrap();
     assert_eq!(cli.status, 0, "{}", String::from_utf8_lossy(&cli.output));
     assert_eq!(cli.output, b"sapi|0|UTF-8|2|0");
-    let worker = runtime.web_worker();
+    let worker = runtime.web_worker(0);
     for (query, expected) in [
         ("change=1", b"sapi|1|ASCII|2|1".as_slice()),
         ("", b"sapi|1|UTF-8|2|0".as_slice()),

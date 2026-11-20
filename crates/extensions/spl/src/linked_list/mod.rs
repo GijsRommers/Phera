@@ -142,3 +142,17 @@ fn range(method: &str) -> NativeError {
         format!("{CLASS}::{method}(): Argument #1 ($index) is out of range"),
     )
 }
+
+impl crate::native_state::ForkValues for List {
+    fn fork_values(
+        &mut self,
+        fork: &mut phera_extension_api::value::Fork<'_>,
+    ) -> Result<(), String> {
+        for entry in &mut self.entries {
+            crate::native_state::fork_value(&mut entry.value, fork);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) const FORK: crate::native_state::StoredFork = crate::native_state::fork_as::<List>;

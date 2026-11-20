@@ -13,6 +13,7 @@ pub mod native_parameters;
 mod object_handlers;
 mod registry;
 mod request_references;
+pub use request_references::register_cycle_fork;
 pub mod serialization;
 mod state;
 pub mod testing;
@@ -40,12 +41,12 @@ pub use function::{
 };
 pub use object_handlers::{
     ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeBinary,
-    NativeClone, NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,
-    PropertyProjection, PropertyPurpose,
+    NativeClone, NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeForkHook,
+    NativeIterator, PropertyProjection, PropertyPurpose, fork_clone, fork_refused_handle,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
-pub use registry::{ConstantValue, Registry};
-pub use state::{ProcessCancellation, RequestState};
+pub use registry::{BundledSource, ConstantValue, Registry, ResourceFork};
+pub use state::{ProcessCancellation, RequestState, StateFork, copy_state, fresh_state};
 pub use working_directory::WorkingDirectory;
 
 /// The PHP version exposed by the engine and its built-in modules.

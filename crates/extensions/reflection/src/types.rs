@@ -9,7 +9,7 @@ use phera_extension_api::{
 use crate::{UNCLONEABLE, allocate, load, values};
 
 #[derive(Clone)]
-struct ReflectedType {
+pub(crate) struct ReflectedType {
     text: String,
     kind: Kind,
 }

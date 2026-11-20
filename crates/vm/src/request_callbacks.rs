@@ -56,7 +56,7 @@ impl OutputCallbacks {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct ResourceFinalizers(Vec<(&'static str, AsyncFn)>);
 
 impl ResourceFinalizers {
@@ -182,5 +182,34 @@ impl Vm {
             }
         }
         self.request_callbacks.shutdown.clear();
+    }
+}
+
+impl crate::snapshot::ForkCopy for Shutdown {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        Shutdown {
+            key: self.key,
+            callback: self.callback.fork_copy(fork),
+            arguments: self.arguments.fork_copy(fork),
+        }
+    }
+}
+
+/// Shutdown functions registered before the snapshot run at the end of
+/// every fork's request, on that fork's copies.
+impl crate::snapshot::ForkCopy for RequestCallbacks {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        let output = match &self.output {
+            OutputCallbacks::None => OutputCallbacks::None,
+            OutputCallbacks::Headers(headers) => OutputCallbacks::Headers(headers.fork_copy(fork)),
+            OutputCallbacks::AfterOutput(finalizer) => OutputCallbacks::AfterOutput(*finalizer),
+            OutputCallbacks::Both(headers, finalizer) => {
+                OutputCallbacks::Both(headers.fork_copy(fork), *finalizer)
+            }
+        };
+        RequestCallbacks {
+            output,
+            shutdown: self.shutdown.fork_copy(fork),
+        }
     }
 }
