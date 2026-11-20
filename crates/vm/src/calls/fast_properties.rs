@@ -147,7 +147,7 @@ impl Machine<'_> {
     /// is one declared property (of `$this`, of an object in a register,
     /// or for a read, of an object at an integer index of an array) and
     /// the site has an entry.
-    fn with_site<R>(
+    pub(super) fn with_site<R>(
         &self,
         position: Position,
         (path, shape): (PathId, Shape),
@@ -162,6 +162,9 @@ impl Machine<'_> {
                 PathBase::Register(root),
                 Shape::Read,
             ) => self.element_object(position, root, *index)?,
+            ([PathStep::Property(_), PathStep::Index(_), ..], base, Shape::Element) => {
+                self.property_object(position, base)?
+            }
             _ => return None,
         };
         // The VM keys the site by the position after the instruction,
@@ -218,9 +221,11 @@ impl Machine<'_> {
 }
 
 /// Which paths an access takes: the VM writes only to a property reached
-/// directly, but reads also one of an object found at an array index.
+/// directly, but reads also one of an object found at an array index; an
+/// element read starts with a property and goes on with array keys.
 #[derive(Clone, Copy)]
-enum Shape {
+pub(super) enum Shape {
     Read,
     Write,
+    Element,
 }

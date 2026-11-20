@@ -54,14 +54,24 @@ impl Machine<'_> {
                 dst,
                 path,
                 mode: FetchMode::Read,
-            } => self.fetch_property::<GUARDED>(position, dst, path),
+            } => match self.fetch_property::<GUARDED>(position, dst, path) {
+                Step::Slow => {
+                    self.fetch_property_element::<GUARDED>(position, dst, (path, FetchMode::Read))
+                }
+                done => done,
+            },
             Instruction::Fetch {
                 dst,
                 path,
-                mode: FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty,
+                mode: mode @ (FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty),
             } => match self.quiet_variable(path, position) {
                 Some(found) => self.store_quiet::<GUARDED>(position, dst, found),
-                None => self.fetch_property_quietly::<GUARDED>(position, dst, path),
+                None => match self.fetch_property_quietly::<GUARDED>(position, dst, path) {
+                    Step::Slow => {
+                        self.fetch_property_element::<GUARDED>(position, dst, (path, mode))
+                    }
+                    done => done,
+                },
             },
             // An element of an object with ArrayAccess, then a property.
             Instruction::AssignPath { path, src } => {

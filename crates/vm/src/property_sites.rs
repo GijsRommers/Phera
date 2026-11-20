@@ -262,6 +262,35 @@ impl Vm {
         Ok(Some(entry))
     }
 
+    /// Records the property's site for a read of an element held in a
+    /// property (`$this->items[$key]`, `isset($object->map['a']['b'])`), so
+    /// that the interpreter loop can make the next such read itself (see
+    /// `calls::fast_property_elements`). Finding the entry raises nothing:
+    /// a property that cannot be read from here simply gets no entry, and
+    /// the read goes on in the general path, which raises PHP's error.
+    pub(crate) fn prepare_element_site(&mut self, place: &AccessPath) -> Result<(), NativeError> {
+        let mut steps = place.steps()?;
+        let (Some(Step::Property(name)), Some(Step::Index(_))) = (steps.next(), steps.next())
+        else {
+            return Ok(());
+        };
+        let object = match place.base()? {
+            phera_bytecode::PathBase::This { .. } => {
+                self.current().and_then(|frame| frame.this().cloned())
+            }
+            phera_bytecode::PathBase::Register(register) => match self.read_defined_local(register)
+            {
+                Some(Value::Object(object)) => Some(object),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(object) = object {
+            let _ = self.property_entry(&object, name);
+        }
+        Ok(())
+    }
+
     /// Mirrors read_place/read_property for an existing single property. Missing
     /// slots fall through for typed initialization errors and undefined warnings.
     pub(crate) fn read_property_site(
