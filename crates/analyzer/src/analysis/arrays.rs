@@ -2,7 +2,7 @@
 //! For partially known arrays, retain a common value type without guessing a key.
 
 use super::*;
-use crate::types::{Field, Shape, ShapeKey, ShapeKind};
+use crate::types::{CollectionKind, Field, Shape, ShapeKey, ShapeKind};
 use std::sync::Arc;
 
 impl Analyzer<'_> {
@@ -178,5 +178,30 @@ pub fn iteration_types(ty: &ValueType) -> (ValueType, ValueType) {
         (ValueType::Mixed, ValueType::Mixed)
     } else {
         (keys, values)
+    }
+}
+
+pub(super) fn nonempty_array(ty: &ValueType) -> bool {
+    match ty {
+        ValueType::Collection(collection) => {
+            collection.kind != CollectionKind::Iterable && collection.non_empty
+        }
+        ValueType::Shape(shape) => {
+            shape.kind != ShapeKind::Object && shape.fields.iter().any(|field| !field.optional)
+        }
+        _ => false,
+    }
+}
+
+pub(super) fn when_truthy(ty: ValueType) -> ValueType {
+    match ty {
+        ValueType::Collection(collection)
+            if collection.kind != CollectionKind::Iterable && !collection.non_empty =>
+        {
+            let mut collection = (*collection).clone();
+            collection.non_empty = true;
+            ValueType::Collection(std::sync::Arc::new(collection))
+        }
+        _ => ty,
     }
 }

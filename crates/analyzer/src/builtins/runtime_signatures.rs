@@ -76,6 +76,7 @@ fn preserve_false_return(index: &mut Index) {
         "ob_get_contents",
         "ob_get_clean",
         "iconv",
+        "normalizer_normalize",
         "parse_ini_file",
         "parse_ini_string",
     ] {

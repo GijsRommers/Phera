@@ -91,7 +91,7 @@ impl Analyzer<'_> {
                 || !expected.excludes_null()
         });
         let rejects = |ty: &ValueType| {
-            if self.strict_mixed(ty) && !expected.is_mixed() {
+            if self.strict_mixed(ty) && !super::strict_mixed::accepts_mixed(expected) {
                 return true;
             }
             expected.accepts(ty, self.index, policy) == Compatibility::Rejects

@@ -16,6 +16,8 @@ pub struct Place {
 pub enum AccessStep {
     Property(String),
     Method(String),
+    IntegerOffset(i64),
+    StringOffset(Vec<u8>),
 }
 
 impl Place {
@@ -38,6 +40,22 @@ impl Place {
                     nullsafe: false,
                 } if arguments.is_empty() => {
                     members.push(AccessStep::Method(name.name.to_ascii_lowercase()));
+                    expression = target;
+                }
+                ExpressionKind::Index {
+                    target,
+                    index: Some(index),
+                } => {
+                    let step = match &index.kind {
+                        ExpressionKind::Literal(phera_ast::Literal::Int(key)) => {
+                            AccessStep::IntegerOffset(*key)
+                        }
+                        ExpressionKind::Literal(phera_ast::Literal::String(key)) => {
+                            AccessStep::StringOffset(key.clone())
+                        }
+                        _ => return None,
+                    };
+                    members.push(step);
                     expression = target;
                 }
                 ExpressionKind::Variable(Variable::Named(root)) => {

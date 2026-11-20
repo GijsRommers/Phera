@@ -1,5 +1,6 @@
 {
   "docs.php": [],
+  "guards.php": [],
   "missing.php": [
     [6, 4, "missingType.iterableValue", "Function incomplete() has parameter $items with no value type specified in iterable type array."],
     [6, 4, "missingType.iterableValue", "Function incomplete() has parameter $iter with no value type specified in iterable type iterable."],

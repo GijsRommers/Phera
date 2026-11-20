@@ -35,6 +35,7 @@ pub fn result(name: &str, arguments: &[T]) -> Option<T> {
                 }
             }
             _ if name == "mb_convert_encoding" => return None,
+            T::Null | T::Bool | T::BoolLiteral(_) => continue,
             T::Array => T::Array,
             T::Collection(collection) if collection.kind != CollectionKind::Iterable => {
                 T::Collection(Arc::new(Collection {
@@ -58,6 +59,9 @@ pub fn result(name: &str, arguments: &[T]) -> Option<T> {
             _ => return None,
         };
         result = result.join(&item);
+    }
+    if result == T::Never {
+        return None;
     }
     if name == "mb_convert_encoding" && !arguments.get(2).is_none_or(single_encoding) {
         result = result.join(&T::BoolLiteral(false));

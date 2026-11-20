@@ -70,7 +70,7 @@ pub fn unary_type(operator: UnaryOperator, value: ValueType) -> ValueType {
         UnaryOperator::Minus if is_numeric(&value) => match value {
             T::IntLiteral(value) => value.checked_neg().map_or(T::Float, T::IntLiteral),
             T::Float => T::Float,
-            _ => T::Int.join(&T::Float),
+            _ => T::OverflowingInt,
         },
         UnaryOperator::BitwiseNot if is_string(&value) => T::String,
         UnaryOperator::BitwiseNot if is_numeric(&value) => T::Int,

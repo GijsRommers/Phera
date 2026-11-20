@@ -81,7 +81,7 @@ impl Analyzer<'_> {
                 let first = first?;
                 let (key, value) = array_parts();
                 let flag = if name == "array_slice" { 3 } else { 1 };
-                if is_list(first)
+                let result = if is_list(first)
                     && types
                         .get(flag)
                         .is_none_or(|flag| *flag == T::BoolLiteral(false))
@@ -89,6 +89,11 @@ impl Analyzer<'_> {
                     list(value)
                 } else {
                     collection(key, value)
+                };
+                if name == "array_reverse" && super::arrays::nonempty_array(first) {
+                    super::arrays::when_truthy(result)
+                } else {
+                    result
                 }
             }
             "array_merge" => {

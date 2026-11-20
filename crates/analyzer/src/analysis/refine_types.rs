@@ -93,19 +93,30 @@ impl Analyzer<'_> {
             scope.get(&place.root).ty
         };
         for member in &place.members {
+            let name = match member {
+                AccessStep::IntegerOffset(key) => {
+                    ty = super::arrays::offset_type(&ty, &ValueType::IntLiteral(*key));
+                    continue;
+                }
+                AccessStep::StringOffset(key) => {
+                    let key = ValueType::StringLiteral(key.as_slice().into());
+                    ty = super::arrays::offset_type(&ty, &key);
+                    continue;
+                }
+                AccessStep::Property(name) | AccessStep::Method(name) => name,
+            };
             let Some(class) = ty.class_name() else {
                 return ValueType::Mixed;
             };
-            ty = match member {
-                AccessStep::Property(member) => self
-                    .index
-                    .property(class, member)
-                    .map(|property| property.effective_type(self.index)),
-                AccessStep::Method(member) => self
-                    .index
-                    .method(class, member)
-                    .or_else(|| self.index.doc_method(class, member))
-                    .map(|signature| signature.clone().typed(self.index).returns),
+            ty = if matches!(member, AccessStep::Property(_)) {
+                self.index
+                    .property(class, name)
+                    .map(|property| property.effective_type(self.index))
+            } else {
+                self.index
+                    .method(class, name)
+                    .or_else(|| self.index.doc_method(class, name))
+                    .map(|signature| signature.clone().typed(self.index).returns)
             }
             .map_or(ValueType::Mixed, |ty| self.relative_type(ty, class));
         }

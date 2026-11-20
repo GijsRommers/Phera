@@ -68,3 +68,18 @@ impl Analyzer<'_> {
         );
     }
 }
+
+pub(super) fn accepts_mixed(ty: &ValueType) -> bool {
+    let mut pending = vec![ty];
+    while let Some(ty) = pending.pop() {
+        if ty.is_mixed() {
+            return true;
+        }
+        match ty {
+            ValueType::Union(arms) => pending.extend(arms.iter()),
+            ValueType::Template(template) => pending.push(&template.bound),
+            _ => {}
+        }
+    }
+    false
+}

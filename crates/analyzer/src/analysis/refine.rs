@@ -12,6 +12,11 @@ impl Analyzer<'_> {
                     scope.refine_variable_guard(name, truth);
                     if truth {
                         let ty = scope.get(name).ty.without_null();
+                        let ty = if self.level >= 7 {
+                            super::arrays::when_truthy(ty)
+                        } else {
+                            ty
+                        };
                         if ty != ValueType::Never {
                             if let Some(variable) = scope.variables.get_mut(name) {
                                 variable.definition = Definition::Definite;

@@ -188,7 +188,7 @@ fn fill_missing_hint<'a>(ty: &'a ValueType, inherited: &'a ValueType) -> &'a Val
     if targets.iter().any(|target| {
         match target {
         T::Array | T::Iterable => sources.iter().any(|source| {
-            matches!(source, T::Collection(_) | T::Shape(_))
+            matches!(source, T::Collection(_) | T::Shape(_) | T::Template(_))
         }),
         T::Class(name) => sources.iter().any(|source| {
             matches!(source, T::Generic(generic) if name.eq_ignore_ascii_case(&generic.base))

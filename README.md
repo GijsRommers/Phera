@@ -41,7 +41,7 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | `phera file.php` | Runs a script |
 | `phera serve public` | Serves a directory over HTTP: one process, one worker thread per core, many requests per thread |
 | `phera new shop` | Starts a project: a small JSON application, or Symfony's or Laravel's official one |
-| `phera check src` | Type-checks PHP and PHPDoc at levels 0–10 (`--level max`); reads PHPStan baselines |
+| `phera check src` | Type-checks PHP and PHPDoc at levels 0–10 (`--level max`) and reads PHPStan baselines |
 | `phera lint src` | Finds unused code and suspicious constructs; `--fix` applies the safe fixes |
 | `phera --dump file.php` | Prints the compiled bytecode |
 

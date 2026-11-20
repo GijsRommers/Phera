@@ -120,7 +120,8 @@ impl Analyzer<'_> {
         let before = scope.clone();
         self.widen_loop(body, [], scope);
         let nonempty = matches!(&subject.kind, ExpressionKind::Array(items)
-            if items.iter().any(|item| !item.spread));
+            if items.iter().any(|item| !item.spread))
+            || self.level >= 7 && super::arrays::nonempty_array(&subject_type);
         let (key_type, value_type) = if self.level >= 2 && !by_reference {
             super::arrays::iteration_types(&subject_type)
         } else {
