@@ -39,7 +39,7 @@ pub fn register(registry: &mut Registry) {
 
 fn get_wrappers(_: &mut dyn Context, _: &[Value]) -> NativeResult {
     let mut wrappers = PhpArray::new();
-    for name in ["php", "file", "data"] {
+    for name in ["php", "file", "data", "compress.zlib"] {
         wrappers.push(Value::from(name))?;
     }
     Ok(Value::from(wrappers))
@@ -54,7 +54,12 @@ fn is_local(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
                     "stream_is_local(): supplied resource is not a valid stream resource",
                 )
             })?,
-            |stream| Value::Bool(stream.wrapper != Wrapper::Data),
+            |stream| {
+                Value::Bool(!matches!(
+                    stream.wrapper,
+                    Wrapper::Data | Wrapper::GzipDirect | Wrapper::Gzip
+                ))
+            },
         );
     }
     let name = to_php_string(value, context.diagnostics())?;
@@ -84,7 +89,7 @@ fn is_local(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(Value::Bool(matches!(
         target,
-        Target::File(_) | Target::Php(_)
+        Target::File(_) | Target::Php(_) | Target::Gzip(_)
     )))
 }
 
@@ -155,6 +160,7 @@ fn metadata(stream: &Stream) -> PhpArray {
     }
     let (wrapper, kind) = match stream.wrapper {
         Wrapper::File => ("plainfile", "STDIO"),
+        Wrapper::Gzip | Wrapper::GzipDirect => ("ZLIB", "ZLIB"),
         Wrapper::Standard => ("PHP", "STDIO"),
         Wrapper::Process => ("plainfile", "STDIO"),
         Wrapper::ProcessSocket => ("", "generic_socket"),
@@ -164,14 +170,14 @@ fn metadata(stream: &Stream) -> PhpArray {
         Wrapper::Input => ("PHP", "Input"),
         Wrapper::Output => ("PHP", "Output"),
     };
-    if stream.child_pipe.is_none() {
+    if stream.wrapper != Wrapper::GzipDirect && stream.child_pipe.is_none() {
         insert("wrapper_type", Value::from(wrapper));
     }
     insert("stream_type", Value::from(kind));
     insert("mode", Value::from(stream.mode.clone()));
     insert("unread_bytes", Value::Int(stream.unread() as i64));
     insert("seekable", Value::Bool(stream.seekable));
-    if stream.child_pipe.is_none() {
+    if stream.wrapper != Wrapper::GzipDirect && stream.child_pipe.is_none() {
         insert("uri", Value::from(stream.uri.clone()));
     }
     result
@@ -214,7 +220,7 @@ fn supports_lock(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         return Ok(Value::Bool(false));
     }
     with_stream(stream_arg(arguments, "stream_supports_lock")?, |stream| {
-        Value::Bool(stream.descriptor().is_some())
+        Value::Bool(stream.lock_descriptor().is_some())
     })
 }
 

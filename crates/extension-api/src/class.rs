@@ -83,6 +83,8 @@ pub enum ClassKind {
     AbstractClass,
     /// A class that cannot be extended.
     FinalClass,
+    /// An immutable class that cannot be extended.
+    FinalReadonlyClass,
     Interface,
     /// An internal, unbacked enum with its cases in declaration order.
     UnitEnum(&'static [&'static str]),

@@ -40,7 +40,7 @@ pub(super) fn exact_types(parameter: &Param) -> TypeMask {
         P::Object => T::OBJECT,
         P::ArrayOrObject | P::ObjectOrArray => T::ARRAY.union(T::OBJECT),
         P::Number => T::INT.union(T::FLOAT),
-        P::IntOrString => T::INT.union(T::STRING),
+        P::IntOrString | P::NativeNumeric(_) => T::INT.union(T::STRING),
         P::ArrayOrInt => T::ARRAY.union(T::INT),
         P::ArrayOrString => T::ARRAY.union(T::STRING),
         P::ObjectOrString => T::OBJECT.union(T::STRING),
@@ -48,7 +48,7 @@ pub(super) fn exact_types(parameter: &Param) -> TypeMask {
         P::ArrayOrNumber => T::ARRAY.union(T::INT).union(T::FLOAT),
         P::ArrayOrFloat => T::ARRAY.union(T::FLOAT),
         P::ArrayOrBool => T::ARRAY.union(T::BOOL),
-        P::Mixed => T::MIXED.union(RESOURCE),
+        P::Untyped | P::Mixed => T::MIXED.union(RESOURCE),
         P::Class(_) | P::Callable | P::ReflectedObject | P::RecursiveOrAggregate => T::default(),
     };
     if parameter.accepts_null() {

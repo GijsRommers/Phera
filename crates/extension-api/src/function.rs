@@ -29,6 +29,8 @@ pub enum NativeFn {
 /// the function runs, with PHP's rules and PHP's error messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParamType {
+    /// A parameter with no declaration. It accepts the same values as `mixed`.
+    Untyped,
     Mixed,
     Bool,
     Int,
@@ -49,6 +51,8 @@ pub enum ParamType {
     Number,
     /// `int|string`
     IntOrString,
+    /// A native numeric object or one of its scalar inputs.
+    NativeNumeric(&'static NativeNumericParameter),
     /// `array|int`
     ArrayOrInt,
     /// `array|string`
@@ -73,6 +77,27 @@ pub enum ParamType {
     RecursiveOrAggregate,
 }
 
+/// Early validation for a native numeric type's string input.
+pub type NumericStringError = fn(&[u8]) -> Option<&'static str>;
+
+/// Native numeric types can reject malformed strings while preparing a call.
+/// This preserves the order of validation and coercion for later arguments.
+#[derive(Debug)]
+pub struct NativeNumericParameter {
+    pub class: &'static str,
+    pub declaration: &'static str,
+    pub type_error: &'static str,
+    pub string_error: Option<NumericStringError>,
+}
+
+impl PartialEq for NativeNumericParameter {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+impl Eq for NativeNumericParameter {}
+
 impl ParamType {
     pub fn name(self) -> &'static str {
         crate::arguments::type_text(self)
@@ -94,6 +119,7 @@ pub struct Param {
     /// The constant spelling PHP uses in a declaration, when the value is symbolic.
     pub default_name: Option<&'static str>,
     pub by_ref: bool,
+    pub(crate) raw_reference: bool,
     /// Replace the argument value in PHP traces.
     pub sensitive: bool,
     pub variadic: bool,
@@ -124,6 +150,7 @@ impl Param {
             default: None,
             default_name: None,
             by_ref: false,
+            raw_reference: false,
             sensitive: false,
             variadic: false,
         }
@@ -191,6 +218,14 @@ impl Param {
 
     pub const fn by_ref(mut self) -> Self {
         self.by_ref = true;
+        self
+    }
+
+    /// Preserve the declared type for reflection and let the native function check
+    /// the original referenced value and report its own diagnostic.
+    pub const fn raw_by_ref(mut self) -> Self {
+        self.by_ref = true;
+        self.raw_reference = true;
         self
     }
 

@@ -4,6 +4,7 @@
 use std::{
     cell::{Cell, OnceCell, RefCell},
     rc::Rc,
+    sync::Arc,
 };
 
 use phera_bytecode::{CompiledUnit, Constant};
@@ -25,7 +26,7 @@ pub(crate) struct UnitCache {
     pub(crate) classes: Vec<RefCell<Option<Rc<crate::classes::Class>>>>,
     /// Keyed by immutable unit TypeId and made at first unit use; spelling cannot
     /// change, so scope classification needs no invalidation. Relative types resolve per call.
-    pub(crate) type_scopes: Vec<crate::types::DeclarationScope>,
+    pub(crate) type_scopes: Arc<[crate::types::DeclarationScope]>,
     pub(crate) class_types: Vec<RefCell<Option<ClassTypeEntry>>>,
     /// The site cells of the top-level code and of each function, one per
     /// instruction, made when the function first looks a site up.
@@ -110,11 +111,14 @@ impl UnitCache {
                 .map(crate::unit_caches::value)
                 .collect(),
             classes: unit.symbols.iter().map(|_| RefCell::new(None)).collect(),
-            type_scopes: unit
-                .types
-                .iter()
-                .map(crate::types::declaration_scope)
-                .collect(),
+            type_scopes: match &unit.metadata {
+                Some(metadata) => metadata.type_scopes.clone(),
+                None => unit
+                    .types
+                    .iter()
+                    .map(crate::types::DeclarationScope::of)
+                    .collect(),
+            },
             class_types: unit.types.iter().map(|_| RefCell::new(None)).collect(),
             main_sites: Sites::new(),
             function_sites: unit.functions.iter().map(|_| Sites::new()).collect(),

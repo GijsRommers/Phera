@@ -146,6 +146,37 @@ base64_decode	ext/standard/basic_functions.stub.php:1912	string	r--		-	strict	o-
 base64_encode	ext/standard/basic_functions.stub.php:1906	string	r--		-
 base_convert	ext/standard/basic_functions.stub.php:3239	num	r--		-	from_base	r--		-	to_base	r--		-
 basename	ext/standard/basic_functions.stub.php:2357	path	r--		-	suffix	o--	""	s
+bcadd	ext/bcmath/bcmath.stub.php:8	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcceil	ext/bcmath/bcmath.stub.php:45	num	r--		-
+bccomp	ext/bcmath/bcmath.stub.php:37	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcdiv	ext/bcmath/bcmath.stub.php:17	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcdivmod	ext/bcmath/bcmath.stub.php:26	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcfloor	ext/bcmath/bcmath.stub.php:42	num	r--		-
+bcmath\number::__construct	ext/bcmath/bcmath.stub.php:61	num	r--		-
+bcmath\number::__serialize	ext/bcmath/bcmath.stub.php:92
+bcmath\number::__tostring	ext/bcmath/bcmath.stub.php:90
+bcmath\number::__unserialize	ext/bcmath/bcmath.stub.php:94	data	r--		-
+bcmath\number::add	ext/bcmath/bcmath.stub.php:63	num	r--		-	scale	o--	null	n
+bcmath\number::ceil	ext/bcmath/bcmath.stub.php:84
+bcmath\number::compare	ext/bcmath/bcmath.stub.php:88	num	r--		-	scale	o--	null	n
+bcmath\number::div	ext/bcmath/bcmath.stub.php:69	num	r--		-	scale	o--	null	n
+bcmath\number::divmod	ext/bcmath/bcmath.stub.php:74	num	r--		-	scale	o--	null	n
+bcmath\number::floor	ext/bcmath/bcmath.stub.php:82
+bcmath\number::mod	ext/bcmath/bcmath.stub.php:71	num	r--		-	scale	o--	null	n
+bcmath\number::mul	ext/bcmath/bcmath.stub.php:67	num	r--		-	scale	o--	null	n
+bcmath\number::pow	ext/bcmath/bcmath.stub.php:78	exponent	r--		-	scale	o--	null	n
+bcmath\number::powmod	ext/bcmath/bcmath.stub.php:76	exponent	r--		-	modulus	r--		-	scale	o--	null	n
+bcmath\number::round	ext/bcmath/bcmath.stub.php:86	precision	o--	0	i0	mode	o--	\RoundingMode::HalfAwayFromZero	eRoundingMode::HalfAwayFromZero
+bcmath\number::sqrt	ext/bcmath/bcmath.stub.php:80	scale	o--	null	n
+bcmath\number::sub	ext/bcmath/bcmath.stub.php:65	num	r--		-	scale	o--	null	n
+bcmod	ext/bcmath/bcmath.stub.php:20	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcmul	ext/bcmath/bcmath.stub.php:14	num1	r--		-	num2	r--		-	scale	o--	null	n
+bcpow	ext/bcmath/bcmath.stub.php:32	num	r--		-	exponent	r--		-	scale	o--	null	n
+bcpowmod	ext/bcmath/bcmath.stub.php:29	num	r--		-	exponent	r--		-	modulus	r--		-	scale	o--	null	n
+bcround	ext/bcmath/bcmath.stub.php:48	num	r--		-	precision	o--	0	i0	mode	o--	RoundingMode::HalfAwayFromZero	eRoundingMode::HalfAwayFromZero
+bcscale	ext/bcmath/bcmath.stub.php:39	scale	o--	null	n
+bcsqrt	ext/bcmath/bcmath.stub.php:35	num	r--		-	scale	o--	null	n
+bcsub	ext/bcmath/bcmath.stub.php:11	num1	r--		-	num2	r--		-	scale	o--	null	n
 bin2hex	ext/standard/basic_functions.stub.php:2277	string	r--		-
 bindec	ext/standard/basic_functions.stub.php:3208	binary_string	r--		-
 boolval	ext/standard/basic_functions.stub.php:3600	value	r--		-
@@ -195,6 +226,33 @@ closure::bindto	Zend/zend_closures.stub.php:19	newThis	r--		-	newScope	o--	"stat
 closure::call	Zend/zend_closures.stub.php:21	newThis	r--		-	args	ov-		-
 closure::fromcallable	Zend/zend_closures.stub.php:23	callback	r--		-
 closure::getcurrent	Zend/zend_closures.stub.php:25
+collator::__construct	ext/intl/collator/collator.stub.php:78	locale	r--		-
+collator::asort	ext/intl/collator/collator.stub.php:108	array	r-&		-	flags	o--	Collator::SORT_REGULAR	i0
+collator::compare	ext/intl/collator/collator.stub.php:90	string1	r--		-	string2	r--		-
+collator::create	ext/intl/collator/collator.stub.php:84	locale	r--		-
+collator::getattribute	ext/intl/collator/collator.stub.php:114	attribute	r--		-
+collator::geterrorcode	ext/intl/collator/collator.stub.php:144
+collator::geterrormessage	ext/intl/collator/collator.stub.php:150
+collator::getlocale	ext/intl/collator/collator.stub.php:138	type	r--		-
+collator::getsortkey	ext/intl/collator/collator.stub.php:156	string	r--		-
+collator::getstrength	ext/intl/collator/collator.stub.php:126
+collator::setattribute	ext/intl/collator/collator.stub.php:120	attribute	r--		-	value	r--		-
+collator::setstrength	ext/intl/collator/collator.stub.php:132	strength	r--		-
+collator::sort	ext/intl/collator/collator.stub.php:96	array	r-&		-	flags	o--	Collator::SORT_REGULAR	i0
+collator::sortwithsortkeys	ext/intl/collator/collator.stub.php:102	array	r-&		-
+collator_asort	ext/intl/php_intl.stub.php:307	object	r--		-	array	r-&		-	flags	o--	Collator::SORT_REGULAR	i0
+collator_compare	ext/intl/php_intl.stub.php:293	object	r--		-	string1	r--		-	string2	r--		-
+collator_create	ext/intl/php_intl.stub.php:291	locale	r--		-
+collator_get_attribute	ext/intl/php_intl.stub.php:295	object	r--		-	attribute	r--		-
+collator_get_error_code	ext/intl/php_intl.stub.php:311	object	r--		-
+collator_get_error_message	ext/intl/php_intl.stub.php:313	object	r--		-
+collator_get_locale	ext/intl/php_intl.stub.php:309	object	r--		-	type	r--		-
+collator_get_sort_key	ext/intl/php_intl.stub.php:315	object	r--		-	string	r--		-
+collator_get_strength	ext/intl/php_intl.stub.php:299	object	r--		-
+collator_set_attribute	ext/intl/php_intl.stub.php:297	object	r--		-	attribute	r--		-	value	r--		-
+collator_set_strength	ext/intl/php_intl.stub.php:301	object	r--		-	strength	r--		-
+collator_sort	ext/intl/php_intl.stub.php:303	object	r--		-	array	r-&		-	flags	o--	Collator::SORT_REGULAR	i0
+collator_sort_with_sort_keys	ext/intl/php_intl.stub.php:305	object	r--		-	array	r-&		-
 compact	ext/standard/basic_functions.stub.php:1634	var_name	r--		-	var_names	ov-		-
 config_get_hash	ext/standard/basic_functions.stub.php:2069
 connection_aborted	ext/standard/basic_functions.stub.php:2019
@@ -221,6 +279,48 @@ ctype_punct	ext/ctype/ctype.stub.php:19	text	r--		-
 ctype_space	ext/ctype/ctype.stub.php:21	text	r--		-
 ctype_upper	ext/ctype/ctype.stub.php:23	text	r--		-
 ctype_xdigit	ext/ctype/ctype.stub.php:25	text	r--		-
+curl_close	ext/curl/curl.stub.php:3744	handle	r--		-
+curl_copy_handle	ext/curl/curl.stub.php:3747	handle	r--		-
+curl_errno	ext/curl/curl.stub.php:3749	handle	r--		-
+curl_error	ext/curl/curl.stub.php:3752	handle	r--		-
+curl_escape	ext/curl/curl.stub.php:3755	handle	r--		-	string	r--		-
+curl_exec	ext/curl/curl.stub.php:3762	handle	r--		-
+curl_file_create	ext/curl/curl.stub.php:3765	filename	r--		-	mime_type	o--	null	n	posted_filename	o--	null	n
+curl_getinfo	ext/curl/curl.stub.php:3767	handle	r--		-	option	o--	null	n
+curl_init	ext/curl/curl.stub.php:3770	url	o--	null	n
+curl_multi_add_handle	ext/curl/curl.stub.php:3776	multi_handle	r--		-	handle	r--		-
+curl_multi_close	ext/curl/curl.stub.php:3780	multi_handle	r--		-
+curl_multi_errno	ext/curl/curl.stub.php:3782	multi_handle	r--		-
+curl_multi_exec	ext/curl/curl.stub.php:3785	multi_handle	r--		-	still_running	r-&		-
+curl_multi_get_handles	ext/curl/curl.stub.php:3778	multi_handle	r--		-
+curl_multi_getcontent	ext/curl/curl.stub.php:3787	handle	r--		-
+curl_multi_info_read	ext/curl/curl.stub.php:3794	multi_handle	r--		-	queued_messages	o-&	null	n
+curl_multi_init	ext/curl/curl.stub.php:3797
+curl_multi_remove_handle	ext/curl/curl.stub.php:3799	multi_handle	r--		-	handle	r--		-
+curl_multi_select	ext/curl/curl.stub.php:3801	multi_handle	r--		-	timeout	o--	1.0	d1.0
+curl_multi_setopt	ext/curl/curl.stub.php:3760	multi_handle	r--		-	option	r--		-	value	r--		-
+curl_multi_strerror	ext/curl/curl.stub.php:3804	error_code	r--		-
+curl_pause	ext/curl/curl.stub.php:3806	handle	r--		-	flags	r--		-
+curl_reset	ext/curl/curl.stub.php:3808	handle	r--		-
+curl_setopt	ext/curl/curl.stub.php:3812	handle	r--		-	option	r--		-	value	r--		-
+curl_setopt_array	ext/curl/curl.stub.php:3810	handle	r--		-	options	r--		-
+curl_share_close	ext/curl/curl.stub.php:3815	share_handle	r--		-
+curl_share_errno	ext/curl/curl.stub.php:3817	share_handle	r--		-
+curl_share_init	ext/curl/curl.stub.php:3820
+curl_share_init_persistent	ext/curl/curl.stub.php:3828	share_options	r--		-
+curl_share_setopt	ext/curl/curl.stub.php:3822	share_handle	r--		-	option	r--		-	value	r--		-
+curl_share_strerror	ext/curl/curl.stub.php:3825	error_code	r--		-
+curl_strerror	ext/curl/curl.stub.php:3831	error_code	r--		-
+curl_unescape	ext/curl/curl.stub.php:3758	handle	r--		-	string	r--		-
+curl_upkeep	ext/curl/curl.stub.php:3773	handle	r--		-
+curl_version	ext/curl/curl.stub.php:3837
+curlfile::__construct	ext/curl/curl_file.stub.php:12	filename	r--		-	mime_type	o--	null	n	posted_filename	o--	null	n
+curlfile::getfilename	ext/curl/curl_file.stub.php:15
+curlfile::getmimetype	ext/curl/curl_file.stub.php:18
+curlfile::getpostfilename	ext/curl/curl_file.stub.php:21
+curlfile::setmimetype	ext/curl/curl_file.stub.php:24	mime_type	r--		-
+curlfile::setpostfilename	ext/curl/curl_file.stub.php:27	posted_filename	r--		-
+curlstringfile::__construct	ext/curl/curl_file.stub.php:36	data	r--		-	postname	r--		-	mime	o--	"application/octet-stream"	s6170706c69636174696f6e2f6f637465742d73747265616d
 current	ext/standard/basic_functions.stub.php:1590	array	r--		-
 date	ext/date/php_date.stub.php:96	format	r--		-	timestamp	o--	null	n
 date_add	ext/date/php_date.stub.php:177	object	r--		-	interval	r--		-
@@ -250,6 +350,26 @@ date_timestamp_get	ext/date/php_date.stub.php:201	object	r--		-
 date_timestamp_set	ext/date/php_date.stub.php:199	object	r--		-	timestamp	r--		-
 date_timezone_get	ext/date/php_date.stub.php:182	object	r--		-
 date_timezone_set	ext/date/php_date.stub.php:184	object	r--		-	timezone	r--		-
+datefmt_create	ext/intl/php_intl.stub.php:329	locale	r--		-	dateType	o--	IntlDateFormatter::FULL	i0	timeType	o--	IntlDateFormatter::FULL	i0	timezone	o--	null	n	calendar	o--	null	n	pattern	o--	null	n
+datefmt_format	ext/intl/php_intl.stub.php:365	formatter	r--		-	datetime	r--		-
+datefmt_format_object	ext/intl/php_intl.stub.php:371	datetime	r--		-	format	o--	null	n	locale	o--	null	n
+datefmt_get_calendar	ext/intl/php_intl.stub.php:342	formatter	r--		-
+datefmt_get_calendar_object	ext/intl/php_intl.stub.php:348	formatter	r--		-
+datefmt_get_datetype	ext/intl/php_intl.stub.php:338	formatter	r--		-
+datefmt_get_error_code	ext/intl/php_intl.stub.php:383	formatter	r--		-
+datefmt_get_error_message	ext/intl/php_intl.stub.php:385	formatter	r--		-
+datefmt_get_locale	ext/intl/php_intl.stub.php:358	formatter	r--		-	type	o--	ULOC_ACTUAL_LOCALE	i0
+datefmt_get_pattern	ext/intl/php_intl.stub.php:356	formatter	r--		-
+datefmt_get_timetype	ext/intl/php_intl.stub.php:340	formatter	r--		-
+datefmt_get_timezone	ext/intl/php_intl.stub.php:350	formatter	r--		-
+datefmt_get_timezone_id	ext/intl/php_intl.stub.php:346	formatter	r--		-
+datefmt_is_lenient	ext/intl/php_intl.stub.php:362	formatter	r--		-
+datefmt_localtime	ext/intl/php_intl.stub.php:381	formatter	r--		-	string	r--		-	offset	o-&	null	n
+datefmt_parse	ext/intl/php_intl.stub.php:374	formatter	r--		-	string	r--		-	offset	o-&	null	n
+datefmt_set_calendar	ext/intl/php_intl.stub.php:344	formatter	r--		-	calendar	r--		-
+datefmt_set_lenient	ext/intl/php_intl.stub.php:360	formatter	r--		-	lenient	r--		-
+datefmt_set_pattern	ext/intl/php_intl.stub.php:354	formatter	r--		-	pattern	r--		-
+datefmt_set_timezone	ext/intl/php_intl.stub.php:352	formatter	r--		-	timezone	r--		-
 dateinterval::__construct	ext/date/php_date.stub.php:647	duration	r--		-
 dateinterval::__serialize	ext/date/php_date.stub.php:660
 dateinterval::__set_state	ext/date/php_date.stub.php:669	array	r--		-
@@ -346,6 +466,8 @@ dechex	ext/standard/basic_functions.stub.php:3233	num	r--		-
 decoct	ext/standard/basic_functions.stub.php:3226	num	r--		-
 define	Zend/zend_builtin_functions.stub.php:44	constant_name	r--		-	value	r--		-	case_insensitive	o--	false	f
 defined	Zend/zend_builtin_functions.stub.php:46	constant_name	r--		-
+deflate_add	ext/zlib/zlib.stub.php:275	context	r--		-	data	r--		-	flush_mode	o--	ZLIB_SYNC_FLUSH	i2
+deflate_init	ext/zlib/zlib.stub.php:273	encoding	r--		-	options	o--	[]	a
 deg2rad	ext/standard/basic_functions.stub.php:3202	num	r--		-
 deprecated::__construct	Zend/zend_attributes.stub.php:87	message	o--	null	n	since	o--	null	n
 die	Zend/zend_builtin_functions.stub.php:16	status	o--	0	i0
@@ -884,7 +1006,91 @@ globiterator::__construct	ext/spl/spl_directory.stub.php:212	pattern	r--		-	flag
 globiterator::count	ext/spl/spl_directory.stub.php:215
 gmdate	ext/date/php_date.stub.php:101	format	r--		-	timestamp	o--	null	n
 gmmktime	ext/date/php_date.stub.php:107	hour	r--		-	minute	o--	null	n	second	o--	null	n	month	o--	null	n	day	o--	null	n	year	o--	null	n
+gmp::__construct	ext/gmp/gmp.stub.php:62	num	o--	0	i0	base	o--	0	i0
+gmp::__serialize	ext/gmp/gmp.stub.php:64
+gmp::__unserialize	ext/gmp/gmp.stub.php:66	data	r--		-
+gmp_abs	ext/gmp/gmp.stub.php:104	num	r--		-
+gmp_add	ext/gmp/gmp.stub.php:79	num1	r--		-	num2	r--		-
+gmp_and	ext/gmp/gmp.stub.php:162	num1	r--		-	num2	r--		-
+gmp_binomial	ext/gmp/gmp.stub.php:186	n	r--		-	k	r--		-
+gmp_clrbit	ext/gmp/gmp.stub.php:172	num	r--		-	index	r--		-
+gmp_cmp	ext/gmp/gmp.stub.php:152	num1	r--		-	num2	r--		-
+gmp_com	ext/gmp/gmp.stub.php:166	num	r--		-
+gmp_div	ext/gmp/gmp.stub.php:96	num1	r--		-	num2	r--		-	rounding_mode	o--	GMP_ROUND_ZERO	i0
+gmp_div_q	ext/gmp/gmp.stub.php:91	num1	r--		-	num2	r--		-	rounding_mode	o--	GMP_ROUND_ZERO	i0
+gmp_div_qr	ext/gmp/gmp.stub.php:89	num1	r--		-	num2	r--		-	rounding_mode	o--	GMP_ROUND_ZERO	i0
+gmp_div_r	ext/gmp/gmp.stub.php:93	num1	r--		-	num2	r--		-	rounding_mode	o--	GMP_ROUND_ZERO	i0
+gmp_divexact	ext/gmp/gmp.stub.php:100	num1	r--		-	num2	r--		-
+gmp_export	ext/gmp/gmp.stub.php:73	num	r--		-	word_size	o--	1	i1	flags	o--	GMP_MSW_FIRST | GMP_NATIVE_ENDIAN	i17
+gmp_fact	ext/gmp/gmp.stub.php:106	num	r--		-
+gmp_gcd	ext/gmp/gmp.stub.php:134	num1	r--		-	num2	r--		-
+gmp_gcdext	ext/gmp/gmp.stub.php:140	num1	r--		-	num2	r--		-
+gmp_hamdist	ext/gmp/gmp.stub.php:182	num1	r--		-	num2	r--		-
+gmp_import	ext/gmp/gmp.stub.php:71	data	r--		-	word_size	o--	1	i1	flags	o--	GMP_MSW_FIRST | GMP_NATIVE_ENDIAN	i17
+gmp_init	ext/gmp/gmp.stub.php:69	num	r--		-	base	o--	0	i0
+gmp_intval	ext/gmp/gmp.stub.php:75	num	r--		-
+gmp_invert	ext/gmp/gmp.stub.php:144	num1	r--		-	num2	r--		-
+gmp_jacobi	ext/gmp/gmp.stub.php:146	num1	r--		-	num2	r--		-
+gmp_kronecker	ext/gmp/gmp.stub.php:150	num1	r--		-	num2	r--		-
+gmp_lcm	ext/gmp/gmp.stub.php:142	num1	r--		-	num2	r--		-
+gmp_legendre	ext/gmp/gmp.stub.php:148	num1	r--		-	num2	r--		-
+gmp_mod	ext/gmp/gmp.stub.php:98	num1	r--		-	num2	r--		-
+gmp_mul	ext/gmp/gmp.stub.php:83	num1	r--		-	num2	r--		-
+gmp_neg	ext/gmp/gmp.stub.php:102	num	r--		-
+gmp_nextprime	ext/gmp/gmp.stub.php:184	num	r--		-
+gmp_or	ext/gmp/gmp.stub.php:164	num1	r--		-	num2	r--		-
+gmp_perfect_power	ext/gmp/gmp.stub.php:130	num	r--		-
+gmp_perfect_square	ext/gmp/gmp.stub.php:128	num	r--		-
+gmp_popcount	ext/gmp/gmp.stub.php:180	num	r--		-
+gmp_pow	ext/gmp/gmp.stub.php:124	num	r--		-	exponent	r--		-
+gmp_powm	ext/gmp/gmp.stub.php:126	num	r--		-	exponent	r--		-	modulus	r--		-
+gmp_prob_prime	ext/gmp/gmp.stub.php:132	num	r--		-	repetitions	o--	10	i10
+gmp_random_bits	ext/gmp/gmp.stub.php:158	bits	r--		-
+gmp_random_range	ext/gmp/gmp.stub.php:160	min	r--		-	max	r--		-
+gmp_random_seed	ext/gmp/gmp.stub.php:156	seed	r--		-
+gmp_root	ext/gmp/gmp.stub.php:116	num	r--		-	nth	r--		-
+gmp_rootrem	ext/gmp/gmp.stub.php:122	num	r--		-	nth	r--		-
+gmp_scan0	ext/gmp/gmp.stub.php:176	num1	r--		-	start	r--		-
+gmp_scan1	ext/gmp/gmp.stub.php:178	num1	r--		-	start	r--		-
+gmp_setbit	ext/gmp/gmp.stub.php:170	num	r--		-	index	r--		-	value	o--	true	t
+gmp_sign	ext/gmp/gmp.stub.php:154	num	r--		-
+gmp_sqrt	ext/gmp/gmp.stub.php:108	num	r--		-
+gmp_sqrtrem	ext/gmp/gmp.stub.php:114	num	r--		-
+gmp_strval	ext/gmp/gmp.stub.php:77	num	r--		-	base	o--	10	i10
+gmp_sub	ext/gmp/gmp.stub.php:81	num1	r--		-	num2	r--		-
+gmp_testbit	ext/gmp/gmp.stub.php:174	num	r--		-	index	r--		-
+gmp_xor	ext/gmp/gmp.stub.php:168	num1	r--		-	num2	r--		-
 gmstrftime	ext/date/php_date.stub.php:123	format	r--		-	timestamp	o--	null	n
+grapheme_extract	ext/intl/php_intl.stub.php:449	haystack	r--		-	size	r--		-	type	o--	GRAPHEME_EXTR_COUNT	i0	offset	o--	0	i0	next	o-&	null	n
+grapheme_levenshtein	ext/intl/php_intl.stub.php:446	string1	r--		-	string2	r--		-	insertion_cost	o--	1	i1	replacement_cost	o--	1	i1	deletion_cost	o--	1	i1	locale	o--	""	s
+grapheme_str_split	ext/intl/php_intl.stub.php:444	string	r--		-	length	o--	1	i1
+grapheme_stripos	ext/intl/php_intl.stub.php:432	haystack	r--		-	needle	r--		-	offset	o--	0	i0	locale	o--	""	s
+grapheme_stristr	ext/intl/php_intl.stub.php:442	haystack	r--		-	needle	r--		-	beforeNeedle	o--	false	f	locale	o--	""	s
+grapheme_strlen	ext/intl/php_intl.stub.php:428	string	r--		-
+grapheme_strpos	ext/intl/php_intl.stub.php:430	haystack	r--		-	needle	r--		-	offset	o--	0	i0	locale	o--	""	s
+grapheme_strripos	ext/intl/php_intl.stub.php:436	haystack	r--		-	needle	r--		-	offset	o--	0	i0	locale	o--	""	s
+grapheme_strrpos	ext/intl/php_intl.stub.php:434	haystack	r--		-	needle	r--		-	offset	o--	0	i0	locale	o--	""	s
+grapheme_strstr	ext/intl/php_intl.stub.php:440	haystack	r--		-	needle	r--		-	beforeNeedle	o--	false	f	locale	o--	""	s
+grapheme_substr	ext/intl/php_intl.stub.php:438	string	r--		-	offset	r--		-	length	o--	null	n	locale	o--	""	s
+gzclose	ext/zlib/zlib.stub.php:229	stream	r--		-
+gzcompress	ext/zlib/zlib.stub.php:195	data	r--		-	level	o--	-1	i-1	encoding	o--	ZLIB_ENCODING_DEFLATE	i15
+gzdecode	ext/zlib/zlib.stub.php:201	data	r--		-	max_length	o--	0	i0
+gzdeflate	ext/zlib/zlib.stub.php:189	data	r--		-	level	o--	-1	i-1	encoding	o--	ZLIB_ENCODING_RAW	i-15
+gzencode	ext/zlib/zlib.stub.php:192	data	r--		-	level	o--	-1	i-1	encoding	o--	ZLIB_ENCODING_GZIP	i31
+gzeof	ext/zlib/zlib.stub.php:235	stream	r--		-
+gzfile	ext/zlib/zlib.stub.php:172	filename	r--		-	use_include_path	o--	false	f
+gzgetc	ext/zlib/zlib.stub.php:241	stream	r--		-
+gzgets	ext/zlib/zlib.stub.php:271	stream	r--		-	length	o--	null	n
+gzinflate	ext/zlib/zlib.stub.php:198	data	r--		-	max_length	o--	0	i0
+gzopen	ext/zlib/zlib.stub.php:178	filename	r--		-	mode	r--		-	use_include_path	o--	false	f
+gzpassthru	ext/zlib/zlib.stub.php:247	stream	r--		-
+gzputs	ext/zlib/zlib.stub.php:217	stream	r--		-	data	r--		-	length	o--	null	n
+gzread	ext/zlib/zlib.stub.php:265	stream	r--		-	length	r--		-
+gzrewind	ext/zlib/zlib.stub.php:223	stream	r--		-
+gzseek	ext/zlib/zlib.stub.php:253	stream	r--		-	offset	r--		-	whence	o--	SEEK_SET	i0
+gztell	ext/zlib/zlib.stub.php:259	stream	r--		-
+gzuncompress	ext/zlib/zlib.stub.php:204	data	r--		-	max_length	o--	0	i0
+gzwrite	ext/zlib/zlib.stub.php:210	stream	r--		-	data	r--		-	length	o--	null	n
 hash	ext/hash/hash.stub.php:12	algo	r--		-	data	r--		-	binary	o--	false	f	options	o--	[]	a
 hash_algos	ext/hash/hash.stub.php:51
 hash_copy	ext/hash/hash.stub.php:44	context	r--		-
@@ -935,6 +1141,8 @@ iconv_strpos	ext/iconv/iconv.stub.php:31	haystack	r--		-	needle	r--		-	offset	o-
 iconv_strrpos	ext/iconv/iconv.stub.php:33	haystack	r--		-	needle	r--		-	encoding	o--	null	n
 iconv_substr	ext/iconv/iconv.stub.php:29	string	r--		-	offset	r--		-	length	o--	null	n	encoding	o--	null	n
 idate	ext/date/php_date.stub.php:98	format	r--		-	timestamp	o--	null	n
+idn_to_ascii	ext/intl/php_intl.stub.php:454	domain	r--		-	flags	o--	IDNA_DEFAULT	i48	variant	o--	INTL_IDNA_VARIANT_UTS46	i1	idna_info	o-&	null	n
+idn_to_utf8	ext/intl/php_intl.stub.php:457	domain	r--		-	flags	o--	IDNA_DEFAULT	i48	variant	o--	INTL_IDNA_VARIANT_UTS46	i1	idna_info	o-&	null	n
 ignore_user_abort	ext/standard/basic_functions.stub.php:2023	enable	o--	null	n
 image_type_to_extension	ext/standard/basic_functions.stub.php:3020	image_type	r--		-	include_dot	o--	true	t
 image_type_to_mime_type	ext/standard/basic_functions.stub.php:3014	image_type	r--		-
@@ -944,6 +1152,10 @@ inet_ntop	ext/standard/basic_functions.stub.php:2211	ip	r--		-
 inet_pton	ext/standard/basic_functions.stub.php:2214	ip	r--		-
 infiniteiterator::__construct	ext/spl/spl_iterators.stub.php:337	iterator	r--		-
 infiniteiterator::next	ext/spl/spl_iterators.stub.php:340
+inflate_add	ext/zlib/zlib.stub.php:279	context	r--		-	data	r--		-	flush_mode	o--	ZLIB_SYNC_FLUSH	i2
+inflate_get_read_len	ext/zlib/zlib.stub.php:283	context	r--		-
+inflate_get_status	ext/zlib/zlib.stub.php:281	context	r--		-
+inflate_init	ext/zlib/zlib.stub.php:277	encoding	r--		-	options	o--	[]	a
 ini_alter	ext/standard/basic_functions.stub.php:2005	option	r--		-	value	r--		-
 ini_get	ext/standard/basic_functions.stub.php:1994	option	r--		-
 ini_get_all	ext/standard/basic_functions.stub.php:2000	extension	o--	null	n	details	o--	true	t
@@ -958,6 +1170,287 @@ internaliterator::key	Zend/zend_interfaces.stub.php:78
 internaliterator::next	Zend/zend_interfaces.stub.php:80
 internaliterator::rewind	Zend/zend_interfaces.stub.php:84
 internaliterator::valid	Zend/zend_interfaces.stub.php:82
+intl_error_name	ext/intl/php_intl.stub.php:325	errorCode	r--		-
+intl_get_error_code	ext/intl/php_intl.stub.php:319
+intl_get_error_message	ext/intl/php_intl.stub.php:321
+intl_is_failure	ext/intl/php_intl.stub.php:323	errorCode	r--		-
+intlbreakiterator::__construct	ext/intl/breakiterator/breakiterator.stub.php:68
+intlbreakiterator::createcharacterinstance	ext/intl/breakiterator/breakiterator.stub.php:51	locale	o--	null	n
+intlbreakiterator::createcodepointinstance	ext/intl/breakiterator/breakiterator.stub.php:54
+intlbreakiterator::createlineinstance	ext/intl/breakiterator/breakiterator.stub.php:57	locale	o--	null	n
+intlbreakiterator::createsentenceinstance	ext/intl/breakiterator/breakiterator.stub.php:60	locale	o--	null	n
+intlbreakiterator::createtitleinstance	ext/intl/breakiterator/breakiterator.stub.php:63	locale	o--	null	n
+intlbreakiterator::createwordinstance	ext/intl/breakiterator/breakiterator.stub.php:66	locale	o--	null	n
+intlbreakiterator::current	ext/intl/breakiterator/breakiterator.stub.php:71
+intlbreakiterator::first	ext/intl/breakiterator/breakiterator.stub.php:74
+intlbreakiterator::following	ext/intl/breakiterator/breakiterator.stub.php:77	offset	r--		-
+intlbreakiterator::geterrorcode	ext/intl/breakiterator/breakiterator.stub.php:80
+intlbreakiterator::geterrormessage	ext/intl/breakiterator/breakiterator.stub.php:83
+intlbreakiterator::getiterator	ext/intl/breakiterator/breakiterator.stub.php:112
+intlbreakiterator::getlocale	ext/intl/breakiterator/breakiterator.stub.php:86	type	r--		-
+intlbreakiterator::getpartsiterator	ext/intl/breakiterator/breakiterator.stub.php:89	type	o--	IntlPartsIterator::KEY_SEQUENTIAL	i0
+intlbreakiterator::gettext	ext/intl/breakiterator/breakiterator.stub.php:92
+intlbreakiterator::isboundary	ext/intl/breakiterator/breakiterator.stub.php:95	offset	r--		-
+intlbreakiterator::last	ext/intl/breakiterator/breakiterator.stub.php:98
+intlbreakiterator::next	ext/intl/breakiterator/breakiterator.stub.php:101	offset	o--	null	n
+intlbreakiterator::preceding	ext/intl/breakiterator/breakiterator.stub.php:104	offset	r--		-
+intlbreakiterator::previous	ext/intl/breakiterator/breakiterator.stub.php:107
+intlbreakiterator::settext	ext/intl/breakiterator/breakiterator.stub.php:110	text	r--		-
+intlcal_add	ext/intl/php_intl.stub.php:194	calendar	r--		-	field	r--		-	value	r--		-
+intlcal_after	ext/intl/php_intl.stub.php:198	calendar	r--		-	other	r--		-
+intlcal_before	ext/intl/php_intl.stub.php:200	calendar	r--		-	other	r--		-
+intlcal_clear	ext/intl/php_intl.stub.php:208	calendar	r--		-	field	o--	null	n
+intlcal_create_instance	ext/intl/php_intl.stub.php:176	timezone	o--	null	n	locale	o--	null	n
+intlcal_equals	ext/intl/php_intl.stub.php:256	calendar	r--		-	other	r--		-
+intlcal_field_difference	ext/intl/php_intl.stub.php:210	calendar	r--		-	timestamp	r--		-	field	r--		-
+intlcal_from_date_time	ext/intl/php_intl.stub.php:264	datetime	r--		-	locale	o--	null	n
+intlcal_get	ext/intl/php_intl.stub.php:188	calendar	r--		-	field	r--		-
+intlcal_get_actual_maximum	ext/intl/php_intl.stub.php:212	calendar	r--		-	field	r--		-
+intlcal_get_actual_minimum	ext/intl/php_intl.stub.php:214	calendar	r--		-	field	r--		-
+intlcal_get_available_locales	ext/intl/php_intl.stub.php:186
+intlcal_get_day_of_week_type	ext/intl/php_intl.stub.php:216	calendar	r--		-	dayOfWeek	r--		-
+intlcal_get_error_code	ext/intl/php_intl.stub.php:268	calendar	r--		-
+intlcal_get_error_message	ext/intl/php_intl.stub.php:270	calendar	r--		-
+intlcal_get_first_day_of_week	ext/intl/php_intl.stub.php:218	calendar	r--		-
+intlcal_get_greatest_minimum	ext/intl/php_intl.stub.php:222	calendar	r--		-	field	r--		-
+intlcal_get_keyword_values_for_locale	ext/intl/php_intl.stub.php:178	keyword	r--		-	locale	r--		-	onlyCommon	r--		-
+intlcal_get_least_maximum	ext/intl/php_intl.stub.php:220	calendar	r--		-	field	r--		-
+intlcal_get_locale	ext/intl/php_intl.stub.php:224	calendar	r--		-	type	r--		-
+intlcal_get_maximum	ext/intl/php_intl.stub.php:226	calendar	r--		-	field	r--		-
+intlcal_get_minimal_days_in_first_week	ext/intl/php_intl.stub.php:228	calendar	r--		-
+intlcal_get_minimum	ext/intl/php_intl.stub.php:232	calendar	r--		-	field	r--		-
+intlcal_get_now	ext/intl/php_intl.stub.php:180
+intlcal_get_repeated_wall_time_option	ext/intl/php_intl.stub.php:254	calendar	r--		-
+intlcal_get_skipped_wall_time_option	ext/intl/php_intl.stub.php:258	calendar	r--		-
+intlcal_get_time	ext/intl/php_intl.stub.php:190	calendar	r--		-
+intlcal_get_time_zone	ext/intl/php_intl.stub.php:234	calendar	r--		-
+intlcal_get_type	ext/intl/php_intl.stub.php:236	calendar	r--		-
+intlcal_get_weekend_transition	ext/intl/php_intl.stub.php:238	calendar	r--		-	dayOfWeek	r--		-
+intlcal_in_daylight_time	ext/intl/php_intl.stub.php:240	calendar	r--		-
+intlcal_is_equivalent_to	ext/intl/php_intl.stub.php:246	calendar	r--		-	other	r--		-
+intlcal_is_lenient	ext/intl/php_intl.stub.php:242	calendar	r--		-
+intlcal_is_set	ext/intl/php_intl.stub.php:244	calendar	r--		-	field	r--		-
+intlcal_is_weekend	ext/intl/php_intl.stub.php:248	calendar	r--		-	timestamp	o--	null	n
+intlcal_roll	ext/intl/php_intl.stub.php:206	calendar	r--		-	field	r--		-	value	r--		-
+intlcal_set	ext/intl/php_intl.stub.php:203	calendar	r--		-	year	r--		-	month	r--		-	dayOfMonth	o--	UNKNOWN	-	hour	o--	UNKNOWN	-	minute	o--	UNKNOWN	-	second	o--	UNKNOWN	-
+intlcal_set_first_day_of_week	ext/intl/php_intl.stub.php:250	calendar	r--		-	dayOfWeek	r--		-
+intlcal_set_lenient	ext/intl/php_intl.stub.php:252	calendar	r--		-	lenient	r--		-
+intlcal_set_minimal_days_in_first_week	ext/intl/php_intl.stub.php:230	calendar	r--		-	days	r--		-
+intlcal_set_repeated_wall_time_option	ext/intl/php_intl.stub.php:260	calendar	r--		-	option	r--		-
+intlcal_set_skipped_wall_time_option	ext/intl/php_intl.stub.php:262	calendar	r--		-	option	r--		-
+intlcal_set_time	ext/intl/php_intl.stub.php:192	calendar	r--		-	timestamp	r--		-
+intlcal_set_time_zone	ext/intl/php_intl.stub.php:196	calendar	r--		-	timezone	r--		-
+intlcal_to_date_time	ext/intl/php_intl.stub.php:266	calendar	r--		-
+intlcalendar::__construct	ext/intl/calendar/calendar.stub.php:90
+intlcalendar::add	ext/intl/calendar/calendar.stub.php:114	field	r--		-	value	r--		-
+intlcalendar::after	ext/intl/calendar/calendar.stub.php:120	other	r--		-
+intlcalendar::before	ext/intl/calendar/calendar.stub.php:126	other	r--		-
+intlcalendar::clear	ext/intl/calendar/calendar.stub.php:132	field	o--	null	n
+intlcalendar::createinstance	ext/intl/calendar/calendar.stub.php:96	timezone	o--	null	n	locale	o--	null	n
+intlcalendar::equals	ext/intl/calendar/calendar.stub.php:102	other	r--		-
+intlcalendar::fielddifference	ext/intl/calendar/calendar.stub.php:108	timestamp	r--		-	field	r--		-
+intlcalendar::fromdatetime	ext/intl/calendar/calendar.stub.php:138	datetime	r--		-	locale	o--	null	n
+intlcalendar::get	ext/intl/calendar/calendar.stub.php:144	field	r--		-
+intlcalendar::getactualmaximum	ext/intl/calendar/calendar.stub.php:150	field	r--		-
+intlcalendar::getactualminimum	ext/intl/calendar/calendar.stub.php:156	field	r--		-
+intlcalendar::getavailablelocales	ext/intl/calendar/calendar.stub.php:163
+intlcalendar::getdayofweektype	ext/intl/calendar/calendar.stub.php:169	dayOfWeek	r--		-
+intlcalendar::geterrorcode	ext/intl/calendar/calendar.stub.php:175
+intlcalendar::geterrormessage	ext/intl/calendar/calendar.stub.php:181
+intlcalendar::getfirstdayofweek	ext/intl/calendar/calendar.stub.php:187
+intlcalendar::getgreatestminimum	ext/intl/calendar/calendar.stub.php:193	field	r--		-
+intlcalendar::getkeywordvaluesforlocale	ext/intl/calendar/calendar.stub.php:199	keyword	r--		-	locale	r--		-	onlyCommon	r--		-
+intlcalendar::getleastmaximum	ext/intl/calendar/calendar.stub.php:205	field	r--		-
+intlcalendar::getlocale	ext/intl/calendar/calendar.stub.php:211	type	r--		-
+intlcalendar::getmaximum	ext/intl/calendar/calendar.stub.php:217	field	r--		-
+intlcalendar::getminimaldaysinfirstweek	ext/intl/calendar/calendar.stub.php:223
+intlcalendar::getminimum	ext/intl/calendar/calendar.stub.php:235	field	r--		-
+intlcalendar::getnow	ext/intl/calendar/calendar.stub.php:241
+intlcalendar::getrepeatedwalltimeoption	ext/intl/calendar/calendar.stub.php:247
+intlcalendar::getskippedwalltimeoption	ext/intl/calendar/calendar.stub.php:253
+intlcalendar::gettime	ext/intl/calendar/calendar.stub.php:259
+intlcalendar::gettimezone	ext/intl/calendar/calendar.stub.php:265
+intlcalendar::gettype	ext/intl/calendar/calendar.stub.php:271
+intlcalendar::getweekendtransition	ext/intl/calendar/calendar.stub.php:277	dayOfWeek	r--		-
+intlcalendar::indaylighttime	ext/intl/calendar/calendar.stub.php:283
+intlcalendar::isequivalentto	ext/intl/calendar/calendar.stub.php:289	other	r--		-
+intlcalendar::islenient	ext/intl/calendar/calendar.stub.php:295
+intlcalendar::isset	ext/intl/calendar/calendar.stub.php:314	field	r--		-
+intlcalendar::isweekend	ext/intl/calendar/calendar.stub.php:301	timestamp	o--	null	n
+intlcalendar::roll	ext/intl/calendar/calendar.stub.php:308	field	r--		-	value	r--		-
+intlcalendar::set	ext/intl/calendar/calendar.stub.php:320	year	r--		-	month	r--		-	dayOfMonth	o--	UNKNOWN	-	hour	o--	UNKNOWN	-	minute	o--	UNKNOWN	-	second	o--	UNKNOWN	-
+intlcalendar::setdate	ext/intl/calendar/calendar.stub.php:322	year	r--		-	month	r--		-	dayOfMonth	r--		-
+intlcalendar::setdatetime	ext/intl/calendar/calendar.stub.php:324	year	r--		-	month	r--		-	dayOfMonth	r--		-	hour	r--		-	minute	r--		-	second	o--	null	n
+intlcalendar::setfirstdayofweek	ext/intl/calendar/calendar.stub.php:330	dayOfWeek	r--		-
+intlcalendar::setlenient	ext/intl/calendar/calendar.stub.php:336	lenient	r--		-
+intlcalendar::setminimaldaysinfirstweek	ext/intl/calendar/calendar.stub.php:229	days	r--		-
+intlcalendar::setrepeatedwalltimeoption	ext/intl/calendar/calendar.stub.php:342	option	r--		-
+intlcalendar::setskippedwalltimeoption	ext/intl/calendar/calendar.stub.php:348	option	r--		-
+intlcalendar::settime	ext/intl/calendar/calendar.stub.php:354	timestamp	r--		-
+intlcalendar::settimezone	ext/intl/calendar/calendar.stub.php:359	timezone	r--		-
+intlcalendar::todatetime	ext/intl/calendar/calendar.stub.php:365
+intlchar::charage	ext/intl/uchar/uchar.stub.php:1392	codepoint	r--		-
+intlchar::chardigitvalue	ext/intl/uchar/uchar.stub.php:1395	codepoint	r--		-
+intlchar::chardirection	ext/intl/uchar/uchar.stub.php:1398	codepoint	r--		-
+intlchar::charfromname	ext/intl/uchar/uchar.stub.php:1401	name	r--		-	type	o--	IntlChar::UNICODE_CHAR_NAME	i0
+intlchar::charmirror	ext/intl/uchar/uchar.stub.php:1404	codepoint	r--		-
+intlchar::charname	ext/intl/uchar/uchar.stub.php:1407	codepoint	r--		-	type	o--	IntlChar::UNICODE_CHAR_NAME	i0
+intlchar::chartype	ext/intl/uchar/uchar.stub.php:1410	codepoint	r--		-
+intlchar::chr	ext/intl/uchar/uchar.stub.php:1413	codepoint	r--		-
+intlchar::digit	ext/intl/uchar/uchar.stub.php:1416	codepoint	r--		-	base	o--	10	i10
+intlchar::enumcharnames	ext/intl/uchar/uchar.stub.php:1419	start	r--		-	end	r--		-	callback	r--		-	type	o--	IntlChar::UNICODE_CHAR_NAME	i0
+intlchar::enumchartypes	ext/intl/uchar/uchar.stub.php:1422	callback	r--		-
+intlchar::foldcase	ext/intl/uchar/uchar.stub.php:1425	codepoint	r--		-	options	o--	IntlChar::FOLD_CASE_DEFAULT	i0
+intlchar::fordigit	ext/intl/uchar/uchar.stub.php:1428	digit	r--		-	base	o--	10	i10
+intlchar::getbidipairedbracket	ext/intl/uchar/uchar.stub.php:1431	codepoint	r--		-
+intlchar::getblockcode	ext/intl/uchar/uchar.stub.php:1434	codepoint	r--		-
+intlchar::getcombiningclass	ext/intl/uchar/uchar.stub.php:1437	codepoint	r--		-
+intlchar::getfc_nfkc_closure	ext/intl/uchar/uchar.stub.php:1440	codepoint	r--		-
+intlchar::getintpropertymaxvalue	ext/intl/uchar/uchar.stub.php:1443	property	r--		-
+intlchar::getintpropertyminvalue	ext/intl/uchar/uchar.stub.php:1446	property	r--		-
+intlchar::getintpropertyvalue	ext/intl/uchar/uchar.stub.php:1449	codepoint	r--		-	property	r--		-
+intlchar::getnumericvalue	ext/intl/uchar/uchar.stub.php:1452	codepoint	r--		-
+intlchar::getpropertyenum	ext/intl/uchar/uchar.stub.php:1455	alias	r--		-
+intlchar::getpropertyname	ext/intl/uchar/uchar.stub.php:1458	property	r--		-	type	o--	IntlChar::LONG_PROPERTY_NAME	i1
+intlchar::getpropertyvalueenum	ext/intl/uchar/uchar.stub.php:1461	property	r--		-	name	r--		-
+intlchar::getpropertyvaluename	ext/intl/uchar/uchar.stub.php:1464	property	r--		-	value	r--		-	type	o--	IntlChar::LONG_PROPERTY_NAME	i1
+intlchar::getunicodeversion	ext/intl/uchar/uchar.stub.php:1467
+intlchar::hasbinaryproperty	ext/intl/uchar/uchar.stub.php:1389	codepoint	r--		-	property	r--		-
+intlchar::isalnum	ext/intl/uchar/uchar.stub.php:1470	codepoint	r--		-
+intlchar::isalpha	ext/intl/uchar/uchar.stub.php:1473	codepoint	r--		-
+intlchar::isbase	ext/intl/uchar/uchar.stub.php:1476	codepoint	r--		-
+intlchar::isblank	ext/intl/uchar/uchar.stub.php:1479	codepoint	r--		-
+intlchar::iscntrl	ext/intl/uchar/uchar.stub.php:1482	codepoint	r--		-
+intlchar::isdefined	ext/intl/uchar/uchar.stub.php:1485	codepoint	r--		-
+intlchar::isdigit	ext/intl/uchar/uchar.stub.php:1488	codepoint	r--		-
+intlchar::isgraph	ext/intl/uchar/uchar.stub.php:1491	codepoint	r--		-
+intlchar::isidignorable	ext/intl/uchar/uchar.stub.php:1494	codepoint	r--		-
+intlchar::isidpart	ext/intl/uchar/uchar.stub.php:1497	codepoint	r--		-
+intlchar::isidstart	ext/intl/uchar/uchar.stub.php:1500	codepoint	r--		-
+intlchar::isisocontrol	ext/intl/uchar/uchar.stub.php:1503	codepoint	r--		-
+intlchar::isjavaidpart	ext/intl/uchar/uchar.stub.php:1506	codepoint	r--		-
+intlchar::isjavaidstart	ext/intl/uchar/uchar.stub.php:1509	codepoint	r--		-
+intlchar::isjavaspacechar	ext/intl/uchar/uchar.stub.php:1512	codepoint	r--		-
+intlchar::islower	ext/intl/uchar/uchar.stub.php:1515	codepoint	r--		-
+intlchar::ismirrored	ext/intl/uchar/uchar.stub.php:1518	codepoint	r--		-
+intlchar::isprint	ext/intl/uchar/uchar.stub.php:1521	codepoint	r--		-
+intlchar::ispunct	ext/intl/uchar/uchar.stub.php:1524	codepoint	r--		-
+intlchar::isspace	ext/intl/uchar/uchar.stub.php:1527	codepoint	r--		-
+intlchar::istitle	ext/intl/uchar/uchar.stub.php:1530	codepoint	r--		-
+intlchar::isualphabetic	ext/intl/uchar/uchar.stub.php:1533	codepoint	r--		-
+intlchar::isulowercase	ext/intl/uchar/uchar.stub.php:1536	codepoint	r--		-
+intlchar::isupper	ext/intl/uchar/uchar.stub.php:1539	codepoint	r--		-
+intlchar::isuuppercase	ext/intl/uchar/uchar.stub.php:1542	codepoint	r--		-
+intlchar::isuwhitespace	ext/intl/uchar/uchar.stub.php:1545	codepoint	r--		-
+intlchar::iswhitespace	ext/intl/uchar/uchar.stub.php:1548	codepoint	r--		-
+intlchar::isxdigit	ext/intl/uchar/uchar.stub.php:1551	codepoint	r--		-
+intlchar::ord	ext/intl/uchar/uchar.stub.php:1554	character	r--		-
+intlchar::tolower	ext/intl/uchar/uchar.stub.php:1557	codepoint	r--		-
+intlchar::totitle	ext/intl/uchar/uchar.stub.php:1560	codepoint	r--		-
+intlchar::toupper	ext/intl/uchar/uchar.stub.php:1563	codepoint	r--		-
+intlcodepointbreakiterator::getlastcodepoint	ext/intl/breakiterator/breakiterator.stub.php:137
+intldateformatter::__construct	ext/intl/dateformat/dateformat.stub.php:37	locale	r--		-	dateType	o--	IntlDateFormatter::FULL	i0	timeType	o--	IntlDateFormatter::FULL	i0	timezone	o--	null	n	calendar	o--	null	n	pattern	o--	null	n
+intldateformatter::create	ext/intl/dateformat/dateformat.stub.php:50	locale	r--		-	dateType	o--	IntlDateFormatter::FULL	i0	timeType	o--	IntlDateFormatter::FULL	i0	timezone	o--	null	n	calendar	o--	null	n	pattern	o--	null	n
+intldateformatter::format	ext/intl/dateformat/dateformat.stub.php:141	datetime	r--		-
+intldateformatter::formatobject	ext/intl/dateformat/dateformat.stub.php:149	datetime	r--		-	format	o--	null	n	locale	o--	null	n
+intldateformatter::getcalendar	ext/intl/dateformat/dateformat.stub.php:75
+intldateformatter::getcalendarobject	ext/intl/dateformat/dateformat.stub.php:93
+intldateformatter::getdatetype	ext/intl/dateformat/dateformat.stub.php:63
+intldateformatter::geterrorcode	ext/intl/dateformat/dateformat.stub.php:175
+intldateformatter::geterrormessage	ext/intl/dateformat/dateformat.stub.php:181
+intldateformatter::getlocale	ext/intl/dateformat/dateformat.stub.php:122	type	o--	ULOC_ACTUAL_LOCALE	i0
+intldateformatter::getpattern	ext/intl/dateformat/dateformat.stub.php:116
+intldateformatter::gettimetype	ext/intl/dateformat/dateformat.stub.php:69
+intldateformatter::gettimezone	ext/intl/dateformat/dateformat.stub.php:99
+intldateformatter::gettimezoneid	ext/intl/dateformat/dateformat.stub.php:87
+intldateformatter::islenient	ext/intl/dateformat/dateformat.stub.php:134
+intldateformatter::localtime	ext/intl/dateformat/dateformat.stub.php:169	string	r--		-	offset	o-&	null	n
+intldateformatter::parse	ext/intl/dateformat/dateformat.stub.php:156	string	r--		-	offset	o-&	null	n
+intldateformatter::parsetocalendar	ext/intl/dateformat/dateformat.stub.php:161	string	r--		-	offset	o-&	null	n
+intldateformatter::setcalendar	ext/intl/dateformat/dateformat.stub.php:81	calendar	r--		-
+intldateformatter::setlenient	ext/intl/dateformat/dateformat.stub.php:128	lenient	r--		-
+intldateformatter::setpattern	ext/intl/dateformat/dateformat.stub.php:110	pattern	r--		-
+intldateformatter::settimezone	ext/intl/dateformat/dateformat.stub.php:104	timezone	r--		-
+intldatepatterngenerator::__construct	ext/intl/dateformat/datepatterngenerator.stub.php:8	locale	o--	null	n
+intldatepatterngenerator::create	ext/intl/dateformat/datepatterngenerator.stub.php:10	locale	o--	null	n
+intldatepatterngenerator::getbestpattern	ext/intl/dateformat/datepatterngenerator.stub.php:12	skeleton	r--		-
+intlgregcal_create_instance	ext/intl/php_intl.stub.php:281	timezoneOrYear	o--	UNKNOWN	-	localeOrMonth	o--	UNKNOWN	-	day	o--	UNKNOWN	-	hour	o--	UNKNOWN	-	minute	o--	UNKNOWN	-	second	o--	UNKNOWN	-
+intlgregcal_get_gregorian_change	ext/intl/php_intl.stub.php:285	calendar	r--		-
+intlgregcal_is_leap_year	ext/intl/php_intl.stub.php:287	calendar	r--		-	year	r--		-
+intlgregcal_set_gregorian_change	ext/intl/php_intl.stub.php:283	calendar	r--		-	timestamp	r--		-
+intlgregoriancalendar::__construct	ext/intl/calendar/calendar.stub.php:383	timezoneOrYear	o--	UNKNOWN	-	localeOrMonth	o--	UNKNOWN	-	day	o--	UNKNOWN	-	hour	o--	UNKNOWN	-	minute	o--	UNKNOWN	-	second	o--	UNKNOWN	-
+intlgregoriancalendar::createfromdate	ext/intl/calendar/calendar.stub.php:371	year	r--		-	month	r--		-	dayOfMonth	r--		-
+intlgregoriancalendar::createfromdatetime	ext/intl/calendar/calendar.stub.php:373	year	r--		-	month	r--		-	dayOfMonth	r--		-	hour	r--		-	minute	r--		-	second	o--	null	n
+intlgregoriancalendar::getgregorianchange	ext/intl/calendar/calendar.stub.php:395
+intlgregoriancalendar::isleapyear	ext/intl/calendar/calendar.stub.php:401	year	r--		-
+intlgregoriancalendar::setgregorianchange	ext/intl/calendar/calendar.stub.php:389	timestamp	r--		-
+intliterator::current	ext/intl/common/common.stub.php:739
+intliterator::key	ext/intl/common/common.stub.php:742
+intliterator::next	ext/intl/common/common.stub.php:745
+intliterator::rewind	ext/intl/common/common.stub.php:748
+intliterator::valid	ext/intl/common/common.stub.php:751
+intllistformatter::__construct	ext/intl/listformatter/listformatter.stub.php:43	locale	r--		-	type	o--	IntlListFormatter::TYPE_AND	i0	width	o--	IntlListFormatter::WIDTH_WIDE	i0
+intllistformatter::format	ext/intl/listformatter/listformatter.stub.php:45	strings	r--		-
+intllistformatter::geterrorcode	ext/intl/listformatter/listformatter.stub.php:47
+intllistformatter::geterrormessage	ext/intl/listformatter/listformatter.stub.php:49
+intlpartsiterator::getbreakiterator	ext/intl/breakiterator/breakiterator_iterators.stub.php:16
+intlpartsiterator::getrulestatus	ext/intl/breakiterator/breakiterator_iterators.stub.php:19
+intlrulebasedbreakiterator::__construct	ext/intl/breakiterator/breakiterator.stub.php:118	rules	r--		-	compiled	o--	false	f
+intlrulebasedbreakiterator::getbinaryrules	ext/intl/breakiterator/breakiterator.stub.php:121
+intlrulebasedbreakiterator::getrules	ext/intl/breakiterator/breakiterator.stub.php:124
+intlrulebasedbreakiterator::getrulestatus	ext/intl/breakiterator/breakiterator.stub.php:127
+intlrulebasedbreakiterator::getrulestatusvec	ext/intl/breakiterator/breakiterator.stub.php:130
+intltimezone::__construct	ext/intl/timezone/timezone.stub.php:33
+intltimezone::countequivalentids	ext/intl/timezone/timezone.stub.php:39	timezoneId	r--		-
+intltimezone::createdefault	ext/intl/timezone/timezone.stub.php:45
+intltimezone::createenumeration	ext/intl/timezone/timezone.stub.php:51	countryOrRawOffset	o--	null	n
+intltimezone::createtimezone	ext/intl/timezone/timezone.stub.php:57	timezoneId	r--		-
+intltimezone::createtimezoneidenumeration	ext/intl/timezone/timezone.stub.php:63	type	r--		-	region	o--	null	n	rawOffset	o--	null	n
+intltimezone::fromdatetimezone	ext/intl/timezone/timezone.stub.php:69	timezone	r--		-
+intltimezone::getcanonicalid	ext/intl/timezone/timezone.stub.php:76	timezoneId	r--		-	isSystemId	o-&	null	n
+intltimezone::getdisplayname	ext/intl/timezone/timezone.stub.php:82	dst	o--	false	f	style	o--	IntlTimeZone::DISPLAY_LONG	i2	locale	o--	null	n
+intltimezone::getdstsavings	ext/intl/timezone/timezone.stub.php:88
+intltimezone::getequivalentid	ext/intl/timezone/timezone.stub.php:94	timezoneId	r--		-	offset	r--		-
+intltimezone::geterrorcode	ext/intl/timezone/timezone.stub.php:100
+intltimezone::geterrormessage	ext/intl/timezone/timezone.stub.php:106
+intltimezone::getgmt	ext/intl/timezone/timezone.stub.php:112
+intltimezone::getianaid	ext/intl/timezone/timezone.stub.php:118	timezoneId	r--		-
+intltimezone::getid	ext/intl/timezone/timezone.stub.php:125
+intltimezone::getidforwindowsid	ext/intl/timezone/timezone.stub.php:169	timezoneId	r--		-	region	o--	null	n
+intltimezone::getoffset	ext/intl/timezone/timezone.stub.php:133	timestamp	r--		-	local	r--		-	rawOffset	r-&		-	dstOffset	r-&		-
+intltimezone::getrawoffset	ext/intl/timezone/timezone.stub.php:139
+intltimezone::getregion	ext/intl/timezone/timezone.stub.php:145	timezoneId	r--		-
+intltimezone::gettzdataversion	ext/intl/timezone/timezone.stub.php:151
+intltimezone::getunknown	ext/intl/timezone/timezone.stub.php:157
+intltimezone::getwindowsid	ext/intl/timezone/timezone.stub.php:163	timezoneId	r--		-
+intltimezone::hassamerules	ext/intl/timezone/timezone.stub.php:175	other	r--		-
+intltimezone::todatetimezone	ext/intl/timezone/timezone.stub.php:181
+intltimezone::usedaylighttime	ext/intl/timezone/timezone.stub.php:187
+intltz_count_equivalent_ids	ext/intl/php_intl.stub.php:566	timezoneId	r--		-
+intltz_create_default	ext/intl/php_intl.stub.php:568
+intltz_create_enumeration	ext/intl/php_intl.stub.php:570	countryOrRawOffset	o--	null	n
+intltz_create_time_zone	ext/intl/php_intl.stub.php:572	timezoneId	r--		-
+intltz_create_time_zone_id_enumeration	ext/intl/php_intl.stub.php:574	type	r--		-	region	o--	null	n	rawOffset	o--	null	n
+intltz_from_date_time_zone	ext/intl/php_intl.stub.php:576	timezone	r--		-
+intltz_get_canonical_id	ext/intl/php_intl.stub.php:579	timezoneId	r--		-	isSystemId	o-&	null	n
+intltz_get_display_name	ext/intl/php_intl.stub.php:581	timezone	r--		-	dst	o--	false	f	style	o--	IntlTimeZone::DISPLAY_LONG	i2	locale	o--	null	n
+intltz_get_dst_savings	ext/intl/php_intl.stub.php:583	timezone	r--		-
+intltz_get_equivalent_id	ext/intl/php_intl.stub.php:585	timezoneId	r--		-	offset	r--		-
+intltz_get_error_code	ext/intl/php_intl.stub.php:587	timezone	r--		-
+intltz_get_error_message	ext/intl/php_intl.stub.php:589	timezone	r--		-
+intltz_get_gmt	ext/intl/php_intl.stub.php:591
+intltz_get_iana_id	ext/intl/php_intl.stub.php:620	timezoneId	r--		-
+intltz_get_id	ext/intl/php_intl.stub.php:593	timezone	r--		-
+intltz_get_id_for_windows_id	ext/intl/php_intl.stub.php:611	timezoneId	r--		-	region	o--	null	n
+intltz_get_offset	ext/intl/php_intl.stub.php:599	timezone	r--		-	timestamp	r--		-	local	r--		-	rawOffset	r-&		-	dstOffset	r-&		-
+intltz_get_raw_offset	ext/intl/php_intl.stub.php:601	timezone	r--		-
+intltz_get_region	ext/intl/php_intl.stub.php:603	timezoneId	r--		-
+intltz_get_tz_data_version	ext/intl/php_intl.stub.php:605
+intltz_get_unknown	ext/intl/php_intl.stub.php:607
+intltz_get_windows_id	ext/intl/php_intl.stub.php:609	timezoneId	r--		-
+intltz_has_same_rules	ext/intl/php_intl.stub.php:613	timezone	r--		-	other	r--		-
+intltz_to_date_time_zone	ext/intl/php_intl.stub.php:615	timezone	r--		-
+intltz_use_daylight_time	ext/intl/php_intl.stub.php:617	timezone	r--		-
 intval	ext/standard/basic_functions.stub.php:3587	value	r--		-	base	o--	10	i10
 ip2long	ext/standard/basic_functions.stub.php:1918	ip	r--		-
 iptcembed	ext/standard/basic_functions.stub.php:3069	iptc_data	r--		-	filename	r--		-	spool	o--	0	i0
@@ -1039,6 +1532,48 @@ limititerator::seek	ext/spl/spl_iterators.stub.php:204	offset	r--		-
 limititerator::valid	ext/spl/spl_iterators.stub.php:198
 link	ext/standard/basic_functions.stub.php:3091	target	r--		-	link	r--		-
 linkinfo	ext/standard/basic_functions.stub.php:3087	path	r--		-
+locale::acceptfromhttp	ext/intl/locale/locale.stub.php:135	header	r--		-
+locale::addlikelysubtags	ext/intl/locale/locale.stub.php:145	locale	r--		-
+locale::canonicalize	ext/intl/locale/locale.stub.php:129	locale	r--		-
+locale::composelocale	ext/intl/locale/locale.stub.php:99	subtags	r--		-
+locale::filtermatches	ext/intl/locale/locale.stub.php:117	languageTag	r--		-	locale	r--		-	canonicalize	o--	false	f
+locale::getallvariants	ext/intl/locale/locale.stub.php:111	locale	r--		-
+locale::getdefault	ext/intl/locale/locale.stub.php:32
+locale::getdisplaylanguage	ext/intl/locale/locale.stub.php:87	locale	r--		-	displayLocale	o--	null	n
+locale::getdisplayname	ext/intl/locale/locale.stub.php:81	locale	r--		-	displayLocale	o--	null	n
+locale::getdisplayregion	ext/intl/locale/locale.stub.php:75	locale	r--		-	displayLocale	o--	null	n
+locale::getdisplayscript	ext/intl/locale/locale.stub.php:69	locale	r--		-	displayLocale	o--	null	n
+locale::getdisplayvariant	ext/intl/locale/locale.stub.php:93	locale	r--		-	displayLocale	o--	null	n
+locale::getkeywords	ext/intl/locale/locale.stub.php:63	locale	r--		-
+locale::getprimarylanguage	ext/intl/locale/locale.stub.php:44	locale	r--		-
+locale::getregion	ext/intl/locale/locale.stub.php:56	locale	r--		-
+locale::getscript	ext/intl/locale/locale.stub.php:50	locale	r--		-
+locale::isrighttoleft	ext/intl/locale/locale.stub.php:140	locale	r--		-
+locale::lookup	ext/intl/locale/locale.stub.php:123	languageTag	r--		-	locale	r--		-	canonicalize	o--	false	f	defaultLocale	o--	null	n
+locale::minimizesubtags	ext/intl/locale/locale.stub.php:150	locale	r--		-
+locale::parselocale	ext/intl/locale/locale.stub.php:105	locale	r--		-
+locale::setdefault	ext/intl/locale/locale.stub.php:38	locale	r--		-
+locale_accept_from_http	ext/intl/php_intl.stub.php:500	header	r--		-
+locale_add_likely_subtags	ext/intl/php_intl.stub.php:504	locale	r--		-
+locale_canonicalize	ext/intl/php_intl.stub.php:496	locale	r--		-
+locale_compose	ext/intl/php_intl.stub.php:488	subtags	r--		-
+locale_filter_matches	ext/intl/php_intl.stub.php:494	languageTag	r--		-	locale	r--		-	canonicalize	o--	false	f
+locale_get_all_variants	ext/intl/php_intl.stub.php:492	locale	r--		-
+locale_get_default	ext/intl/php_intl.stub.php:462
+locale_get_display_language	ext/intl/php_intl.stub.php:484	locale	r--		-	displayLocale	o--	null	n
+locale_get_display_name	ext/intl/php_intl.stub.php:482	locale	r--		-	displayLocale	o--	null	n
+locale_get_display_region	ext/intl/php_intl.stub.php:480	locale	r--		-	displayLocale	o--	null	n
+locale_get_display_script	ext/intl/php_intl.stub.php:478	locale	r--		-	displayLocale	o--	null	n
+locale_get_display_variant	ext/intl/php_intl.stub.php:486	locale	r--		-	displayLocale	o--	null	n
+locale_get_keywords	ext/intl/php_intl.stub.php:476	locale	r--		-
+locale_get_primary_language	ext/intl/php_intl.stub.php:466	locale	r--		-
+locale_get_region	ext/intl/php_intl.stub.php:470	locale	r--		-
+locale_get_script	ext/intl/php_intl.stub.php:468	locale	r--		-
+locale_is_right_to_left	ext/intl/php_intl.stub.php:502	locale	r--		-
+locale_lookup	ext/intl/php_intl.stub.php:498	languageTag	r--		-	locale	r--		-	canonicalize	o--	false	f	defaultLocale	o--	null	n
+locale_minimize_subtags	ext/intl/php_intl.stub.php:506	locale	r--		-
+locale_parse	ext/intl/php_intl.stub.php:490	locale	r--		-
+locale_set_default	ext/intl/php_intl.stub.php:464	locale	r--		-
 localeconv	ext/standard/basic_functions.stub.php:2570
 localtime	ext/date/php_date.stub.php:131	timestamp	o--	null	n	associative	o--	false	f
 log	ext/standard/basic_functions.stub.php:3190	num	r--		-	base	o--	M_E	d2.718281828459045
@@ -1119,6 +1654,17 @@ md5_file	ext/standard/basic_functions.stub.php:2178	filename	r--		-	binary	o--	f
 memory_get_peak_usage	ext/standard/basic_functions.stub.php:3788	real_usage	o--	false	f
 memory_get_usage	ext/standard/basic_functions.stub.php:3786	real_usage	o--	false	f
 memory_reset_peak_usage	ext/standard/basic_functions.stub.php:3790
+messageformatter::__construct	ext/intl/msgformat/msgformat.stub.php:8	locale	r--		-	pattern	r--		-
+messageformatter::create	ext/intl/msgformat/msgformat.stub.php:14	locale	r--		-	pattern	r--		-
+messageformatter::format	ext/intl/msgformat/msgformat.stub.php:20	values	r--		-
+messageformatter::formatmessage	ext/intl/msgformat/msgformat.stub.php:26	locale	r--		-	pattern	r--		-	values	r--		-
+messageformatter::geterrorcode	ext/intl/msgformat/msgformat.stub.php:64
+messageformatter::geterrormessage	ext/intl/msgformat/msgformat.stub.php:70
+messageformatter::getlocale	ext/intl/msgformat/msgformat.stub.php:58
+messageformatter::getpattern	ext/intl/msgformat/msgformat.stub.php:52
+messageformatter::parse	ext/intl/msgformat/msgformat.stub.php:33	string	r--		-
+messageformatter::parsemessage	ext/intl/msgformat/msgformat.stub.php:40	locale	r--		-	pattern	r--		-	message	r--		-
+messageformatter::setpattern	ext/intl/msgformat/msgformat.stub.php:46	pattern	r--		-
 metaphone	ext/standard/basic_functions.stub.php:2219	string	r--		-	max_phonemes	o--	0	i0
 method_exists	Zend/zend_builtin_functions.stub.php:77	object_or_class	r--		-	method	r--		-
 mhash	ext/hash/hash.stub.php:95	algo	r--		-	data	r--		-	key	o--	null	n
@@ -1131,6 +1677,16 @@ min	ext/standard/basic_functions.stub.php:1601	value	r--		-	values	ov-		-
 mkdir	ext/standard/basic_functions.stub.php:2818	directory	r--		-	permissions	o--	0777	i511	recursive	o--	false	f	context	o--	null	n
 mktime	ext/date/php_date.stub.php:103	hour	r--		-	minute	o--	null	n	second	o--	null	n	month	o--	null	n	day	o--	null	n	year	o--	null	n
 move_uploaded_file	ext/standard/basic_functions.stub.php:2049	from	r--		-	to	r--		-
+msgfmt_create	ext/intl/php_intl.stub.php:510	locale	r--		-	pattern	r--		-
+msgfmt_format	ext/intl/php_intl.stub.php:512	formatter	r--		-	values	r--		-
+msgfmt_format_message	ext/intl/php_intl.stub.php:514	locale	r--		-	pattern	r--		-	values	r--		-
+msgfmt_get_error_code	ext/intl/php_intl.stub.php:534	formatter	r--		-
+msgfmt_get_error_message	ext/intl/php_intl.stub.php:536	formatter	r--		-
+msgfmt_get_locale	ext/intl/php_intl.stub.php:532	formatter	r--		-
+msgfmt_get_pattern	ext/intl/php_intl.stub.php:530	formatter	r--		-
+msgfmt_parse	ext/intl/php_intl.stub.php:520	formatter	r--		-	string	r--		-
+msgfmt_parse_message	ext/intl/php_intl.stub.php:526	locale	r--		-	pattern	r--		-	message	r--		-
+msgfmt_set_pattern	ext/intl/php_intl.stub.php:528	formatter	r--		-	pattern	r--		-
 mt_getrandmax	ext/random/random.stub.php:31
 mt_rand	ext/random/random.stub.php:28	min	o--	UNKNOWN	-	max	o--	UNKNOWN	-
 mt_srand	ext/random/random.stub.php:21	seed	o--	null	n	mode	o--	MT_RAND_MT19937	i0
@@ -1147,6 +1703,195 @@ multipleiterator::next	ext/spl/spl_observer.stub.php:163
 multipleiterator::rewind	ext/spl/spl_observer.stub.php:151
 multipleiterator::setflags	ext/spl/spl_observer.stub.php:136	flags	r--		-
 multipleiterator::valid	ext/spl/spl_observer.stub.php:154
+mysqli::__construct	ext/mysqli/mysqli.stub.php:719	hostname	o--	null	n	username	o--	null	n	password	o--	null	n	database	o--	null	n	port	o--	null	n	socket	o--	null	n
+mysqli::autocommit	ext/mysqli/mysqli.stub.php:732	enable	r--		-
+mysqli::begin_transaction	ext/mysqli/mysqli.stub.php:738	flags	o--	0	i0	name	o--	null	n
+mysqli::change_user	ext/mysqli/mysqli.stub.php:744	username	r--		-	password	r--		-	database	r--		-
+mysqli::character_set_name	ext/mysqli/mysqli.stub.php:750
+mysqli::close	ext/mysqli/mysqli.stub.php:756
+mysqli::commit	ext/mysqli/mysqli.stub.php:762	flags	o--	0	i0	name	o--	null	n
+mysqli::connect	ext/mysqli/mysqli.stub.php:769	hostname	o--	null	n	username	o--	null	n	password	o--	null	n	database	o--	null	n	port	o--	null	n	socket	o--	null	n
+mysqli::debug	ext/mysqli/mysqli.stub.php:789	options	r--		-
+mysqli::dump_debug_info	ext/mysqli/mysqli.stub.php:782
+mysqli::escape_string	ext/mysqli/mysqli.stub.php:914	string	r--		-
+mysqli::execute_query	ext/mysqli/mysqli.stub.php:800	query	r--		-	params	o--	null	n
+mysqli::get_charset	ext/mysqli/mysqli.stub.php:795
+mysqli::get_client_info	ext/mysqli/mysqli.stub.php:807
+mysqli::get_connection_stats	ext/mysqli/mysqli.stub.php:814
+mysqli::get_server_info	ext/mysqli/mysqli.stub.php:820
+mysqli::get_warnings	ext/mysqli/mysqli.stub.php:826
+mysqli::init	ext/mysqli/mysqli.stub.php:832
+mysqli::kill	ext/mysqli/mysqli.stub.php:839	process_id	r--		-
+mysqli::more_results	ext/mysqli/mysqli.stub.php:851
+mysqli::multi_query	ext/mysqli/mysqli.stub.php:845	query	r--		-
+mysqli::next_result	ext/mysqli/mysqli.stub.php:857
+mysqli::options	ext/mysqli/mysqli.stub.php:957	option	r--		-	value	r--		-
+mysqli::ping	ext/mysqli/mysqli.stub.php:864
+mysqli::poll	ext/mysqli/mysqli.stub.php:870	read	r-&		-	error	r-&		-	reject	r-&		-	seconds	r--		-	microseconds	o--	0	i0
+mysqli::prepare	ext/mysqli/mysqli.stub.php:876	query	r--		-
+mysqli::query	ext/mysqli/mysqli.stub.php:882	query	r--		-	result_mode	o--	MYSQLI_STORE_RESULT	i0
+mysqli::real_connect	ext/mysqli/mysqli.stub.php:888	hostname	o--	null	n	username	o--	null	n	password	o--	null	n	database	o--	null	n	port	o--	null	n	socket	o--	null	n	flags	o--	0	i0
+mysqli::real_escape_string	ext/mysqli/mysqli.stub.php:902	string	r--		-
+mysqli::real_query	ext/mysqli/mysqli.stub.php:920	query	r--		-
+mysqli::reap_async_query	ext/mysqli/mysqli.stub.php:908
+mysqli::refresh	ext/mysqli/mysqli.stub.php:1013	flags	r--		-
+mysqli::release_savepoint	ext/mysqli/mysqli.stub.php:926	name	r--		-
+mysqli::rollback	ext/mysqli/mysqli.stub.php:932	flags	o--	0	i0	name	o--	null	n
+mysqli::savepoint	ext/mysqli/mysqli.stub.php:938	name	r--		-
+mysqli::select_db	ext/mysqli/mysqli.stub.php:944	database	r--		-
+mysqli::set_charset	ext/mysqli/mysqli.stub.php:950	charset	r--		-
+mysqli::set_opt	ext/mysqli/mysqli.stub.php:964	option	r--		-	value	r--		-
+mysqli::ssl_set	ext/mysqli/mysqli.stub.php:970	key	r--		-	certificate	r--		-	ca_certificate	r--		-	ca_path	r--		-	cipher_algos	r--		-
+mysqli::stat	ext/mysqli/mysqli.stub.php:982
+mysqli::stmt_init	ext/mysqli/mysqli.stub.php:988
+mysqli::store_result	ext/mysqli/mysqli.stub.php:994	mode	o--	0	i0
+mysqli::thread_safe	ext/mysqli/mysqli.stub.php:1000
+mysqli::use_result	ext/mysqli/mysqli.stub.php:1006
+mysqli_affected_rows	ext/mysqli/mysqli.stub.php:1331	mysql	r--		-
+mysqli_autocommit	ext/mysqli/mysqli.stub.php:1333	mysql	r--		-	enable	r--		-
+mysqli_begin_transaction	ext/mysqli/mysqli.stub.php:1335	mysql	r--		-	flags	o--	0	i0	name	o--	null	n
+mysqli_change_user	ext/mysqli/mysqli.stub.php:1337	mysql	r--		-	username	r--		-	password	r--		-	database	r--		-
+mysqli_character_set_name	ext/mysqli/mysqli.stub.php:1340	mysql	r--		-
+mysqli_close	ext/mysqli/mysqli.stub.php:1342	mysql	r--		-
+mysqli_commit	ext/mysqli/mysqli.stub.php:1344	mysql	r--		-	flags	o--	0	i0	name	o--	null	n
+mysqli_connect	ext/mysqli/mysqli.stub.php:1349	hostname	o--	null	n	username	o--	null	n	password	o--	null	n	database	o--	null	n	port	o--	null	n	socket	o--	null	n
+mysqli_connect_errno	ext/mysqli/mysqli.stub.php:1358
+mysqli_connect_error	ext/mysqli/mysqli.stub.php:1361
+mysqli_data_seek	ext/mysqli/mysqli.stub.php:1363	result	r--		-	offset	r--		-
+mysqli_debug	ext/mysqli/mysqli.stub.php:1367	options	r--		-
+mysqli_dump_debug_info	ext/mysqli/mysqli.stub.php:1365	mysql	r--		-
+mysqli_errno	ext/mysqli/mysqli.stub.php:1369	mysql	r--		-
+mysqli_error	ext/mysqli/mysqli.stub.php:1372	mysql	r--		-
+mysqli_error_list	ext/mysqli/mysqli.stub.php:1378	mysql	r--		-
+mysqli_escape_string	ext/mysqli/mysqli.stub.php:1543	mysql	r--		-	string	r--		-
+mysqli_execute	ext/mysqli/mysqli.stub.php:1384	statement	r--		-	params	o--	null	n
+mysqli_execute_query	ext/mysqli/mysqli.stub.php:1386	mysql	r--		-	query	r--		-	params	o--	null	n
+mysqli_fetch_all	ext/mysqli/mysqli.stub.php:1410	result	r--		-	mode	o--	MYSQLI_NUM	i2
+mysqli_fetch_array	ext/mysqli/mysqli.stub.php:1416	result	r--		-	mode	o--	MYSQLI_BOTH	i3
+mysqli_fetch_assoc	ext/mysqli/mysqli.stub.php:1422	result	r--		-
+mysqli_fetch_column	ext/mysqli/mysqli.stub.php:1433	result	r--		-	column	o--	0	i0
+mysqli_fetch_field	ext/mysqli/mysqli.stub.php:1389	result	r--		-
+mysqli_fetch_field_direct	ext/mysqli/mysqli.stub.php:1398	result	r--		-	index	r--		-
+mysqli_fetch_fields	ext/mysqli/mysqli.stub.php:1395	result	r--		-
+mysqli_fetch_lengths	ext/mysqli/mysqli.stub.php:1404	result	r--		-
+mysqli_fetch_object	ext/mysqli/mysqli.stub.php:1425	result	r--		-	class	o--	"stdClass"	s737464436c617373	constructor_args	o--	[]	a
+mysqli_fetch_row	ext/mysqli/mysqli.stub.php:1431	result	r--		-
+mysqli_field_count	ext/mysqli/mysqli.stub.php:1435	mysql	r--		-
+mysqli_field_seek	ext/mysqli/mysqli.stub.php:1437	result	r--		-	index	r--		-
+mysqli_field_tell	ext/mysqli/mysqli.stub.php:1439	result	r--		-
+mysqli_free_result	ext/mysqli/mysqli.stub.php:1441	result	r--		-
+mysqli_get_charset	ext/mysqli/mysqli.stub.php:1456	mysql	r--		-
+mysqli_get_client_info	ext/mysqli/mysqli.stub.php:1459	mysql	o--	null	n
+mysqli_get_client_stats	ext/mysqli/mysqli.stub.php:1453
+mysqli_get_client_version	ext/mysqli/mysqli.stub.php:1461
+mysqli_get_connection_stats	ext/mysqli/mysqli.stub.php:1447	mysql	r--		-
+mysqli_get_host_info	ext/mysqli/mysqli.stub.php:1470	mysql	r--		-
+mysqli_get_links_stats	ext/mysqli/mysqli.stub.php:1467
+mysqli_get_proto_info	ext/mysqli/mysqli.stub.php:1472	mysql	r--		-
+mysqli_get_server_info	ext/mysqli/mysqli.stub.php:1475	mysql	r--		-
+mysqli_get_server_version	ext/mysqli/mysqli.stub.php:1477	mysql	r--		-
+mysqli_get_warnings	ext/mysqli/mysqli.stub.php:1480	mysql	r--		-
+mysqli_info	ext/mysqli/mysqli.stub.php:1486	mysql	r--		-
+mysqli_init	ext/mysqli/mysqli.stub.php:1483
+mysqli_insert_id	ext/mysqli/mysqli.stub.php:1489	mysql	r--		-
+mysqli_kill	ext/mysqli/mysqli.stub.php:1492	mysql	r--		-	process_id	r--		-
+mysqli_more_results	ext/mysqli/mysqli.stub.php:1494	mysql	r--		-
+mysqli_multi_query	ext/mysqli/mysqli.stub.php:1496	mysql	r--		-	query	r--		-
+mysqli_next_result	ext/mysqli/mysqli.stub.php:1498	mysql	r--		-
+mysqli_num_fields	ext/mysqli/mysqli.stub.php:1500	result	r--		-
+mysqli_num_rows	ext/mysqli/mysqli.stub.php:1503	result	r--		-
+mysqli_options	ext/mysqli/mysqli.stub.php:1506	mysql	r--		-	option	r--		-	value	r--		-
+mysqli_ping	ext/mysqli/mysqli.stub.php:1515	mysql	r--		-
+mysqli_poll	ext/mysqli/mysqli.stub.php:1517	read	r-&		-	error	r-&		-	reject	r-&		-	seconds	r--		-	microseconds	o--	0	i0
+mysqli_prepare	ext/mysqli/mysqli.stub.php:1520	mysql	r--		-	query	r--		-
+mysqli_query	ext/mysqli/mysqli.stub.php:1525	mysql	r--		-	query	r--		-	result_mode	o--	MYSQLI_STORE_RESULT	i0
+mysqli_real_connect	ext/mysqli/mysqli.stub.php:1527	mysql	r--		-	hostname	o--	null	n	username	o--	null	n	password	o--	null	n	database	o--	null	n	port	o--	null	n	socket	o--	null	n	flags	o--	0	i0
+mysqli_real_escape_string	ext/mysqli/mysqli.stub.php:1540	mysql	r--		-	string	r--		-
+mysqli_real_query	ext/mysqli/mysqli.stub.php:1545	mysql	r--		-	query	r--		-
+mysqli_reap_async_query	ext/mysqli/mysqli.stub.php:1548	mysql	r--		-
+mysqli_refresh	ext/mysqli/mysqli.stub.php:1655	mysql	r--		-	flags	r--		-
+mysqli_release_savepoint	ext/mysqli/mysqli.stub.php:1550	mysql	r--		-	name	r--		-
+mysqli_report	ext/mysqli/mysqli.stub.php:1522	flags	r--		-
+mysqli_result::__construct	ext/mysqli/mysqli.stub.php:1044	mysql	r--		-	result_mode	o--	MYSQLI_STORE_RESULT	i0
+mysqli_result::close	ext/mysqli/mysqli.stub.php:1050
+mysqli_result::data_seek	ext/mysqli/mysqli.stub.php:1062	offset	r--		-
+mysqli_result::fetch_all	ext/mysqli/mysqli.stub.php:1088	mode	o--	MYSQLI_NUM	i2
+mysqli_result::fetch_array	ext/mysqli/mysqli.stub.php:1095	mode	o--	MYSQLI_BOTH	i3
+mysqli_result::fetch_assoc	ext/mysqli/mysqli.stub.php:1102
+mysqli_result::fetch_column	ext/mysqli/mysqli.stub.php:1118	column	o--	0	i0
+mysqli_result::fetch_field	ext/mysqli/mysqli.stub.php:1068
+mysqli_result::fetch_field_direct	ext/mysqli/mysqli.stub.php:1081	index	r--		-
+mysqli_result::fetch_fields	ext/mysqli/mysqli.stub.php:1075
+mysqli_result::fetch_object	ext/mysqli/mysqli.stub.php:1108	class	o--	"stdClass"	s737464436c617373	constructor_args	o--	[]	a
+mysqli_result::fetch_row	ext/mysqli/mysqli.stub.php:1115
+mysqli_result::field_seek	ext/mysqli/mysqli.stub.php:1124	index	r--		-
+mysqli_result::free	ext/mysqli/mysqli.stub.php:1056
+mysqli_result::free_result	ext/mysqli/mysqli.stub.php:1130
+mysqli_result::getiterator	ext/mysqli/mysqli.stub.php:1132
+mysqli_rollback	ext/mysqli/mysqli.stub.php:1552	mysql	r--		-	flags	o--	0	i0	name	o--	null	n
+mysqli_savepoint	ext/mysqli/mysqli.stub.php:1554	mysql	r--		-	name	r--		-
+mysqli_select_db	ext/mysqli/mysqli.stub.php:1556	mysql	r--		-	database	r--		-
+mysqli_set_charset	ext/mysqli/mysqli.stub.php:1558	mysql	r--		-	charset	r--		-
+mysqli_set_opt	ext/mysqli/mysqli.stub.php:1512	mysql	r--		-	option	r--		-	value	r--		-
+mysqli_sql_exception::getsqlstate	ext/mysqli/mysqli.stub.php:1327
+mysqli_sqlstate	ext/mysqli/mysqli.stub.php:1628	mysql	r--		-
+mysqli_ssl_set	ext/mysqli/mysqli.stub.php:1630	mysql	r--		-	key	r--		-	certificate	r--		-	ca_certificate	r--		-	ca_path	r--		-	cipher_algos	r--		-
+mysqli_stat	ext/mysqli/mysqli.stub.php:1640	mysql	r--		-
+mysqli_stmt::__construct	ext/mysqli/mysqli.stub.php:1193	mysql	r--		-	query	o--	null	n
+mysqli_stmt::attr_get	ext/mysqli/mysqli.stub.php:1199	attribute	r--		-
+mysqli_stmt::attr_set	ext/mysqli/mysqli.stub.php:1205	attribute	r--		-	value	r--		-
+mysqli_stmt::bind_param	ext/mysqli/mysqli.stub.php:1211	types	r--		-	vars	ov&		-
+mysqli_stmt::bind_result	ext/mysqli/mysqli.stub.php:1217	vars	ov&		-
+mysqli_stmt::close	ext/mysqli/mysqli.stub.php:1223
+mysqli_stmt::data_seek	ext/mysqli/mysqli.stub.php:1229	offset	r--		-
+mysqli_stmt::execute	ext/mysqli/mysqli.stub.php:1235	params	o--	null	n
+mysqli_stmt::fetch	ext/mysqli/mysqli.stub.php:1241
+mysqli_stmt::free_result	ext/mysqli/mysqli.stub.php:1283
+mysqli_stmt::get_result	ext/mysqli/mysqli.stub.php:1307
+mysqli_stmt::get_warnings	ext/mysqli/mysqli.stub.php:1247
+mysqli_stmt::more_results	ext/mysqli/mysqli.stub.php:1259
+mysqli_stmt::next_result	ext/mysqli/mysqli.stub.php:1265
+mysqli_stmt::num_rows	ext/mysqli/mysqli.stub.php:1271
+mysqli_stmt::prepare	ext/mysqli/mysqli.stub.php:1295	query	r--		-
+mysqli_stmt::reset	ext/mysqli/mysqli.stub.php:1289
+mysqli_stmt::result_metadata	ext/mysqli/mysqli.stub.php:1253
+mysqli_stmt::send_long_data	ext/mysqli/mysqli.stub.php:1277	param_num	r--		-	data	r--		-
+mysqli_stmt::store_result	ext/mysqli/mysqli.stub.php:1301
+mysqli_stmt_affected_rows	ext/mysqli/mysqli.stub.php:1561	statement	r--		-
+mysqli_stmt_attr_get	ext/mysqli/mysqli.stub.php:1563	statement	r--		-	attribute	r--		-
+mysqli_stmt_attr_set	ext/mysqli/mysqli.stub.php:1565	statement	r--		-	attribute	r--		-	value	r--		-
+mysqli_stmt_bind_param	ext/mysqli/mysqli.stub.php:1567	statement	r--		-	types	r--		-	vars	ov&		-
+mysqli_stmt_bind_result	ext/mysqli/mysqli.stub.php:1569	statement	r--		-	vars	ov&		-
+mysqli_stmt_close	ext/mysqli/mysqli.stub.php:1571	statement	r--		-
+mysqli_stmt_data_seek	ext/mysqli/mysqli.stub.php:1573	statement	r--		-	offset	r--		-
+mysqli_stmt_errno	ext/mysqli/mysqli.stub.php:1575	statement	r--		-
+mysqli_stmt_error	ext/mysqli/mysqli.stub.php:1578	statement	r--		-
+mysqli_stmt_error_list	ext/mysqli/mysqli.stub.php:1584	statement	r--		-
+mysqli_stmt_execute	ext/mysqli/mysqli.stub.php:1380	statement	r--		-	params	o--	null	n
+mysqli_stmt_fetch	ext/mysqli/mysqli.stub.php:1586	statement	r--		-
+mysqli_stmt_field_count	ext/mysqli/mysqli.stub.php:1588	statement	r--		-
+mysqli_stmt_free_result	ext/mysqli/mysqli.stub.php:1590	statement	r--		-
+mysqli_stmt_get_result	ext/mysqli/mysqli.stub.php:1593	statement	r--		-
+mysqli_stmt_get_warnings	ext/mysqli/mysqli.stub.php:1596	statement	r--		-
+mysqli_stmt_init	ext/mysqli/mysqli.stub.php:1599	mysql	r--		-
+mysqli_stmt_insert_id	ext/mysqli/mysqli.stub.php:1602	statement	r--		-
+mysqli_stmt_more_results	ext/mysqli/mysqli.stub.php:1604	statement	r--		-
+mysqli_stmt_next_result	ext/mysqli/mysqli.stub.php:1606	statement	r--		-
+mysqli_stmt_num_rows	ext/mysqli/mysqli.stub.php:1609	statement	r--		-
+mysqli_stmt_param_count	ext/mysqli/mysqli.stub.php:1611	statement	r--		-
+mysqli_stmt_prepare	ext/mysqli/mysqli.stub.php:1613	statement	r--		-	query	r--		-
+mysqli_stmt_reset	ext/mysqli/mysqli.stub.php:1615	statement	r--		-
+mysqli_stmt_result_metadata	ext/mysqli/mysqli.stub.php:1618	statement	r--		-
+mysqli_stmt_send_long_data	ext/mysqli/mysqli.stub.php:1620	statement	r--		-	param_num	r--		-	data	r--		-
+mysqli_stmt_sqlstate	ext/mysqli/mysqli.stub.php:1625	statement	r--		-
+mysqli_stmt_store_result	ext/mysqli/mysqli.stub.php:1622	statement	r--		-
+mysqli_store_result	ext/mysqli/mysqli.stub.php:1643	mysql	r--		-	mode	o--	0	i0
+mysqli_thread_id	ext/mysqli/mysqli.stub.php:1645	mysql	r--		-
+mysqli_thread_safe	ext/mysqli/mysqli.stub.php:1647
+mysqli_use_result	ext/mysqli/mysqli.stub.php:1650	mysql	r--		-
+mysqli_warning::__construct	ext/mysqli/mysqli.stub.php:1318
+mysqli_warning::next	ext/mysqli/mysqli.stub.php:1320
+mysqli_warning_count	ext/mysqli/mysqli.stub.php:1652	mysql	r--		-
 natcasesort	ext/standard/basic_functions.stub.php:1566	array	r-&		-
 natsort	ext/standard/basic_functions.stub.php:1564	array	r-&		-
 net_get_interfaces	ext/standard/basic_functions.stub.php:2159
@@ -1160,7 +1905,46 @@ norewinditerator::key	ext/spl/spl_iterators.stub.php:300
 norewinditerator::next	ext/spl/spl_iterators.stub.php:306
 norewinditerator::rewind	ext/spl/spl_iterators.stub.php:294
 norewinditerator::valid	ext/spl/spl_iterators.stub.php:297
+normalizer::getrawdecomposition	ext/intl/normalizer/normalizer.stub.php:44	string	r--		-	form	o--	Normalizer::FORM_C	i16
+normalizer::isnormalized	ext/intl/normalizer/normalizer.stub.php:38	string	r--		-	form	o--	Normalizer::FORM_C	i16
+normalizer::normalize	ext/intl/normalizer/normalizer.stub.php:32	string	r--		-	form	o--	Normalizer::FORM_C	i16
+normalizer_get_raw_decomposition	ext/intl/php_intl.stub.php:544	string	r--		-	form	o--	Normalizer::FORM_C	i16
+normalizer_is_normalized	ext/intl/php_intl.stub.php:542	string	r--		-	form	o--	Normalizer::FORM_C	i16
+normalizer_normalize	ext/intl/php_intl.stub.php:540	string	r--		-	form	o--	Normalizer::FORM_C	i16
 number_format	ext/standard/basic_functions.stub.php:3245	num	r--		-	decimals	o--	0	i0	decimal_separator	o--	"."	s2e	thousands_separator	o--	","	s2c
+numberformatter::__construct	ext/intl/formatter/formatter.stub.php:198	locale	r--		-	style	r--		-	pattern	o--	null	n
+numberformatter::create	ext/intl/formatter/formatter.stub.php:204	locale	r--		-	style	r--		-	pattern	o--	null	n
+numberformatter::format	ext/intl/formatter/formatter.stub.php:210	num	r--		-	type	o--	NumberFormatter::TYPE_DEFAULT	i0
+numberformatter::formatcurrency	ext/intl/formatter/formatter.stub.php:223	amount	r--		-	currency	r--		-
+numberformatter::getattribute	ext/intl/formatter/formatter.stub.php:243	attribute	r--		-
+numberformatter::geterrorcode	ext/intl/formatter/formatter.stub.php:291
+numberformatter::geterrormessage	ext/intl/formatter/formatter.stub.php:297
+numberformatter::getlocale	ext/intl/formatter/formatter.stub.php:285	type	o--	ULOC_ACTUAL_LOCALE	i0
+numberformatter::getpattern	ext/intl/formatter/formatter.stub.php:279
+numberformatter::getsymbol	ext/intl/formatter/formatter.stub.php:267	symbol	r--		-
+numberformatter::gettextattribute	ext/intl/formatter/formatter.stub.php:255	attribute	r--		-
+numberformatter::parse	ext/intl/formatter/formatter.stub.php:217	string	r--		-	type	o--	NumberFormatter::TYPE_DOUBLE	i3	offset	o-&	null	n
+numberformatter::parsecurrency	ext/intl/formatter/formatter.stub.php:231	string	r--		-	currency	r-&		-	offset	o-&	null	n
+numberformatter::setattribute	ext/intl/formatter/formatter.stub.php:237	attribute	r--		-	value	r--		-
+numberformatter::setpattern	ext/intl/formatter/formatter.stub.php:273	pattern	r--		-
+numberformatter::setsymbol	ext/intl/formatter/formatter.stub.php:261	symbol	r--		-	value	r--		-
+numberformatter::settextattribute	ext/intl/formatter/formatter.stub.php:249	attribute	r--		-	value	r--		-
+numfmt_create	ext/intl/php_intl.stub.php:389	locale	r--		-	style	r--		-	pattern	o--	null	n
+numfmt_format	ext/intl/php_intl.stub.php:391	formatter	r--		-	num	r--		-	type	o--	NumberFormatter::TYPE_DEFAULT	i0
+numfmt_format_currency	ext/intl/php_intl.stub.php:396	formatter	r--		-	amount	r--		-	currency	r--		-
+numfmt_get_attribute	ext/intl/php_intl.stub.php:406	formatter	r--		-	attribute	r--		-
+numfmt_get_error_code	ext/intl/php_intl.stub.php:422	formatter	r--		-
+numfmt_get_error_message	ext/intl/php_intl.stub.php:424	formatter	r--		-
+numfmt_get_locale	ext/intl/php_intl.stub.php:420	formatter	r--		-	type	o--	ULOC_ACTUAL_LOCALE	i0
+numfmt_get_pattern	ext/intl/php_intl.stub.php:418	formatter	r--		-
+numfmt_get_symbol	ext/intl/php_intl.stub.php:414	formatter	r--		-	symbol	r--		-
+numfmt_get_text_attribute	ext/intl/php_intl.stub.php:410	formatter	r--		-	attribute	r--		-
+numfmt_parse	ext/intl/php_intl.stub.php:394	formatter	r--		-	string	r--		-	type	o--	NumberFormatter::TYPE_DOUBLE	i3	offset	o-&	null	n
+numfmt_parse_currency	ext/intl/php_intl.stub.php:402	formatter	r--		-	string	r--		-	currency	r-&		-	offset	o-&	null	n
+numfmt_set_attribute	ext/intl/php_intl.stub.php:404	formatter	r--		-	attribute	r--		-	value	r--		-
+numfmt_set_pattern	ext/intl/php_intl.stub.php:416	formatter	r--		-	pattern	r--		-
+numfmt_set_symbol	ext/intl/php_intl.stub.php:412	formatter	r--		-	symbol	r--		-	value	r--		-
+numfmt_set_text_attribute	ext/intl/php_intl.stub.php:408	formatter	r--		-	attribute	r--		-	value	r--		-
 ob_clean	ext/standard/basic_functions.stub.php:1503
 ob_end_clean	ext/standard/basic_functions.stub.php:1507
 ob_end_flush	ext/standard/basic_functions.stub.php:1505
@@ -1171,6 +1955,7 @@ ob_get_flush	ext/standard/basic_functions.stub.php:1510
 ob_get_length	ext/standard/basic_functions.stub.php:1519
 ob_get_level	ext/standard/basic_functions.stub.php:1517
 ob_get_status	ext/standard/basic_functions.stub.php:1531	full_status	o--	false	f
+ob_gzhandler	ext/zlib/zlib.stub.php:163	data	r--		-	flags	r--		-
 ob_implicit_flush	ext/standard/basic_functions.stub.php:1533	enable	o--	true	t
 ob_list_handlers	ext/standard/basic_functions.stub.php:1525
 ob_start	ext/standard/basic_functions.stub.php:1499	callback	o--	null	n	chunk_size	o--	0	i0	flags	o--	PHP_OUTPUT_HANDLER_STDFLAGS	i112
@@ -1440,6 +2225,129 @@ pdostatement::rowcount	ext/pdo/pdo_stmt.stub.php:59
 pdostatement::setattribute	ext/pdo/pdo_stmt.stub.php:62	attribute	r--		-	value	r--		-
 pdostatement::setfetchmode	ext/pdo/pdo_stmt.stub.php:65	mode	r--		-	args	ov-		-
 pfsockopen	ext/standard/basic_functions.stub.php:2990	hostname	r--		-	port	o--	-1	i-1	error_code	o-&	null	n	error_message	o-&	null	n	timeout	o--	null	n
+pg_affected_rows	ext/pgsql/pgsql.stub.php:567	result	r--		-
+pg_cancel_query	ext/pgsql/pgsql.stub.php:891	connection	r--		-
+pg_change_password	ext/pgsql/pgsql.stub.php:960	connection	r--		-	user	r--		-	password	r--		-
+pg_client_encoding	ext/pgsql/pgsql.stub.php:831	connection	o--	null	n
+pg_clientencoding	ext/pgsql/pgsql.stub.php:837	connection	o--	null	n
+pg_close	ext/pgsql/pgsql.stub.php:474	connection	o--	null	n
+pg_close_stmt	ext/pgsql/pgsql.stub.php:974	connection	r--		-	statement_name	r--		-
+pg_cmdtuples	ext/pgsql/pgsql.stub.php:573	result	r--		-
+pg_connect	ext/pgsql/pgsql.stub.php:468	connection_string	r--		-	flags	o--	0	i0
+pg_connect_poll	ext/pgsql/pgsql.stub.php:472	connection	r--		-
+pg_connection_busy	ext/pgsql/pgsql.stub.php:893	connection	r--		-
+pg_connection_reset	ext/pgsql/pgsql.stub.php:889	connection	r--		-
+pg_connection_status	ext/pgsql/pgsql.stub.php:885	connection	r--		-
+pg_consume_input	ext/pgsql/pgsql.stub.php:923	connection	r--		-
+pg_convert	ext/pgsql/pgsql.stub.php:937	connection	r--		-	table_name	r--		-	values	r--		-	flags	o--	0	i0
+pg_copy_from	ext/pgsql/pgsql.stub.php:850	connection	r--		-	table_name	r--		-	rows	r--		-	separator	o--	"\t"	s09	null_as	o--	"\\\\N"	s5c5c4e
+pg_copy_to	ext/pgsql/pgsql.stub.php:848	connection	r--		-	table_name	r--		-	separator	o--	"\t"	s09	null_as	o--	"\\\\N"	s5c5c4e
+pg_dbname	ext/pgsql/pgsql.stub.php:477	connection	o--	null	n
+pg_delete	ext/pgsql/pgsql.stub.php:946	connection	r--		-	table_name	r--		-	conditions	r--		-	flags	o--	PGSQL_DML_EXEC	i512
+pg_end_copy	ext/pgsql/pgsql.stub.php:839	connection	o--	null	n
+pg_errormessage	ext/pgsql/pgsql.stub.php:485	connection	o--	null	n
+pg_escape_bytea	ext/pgsql/pgsql.stub.php:862	connection	r--		-	string	o--	UNKNOWN	-
+pg_escape_identifier	ext/pgsql/pgsql.stub.php:877	connection	r--		-	string	o--	UNKNOWN	-
+pg_escape_literal	ext/pgsql/pgsql.stub.php:871	connection	r--		-	string	o--	UNKNOWN	-
+pg_escape_string	ext/pgsql/pgsql.stub.php:856	connection	r--		-	string	o--	UNKNOWN	-
+pg_exec	ext/pgsql/pgsql.stub.php:529	connection	r--		-	query	o--	UNKNOWN	-
+pg_execute	ext/pgsql/pgsql.stub.php:549	connection	r--		-	statement_name	r--		-	params	o--	UNKNOWN	-
+pg_fetch_all	ext/pgsql/pgsql.stub.php:653	result	r--		-	mode	o--	PGSQL_ASSOC	i1
+pg_fetch_all_columns	ext/pgsql/pgsql.stub.php:659	result	r--		-	field	o--	0	i0
+pg_fetch_array	ext/pgsql/pgsql.stub.php:644	result	r--		-	row	o--	null	n	mode	o--	PGSQL_BOTH	i3
+pg_fetch_assoc	ext/pgsql/pgsql.stub.php:638	result	r--		-	row	o--	null	n
+pg_fetch_object	ext/pgsql/pgsql.stub.php:647	result	r--		-	row	o--	null	n	class	o--	"stdClass"	s737464436c617373	constructor_args	o--	[]	a
+pg_fetch_result	ext/pgsql/pgsql.stub.php:619	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_fetch_row	ext/pgsql/pgsql.stub.php:632	result	r--		-	row	o--	null	n	mode	o--	PGSQL_NUM	i2
+pg_field_is_null	ext/pgsql/pgsql.stub.php:673	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_field_name	ext/pgsql/pgsql.stub.php:580	result	r--		-	field	r--		-
+pg_field_num	ext/pgsql/pgsql.stub.php:607	result	r--		-	field	r--		-
+pg_field_prtlen	ext/pgsql/pgsql.stub.php:664	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_field_size	ext/pgsql/pgsql.stub.php:588	result	r--		-	field	r--		-
+pg_field_table	ext/pgsql/pgsql.stub.php:577	result	r--		-	field	r--		-	oid_only	o--	false	f
+pg_field_type	ext/pgsql/pgsql.stub.php:596	result	r--		-	field	r--		-
+pg_field_type_oid	ext/pgsql/pgsql.stub.php:605	result	r--		-	field	r--		-
+pg_fieldisnull	ext/pgsql/pgsql.stub.php:679	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_fieldname	ext/pgsql/pgsql.stub.php:586	result	r--		-	field	r--		-
+pg_fieldnum	ext/pgsql/pgsql.stub.php:613	result	r--		-	field	r--		-
+pg_fieldprtlen	ext/pgsql/pgsql.stub.php:670	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_fieldsize	ext/pgsql/pgsql.stub.php:594	result	r--		-	field	r--		-
+pg_fieldtype	ext/pgsql/pgsql.stub.php:602	result	r--		-	field	r--		-
+pg_flush	ext/pgsql/pgsql.stub.php:925	connection	r--		-
+pg_free_result	ext/pgsql/pgsql.stub.php:681	result	r--		-
+pg_freeresult	ext/pgsql/pgsql.stub.php:687	result	r--		-
+pg_get_notify	ext/pgsql/pgsql.stub.php:913	connection	r--		-	mode	o--	PGSQL_ASSOC	i1
+pg_get_pid	ext/pgsql/pgsql.stub.php:915	connection	r--		-
+pg_get_result	ext/pgsql/pgsql.stub.php:904	connection	r--		-
+pg_getlastoid	ext/pgsql/pgsql.stub.php:696	result	r--		-
+pg_host	ext/pgsql/pgsql.stub.php:497	connection	o--	null	n
+pg_insert	ext/pgsql/pgsql.stub.php:940	connection	r--		-	table_name	r--		-	values	r--		-	flags	o--	PGSQL_DML_EXEC	i512
+pg_jit	ext/pgsql/pgsql.stub.php:509	connection	o--	null	n
+pg_last_error	ext/pgsql/pgsql.stub.php:479	connection	o--	null	n
+pg_last_notice	ext/pgsql/pgsql.stub.php:575	connection	r--		-	mode	o--	PGSQL_NOTICE_LAST	i1
+pg_last_oid	ext/pgsql/pgsql.stub.php:690	result	r--		-
+pg_lo_close	ext/pgsql/pgsql.stub.php:746	lob	r--		-
+pg_lo_create	ext/pgsql/pgsql.stub.php:707	connection	o--	UNKNOWN	-	oid	o--	UNKNOWN	-
+pg_lo_export	ext/pgsql/pgsql.stub.php:801	connection	r--		-	oid	o--	UNKNOWN	-	filename	o--	UNKNOWN	-
+pg_lo_import	ext/pgsql/pgsql.stub.php:785	connection	r--		-	filename	o--	UNKNOWN	-	oid	o--	UNKNOWN	-
+pg_lo_open	ext/pgsql/pgsql.stub.php:736	connection	r--		-	oid	o--	UNKNOWN	-	mode	o--	UNKNOWN	-
+pg_lo_read	ext/pgsql/pgsql.stub.php:755	lob	r--		-	length	o--	8192	i8192
+pg_lo_read_all	ext/pgsql/pgsql.stub.php:771	lob	r--		-
+pg_lo_seek	ext/pgsql/pgsql.stub.php:812	lob	r--		-	offset	r--		-	whence	o--	SEEK_CUR	i1
+pg_lo_tell	ext/pgsql/pgsql.stub.php:814	lob	r--		-
+pg_lo_truncate	ext/pgsql/pgsql.stub.php:816	lob	r--		-	size	r--		-
+pg_lo_unlink	ext/pgsql/pgsql.stub.php:721	connection	r--		-	oid	o--	UNKNOWN	-
+pg_lo_write	ext/pgsql/pgsql.stub.php:763	lob	r--		-	data	r--		-	length	o--	null	n
+pg_loclose	ext/pgsql/pgsql.stub.php:752	lob	r--		-
+pg_locreate	ext/pgsql/pgsql.stub.php:715	connection	o--	UNKNOWN	-	oid	o--	UNKNOWN	-
+pg_loexport	ext/pgsql/pgsql.stub.php:810	connection	r--		-	oid	o--	UNKNOWN	-	filename	o--	UNKNOWN	-
+pg_loimport	ext/pgsql/pgsql.stub.php:794	connection	r--		-	filename	o--	UNKNOWN	-	oid	o--	UNKNOWN	-
+pg_loopen	ext/pgsql/pgsql.stub.php:744	connection	r--		-	oid	o--	UNKNOWN	-	mode	o--	UNKNOWN	-
+pg_loread	ext/pgsql/pgsql.stub.php:761	lob	r--		-	length	o--	8192	i8192
+pg_loreadall	ext/pgsql/pgsql.stub.php:777	lob	r--		-
+pg_lounlink	ext/pgsql/pgsql.stub.php:729	connection	r--		-	oid	o--	UNKNOWN	-
+pg_lowrite	ext/pgsql/pgsql.stub.php:769	lob	r--		-	data	r--		-	length	o--	null	n
+pg_meta_data	ext/pgsql/pgsql.stub.php:931	connection	r--		-	table_name	r--		-	extended	o--	false	f
+pg_num_fields	ext/pgsql/pgsql.stub.php:559	result	r--		-
+pg_num_rows	ext/pgsql/pgsql.stub.php:551	result	r--		-
+pg_numfields	ext/pgsql/pgsql.stub.php:565	result	r--		-
+pg_numrows	ext/pgsql/pgsql.stub.php:557	result	r--		-
+pg_options	ext/pgsql/pgsql.stub.php:488	connection	o--	null	n
+pg_parameter_status	ext/pgsql/pgsql.stub.php:515	connection	r--		-	name	o--	UNKNOWN	-
+pg_pconnect	ext/pgsql/pgsql.stub.php:470	connection_string	r--		-	flags	o--	0	i0
+pg_ping	ext/pgsql/pgsql.stub.php:517	connection	o--	null	n
+pg_port	ext/pgsql/pgsql.stub.php:491	connection	o--	null	n
+pg_prepare	ext/pgsql/pgsql.stub.php:542	connection	r--		-	statement_name	r--		-	query	o--	UNKNOWN	-
+pg_put_copy_data	ext/pgsql/pgsql.stub.php:962	connection	r--		-	cmd	r--		-
+pg_put_copy_end	ext/pgsql/pgsql.stub.php:963	connection	r--		-	error	o--	null	n
+pg_put_line	ext/pgsql/pgsql.stub.php:842	connection	r--		-	query	o--	UNKNOWN	-
+pg_query	ext/pgsql/pgsql.stub.php:523	connection	r--		-	query	o--	UNKNOWN	-
+pg_query_params	ext/pgsql/pgsql.stub.php:536	connection	r--		-	query	r--		-	params	o--	UNKNOWN	-
+pg_result	ext/pgsql/pgsql.stub.php:626	result	r--		-	row	r--		-	field	o--	UNKNOWN	-
+pg_result_error	ext/pgsql/pgsql.stub.php:880	result	r--		-
+pg_result_error_field	ext/pgsql/pgsql.stub.php:883	result	r--		-	field_code	r--		-
+pg_result_memory_size	ext/pgsql/pgsql.stub.php:957	result	r--		-
+pg_result_seek	ext/pgsql/pgsql.stub.php:661	result	r--		-	row	r--		-
+pg_result_status	ext/pgsql/pgsql.stub.php:907	result	r--		-	mode	o--	PGSQL_STATUS_LONG	i1
+pg_select	ext/pgsql/pgsql.stub.php:952	connection	r--		-	table_name	r--		-	conditions	o--	[]	a	flags	o--	PGSQL_DML_EXEC	i512	mode	o--	PGSQL_ASSOC	i1
+pg_send_execute	ext/pgsql/pgsql.stub.php:901	connection	r--		-	statement_name	r--		-	params	r--		-
+pg_send_prepare	ext/pgsql/pgsql.stub.php:899	connection	r--		-	statement_name	r--		-	query	r--		-
+pg_send_query	ext/pgsql/pgsql.stub.php:895	connection	r--		-	query	r--		-
+pg_send_query_params	ext/pgsql/pgsql.stub.php:897	connection	r--		-	query	r--		-	params	r--		-
+pg_set_chunked_rows_size	ext/pgsql/pgsql.stub.php:971	connection	r--		-	size	r--		-
+pg_set_client_encoding	ext/pgsql/pgsql.stub.php:822	connection	r--		-	encoding	o--	UNKNOWN	-
+pg_set_error_context_visibility	ext/pgsql/pgsql.stub.php:954	connection	r--		-	visibility	r--		-
+pg_set_error_verbosity	ext/pgsql/pgsql.stub.php:819	connection	r--		-	verbosity	o--	UNKNOWN	-
+pg_setclientencoding	ext/pgsql/pgsql.stub.php:829	connection	r--		-	encoding	o--	UNKNOWN	-
+pg_socket	ext/pgsql/pgsql.stub.php:921	connection	r--		-
+pg_socket_poll	ext/pgsql/pgsql.stub.php:968	socket	r--		-	read	r--		-	write	r--		-	timeout	o--	-1	i-1
+pg_trace	ext/pgsql/pgsql.stub.php:698	filename	r--		-	mode	o--	"w"	s77	connection	o--	null	n	trace_mode	o--	0	i0
+pg_transaction_status	ext/pgsql/pgsql.stub.php:887	connection	r--		-
+pg_tty	ext/pgsql/pgsql.stub.php:494	connection	o--	null	n
+pg_unescape_bytea	ext/pgsql/pgsql.stub.php:865	string	r--		-
+pg_untrace	ext/pgsql/pgsql.stub.php:700	connection	o--	null	n
+pg_update	ext/pgsql/pgsql.stub.php:943	connection	r--		-	table_name	r--		-	values	r--		-	conditions	r--		-	flags	o--	PGSQL_DML_EXEC	i512
+pg_version	ext/pgsql/pgsql.stub.php:503	connection	o--	null	n
 php_ini_loaded_file	ext/standard/basic_functions.stub.php:3064
 php_ini_scanned_files	ext/standard/basic_functions.stub.php:3061
 php_sapi_name	ext/standard/basic_functions.stub.php:3052
@@ -1567,6 +2475,7 @@ rawurldecode	ext/standard/basic_functions.stub.php:3718	string	r--		-
 rawurlencode	ext/standard/basic_functions.stub.php:3712	string	r--		-
 readdir	ext/standard/basic_functions.stub.php:2666	dir_handle	o--	null	n
 readfile	ext/standard/basic_functions.stub.php:2735	filename	r--		-	use_include_path	o--	false	f	context	o--	null	n
+readgzfile	ext/zlib/zlib.stub.php:180	filename	r--		-	use_include_path	o--	false	f
 readlink	ext/standard/basic_functions.stub.php:3085	path	r--		-
 realpath	ext/standard/basic_functions.stub.php:2865	path	r--		-
 realpath_cache_get	ext/standard/basic_functions.stub.php:2953
@@ -2200,6 +3109,20 @@ register_tick_function	ext/standard/basic_functions.stub.php:2043	callback	r--		
 rename	ext/standard/basic_functions.stub.php:2821	from	r--		-	to	r--		-	context	o--	null	n
 request_parse_body	ext/standard/basic_functions.stub.php:3006	options	o--	null	n
 reset	ext/standard/basic_functions.stub.php:1588	array	r-&		-
+resourcebundle::__construct	ext/intl/resourcebundle/resourcebundle.stub.php:8	locale	r--		-	bundle	r--		-	fallback	o--	true	t
+resourcebundle::count	ext/intl/resourcebundle/resourcebundle.stub.php:23
+resourcebundle::create	ext/intl/resourcebundle/resourcebundle.stub.php:14	locale	r--		-	bundle	r--		-	fallback	o--	true	t
+resourcebundle::get	ext/intl/resourcebundle/resourcebundle.stub.php:17	index	r--		-	fallback	o--	true	t
+resourcebundle::geterrorcode	ext/intl/resourcebundle/resourcebundle.stub.php:36
+resourcebundle::geterrormessage	ext/intl/resourcebundle/resourcebundle.stub.php:42
+resourcebundle::getiterator	ext/intl/resourcebundle/resourcebundle.stub.php:44
+resourcebundle::getlocales	ext/intl/resourcebundle/resourcebundle.stub.php:30	bundle	r--		-
+resourcebundle_count	ext/intl/php_intl.stub.php:552	bundle	r--		-
+resourcebundle_create	ext/intl/php_intl.stub.php:548	locale	r--		-	bundle	r--		-	fallback	o--	true	t
+resourcebundle_get	ext/intl/php_intl.stub.php:550	bundle	r--		-	index	r--		-	fallback	o--	true	t
+resourcebundle_get_error_code	ext/intl/php_intl.stub.php:560	bundle	r--		-
+resourcebundle_get_error_message	ext/intl/php_intl.stub.php:562	bundle	r--		-
+resourcebundle_locales	ext/intl/php_intl.stub.php:558	bundle	r--		-
 restore_error_handler	Zend/zend_builtin_functions.stub.php:121
 restore_exception_handler	Zend/zend_builtin_functions.stub.php:128
 returntypewillchange::__construct	Zend/zend_attributes.stub.php:35
@@ -2286,6 +3209,116 @@ sleep	ext/standard/basic_functions.stub.php:1942	seconds	r--		-
 socket_get_status	ext/standard/basic_functions.stub.php:3521	stream	r--		-
 socket_set_blocking	ext/standard/basic_functions.stub.php:3508	stream	r--		-	enable	r--		-
 socket_set_timeout	ext/standard/basic_functions.stub.php:3567	stream	r--		-	seconds	r--		-	microseconds	o--	0	i0
+sodium_add	ext/sodium/libsodium.stub.php:775	string1	r-&		-	string2	r--		-
+sodium_base642bin	ext/sodium/libsodium.stub.php:796	string	r--		-	id	r--		-	ignore	o--	""	s
+sodium_bin2base64	ext/sodium/libsodium.stub.php:794	string	r--		-	id	r--		-
+sodium_bin2hex	ext/sodium/libsodium.stub.php:789	string	r--		-
+sodium_compare	ext/sodium/libsodium.stub.php:777	string1	r--		-	string2	r--		-
+sodium_crypto_aead_aegis128l_decrypt	ext/sodium/libsodium.stub.php:557	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis128l_encrypt	ext/sodium/libsodium.stub.php:559	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis128l_keygen	ext/sodium/libsodium.stub.php:561
+sodium_crypto_aead_aegis256_decrypt	ext/sodium/libsodium.stub.php:565	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis256_encrypt	ext/sodium/libsodium.stub.php:567	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis256_keygen	ext/sodium/libsodium.stub.php:569
+sodium_crypto_aead_aes256gcm_decrypt	ext/sodium/libsodium.stub.php:549	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aes256gcm_encrypt	ext/sodium/libsodium.stub.php:551	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aes256gcm_is_available	ext/sodium/libsodium.stub.php:546
+sodium_crypto_aead_aes256gcm_keygen	ext/sodium/libsodium.stub.php:553
+sodium_crypto_aead_chacha20poly1305_decrypt	ext/sodium/libsodium.stub.php:572	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_encrypt	ext/sodium/libsodium.stub.php:574	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_ietf_decrypt	ext/sodium/libsodium.stub.php:578	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_ietf_encrypt	ext/sodium/libsodium.stub.php:580	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_ietf_keygen	ext/sodium/libsodium.stub.php:582
+sodium_crypto_aead_chacha20poly1305_keygen	ext/sodium/libsodium.stub.php:576
+sodium_crypto_aead_xchacha20poly1305_ietf_decrypt	ext/sodium/libsodium.stub.php:585	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_xchacha20poly1305_ietf_encrypt	ext/sodium/libsodium.stub.php:589	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_xchacha20poly1305_ietf_keygen	ext/sodium/libsodium.stub.php:587
+sodium_crypto_auth	ext/sodium/libsodium.stub.php:592	message	r--		-	key	r--		-
+sodium_crypto_auth_keygen	ext/sodium/libsodium.stub.php:594
+sodium_crypto_auth_verify	ext/sodium/libsodium.stub.php:596	mac	r--		-	message	r--		-	key	r--		-
+sodium_crypto_box	ext/sodium/libsodium.stub.php:598	message	r--		-	nonce	r--		-	key_pair	r--		-
+sodium_crypto_box_keypair	ext/sodium/libsodium.stub.php:600
+sodium_crypto_box_keypair_from_secretkey_and_publickey	ext/sodium/libsodium.stub.php:604	secret_key	r--		-	public_key	r--		-
+sodium_crypto_box_open	ext/sodium/libsodium.stub.php:606	ciphertext	r--		-	nonce	r--		-	key_pair	r--		-
+sodium_crypto_box_publickey	ext/sodium/libsodium.stub.php:608	key_pair	r--		-
+sodium_crypto_box_publickey_from_secretkey	ext/sodium/libsodium.stub.php:610	secret_key	r--		-
+sodium_crypto_box_seal	ext/sodium/libsodium.stub.php:612	message	r--		-	public_key	r--		-
+sodium_crypto_box_seal_open	ext/sodium/libsodium.stub.php:614	ciphertext	r--		-	key_pair	r--		-
+sodium_crypto_box_secretkey	ext/sodium/libsodium.stub.php:616	key_pair	r--		-
+sodium_crypto_box_seed_keypair	ext/sodium/libsodium.stub.php:602	seed	r--		-
+sodium_crypto_core_ristretto255_add	ext/sodium/libsodium.stub.php:619	p	r--		-	q	r--		-
+sodium_crypto_core_ristretto255_from_hash	ext/sodium/libsodium.stub.php:621	s	r--		-
+sodium_crypto_core_ristretto255_is_valid_point	ext/sodium/libsodium.stub.php:623	s	r--		-
+sodium_crypto_core_ristretto255_random	ext/sodium/libsodium.stub.php:625
+sodium_crypto_core_ristretto255_scalar_add	ext/sodium/libsodium.stub.php:627	x	r--		-	y	r--		-
+sodium_crypto_core_ristretto255_scalar_complement	ext/sodium/libsodium.stub.php:629	s	r--		-
+sodium_crypto_core_ristretto255_scalar_invert	ext/sodium/libsodium.stub.php:631	s	r--		-
+sodium_crypto_core_ristretto255_scalar_mul	ext/sodium/libsodium.stub.php:633	x	r--		-	y	r--		-
+sodium_crypto_core_ristretto255_scalar_negate	ext/sodium/libsodium.stub.php:635	s	r--		-
+sodium_crypto_core_ristretto255_scalar_random	ext/sodium/libsodium.stub.php:637
+sodium_crypto_core_ristretto255_scalar_reduce	ext/sodium/libsodium.stub.php:639	s	r--		-
+sodium_crypto_core_ristretto255_scalar_sub	ext/sodium/libsodium.stub.php:641	x	r--		-	y	r--		-
+sodium_crypto_core_ristretto255_sub	ext/sodium/libsodium.stub.php:643	p	r--		-	q	r--		-
+sodium_crypto_generichash	ext/sodium/libsodium.stub.php:665	message	r--		-	key	o--	""	s	length	o--	SODIUM_CRYPTO_GENERICHASH_BYTES	i32
+sodium_crypto_generichash_final	ext/sodium/libsodium.stub.php:673	state	r-&		-	length	o--	SODIUM_CRYPTO_GENERICHASH_BYTES	i32
+sodium_crypto_generichash_init	ext/sodium/libsodium.stub.php:669	key	o--	""	s	length	o--	SODIUM_CRYPTO_GENERICHASH_BYTES	i32
+sodium_crypto_generichash_keygen	ext/sodium/libsodium.stub.php:667
+sodium_crypto_generichash_update	ext/sodium/libsodium.stub.php:671	state	r-&		-	message	r--		-
+sodium_crypto_kdf_derive_from_key	ext/sodium/libsodium.stub.php:675	subkey_length	r--		-	subkey_id	r--		-	context	r--		-	key	r--		-
+sodium_crypto_kdf_keygen	ext/sodium/libsodium.stub.php:677
+sodium_crypto_kx_client_session_keys	ext/sodium/libsodium.stub.php:657	client_key_pair	r--		-	server_key	r--		-
+sodium_crypto_kx_keypair	ext/sodium/libsodium.stub.php:646
+sodium_crypto_kx_publickey	ext/sodium/libsodium.stub.php:648	key_pair	r--		-
+sodium_crypto_kx_secretkey	ext/sodium/libsodium.stub.php:650	key_pair	r--		-
+sodium_crypto_kx_seed_keypair	ext/sodium/libsodium.stub.php:652	seed	r--		-
+sodium_crypto_kx_server_session_keys	ext/sodium/libsodium.stub.php:663	server_key_pair	r--		-	client_key	r--		-
+sodium_crypto_pwhash	ext/sodium/libsodium.stub.php:680	length	r--		-	password	r--		-	salt	r--		-	opslimit	r--		-	memlimit	r--		-	algo	o--	SODIUM_CRYPTO_PWHASH_ALG_DEFAULT	i2
+sodium_crypto_pwhash_scryptsalsa208sha256	ext/sodium/libsodium.stub.php:692	length	r--		-	password	r--		-	salt	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_scryptsalsa208sha256_str	ext/sodium/libsodium.stub.php:694	password	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_scryptsalsa208sha256_str_verify	ext/sodium/libsodium.stub.php:696	hash	r--		-	password	r--		-
+sodium_crypto_pwhash_str	ext/sodium/libsodium.stub.php:682	password	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_str_needs_rehash	ext/sodium/libsodium.stub.php:688	password	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_str_verify	ext/sodium/libsodium.stub.php:684	hash	r--		-	password	r--		-
+sodium_crypto_scalarmult	ext/sodium/libsodium.stub.php:699	n	r--		-	p	r--		-
+sodium_crypto_scalarmult_base	ext/sodium/libsodium.stub.php:802	secret_key	r--		-
+sodium_crypto_scalarmult_ristretto255	ext/sodium/libsodium.stub.php:702	n	r--		-	p	r--		-
+sodium_crypto_scalarmult_ristretto255_base	ext/sodium/libsodium.stub.php:704	n	r--		-
+sodium_crypto_secretbox	ext/sodium/libsodium.stub.php:707	message	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_secretbox_keygen	ext/sodium/libsodium.stub.php:709
+sodium_crypto_secretbox_open	ext/sodium/libsodium.stub.php:711	ciphertext	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_secretstream_xchacha20poly1305_init_pull	ext/sodium/libsodium.stub.php:723	header	r--		-	key	r--		-
+sodium_crypto_secretstream_xchacha20poly1305_init_push	ext/sodium/libsodium.stub.php:719	key	r--		-
+sodium_crypto_secretstream_xchacha20poly1305_keygen	ext/sodium/libsodium.stub.php:714
+sodium_crypto_secretstream_xchacha20poly1305_pull	ext/sodium/libsodium.stub.php:726	state	r-&		-	ciphertext	r--		-	additional_data	o--	""	s
+sodium_crypto_secretstream_xchacha20poly1305_push	ext/sodium/libsodium.stub.php:721	state	r-&		-	message	r--		-	additional_data	o--	""	s	tag	o--	SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_MESSAGE	i0
+sodium_crypto_secretstream_xchacha20poly1305_rekey	ext/sodium/libsodium.stub.php:728	state	r-&		-
+sodium_crypto_shorthash	ext/sodium/libsodium.stub.php:731	message	r--		-	key	r--		-
+sodium_crypto_shorthash_keygen	ext/sodium/libsodium.stub.php:733
+sodium_crypto_sign	ext/sodium/libsodium.stub.php:735	message	r--		-	secret_key	r--		-
+sodium_crypto_sign_detached	ext/sodium/libsodium.stub.php:737	message	r--		-	secret_key	r--		-
+sodium_crypto_sign_ed25519_pk_to_curve25519	ext/sodium/libsodium.stub.php:739	public_key	r--		-
+sodium_crypto_sign_ed25519_sk_to_curve25519	ext/sodium/libsodium.stub.php:741	secret_key	r--		-
+sodium_crypto_sign_keypair	ext/sodium/libsodium.stub.php:743
+sodium_crypto_sign_keypair_from_secretkey_and_publickey	ext/sodium/libsodium.stub.php:745	secret_key	r--		-	public_key	r--		-
+sodium_crypto_sign_open	ext/sodium/libsodium.stub.php:747	signed_message	r--		-	public_key	r--		-
+sodium_crypto_sign_publickey	ext/sodium/libsodium.stub.php:749	key_pair	r--		-
+sodium_crypto_sign_publickey_from_secretkey	ext/sodium/libsodium.stub.php:753	secret_key	r--		-
+sodium_crypto_sign_secretkey	ext/sodium/libsodium.stub.php:751	key_pair	r--		-
+sodium_crypto_sign_seed_keypair	ext/sodium/libsodium.stub.php:755	seed	r--		-
+sodium_crypto_sign_verify_detached	ext/sodium/libsodium.stub.php:757	signature	r--		-	message	r--		-	public_key	r--		-
+sodium_crypto_stream	ext/sodium/libsodium.stub.php:759	length	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_stream_keygen	ext/sodium/libsodium.stub.php:761
+sodium_crypto_stream_xchacha20	ext/sodium/libsodium.stub.php:766	length	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_stream_xchacha20_keygen	ext/sodium/libsodium.stub.php:768
+sodium_crypto_stream_xchacha20_xor	ext/sodium/libsodium.stub.php:770	message	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_stream_xchacha20_xor_ic	ext/sodium/libsodium.stub.php:772	message	r--		-	nonce	r--		-	counter	r--		-	key	r--		-
+sodium_crypto_stream_xor	ext/sodium/libsodium.stub.php:763	message	r--		-	nonce	r--		-	key	r--		-
+sodium_hex2bin	ext/sodium/libsodium.stub.php:791	string	r--		-	ignore	o--	""	s
+sodium_increment	ext/sodium/libsodium.stub.php:779	string	r-&		-
+sodium_memcmp	ext/sodium/libsodium.stub.php:781	string1	r--		-	string2	r--		-
+sodium_memzero	ext/sodium/libsodium.stub.php:783	string	r-&		-
+sodium_pad	ext/sodium/libsodium.stub.php:785	string	r--		-	block_size	r--		-
+sodium_unpad	ext/sodium/libsodium.stub.php:787	string	r--		-	block_size	r--		-
 sort	ext/standard/basic_functions.stub.php:1572	array	r-&		-	flags	o--	SORT_REGULAR	i0
 soundex	ext/standard/basic_functions.stub.php:3361	string	r--		-
 spl_autoload	ext/spl/php_spl.stub.php:26	class	r--		-	file_extensions	o--	null	n
@@ -2469,6 +3502,13 @@ splsubject::attach	ext/spl/spl_observer.stub.php:14	observer	r--		-
 splsubject::detach	ext/spl/spl_observer.stub.php:17	observer	r--		-
 splsubject::notify	ext/spl/spl_observer.stub.php:20
 spltempfileobject::__construct	ext/spl/spl_directory.stub.php:333	maxMemory	o--	2 * 1024 * 1024	i2097152
+spoofchecker::__construct	ext/intl/spoofchecker/spoofchecker.stub.php:52
+spoofchecker::areconfusable	ext/intl/spoofchecker/spoofchecker.stub.php:64	string1	r--		-	string2	r--		-	errorCode	o-&	null	n
+spoofchecker::issuspicious	ext/intl/spoofchecker/spoofchecker.stub.php:58	string	r--		-	errorCode	o-&	null	n
+spoofchecker::setallowedchars	ext/intl/spoofchecker/spoofchecker.stub.php:74	pattern	r--		-	patternOptions	o--	0	i0
+spoofchecker::setallowedlocales	ext/intl/spoofchecker/spoofchecker.stub.php:67	locales	r--		-
+spoofchecker::setchecks	ext/intl/spoofchecker/spoofchecker.stub.php:70	checks	r--		-
+spoofchecker::setrestrictionlevel	ext/intl/spoofchecker/spoofchecker.stub.php:73	level	r--		-
 sprintf	ext/standard/basic_functions.stub.php:2960	format	r--		-	values	ov-		-
 sqlite3::__construct	ext/sqlite3/sqlite3.stub.php:165	filename	r--		-	flags	o--	SQLITE3_OPEN_READWRITE | SQLITE3_OPEN_CREATE	i6	encryptionKey	o--	""	s
 sqlite3::backup	ext/sqlite3/sqlite3.stub.php:204	destination	r--		-	sourceDatabase	o--	"main"	s6d61696e	destinationDatabase	o--	"main"	s6d61696e
@@ -2647,10 +3687,44 @@ token_get_all	ext/tokenizer/tokenizer.stub.php:11	code	r--		-	flags	o--	0	i0
 token_name	ext/tokenizer/tokenizer.stub.php:13	id	r--		-
 touch	ext/standard/basic_functions.stub.php:2937	filename	r--		-	mtime	o--	null	n	atime	o--	null	n
 trait_exists	Zend/zend_builtin_functions.stub.php:93	trait	r--		-	autoload	o--	true	t
+transliterator::__construct	ext/intl/transliterator/transliterator.stub.php:15
+transliterator::create	ext/intl/transliterator/transliterator.stub.php:21	id	r--		-	direction	o--	Transliterator::FORWARD	i0
+transliterator::createfromrules	ext/intl/transliterator/transliterator.stub.php:27	rules	r--		-	direction	o--	Transliterator::FORWARD	i0
+transliterator::createinverse	ext/intl/transliterator/transliterator.stub.php:33
+transliterator::geterrorcode	ext/intl/transliterator/transliterator.stub.php:52
+transliterator::geterrormessage	ext/intl/transliterator/transliterator.stub.php:58
+transliterator::listids	ext/intl/transliterator/transliterator.stub.php:40
+transliterator::transliterate	ext/intl/transliterator/transliterator.stub.php:46	string	r--		-	start	o--	0	i0	end	o--	-1	i-1
+transliterator_create	ext/intl/php_intl.stub.php:625	id	r--		-	direction	o--	Transliterator::FORWARD	i0
+transliterator_create_from_rules	ext/intl/php_intl.stub.php:627	rules	r--		-	direction	o--	Transliterator::FORWARD	i0
+transliterator_create_inverse	ext/intl/php_intl.stub.php:635	transliterator	r--		-
+transliterator_get_error_code	ext/intl/php_intl.stub.php:639	transliterator	r--		-
+transliterator_get_error_message	ext/intl/php_intl.stub.php:641	transliterator	r--		-
+transliterator_list_ids	ext/intl/php_intl.stub.php:633
+transliterator_transliterate	ext/intl/php_intl.stub.php:637	transliterator	r--		-	string	r--		-	start	o--	0	i0	end	o--	-1	i-1
 trigger_error	Zend/zend_builtin_functions.stub.php:113	message	r--		-	error_level	o--	E_USER_NOTICE	i1024
 trim	ext/standard/basic_functions.stub.php:2307	string	r--		-	characters	o--	" \n\r\t\v\0"	s200a0d090b00
 uasort	ext/standard/basic_functions.stub.php:1578	array	r-&		-	callback	r--		-
 ucfirst	ext/standard/basic_functions.stub.php:2461	string	r--		-
+uconverter::__construct	ext/intl/converter/converter.stub.php:96	destination_encoding	o--	null	n	source_encoding	o--	null	n
+uconverter::convert	ext/intl/converter/converter.stub.php:99	str	r--		-	reverse	o--	false	f
+uconverter::fromucallback	ext/intl/converter/converter.stub.php:105	reason	r--		-	source	r--		-	codePoint	r--		-	error	r-&		-
+uconverter::getaliases	ext/intl/converter/converter.stub.php:111	name	r--		-
+uconverter::getavailable	ext/intl/converter/converter.stub.php:117
+uconverter::getdestinationencoding	ext/intl/converter/converter.stub.php:120
+uconverter::getdestinationtype	ext/intl/converter/converter.stub.php:123
+uconverter::geterrorcode	ext/intl/converter/converter.stub.php:126
+uconverter::geterrormessage	ext/intl/converter/converter.stub.php:129
+uconverter::getsourceencoding	ext/intl/converter/converter.stub.php:132
+uconverter::getsourcetype	ext/intl/converter/converter.stub.php:135
+uconverter::getstandards	ext/intl/converter/converter.stub.php:138
+uconverter::getsubstchars	ext/intl/converter/converter.stub.php:141
+uconverter::reasontext	ext/intl/converter/converter.stub.php:144	reason	r--		-
+uconverter::setdestinationencoding	ext/intl/converter/converter.stub.php:147	encoding	r--		-
+uconverter::setsourceencoding	ext/intl/converter/converter.stub.php:150	encoding	r--		-
+uconverter::setsubstchars	ext/intl/converter/converter.stub.php:153	chars	r--		-
+uconverter::toucallback	ext/intl/converter/converter.stub.php:159	reason	r--		-	source	r--		-	codeUnits	r--		-	error	r-&		-
+uconverter::transcode	ext/intl/converter/converter.stub.php:162	str	r--		-	toEncoding	r--		-	fromEncoding	r--		-	options	o--	null	n
 ucwords	ext/standard/basic_functions.stub.php:2470	string	r--		-	separators	o--	" \t\r\n\f\v"	s20090d0a0c0b
 uksort	ext/standard/basic_functions.stub.php:1580	array	r-&		-	callback	r--		-
 umask	ext/standard/basic_functions.stub.php:2743	mask	o--	null	n
@@ -2685,3 +3759,6 @@ weakreference::get	Zend/zend_weakrefs.stub.php:15
 wordwrap	ext/standard/basic_functions.stub.php:2322	string	r--		-	width	o--	75	i75	break	o--	"\n"	s0a	cut_long_words	o--	false	f
 zend_thread_id	Zend/zend_builtin_functions.stub.php:202
 zend_version	Zend/zend_builtin_functions.stub.php:19
+zlib_decode	ext/zlib/zlib.stub.php:186	data	r--		-	max_length	o--	0	i0
+zlib_encode	ext/zlib/zlib.stub.php:183	data	r--		-	encoding	r--		-	level	o--	-1	i-1
+zlib_get_coding_type	ext/zlib/zlib.stub.php:166

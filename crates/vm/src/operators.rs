@@ -21,6 +21,13 @@ impl Vm {
         right: i32,
     ) -> Result<(), NativeError> {
         let left = self.read_local(left);
+        if left.is_object()
+            && let Some(value) =
+                self.native_binary(operator, &left, &Value::Int(i64::from(right)))?
+        {
+            self.set(destination, value);
+            return Ok(());
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let result = ops::binary(
             operator,
@@ -61,6 +68,14 @@ impl Vm {
         let left = left.unwrap_or(&null).deref();
         let right = right.unwrap_or(&null).deref();
         let result = match fast_binary(operator, &left, &right) {
+            None if crate::object_operators::has_binary(&left, &right) => {
+                return Ok(Some(BatchExit::Instruction(Instruction::Binary {
+                    dst: destination,
+                    op: operator,
+                    lhs,
+                    rhs,
+                })));
+            }
             Some(value) => Ok(value),
             None if needs_comparison_step(operator, &left, &right) => {
                 if self.classes.has_property_views
@@ -307,7 +322,21 @@ impl Vm {
         let old = self.read_local(local);
         let increment = matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement);
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        let value = if let Value::Int(integer) = old {
+        let native = if old.is_object() {
+            let operator = if increment {
+                BinaryOp::Add
+            } else {
+                BinaryOp::Subtract
+            };
+            diagnostics
+                .vm
+                .native_binary(operator, &old, &Value::Int(1))?
+        } else {
+            None
+        };
+        let value = if let Some(value) = native {
+            Ok(value)
+        } else if let Value::Int(integer) = old {
             let step = if increment { 1 } else { -1 };
             Ok(integer
                 .checked_add(step)
@@ -381,6 +410,16 @@ impl Vm {
                 return Ok(None);
             }
         }
+        // Only an object operand can overload the operator; the common case
+        // keeps borrowing its operands.
+        if self.operand(local).is_object() || self.operand(source).is_object() {
+            let left = (*self.operand(local)).clone();
+            let right = (*self.operand(source)).clone();
+            if let Some(value) = self.native_binary(operator, &left, &right)? {
+                self.assign_local(local, value)?;
+                return Ok(None);
+            }
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = ops::binary(
             operator,
@@ -401,6 +440,12 @@ impl Vm {
         source: Reg,
     ) -> Result<(), NativeError> {
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+        let source_value = diagnostics.vm.get(source);
+        if let Some(value) = diagnostics.vm.native_unary(operator, &source_value)? {
+            drop(diagnostics);
+            self.set(destination, value);
+            return Ok(());
+        }
         let value = ops::unary(
             operator,
             &diagnostics.vm.operand(source),

@@ -1,0 +1,16 @@
+[package]
+name = "phera-ext-zlib"
+description = "PHP zlib compression and gzip streams for Phera"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+adler2.workspace = true
+flate2.workspace = true
+phera-extension-api.workspace = true
+phera-ext-http.workspace = true
+phera-ext-streams.workspace = true
+
+[lints]
+workspace = true

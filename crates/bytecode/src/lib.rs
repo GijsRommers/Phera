@@ -43,6 +43,9 @@ mod ids;
 mod instruction;
 pub mod reflection;
 mod unit;
+mod unit_metadata;
+
+pub use unit_metadata::{DeclarationScope, FunctionShape, FunctionSignature, UnitMetadata};
 
 pub use builtin::{BuiltinFrame, BuiltinUnary, CallbackArguments};
 pub use class::{

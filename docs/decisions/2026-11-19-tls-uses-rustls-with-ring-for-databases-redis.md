@@ -6,7 +6,8 @@
 
 ## Decision
 
-TLS uses rustls with ring for databases, Redis and HTTP clients. PDO and Redis share TLS 1.2 and 1.3 policy in `phera-io-pool`.
+TLS uses rustls with ring for databases, Redis and HTTP clients. PDO, Redis, and
+curl share TLS 1.2 and 1.3 policy in `phera-io-pool`.
 
 ## Why
 

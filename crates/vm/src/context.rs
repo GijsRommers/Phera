@@ -27,6 +27,14 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn extension_value(&self, key: &'static str) -> Option<Value> {
+        self.extension_values.get(key).cloned()
+    }
+
+    fn set_extension_value(&mut self, key: &'static str, value: Value) {
+        self.extension_values.insert(key, value);
+    }
+
     fn reflection(
         &mut self,
     ) -> Option<&mut dyn phera_extension_api::reflection::ReflectionContext> {
@@ -245,6 +253,15 @@ impl Context for Vm {
 
     fn chain_exception(&mut self, error: NativeError, previous: NativeError) -> NativeError {
         self.exception_with_previous(error, previous)
+    }
+
+    fn native_binary(
+        &mut self,
+        operator: phera_extension_api::NativeBinaryOp,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Option<Value>, NativeError> {
+        Vm::native_binary(self, operator, left, right)
     }
 
     fn compare<'a>(
@@ -817,7 +834,7 @@ impl Context for Vm {
             return Err(internal_error!("InternalIterator allocation"));
         };
         *object.native.borrow_mut() = Some(Box::new(crate::internal_iterator::InternalIterator {
-            cursor,
+            cursor: Some(cursor),
             initialized: false,
         }));
         Ok(value)

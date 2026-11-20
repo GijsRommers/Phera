@@ -12,7 +12,10 @@
 //! It also holds the function's instructions, shared with the compiled
 //! file, so that a call or a return reaches them from here.
 
-use phera_bytecode::{Code, Function, Type, TypeMask};
+use std::sync::Arc;
+
+pub(crate) use phera_bytecode::FunctionShape;
+use phera_bytecode::{Code, FunctionSignature, TypeMask};
 
 use crate::code_table::{FunctionIndex, UnitIndex};
 
@@ -39,23 +42,13 @@ pub(crate) struct FunctionFacts {
     /// One bit per parameter that takes a reference (the first 64).
     by_reference: u64,
     /// The declared built-in types of each parameter, for the one-bit check.
-    pub(crate) parameter_masks: Box<[TypeMask]>,
+    pub(crate) parameter_masks: Arc<[TypeMask]>,
     /// The declared return type's built-in types, when there is a return type.
     pub(crate) return_mask: Option<TypeMask>,
     pub(crate) shape: FunctionShape,
     /// The class that declares this function as a method: a method frame's
     /// class scope.
     pub(crate) class: Option<crate::classes::ClassIndex>,
-}
-
-/// Whether entering a function is just moving arguments into place.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FunctionShape {
-    /// At most 64 parameters, none of them variadic.
-    Plain,
-    /// A variadic parameter or more than 64 parameters: the general entry
-    /// collects or checks what the bit masks cannot describe.
-    General,
 }
 
 impl FunctionFacts {
@@ -80,53 +73,25 @@ impl FunctionFacts {
         index < self.parameters as usize && index < 64 && self.special & (1 << index) == 0
     }
 
-    pub(crate) fn new(
-        place: (UnitIndex, FunctionIndex, Option<u32>),
-        body: &Function,
-        types: &[Type],
+    pub(crate) fn bind(
+        (unit, unit_first, local): (UnitIndex, FunctionIndex, Option<u32>),
+        signature: FunctionSignature,
+        instructions: Code,
     ) -> Self {
-        let (unit, unit_first, local) = place;
-        let mask_of = |ty: phera_bytecode::TypeId| types[ty.index()].mask;
-        let masks = body
-            .parameters
-            .iter()
-            .map(|parameter| parameter.ty.map_or(TypeMask::MIXED, mask_of))
-            .collect();
-        let bits = |test: fn(&phera_bytecode::Parameter) -> bool| {
-            body.parameters
-                .iter()
-                .take(64)
-                .enumerate()
-                .filter(|(_, parameter)| test(parameter))
-                .fold(0u64, |bits, (index, _)| bits | 1 << index)
-        };
-        let typed = bits(|parameter| parameter.ty.is_some());
-        let special = bits(|parameter| parameter.by_reference || parameter.variadic);
-        let by_reference = bits(|parameter| parameter.by_reference && !parameter.variadic);
-        let general = body.parameters.len() > 64
-            || body.argument_layout == phera_bytecode::ArgumentLayout::Variadic;
         Self {
-            instructions: body.instructions.clone(),
+            instructions,
             unit,
             local,
             unit_first,
-            registers: body.registers,
-            parameters: body.parameters.len() as u16,
-            required: body
-                .parameters
-                .iter()
-                .rposition(|parameter| !parameter.has_default && !parameter.variadic)
-                .map_or(0, |index| index as u16 + 1),
-            typed,
-            special,
-            by_reference,
-            parameter_masks: masks,
-            return_mask: body.return_type.map(mask_of),
-            shape: if general {
-                FunctionShape::General
-            } else {
-                FunctionShape::Plain
-            },
+            registers: signature.registers,
+            parameters: signature.parameters,
+            required: signature.required,
+            typed: signature.typed,
+            special: signature.special,
+            by_reference: signature.by_reference,
+            parameter_masks: signature.parameter_masks,
+            return_mask: signature.return_mask,
+            shape: signature.shape,
             class: None,
         }
     }

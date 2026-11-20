@@ -7,7 +7,10 @@
 
 use std::rc::Rc;
 
-use crate::{Context, NativeError, NativeResult, Object, PhpArray, Value};
+use crate::{
+    Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value,
+    traversal::IteratorStep,
+};
 
 /// PHP's three-way comparison. Uncomparable pairs fail every ordering test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +78,18 @@ pub trait NativeIterator {
     fn current(&mut self, context: &mut dyn Context) -> NativeResult;
     fn key(&mut self, context: &mut dyn Context) -> NativeResult;
 
+    /// An opted-in step can wait for I/O before its synchronous cursor operation.
+    fn needs_input(&self, _operation: IteratorStep) -> bool {
+        false
+    }
+
+    fn read_input<'a>(
+        &'a mut self,
+        _context: &'a mut dyn Context,
+    ) -> LocalFuture<'a, Result<(), NativeError>> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// Read a foreach entry synchronously, advancing first after the first successful read.
     /// Returning None leaves the cursor untouched so the VM can run the ordinary steps.
     fn next_entry(&mut self, _with_key: bool) -> Option<(Value, Option<Value>)> {
@@ -131,10 +146,30 @@ pub type PropertyProjection =
 pub type NativeCount = fn(&mut dyn Context, &Object) -> Result<i64, NativeError>;
 pub type MethodForwarder = fn(&Object) -> Result<Option<Rc<Object>>, NativeError>;
 
+/// A native operand can handle an operator or decline ordinary PHP dispatch.
+pub type NativeBinary = fn(
+    &mut dyn Context,
+    crate::NativeBinaryOp,
+    &Value,
+    &Value,
+) -> Result<Option<Value>, NativeError>;
+
+pub type NativeUnary =
+    fn(&mut dyn Context, crate::NativeUnaryOp, &Object) -> Result<Option<Value>, NativeError>;
+pub type NativeCast = fn(&Object, crate::NativeCastKind) -> Option<Value>;
+
 #[derive(Clone, Copy, Default)]
 pub struct ClassHooks {
     pub clone: Option<NativeClone>,
     pub compare: Option<NativeCompare>,
+    pub binary: Option<NativeBinary>,
+    pub unary: Option<NativeUnary>,
+    pub cast: Option<NativeCast>,
+    /// Native state that cannot be represented by PHP's serialization format.
+    pub forbid_serialization: bool,
+    /// An exception of this class (or a subclass) shows no argument values in
+    /// its trace: they may be keys or passwords.
+    pub redact_trace_arguments: bool,
     /// Whole-object enumeration, with the consuming operation supplied as a purpose.
     pub properties: Option<PropertyProjection>,
     /// Direct read, mutation or presence check for one virtual property.
@@ -154,6 +189,11 @@ impl ClassHooks {
     pub const EMPTY: Self = Self {
         clone: None,
         compare: None,
+        binary: None,
+        unary: None,
+        cast: None,
+        forbid_serialization: false,
+        redact_trace_arguments: false,
         properties: None,
         property_access: None,
         iterator: None,

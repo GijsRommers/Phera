@@ -203,3 +203,15 @@ fn set(target: &mut PhpArray, wrapper: ArrayKey, option: ArrayKey, value: Value)
     options.insert(option, value);
     target.insert(wrapper, Value::from(options));
 }
+
+pub(crate) fn option(value: &Value, wrapper: &str, key: &str) -> Option<Value> {
+    let Value::Resource(resource) = value else {
+        return None;
+    };
+    let data = resource.data.borrow();
+    let options = data.as_ref()?.downcast_ref::<Options>()?;
+    let Value::Array(options) = options.0.get(&ArrayKey::str(wrapper))? else {
+        return None;
+    };
+    options.get(&ArrayKey::str(key)).cloned()
+}

@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use phera_bytecode::{CompiledUnit, Function, Instruction};
+use phera_bytecode::{CompiledUnit, Function, FunctionSignature, Instruction};
 
 pub(crate) use crate::function_facts::{FunctionFacts, FunctionShape};
 
@@ -83,26 +83,51 @@ impl CodeTable {
         }
         let index = self.next_unit_index();
         let first = FunctionIndex(self.functions.len() as u32);
-        let bodies = std::iter::once((None, &unit.main)).chain(
-            unit.functions
+        let (name_keys, symbol_keys) = if let Some(metadata) = &unit.metadata {
+            self.functions
+                .extend(metadata.functions.iter().cloned().enumerate().map(
+                    |(offset, signature)| {
+                        let local = offset.checked_sub(1).map(|local| local as u32);
+                        let instructions = body(unit, local.map(|local| local as usize))
+                            .instructions
+                            .clone();
+                        FunctionFacts::bind((index, first, local), signature, instructions)
+                    },
+                ));
+            let names = metadata
+                .names
                 .iter()
-                .enumerate()
-                .map(|(local, body)| (Some(local as u32), body)),
-        );
-        for (local, body) in bodies {
-            let facts = FunctionFacts::new((index, first, local), body, &unit.types);
-            self.functions.push(facts);
-        }
-        let name_keys = unit
-            .names
-            .iter()
-            .map(|name| self.intern(name.to_ascii_lowercase()))
-            .collect();
-        let symbol_keys = unit
-            .symbols
-            .iter()
-            .map(|symbol| self.intern(symbol.name.to_ascii_lowercase()))
-            .collect();
+                .map(|name| self.intern_shared(name))
+                .collect();
+            let symbols = metadata
+                .symbols
+                .iter()
+                .map(|name| self.intern_shared(name))
+                .collect();
+            (names, symbols)
+        } else {
+            let bodies = std::iter::once(&unit.main).chain(&unit.functions);
+            self.functions
+                .extend(bodies.enumerate().map(|(offset, body)| {
+                    let local = offset.checked_sub(1).map(|local| local as u32);
+                    FunctionFacts::bind(
+                        (index, first, local),
+                        FunctionSignature::new(body, &unit.types),
+                        body.instructions.clone(),
+                    )
+                }));
+            let names = unit
+                .names
+                .iter()
+                .map(|name| self.intern(name.to_ascii_lowercase()))
+                .collect();
+            let symbols = unit
+                .symbols
+                .iter()
+                .map(|symbol| self.intern(symbol.name.to_ascii_lowercase()))
+                .collect();
+            (names, symbols)
+        };
         self.units.push(LoadedUnit {
             unit: unit.clone(),
             cache: UnitCache::new(unit),
@@ -117,6 +142,13 @@ impl CodeTable {
     fn intern(&mut self, lowercase: String) -> NameKey {
         let next = NameKey(self.names.len() as u32);
         *self.names.entry(lowercase).or_insert(next)
+    }
+
+    fn intern_shared(&mut self, lowercase: &str) -> NameKey {
+        match self.names.get(lowercase) {
+            Some(key) => *key,
+            None => self.intern(lowercase.to_owned()),
+        }
     }
 
     /// The key of a lowercased name, if some loaded file uses the name.
