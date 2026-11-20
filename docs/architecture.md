@@ -1869,6 +1869,10 @@ runtime selects a session from startup settings and the request's parsed
 trigger fields before executing PHP. Each session owns its own features,
 breakpoints, continuation command, and asynchronous TCP stream.
 
+Workers select their HTTP handler when the server starts. The ordinary
+handler calls the ordinary runtime specialization. Enabling debugging
+registers the debugger's PHP functions and directives at process startup.
+
 The VM selects the debugger batch after a connection succeeds. The debugger
 batch publishes the next instruction before a source stop and uses the same
 guarded register operations and slow instruction handlers as ordinary PHP
@@ -1881,7 +1885,9 @@ already charges only while the task is being polled.
 
 With snapshot and fork, the runtime sets up request globals before choosing
 whether to attach the request debugger. A fork has its own connection and
-can stop only in code it runs. A development server can attach to the boot
+can stop in request code from files compiled during boot. Breakpoints
+resolve against the fork's copy of the worker's loaded code table.
+A development server can attach to the boot
 VM with `--debug --dev --debug-boot`. Snapshot creation closes the boot's
 debugger session and the snapshot retains no connection state.
 

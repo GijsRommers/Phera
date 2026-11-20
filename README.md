@@ -109,7 +109,8 @@ To stop in PHP that runs before the snapshot, start the IDE listener and run
 can pause before the worker accepts requests. The first HTTP request has its
 own debugging session.
 
-PHP exposes the active settings through `ini_get('xdebug.mode')` and the
+With debugging enabled, PHP exposes the active settings through
+`ini_get('xdebug.mode')` and the
 other `xdebug.*` directives above. PhpStorm's validator checks for the
 Xdebug PHP extension. Use **Start Listening for PHP Debug Connections**
 and a breakpoint to verify a Phera session.

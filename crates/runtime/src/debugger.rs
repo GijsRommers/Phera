@@ -5,10 +5,17 @@ use std::sync::Arc;
 use phera_vm::{DebugConfig, DebugStart, DebugTimeLimit, Vm};
 
 use crate::Runtime;
+use crate::cache::{CodeCache, FileMode};
 
 impl Runtime {
-    pub fn with_debug(mut self, debug: Option<DebugConfig>) -> Self {
-        self.debug = debug.map(Arc::new);
+    pub fn with_debug(mut self, debug: DebugConfig) -> Self {
+        if self.debug.is_none() {
+            Vm::register_debugger(Arc::make_mut(&mut self.registry));
+            Vm::register_debugger(Arc::make_mut(&mut self.web_registry));
+            self.cache = CodeCache::new(self.registry.clone(), FileMode::Cli);
+            self.web_cache = CodeCache::new(self.web_registry.clone(), FileMode::Web);
+        }
+        self.debug = Some(Arc::new(debug));
         self
     }
 
@@ -20,6 +27,7 @@ impl Runtime {
         time_limit: Option<DebugTimeLimit>,
     ) {
         let Some(debug) = &self.debug else { return };
+        debug.apply_ini(vm);
         let trigger = |name: &str| {
             vm.debugger_trigger(name).or_else(|| {
                 self.environment

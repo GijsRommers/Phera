@@ -56,9 +56,10 @@ pub(crate) fn script(
             return ExitCode::FAILURE;
         }
     };
-    let runtime = Runtime::with_environment(loaded.environment)
-        .with_startup_ini(ini)
-        .with_debug(debug);
+    let mut runtime = Runtime::with_environment(loaded.environment).with_startup_ini(ini);
+    if let Some(debug) = debug {
+        runtime = runtime.with_debug(debug);
+    }
     match runtime.run_file_blocking(script, arguments, Some(Box::new(Stdout))) {
         Ok(result) => {
             if std::env::var_os("PHERA_INSTRUCTION_COUNT").is_some() {

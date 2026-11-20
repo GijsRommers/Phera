@@ -111,9 +111,12 @@ impl Runtime {
             script.parent().map(Path::to_path_buf),
             Vec::new().into(),
         );
-        if let Some(debug) = self.debug.as_ref().filter(|debug| debug.boot) {
-            vm.connect_debugger(debug, &unit.file, &debug.idekey, None)
-                .await;
+        if let Some(debug) = &self.debug {
+            debug.apply_ini(&mut vm);
+            if debug.boot {
+                vm.connect_debugger(debug, &unit.file, &debug.idekey, None)
+                    .await;
+            }
         }
         match vm.boot(unit).await {
             BootOutcome::Snapshot(snapshot) => {

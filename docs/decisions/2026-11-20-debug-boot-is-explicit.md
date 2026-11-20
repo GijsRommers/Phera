@@ -10,7 +10,9 @@
 the IDE, including a boot repeated after source changes. The boot
 connection ends at `Phera\snapshot()` or when the script ends. Every
 debugged request receives its own connection after it forks. A snapshot
-contains PHP state and no debugger transport.
+contains PHP state and no debugger transport. The fork's loaded code table
+includes the units compiled during boot. A request debugger resolves line
+breakpoints in those units before PHP resumes.
 
 ## Why
 

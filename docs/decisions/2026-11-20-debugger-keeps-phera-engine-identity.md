@@ -7,7 +7,7 @@
 ## Decision
 
 DBGp init reports Phera and its version. Clients can discover supported
-features with DBGp commands. PHP code can read the effective
+features with DBGp commands. On a debugger-enabled process, PHP code can read the effective
 `xdebug.*` startup values via `ini_get()` and request a stop via
 `xdebug_break()`. The latter returns false when there is no attachment.
 

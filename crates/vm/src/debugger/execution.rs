@@ -92,7 +92,26 @@ impl Vm {
         if debugger.poll_running() {
             return true;
         }
-        if !is_breakable(instruction) && !debugger.force_break {
+        let Some(frame) = self.current() else {
+            return false;
+        };
+        let loop_back = match instruction {
+            Instruction::Jump { target } if target.index() < position.ip => {
+                frame.function().lines.get(target.index()).copied() == Some(position.line)
+                    && frame
+                        .function()
+                        .instructions
+                        .get(target.index())
+                        .is_some_and(|target| {
+                            matches!(
+                                target,
+                                Instruction::IterNext { .. } | Instruction::IterNextKeyed { .. }
+                            )
+                        })
+            }
+            _ => false,
+        };
+        if (!is_breakable(instruction) || loop_back) && !debugger.force_break {
             return false;
         }
         let previous = debugger.visit(position);
@@ -118,9 +137,6 @@ impl Vm {
         if !line && !returning && !debugger.force_break {
             return false;
         }
-        let Some(frame) = self.current() else {
-            return false;
-        };
         let file = debugger.sources.uri(frame.unit());
         if debugger.features.resolved_breakpoints && line {
             let resolved = debugger.breakpoints.resolve_file(&file, |file, line| {
@@ -182,5 +198,8 @@ fn is_breakable(instruction: Instruction) -> bool {
             | Instruction::CheckType { .. }
             | Instruction::ReceiveDefault { .. }
             | Instruction::GeneratorStart
+            | Instruction::IterNext { .. }
+            | Instruction::IterNextKeyed { .. }
+            | Instruction::IterEnd { .. }
     )
 }

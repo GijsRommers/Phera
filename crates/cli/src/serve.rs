@@ -118,17 +118,17 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         config.request_read_timeout = request_read_timeout;
     }
     let workers = config.workers;
-    let debug_timeout = if debug.is_some() {
-        config.request_timeout.take()
-    } else {
-        None
-    };
+    let debug_server = debug.as_ref().map(|_| DebugServer {
+        timeout: config.request_timeout.take(),
+    });
 
     let mut runtime = Runtime::with_environment(loaded.environment)
         .with_startup_ini(options.ini)
-        .with_debug(debug)
         .with_web_development(options.dev)
         .without_web_processes(options.no_process);
+    if let Some(debug) = debug {
+        runtime = runtime.with_debug(debug);
+    }
     if let (Adapter::Laravel, Some(front_controller)) = (adapter, site.front_controller()) {
         runtime = runtime.with_entry_script(
             front_controller.to_path_buf(),
@@ -156,7 +156,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     let factory = SiteHandlerFactory {
         runtime,
         adapter,
-        debug_timeout,
+        debug_server,
         site: site.clone(),
         compress: options.compress,
         trusted_proxies: Arc::new(trusted_proxies),
@@ -244,7 +244,7 @@ struct SiteHandlerFactory {
     /// The framework adapter in use, which makes the front controller boot
     /// at start.
     adapter: Adapter,
-    debug_timeout: Option<Duration>,
+    debug_server: Option<DebugServer>,
     site: Arc<Site>,
     compress: bool,
     trusted_proxies: Arc<TrustedProxies>,
@@ -253,7 +253,7 @@ struct SiteHandlerFactory {
 
 impl HandlerFactory for SiteHandlerFactory {
     fn create(&self, worker_index: usize) -> Rc<dyn Handler> {
-        Rc::new(SiteHandler {
+        let site = SiteHandler {
             runtime: match self.adapter {
                 Adapter::Off => self.runtime.web_worker(worker_index),
                 _ => self
@@ -262,19 +262,29 @@ impl HandlerFactory for SiteHandlerFactory {
                     .with_background_boots(),
             },
             adapter: self.adapter,
-            debug_timeout: self.debug_timeout,
             site: self.site.clone(),
             compress: self.compress,
             trusted_proxies: self.trusted_proxies.clone(),
             health_path: self.health_path.clone(),
-        })
+        };
+        match self.debug_server {
+            Some(debug) => Rc::new(DebugSiteHandler {
+                site,
+                timeout: debug.timeout,
+            }),
+            None => Rc::new(site),
+        }
     }
+}
+
+#[derive(Clone, Copy)]
+struct DebugServer {
+    timeout: Option<Duration>,
 }
 
 struct SiteHandler {
     runtime: WebWorker,
     adapter: Adapter,
-    debug_timeout: Option<Duration>,
     site: Arc<Site>,
     /// `--compress`: compress responses for clients that accept it.
     compress: bool,
@@ -286,12 +296,28 @@ struct SiteHandler {
 
 impl Handler for SiteHandler {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>> {
-        match self.debug_timeout {
-            None => Box::pin(self.respond(request, None)),
+        Box::pin(self.respond::<false>(request, None))
+    }
+
+    fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+        Box::pin(self.boot())
+    }
+}
+
+/// Installed by the worker only when debugger startup is enabled.
+struct DebugSiteHandler {
+    site: SiteHandler,
+    timeout: Option<Duration>,
+}
+
+impl Handler for DebugSiteHandler {
+    fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>> {
+        match self.timeout {
+            None => Box::pin(self.site.respond::<true>(request, None)),
             Some(timeout) => Box::pin(async move {
                 let clock = DebugTimeLimit::new(timeout);
                 clock
-                    .run(self.respond(request, Some(clock.clone())))
+                    .run(self.site.respond::<true>(request, Some(clock.clone())))
                     .await
                     .unwrap_or_else(|| Response::text(504, "the request took too long\n"))
             }),
@@ -299,7 +325,7 @@ impl Handler for SiteHandler {
     }
 
     fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
-        Box::pin(self.boot())
+        Box::pin(self.site.boot())
     }
 }
 
@@ -338,7 +364,11 @@ impl SiteHandler {
         }
     }
 
-    async fn respond(&self, request: Request, time_limit: Option<DebugTimeLimit>) -> Response {
+    async fn respond<const DEBUG: bool>(
+        &self,
+        request: Request,
+        time_limit: Option<DebugTimeLimit>,
+    ) -> Response {
         // A platform asks "are you alive?" every few seconds. The answer
         // must not depend on the application, its database or a free worker
         // slot in PHP.
@@ -364,13 +394,12 @@ impl SiteHandler {
             Ok(Found::Script(script)) => {
                 let request = to_runtime(request, &self.trusted_proxies);
                 let root = self.site.document_root();
-                let response = match time_limit {
-                    Some(clock) => {
-                        self.runtime
-                            .handle_debug_request(&script, root, request, clock)
-                            .await
-                    }
-                    None => self.runtime.handle_request(&script, root, request).await,
+                let response = if DEBUG {
+                    self.runtime
+                        .handle_debug_request(&script, root, request, time_limit)
+                        .await
+                } else {
+                    self.runtime.handle_request(&script, root, request).await
                 };
                 let response = from_runtime(response);
                 if self.compress {

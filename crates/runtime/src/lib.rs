@@ -93,10 +93,10 @@ impl WebWorker {
         script: &Path,
         document_root: &Path,
         request: HttpRequest,
-        time_limit: DebugTimeLimit,
+        time_limit: Option<DebugTimeLimit>,
     ) -> HttpResponse {
         self.runtime
-            .handle_web_request(self, script, document_root, request, Some(time_limit))
+            .handle_web_request::<true>(self, script, document_root, request, time_limit)
             .await
     }
 
@@ -120,7 +120,7 @@ impl WebWorker {
         request: HttpRequest,
     ) -> HttpResponse {
         self.runtime
-            .handle_web_request(self, script, document_root, request, None)
+            .handle_web_request::<false>(self, script, document_root, request, None)
             .await
     }
 }
@@ -203,7 +203,6 @@ impl Runtime {
         registry.load(&phera_ext_serialize::Serialize);
         Vm::register_fiber_classes(&mut registry);
         Vm::register_state_forks(&mut registry);
-        Vm::register_debugger(&mut registry);
         registry.load(&phera_ext_spl::Spl);
         registry.load(&phera_ext_session::Session);
         adapters::register(&mut registry);
@@ -366,7 +365,7 @@ impl Runtime {
             .await
     }
 
-    async fn handle_web_request(
+    async fn handle_web_request<const DEBUG: bool>(
         &self,
         worker: &WebWorker,
         script: &Path,
@@ -458,9 +457,7 @@ impl Runtime {
         if let Some(warning) = form_warning {
             vm.request_startup_warning(warning);
         }
-        if self.debug.is_some()
-            && let Ok(unit) = &compiled
-        {
+        if DEBUG && let Ok(unit) = &compiled {
             self.connect_debugger(&mut vm, &unit.file, debug_time_limit)
                 .await;
         }
@@ -547,9 +544,6 @@ impl Runtime {
         }
         for (name, value) in self.startup_ini.iter() {
             vm.set_startup_ini(name, value);
-        }
-        if let Some(debug) = &self.debug {
-            debug.apply_ini(&mut vm);
         }
         if matches!(sapi, Sapi::Web) && self.web_development {
             vm.set_startup_ini("opcache.validate_timestamps", "1");
