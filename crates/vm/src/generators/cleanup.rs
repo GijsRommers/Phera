@@ -82,6 +82,12 @@ impl Vm {
         &mut self,
         object: &Object,
     ) -> Result<(), NativeError> {
+        // A generator that is running, itself or at the end of its
+        // `yield from` chain (on the stack of a suspended fiber), is left
+        // alone: destroying the fiber unwinds it, inner frames first.
+        if chain_is_running(object) {
+            return Ok(());
+        }
         let Ok(released) = super::state(object, |generator| Released::Owners {
             state: std::mem::replace(&mut generator.state, State::Returned(Value::Null)),
             item: generator.item.take(),
@@ -251,5 +257,28 @@ impl Vm {
             }
         }
         Ok(())
+    }
+}
+
+/// Whether the generator, or the generator its `yield from` chain ends in,
+/// is running. The chain is followed in a loop, one delegate at a time.
+fn chain_is_running(object: &Object) -> bool {
+    let mut current: Option<Rc<Object>> = None;
+    loop {
+        let link = super::state(
+            current.as_deref().unwrap_or(object),
+            |generator| match &generator.state {
+                State::Running => Err(true),
+                State::Delegating(_, _, super::delegation::Delegate::Generator(delegate)) => {
+                    Ok(delegate.clone())
+                }
+                _ => Err(false),
+            },
+        );
+        match link {
+            Ok(Ok(delegate)) => current = Some(delegate),
+            Ok(Err(running)) => return running,
+            Err(_) => return false,
+        }
     }
 }
