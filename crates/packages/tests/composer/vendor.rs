@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 #[derive(PartialEq, Eq)]
 enum Entry {
-    Directory,
+    Directory(u32),
     Link(PathBuf),
     File { sha256: String, executable: u32 },
 }
@@ -19,7 +19,7 @@ fn tree(root: &Path) -> Result<BTreeMap<PathBuf, Entry>> {
         let entry = entry?;
         let path = entry.path();
         let value = if entry.file_type().is_dir() {
-            Entry::Directory
+            Entry::Directory(mode(&entry.metadata()?))
         } else if entry.file_type().is_symlink() {
             Entry::Link(fs::read_link(path)?)
         } else if entry.file_type().is_file() {

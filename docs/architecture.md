@@ -1570,8 +1570,8 @@ that a project can use either tool.
   copy-on-write clones or hard links, so a second project with the same
   dependency costs no download and almost no disk.
 - **Parallel everywhere.** Metadata is fetched concurrently while the resolver
-  runs, archives are downloaded and unpacked concurrently, the autoloader's
-  class map is built by scanning files on all cores with Phera's own parser.
+  runs, archives are downloaded and unpacked concurrently, and the autoloader's
+  class map is built by scanning files on all cores with Phera's tokenizer.
 - **Installing from a lock file needs no resolution** and, when the store is
   warm, no network: it is linking files.
 - **Commands**: `phera install`, `phera update`, `phera add`, `phera remove`,
@@ -1589,13 +1589,10 @@ that a project can use either tool.
   reason for each difference. Timings are measured cold and warm against
   Composer.
 
-Legacy layouts are not installed (6.2): a package that declares PSR-0
-autoloading, `target-dir` or `include-path` stops the install with an error
-naming the package and the field.
-
-The runtime side: when a script runs under Phera, autoloading reads the same
-metadata natively instead of executing the generated PHP autoloader, which
-needs namespaces and autoloading in the engine (11.3, item 3).
+The current autoloader supports PSR-4, PSR-0, class maps and eager files.
+The runtime executes the generated PHP autoloader. The server's `--preload`
+option reads the generated metadata to compile PHP files before serving
+requests.
 
 ### 11.6 Phera views: a native template renderer
 

@@ -1,4 +1,4 @@
-//! Scan PHP declarations with Phera's parser on all cores.
+//! Scan PHP declarations with Phera's tokenizer on all cores.
 //!
 //! `namespace App; enum Status {}` adds `App\Status` to the optimized class map.
 
@@ -88,50 +88,38 @@ pub(super) fn classes(
             }
         }
     }
-    let pool = rayon::ThreadPoolBuilder::new()
-        .stack_size(phera_parser::PARSER_STACK_BYTES)
-        .build()?;
-    let discovered: Vec<Vec<(String, PathBuf)>> = pool.install(|| {
-        files
-            .par_iter()
-            .map(|(path, source)| -> Result<_> {
-                let text = fs::read_to_string(path)
-                    .with_context(|| format!("Cannot read PHP file {}.", path.display()))?;
-                let key = format!(
-                    "{:x}.json",
-                    Sha256::digest(
-                        [
-                            b"class-map-v2".as_slice(),
-                            env!("CARGO_PKG_VERSION").as_bytes(),
-                            text.as_bytes()
-                        ]
-                        .concat()
-                    )
-                );
-                let cache_file = cache.join(key);
-                let cached: Option<Vec<String>> = fs::read(&cache_file)
-                    .ok()
-                    .and_then(|bytes| serde_json::from_slice(&bytes).ok());
-                let names = if let Some(names) = cached {
-                    names
-                } else {
-                    let program = super::parse::source(&text)
-                        .map_err(|error| anyhow::anyhow!("{}: {error}", path.display()))?;
-                    let mut names = Vec::new();
-                    super::discovery::statements(&program.statements, "", &mut names);
-                    let mut record = tempfile::NamedTempFile::new_in(cache)?;
-                    record.write_all(&serde_json::to_vec(&names)?)?;
-                    record.persist(&cache_file)?;
-                    names
-                };
-                Ok(names
-                    .into_iter()
-                    .filter(|name| compliant(name, path, source))
-                    .map(|name| (name, path.clone()))
-                    .collect())
-            })
-            .collect::<Result<_>>()
-    })?;
+    let discovered: Vec<Vec<(String, PathBuf)>> = files
+        .par_iter()
+        .map(|(path, source)| -> Result<_> {
+            let text = fs::read(path)
+                .with_context(|| format!("Cannot read PHP file {}.", path.display()))?;
+            let mut digest = Sha256::new();
+            digest.update(b"class-map-v3");
+            digest.update(env!("CARGO_PKG_VERSION"));
+            digest.update(&text);
+            let key = format!("{:x}.json", digest.finalize());
+            let cache_file = cache.join(key);
+            let cached: Option<Vec<String>> = fs::read(&cache_file)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+            let names = if let Some(names) = cached {
+                names
+            } else {
+                let names = super::declarations::names(&text).with_context(|| {
+                    format!("Cannot scan PHP declarations in {}.", path.display())
+                })?;
+                let mut record = tempfile::NamedTempFile::new_in(cache)?;
+                record.write_all(&serde_json::to_vec(&names)?)?;
+                record.persist(&cache_file)?;
+                names
+            };
+            Ok(names
+                .into_iter()
+                .filter(|name| compliant(name, path, source))
+                .map(|name| (name, path.clone()))
+                .collect())
+        })
+        .collect::<Result<_>>()?;
     let mut classes = BTreeMap::new();
     for declarations in discovered {
         for (name, path) in declarations {

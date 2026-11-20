@@ -6,8 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-phera-parser.workspace = true
-phera-ast.workspace = true
+phera-lexer.workspace = true
 phera-io-pool.workspace = true
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }

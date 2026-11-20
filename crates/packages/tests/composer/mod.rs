@@ -5,6 +5,7 @@ mod oracle;
 mod vendor;
 
 use anyhow::{Context, Result, bail};
+use rayon::prelude::*;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -30,23 +31,27 @@ pub(super) fn compare() -> Result<()> {
         phera: required_path("PHERA_BIN")?,
         composer: required_path("PHERA_COMPOSER")?,
         probe: oracle::write_probe(&work)?,
+        install_only: std::env::var("PHERA_PACKAGES_INSTALL_ONLY").as_deref() == Ok("1"),
         work,
     };
     let only = std::env::var("PHERA_PACKAGES_FIXTURE").ok();
-    let mut rows = Vec::new();
-    for fixture in corpus::fixtures(&tools.work)? {
-        if only
-            .as_ref()
-            .is_some_and(|pattern| pattern != &fixture.name)
-        {
-            continue;
-        }
-        let result = tools.fixture(&fixture).unwrap_or_else(
-            |error| json!({"fixture": fixture.name, "error": format!("{error:#}")}),
-        );
-        println!("{result}");
-        rows.push(result);
-    }
+    let fixtures: Vec<_> = corpus::fixtures(&tools.work)?
+        .into_iter()
+        .filter(|fixture| only.as_ref().is_none_or(|name| name == &fixture.name))
+        .collect();
+    let pool = rayon::ThreadPoolBuilder::new().num_threads(3).build()?;
+    let rows: Vec<_> = pool.install(|| {
+        fixtures
+            .par_iter()
+            .map(|fixture| {
+                let row = tools.fixture(fixture).unwrap_or_else(
+                    |error| json!({"fixture": fixture.name, "error": format!("{error:#}")}),
+                );
+                println!("{row}");
+                row
+            })
+            .collect()
+    });
     fs::write(
         tools.work.join("results.json"),
         serde_json::to_vec_pretty(&rows)?,
@@ -67,6 +72,7 @@ struct Tools {
     phera: PathBuf,
     composer: PathBuf,
     probe: PathBuf,
+    install_only: bool,
     work: PathBuf,
 }
 
@@ -162,23 +168,54 @@ impl Tools {
         )?;
         let autoload_identical = composer_probe == phera_probe;
         let phera_autoload_identical = composer_probe == runtime_probe;
+        let mut row = json!({
+            "fixture": fixture.name,
+            "package_differences": package_differences,
+            "generated_differences": generated_differences,
+            "installed_json_identical": installed_identical,
+            "installed_php_identical": installed_php_identical,
+            "autoload_identical_under_php": autoload_identical,
+            "autoload_identical_under_phera": phera_autoload_identical,
+            "draft_checks_pass": package_differences.is_empty()
+                && installed_identical && autoload_identical,
+        });
+        if self.install_only {
+            return Ok(row);
+        }
+        if let Err(error) =
+            self.compare_resolution(fixture, &left, &right, &logs, &right_vendor, &mut row)
+        {
+            row["resolution_error"] = format!("{error:#}").into();
+            row["draft_checks_pass"] = false.into();
+        }
+        Ok(row)
+    }
 
+    fn compare_resolution(
+        &self,
+        fixture: &Fixture,
+        left: &Path,
+        right: &Path,
+        logs: &Path,
+        right_vendor: &Path,
+        row: &mut Value,
+    ) -> Result<()> {
         fs::remove_file(left.join("composer.lock"))?;
         fs::remove_file(right.join("composer.lock"))?;
         run(
-            self.composer(&left, fixture)
+            self.composer(left, fixture)
                 .args(["update", "--no-audit"])
                 .args(UPDATE),
-            &logs,
+            logs,
             "composer-update",
         )?;
         run(
-            self.phera(&right, fixture).arg("update").args(UPDATE),
-            &logs,
+            self.phera(right, fixture).arg("update").args(UPDATE),
+            logs,
             "phera-update",
         )?;
-        let composer_versions = versions(&left)?;
-        let phera_versions = versions(&right)?;
+        let composer_versions = versions(left)?;
+        let phera_versions = versions(right)?;
         let differences = composer_versions
             .keys()
             .chain(phera_versions.keys())
@@ -189,9 +226,9 @@ impl Tools {
             })
             .collect::<BTreeMap<_, _>>();
         let validation = run_output(
-            self.composer(&right, fixture)
+            self.composer(right, fixture)
                 .args(["validate", "--no-check-publish"]),
-            &logs,
+            logs,
             "validate-phera-lock",
         )?;
         let validation_text = format!(
@@ -200,31 +237,19 @@ impl Tools {
             String::from_utf8_lossy(&validation.stderr)
         );
         let fresh_lock = !validation_text.contains("not up to date");
-        fs::remove_dir_all(&right_vendor)?;
+        fs::remove_dir_all(right_vendor)?;
         run(
-            self.composer(&right, fixture).arg("install").args(INSTALL),
-            &logs,
+            self.composer(right, fixture).arg("install").args(INSTALL),
+            logs,
             "handoff",
         )?;
 
-        let draft_checks_pass = package_differences.is_empty()
-            && installed_identical
-            && autoload_identical
-            && differences.is_empty()
-            && fresh_lock;
-        Ok(json!({
-            "fixture": fixture.name,
-            "package_differences": package_differences,
-            "generated_differences": generated_differences,
-            "installed_json_identical": installed_identical,
-            "installed_php_identical": installed_php_identical,
-            "autoload_identical_under_php": autoload_identical,
-            "autoload_identical_under_phera": phera_autoload_identical,
-            "resolution_differences": differences,
-            "composer_accepts_lock": fresh_lock,
-            "composer_installs_phera_lock": true,
-            "draft_checks_pass": draft_checks_pass,
-        }))
+        row["draft_checks_pass"] =
+            (row["draft_checks_pass"] == true && differences.is_empty() && fresh_lock).into();
+        row["resolution_differences"] = json!(differences);
+        row["composer_accepts_lock"] = fresh_lock.into();
+        row["composer_installs_phera_lock"] = true.into();
+        Ok(())
     }
 }
 

@@ -86,9 +86,10 @@ exact generated-file differences, benchmarks and the readiness gate.
 inside tests, and the local PHP oracle. Network comparisons require
 `PHERA_PACKAGES_NETWORK=1`, `PHERA_BIN`, and `PHERA_COMPOSER`. The network test
 fetches the 25 original fixtures by commit and runs the pinned project sources
-with scripts and plugins disabled. Set `PHERA_PACKAGES_COMPARISON_DIR` to retain
-logs, result rows and caches outside the checkout. The registry CI job is
-informational.
+with scripts and plugins disabled. `PHERA_PACKAGES_COMPARISON_DIR` sets the
+location for logs, results and caches outside the checkout.
+`PHERA_PACKAGES_INSTALL_ONLY=1` runs the locked-install comparisons on their
+own. The registry CI job runs both install and resolution checks.
 
 Composer's ClassLoader.php and InstalledVersions.php are included verbatim under
 their MIT license. See [resources/README.md](resources/README.md) for source commits
