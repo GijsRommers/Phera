@@ -50,6 +50,17 @@ pub use registry::{BundledSource, ConstantValue, Registry, ResourceFork};
 pub use state::{ProcessCancellation, RequestState, StateFork, copy_state, fresh_state};
 pub use working_directory::WorkingDirectory;
 
+/// The iconv errors that PHP reports differently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IconvFailure {
+    UnknownConversion,
+    IncompleteCharacter,
+    IllegalCharacter,
+}
+
+/// Byte conversion for `iconv()` and `convert.iconv.*`, without PHP diagnostics.
+pub type IconvConverter = fn(&[u8], &str, &str) -> Result<Vec<u8>, IconvFailure>;
+
 /// The PHP version exposed by the engine and its built-in modules.
 pub const PHP_VERSION: &str = "8.5.13";
 

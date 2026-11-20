@@ -144,7 +144,7 @@ fn clear(slot: &mut Option<Value>) -> ScalarStep {
 fn write_releasing(slot: &mut Option<Value>, value: Option<Value>) -> ScalarStep {
     let pool = match slot {
         Some(Value::Object(object)) if std::rc::Rc::strong_count(object) == 1 => object.pool(),
-        Some(Value::Array(_) | Value::Reference(_)) if frees_on_drop(slot) => {
+        Some(Value::Array(_) | Value::Resource(_) | Value::Reference(_)) if frees_on_drop(slot) => {
             return ScalarStep::Fallback;
         }
         _ => None,
@@ -157,9 +157,8 @@ fn write_releasing(slot: &mut Option<Value>, value: Option<Value>) -> ScalarStep
 }
 
 /// Whether a register holds an array, object, resource or PHP reference,
-/// whose release the out-of-line writes look at. Resources free no object;
-/// they are included because the four kinds are adjacent in `Value`, which
-/// makes this test a single comparison.
+/// whose release can queue a callback. The four kinds are adjacent in `Value`,
+/// which makes this test a single comparison.
 #[inline(always)]
 pub(crate) fn owns_heap_values(slot: &Option<Value>) -> bool {
     matches!(
@@ -176,6 +175,7 @@ fn frees_on_drop(slot: &Option<Value>) -> bool {
     match slot {
         Some(Value::Array(array)) => std::rc::Rc::strong_count(array) == 1,
         Some(Value::Object(object)) => std::rc::Rc::strong_count(object) == 1,
+        Some(Value::Resource(resource)) => std::rc::Rc::strong_count(resource) == 1,
         Some(Value::Reference(cell)) => std::rc::Rc::strong_count(cell) == 1,
         _ => false,
     }
@@ -533,7 +533,11 @@ pub(crate) fn releasing_step(
         _ => return None,
     };
     let slot = slots.get_mut(register.index())?;
-    if !matches!(slot, Some(Value::Array(_) | Value::Object(_))) || !frees_on_drop(slot) {
+    if !matches!(
+        slot,
+        Some(Value::Array(_) | Value::Object(_) | Value::Resource(_))
+    ) || !frees_on_drop(slot)
+    {
         return None;
     }
     std::mem::replace(slot, value)
