@@ -169,7 +169,11 @@ impl Machine<'_> {
         let site = self
             .code
             .cache(function)
-            .site(self.code.local(function), position.ip)?
+            .site(
+                self.code.function(function),
+                self.code.local(function),
+                position.ip,
+            )?
             .try_borrow()
             .ok()?;
         let CachedSite::Property(entry) = &*site else {

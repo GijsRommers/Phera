@@ -60,18 +60,29 @@ impl UnitCache {
         )
     }
 
-    /// IP has already advanced; the extra terminal cell covers the last instruction.
-    pub(crate) fn site(&self, function: Option<usize>, ip: usize) -> Option<&RefCell<CachedSite>> {
+    /// The site of the instruction of `body` (function `function` of the
+    /// file, or its top-level code) that ends at `ip`: the VM looks it up
+    /// after the instruction pointer has advanced. `None` for an
+    /// instruction without one.
+    pub(crate) fn site(
+        &self,
+        body: &phera_bytecode::Function,
+        function: Option<usize>,
+        ip: usize,
+    ) -> Option<&RefCell<CachedSite>> {
+        let slot = body.sites.site(&body.instructions, ip)?;
         match function {
-            Some(function) => self.function_sites.get(function)?.get(ip),
-            None => self.main_sites.get(ip),
+            Some(function) => self.function_sites.get(function)?.get(slot),
+            None => self.main_sites.get(slot),
         }
     }
 }
 
-/// Reserve only a small empty cell per instruction; resolved payloads allocate on first use.
+/// An empty cell for each instruction that has a site (see
+/// `phera_bytecode::SiteTable`); what a site resolves to is allocated when
+/// it is first used.
 fn instruction_sites(function: &phera_bytecode::Function) -> Vec<RefCell<CachedSite>> {
-    (0..=function.instructions.len())
+    (0..function.sites.count(&function.instructions))
         .map(|_| RefCell::new(CachedSite::Empty))
         .collect()
 }
