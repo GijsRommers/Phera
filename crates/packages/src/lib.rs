@@ -26,6 +26,7 @@ mod registry;
 mod scripts;
 mod solver;
 mod store;
+mod template;
 mod update;
 mod validate;
 pub mod version;
@@ -35,6 +36,7 @@ pub use commands::{add, add_many, outdated, remove, remove_many, why};
 pub use exec::exec;
 pub use inspect::{licenses, show, why_not};
 pub use project::{Lock, Options, Package, Project};
+pub use template::fetch_project;
 pub use validate::validate;
 
 use anyhow::{Context, Result, bail};

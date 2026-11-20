@@ -1,14 +1,14 @@
 //! Running Composer: it fetches a framework's official starting project and
 //! installs packages.
 //!
-//! `phera install` will take this over once it exists (section 11.5 of
-//! `docs/architecture.md`).
+//! This is the fallback for templates the native installer cannot create.
 
 use std::io;
 use std::path::Path;
 use std::process::Command;
 
 use super::Template;
+use super::native::SYMFONY_VERSION;
 
 /// One run of Composer.
 #[derive(Debug, PartialEq)]
@@ -51,23 +51,20 @@ pub(super) fn steps(template: Template, directory: &Path, install: bool) -> Vec<
             inside_project: true,
         }
     };
+    let symfony = format!("symfony/skeleton:{SYMFONY_VERSION}");
 
     match template {
         // Nothing to fetch, but the class loader is Composer's to write.
         Template::Plain if !install => Vec::new(),
         Template::Plain => vec![in_project(&["install", "--no-interaction"])],
-        Template::Symfony => vec![create_project(SYMFONY)],
+        Template::Symfony => vec![create_project(&symfony)],
         Template::SymfonyWebApp => vec![
-            create_project(SYMFONY),
+            create_project(&symfony),
             in_project(&["require", "webapp", "--no-interaction"]),
         ],
         Template::Laravel => vec![create_project("laravel/laravel")],
     }
 }
-
-/// Symfony 7.4 is the long-term support line, and the one Phera is measured
-/// against (section 6.1 of `docs/architecture.md`).
-const SYMFONY: &str = "symfony/skeleton:7.4.*";
 
 /// Why a Composer run did not do its work.
 pub(super) enum Failure {

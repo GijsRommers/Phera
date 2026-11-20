@@ -175,7 +175,7 @@ pub(crate) fn materialise(
     Ok(method)
 }
 
-fn copy_tree(source: &Path, target: &Path) -> Result<&'static str> {
+pub(crate) fn copy_tree(source: &Path, target: &Path) -> Result<&'static str> {
     let mut method = "copy-on-write clone";
     for entry in walkdir::WalkDir::new(source)
         .min_depth(1)

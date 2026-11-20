@@ -71,6 +71,10 @@ Use `--no-plugins` to skip native plugin hooks.
 In a terminal Phera can save a Composer plugin trust decision to composer.json.
 Use `--no-interaction` to require a decision already present in the project.
 
+`phera new` fetches official framework templates through the package manager.
+Composer is the fallback when the native installer refuses a template or its
+dependency requirements. Use `--no-install` to fetch just the starter files.
+
 Use `phera update vendor/package` to update selected dependencies, or
 `--dry-run` to see what would change. `-W` also unlocks their dependencies.
 `phera update --lock` refreshes the content hash without resolving.

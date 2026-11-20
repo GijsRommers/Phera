@@ -4,7 +4,7 @@ use crate::version::{Constraint, Version};
 use crate::{
     Lock, Options, Package, Project, installed, project::strings, registry::Registry, solver,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde_json::Value;
 use std::fmt::Write;
 use std::path::Path;

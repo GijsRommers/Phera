@@ -1574,8 +1574,8 @@ that a project can use either tool.
 - **Parallel everywhere.** Metadata is fetched concurrently while the resolver
   runs, archives are downloaded and unpacked concurrently, and the autoloader's
   class map is built by scanning files on all cores with Phera's tokenizer.
-- **Installing from a lock file needs no resolution** and, when the store is
-  warm, no network: it is linking files.
+- **Installing from a lock file needs no resolution.** A warm store supports
+  `--offline`. Online installs also show a Packagist advisory summary.
 - **Commands**: `phera install`, `phera update`, `phera add`, `phera remove`,
   `phera why`, `phera outdated`, `phera audit` (security advisories from
   Packagist), `phera dump-autoload`, and `phera exec bin-tool` to run a
@@ -1708,19 +1708,17 @@ phera new shop --template symfony           asks nothing
 | `symfony-webapp` | The skeleton plus the `webapp` pack: Twig, Doctrine, forms, security. |
 | `laravel` | The official Laravel application. |
 
-- **Frameworks come from their own starting projects**, fetched with
-  Composer, not from copies kept in Phera: a copy would be out of date with
-  the next release of the framework. `phera install` (11.5) takes over from
-  Composer when it exists; until then a framework template needs Composer on
-  the machine, and the plain template only uses it to write the class loader.
+- **Frameworks come from their official starting projects.** Phera fetches
+  and installs them through its package manager (11.5). Composer can take
+  over when Phera refuses the template or its dependency requirements.
 - **It never overwrites.** The directory must be missing or empty.
 - **The name** is the last part of the directory. It is put into PHP, JSON
   and Markdown, so only letters, digits, `-`, `_` and `.` are accepted.
 - **Without a terminal** (a script, a pipeline) an unanswered question is an
   error that names the options, not a wait.
-- **While Phera cannot run a framework**, the command says so after creating
-  the project and names the PHP command that serves it meanwhile. One
-  function, `Template::runs_on_phera`, holds that fact.
+- **Serve the project** with `phera serve public` for the plain, Symfony
+  skeleton and Laravel templates. The webapp template prints the PHP server
+  command while its runtime requirements are still being built.
 
 ### 11.9 `phera lint`: source checks and local edits
 
