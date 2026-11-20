@@ -83,7 +83,8 @@ exact generated-file differences, benchmarks and the readiness gate.
 ## Composer plugins
 
 Native hooks use the project's ordered `config.allow-plugins` rules.
-`--no-plugins` disables them. Other plugin effects need explicit project setup.
+`--no-plugins` disables them, while `--no-scripts` suppresses root scripts.
+Other plugin effects need explicit project setup.
 
 | Plugin | Current coverage |
 | --- | --- |

@@ -9,6 +9,8 @@
 Substitute runtime class, project directory and options into the template
 shipped by the installed `symfony/runtime` package. Write the result during
 the post-autoload phase. A project may select a template inside its own tree.
+The hook still runs when root scripts are disabled, as Composer's plugin
+listener does. The plugin setting controls its activation.
 
 ## Why
 

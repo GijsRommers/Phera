@@ -79,6 +79,10 @@ fn symfony_runtime_only_generates_for_an_allowed_plugin() {
         .to_string(),
     )
     .unwrap();
+    let options = Options {
+        no_scripts: true,
+        ..options
+    };
     install(root, &options).unwrap();
     assert_eq!(
         fs::read_to_string(output).unwrap(),

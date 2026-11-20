@@ -71,7 +71,7 @@ pub(crate) fn post_autoload(
     options: &Options,
     packages: &[Package],
 ) -> Result<()> {
-    if !options.no_scripts && active(project, options, packages, runtime::NAME)? {
+    if active(project, options, packages, runtime::NAME)? {
         runtime::write(project)?;
     }
     Ok(())
