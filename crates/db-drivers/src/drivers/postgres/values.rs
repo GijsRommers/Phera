@@ -16,7 +16,9 @@ type DecodeError = Box<dyn Error + Send + Sync>;
 /// formatted as text takes that text; every other one is decoded from the
 /// binary format.
 pub fn convert(columns: Vec<Column>, rows: Vec<Row>, affected: u64) -> Result<Rows, DbError> {
-    let mut values = RowBuffer::with_capacity(columns.len(), rows.len());
+    // Cursor batches carry rows only. The statement already has their columns.
+    let width = rows.first().map_or(columns.len(), |row| row.binary.len());
+    let mut values = RowBuffer::with_capacity(width, rows.len());
     for Row { binary, text } in rows {
         let mut text = text.into_iter().peekable();
         values.try_push((0..binary.len()).map(|index| {
