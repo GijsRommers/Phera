@@ -248,6 +248,22 @@ async fn what_the_boot_wrote_into_server_is_there_in_every_request() {
     assert_eq!(answers, ["prod unset /index.php?x=1"]);
 }
 
+/// WordPress's `wp_fix_server_vars()` fills in `REQUEST_URI` when the
+/// boot request has none; each request keeps its own.
+#[tokio::test(flavor = "current_thread")]
+async fn a_key_the_boot_added_yields_to_the_requests_own_value() {
+    let answers = boot_and_answer(
+        "added",
+        "<?php if (empty($_SERVER['REQUEST_URI'])) { $_SERVER['REQUEST_URI'] = '/boot'; }
+         $_SERVER['PHERA_ADDED'] = 'boot'; Phera\\snapshot();
+         echo $_SERVER['REQUEST_URI'], ' ', $_SERVER['PHERA_ADDED'];",
+        &["/one?a=1", "/two"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["/one?a=1 boot", "/two boot"]);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn each_fork_destroys_its_own_copies_and_the_snapshot_keeps_its_objects() {
     let answers = boot_and_answer(

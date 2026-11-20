@@ -116,7 +116,7 @@ static DRIVER_PROPERTIES: NativePropertyAccess = NativePropertyAccess {
 
 const MYSQLI_HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
-    fork: Some(phera_extension_api::fork_refused_handle),
+    fork: Some(crate::connection::fork::fork_connection),
     properties: Some(properties::view),
     property_access: Some(&properties::ACCESS),
     ..ClassHooks::EMPTY
