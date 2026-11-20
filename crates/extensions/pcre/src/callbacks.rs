@@ -103,6 +103,7 @@ impl Operation<'_> {
                     .replace(&captures)
                     .extend_from_slice(replacement.as_bytes());
             }
+            drop(scanner);
             subject = splice.finish();
         }
         Ok(Value::from(subject))

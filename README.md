@@ -82,7 +82,8 @@ includes it. The Zend-specific `opcache.preload` directive is unsupported.
 Built in, each checked call by call against real PHP: core, standard, ctype,
 [curl](crates/extensions/curl/README.md) (HTTP and HTTPS, including HTTP/2,
 connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`,
-`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, intl, json, mbstring, openssl, pcre,
+`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, intl, json, mbstring, openssl, pcre
+(`MARK` in match arrays, including Symfony's compiled route patterns),
 PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.

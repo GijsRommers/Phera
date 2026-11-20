@@ -72,6 +72,7 @@ impl Source {
 pub(crate) struct Mode {
     multiline: bool,
     pub extended: bool,
+    pub extended_more: bool,
     pub no_auto_capture: bool,
 }
 
@@ -90,18 +91,24 @@ pub(crate) fn inline_options(tail: &[u8], current: Mode) -> Option<InlineOptions
     let tail = tail.strip_prefix(b"(?")?;
     let mut mode = current;
     let mut enabled = true;
-    for (index, &byte) in tail.iter().enumerate() {
+    let mut flags = tail.iter().enumerate().peekable();
+    while let Some((index, &byte)) = flags.next() {
         match byte {
             b'^' => {
                 mode = Mode {
                     multiline: false,
                     extended: false,
+                    extended_more: false,
                     no_auto_capture: false,
                 };
             }
             b'-' => enabled = false,
             b'm' => mode.multiline = enabled,
-            b'x' => mode.extended = enabled,
+            b'x' => {
+                let more = flags.next_if(|(_, next)| **next == b'x').is_some();
+                mode.extended = enabled;
+                mode.extended_more = enabled && more;
+            }
             b'n' => mode.no_auto_capture = enabled,
             b'i' | b's' | b'r' | b'J' | b'U' | b'a' | b'T' | b'P' | b'S' | b'W' => {}
             b':' | b')' if index > 0 => {
@@ -242,6 +249,7 @@ impl Mode {
         Self {
             multiline: options.multiline,
             extended: options.extended,
+            extended_more: false,
             no_auto_capture: options.inline.contains('n'),
         }
     }

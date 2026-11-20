@@ -37,7 +37,8 @@ pub(crate) fn insert(
     let mut cursor = 0;
     let mut copied = 0;
     let mut numeric_reference = false;
-    let newline = Newline::from_startup(&source.text[..startup]);
+    let directives = &source.text[..startup];
+    let newline = Newline::from_startup(directives, options.utf || directives.contains("(*UTF"));
 
     while cursor < body.len() {
         let tail = &body.as_bytes()[cursor..];
@@ -48,7 +49,7 @@ pub(crate) fn insert(
                     matches!(escaped, b'1'..=b'9') || (*escaped == b'g' && numeric(rest));
                 cursor += if *escaped == b'c' { 3 } else { 2 };
             }
-            [b'[', ..] => cursor += class_end(tail),
+            [b'[', ..] => cursor += class_end(tail, mode.extended_more),
             [b'#', ..] if mode.extended => cursor += newline.comment_end(tail),
             [b'(', b'?', b'#', ..] => cursor += through(tail, b')'),
             [b'(', b'*', ..] => {
@@ -65,9 +66,9 @@ pub(crate) fn insert(
                         probe.groups += 1;
                         let name_start = source.offsets[startup + cursor + 3 + kind.len()];
                         let name_end = source.offsets[startup + end - 1];
-                        probe
-                            .marks
-                            .push((probe.groups, original[name_start..name_end].into()));
+                        let name = original.get(name_start..name_end)?;
+                        let name = name.split(|&byte| byte == 0).next()?;
+                        probe.marks.push((probe.groups, name.into()));
                         copied = end;
                     } else if is_group_verb(kind) {
                         // These verbs open groups and their bodies are pattern syntax.
@@ -190,10 +191,20 @@ fn quote_end(tail: &[u8]) -> usize {
         .map_or(tail.len(), |i| i + 4)
 }
 
-fn class_end(tail: &[u8]) -> usize {
+fn class_end(tail: &[u8], extended_more: bool) -> usize {
     let mut cursor = 1;
-    if tail.get(cursor) == Some(&b'^') {
-        cursor += 1;
+    let mut negated = false;
+    loop {
+        match &tail[cursor..] {
+            [b'\\', b'Q', b'\\', b'E', ..] => cursor += 4,
+            [b'\\', b'E', ..] => cursor += 2,
+            [b' ' | b'\t', ..] if extended_more => cursor += 1,
+            [b'^', ..] if !negated => {
+                negated = true;
+                cursor += 1;
+            }
+            _ => break,
+        }
     }
     if tail.get(cursor) == Some(&b']') {
         cursor += 1;
@@ -242,11 +253,11 @@ enum Newline {
     Byte(u8),
     CrLf,
     AnyCrLf,
-    Any,
+    Any { utf: bool },
 }
 
 impl Newline {
-    fn from_startup(startup: &str) -> Self {
+    fn from_startup(startup: &str, utf: bool) -> Self {
         let mut newline = Self::Byte(b'\n');
         for directive in startup.split("(*") {
             newline = match directive.trim_end_matches(')') {
@@ -255,7 +266,7 @@ impl Newline {
                 "NUL" => Self::Byte(b'\0'),
                 "CRLF" => Self::CrLf,
                 "ANYCRLF" => Self::AnyCrLf,
-                "ANY" => Self::Any,
+                "ANY" => Self::Any { utf },
                 _ => continue,
             };
         }
@@ -268,10 +279,13 @@ impl Newline {
             .find_map(|(i, &byte)| match self {
                 Self::Byte(end) if end == byte => Some(i + 1),
                 Self::CrLf if tail[i..].starts_with(b"\r\n") => Some(i + 2),
-                Self::Any | Self::AnyCrLf if matches!(byte, b'\r' | b'\n') => Some(i + 1),
-                Self::Any if matches!(byte, 0x0b | 0x0c | 0x85) => Some(i + 1),
-                Self::Any if tail[i..].starts_with(b"\xc2\x85") => Some(i + 2),
-                Self::Any if matches!(&tail[i..], [0xe2, 0x80, 0xa8 | 0xa9, ..]) => Some(i + 3),
+                Self::Any { .. } | Self::AnyCrLf if matches!(byte, b'\r' | b'\n') => Some(i + 1),
+                Self::Any { .. } if matches!(byte, 0x0b | 0x0c) => Some(i + 1),
+                Self::Any { utf: false } if byte == 0x85 => Some(i + 1),
+                Self::Any { utf: true } if tail[i..].starts_with(b"\xc2\x85") => Some(i + 2),
+                Self::Any { utf: true } if matches!(&tail[i..], [0xe2, 0x80, 0xa8 | 0xa9, ..]) => {
+                    Some(i + 3)
+                }
                 _ => None,
             })
             .unwrap_or(tail.len())
