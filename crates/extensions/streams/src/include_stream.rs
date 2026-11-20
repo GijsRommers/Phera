@@ -56,7 +56,14 @@ pub async fn include_source(
         {
             return Ok(IncludeSource::AlreadyIncluded);
         }
-        let bytes = stream.collect(context, function, None).await?;
+        let length = match stream.stat(context, function).await? {
+            Some(Value::Array(fields)) => crate::user_stat::fields(context, &fields)?[7],
+            _ => 0,
+        };
+        let length = u64::try_from(length).ok().filter(|length| *length > 0);
+        let bytes = stream
+            .collect_bytes(context, function, length, false)
+            .await?;
         let name = String::from_utf8_lossy(name).into_owned();
         Ok(IncludeSource::Source { name, bytes })
     }

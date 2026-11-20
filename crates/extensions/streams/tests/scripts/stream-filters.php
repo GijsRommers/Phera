@@ -33,3 +33,7 @@ stream_filter_remove($f);
 rewind($h);
 echo stream_get_contents($h), "\n";
 fclose($h);
+
+$h = fopen('php://memory', 'w+');
+var_dump(stream_filter_append($h, 'string.strip_tags', STREAM_FILTER_READ));
+fclose($h);

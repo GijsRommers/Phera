@@ -149,10 +149,20 @@ impl UserFile {
         if !limited && function != "readfile" {
             self.stat(context, function).await?;
         }
+        self.collect_bytes(context, function, length, limited).await
+    }
+
+    pub async fn collect_bytes(
+        &self,
+        context: &mut dyn Context,
+        function: &str,
+        length: Option<u64>,
+        check_eof: bool,
+    ) -> Result<Vec<u8>, NativeError> {
         let mut result = Vec::new();
         let mut remaining = length.unwrap_or(u64::MAX);
         while remaining > 0 {
-            if limited && self.at_end(context, function).await? {
+            if check_eof && self.at_end(context, function).await? {
                 break;
             }
             let chunk = remaining.min(crate::io_policy::CHUNK as u64) as usize;

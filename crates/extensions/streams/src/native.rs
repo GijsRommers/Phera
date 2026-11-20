@@ -37,7 +37,20 @@ pub enum FileStatus {
 
 impl FileStatus {
     pub fn get(self, context: &mut dyn Context, path: &[u8], method: &str) -> NativeResult {
-        let query = match self {
+        self.query().path(context, path, method, true)
+    }
+
+    pub async fn get_async(
+        self,
+        context: &mut dyn Context,
+        path: &[u8],
+        method: &str,
+    ) -> NativeResult {
+        self.query().path_async(context, path, method, true).await
+    }
+
+    fn query(self) -> Query {
+        match self {
             Self::Perms => Query::Field(StatField::Mode),
             Self::Inode => Query::Field(StatField::Inode),
             Self::Size => Query::Field(StatField::Size),
@@ -53,8 +66,7 @@ impl FileStatus {
             Self::IsFile => Query::IsFile,
             Self::IsDirectory => Query::IsDirectory,
             Self::IsLink => Query::IsLink,
-        };
-        query.path(context, path, method, true)
+        }
     }
 }
 
@@ -81,7 +93,11 @@ impl FileStream {
     ) -> Result<Self, phera_extension_api::NativeError> {
         use phera_extension_api::{NativeError, value::to_bool};
 
-        if to_bool(&FileStatus::IsDirectory.get(context, name, function)?) {
+        if to_bool(
+            &FileStatus::IsDirectory
+                .get_async(context, name, function)
+                .await?,
+        ) {
             return Err(NativeError::throw(
                 "LogicException",
                 "Cannot use SplFileObject with directories",
@@ -93,6 +109,29 @@ impl FileStream {
             4
         };
         crate::context_options::validate(stream_context, function, parameter)?;
+        if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+            let supplied = if stream_context.is_null() {
+                crate::context_options::default_for_wrapper(context)
+            } else {
+                stream_context.clone()
+            };
+            let flags = if include_path {
+                crate::user_wrappers::USE_PATH
+            } else {
+                0
+            };
+            let file =
+                crate::user_file::open(context, wrapper, function, name, mode, flags, supplied)
+                    .await?
+                    .ok_or_else(|| {
+                        NativeError::throw("RuntimeException", "Failed to open stream")
+                    })?;
+            let value = crate::user_resource::make_file(context, file);
+            return match value {
+                Value::Resource(handle) => Ok(Self(handle)),
+                _ => Err(NativeError::error("Stream factory returned no resource")),
+            };
+        }
         let stream = crate::wrapper::open_with_errors(
             context,
             function,
@@ -115,14 +154,18 @@ impl FileStream {
     }
 
     pub fn eof(&self) -> Result<bool, phera_extension_api::NativeError> {
+        if let Some(file) = crate::user_file::resource_file(&self.0) {
+            return Ok(file.eof.get() && file.buffer.borrow().is_empty());
+        }
         crate::resource::with_stream(&self.0, |stream| stream.eof)
     }
 
     pub async fn read_line(
         &self,
+        context: &mut dyn Context,
         limit: Option<u64>,
     ) -> Result<std::io::Result<Vec<u8>>, phera_extension_api::NativeError> {
-        crate::transfer::line(&self.0, limit).await
+        crate::transfer::read_context(context, &self.0, "SplFileObject::fgets", limit, true).await
     }
 }
 
@@ -161,9 +204,11 @@ impl FileStream {
 impl FileStream {
     pub async fn read_bytes(
         &self,
+        context: &mut dyn Context,
+        function: &str,
         length: u64,
     ) -> Result<std::io::Result<Vec<u8>>, phera_extension_api::NativeError> {
-        crate::transfer::read(&self.0, Some(length)).await
+        crate::transfer::read_context(context, &self.0, function, Some(length), false).await
     }
 
     pub async fn write_bytes(&self, context: &mut dyn Context, bytes: &[u8]) -> NativeResult {
@@ -172,8 +217,19 @@ impl FileStream {
 
     pub async fn truncate(
         &self,
+        context: &mut dyn Context,
         size: u64,
     ) -> Result<std::io::Result<()>, phera_extension_api::NativeError> {
+        if let Some(file) = crate::user_file::resource_file(&self.0) {
+            let truncated = file
+                .truncate(context, "SplFileObject::ftruncate", size)
+                .await?;
+            return Ok(if truncated {
+                Ok(())
+            } else {
+                Err(std::io::ErrorKind::Other.into())
+            });
+        }
         crate::resource::operate(
             &self.0,
             crate::io_policy::IoPolicy::Blocking,

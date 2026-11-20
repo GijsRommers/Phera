@@ -94,7 +94,7 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
                 crate::user_file::open(context, wrapper, "fopen", name, mode, flags, supplied)
                     .await?;
             return Ok(match opened {
-                Some(stream) => new_resource(context.state(), "stream", stream),
+                Some(stream) => crate::user_resource::make_file(context, stream),
                 None => Value::Bool(false),
             });
         }
@@ -143,6 +143,15 @@ pub(crate) async fn close_arguments(
         return Ok(Value::Bool(false));
     }
     let resource = stream_arg(&arguments, function)?;
+    if let Some(chains) = crate::filters::user::lookup(context, resource.id) {
+        if chains.is_busy() {
+            context.warning(format!(
+                "{function}(): cannot close the provided stream, as it must not be manually closed"
+            ));
+            return Ok(Value::Bool(false));
+        }
+        crate::filters::user::close(context, resource).await?;
+    }
     if let Some(file) = crate::user_file::resource_file(resource) {
         if file.busy() {
             context.warning(format!(
@@ -151,6 +160,7 @@ pub(crate) async fn close_arguments(
             return Ok(Value::Bool(false));
         }
         resource.data.borrow_mut().take();
+        crate::user_resource::release(context, resource.id);
         file.close(context).await?;
         return Ok(Value::Bool(true));
     }

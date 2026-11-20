@@ -51,6 +51,7 @@ mod transfer;
 mod user_directory;
 mod user_file;
 mod user_paths;
+mod user_resource;
 mod user_stat;
 mod user_wrappers;
 mod whole_file;

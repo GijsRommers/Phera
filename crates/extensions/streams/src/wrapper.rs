@@ -159,7 +159,7 @@ pub(crate) async fn open_with_errors(
                 )?;
                 Err(OpenFailure::new("no suitable wrapper could be found"))
             } else {
-                open_file(context, filename, name, mode, include_path).await?
+                open_file(context, filename, target_name, mode, include_path).await?
             },
             None,
         ),
@@ -171,7 +171,7 @@ pub(crate) async fn open_with_errors(
             )),
         ),
         Target::Php(target) => {
-            match open_php(target, mode, name, files(context).input.clone()).await? {
+            match open_php(target, mode, target_name, files(context).input.clone()).await? {
                 Some(result) => (
                     result.map_err(|error| OpenFailure::new(reason(&error))),
                     None,
@@ -183,7 +183,7 @@ pub(crate) async fn open_with_errors(
             }
         }
         Target::Data(data) => (
-            crate::data_uri::open(data, mode, name).map_err(OpenFailure::new),
+            crate::data_uri::open(data, mode, target_name).map_err(OpenFailure::new),
             None,
         ),
         Target::Unavailable(scheme) => {

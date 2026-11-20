@@ -100,6 +100,26 @@ pub async fn read_context(
     length: Option<u64>,
     by_line: bool,
 ) -> Result<io::Result<Vec<u8>>, phera_extension_api::NativeError> {
+    if let Some(chains) = crate::filters::user::lookup(context, resource.id)
+        && chains.reading()
+    {
+        let size = length
+            .and_then(|length| usize::try_from(length).ok())
+            .unwrap_or(usize::MAX);
+        return chains
+            .read(context, resource, function, size, by_line)
+            .await;
+    }
+    read_unfiltered(context, resource, function, length, by_line).await
+}
+
+pub async fn read_unfiltered(
+    context: &mut dyn Context,
+    resource: &Resource,
+    function: &str,
+    length: Option<u64>,
+    by_line: bool,
+) -> Result<io::Result<Vec<u8>>, phera_extension_api::NativeError> {
     if let Some(file) = crate::user_file::resource_file(resource) {
         let length = length
             .and_then(|size| usize::try_from(size).ok())
@@ -159,6 +179,20 @@ pub(crate) async fn write_arguments(
 }
 
 pub async fn write(
+    context: &mut dyn Context,
+    resource: &Resource,
+    data: &[u8],
+    function: &str,
+) -> NativeResult {
+    if let Some(chains) = crate::filters::user::lookup(context, resource.id)
+        && chains.writing()
+    {
+        return chains.write(context, resource, function, data).await;
+    }
+    write_unfiltered(context, resource, data, function).await
+}
+
+pub async fn write_unfiltered(
     context: &mut dyn Context,
     resource: &Resource,
     data: &[u8],

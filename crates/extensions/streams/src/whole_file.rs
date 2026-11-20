@@ -133,24 +133,30 @@ fn readfile(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
         let name = name(&arguments, function, 2)?;
         let use_include = args::bool(&arguments, 1).unwrap_or(false);
         files(context).use_default_context(args::value(&arguments, 2));
-        if let Some(result) = user_contents(
-            context,
-            name,
-            function,
-            use_include,
-            args::value(&arguments, 2),
-            (0, None),
-            true,
-        )
-        .await?
-        {
-            return match result {
-                Value::String(bytes) => {
-                    context.write(bytes.as_bytes());
-                    Ok(Value::Int(bytes.as_bytes().len() as i64))
-                }
-                other => Ok(other),
+        if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+            let explicit = args::value(&arguments, 2);
+            let supplied = if explicit.is_null() {
+                crate::context_options::default_for_wrapper(context)
+            } else {
+                explicit.clone()
             };
+            let flags = if use_include {
+                crate::user_wrappers::USE_PATH
+            } else {
+                0
+            };
+            let Some(file) =
+                crate::user_file::open(context, wrapper, function, name, b"rb", flags, supplied)
+                    .await?
+            else {
+                return Ok(Value::Bool(false));
+            };
+            files(context).claim_id();
+            let result = user_passthru(context, &file, function).await;
+            let closed = file.close(context).await;
+            let result = result?;
+            closed?;
+            return Ok(result);
         }
         let Some(stream) = open(context, function, name, b"rb", use_include).await? else {
             return Ok(Value::Bool(false));
@@ -322,4 +328,23 @@ async fn user_contents(
     let result = result?;
     closed?;
     Ok(Some(result))
+}
+
+async fn user_passthru(
+    context: &mut dyn Context,
+    file: &crate::user_file::UserFile,
+    function: &str,
+) -> NativeResult {
+    let mut count = 0;
+    loop {
+        match file.read(context, function, CHUNK, false).await? {
+            Ok(bytes) if bytes.is_empty() => break,
+            Ok(bytes) => {
+                count += bytes.len();
+                context.write(&bytes);
+            }
+            Err(_) => return Ok(Value::Int(if count == 0 { -1 } else { count as i64 })),
+        }
+    }
+    Ok(Value::Int(count as i64))
 }

@@ -80,7 +80,7 @@ pub(super) fn seek(
 }
 
 pub(super) fn character(
-    _: &mut dyn Context,
+    context: &mut dyn Context,
     this: Option<Rc<Object>>,
     _: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
@@ -90,7 +90,10 @@ pub(super) fn character(
             lines::clear(file);
             file.stream.clone()
         })?;
-        let Ok(bytes) = stream.read_bytes(1).await? else {
+        let Ok(bytes) = stream
+            .read_bytes(context, "SplFileObject::fgetc", 1)
+            .await?
+        else {
             return Ok(Value::Bool(false));
         };
         if bytes.is_empty() {
@@ -104,7 +107,7 @@ pub(super) fn character(
 }
 
 pub(super) fn read(
-    _: &mut dyn Context,
+    context: &mut dyn Context,
     this: Option<Rc<Object>>,
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
@@ -117,7 +120,7 @@ pub(super) fn read(
             ));
         }
         Ok(stream
-            .read_bytes(length as u64)
+            .read_bytes(context, "SplFileObject::fread", length as u64)
             .await?
             .map_or(Value::Bool(false), Value::from))
     })
@@ -144,7 +147,7 @@ pub(super) fn write(
 }
 
 pub(super) fn truncate(
-    _: &mut dyn Context,
+    context: &mut dyn Context,
     this: Option<Rc<Object>>,
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
@@ -159,7 +162,7 @@ pub(super) fn truncate(
                 "must be greater than or equal to 0"
             ))
         })?;
-        match stream.truncate(size).await? {
+        match stream.truncate(context, size).await? {
             Ok(()) => Ok(Value::Bool(true)),
             Err(error) if error.kind() == std::io::ErrorKind::Unsupported => {
                 Err(NativeError::throw(
@@ -176,12 +179,13 @@ pub(super) fn truncate(
 }
 
 pub(super) fn scan(
-    _: &mut dyn Context,
+    context: &mut dyn Context,
     this: Option<Rc<Object>>,
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let line = lines::raw_line(
+            context,
             receiver(this.as_ref())?,
             lines::LineNumber::AdvanceAfterBuffered,
             true,

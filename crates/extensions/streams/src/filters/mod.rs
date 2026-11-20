@@ -6,6 +6,7 @@ mod dechunk;
 mod functions;
 mod quoted;
 mod uri;
+pub(crate) mod user;
 
 pub(crate) use functions::register;
 pub(crate) use uri::FilterUri;

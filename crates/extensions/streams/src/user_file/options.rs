@@ -3,8 +3,42 @@
 use phera_extension_api::{ArrayKey, Context, NativeError, Value, value::to_bool};
 
 use super::{UserFile, missing};
+use phera_extension_api::value::Resource;
+use std::rc::Rc;
 
 impl UserFile {
+    pub async fn cast_for_select(
+        &self,
+        context: &mut dyn Context,
+        id: i64,
+    ) -> Result<Option<Rc<Resource>>, NativeError> {
+        match self
+            .invoke(context, "stream_cast", vec![Value::Int(3)])
+            .await?
+        {
+            Some(Value::Resource(resource)) if resource.id != id => Ok(Some(resource)),
+            Some(Value::Resource(_)) => {
+                context.warning(format!(
+                    "stream_select(): {}::stream_cast must not return itself",
+                    self.object.class.name()
+                ));
+                Ok(None)
+            }
+            Some(value) if to_bool(&value) => {
+                context.warning(format!(
+                    "stream_select(): {}::stream_cast must return a stream resource",
+                    self.object.class.name()
+                ));
+                Ok(None)
+            }
+            None => {
+                missing(context, &self.object, "stream_select", "stream_cast", "");
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
+    }
+
     pub async fn lock(
         &self,
         context: &mut dyn Context,

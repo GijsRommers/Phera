@@ -7,7 +7,7 @@ use super::{Direction, Filter, Filters, MAX_STAGES};
 
 pub(crate) struct FilterUri<'a> {
     pub path: &'a [u8],
-    groups: Vec<(&'a [u8], Option<Direction>)>,
+    groups: Vec<Vec<(&'a [u8], Option<Direction>)>>,
 }
 
 impl<'a> FilterUri<'a> {
@@ -28,6 +28,7 @@ impl<'a> FilterUri<'a> {
             else {
                 return Err("No URL resource specified");
             };
+            let mut layer = Vec::new();
             for group in uri[..resource.0]
                 .split(|byte| *byte == b'/')
                 .filter(|group| !group.is_empty())
@@ -43,8 +44,9 @@ impl<'a> FilterUri<'a> {
                 if stages > MAX_STAGES {
                     return Err("Stream filter chain exceeds Phera's limit of 16 filters");
                 }
-                groups.push((chain, direction));
+                layer.push((chain, direction));
             }
+            groups.push(layer);
             path = &uri[resource.1..];
         }
         Ok((depth != 0).then_some(Self { path, groups }))
@@ -54,27 +56,38 @@ impl<'a> FilterUri<'a> {
         let mut filters = Filters::default();
         let read = mode.contains(&b'r') || mode.contains(&b'+');
         let write = mode.contains(&b'+') || mode.first() != Some(&b'r');
-        for &(group, direction) in &self.groups {
-            for name in group
-                .split(|byte| *byte == b'|')
-                .filter(|name| !name.is_empty())
-            {
-                let name = percent_decode(name).collect::<Vec<_>>();
-                let mut add = |chain: &mut super::Chain| {
-                    if let Some(filter) = Filter::new(0, &name, &Value::Null) {
-                        chain.add(filter, false);
-                    } else {
-                        let name = String::from_utf8_lossy(&name);
-                        context
-                            .warning(format!("{function}(): Unable to locate filter \"{name}\""));
-                        context.warning(format!("{function}(): Unable to create filter ({name})"));
-                    }
-                };
-                if direction == Some(Direction::Read) || direction.is_none() && read {
-                    add(&mut filters.read);
+        for (direction, bare, chain) in [
+            (Direction::Read, read, &mut filters.read),
+            (Direction::Write, write, &mut filters.write),
+        ] {
+            let layer = |index| {
+                if direction == Direction::Read {
+                    self.groups.len() - 1 - index
+                } else {
+                    index
                 }
-                if direction == Some(Direction::Write) || direction.is_none() && write {
-                    add(&mut filters.write);
+            };
+            for index in 0..self.groups.len() {
+                for &(group, explicit) in &self.groups[layer(index)] {
+                    if explicit != Some(direction) && !(bare && explicit.is_none()) {
+                        continue;
+                    }
+                    for name in group
+                        .split(|byte| *byte == b'|')
+                        .filter(|name| !name.is_empty())
+                    {
+                        let name = percent_decode(name).collect::<Vec<_>>();
+                        if let Some(filter) = Filter::new(0, &name, &Value::Null) {
+                            chain.add(filter, false);
+                        } else {
+                            let name = String::from_utf8_lossy(&name);
+                            context.warning(format!(
+                                "{function}(): Unable to locate filter \"{name}\""
+                            ));
+                            context
+                                .warning(format!("{function}(): Unable to create filter ({name})"));
+                        }
+                    }
                 }
             }
         }

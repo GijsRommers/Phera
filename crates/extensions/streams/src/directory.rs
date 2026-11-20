@@ -90,7 +90,7 @@ async fn open(context: &mut dyn Context, arguments: Vec<Value>, function: &str) 
                 ),
             );
         };
-        let value = new_resource(context.state(), "stream", dir);
+        let value = crate::user_resource::make_directory(context, dir);
         if let Value::Resource(resource) = &value {
             files(context).directory = Some(resource.clone());
         }
@@ -265,6 +265,7 @@ pub async fn close(context: &mut dyn Context, resource: &Resource) -> NativeResu
     }
     resource.data.borrow_mut().take();
     if let Some(dir) = dir {
+        crate::user_resource::release(context, resource.id);
         dir.close(context).await?;
     }
     Ok(Value::Null)

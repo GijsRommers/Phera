@@ -14,6 +14,17 @@ use crate::stream::Wrapper;
 
 use super::{Filter, Filters, MAX_STAGES};
 
+pub(super) const BUILTINS: &[&str] = &[
+    "zlib.*",
+    "convert.iconv.*",
+    "string.rot13",
+    "string.toupper",
+    "string.tolower",
+    "convert.*",
+    "consumed",
+    "dechunk",
+];
+
 const NAME: Param = Param::new("filter_name", ParamType::String);
 const INSERT: &[Param] = &[
     STREAM,
@@ -23,10 +34,11 @@ const INSERT: &[Param] = &[
 ];
 
 pub fn register(registry: &mut Registry) {
+    super::user::register(registry);
     for function in [
         FunctionEntry::sync("stream_get_filters", &[], get_filters),
-        FunctionEntry::sync("stream_filter_append", INSERT, append),
-        FunctionEntry::sync("stream_filter_prepend", INSERT, prepend),
+        FunctionEntry::asynchronous("stream_filter_append", INSERT, append),
+        FunctionEntry::asynchronous("stream_filter_prepend", INSERT, prepend),
         FunctionEntry::asynchronous(
             "stream_filter_remove",
             const { &[Param::new("stream_filter", ParamType::Mixed)] },
@@ -46,64 +58,75 @@ pub fn register(registry: &mut Registry) {
 
 struct Attachment(Weak<Resource>);
 
-fn get_filters(_: &mut dyn Context, _: &[Value]) -> NativeResult {
+fn get_filters(context: &mut dyn Context, _: &[Value]) -> NativeResult {
     let mut names = PhpArray::new();
-    for name in [
-        "zlib.*",
-        "convert.iconv.*",
-        "string.rot13",
-        "string.toupper",
-        "string.tolower",
-        "convert.*",
-        "consumed",
-        "dechunk",
-    ] {
+    for &name in BUILTINS {
         names.push(Value::from(name))?;
     }
+    super::user::names(context, &mut names)?;
     Ok(Value::from(names))
 }
 
-fn append(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    attach(context, arguments, "stream_filter_append", false)
+fn append(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(attach(context, arguments, "stream_filter_append", false))
 }
 
-fn prepend(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    attach(context, arguments, "stream_filter_prepend", true)
+fn prepend(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(attach(context, arguments, "stream_filter_prepend", true))
 }
 
-fn attach(
+async fn attach(
     context: &mut dyn Context,
-    arguments: &[Value],
+    arguments: Vec<Value>,
     function: &str,
     prepend: bool,
 ) -> NativeResult {
-    let stream = stream_arg(arguments, function)?;
-    let name = args::bytes(arguments, 1);
-    let mode = args::int(arguments, 2).unwrap_or_default();
-    let params = args::value(arguments, 3);
-    if crate::user_file::resource_file(stream).is_some() {
+    let stream = stream_arg(&arguments, function)?;
+    let name = args::bytes(&arguments, 1);
+    let mode = args::int(&arguments, 2).unwrap_or_default();
+    let params = args::value(&arguments, 3);
+    let user_stream = crate::user_file::resource_file(stream);
+    let direction = |flags: &[u8]| {
+        if mode == 0 {
+            (
+                flags.contains(&b'r') || flags.contains(&b'+'),
+                flags.first() != Some(&b'r') || flags.contains(&b'+'),
+            )
+        } else {
+            (mode & 1 != 0, mode & 2 != 0)
+        }
+    };
+    let ((read, write), stages) = if let Some(file) = &user_stream {
+        (direction(&file.mode), 0)
+    } else {
+        with_stream(stream, |stream| {
+            (
+                direction(&stream.mode),
+                stream
+                    .filters
+                    .as_ref()
+                    .map_or(0, |filters| filters.read.len() + filters.write.len()),
+            )
+        })?
+    };
+    if let Some(class) = super::user::class(context, name) {
+        return super::user::attach(
+            context,
+            stream,
+            function,
+            name,
+            &class,
+            params,
+            ((read, write), prepend),
+        )
+        .await;
+    }
+    if user_stream.is_some() {
         context.warning(format!(
-            "{function}(): Stream filters on user wrappers are unsupported"
+            "{function}(): Built-in filters on user wrappers are unsupported"
         ));
         return Ok(Value::Bool(false));
     }
-    let (read, write, stages) = with_stream(stream, |stream| {
-        let read = if mode == 0 {
-            stream.mode.contains(&b'r') || stream.mode.contains(&b'+')
-        } else {
-            mode & 1 != 0
-        };
-        let write = if mode == 0 {
-            stream.mode.first() != Some(&b'r') || stream.mode.contains(&b'+')
-        } else {
-            mode & 2 != 0
-        };
-        let count = stream
-            .filters
-            .as_ref()
-            .map_or(0, |filters| filters.read.len() + filters.write.len());
-        (read, write, count)
-    })?;
     if stages + usize::from(read) + usize::from(write) > MAX_STAGES {
         context.warning(format!(
             "{function}(): Stream filter chain exceeds Phera's limit of 16 filters"
@@ -154,6 +177,9 @@ fn remove(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
             "stream_filter_remove",
             "#1 ($stream_filter)",
         )?;
+        if let Some(result) = super::user::remove(context, resource).await? {
+            return Ok(result);
+        }
         let stream = resource
             .data
             .borrow()
