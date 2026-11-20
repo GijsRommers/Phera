@@ -88,7 +88,8 @@ pub(super) fn construct_with_call<'a>(
             dsn.fields
                 .insert("timeout".into(), attributes.timeout.to_string());
         }
-        let driver = match pool::acquire(&dsn, &username, &password, policy).await {
+        let boot = context.is_snapshot_boot();
+        let driver = match pool::acquire(&dsn, &username, &password, policy, boot).await {
             Ok(driver) => driver,
             Err(error) => {
                 let code = error.code.unwrap_or(0);

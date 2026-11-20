@@ -28,10 +28,9 @@ use crate::unit_caches::UnitCache;
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct FunctionIndex(pub(crate) u32);
 
-/// A name, lowercased, as one number for the whole request: every file that
-/// writes `->add(` gets the same key for `add`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct NameKey(pub(crate) u32);
+/// A name, lowercased, as one number for the whole process: every file that
+/// writes `->add(` gets the same key for `add` (see `phera_bytecode::name_keys`).
+pub(crate) use phera_bytecode::NameKey;
 
 /// A loaded file's position in the request's code table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,11 +48,12 @@ pub(crate) struct LoadedUnit {
     pub(crate) cache: UnitCache,
     /// The number of the file's top-level code; its functions follow it.
     first: FunctionIndex,
-    /// The key of each of the file's names, lowercased.
-    name_keys: Box<[NameKey]>,
+    /// The key of each of the file's names, lowercased; shared with the
+    /// compiled file, which numbered them once.
+    name_keys: Arc<[NameKey]>,
     /// The key of each of the file's symbols (functions, classes, methods
     /// referred to by name), lowercased.
-    symbol_keys: Box<[NameKey]>,
+    symbol_keys: Arc<[NameKey]>,
 }
 
 /// The code of one request: every loaded file and every function in them.
@@ -61,8 +61,10 @@ pub(crate) struct LoadedUnit {
 pub(crate) struct CodeTable {
     units: Vec<LoadedUnit>,
     functions: Vec<FunctionFacts>,
-    /// Every lowercased name of every loaded file, numbered.
-    names: std::collections::HashMap<String, NameKey>,
+    /// Where each loaded file is, by its process number
+    /// (`UnitMetadata::id`): its position in `units` plus one, 0 if this
+    /// request has not loaded it.
+    slots: Vec<u32>,
     trait_method_names: std::collections::HashMap<FunctionIndex, String>,
 }
 
@@ -74,14 +76,17 @@ impl CodeTable {
     /// Adds a compiled file and numbers its functions, or finds it when it
     /// was loaded before. Returns the number of its top-level code.
     pub(crate) fn load(&mut self, unit: &Arc<CompiledUnit>) -> FunctionIndex {
-        if let Some(loaded) = self
-            .units
-            .iter()
-            .find(|loaded| Arc::ptr_eq(&loaded.unit, unit))
-        {
+        if let Some(loaded) = self.find(unit) {
             return loaded.first;
         }
         let index = self.next_unit_index();
+        if let Some(metadata) = &unit.metadata {
+            let id = metadata.id as usize;
+            if self.slots.len() <= id {
+                self.slots.resize(id + 1, 0);
+            }
+            self.slots[id] = index.0 + 1;
+        }
         let first = FunctionIndex(self.functions.len() as u32);
         let (name_keys, symbol_keys) = if let Some(metadata) = &unit.metadata {
             self.functions
@@ -94,17 +99,7 @@ impl CodeTable {
                         FunctionFacts::bind((index, first, local), signature, instructions)
                     },
                 ));
-            let names = metadata
-                .names
-                .iter()
-                .map(|name| self.intern_shared(name))
-                .collect();
-            let symbols = metadata
-                .symbols
-                .iter()
-                .map(|name| self.intern_shared(name))
-                .collect();
-            (names, symbols)
+            (metadata.name_keys.clone(), metadata.symbol_keys.clone())
         } else {
             let bodies = std::iter::once(&unit.main).chain(&unit.functions);
             self.functions
@@ -116,17 +111,20 @@ impl CodeTable {
                         body.instructions.clone(),
                     )
                 }));
-            let names = unit
+            let names: Vec<String> = unit
                 .names
                 .iter()
-                .map(|name| self.intern(name.to_ascii_lowercase()))
+                .map(|name| name.to_ascii_lowercase())
                 .collect();
-            let symbols = unit
+            let symbols: Vec<String> = unit
                 .symbols
                 .iter()
-                .map(|symbol| self.intern(symbol.name.to_ascii_lowercase()))
+                .map(|symbol| symbol.name.to_ascii_lowercase())
                 .collect();
-            (names, symbols)
+            (
+                phera_bytecode::name_keys::keys(names.iter().map(String::as_str)),
+                phera_bytecode::name_keys::keys(symbols.iter().map(String::as_str)),
+            )
         };
         self.units.push(LoadedUnit {
             unit: unit.clone(),
@@ -136,24 +134,6 @@ impl CodeTable {
             symbol_keys,
         });
         first
-    }
-
-    /// The key of a lowercased name, numbering it if it is new.
-    fn intern(&mut self, lowercase: String) -> NameKey {
-        let next = NameKey(self.names.len() as u32);
-        *self.names.entry(lowercase).or_insert(next)
-    }
-
-    fn intern_shared(&mut self, lowercase: &str) -> NameKey {
-        match self.names.get(lowercase) {
-            Some(key) => *key,
-            None => self.intern(lowercase.to_owned()),
-        }
-    }
-
-    /// The key of a lowercased name, if some loaded file uses the name.
-    pub(crate) fn name_key(&self, lowercase: &str) -> Option<NameKey> {
-        self.names.get(lowercase).copied()
     }
 
     /// The key of symbol `symbol` of the file `function` belongs to.
@@ -181,12 +161,26 @@ impl CodeTable {
         FunctionIndex(first.0 + 1 + local as u32)
     }
 
+    /// The file, if this request loaded it: by its process number, or for a
+    /// file compiled without metadata (command line, `eval`) by a search.
+    fn find(&self, unit: &Arc<CompiledUnit>) -> Option<&LoadedUnit> {
+        match &unit.metadata {
+            Some(metadata) => {
+                let slot = *self.slots.get(metadata.id as usize)?;
+                let loaded = self.units.get(slot.checked_sub(1)? as usize)?;
+                Arc::ptr_eq(&loaded.unit, unit).then_some(loaded)
+            }
+            None => self
+                .units
+                .iter()
+                .find(|loaded| Arc::ptr_eq(&loaded.unit, unit)),
+        }
+    }
+
     /// The number of a body of an already loaded unit; `None` is top-level code.
     pub(crate) fn index_in(&self, unit: &Arc<CompiledUnit>, local: Option<usize>) -> FunctionIndex {
         let first = self
-            .units
-            .iter()
-            .find(|loaded| Arc::ptr_eq(&loaded.unit, unit))
+            .find(unit)
             .map_or(FunctionIndex(0), |loaded| loaded.first);
         match local {
             Some(local) => self.declared(first, local),
@@ -322,7 +316,7 @@ impl crate::snapshot::ForkCopy for CodeTable {
                 })
                 .collect(),
             functions: self.functions.clone(),
-            names: self.names.clone(),
+            slots: self.slots.clone(),
             trait_method_names: self.trait_method_names.clone(),
         }
     }

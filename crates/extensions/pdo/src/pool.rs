@@ -18,6 +18,7 @@
 mod lease;
 
 pub use lease::Lease;
+use lease::Origin;
 
 use phera_extension_api::value::to_bool;
 use phera_extension_api::{ArrayKey, PhpArray};
@@ -56,8 +57,16 @@ pub async fn acquire(
     username: &str,
     password: &str,
     policy: Policy,
+    boot: bool,
 ) -> Result<Lease, DbError> {
-    Lease::new(phera_db_drivers::pool::acquire(dsn, username, password, policy).await?)
+    let connection = phera_db_drivers::pool::acquire(dsn, username, password, policy).await?;
+    let origin = boot.then(|| Origin {
+        dsn: dsn.clone(),
+        username: username.to_owned(),
+        password: password.to_owned(),
+        policy,
+    });
+    Lease::new(connection, origin)
 }
 
 #[cfg(test)]
@@ -68,7 +77,7 @@ async fn acquire_from(
     password: &str,
     policy: Policy,
 ) -> Result<Lease, DbError> {
-    Lease::new(pool.acquire(dsn, username, password, policy).await?)
+    Lease::new(pool.acquire(dsn, username, password, policy).await?, None)
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ use phera_db_drivers::drivers::{
 use phera_db_drivers::dsn::{DriverName, Dsn, postgres};
 use phera_db_drivers::errors::DbError;
 use phera_db_drivers::pool::{self, BackgroundOperation, Lease, Operation, Policy};
+use phera_db_drivers::session_log::SessionLog;
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
@@ -32,19 +33,136 @@ pub struct Connection {
     pub pid: i32,
     pub encoding: String,
     credentials: Credentials,
+    /// How `pg_connect()` borrowed the connection.
+    policy: Policy,
+    /// A fork's copy of a connection the boot made: it borrows its own
+    /// session on first use (see [`fork_connection`]).
+    reconnect: bool,
+    /// What the script changed about the session, for a fork to replay.
+    pub log: SessionLog,
 }
 
+#[derive(Clone)]
 struct Credentials {
     user: String,
     password: String,
 }
 
 impl Connection {
-    pub fn lease(&self) -> Result<Lease, NativeError> {
-        self.lease
-            .clone()
-            .ok_or_else(|| NativeError::error("PostgreSQL connection has already been closed"))
+    /// Fails if the connection was closed. A fork's copy that has not
+    /// connected yet is open.
+    pub fn ensure_open(&self) -> Result<(), NativeError> {
+        if self.lease.is_none() && !self.reconnect {
+            return Err(NativeError::error(
+                "PostgreSQL connection has already been closed",
+            ));
+        }
+        Ok(())
     }
+}
+
+/// The connection's lease; a fork's copy of a connection the boot made
+/// connects now, and replays what the boot changed about its session.
+pub async fn lease(handle: &Handle) -> Result<Lease, NativeError> {
+    let (dsn, credentials, policy, statements) = {
+        let state = handle.borrow();
+        state.ensure_open()?;
+        if let Some(lease) = &state.lease {
+            return Ok(lease.clone());
+        }
+        (
+            state.dsn.clone(),
+            state.credentials.clone(),
+            state.policy,
+            state.log.statements().to_vec(),
+        )
+    };
+    let unable = |error: DbError| {
+        NativeError::error(format!(
+            "Unable to connect to PostgreSQL server: {}",
+            error.detail
+        ))
+    };
+    let lease = pool::acquire(&dsn, &credentials.user, &credentials.password, policy)
+        .await
+        .map_err(unable)?;
+    let pid = run(&lease, move |postgres| {
+        Box::pin(async move {
+            for statement in statements {
+                postgres
+                    .native_query(&String::from_utf8_lossy(&statement))
+                    .await?;
+            }
+            Ok(postgres.pid())
+        })
+    })
+    .await
+    .map_err(unable)?;
+    let mut state = handle.borrow_mut();
+    state.pid = pid;
+    state.reconnect = false;
+    state.lease = Some(lease.clone());
+    Ok(lease)
+}
+
+/// The fork hook of `PgSql\Connection`: each fork's copy borrows its own
+/// session on first use, from the shared pool (which resets a session
+/// before lending it again), and replays the boot's `SET` statements.
+///
+/// ```php
+/// $db = pg_connect('host=db dbname=shop user=app');
+/// pg_query($db, "SET TIME ZONE 'UTC'");
+/// Phera\snapshot();
+/// pg_query($db, 'SELECT now()');   // each request: its own session, UTC
+/// ```
+pub fn fork_connection(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    _fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    const ADVICE: &str = "; finish it before Phera\\snapshot(), or connect after the call";
+    let handle = state
+        .downcast_ref::<Handle>()
+        .ok_or("its built-in state is not initialized")?;
+    let state = handle.borrow();
+    if state.busy.is_some() || !state.results.is_empty() {
+        return Err(format!("a query result on it was not read yet{ADVICE}"));
+    }
+    if let Some(reason) = state.log.unreplayable() {
+        return Err(format!(
+            "{reason}, which a new session would not have{ADVICE}"
+        ));
+    }
+    if let Some(lease) = &state.lease {
+        let transaction = lease
+            .try_inspect(|driver| match driver {
+                Driver::Postgres(postgres) => postgres.transaction_status(),
+                _ => 0,
+            })
+            .ok_or_else(|| format!("it is busy with an operation{ADVICE}"))?;
+        // PGSQL_TRANSACTION_IDLE is 0; anything else is inside a transaction.
+        if transaction != 0 {
+            return Err(format!("a transaction is open on it{ADVICE}"));
+        }
+    }
+    let copy = Connection {
+        lease: None,
+        dsn: state.dsn.clone(),
+        busy: None,
+        results: VecDeque::new(),
+        last_error: state.last_error.clone(),
+        server_version: state.server_version.clone(),
+        pid: state.pid,
+        encoding: state.encoding.clone(),
+        credentials: state.credentials.clone(),
+        policy: match state.policy {
+            Policy::Persistent => Policy::Persistent,
+            Policy::Pooled | Policy::Unpooled => Policy::Pooled,
+        },
+        reconnect: state.lease.is_some() || state.reconnect,
+        log: state.log.forked(),
+    };
+    Ok(Box::new(Rc::new(RefCell::new(copy))) as Box<dyn std::any::Any>)
 }
 
 pub fn argument(
@@ -133,7 +251,7 @@ pub fn connect<const PERSISTENT: bool>(
         };
         if flags & 2 == 0
             && let Some(Value::Object(object)) = cache.get(&key)
-            && object_handle(object)?.borrow().lease.is_some()
+            && object_handle(object)?.borrow().ensure_open().is_ok()
         {
             let value = Value::Object(object.clone());
             context.set_extension_value(DEFAULT, value.clone());
@@ -188,6 +306,9 @@ pub fn connect<const PERSISTENT: bool>(
                 pid,
                 encoding: "UTF8".into(),
                 credentials: Credentials { user, password },
+                policy,
+                reconnect: false,
+                log: SessionLog::new(context.is_snapshot_boot()),
             }));
             *object.native.borrow_mut() = Some(Box::new(state));
         }
@@ -210,14 +331,13 @@ fn fail_connect(context: &mut dyn Context, call: &str, error: &str) -> NativeRes
 pub fn reset(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let state = argument(context, args::value(&arguments, 0), "pg_connection_reset")?;
-        let (lease, dsn, user, password) = {
+        let lease = lease(&state).await?;
+        let (dsn, user, password) = {
             let mut state = state.borrow_mut();
-            let lease = state.lease()?;
             state.busy = None;
             state.results.clear();
             state.last_error.clear();
             (
-                lease,
                 state.dsn.clone(),
                 state.credentials.user.clone(),
                 state.credentials.password.clone(),
@@ -236,6 +356,7 @@ pub fn reset(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
                 state.pid = pid;
                 state.server_version = version;
                 state.encoding = "UTF8".into();
+                state.log = SessionLog::new(state.log.is_recording());
                 Ok(Value::Bool(true))
             }
             Err(error) => {
@@ -282,9 +403,10 @@ fn parse(source: &str) -> Result<Dsn, String> {
 pub fn close(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let handle = argument(context, args::value(arguments, 0), "pg_close")?;
     let mut state = handle.borrow_mut();
-    state.lease()?;
+    state.ensure_open()?;
     state.busy = None;
     state.lease = None;
+    state.reconnect = false;
     state.results.clear();
     if context
         .extension_value(DEFAULT)

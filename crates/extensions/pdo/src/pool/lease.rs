@@ -1,8 +1,11 @@
 //! A PDO borrows its worker's connection for each operation, including `$pdo->query($sql)`.
 
-use std::cell::Cell;
+use std::cell::{Cell, OnceCell, RefCell};
+use std::rc::Rc;
 use std::sync::Arc;
 
+use phera_db_drivers::pool::Lease as DriverLease;
+use phera_db_drivers::session_log::SessionLog;
 use phera_extension_api::PhpArray;
 
 use crate::constants::ATTR_SERVER_INFO;
@@ -13,13 +16,32 @@ use crate::parameters::BoundValue;
 use crate::placeholders::Sql;
 
 pub struct Lease {
-    connection: phera_db_drivers::pool::Lease,
+    connection: OnceCell<DriverLease>,
+    boot: Option<Boot>,
+    replay: Option<Rc<Replay>>,
     version: String,
     observed_transaction: Cell<Option<bool>>,
 }
 
+pub struct Origin {
+    pub dsn: crate::dsn::Dsn,
+    pub username: String,
+    pub password: String,
+    pub policy: super::Policy,
+}
+
+struct Boot {
+    origin: Rc<Origin>,
+    log: RefCell<SessionLog>,
+}
+
+struct Replay {
+    origin: Rc<Origin>,
+    statements: Vec<Vec<u8>>,
+}
+
 impl Lease {
-    pub(super) fn new(connection: phera_db_drivers::pool::Lease) -> Result<Self, DbError> {
+    pub(super) fn new(connection: DriverLease, origin: Option<Origin>) -> Result<Self, DbError> {
         let (version, observed_transaction) = connection
             .try_inspect(|driver| {
                 (
@@ -29,10 +51,89 @@ impl Lease {
             })
             .ok_or_else(|| connection_error("Missing server connection"))?;
         Ok(Self {
-            connection,
+            connection: OnceCell::from(connection),
+            boot: origin.map(|origin| Boot {
+                origin: Rc::new(origin),
+                log: RefCell::new(SessionLog::new(true)),
+            }),
+            replay: None,
             version,
             observed_transaction: Cell::new(observed_transaction),
         })
+    }
+
+    /// The snapshot stores the connection settings and the boot's session log.
+    /// Each fork borrows a worker-local socket on its first operation.
+    pub fn forked(&self) -> Result<Self, String> {
+        const ADVICE: &str = "; finish it before Phera\\snapshot(), or connect after the call";
+        let replay = if let Some(boot) = &self.boot {
+            let log = boot.log.borrow();
+            if let Some(reason) = log.unreplayable() {
+                return Err(format!(
+                    "{reason}, which a new session would not have{ADVICE}"
+                ));
+            }
+            Rc::new(Replay {
+                origin: boot.origin.clone(),
+                statements: log.statements().to_vec(),
+            })
+        } else {
+            self.replay
+                .clone()
+                .ok_or("it was opened in a way a fork cannot repeat")?
+        };
+        if self.observed_transaction.get() == Some(true) {
+            return Err(format!("a transaction is open on it{ADVICE}"));
+        }
+        if let Some(connection) = self.connection.get() {
+            let sqlite = connection
+                .try_inspect(|driver| matches!(driver, Driver::Sqlite(_)))
+                .ok_or_else(|| format!("it is busy with an operation{ADVICE}"))?;
+            if sqlite && sqlite_in_memory(&replay.origin.dsn) {
+                return Err(format!(
+                    "an in-memory SQLite database lives only in its connection{ADVICE}"
+                ));
+            }
+        }
+        Ok(Self {
+            connection: OnceCell::new(),
+            boot: None,
+            replay: Some(replay),
+            version: self.version.clone(),
+            observed_transaction: Cell::new(None),
+        })
+    }
+
+    async fn reconnect(&self) -> Result<&DriverLease, DbError> {
+        let replay = self
+            .replay
+            .as_ref()
+            .ok_or_else(|| connection_error("Missing server connection"))?;
+        let origin = &replay.origin;
+        let lease = phera_db_drivers::pool::acquire(
+            &origin.dsn,
+            &origin.username,
+            &origin.password,
+            origin.policy,
+        )
+        .await?;
+        lease
+            .run(async |driver| {
+                for statement in &replay.statements {
+                    driver
+                        .run_unprepared(&String::from_utf8_lossy(statement))
+                        .await?;
+                }
+                Ok(())
+            })
+            .await?;
+        Ok(self.connection.get_or_init(|| lease))
+    }
+
+    fn note(&self, sql: &str) {
+        if let Some(boot) = &self.boot {
+            boot.log.borrow_mut().ran(sql.as_bytes());
+        }
     }
 
     pub fn version(&self) -> &str {
@@ -43,7 +144,11 @@ impl Lease {
         &self,
         operation: impl AsyncFnOnce(&mut Driver) -> Result<T, DbError>,
     ) -> Result<T, DbError> {
-        self.connection
+        let connection = match self.connection.get() {
+            Some(connection) => connection,
+            None => self.reconnect().await?,
+        };
+        connection
             .run(async move |driver| {
                 let result = operation(driver).await;
                 self.observed_transaction
@@ -65,8 +170,13 @@ impl Lease {
         values: &[BoundValue],
         options: Execution,
     ) -> Result<Rows, DbError> {
-        self.run(async |driver| driver.execute(sql, prepared, values, &options).await)
-            .await
+        let rows = self
+            .run(async |driver| driver.execute(sql, prepared, values, &options).await)
+            .await?;
+        if values.is_empty() {
+            self.note(&sql.source);
+        }
+        Ok(rows)
     }
 
     pub async fn read_stream(
@@ -99,12 +209,17 @@ impl Lease {
     }
 
     pub async fn exec(&self, sql: &str) -> Result<Rows, DbError> {
-        self.run(async |driver| driver.exec(sql).await).await
+        let rows = self.run(async |driver| driver.exec(sql).await).await?;
+        self.note(sql);
+        Ok(rows)
     }
 
     pub async fn run_unprepared(&self, sql: &str) -> Result<Rows, DbError> {
-        self.run(async |driver| driver.run_unprepared(sql).await)
-            .await
+        let rows = self
+            .run(async |driver| driver.run_unprepared(sql).await)
+            .await?;
+        self.note(sql);
+        Ok(rows)
     }
 
     pub async fn last_id(&self, name: Option<&str>) -> Result<String, DbError> {
@@ -141,7 +256,13 @@ impl Lease {
             Driver::Sqlite(sqlite) => sqlite.set_timeout(milliseconds).await,
             _ => Err(connection_error("ATTR_TIMEOUT is set on SQLite only")),
         })
-        .await
+        .await?;
+        if let Some(boot) = &self.boot {
+            boot.log
+                .borrow_mut()
+                .record(format!("PRAGMA busy_timeout = {milliseconds}").into_bytes());
+        }
+        Ok(())
     }
 
     pub async fn mysql_autocommit(&self, enabled: bool) -> Result<(), DbError> {
@@ -149,7 +270,13 @@ impl Lease {
             Driver::Mysql(mysql) => mysql.set_autocommit(enabled).await,
             _ => Err(connection_error("ATTR_AUTOCOMMIT is set on MySQL only")),
         })
-        .await
+        .await?;
+        if let Some(boot) = &self.boot {
+            boot.log
+                .borrow_mut()
+                .record(format!("SET autocommit={}", u8::from(enabled)).into_bytes());
+        }
+        Ok(())
     }
 
     pub async fn server_attribute(&self, attribute: i64) -> Result<String, DbError> {
@@ -181,4 +308,10 @@ impl Lease {
     pub async fn reset(&self) -> Result<(), DbError> {
         self.run(async |driver| driver.reset().await).await
     }
+}
+
+/// An in-memory or temporary SQLite database lives only in its connection.
+fn sqlite_in_memory(dsn: &crate::dsn::Dsn) -> bool {
+    let path = dsn.get("filename", "");
+    path.is_empty() || path == ":memory:" || path.contains("mode=memory")
 }

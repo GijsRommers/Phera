@@ -41,6 +41,8 @@ pub const HASH_CONTEXT: ClassEntry = ClassEntry {
     kind: ClassKind::FinalClass,
     hooks: Some(&ClassHooks {
         clone: Some(NativeClone::Copy(clone_hash_context)),
+        // A fork continues the boot's input with its own copy.
+        fork: Some(phera_extension_api::fork_clone::<State>),
         ..ClassHooks::EMPTY
     }),
     methods: &[

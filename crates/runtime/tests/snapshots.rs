@@ -166,6 +166,43 @@ async fn boot_and_answer(
         .await
 }
 
+/// A file the boot opened is opened again in each fork, at the boot's
+/// position: one fork's reads and writes do not move another's.
+#[tokio::test(flavor = "current_thread")]
+async fn an_open_file_of_the_boot_is_each_forks_own() {
+    let answers = boot_and_answer(
+        "file",
+        "<?php file_put_contents(__DIR__ . '/data.txt', 'abcdef');
+         $in = fopen(__DIR__ . '/data.txt', 'r'); fread($in, 2);
+         $log = fopen(__DIR__ . '/log.txt', 'a');
+         Phera\\snapshot();
+         echo fread($in, 2), ' ', ftell($in);
+         fwrite($log, 'x');
+         clearstatcache(); echo ' ', filesize(__DIR__ . '/log.txt');",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["cd 4 1", "cd 4 2"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_locked_file_refuses_the_snapshot_and_names_where_it_is() {
+    let error = boot_and_answer(
+        "refusal",
+        "<?php class Log { public static $file; } Log::$file = fopen(__FILE__, 'r');
+         flock(Log::$file, LOCK_SH); Phera\\snapshot();",
+        &[],
+    )
+    .await
+    .expect_err("a locked file cannot be kept");
+    assert!(
+        error.contains("Phera\\snapshot(): cannot keep stream (Log::$file)"),
+        "{error}"
+    );
+    assert!(error.contains("flock()"), "{error}");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn xml_snapshots_copy_memory_and_keep_simplexml_views_together() {
     let plain = r#"["boot","boot","item","pending","<r><item>boot<\/item><\/r>",["R","ITEM"],"boot resolver",false,false,false]"#;
@@ -208,25 +245,6 @@ async fn xml_snapshots_refuse_open_io() {
         assert!(error.contains(&format!("cannot keep {class}")), "{error}");
         assert!(error.contains("belongs to one request"), "{error}");
     }
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn an_open_file_refuses_the_snapshot_and_names_where_it_is() {
-    let error = boot_and_answer(
-        "refusal",
-        "<?php class Log { public static $file; } Log::$file = fopen(__FILE__, 'r'); Phera\\snapshot();",
-        &[],
-    )
-    .await
-    .expect_err("an open file cannot be kept");
-    assert!(
-        error.contains("Phera\\snapshot(): cannot keep stream (Log::$file)"),
-        "{error}"
-    );
-    assert!(
-        error.contains("an open file belongs to one request"),
-        "{error}"
-    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -296,6 +314,22 @@ async fn what_the_boot_wrote_into_server_is_there_in_every_request() {
     assert_eq!(answers, ["prod unset /index.php?x=1"]);
 }
 
+/// WordPress's `wp_fix_server_vars()` fills in `REQUEST_URI` when the
+/// boot request has none; each request keeps its own.
+#[tokio::test(flavor = "current_thread")]
+async fn a_key_the_boot_added_yields_to_the_requests_own_value() {
+    let answers = boot_and_answer(
+        "added",
+        "<?php if (empty($_SERVER['REQUEST_URI'])) { $_SERVER['REQUEST_URI'] = '/boot'; }
+         $_SERVER['PHERA_ADDED'] = 'boot'; Phera\\snapshot();
+         echo $_SERVER['REQUEST_URI'], ' ', $_SERVER['PHERA_ADDED'];",
+        &["/one?a=1", "/two"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["/one?a=1 boot", "/two boot"]);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn each_fork_destroys_its_own_copies_and_the_snapshot_keeps_its_objects() {
     let answers = boot_and_answer(
@@ -344,4 +378,222 @@ fn on_the_command_line_the_call_returns_false_and_keeps_nothing() {
         String::from_utf8_lossy(&result.output),
         "bool(false)\nafter"
     );
+}
+
+/// A PDO connection the boot made reconnects in each fork, with what the
+/// boot changed about its session, and a fork's own change stays its own.
+#[tokio::test(flavor = "current_thread")]
+async fn a_pdo_connection_of_the_boot_reconnects_in_each_fork() {
+    let answers = boot_and_answer(
+        "pdo-sqlite",
+        "<?php $pdo = new PDO('sqlite:' . __DIR__ . '/data.sqlite');
+         $pdo->exec('CREATE TABLE IF NOT EXISTS t (id INTEGER)');
+         $pdo->exec('PRAGMA cache_size = 1234');
+         Phera\\snapshot();
+         echo $pdo->query('PRAGMA cache_size')->fetchColumn();
+         if (isset($_GET['change'])) { $pdo->exec('PRAGMA cache_size = 99'); }
+         echo ' ', $pdo->query('SELECT COUNT(*) FROM t')->fetchColumn();",
+        &["/?change=1", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["1234 0", "1234 0"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_in_memory_sqlite_database_refuses_the_snapshot() {
+    let error = boot_and_answer(
+        "pdo-memory",
+        "<?php $pdo = new PDO('sqlite::memory:'); Phera\\snapshot();",
+        &[],
+    )
+    .await
+    .expect_err("refused");
+    assert!(error.contains("in-memory SQLite database"), "{error}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_open_transaction_refuses_the_snapshot() {
+    let error = boot_and_answer(
+        "pdo-transaction",
+        "<?php $pdo = new PDO('sqlite:' . __DIR__ . '/data.sqlite');
+         $pdo->beginTransaction(); Phera\\snapshot();",
+        &[],
+    )
+    .await
+    .expect_err("refused");
+    assert!(error.contains("a transaction is open"), "{error}");
+}
+
+/// Whether the test MySQL of `crates/extensions/pdo/README.md` answers.
+fn mysql_available() -> bool {
+    let available = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:33069".parse().expect("address"),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok();
+    if !available {
+        eprintln!("SKIP: the test MySQL on port 33069 is not running");
+    }
+    available
+}
+
+/// mysqli and PDO connections of the boot: each fork has its own session,
+/// with the boot's settings replayed, and what one fork sets is gone in
+/// the next.
+#[tokio::test(flavor = "current_thread")]
+async fn mysql_connections_of_the_boot_get_a_session_of_their_own_in_each_fork() {
+    if !mysql_available() {
+        return;
+    }
+    let answers = boot_and_answer(
+        "mysql",
+        "<?php $db = new mysqli('127.0.0.1', 'phera', 'phera', 'phera_test', 33069);
+         $db->set_charset('latin1');
+         $db->query(\"SET @boot = 'mysqli'\");
+         $pdo = new PDO('mysql:host=127.0.0.1;port=33069;dbname=phera_test', 'phera', 'phera');
+         $pdo->exec(\"SET @boot = 'pdo'\");
+         $stored = $db->query('SELECT 1 UNION SELECT 2');
+         $stored->fetch_row();
+         Phera\\snapshot();
+         $row = $db->query('SELECT @boot, @fork, @@character_set_client')->fetch_row();
+         echo implode(',', array_map('strval', $row)), ' ';
+         echo implode(',', array_map('strval', $pdo->query('SELECT @boot, @fork')->fetch(PDO::FETCH_NUM))), ' ';
+         echo $stored->fetch_row()[0];
+         $db->query(\"SET @fork = 'set'\");
+         $pdo->exec(\"SET @fork = 'set'\");",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["mysqli,,latin1 pdo, 2", "mysqli,,latin1 pdo, 2"]);
+}
+
+/// A pgsql connection of the boot: each fork borrows its own session with
+/// the boot's `SET` replayed; what one fork sets is gone in the next.
+#[tokio::test(flavor = "current_thread")]
+async fn a_pgsql_connection_of_the_boot_gets_a_session_of_its_own_in_each_fork() {
+    let available = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:54329".parse().expect("address"),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok();
+    if !available {
+        eprintln!("SKIP: the test PostgreSQL on port 54329 is not running");
+        return;
+    }
+    let answers = boot_and_answer(
+        "pgsql",
+        "<?php $db = pg_connect('host=127.0.0.1 port=54329 dbname=phera_test user=phera password=phera');
+         pg_query($db, \"SET application_name = 'boot'\");
+         Phera\\snapshot();
+         echo pg_fetch_result(pg_query($db, 'SHOW application_name'), 0, 0), ' ';
+         echo pg_fetch_result(pg_query($db, \"SELECT current_setting('phera.fork', true)\"), 0, 0) ?? 'unset';
+         pg_query($db, \"SET phera.fork = 'set'\");",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["boot unset", "boot unset"]);
+}
+
+/// A Redis connection of the boot: each fork borrows its own socket, in the
+/// database the boot selected.
+#[tokio::test(flavor = "current_thread")]
+async fn a_redis_connection_of_the_boot_gets_a_socket_of_its_own_in_each_fork() {
+    let available = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:16399".parse().expect("address"),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok();
+    if !available {
+        eprintln!("SKIP: the test Redis on port 16399 is not running");
+        return;
+    }
+    let answers = boot_and_answer(
+        "redis",
+        "<?php $redis = new Redis(); $redis->connect('127.0.0.1', 16399); $redis->select(14);
+         $redis->set('phera:snapshot', 'boot');
+         Phera\\snapshot();
+         echo $redis->get('phera:snapshot'), ' ', $redis->getDbNum();
+         $redis->select(15);",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["boot 14", "boot 14"]);
+}
+
+/// A DOM document of the boot: each fork's nodes are its own, one copy of
+/// the document per fork shared by all of them, so a change through one
+/// node object is seen through another, in that fork only.
+#[tokio::test(flavor = "current_thread")]
+async fn a_dom_document_of_the_boot_is_each_forks_own() {
+    let answers = boot_and_answer(
+        "dom",
+        "<?php $d = new DOMDocument(); $d->loadXML('<a><b>x</b></a>');
+         $b = $d->getElementsByTagName('b')->item(0);
+         $hash = hash_init('sha256'); hash_update($hash, 'boot');
+         $curl = curl_init('http://127.0.0.1:1/'); curl_setopt($curl, CURLOPT_PRIVATE, 'boot');
+         Phera\\snapshot();
+         echo $d->saveXML($d->documentElement), ' ', $b === $d->documentElement->firstChild ? 'same' : 'other';
+         $b->nodeValue = 'changed'; $d->documentElement->setAttribute('fork', '1');
+         echo ' ', $d->saveXML($d->documentElement);
+         echo ' ', substr(hash_final($hash), 0, 8), ' ', curl_getinfo($curl, CURLINFO_PRIVATE);
+         curl_setopt($curl, CURLOPT_PRIVATE, 'fork');",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    let expected = "<a><b>x</b></a> same <a fork=\"1\"><b>changed</b></a> 4509beb0 boot";
+    assert_eq!(answers, [expected, expected]);
+}
+
+/// Generators and fibers of the boot: each fork resumes its own copy from
+/// where the boot left it, and a suspended generator's `finally` runs at
+/// the end of every request, as it would in a run from the top.
+#[tokio::test(flavor = "current_thread")]
+async fn generators_and_fibers_of_the_boot_are_each_forks_own() {
+    let answers = boot_and_answer(
+        "generators",
+        "<?php function count_up() { try { $i = 0; while (true) { $got = yield $i++; if ($got) echo \"[$got]\"; } } finally { echo '(closed)'; } }
+         $counter = count_up(); $counter->current(); $counter->next();
+         function done() { yield 1; } $done = done(); foreach ($done as $_) {}
+         $fiber = new Fiber(fn (int $n) => $n * 2);
+         $finished = new Fiber(fn () => 'ok'); $finished->start();
+         Phera\\snapshot();
+         echo $counter->current(), $counter->send('x'), ' ';
+         echo $done->valid() ? 'valid' : 'done', ' ';
+         $fiber->start(21); echo $fiber->getReturn(), ' ', $finished->getReturn(), ' ';",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(
+        answers,
+        ["1[x]2 done 42 ok (closed)", "1[x]2 done 42 ok (closed)"]
+    );
+}
+
+/// Temporary files, unused compression contexts and curl's multi and share
+/// handles of the boot: each fork has its own.
+#[tokio::test(flavor = "current_thread")]
+async fn temporary_files_and_unused_contexts_of_the_boot_are_each_forks_own() {
+    let answers = boot_and_answer(
+        "temporary",
+        "<?php $temp = fopen('php://temp/maxmemory:4', 'w+'); fwrite($temp, 'boot-data');
+         $file = tmpfile(); fwrite($file, 'tmp');
+         $deflate = deflate_init(ZLIB_ENCODING_DEFLATE);
+         $multi = curl_multi_init(); $share = curl_share_init();
+         Phera\\snapshot();
+         fwrite($temp, '+fork'); rewind($temp); echo stream_get_contents($temp), ' ';
+         fwrite($file, '+fork'); rewind($file); echo stream_get_contents($file), ' ';
+         echo bin2hex(gzuncompress(deflate_add($deflate, 'abc', ZLIB_FINISH))), ' ';
+         echo get_class($multi), ' ', get_class($share);",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    let expected = "boot-data+fork tmp+fork 616263 CurlMultiHandle CurlShareHandle";
+    assert_eq!(answers, [expected, expected]);
 }

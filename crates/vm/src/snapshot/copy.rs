@@ -43,9 +43,15 @@ impl Vm {
     /// A copy of this VM that shares nothing a script can change with it.
     pub(crate) fn fork_vm(&self) -> Result<Vm, SnapshotRefusal> {
         self.check_forkable()?;
+        // Generators the boot made are released into the fork's own queue.
+        let generator_releases = self.generator_releases.as_ref().map(|_| Rc::default());
         let natives = VmNatives {
             registry: &self.registry,
             rebind: Default::default(),
+            releases: generator_releases
+                .as_ref()
+                .map(Rc::downgrade)
+                .unwrap_or_default(),
         };
         let mut fork = Fork::new(self.classes.ids(), &natives);
         let globals = self.globals.fork_copy(&mut fork);
@@ -133,7 +139,7 @@ impl Vm {
             finally_stack: Vec::new(),
             generator_suspension: None,
             generator_traces: Vec::new(),
-            generator_releases: None,
+            generator_releases,
             draining_generators: false,
             closing_generator: None,
             executed_instructions: 0,

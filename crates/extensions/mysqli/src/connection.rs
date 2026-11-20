@@ -2,6 +2,7 @@
 
 pub mod commands;
 pub mod escape;
+pub mod fork;
 pub mod properties;
 pub mod query;
 use std::cell::RefCell;
@@ -15,6 +16,7 @@ use phera_db_drivers::drivers::{Driver, connection_error};
 use phera_db_drivers::dsn::{DriverName, Dsn};
 use phera_db_drivers::errors::DbError;
 use phera_db_drivers::pool::{self, Lease, Operation, Policy};
+use phera_db_drivers::session_log::SessionLog;
 use phera_extension_api::{
     Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
@@ -39,6 +41,10 @@ pub struct Connection {
     pub pending: Option<query::Pending>,
     pub pending_stream: Option<Weak<()>>,
     pub more: VecDeque<Result<Outcome, DbError>>,
+    /// How the connection was made, so that a fork can make it again.
+    pub origin: Option<Rc<fork::Origin>>,
+    /// What the script changed about the session, for a fork to replay.
+    pub session: SessionLog,
 }
 
 #[derive(Default)]
@@ -46,17 +52,21 @@ enum Status {
     #[default]
     Initialized,
     Open(Lease),
+    /// A fork of a connection the boot made. It connects again on first use.
+    Reconnect(Rc<fork::Origin>),
     Closed,
 }
 
 impl Connection {
     pub fn connected(&self) -> bool {
-        matches!(self.status, Status::Open(_))
+        matches!(self.status, Status::Open(_) | Status::Reconnect(_))
     }
 
-    pub fn lease(&self) -> Result<Lease, NativeError> {
+    /// Fails unless the connection is open, or a fork's that connects on
+    /// first use.
+    pub fn ensure_open(&self) -> Result<(), NativeError> {
         match &self.status {
-            Status::Open(lease) => Ok(lease.clone()),
+            Status::Open(_) | Status::Reconnect(_) => Ok(()),
             Status::Initialized => {
                 Err(NativeError::error("mysqli object is not fully initialized"))
             }
@@ -116,6 +126,41 @@ pub fn init(context: &mut dyn Context, _: &[Value]) -> NativeResult {
         initialize(object);
     }
     Ok(value)
+}
+
+/// The connection's lease, connecting a fork's connection first. When that
+/// fails, `Err` holds what the call returns: `false` with a warning, or the
+/// exception, as for a failed query.
+pub async fn lease(
+    context: &mut dyn Context,
+    handle: &Handle,
+    call: &str,
+) -> Result<Lease, NativeResult> {
+    let origin = {
+        let state = handle.borrow();
+        match &state.status {
+            Status::Open(lease) => return Ok(lease.clone()),
+            Status::Reconnect(origin) => origin.clone(),
+            Status::Initialized | Status::Closed => {
+                return Err(state.ensure_open().map(|()| Value::Null));
+            }
+        }
+    };
+    let statements = handle.borrow().session.statements().to_vec();
+    match origin.reconnect(statements).await {
+        Ok((lease, thread_id)) => {
+            let mut state = handle.borrow_mut();
+            state.thread_id = thread_id;
+            state.status = Status::Open(lease.clone());
+            Ok(lease)
+        }
+        Err(error) => Err(query::failure(
+            context,
+            &mut handle.borrow_mut(),
+            error,
+            call,
+        )),
+    }
 }
 
 pub async fn run<T, F>(lease: &Lease, operation: F) -> Result<T, DbError>
@@ -246,6 +291,9 @@ pub async fn connect(
         state.charset = Some(connection_info.3);
         state.backslashes = connection_info.4;
         state.status = Status::Open(lease);
+        let recording = context.is_snapshot_boot();
+        state.origin = recording.then(|| Rc::new(fork::Origin::new(dsn, user, password, policy)));
+        state.session = SessionLog::new(recording);
         state.error = None;
     }
     errors::set_connect_error(context, None);

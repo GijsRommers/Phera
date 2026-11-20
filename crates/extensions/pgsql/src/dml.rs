@@ -35,7 +35,7 @@ pub fn execute<const OP: usize>(
         ];
         let call = names.get(OP).copied().unwrap_or_default();
         let handle = connection::argument(c, args::value(&a, 0), call)?;
-        let lease = handle.borrow().lease()?;
+        let lease = crate::connection::lease(&handle).await?;
         let table = args::string(&a, 1).map_or_else(String::new, |value| value.to_string_lossy());
         let flags = args::int(&a, if OP == UPDATE { 4 } else { 3 }).unwrap_or(if OP == CONVERT {
             0

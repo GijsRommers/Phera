@@ -11,7 +11,7 @@ use super::{Mysql, error};
 use crate::drivers::RawRows;
 use crate::errors::DbError;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Reply {
     pub affected: u64,
     pub insert_id: u64,

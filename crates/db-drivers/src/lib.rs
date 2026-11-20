@@ -8,3 +8,4 @@ pub mod metadata;
 pub mod parameters;
 pub mod placeholders;
 pub mod pool;
+pub mod session_log;

@@ -25,6 +25,32 @@ pub(crate) struct Multi {
     executing: bool,
 }
 
+impl Multi {
+    /// The copy for a fork of a snapshot, while no transfer was added.
+    pub(crate) fn forked(
+        &self,
+        fork: &mut phera_extension_api::value::Fork<'_>,
+    ) -> Result<Self, String> {
+        if !self.entries.is_empty() || self.executing {
+            return Err("handles are added to it; add them after Phera\\snapshot()".into());
+        }
+        Ok(Multi {
+            entries: Vec::new(),
+            messages: self
+                .messages
+                .iter()
+                .map(|(object, code)| (fork.object(object), *code))
+                .collect(),
+            error: self.error,
+            max_host: self.max_host,
+            max_total: self.max_total,
+            max_cached: self.max_cached,
+            multiplex: self.multiplex,
+            executing: false,
+        })
+    }
+}
+
 struct Entry {
     object: Rc<Object>,
     handle: easy::Handle,

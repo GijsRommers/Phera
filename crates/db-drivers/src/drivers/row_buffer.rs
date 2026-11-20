@@ -7,7 +7,7 @@ use std::ops::Range;
 
 use phera_extension_api::Value;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct RowBuffer {
     width: usize,
     rows: usize,
