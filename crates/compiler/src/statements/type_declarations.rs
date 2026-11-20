@@ -26,8 +26,16 @@ enum Bound {
 #[derive(Clone, Copy, Default)]
 pub(super) struct TypeScope<'a> {
     pub(super) class: Option<&'a str>,
-    pub(super) parent: Option<&'a str>,
+    pub(super) parent: TypeParent<'a>,
     pub(super) trait_scope: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(super) enum TypeParent<'a> {
+    Named(&'a str),
+    Absent,
+    #[default]
+    Deferred,
 }
 
 pub(super) fn builtin_type(lower: &str) -> bool {
@@ -201,9 +209,9 @@ impl Compiler<'_> {
             )));
         }
         if name.kind == NameKind::Unqualified && relative {
-            let resolved = match lower.as_ref() {
-                "self" if !scope.trait_scope => scope.class,
-                "parent" if !scope.trait_scope => scope.parent,
+            let resolved = match (lower.as_ref(), scope.parent) {
+                ("self", _) if !scope.trait_scope => scope.class,
+                ("parent", TypeParent::Named(parent)) => Some(parent),
                 _ => None,
             };
             if form == Bound::Intersection && resolved.is_none() {
@@ -216,6 +224,11 @@ impl Compiler<'_> {
                 return Err(error(format!(
                     "Cannot use \"{lower}\" when no class scope is active"
                 )));
+            }
+            if lower == "parent" && matches!(scope.parent, TypeParent::Absent) {
+                return Err(error(
+                    "Cannot use \"parent\" when current class scope has no parent".into(),
+                ));
             }
             return Ok(resolved.map_or(lower, Cow::Borrowed));
         }
@@ -286,29 +299,24 @@ fn declaration_union(
     alternatives: &[Range<usize>],
     nullable: bool,
 ) -> String {
-    let mut classes = Vec::new();
-    let mut builtins = Vec::new();
+    let mut members = Vec::new();
     let mut has_iterable = false;
     for range in alternatives {
         let bounds = &atoms[range.clone()];
         match bounds {
             [atom] if atom == "iterable" => {
-                classes.push("Traversable".to_owned());
+                members.push("Traversable".to_owned());
                 has_iterable = true;
             }
-            [atom] if builtin_type(atom) || atom == "static" => builtins.push(atom.as_ref()),
-            [atom] => classes.push(atom.to_string()),
-            _ => classes.push(format!("({})", bounds.join("&"))),
+            [atom] => members.push(atom.to_string()),
+            _ => members.push(bounds.join("&")),
         }
     }
     if has_iterable {
-        builtins.push("array");
+        members.push("array".to_owned());
     }
     if nullable {
-        builtins.push("null");
+        members.push("null".to_owned());
     }
-    if !builtins.is_empty() {
-        classes.push(phera_bytecode::union_in_php_order(&builtins.join("|")));
-    }
-    classes.join("|")
+    phera_bytecode::union_in_php_order(&members.join("|"))
 }

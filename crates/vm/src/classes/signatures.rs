@@ -373,8 +373,8 @@ impl Vm {
         let wide = wide.replace('?', "null|");
         narrow.split('|').all(|source| {
             wide.split('|').any(|target| {
-                target.split('&').all(|bound| {
-                    source.split('&').any(|member| {
+                target.trim_matches(['(', ')']).split('&').all(|bound| {
+                    source.trim_matches(['(', ')']).split('&').any(|member| {
                         self.atomic_subtype(member, narrow_scope, bound, wide_scope, unit)
                     })
                 })

@@ -3,7 +3,7 @@
 use crate::{CompileError, Compiler};
 use phera_ast as ast;
 
-use super::type_declarations::{TypeScope, TypeSite, builtin_type};
+use super::type_declarations::{TypeParent, TypeScope, TypeSite, builtin_type};
 
 impl Compiler<'_> {
     /// Reject structurally invalid classes before any top-level instruction runs.
@@ -74,10 +74,17 @@ impl Compiler<'_> {
             .then(|| declaration.extends.first())
             .flatten()
             .map(|parent| self.resolve(parent, crate::policies::NameKind::Class).0);
+        let trait_scope = declaration.kind == ast::ClassKind::Trait;
         let scope = TypeScope {
             class: Some(name),
-            parent: parent.as_deref(),
-            trait_scope: declaration.kind == ast::ClassKind::Trait,
+            parent: if trait_scope {
+                TypeParent::Deferred
+            } else {
+                parent
+                    .as_deref()
+                    .map_or(TypeParent::Absent, TypeParent::Named)
+            },
+            trait_scope,
         };
         let mut properties = std::collections::HashSet::new();
         for member in &declaration.members {
