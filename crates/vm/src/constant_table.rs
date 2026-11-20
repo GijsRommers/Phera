@@ -1,10 +1,10 @@
 //! Resolve constant symbols once, invalidating fallbacks when PHP defines names.
 
 use crate::code_table::FunctionIndex;
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::{cell::OnceCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use phera_bytecode::{CompiledUnit, SymbolId};
-use phera_extension_api::NativeError;
+use phera_extension_api::{NativeError, Registry};
 use phera_value::Value;
 
 /// A bytecode constant reference belongs to a particular immutable unit.
@@ -27,7 +27,6 @@ pub(crate) struct GlobalConstant {
 }
 
 /// Request constants and the resolved values of bytecode symbols.
-#[derive(Default)]
 pub(crate) struct ConstantTable {
     native: Rc<NativeConstants>,
     values: HashMap<String, GlobalConstant>,
@@ -36,10 +35,33 @@ pub(crate) struct ConstantTable {
     resolved: HashMap<ConstantSite, ResolvedConstant>,
 }
 
-pub(crate) type NativeConstants = HashMap<String, GlobalConstant>;
+pub(crate) struct NativeConstants {
+    registry: Arc<Registry>,
+    values: OnceCell<HashMap<String, GlobalConstant>>,
+}
 
-pub(crate) fn native_constants(registry: &phera_extension_api::Registry) -> NativeConstants {
-    let mut values: NativeConstants = registry
+impl NativeConstants {
+    pub(crate) fn new(registry: Arc<Registry>) -> Self {
+        Self {
+            registry,
+            values: OnceCell::new(),
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<&GlobalConstant> {
+        self.values
+            .get_or_init(|| native_constants(&self.registry))
+            .get(name)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_initialized(&self) -> bool {
+        self.values.get().is_some()
+    }
+}
+
+fn native_constants(registry: &Registry) -> HashMap<String, GlobalConstant> {
+    let mut values: HashMap<_, _> = registry
         .constant_entries()
         .map(|(name, value, deprecated)| {
             (

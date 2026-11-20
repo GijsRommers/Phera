@@ -87,6 +87,9 @@ PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.
 
+Phera registers native metadata on first lookup and shares it across workers.
+Each worker prepares native class definitions and constant values on first use.
+
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 
 - Documents and elements include `Dom\Document`, `Dom\HTMLDocument`,

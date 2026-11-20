@@ -1,17 +1,19 @@
 //! Request class lookup, leased object ids, and weak cycle-cleanup records.
 
 use std::{
-    cell::OnceCell,
+    cell::{Cell, OnceCell},
     collections::HashMap,
+    num::NonZeroU32,
     rc::{Rc, Weak},
 };
 
 use phera_value::{Object, ObjectIds, PhpArray};
 
-use super::Class;
 use super::method_table::MethodTable;
 use super::operations::ClassOperations;
+use super::{Class, class::ClassOrigin};
 use crate::code_table::CodeTable;
+use crate::native_tables::NativeClasses;
 
 type NativeMethodTables = Box<[OnceCell<MethodTable>]>;
 
@@ -51,7 +53,7 @@ impl ClassDefinitions {
             .hooks
             .as_ref()
             .is_some_and(|hooks| hooks.properties.is_some());
-        if class.origin == super::class::ClassOrigin::Closure {
+        if class.origin == ClassOrigin::Closure {
             self.closure = Some(class.index);
         }
         self.numbered.push(class.clone());
@@ -71,12 +73,12 @@ impl Drop for ClassDefinitions {
 
 /// One request owns its class additions and objects. Built-ins keep their indices on the worker.
 pub(crate) struct ClassTable {
-    native: Rc<ClassDefinitions>,
+    native: Rc<NativeClasses>,
     local: ClassDefinitions,
     pub(crate) has_dimensions: bool,
     pub(crate) has_property_views: bool,
     pub(crate) has_lazy_objects: bool,
-    native_count: u32,
+    native_count: Cell<Option<NonZeroU32>>,
     native_methods: OnceCell<NativeMethodTables>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
@@ -87,16 +89,19 @@ pub(crate) struct ClassTable {
 }
 
 impl ClassTable {
-    pub(crate) fn native_definitions(&self) -> Rc<ClassDefinitions> {
+    pub(crate) fn native_definitions(&self) -> Rc<NativeClasses> {
         self.native.clone()
     }
 
-    pub(crate) fn new(native: Rc<ClassDefinitions>) -> Self {
+    pub(crate) fn new(native: Rc<NativeClasses>) -> Self {
+        let native_count = native
+            .initialized()
+            .and_then(|classes| NonZeroU32::new(classes.next_index().0));
         Self {
             has_dimensions: false,
-            has_property_views: native.has_property_views,
+            has_property_views: false,
             has_lazy_objects: false,
-            native_count: native.numbered.len() as u32,
+            native_count: Cell::new(native_count),
             native_methods: OnceCell::new(),
             native,
             local: ClassDefinitions::default(),
@@ -108,7 +113,24 @@ impl ClassTable {
     }
 
     pub(crate) fn next_index(&self) -> ClassIndex {
-        ClassIndex((self.native_count as usize + self.local.numbered.len()) as u32)
+        ClassIndex((self.native_count() + self.local.numbered.len()) as u32)
+    }
+
+    fn native_count(&self) -> usize {
+        if let Some(count) = self.native_count.get() {
+            return count.get() as usize;
+        }
+        let count = self.native.definitions().numbered.len();
+        self.native_count.set(NonZeroU32::new(count as u32));
+        count
+    }
+
+    pub(crate) fn has_property_views(&self) -> bool {
+        self.has_property_views
+            || self
+                .native
+                .initialized()
+                .is_some_and(|classes| classes.has_property_views)
     }
 
     /// `$reflection->getName()` uses this request's name numbers, even when
@@ -119,14 +141,14 @@ impl ClassTable {
         class: &'c Class,
         code: &CodeTable,
     ) -> &'c MethodTable {
-        let index = class.index.0 as usize;
-        let cell = if index < self.native_count as usize {
-            &self
-                .native_methods
-                .get()
-                .unwrap_or_else(|| self.allocate_native_method_tables())[index]
-        } else {
+        let cell = if class.origin == ClassOrigin::User {
             &class.method_table
+        } else {
+            self.native_methods
+                .get()
+                .unwrap_or_else(|| self.allocate_native_method_tables())
+                .get(class.index.0 as usize)
+                .unwrap_or(&class.method_table)
         };
         cell.get_or_init(|| MethodTable::build(class, code, |method| self.get(&method.declaring)))
     }
@@ -134,15 +156,17 @@ impl ClassTable {
     #[cold]
     fn allocate_native_method_tables(&self) -> &NativeMethodTables {
         self.native_methods
-            .get_or_init(|| (0..self.native_count).map(|_| OnceCell::new()).collect())
+            .get_or_init(|| (0..self.native_count()).map(|_| OnceCell::new()).collect())
     }
 
     pub(crate) fn cached_method_table<'c>(&'c self, class: &'c Class) -> Option<&'c MethodTable> {
-        let index = class.index.0 as usize;
-        if index < self.native_count as usize {
-            self.native_methods.get()?[index].get()
-        } else {
+        if class.origin == ClassOrigin::User {
             class.method_table.get()
+        } else {
+            self.native_methods
+                .get()?
+                .get(class.index.0 as usize)?
+                .get()
         }
     }
 
@@ -164,6 +188,7 @@ impl ClassTable {
 
     pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
         self.native
+            .definitions()
             .order
             .iter()
             .chain(&self.local.order)
@@ -174,9 +199,9 @@ impl ClassTable {
     #[inline]
     pub(crate) fn class(&self, index: ClassIndex) -> &Rc<Class> {
         let index = index.0 as usize;
-        let base = self.native_count as usize;
+        let base = self.native_count();
         if index < base {
-            &self.native.numbered[index]
+            &self.native.definitions().numbered[index]
         } else {
             &self.local.numbered[index - base]
         }
@@ -184,9 +209,9 @@ impl ClassTable {
 
     pub(crate) fn numbered(&self, index: u32) -> Option<Rc<Class>> {
         let index = index as usize;
-        let base = self.native_count as usize;
+        let base = self.native_count();
         if index < base {
-            self.native.numbered.get(index).cloned()
+            self.native.definitions().numbered.get(index).cloned()
         } else {
             self.local.numbered.get(index - base).cloned()
         }
@@ -194,15 +219,16 @@ impl ClassTable {
 
     /// The built-in Closure class is fixed for a request.
     pub(crate) fn closure_class(&self) -> Option<Rc<Class>> {
-        let index = self.native.closure?;
-        self.native.numbered.get(index.0 as usize).cloned()
+        let native = self.native.definitions();
+        let index = native.closure?;
+        native.numbered.get(index.0 as usize).cloned()
     }
 
     pub(crate) fn get_lowercase(&self, name: &str) -> Option<&Rc<Class>> {
         self.local
             .entries
             .get(name)
-            .or_else(|| self.native.entries.get(name))
+            .or_else(|| self.native.definitions().entries.get(name))
     }
 
     /// Class identifiers ignore case, including names produced by dynamic expressions.
@@ -340,7 +366,7 @@ mod tests {
     use phera_extension_api::Registry;
     use phera_value::{ArrayKey, Value};
 
-    use super::{ClassDefinitions, ClassTable};
+    use super::{ClassTable, NativeClasses};
 
     #[tokio::test]
     async fn static_singletons_and_cached_enum_cases_release_their_classes() {
@@ -362,7 +388,7 @@ mod tests {
 
     #[test]
     fn freed_object_ids_reuse_the_most_recently_freed_slot() {
-        let mut table = ClassTable::new(Rc::new(ClassDefinitions::native(&Registry::new())));
+        let mut table = ClassTable::new(Rc::new(NativeClasses::new(Arc::new(Registry::new()))));
         let class = table.get("stdClass").unwrap();
         let first = table.allocate(class.clone());
         let second = table.allocate(class.clone());
@@ -384,7 +410,7 @@ mod tests {
 
     #[test]
     fn a_million_linked_objects_drop_without_rust_recursion() {
-        let table = ClassTable::new(Rc::new(ClassDefinitions::native(&Registry::new())));
+        let table = ClassTable::new(Rc::new(NativeClasses::new(Arc::new(Registry::new()))));
         let class = table.get("stdClass").unwrap();
         let mut head = Value::Null;
         for index in 0..1_000_000 {
