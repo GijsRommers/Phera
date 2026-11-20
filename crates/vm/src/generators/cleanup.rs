@@ -36,6 +36,11 @@ enum Released {
     Close(Activation),
 }
 
+enum CloseSite {
+    Release(Option<SourceLocation>),
+    Shutdown,
+}
+
 struct ClosingComplete;
 
 /// FINALLY_RETURN ends the forced close subroutine without executing its normal successor.
@@ -46,11 +51,17 @@ pub(crate) fn close_complete() -> NativeError {
 impl Drop for Generator {
     fn drop(&mut self) {
         if let Some(queue) = self.releases.upgrade() {
-            queue.0.borrow_mut().push(Released::Owners {
-                state: std::mem::replace(&mut self.state, State::Failed),
-                item: self.item.take(),
-                closure: self.closure.take(),
-            });
+            queue.0.borrow_mut().push(self.take_released());
+        }
+    }
+}
+
+impl Generator {
+    fn take_released(&mut self) -> Released {
+        Released::Owners {
+            state: std::mem::replace(&mut self.state, State::Failed),
+            item: self.item.take(),
+            closure: self.closure.take(),
         }
     }
 }
@@ -74,24 +85,79 @@ impl Vm {
     /// The queue keeps destruction iterative, including a chain of abandoned delegates.
     #[cold]
     pub(crate) fn drain_generator_releases(&mut self) -> LocalFuture<'_, Result<(), NativeError>> {
-        self.drain_generator_releases_at(None)
+        self.drain_generator_releases_at(CloseSite::Release(None))
     }
 
     fn drain_generator_releases_at(
         &mut self,
-        caller: Option<SourceLocation>,
+        site: CloseSite,
     ) -> LocalFuture<'_, Result<(), NativeError>> {
         Box::pin(async move {
             let Some(releases) = self.generator_releases.clone() else {
                 return Ok(());
             };
             self.draining_generators = true;
-            let result = self
-                .run_generator_releases(&releases, caller.as_ref())
-                .await;
+            let result = self.run_generator_releases(&releases, &site).await;
             self.draining_generators = false;
             result
         })
+    }
+
+    /// The request object store closes suspended generators even when globals
+    /// or other PHP values still own them.
+    pub(crate) async fn finish_request_generators(&mut self) -> Result<(), NativeError> {
+        let Some(queue) = self.generator_releases.clone() else {
+            return Ok(());
+        };
+        self.release_global_generators().await?;
+        let mut index = 0;
+        while let Some(entry) = self.classes.objects.get(index) {
+            index += 1;
+            let Some(object) = entry.upgrade().filter(super::generator_object) else {
+                continue;
+            };
+            let released = super::state(&object, |generator| {
+                matches!(
+                    generator.state,
+                    State::Ready(_) | State::Yielded(..) | State::Delegating(..)
+                )
+                .then(|| generator.take_released())
+            })?;
+            if let Some(released) = released {
+                queue.0.borrow_mut().push(released);
+                self.drain_generator_releases_at(CloseSite::Shutdown)
+                    .await?;
+            }
+        }
+        self.drain_generator_releases_at(CloseSite::Shutdown).await
+    }
+
+    /// PHP destroys sole-owned objects in reverse symbol order before it
+    /// visits shared objects in the request object store.
+    async fn release_global_generators(&mut self) -> Result<(), NativeError> {
+        loop {
+            let names: Vec<_> = self
+                .globals
+                .iter()
+                .rev()
+                .filter(|(_, value)| is_generator(value))
+                .map(|(name, _)| name.clone())
+                .collect();
+            let mut removed = false;
+            for name in names {
+                if matches!(self.globals.get(&name), Some(Value::Object(object))
+                    if super::generator_object(object) && Rc::strong_count(object) == 1)
+                {
+                    self.globals.remove(&name);
+                    removed = true;
+                    self.drain_generator_releases_at(CloseSite::Shutdown)
+                        .await?;
+                }
+            }
+            if !removed {
+                return Ok(());
+            }
+        }
     }
 
     /// Preserve the active exception unless releasing a frame raises a replacement.
@@ -113,7 +179,10 @@ impl Vm {
                 }
                 _ => None,
             };
-            match self.drain_generator_releases_at(caller).await {
+            match self
+                .drain_generator_releases_at(CloseSite::Release(caller))
+                .await
+            {
                 Ok(()) => previous,
                 Err(error) => {
                     let replacement = self.materialize_error(error);
@@ -135,7 +204,7 @@ impl Vm {
     async fn run_generator_releases(
         &mut self,
         queue: &Releases,
-        caller: Option<&SourceLocation>,
+        site: &CloseSite,
     ) -> Result<(), NativeError> {
         loop {
             let released = queue.0.borrow_mut().pop();
@@ -158,9 +227,7 @@ impl Vm {
                     drop(item);
                     drop(closure);
                 }
-                Some(Released::Close(activation)) => {
-                    self.close_generator(activation, caller).await?
-                }
+                Some(Released::Close(activation)) => self.close_generator(activation, site).await?,
                 None => return Ok(()),
             }
         }
@@ -169,7 +236,7 @@ impl Vm {
     async fn close_generator(
         &mut self,
         activation: Activation,
-        caller: Option<&SourceLocation>,
+        site: &CloseSite,
     ) -> Result<(), NativeError> {
         let position = activation.frame.ip().saturating_sub(1);
         let handlers: Vec<_> = self
@@ -186,8 +253,16 @@ impl Vm {
         let stop = self.call_stack.depth();
         let caller_silence = self.diagnostic_reporter.silence();
         let previous = self.closing_generator.replace(stop + 1);
+        let caller = match site {
+            CloseSite::Release(None) => None,
+            CloseSite::Release(Some(location)) => {
+                Some(NativeCaller::Internal(Some(location.clone())))
+            }
+            CloseSite::Shutdown => Some(NativeCaller::Internal(None)),
+        };
+        let traced = caller.is_some();
         if let Some(caller) = caller {
-            self.push_native_callback(NativeCaller::Internal(Some(caller.clone())));
+            self.push_native_callback(caller);
         }
         self.restore_generator_frame(activation);
         // The suspended expression's unfinished arguments cannot enter the cleanup.
@@ -197,7 +272,7 @@ impl Vm {
             self.registers.truncate(end);
         }
         let result = self.run_closing_finally(handlers, stop).await;
-        if caller.is_some() {
+        if traced {
             self.native_callback_sites.pop();
         }
         self.closing_generator = previous;
@@ -223,4 +298,8 @@ impl Vm {
         }
         Ok(())
     }
+}
+
+fn is_generator(value: &Value) -> bool {
+    matches!(value, Value::Object(object) if super::generator_object(object))
 }

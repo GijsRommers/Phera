@@ -13,25 +13,6 @@ impl Vm {
         self.timed_out_objects = Some(self.classes.objects.clone());
     }
 
-    /// Globals outlive the abandoned main frame and remain visible in shutdown.
-    pub(crate) fn retain_timeout_globals(&mut self) {
-        let Some(main) = self.global_frame() else {
-            return;
-        };
-        let slots = main.slots(&self.registers);
-        let values: Vec<_> = main
-            .named_registers()
-            .map(|(name, register)| (name.clone(), slots.get(register.index()).cloned().flatten()))
-            .collect();
-        for (name, value) in values {
-            if let Some(value) = value {
-                self.globals.insert(name, value);
-            } else {
-                self.globals.remove(&name);
-            }
-        }
-    }
-
     pub(crate) async fn destroy_objects_after_timeout(&mut self, before: Vec<Weak<Object>>) {
         let mut index = 0;
         while let Some(current) = self.classes.objects.get(index) {

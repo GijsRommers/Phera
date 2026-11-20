@@ -420,6 +420,13 @@ impl Vm {
         if !self.suspended_fibers.is_empty() {
             Box::pin(self.close_fibers()).await;
         }
+        if self.generator_releases.is_some()
+            && !self.fiber_bailout
+            && let Err(error) = Box::pin(self.finish_request_generators()).await
+        {
+            let error = self.materialize_error(error);
+            self.report_uncaught(error).await;
+        }
         self.finish_buffers().await;
         self.finish_request_headers().await;
         self.finish_resource_finalizers().await;

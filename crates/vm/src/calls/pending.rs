@@ -305,6 +305,7 @@ impl Vm {
             let text = self.stringify_value(&value).await?;
             self.out(text.as_bytes());
         }
+        self.park_global_registers();
         self.call_stack.clear();
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
             (),

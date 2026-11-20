@@ -1,18 +1,19 @@
 //! Request globals and the shared cells created by PHP global declarations.
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
+use indexmap::IndexMap;
 use phera_value::Value;
 
 /// Global values are promoted to reference cells when a function binds them.
 pub(crate) struct Globals {
-    values: HashMap<String, Value>,
+    values: IndexMap<String, Value>,
 }
 
 impl Globals {
     pub(crate) fn new() -> Self {
         Self {
-            values: HashMap::new(),
+            values: IndexMap::new(),
         }
     }
 
@@ -25,15 +26,15 @@ impl Globals {
     }
 
     pub(crate) fn take(&mut self, name: &str) -> Option<Value> {
-        self.values.remove(name)
+        self.values.shift_remove(name)
     }
 
     /// Unset detaches the global name while existing references remain alive.
     pub(crate) fn remove(&mut self, name: &str) {
-        self.values.remove(name);
+        self.values.shift_remove(name);
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Value)> {
+    pub(crate) fn iter(&self) -> impl DoubleEndedIterator<Item = (&String, &Value)> {
         self.values.iter()
     }
 
