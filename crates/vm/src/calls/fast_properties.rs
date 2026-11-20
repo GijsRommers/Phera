@@ -170,9 +170,15 @@ impl Machine<'_> {
                 PathBase::Register(root),
                 Shape::Read,
             ) => self.element_object(position, root, *index)?,
-            ([PathStep::Property(_), PathStep::Index(_), ..], base, Shape::Element) => {
-                self.property_object(position, base)?
-            }
+            (
+                [
+                    PathStep::Property(_),
+                    PathStep::Index(_) | PathStep::Append,
+                    ..,
+                ],
+                base,
+                Shape::Element,
+            ) => self.property_object(position, base)?,
             _ => return None,
         };
         // The VM keys the site by the position after the instruction,

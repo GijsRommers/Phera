@@ -285,14 +285,16 @@ impl Vm {
     }
 
     /// Records the property's site for a read of an element held in a
-    /// property (`$this->items[$key]`, `isset($object->map['a']['b'])`), so
-    /// that the interpreter loop can make the next such read itself (see
-    /// `calls::fast_property_elements`). Finding the entry raises nothing:
+    /// property (`$this->items[$key]`, `isset($object->map['a']['b'])`), or
+    /// a write or append to one (`$this->items[] = $item`), so that the
+    /// interpreter loop can make the next one itself (see
+    /// `calls::fast_property_elements` and `calls::fast_element_writes`). Finding the entry raises nothing:
     /// a property that cannot be read from here simply gets no entry, and
     /// the read goes on in the general path, which raises PHP's error.
     pub(crate) fn prepare_element_site(&mut self, place: &AccessPath) -> Result<(), NativeError> {
         let mut steps = place.steps()?;
-        let (Some(Step::Property(name)), Some(Step::Index(_))) = (steps.next(), steps.next())
+        let (Some(Step::Property(name)), Some(Step::Index(_) | Step::Append)) =
+            (steps.next(), steps.next())
         else {
             return Ok(());
         };
