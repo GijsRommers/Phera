@@ -64,9 +64,12 @@ impl Machine<'_> {
                 let receiver = Some(object.clone());
                 self.prepare_php_method(function, receiver, None, position.ip)
             }
+            // `Closure::__invoke` and the methods of a generator have their
+            // own preparation in the VM.
             MethodBody::Native(entry)
-                if entry.direct.is_some()
-                    && method.visibility == Visibility::Public
+                if method.visibility == Visibility::Public
+                    && class.name != "Closure"
+                    && class.name != "Generator"
                     && (!self.classes.has_lazy_objects || object.lazy().is_none())
                     && !self.shadowed_by_private(self.running_scope(), key, method) =>
             {
@@ -84,7 +87,10 @@ impl Machine<'_> {
                     called: class,
                     invocation: crate::classes::Invocation::Method,
                 };
-                self.prepare_direct_method(position, context, method, entry)
+                match entry.direct {
+                    Some(_) => self.prepare_direct_method(position, context, method, entry),
+                    None => self.prepare_native_method(position, context, method),
+                }
             }
             _ => Step::Slow,
         }
