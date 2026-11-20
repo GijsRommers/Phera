@@ -44,6 +44,12 @@ pub(crate) struct ClassStates {
 }
 
 impl ClassStates {
+    /// The bytes of the slot tables, for a fork's footprint.
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.statics.capacity() * std::mem::size_of::<Option<Rc<StaticProperty>>>()
+            + self.constants.capacity() * std::mem::size_of::<ConstantState>()
+    }
+
     /// A new static property's slot, for a declaration being linked.
     pub(crate) fn new_static(&mut self) -> StaticSlot {
         self.statics.push(None);

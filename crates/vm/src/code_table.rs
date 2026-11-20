@@ -299,6 +299,35 @@ pub(crate) fn body(unit: &CompiledUnit, local: Option<usize>) -> &Function {
     }
 }
 
+impl CodeTable {
+    /// What a fork's copy of this table holds on the heap, by structure, in
+    /// bytes (see `crate::snapshot::footprint`).
+    pub(crate) fn fork_footprint(&self) -> Vec<(&'static str, usize)> {
+        use std::mem::size_of;
+        let (mut cells, mut boxes, mut slots) = (0, 0, 0);
+        for loaded in &self.units {
+            let (c, b, s) = loaded.cache.fork_bytes();
+            cells += c;
+            boxes += b;
+            slots += s;
+        }
+        vec![
+            ("site cells", cells),
+            ("per-function site boxes", boxes),
+            ("per-symbol resolution slots", slots),
+            (
+                "function facts",
+                self.functions.capacity() * size_of::<FunctionFacts>(),
+            ),
+            (
+                "loaded-file records",
+                self.units.capacity() * size_of::<LoadedUnit>()
+                    + self.slots.capacity() * size_of::<u32>(),
+            ),
+        ]
+    }
+}
+
 /// A fork has the snapshot's files with the same numbers, and its own
 /// copies of their caches (see `crate::snapshot`).
 impl crate::snapshot::ForkCopy for CodeTable {

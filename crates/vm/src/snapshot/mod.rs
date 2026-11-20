@@ -24,6 +24,8 @@
 mod boot;
 mod callees;
 mod copy;
+#[cfg(debug_assertions)]
+mod footprint;
 mod intrinsic;
 mod natives;
 mod paths;
