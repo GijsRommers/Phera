@@ -174,14 +174,14 @@ struct Cursor {
     started: bool,
 }
 
-fn current_reference(object: &Object) -> NativeResult {
+fn current_reference(context: &mut dyn Context, object: &Object) -> NativeResult {
     let Some(position) = inspect(object, |_, index| index)? else {
         return Ok(Value::Null);
     };
     Target::of(object)?.update(|array| {
         array
             .entry_at_mut(position)
-            .map(|(_, slot)| super::dimensions::element_reference(slot))
+            .map(|(_, slot)| super::dimensions::element_reference(context, slot))
             .ok_or_else(|| NativeError::error("SPL array entry vanished"))
     })
 }
@@ -200,11 +200,11 @@ impl NativeIterator for Cursor {
         inspect(&self.object, |_, index| index.is_some())
     }
 
-    fn current(&mut self, _: &mut dyn Context) -> NativeResult {
+    fn current(&mut self, context: &mut dyn Context) -> NativeResult {
         self.started = true;
         match self.mode {
             CursorMode::Value => current_value(&self.object),
-            CursorMode::Reference => current_reference(&self.object),
+            CursorMode::Reference => current_reference(context, &self.object),
         }
     }
 

@@ -169,7 +169,7 @@ impl Site<'_> {
 /// The type as PHP writes it in messages.
 pub(crate) fn type_text(ty: ParamType) -> &'static str {
     match ty {
-        ParamType::Mixed => "mixed",
+        ParamType::Untyped | ParamType::Mixed => "mixed",
         ParamType::Bool => "bool",
         ParamType::Int => "int",
         ParamType::Float => "float",
@@ -238,7 +238,12 @@ fn convert(
     let converted = match site.param.ty {
         // Whether a value is callable depends on which functions and classes
         // exist, which only the VM knows; `Context::call` reports it.
-        ParamType::Mixed | ParamType::Callable | ParamType::ReflectedObject => return Ok(()),
+        ParamType::Untyped
+        | ParamType::Mixed
+        | ParamType::Callable
+        | ParamType::ReflectedObject => {
+            return Ok(());
+        }
         ParamType::Array => matches!(value, Value::Array(_)).then_some(None),
         ParamType::Class(name) => {
             matches!(value, Value::Object(obj) if obj.class.is_instance_of(name)).then_some(None)

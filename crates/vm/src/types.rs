@@ -7,25 +7,7 @@ use phera_value::{is_numeric, to_float, to_int};
 
 use crate::Vm;
 
-/// Only declarations containing relative class keywords depend on the callee scope.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DeclarationScope {
-    Absolute,
-    Relative,
-}
-
-/// This classification mirrors argument checking's keyword scan, once per declaration.
-pub(crate) fn declaration_scope(declaration: &Type) -> DeclarationScope {
-    if declaration
-        .display
-        .split(['|', '&', '?', '(', ')'])
-        .any(|name| matches!(name, "self" | "parent" | "static"))
-    {
-        DeclarationScope::Relative
-    } else {
-        DeclarationScope::Absolute
-    }
-}
+pub(crate) use phera_bytecode::DeclarationScope;
 
 /// Strict declarations reject scalar coercion except PHP's int-to-float widening.
 #[derive(Clone, Copy, PartialEq, Eq)]

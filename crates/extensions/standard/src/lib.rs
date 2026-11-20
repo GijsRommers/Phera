@@ -22,6 +22,7 @@ mod strings;
 mod time;
 mod version_compare;
 
+pub use arrays::zend_sort::order as zend_sort_order;
 pub use url::query;
 mod url;
 

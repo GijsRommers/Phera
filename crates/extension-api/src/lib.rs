@@ -12,6 +12,7 @@ mod function;
 pub mod native_parameters;
 mod object_handlers;
 mod registry;
+mod request_references;
 pub mod serialization;
 mod state;
 pub mod testing;

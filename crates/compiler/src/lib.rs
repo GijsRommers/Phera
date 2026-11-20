@@ -51,6 +51,21 @@ pub fn compile_bytes_with_natives(
     )
 }
 
+/// Compiles on a caller-provided stack of at least the parser's stack size.
+/// A preload worker can reuse that stack for all the files it compiles.
+pub fn compile_bytes_with_natives_on_stack(
+    source: &[u8],
+    file: &str,
+    native_functions: &NativeFunctions<'_>,
+) -> Result<phera_bytecode::CompiledUnit, CompileError> {
+    pipeline::compile_on_stack(
+        source,
+        file,
+        pipeline::SourceKind::File,
+        Some(native_functions),
+    )
+}
+
 /// Registry facts shared with the compiler thread for calls such as
 /// `strlen($text)` and `extension_loaded('Core')`.
 pub struct NativeFunctions<'a> {

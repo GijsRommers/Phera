@@ -29,7 +29,7 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | --- | --- |
 | Laravel 13 JSON API with Eloquent | Runs. `artisan migrate` and 20 API requests (validation, create, read, update, delete, pagination, relations, a transaction) give PHP's answers on SQLite, MySQL and PostgreSQL |
 | Symfony 7.4 | A skeleton route runs. An application with Doctrine does not yet: it needs destructors that run at the end of a statement, which is being built |
-| WordPress | Not yet: `mysqli` is being built |
+| WordPress | Compatibility testing in progress for the new `mysqli` extension |
 | PHP's own test suite (php-src, 13,388 tests) | 8,704 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
 | Speed of a framework request | Roughly 10 times slower than PHP with opcache (one Laravel API request: about 150 ms against 9 to 17 ms). Phera links every class again for each request; sharing linked code between requests, forking a booted application and a worker mode with FrankenPHP's interface are designed ([architecture, 5.4](docs/architecture.md)) and not built. Measured CPU per request for a Laravel route with two MySQL queries: 34 million cycles on PHP with opcache, 369 million on Phera |
@@ -52,19 +52,36 @@ runner yet.
 
 Run `phera serve public` to serve a document root. PHP diagnostics, including
 fatal backtraces, go to the server log by default. Use `phera serve --dev public`
-to display diagnostics in responses during local development.
+to display diagnostics in responses and check PHP files on each request during
+local development.
 
 `--request-read-timeout SECONDS` sets the initial time budget for receiving
 headers and the body. It defaults to 60 seconds and gains one second for every
 16 KiB of body data received. If the budget runs out, the server returns HTTP 408
 and closes the connection.
 
+`phera serve` caches compiled PHP files and rechecks their paths and timestamps
+every two seconds by default. Set `-d opcache.revalidate_freq=0` to check on
+each request with production diagnostics, or `-d opcache.validate_timestamps=0`
+to keep cached code until the server restarts. `opcache.revalidate_path=1`
+checks the include search path on each lookup. `--dev` enables timestamp
+validation and sets the interval to zero.
+
+Request teardown releases circular arrays and objects held by their class's
+static properties or cached constant values.
+
+Use `phera serve --preload public` or set `preload = true` under `[server]`
+in the project's `phera.toml`. At startup Phera compiles the PHP files in
+Composer's generated class map and files autoload list. The start line gives
+the count and elapsed time. PHP still runs each file when the application
+includes it. The Zend-specific `opcache.preload` directive is unsupported.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
 [curl](crates/extensions/curl/README.md) (HTTP and HTTPS, including HTTP/2,
 connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`,
-`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, json, mbstring, openssl, pcre,
+`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, intl, json, mbstring, openssl, pcre,
 PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.
@@ -109,7 +126,17 @@ gzip file functions, and the `compress.zlib://` wrapper. The
 `zlib.output_compression` directive stores its value. Use `ob_gzhandler` for
 PHP output-buffer compression or `phera serve --compress` for server compression.
 
-In progress: intl, mysqli, pgsql, SimpleXML, XMLReader, XMLWriter.
+The `mysqli` and `pgsql` extensions share PDO's async connections, TLS and
+connection pool. For mysqli single statements, `MYSQLI_USE_RESULT` fetches one
+row at a time, including in `foreach`. PostgreSQL supports the `pg_exec` alias
+and other PHP 8.5 aliases for supported operations. `pg_copy_from()` accepts
+arrays and traversable row sources. PostgreSQL large objects can be opened,
+read, written, sought, truncated and unlinked in the current transaction.
+`pg_lo_import()` and `pg_lo_export()` transfer local files in bounded chunks.
+Native function return types are visible through reflection. Compatibility
+testing is in progress. MySQL LOCAL INFILE is disabled.
+
+In progress: SimpleXML, XMLReader, XMLWriter.
 Not started: gd, fileinfo, zip, sockets.
 
 ### Sodium
@@ -121,6 +148,14 @@ secretstream, key derivation and exchange, Argon2 and scrypt passwords, binary
 encodings, and ISO/IEC 7816-4 padding. The six AEGIS-128L and AEGIS-256 functions are
 absent pending a published audit of a pure Rust backend. Ed25519 signing
 rejects secret keys whose embedded public half cannot be decoded as a point.
+
+### intl
+
+The intl extension includes ICU4X normalization, grapheme operations, IDNA,
+locale queries, number and date formatting, collation, list and message
+formatting, transliteration, break iteration, resource bundles, and calendar
+and timezone objects. See the [intl coverage notes](crates/extensions/intl/README.md) for
+the APIs that still differ from PHP.
 
 ## ✨ Goals
 

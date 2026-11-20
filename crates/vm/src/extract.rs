@@ -167,6 +167,9 @@ impl Vm {
             } else {
                 Value::Reference(Rc::new(RefCell::new(value)))
             };
+            if let Value::Reference(cell) = &reference {
+                self.state.track_cycle_reference(cell);
+            }
             Rc::make_mut(array).insert(key, reference.clone());
             self.set(register, reference);
         } else {
