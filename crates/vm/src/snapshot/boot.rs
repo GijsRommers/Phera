@@ -49,6 +49,7 @@ impl Vm {
         registry.fork_state::<crate::reflection::initializers::InitializerCode>(fresh_state);
         registry.fork_state::<crate::serialization::property_index::PropertyCache>(fresh_state);
         registry.fork_state::<phera_extension_api::ProcessCancellation>(fresh_state);
+        phera_extension_api::register_cycle_fork(registry);
         registry.fork_state::<crate::request_callbacks::ResourceFinalizers>(
             phera_extension_api::copy_state::<crate::request_callbacks::ResourceFinalizers>,
         );

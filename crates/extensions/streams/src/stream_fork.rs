@@ -41,6 +41,7 @@ pub(crate) fn fork_stream(data: &dyn Any, _fork: &mut Fork<'_>) -> Result<Box<dy
             Backing::File(BufReader::new(file))
         }
         (Backing::Input(_), _) => return Err("php://input is the body of one request".into()),
+        (Backing::Gzip(_), _) => return Err("an open gzip file belongs to one request".into()),
         _ => return Err("an open file belongs to one request".into()),
     };
     let mut copy = Stream::new(backing, stream.wrapper, &stream.mode, &stream.uri);

@@ -28,6 +28,7 @@ pub(crate) const CLASS: ClassEntry = ClassEntry {
     methods: methods::METHODS,
     hooks: Some(&ClassHooks {
         clone: Some(NativeClone::copy::<Decimal>()),
+        fork: Some(phera_extension_api::fork_clone::<Decimal>),
         compare: Some(operators::compare_objects),
         binary: Some(operators::binary),
         cast: Some(cast),

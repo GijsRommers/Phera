@@ -224,3 +224,31 @@ impl ClassHooks {
         fork: None,
     };
 }
+
+/// The fork hook of a class whose native state is plain data with no PHP
+/// value inside (a number, a formatter's settings): the fork gets a clone.
+///
+/// ```php
+/// $money = new NumberFormatter('nl_NL', NumberFormatter::CURRENCY);
+/// Phera\snapshot();   // each request formats with its own copy
+/// ```
+pub fn fork_clone<T: Clone + 'static>(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    _fork: &mut phera_value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    state
+        .downcast_ref::<T>()
+        .map(|state| Box::new(state.clone()) as Box<dyn std::any::Any>)
+        .ok_or_else(|| "its built-in state is not initialized".into())
+}
+
+/// The fork hook of a class whose objects hold a connection, a transfer or
+/// a compression in progress: one of those belongs to one request.
+pub fn fork_refused_handle(
+    _object: &Object,
+    _state: &dyn std::any::Any,
+    _fork: &mut phera_value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    Err("a connection, transfer or compression context made before the call belongs to one request; create it after Phera\\snapshot()".into())
+}

@@ -64,6 +64,8 @@ impl Extension for Zlib {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this request state: output compression is chosen per request.
+        registry.fork_state::<crate::output::Output>(phera_extension_api::fresh_state);
         for (name, value) in [
             ("FORCE_GZIP", Encoding::Gzip.php()),
             ("FORCE_DEFLATE", Encoding::Zlib.php()),
