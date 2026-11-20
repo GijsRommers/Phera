@@ -13,6 +13,17 @@ use crate::user_file::{invoke, missing};
 use crate::user_wrappers::UserWrapper;
 use crate::wrapper::Target;
 
+#[derive(Default)]
+struct StatusCache {
+    followed: Option<(Vec<u8>, [i64; 13])>,
+    link: Option<(Vec<u8>, [i64; 13])>,
+}
+
+pub(crate) fn clear(context: &mut dyn Context, _: &[Value]) -> NativeResult {
+    context.state().take::<StatusCache>();
+    Ok(Value::Null)
+}
+
 pub(crate) async fn url_stat(
     context: &mut dyn Context,
     wrapper: UserWrapper,
@@ -23,6 +34,18 @@ pub(crate) async fn url_stat(
 ) -> NativeResult {
     if !wrapper.permitted(context, function) {
         return query.failed(context, uri, function, throws);
+    }
+    let follow = query.follow();
+    if let Some(cached) = context.state().get::<StatusCache>()
+        && let Some((_, fields)) = if follow {
+            &cached.followed
+        } else {
+            &cached.link
+        }
+        .as_ref()
+        .filter(|(path, _)| path == uri)
+    {
+        return query_value(query, *fields);
     }
     let path = match Target::parse(uri) {
         Target::File(path) => path,
@@ -40,6 +63,13 @@ pub(crate) async fn url_stat(
     match result {
         Some(Value::Array(array)) => {
             let fields = fields(context, &array)?;
+            let cache = context.state().get_or_default::<StatusCache>();
+            if !follow {
+                cache.link = Some((uri.to_vec(), fields));
+            }
+            if follow || fields[StatField::Mode as usize] & 0o170000 != 0o120000 {
+                cache.followed = Some((uri.to_vec(), fields));
+            }
             query_value(query, fields)
         }
         None => {

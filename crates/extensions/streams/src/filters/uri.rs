@@ -20,12 +20,11 @@ impl<'a> FilterUri<'a> {
             if depth > MAX_STAGES {
                 return Err("Stream filter chain exceeds Phera's limit of 16 filters");
             }
-            let Some(resource) = uri
-                .windows(10)
-                .position(|part| part.eq_ignore_ascii_case(b"/resource="))
-                .map(|index| (index, index + 10))
-                .or_else(|| after(uri, b"resource=").map(|_| (0, 9)))
-            else {
+            let Some(resource) = after(uri, b"resource=").map(|_| (0, 9)).or_else(|| {
+                uri.windows(10)
+                    .position(|part| part.eq_ignore_ascii_case(b"/resource="))
+                    .map(|index| (index, index + 10))
+            }) else {
                 return Err("No URL resource specified");
             };
             let mut layer = Vec::new();

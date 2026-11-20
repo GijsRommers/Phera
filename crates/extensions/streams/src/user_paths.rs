@@ -30,7 +30,11 @@ pub(crate) async fn method(
     if result.is_none() {
         missing(context, &object, function, method, "");
     }
-    Ok(Value::Bool(matches!(result, Some(Value::Bool(true)))))
+    let success = matches!(result, Some(Value::Bool(true)));
+    if success {
+        crate::user_stat::clear(context, &[])?;
+    }
+    Ok(Value::Bool(success))
 }
 
 pub(crate) async fn metadata(

@@ -43,7 +43,7 @@ pub fn register(registry: &mut Registry) {
         FunctionEntry::asynchronous("stat", &[FILENAME], stat),
         FunctionEntry::asynchronous("lstat", &[FILENAME], lstat),
         FunctionEntry::asynchronous("fstat", &[STREAM], fstat),
-        FunctionEntry::sync("clearstatcache", CACHE, |_, _| Ok(Value::Null)),
+        FunctionEntry::sync("clearstatcache", CACHE, crate::user_stat::clear),
         FunctionEntry::sync("realpath", PATH, realpath),
         FunctionEntry::sync("disk_free_space", DIRECTORY, disk_free_space),
         FunctionEntry::sync("disk_total_space", DIRECTORY, disk_total_space),
