@@ -1,4 +1,52 @@
-# Historical Composer differential results from PR #15
+# Composer differential results
+
+## Native locked-install checkpoint
+
+Composer 2.11.2 and PHP 8.5.12 on macOS. All 25 original locked fixtures match
+package files, parsed installed.json and installed.php, and PHP autoload lookups.
+The generated PHP and installed JSON files match byte for byte across all 25
+fixtures. Phera's runtime probe matches 23. Guzzle requires stream filters
+tracked in #122. Slim emits a different nullable-parameter deprecation.
+
+The framework run enabled approved plugins and disabled root scripts for the
+file comparison. The boot run installed with root scripts enabled and Composer
+absent from PATH. It used the official Symfony 8.1 skeleton and webapp
+dependency locks, with the native installer laying out the pinned recipe
+files. The copied applications stayed in isolated directories.
+
+| Framework | First strict platform rejection | Phera HTTP | PHP 8.5 HTTP |
+| --- | --- | --- | --- |
+| Drupal recommended project | `ext-gd` | 302 to `/core/install.php` | Same 302 |
+| Laravel skeleton | `ext-xml` from Pint | 200 | 200 |
+| Copied Laravel application | `ext-xml` from Pint | 200 | 200 |
+| Copied Symfony application | `ext-xml` | 200, route parameter `Ada` | Same 200 |
+| Roots Bedrock | `ext-simplexml` from ParaTest | 200, WordPress site title | Same 200 |
+| Symfony skeleton | `ext-xml` | 200, route parameter `Ada` | Same 200 |
+| Symfony webapp | `ext-phar` from phar-io/manifest | 500, Finder string conversion | 200, route parameter `Ada` |
+
+The Symfony webapp also reaches the unsupported
+`DOMDocument::schemaValidateSource()` during a Phera cache warmup. Bedrock
+used a disposable MySQL server and an installed WordPress site.
+Both Laravel projects ran their typed post-autoload callback and Phera's
+`artisan package:discover`.
+
+All seven match parsed installed.json and installed.php. Drupal's
+`web/core` and Bedrock's `web/wp` and `web/app/mu-plugins` package files
+match by path and content. The following differences remain across these
+framework installs.
+
+| Generated file | Projects | Cause |
+| --- | --- | --- |
+| `vendor/pest-plugins.json` | Bedrock | Composer's Pest plugin registers Pest plugins. Phera skips that plugin. |
+| `vendor/drupal/DrupalInstalled.php` | Drupal | Composer's scaffold plugin generates a cache version class. Drupal falls back to its own version without it. |
+| `vendor/composer/autoload_classmap.php` and `autoload_static.php` | Drupal, three Symfony projects | Drupal's Composer-only cache class adds a map entry. Symfony's one-byte class key is escaped by Phera and emitted literally by Composer. |
+| `vendor/composer/include_paths.php` | Drupal | Composer puts `pear/pear_exception` before `pear/console_getopt`; Phera's dependency-weight ordering reverses those two paths. |
+| `vendor/bin/*` | Projects with executable dependencies | Phera emits shorter PHP 8.5 and shell proxies. |
+
+Both PHP and Phera produce identical framework class probes for six projects.
+The Drupal probe differs only by the Composer-only cache class above.
+
+## Historical Composer differential results from PR #15
 
 Oracle: Composer 2.11.2 under PHP 8.5.12 on macOS, 2026-11-17. The manifests
 come from the release references recorded in each fixture's provenance.json.
