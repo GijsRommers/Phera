@@ -23,16 +23,21 @@ pub struct Matrix {
     script: String,
     labels: Vec<String>,
     results: Vec<String>,
+    icu78: Vec<(usize, String, String)>,
 }
 
 impl Matrix {
     pub fn new() -> Self {
-        let script = format!("<?php\n{}\n", oracle::PHP_PREAMBLE);
+        let script = format!(
+            "<?php\necho INTL_ICU_VERSION, \"\\n\";\n{}\n",
+            oracle::PHP_PREAMBLE
+        );
         Self {
             registry: registry(),
             script,
             labels: Vec::new(),
             results: Vec::new(),
+            icu78: Vec::new(),
         }
     }
 
@@ -42,6 +47,31 @@ impl Matrix {
 
     pub fn record(&mut self, function: &str, arguments: &[Value], next: Option<Value>) {
         self.run(function, arguments, next, None);
+    }
+
+    /// Record both successful values for the next case where ICU 78 differs.
+    /// The result, error state and any changed reference are compared together.
+    pub fn icu78_difference(&mut self, php: &str, phera: &str, offsets: Option<(i64, i64)>) {
+        let index = self.labels.len();
+        let encode = |output: &str, offset: Option<i64>| {
+            let mut values = vec![
+                Value::from(output),
+                Value::Int(0),
+                Value::from("U_ZERO_ERROR"),
+            ];
+            values.extend(offset.map(Value::Int));
+            let array: PhpArray = values
+                .into_iter()
+                .enumerate()
+                .map(|(key, value)| (ArrayKey::Int(key as i64), value))
+                .collect();
+            format!("{index}={}", oracle::encode(&Value::from(array)))
+        };
+        self.icu78.push((
+            index,
+            encode(php, offsets.map(|(php, _)| php)),
+            encode(phera, offsets.map(|(_, phera)| phera)),
+        ));
     }
 
     pub fn instance(
@@ -141,7 +171,8 @@ impl Matrix {
     }
 
     pub fn compare(&self, name: &str) {
-        let php = oracle::run_php(name, &self.script).expect("PHP 8.5 with intl required");
+        let mut php = oracle::run_php(name, &self.script).expect("PHP 8.5 with intl required");
+        let icu = php.remove(0);
         if std::env::var_os("PHERA_INTL_ORACLE_DIFF").is_some() {
             for ((label, expected), actual) in self.labels.iter().zip(&php).zip(&self.results) {
                 if expected != actual {
@@ -149,6 +180,18 @@ impl Matrix {
                 }
             }
         }
+        let mut differences = 0;
+        if icu.starts_with("78.") {
+            for (index, reference, phera) in &self.icu78 {
+                if php.get(*index) == Some(reference) {
+                    php[*index].clone_from(phera);
+                    differences += 1;
+                }
+            }
+        }
         oracle::compare(name, &self.labels, &php, &self.results);
+        if differences != 0 {
+            println!("{name}: verified {differences} documented ICU {icu} data differences");
+        }
     }
 }

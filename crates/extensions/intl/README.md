@@ -62,6 +62,8 @@ reads files asynchronously. The implementation follows the
 | Generic `Any-Latin/BGN` transform | 49 | 49 | Fixed. ICU4C registers language-specific BGN identifiers and rejects this generic ID. Symfony falls back to `Any-Latin`. |
 | Explicit date patterns using `ss.SSS` in `fr_FR`, `nl_BE` and `ar_EG` | 49 | 49 | Fixed. PHP keeps the literal dot between seconds and milliseconds. |
 | `INTL_ICU_VERSION` and `INTL_ICU_DATA_VERSION` | 49 (`79.1` for both PHP constants) | 49 (`2.4.0` and `49`) | Accepted. Phera reports the ICU4X backend and compiled CLDR release. The PHP eligibility sweep covers ICU-version-gated fixtures on this host. |
+| Long date and time style for `fr_BE`, `fr_FR` and `ar_EG` at UTC and `pt_BR` in `Europe/Brussels` | 48 (ICU4C 78) | 49 | Accepted for eight exact results. The time-zone text differs (`UTC` versus `TU` or `التوقيت العالمي`, and `GMT+1`/`GMT+2` versus `+1 GMT`/`+2 GMT`). |
+| Four `grapheme_extract` cases for `क्ष` starting inside the first UTF-8 scalar | 48 (ICU4C 78, Unicode 17) | 49 (Unicode 18) | Accepted. The virama boundary differs. The test compares the complete string, error state and resulting byte offset for each implementation. |
 | `IntlTimeZone::getIDForWindowsID` with India or an absent Pacific region override | 49 | 49 | Fixed. Resolve through the world region and return ICU's legacy `Asia/Calcutta` alias. |
 | `DECIMAL_COMPACT_SHORT` for legacy `en_UK` | 49 | 49 | Open. PHP renders `1.2M` and Phera resolves the legacy region alias and renders `1.2m`. |
 | Traditional Hebrew and Hijri formatting in `en_US` and `pt_PT` | 49 | 49 | Open. Traditional calendars currently use medium fields. The requested weekday, time-zone and custom-pattern fields can differ. |

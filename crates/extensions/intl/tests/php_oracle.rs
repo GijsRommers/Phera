@@ -135,6 +135,16 @@ fn grapheme_boundaries_and_references() {
         for unit in [0, 1, 2, 3] {
             for offset in [-2, 0, 1, 2, 6, i64::MAX] {
                 for size in [-1, 0, 1, 2, 6, i64::MAX] {
+                    if size == 1
+                        && matches!(offset, 1 | 2)
+                        && matches!(&text, Value::String(value) if value.as_bytes() == "क्ष".as_bytes())
+                    {
+                        match unit {
+                            0 => matrix.icu78_difference("्", "्ष", Some((6, 9))),
+                            2 => matrix.icu78_difference("्", "", Some((6, 3))),
+                            _ => {}
+                        }
+                    }
                     matrix.record(
                         "grapheme_extract",
                         &[

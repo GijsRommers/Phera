@@ -67,6 +67,9 @@ fn core_date_formats() {
                     Value::from(zone),
                 ];
                 for timestamp in [0, 1_724_727_600] {
+                    if style == 1 {
+                        date_zone_difference(&mut matrix, locale, zone, timestamp);
+                    }
                     matrix.instance(
                         "IntlDateFormatter",
                         &constructor,
@@ -79,6 +82,25 @@ fn core_date_formats() {
         }
     }
     matrix.compare("intl-core-date-formats");
+}
+
+fn date_zone_difference(matrix: &mut Matrix, locale: &str, zone: &str, timestamp: i64) {
+    let (prefix, php, phera) = match (locale, zone, timestamp) {
+        ("fr_BE" | "fr_FR", "UTC", 0) => ("1 janvier 1970 à 00:00:00", "UTC", "TU"),
+        ("fr_BE" | "fr_FR", "UTC", 1_724_727_600) => ("27 août 2024 à 03:00:00", "UTC", "TU"),
+        ("pt_BR", "Europe/Brussels", 0) => ("1 de janeiro de 1970 às 01:00:00", "GMT+1", "+1 GMT"),
+        ("pt_BR", "Europe/Brussels", 1_724_727_600) => {
+            ("27 de agosto de 2024 às 05:00:00", "GMT+2", "+2 GMT")
+        }
+        ("ar_EG", "UTC", 0) => ("١ يناير ١٩٧٠ في ١٢:٠٠:٠٠ ص", "UTC", "التوقيت العالمي"),
+        ("ar_EG", "UTC", 1_724_727_600) => ("٢٧ أغسطس ٢٠٢٤ في ٣:٠٠:٠٠ ص", "UTC", "التوقيت العالمي"),
+        _ => return,
+    };
+    matrix.icu78_difference(
+        &format!("{prefix} {php}"),
+        &format!("{prefix} {phera}"),
+        None,
+    );
 }
 
 #[test]

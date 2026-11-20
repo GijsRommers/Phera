@@ -38,6 +38,7 @@ foreach (['pgsql' => 54329, 'mysql' => 33069] as $driver => $port) {
     new PDO("$driver:host=127.0.0.1;port=$port;dbname=phera_test", 'phera_pool', 'phera_pool');
 }
 echo 'PHP ', PHP_VERSION, ': extensions, both test databases and the pool test account ready', PHP_EOL;
+echo 'intl ICU ', INTL_ICU_VERSION, ' (data ', INTL_ICU_DATA_VERSION, ')', PHP_EOL;
 
 $redis = new Redis();
 $redis->connect('127.0.0.1', 16399);
