@@ -2736,8 +2736,11 @@ dependencies = [
  "phera-extension-api",
  "precomputed-hash",
  "quick-xml",
+ "regex",
+ "rustix",
  "selectors",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -2999,6 +3002,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-simplexml"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "percent-encoding",
+ "phera-ext-dom",
+ "phera-ext-streams",
+ "phera-extension-api",
+ "tokio",
+]
+
+[[package]]
 name = "phera-ext-sodium"
 version = "0.1.0"
 dependencies = [
@@ -3086,6 +3101,39 @@ dependencies = [
  "phera-lexer",
  "phera-parser",
  "phera-phpt",
+]
+
+[[package]]
+name = "phera-ext-xml"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "phera-ext-dom",
+ "phera-extension-api",
+ "quick-xml",
+]
+
+[[package]]
+name = "phera-ext-xmlreader"
+version = "0.1.0"
+dependencies = [
+ "phera-ext-dom",
+ "phera-ext-streams",
+ "phera-extension-api",
+ "tokio",
+ "url",
+]
+
+[[package]]
+name = "phera-ext-xmlwriter"
+version = "0.1.0"
+dependencies = [
+ "encoding_rs",
+ "percent-encoding",
+ "phera-ext-dom",
+ "phera-ext-streams",
+ "phera-extension-api",
+ "tokio",
 ]
 
 [[package]]
@@ -3177,12 +3225,16 @@ dependencies = [
  "phera-ext-reflection",
  "phera-ext-serialize",
  "phera-ext-session",
+ "phera-ext-simplexml",
  "phera-ext-sodium",
  "phera-ext-spl",
  "phera-ext-sqlite3",
  "phera-ext-standard",
  "phera-ext-streams",
  "phera-ext-tokenizer",
+ "phera-ext-xml",
+ "phera-ext-xmlreader",
+ "phera-ext-xmlwriter",
  "phera-ext-zlib",
  "phera-extension-api",
  "phera-io-pool",

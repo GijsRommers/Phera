@@ -29,7 +29,7 @@
 mod arrays;
 mod objects;
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -68,6 +68,11 @@ pub struct Refusal {
 /// A PHP reference cell.
 type Cell = Rc<RefCell<Value>>;
 
+struct NativeCopy {
+    _source: Rc<dyn Any>,
+    copy: Rc<dyn Any>,
+}
+
 /// One copy in progress. Make it with [`Fork::new`], map each root with
 /// [`Fork::value`], then call [`Fork::finish`].
 pub struct Fork<'n> {
@@ -81,6 +86,7 @@ pub struct Fork<'n> {
     references: HashMap<usize, Rc<RefCell<Value>>>,
     resources: HashMap<usize, Rc<Resource>>,
     pub(crate) arrays: HashMap<usize, Rc<crate::PhpArray>>,
+    native_copies: Option<HashMap<(TypeId, usize), NativeCopy>>,
     /// Copies made but not filled yet.
     pub(crate) unfilled_objects: Vec<(Rc<Object>, Rc<Object>)>,
     unfilled_references: Vec<(Cell, Cell)>,
@@ -102,6 +108,7 @@ impl<'n> Fork<'n> {
             references: HashMap::new(),
             resources: HashMap::new(),
             arrays: HashMap::new(),
+            native_copies: None,
             unfilled_objects: Vec::new(),
             unfilled_references: Vec::new(),
             unfilled_attachments: Vec::new(),
@@ -112,6 +119,31 @@ impl<'n> Fork<'n> {
     /// The id pool of the copies.
     pub fn ids(&self) -> &Rc<ObjectIds> {
         &self.ids
+    }
+
+    /// Copy native backing shared by several PHP objects once for this fork.
+    /// For example, two views of one XML document must keep sharing its copied tree.
+    pub fn shared_native<T: 'static>(
+        &mut self,
+        source: &Rc<T>,
+        copy: impl FnOnce(&T) -> T,
+    ) -> Rc<T> {
+        let key = (TypeId::of::<T>(), Rc::as_ptr(source) as usize);
+        let copies = self.native_copies.get_or_insert_with(HashMap::new);
+        if let Some(copied) = copies.get(&key)
+            && let Ok(value) = copied.copy.clone().downcast::<T>()
+        {
+            return value;
+        }
+        let value = Rc::new(copy(source));
+        copies.insert(
+            key,
+            NativeCopy {
+                _source: source.clone(),
+                copy: value.clone(),
+            },
+        );
+        value
     }
 
     /// The copy of a value. Scalars and strings are themselves.

@@ -164,6 +164,9 @@ impl Runtime {
         registry.load(&phera_ext_curl::Curl);
         registry.load(&phera_ext_dom::Libxml);
         registry.load(&phera_ext_dom::Dom);
+        registry.load(&phera_ext_xml::Xml);
+        registry.load(&phera_ext_xmlreader::XmlReader);
+        registry.load(&phera_ext_xmlwriter::XmlWriter);
         registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_intl::Intl);
         registry.load(&phera_ext_json::Json);
@@ -189,6 +192,7 @@ impl Runtime {
         Vm::register_fiber_classes(&mut registry);
         Vm::register_state_forks(&mut registry);
         registry.load(&phera_ext_spl::Spl);
+        registry.load(&phera_ext_simplexml::SimpleXml);
         registry.load(&phera_ext_session::Session);
         adapters::register(&mut registry);
         let mut web_registry = registry.clone();

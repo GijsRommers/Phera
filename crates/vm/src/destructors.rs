@@ -150,6 +150,9 @@ impl Vm {
         let Some(class) = self.classes.for_object(&object) else {
             return Ok(());
         };
+        if let Some(release) = class.hooks.as_ref().and_then(|hooks| hooks.release) {
+            release(self, &object).await;
+        }
         let Some(method) = class
             .magic
             .as_ref()

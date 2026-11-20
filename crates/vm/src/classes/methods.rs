@@ -121,8 +121,10 @@ impl Vm {
         let signature = method.signature(&self.code);
         let call_name = signature.name.clone();
         let parameters = signature.parameters.clone();
+        let needs_receiver = !method.is_static
+            || matches!(&method.body, super::class::MethodBody::Native(entry) if entry.uses_instance_receiver);
         let context = MethodContext {
-            receiver: if method.is_static { None } else { receiver },
+            receiver: if needs_receiver { receiver } else { None },
             scope,
             called: class,
             invocation,
