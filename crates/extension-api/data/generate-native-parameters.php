@@ -202,9 +202,10 @@ function is_runtime_stub(string $file): bool {
     return in_array($parts[0], ['Zend', 'main'], true)
         || ($parts[0] === 'sapi' && $parts[1] === 'cli')
         || ($parts[0] === 'ext' && in_array($parts[1], [
-            'ctype', 'date', 'dom', 'filter', 'hash', 'iconv', 'json', 'libxml',
-            'mbstring', 'openssl', 'pcntl', 'pcre', 'pdo', 'pdo_mysql', 'pdo_pgsql', 'pdo_sqlite',
-            'posix', 'random', 'reflection', 'session', 'spl', 'sqlite3', 'standard', 'tokenizer',
+            'bcmath', 'ctype', 'curl', 'date', 'dom', 'filter', 'gmp', 'hash', 'iconv', 'json',
+            'libxml', 'mbstring', 'openssl', 'pcntl', 'pcre', 'pdo', 'pdo_mysql', 'pdo_pgsql',
+            'pdo_sqlite', 'posix', 'random', 'reflection', 'session', 'spl', 'sqlite3', 'standard',
+            'tokenizer', 'zlib',
         ], true));
 }
 

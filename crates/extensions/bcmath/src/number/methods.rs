@@ -54,8 +54,7 @@ pub(super) const METHODS: &[MethodEntry] = &[
         "round",
         &[
             Param::new("precision", ParamType::Int).with_default(ConstantValue::Int(0)),
-            Param::new("mode", ParamType::Class("RoundingMode"))
-                .with_constant_default("RoundingMode::HalfAwayFromZero", ConstantValue::Null),
+            Param::new("mode", ParamType::Class("RoundingMode")).optional(),
         ],
         round,
     )
