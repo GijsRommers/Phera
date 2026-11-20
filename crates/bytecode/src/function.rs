@@ -1,6 +1,6 @@
 //! A compiled function and the tables its instructions point into.
 
-use crate::{Code, NameId, Reg, SiteTable, Target, TypeId};
+use crate::{Code, NameId, Reg, Target, TypeId};
 
 /// The code of one PHP function, or of a file's top level.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -50,8 +50,6 @@ pub struct Function {
     /// `try` blocks, innermost first. Unwinding searches this table; it is
     /// consulted only when an exception leaves an instruction.
     pub handlers: Vec<Handler>,
-    /// Which instructions have a per-request cache (see [`SiteTable`]).
-    pub sites: SiteTable,
 }
 
 #[derive(Debug, Clone, PartialEq)]

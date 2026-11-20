@@ -27,8 +27,10 @@ pub(crate) struct UnitCache {
     /// change, so scope classification needs no invalidation. Relative types resolve per call.
     pub(crate) type_scopes: Vec<crate::types::DeclarationScope>,
     pub(crate) class_types: Vec<RefCell<Option<ClassTypeEntry>>>,
-    main_sites: Vec<RefCell<CachedSite>>,
-    function_sites: Vec<Vec<RefCell<CachedSite>>>,
+    /// The site cells of the top-level code and of each function, one per
+    /// instruction, made when the function first looks a site up.
+    main_sites: Sites,
+    function_sites: Box<[Sites]>,
     pub(crate) closure_signatures: RefCell<Vec<Option<crate::calls::call_state::Callee>>>,
 }
 
@@ -62,26 +64,34 @@ impl UnitCache {
 
     /// The site of the instruction of the function `facts` describes that
     /// ends at `ip`: the VM looks it up after the instruction pointer has
-    /// advanced. `None` for an instruction without one.
+    /// advanced.
     #[inline]
     pub(crate) fn site(
         &self,
         facts: &crate::function_facts::FunctionFacts,
         ip: usize,
     ) -> Option<&RefCell<CachedSite>> {
-        let slot = phera_bytecode::site_of(&facts.sites, ip)?;
-        match facts.local {
-            Some(function) => self.function_sites.get(function as usize)?.get(slot),
-            None => self.main_sites.get(slot),
-        }
+        let sites = match facts.local {
+            Some(function) => self.function_sites.get(function as usize)?,
+            None => &self.main_sites,
+        };
+        sites
+            .get_or_init(|| empty_sites(facts.instructions.len()))
+            .get(ip)
     }
 }
 
-/// An empty cell for each instruction that has a site (see
-/// `phera_bytecode::SiteTable`); what a site resolves to is allocated when
-/// it is first used.
-fn instruction_sites(function: &phera_bytecode::Function) -> Vec<RefCell<CachedSite>> {
-    (0..function.sites.count(&function.instructions))
+/// The site cells of one function, made when it first uses one: a request
+/// loads every function of a file but runs few of them, so most functions
+/// never get any (and a fork of a snapshot copies only those that ran).
+pub(crate) type Sites = OnceCell<Box<[RefCell<CachedSite>]>>;
+
+/// An empty cell per instruction, and one past the last: a site is keyed by
+/// the position after its instruction. What a site resolves to is allocated
+/// when it is first used.
+#[cold]
+fn empty_sites(instructions: usize) -> Box<[RefCell<CachedSite>]> {
+    (0..=instructions)
         .map(|_| RefCell::new(CachedSite::Empty))
         .collect()
 }
@@ -106,8 +116,8 @@ impl UnitCache {
                 .map(crate::types::declaration_scope)
                 .collect(),
             class_types: unit.types.iter().map(|_| RefCell::new(None)).collect(),
-            main_sites: instruction_sites(&unit.main),
-            function_sites: unit.functions.iter().map(instruction_sites).collect(),
+            main_sites: Sites::new(),
+            function_sites: unit.functions.iter().map(|_| Sites::new()).collect(),
             closure_signatures: RefCell::new(Vec::new()),
             class_names: unit
                 .symbols
