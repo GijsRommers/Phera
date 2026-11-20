@@ -336,7 +336,7 @@ changes afterwards. A request's class table points at the shared class. What a
 request can change moves out of the class into a table of the request, indexed
 by the class's number: static properties, static variables of functions and
 methods, and constant values that are objects (enum cases, `new` in
-initializers). This is what opcache's inheritance cache does for PHP. Include
+initializers). Include
 resolution (path to compiled unit) is cached per worker as well. Whether a
 changed file is noticed follows `opcache.validate_timestamps` and
 `opcache.revalidate_freq`; `phera serve --dev` checks on every request. Step 1
@@ -507,26 +507,29 @@ cache in front of a slow structure):
 | Finding a loaded file | a linear scan over the request's files | a flat array indexed by the file revision's process number (`UnitMetadata::id`); done |
 | Function numbering | per request: files numbered in the order the request loads them | per file revision: a function is (file number, local number), so the same function has the same number in every request |
 | Function facts | a vector per request, copied per fork | one immutable array per file revision, shared; a request keeps only what it adds (trait imports, declaring class) |
-| Linked classes | an `Rc` graph per worker (methods in a `HashMap<String, Rc<Method>>`, ancestors in a `HashSet<String>`), linked again by each request that declares the class after the boot | an immutable entry in a table of the process, linked once per file revision and dependency key; a request holds the entry's number |
-| A request's declared classes | a map from name to `Rc<Class>` | a bitset over the process table plus the name's slot |
+| Linked classes | an `Rc` graph per worker (methods in a `HashMap<String, Rc<Method>>`, ancestors in a `HashSet<String>`), linked again by each request that declares the class after the boot | one table of linked classes for the worker (later the process), each entry addressed by a stable index; methods in a flat array in the order PHP lists them, property declarations in a flat array |
+| A request's declared classes | a map from name to `Rc<Class>`, plus per-file resolution slots copied per fork | a bitset over the worker's table of which entries the request has declared, the name's slot, and the request's own statics |
 
-The key of a linked class is that of opcache's inheritance cache
-(`zend_inheritance_cache_get`): the unlinked declaration (file revision and
-class number) and the exact classes its parent, interfaces and traits
-resolved to, plus every class a variance check looked up by name (opcache
-records those in `track_class_dependency`). Two differences: the
-dependencies are numbers of the same table, compared as integers, where
-opcache compares class-entry pointers and looks the names up again; and an
-entry is made for a declaration whatever the request had declared, since
-a conditional declaration or a `class_alias` only changes which entry a
-name resolves to, which is the dependency key itself. Warnings that linking
-emits are recorded with the entry and emitted again, as opcache does.
+When two requests may use the same entry is a fact of the language, not
+a lookup: a class declaration yields the same linked class when it is the
+same declaration (the same revision of the same file, the same class in
+it) and its parent, its interfaces and its traits are the same linked
+classes, and every class its method signatures name in type checks that
+decide whether a signature is compatible resolves to the same linked
+class. An entry records those identities, as indexes of the same table,
+when it is made. A request that declares the class finds the entry made
+from its declaration whose recorded identities are the entries that
+request has declared under those names; a conditional declaration or a
+`class_alias` only changes which entries a request has declared, so it
+picks another entry or makes a new one, never a wrong one. Warnings that
+linking emits belong to the entry and are emitted again for each request
+that declares it, as a request from the top would see them.
 
 What is still in the way of the table being the process's rather than each
 worker's: a linked class holds PHP values (default property values,
 constant literals, the class name as a `Value`), and values are `Rc`, which
-cannot cross threads. The process table therefore holds the declaration's
-literal values in the compiled file's own form, and each worker makes its
+cannot cross threads. A process table would hold the declaration's literal
+values in the compiled file's own form, and each worker would make its
 `Value`s from them once per entry. Native hooks are `&'static` already.
 
 **Code caches and snapshots: one design.** Three layers hold code, from the
