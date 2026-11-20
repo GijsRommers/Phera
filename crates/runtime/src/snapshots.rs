@@ -87,6 +87,17 @@ fn modified(file: &Path) -> Option<SystemTime> {
 /// How long a failed boot waits before it is tried again.
 const RETRY_AFTER: Duration = Duration::from_secs(2);
 
+/// What requests do while a snapshot whose files changed boots again.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Stale {
+    /// Production: fork the old snapshot until the new one is ready, as
+    /// opcache serves the old code until it has compiled the new.
+    ForkOld,
+    /// `phera serve --dev`: run from the top, so that the next request after
+    /// an edit already runs the edited code.
+    RunFromTheTop,
+}
+
 /// What a request should do with its script.
 pub(crate) enum Plan {
     /// Fork this snapshot.
@@ -107,13 +118,17 @@ impl WorkerSnapshots {
     /// What to do for a request to `script`, and whether a boot should be
     /// started for it (the snapshot is out of date, a failed boot is due
     /// again, or a classic script's files changed).
-    pub(crate) fn plan(&self, script: &Path, policy: IncludeCachePolicy) -> (Plan, bool) {
+    pub(crate) fn plan(&self, script: &Path, policy: IncludeCachePolicy, stale: Stale) -> (Plan, bool) {
         let mut scripts = self.scripts.borrow_mut();
         let booting = self.booting.borrow().iter().any(|path| path == script);
         match scripts.get_mut(script) {
             Some(ScriptState::Ready(snapshot, files, changes)) => {
-                let stale = !booting && files.changed(policy);
-                (Plan::Fork(snapshot.clone(), changes.clone()), stale)
+                let changed = !booting && files.changed(policy);
+                if changed && stale == Stale::RunFromTheTop {
+                    scripts.remove(script);
+                    return (Plan::Classic, true);
+                }
+                (Plan::Fork(snapshot.clone(), changes.clone()), changed)
             }
             Some(ScriptState::Classic(files)) => {
                 let stale = !booting && files.changed(policy);

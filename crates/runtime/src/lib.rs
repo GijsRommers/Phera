@@ -245,7 +245,21 @@ impl Runtime {
     /// Display diagnostics and validate source files on each web request.
     pub fn with_web_development(mut self, enabled: bool) -> Self {
         self.web_development = enabled;
+        if enabled {
+            // As for includes: every request looks for changed files.
+            self.include_policy.validate_timestamps = true;
+            self.include_policy.revalidate_freq = std::time::Duration::ZERO;
+        }
         self
+    }
+
+    /// What a request does while a changed snapshot boots again.
+    fn stale_snapshots(&self) -> snapshots::Stale {
+        if self.web_development {
+            snapshots::Stale::RunFromTheTop
+        } else {
+            snapshots::Stale::ForkOld
+        }
     }
 
     pub fn without_web_processes(mut self, disabled: bool) -> Self {
@@ -358,7 +372,7 @@ impl Runtime {
             http::Boundary::OtherMediaType => (None, None),
         };
 
-        let (plan, reboot) = worker.snapshots.plan(script, self.include_policy);
+        let (plan, reboot) = worker.snapshots.plan(script, self.include_policy, self.stale_snapshots());
         if reboot {
             worker.boot_in_background(script, document_root);
         }
