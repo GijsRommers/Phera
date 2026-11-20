@@ -2,10 +2,10 @@
 //! its pending native and PHP frames. `Fiber::suspend()` gives it back.
 
 use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use phera_extension_api::{LocalFuture, NativeError, NativeResult, fiber::FiberInspection};
-use phera_value::{Object, Value};
+use phera_value::{Value, WeakObject};
 
 use super::caller::CallerStack;
 use super::trace::{Site, Waiting};
@@ -33,7 +33,9 @@ pub(super) struct Exchange {
 }
 
 pub(crate) struct Active {
-    pub(super) object: Weak<Object>,
+    /// The fiber itself; weak, and still found while the fiber is being
+    /// destroyed (see `phera_value::WeakObject`).
+    pub(super) object: WeakObject,
     pub(super) exchange: Rc<Exchange>,
     pub(super) closing: bool,
 }
@@ -191,6 +193,12 @@ impl Vm {
         swap(&mut self.autoload, &mut other.autoload);
         swap(&mut self.ini_overrides, &mut other.ini_overrides);
         swap(&mut self.suspended_fibers, &mut other.suspended_fibers);
+        // The request's object pool: destructors become due and run inside
+        // the fiber too. The collector's counters and the end-of-request
+        // state belong to the request as well.
+        swap(&mut self.object_ids, &mut other.object_ids);
+        swap(&mut self.cycles, &mut other.cycles);
+        swap(&mut self.request_end, &mut other.request_end);
         self.refresh_pending_callbacks();
     }
 }

@@ -59,7 +59,7 @@ impl Vm {
                 self.fiber_bailout = true;
                 self.status = 255;
                 return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-                    (),
+                    crate::request_end::FatalStop,
                 ))));
             }
         }

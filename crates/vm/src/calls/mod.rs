@@ -23,6 +23,7 @@ pub(crate) mod callback_arguments;
 pub(crate) mod callback_binding;
 pub(crate) mod callback_execution;
 pub(crate) mod callback_references;
+mod discarded_results;
 pub(crate) mod execution_loop;
 mod fast_arguments;
 mod fast_calls;

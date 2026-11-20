@@ -33,6 +33,10 @@ use delegation::Delegate;
 
 struct Generator {
     releases: cleanup::ReleaseQueue,
+    /// The request's object pool: a released generator wakes the
+    /// interpreter's destructor check, so that it is closed (and its
+    /// variables destructed) before the next instruction.
+    pool: Weak<phera_value::ObjectIds>,
     name: Value,
     function: crate::code_table::FunctionIndex,
     closure: Option<Rc<Object>>,
@@ -166,6 +170,7 @@ impl Vm {
         let first_generator = self.generator_releases.is_none();
         *object.native.borrow_mut() = Some(Box::new(Generator {
             releases: self.generator_release_queue(),
+            pool: Rc::downgrade(&self.object_ids),
             name,
             function,
             closure,

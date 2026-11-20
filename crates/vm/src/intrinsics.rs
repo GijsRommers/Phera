@@ -46,6 +46,8 @@ pub(crate) enum Intrinsic {
     FuncGetArg,
     /// PHP `error_reporting()` runtime service.
     ErrorReporting,
+    /// The cycle collector belongs to the request.
+    Gc(crate::cycles::GcFunction),
 }
 
 impl Intrinsic {
@@ -87,7 +89,10 @@ impl Intrinsic {
             "func_get_arg" => Self::FuncGetArg,
             "error_reporting" => Self::ErrorReporting,
             name => {
-                if let Some(function) = crate::class_intrinsics::ClassFunction::resolve(name) {
+                if let Some(function) = crate::cycles::GcFunction::resolve(name) {
+                    Self::Gc(function)
+                } else if let Some(function) = crate::class_intrinsics::ClassFunction::resolve(name)
+                {
                     Self::Class(function)
                 } else if let Some(function) = crate::spl_autoload::SplAutoload::resolve(name) {
                     Self::SplAutoload(function)
@@ -134,6 +139,8 @@ impl Intrinsic {
     pub(crate) fn parameters(self) -> Option<&'static [phera_extension_api::Param]> {
         match self {
             Self::Class(function) => Some(function.parameters()),
+            // The gc_* functions take no arguments.
+            Self::Gc(_) => Some(&[]),
             Self::SplAutoload(function) => Some(function.parameters()),
             Self::Runtime(function) => Some(function.parameters()),
             Self::Output(function) => Some(function.parameters()),
