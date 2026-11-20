@@ -2,8 +2,10 @@
 
 ## Native locked-install checkpoint
 
-Composer 2.11.2 and PHP 8.5.12 on macOS. All 25 original locked fixtures match
-package files, parsed installed.json and installed.php, and PHP autoload lookups.
+Composer 2.11.2 and PHP 8.5.12 on macOS. The strict fixture and HTTP boot
+checks were repeated after merging batch 18 (#132). All 25 original locked
+fixtures match package files, parsed installed.json and installed.php, and
+PHP autoload lookups.
 The generated PHP and installed JSON files match byte for byte across all 25
 fixtures. Phera's runtime probe matches 23. Guzzle requires stream filters
 tracked in #122. Slim emits a different nullable-parameter deprecation.
@@ -215,7 +217,7 @@ refresh, artifact installs and script ordering have focused regressions. Locked
 platform checks cover incompatible PHP before vendor mutation, config.platform,
 development requirements, extension providers, conflicts and an explicit bypass.
 
-## Readiness gate
+## Historical readiness gate at `c99758c`
 
 This PR remains draft. Local package tests, workspace Clippy, formatting and the
 safe-Rust guard pass. A complete local `make ci` was not run: its prerequisite
