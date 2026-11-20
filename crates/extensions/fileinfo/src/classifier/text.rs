@@ -43,7 +43,7 @@ impl Encoding {
             ),
         ] {
             if let Some(text) = bytes.strip_prefix(&bom)
-                && text.chunks_exact(2).all(|pair| {
+                && text.as_chunks::<2>().0.iter().all(|pair| {
                     let unit = convert([pair[0], pair[1]]);
                     unit >= 128 || ascii(unit as u8)
                 })
@@ -90,7 +90,7 @@ impl Encoding {
             Self::Ascii | Self::Utf8 => String::from_utf8_lossy(bytes).into_owned(),
             Self::Utf8Bom => String::from_utf8_lossy(&bytes[3..]).into_owned(),
             Self::Utf16Le | Self::Utf16Be => {
-                let units = bytes[2..].chunks_exact(2).map(|pair| {
+                let units = bytes[2..].as_chunks::<2>().0.iter().map(|pair| {
                     let pair = [pair[0], pair[1]];
                     if matches!(self, Self::Utf16Le) {
                         u16::from_le_bytes(pair)

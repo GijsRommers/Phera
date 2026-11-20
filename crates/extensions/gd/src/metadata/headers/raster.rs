@@ -24,9 +24,11 @@ pub(super) fn ico(data: &[u8]) -> Option<Size> {
     let count = usize::from(le16(data, 4)?);
     let directory = data.get(6..)?;
     let selected = directory
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .take(count)
-        .max_by_key(|entry| le16(entry, 6).unwrap_or(0))?;
+        .max_by_key(|entry| le16(entry.as_slice(), 6).unwrap_or(0))?;
     let dimension = |byte: u8| if byte == 0 { 256 } else { u32::from(byte) };
     Some(Size::new(
         dimension(selected[0]),
@@ -64,7 +66,7 @@ pub(super) fn tiff(data: &[u8]) -> Option<Size> {
     let count = usize::from(read16(directory, 0)?);
     let mut width = None;
     let mut height = None;
-    for item in directory.get(2..)?.chunks_exact(12).take(count) {
+    for item in directory.get(2..)?.as_chunks::<12>().0.iter().take(count) {
         let slot = match read16(item, 0)? {
             256 => &mut width,
             257 => &mut height,

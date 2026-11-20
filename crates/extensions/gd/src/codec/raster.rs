@@ -4,12 +4,11 @@ mod bmp;
 
 use std::io::Cursor;
 
-use image::codecs::{
-    bmp::BmpDecoder,
-    jpeg::{JpegEncoder, PixelDensity, PixelDensityUnit},
-    webp::WebPEncoder,
-};
+use image::codecs::{bmp::BmpDecoder, webp::WebPEncoder};
 use image::{DynamicImage, ExtendedColorType, ImageDecoder, ImageFormat, ImageReader};
+use jpeg_encoder::{
+    ChromaSubsamplingMethod, ColorType, Encoder, PixelDensity, PixelDensityUnit, SamplingFactor,
+};
 
 use crate::pixels::{Color, Image, MAX_DIMENSION, Storage, pixel_count};
 
@@ -80,16 +79,24 @@ pub(super) fn encode(image: &Image, format: Format, options: Options) -> Result<
             } else {
                 options.quality as u8
             };
-            let mut encoder = JpegEncoder::new_with_quality(&mut output, quality);
+            let mut encoder = Encoder::new(&mut output, quality);
+            encoder.set_sampling_factor(SamplingFactor::R_4_2_0);
+            encoder.set_chroma_subsampling_method(ChromaSubsamplingMethod::Average);
+            encoder.set_progressive(image.interlaced);
             let [x, y] = image
                 .resolution
                 .map(|dpi| dpi.min(u32::from(u16::MAX)) as u16);
-            encoder.set_pixel_density(PixelDensity {
+            encoder.set_density(PixelDensity {
                 density: (x, y),
                 unit: PixelDensityUnit::Inches,
             });
             encoder
-                .encode(&rgb, image.width, image.height, ExtendedColorType::Rgb8)
+                .encode(
+                    &rgb,
+                    image.width as u16,
+                    image.height as u16,
+                    ColorType::Rgb,
+                )
                 .map_err(to_string)?;
         }
         Format::Webp => {

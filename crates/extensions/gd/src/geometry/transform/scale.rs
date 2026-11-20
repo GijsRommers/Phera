@@ -81,7 +81,7 @@ fn scale(context: &mut dyn Context, values: &[Value]) -> NativeResult {
     }
     if width < 0 && height < 0 {
         return Err(phera_extension_api::NativeError::value_error(
-            "imagescale(): Argument #2 ($width) and argument #3 ($height) cannot be both negative",
+            "Argument #2 ($width) and argument #3 ($height) cannot be both negative",
         ));
     }
     let output = with(values, 0, |image| {
@@ -141,6 +141,9 @@ fn proportional(
 }
 
 fn scale_pixels(image: &Image, width: u32, height: u32, mode: i32) -> Option<Image> {
+    if !matches!(mode, 0 | 3 | 16) {
+        return kernel::scale(image, width, height, mode);
+    }
     let mut output = Image::create(width, height, true)?;
     output.blend = false;
     let dx = (image.width as f32 / width as f32 * 256.0) as i64;
@@ -151,8 +154,7 @@ fn scale_pixels(image: &Image, width: u32, height: u32, mode: i32) -> Option<Ima
                 16 => image
                     .location((x * dx) >> 8, (y * dy) >> 8)
                     .map_or(Color::BLACK, |pos| image.true_pixel(pos)),
-                0 | 3 => bilinear(image, x * dx, y * dy, None),
-                _ => kernel::sample(image, x, y, width, height, mode),
+                _ => bilinear(image, x * dx, y * dy, None),
             };
             output.set(x, y, color.0 as i32);
         }

@@ -46,7 +46,7 @@ const FILTER: &str = "imagefilter";
 fn filter(context: &mut dyn Context, values: &[Value]) -> NativeResult {
     let mode = args::int(values, 1).unwrap_or(-1);
     let (minimum, maximum) = match mode {
-        0 | 1 | 5..=9 => (2, 2),
+        0 | 1 | 5..=9 => (2, 8),
         2 | 3 | 10 => (3, 3),
         4 => (5, 6),
         11 => (3, 4),
@@ -69,7 +69,11 @@ fn filter(context: &mut dyn Context, values: &[Value]) -> NativeResult {
             (12, 2) => T::Array,
             _ => T::Int,
         };
-        prepare_single_argument(FILTER, index + 2, &P::new("args", ty), option, context)?;
+        if matches!(mode, 0 | 1 | 5..=9) {
+            break;
+        }
+        prepare_single_argument(FILTER, index + 2, &P::new("args", ty), option, context)
+            .map_err(unnamed_option)?;
     }
     with_mut(values, 0, |image| {
         let first = args::int(&options, 0).unwrap_or_default() as i32;
@@ -148,6 +152,21 @@ fn filter(context: &mut dyn Context, values: &[Value]) -> NativeResult {
         };
         Ok(Value::Bool(applied))
     })
+}
+
+fn unnamed_option(error: NativeError) -> NativeError {
+    match error {
+        NativeError::Throw {
+            class,
+            message,
+            code,
+        } => NativeError::Throw {
+            class,
+            message: message.replace(" ($args)", ""),
+            code,
+        },
+        other => other,
+    }
 }
 
 fn check_count(count: usize, minimum: usize, maximum: usize) -> Result<(), NativeError> {

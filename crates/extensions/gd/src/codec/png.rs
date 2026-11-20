@@ -46,10 +46,10 @@ pub(super) fn decode(data: &[u8]) -> Result<Image, String> {
         ColorType::Rgb | ColorType::Rgba | ColorType::GrayscaleAlpha => {
             let pixels = bytes
                 .chunks_exact(frame.color_type.samples())
-                .filter_map(|pixel| match pixel {
-                    &[r, g, b] => Some(Color::gd(r, g, b, 0)),
-                    &[r, g, b, a] => Some(Color::from_rgba([r, g, b, a])),
-                    &[gray, a] => Some(Color::from_rgba([gray, gray, gray, a])),
+                .filter_map(|pixel| match *pixel {
+                    [r, g, b] => Some(Color::gd(r, g, b, 0)),
+                    [r, g, b, a] => Some(Color::from_rgba([r, g, b, a])),
+                    [gray, a] => Some(Color::from_rgba([gray, gray, gray, a])),
                     _ => None,
                 })
                 .collect();
@@ -86,7 +86,9 @@ fn indexed_palette(
 ) -> (Vec<Color>, Option<i32>) {
     if matches!(kind, ColorType::Indexed) {
         let entries = palette
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .enumerate()
             .map(|(index, rgb)| {
                 let alpha = trns.get(index).copied().unwrap_or(255);

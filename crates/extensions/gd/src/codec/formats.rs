@@ -44,6 +44,9 @@ impl Options {
 
 impl Format {
     pub fn detect(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < 12 {
+            return None;
+        }
         if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
             Some(Self::Png)
         } else if bytes.starts_with(b"GIF") {
@@ -128,6 +131,10 @@ mod tests {
             (
                 Format::Bmp,
                 include_bytes!("../../tests/corpus/rgb.bmp").as_slice(),
+            ),
+            (
+                Format::Bmp,
+                include_bytes!("../../tests/corpus/indexed.bmp").as_slice(),
             ),
             (
                 Format::Webp,

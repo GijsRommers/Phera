@@ -65,7 +65,12 @@ fn iso_media(bytes: &[u8]) -> Option<Kind> {
     let brands = bytes.get(16..size.min(bytes.len()))?;
     let primary = bytes.get(8..12)?;
     let compatible = |brand: &[u8]| {
-        primary == brand || brands.chunks_exact(4).any(|candidate| candidate == brand)
+        primary == brand
+            || brands
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|candidate| candidate == brand)
     };
     let (mime, extension, platform) = if compatible(b"avif") {
         ("image/avif", "???", "AVIF Image")

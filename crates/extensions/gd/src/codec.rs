@@ -14,7 +14,7 @@ use phera_extension_api::{
     NativeResult, Param as P, ParamType as T, PhpArray, Registry, Value, args,
 };
 
-use crate::core::{IMAGE, value_error, with, wrap};
+use crate::core::{IMAGE, with, wrap};
 use formats::{Format, Options};
 
 const FILENAME: P = P::new("filename", T::String).without_nul();
@@ -118,7 +118,13 @@ fn from_string(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<
         match blocking(move || format.decode(&bytes)).await? {
             Ok(image) => wrap(context, image),
             Err(error) => {
-                context.warning(format!("imagecreatefromstring(): {error}"));
+                if error.contains("limit") {
+                    context.warning(format!("imagecreatefromstring(): {error}"));
+                }
+                context.warning(format!(
+                    "imagecreatefromstring(): Passed data is not in \"{}\" format",
+                    format.label()
+                ));
                 context.warning(
                     "imagecreatefromstring(): Couldn't create GD Image Stream out of Data".into(),
                 );
@@ -136,7 +142,7 @@ async fn from_file(
     let path = args::bytes(&arguments, 0);
     let name = format.reader();
     if path.is_empty() {
-        return Err(value_error(name, 1, "filename", "must not be empty"));
+        return Err(NativeError::value_error("Path must not be empty"));
     }
     let contents = inspect_path(context, name, path, LIMIT + 1, 0).await?;
     let result = match contents {

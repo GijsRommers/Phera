@@ -153,7 +153,7 @@ pub(super) fn filled(image: &mut Image, points: &[Point], color: i32) {
             }
         }
         crossings.sort_unstable();
-        for pair in crossings.chunks_exact(2) {
+        for pair in crossings.as_chunks::<2>().0.iter() {
             stroke::line(
                 image,
                 Point { x: pair[0], y },

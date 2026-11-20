@@ -6,12 +6,14 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-ab_glyph.workspace = true
+ab_glyph_rasterizer.workspace = true
 gif.workspace = true
 image.workspace = true
+jpeg-encoder.workspace = true
 phera-extension-api.workspace = true
 phera-ext-streams.workspace = true
 png.workspace = true
+skrifa.workspace = true
 
 [lints]
 workspace = true

@@ -51,8 +51,10 @@ phera-ext-redis = { path = "crates/extensions/redis" }
 phera-db-drivers = { path = "crates/db-drivers" }
 phera-io-pool = { path = "crates/io-pool" }
 phera-dotenv = { path = "crates/dotenv" }
-ab_glyph = "0.2.32"
+ab_glyph_rasterizer = "0.1.10"
+skrifa = { version = "0.50.0", default-features = false, features = ["std"] }
 gif = "0.14.2"
+jpeg-encoder = "0.7.1"
 image = { version = "0.25.10", default-features = false, features = ["bmp", "jpeg", "webp"] }
 png = "0.18.1"
 indexmap = "2"

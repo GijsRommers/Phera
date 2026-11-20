@@ -71,7 +71,7 @@ fn compound(bytes: &[u8]) -> Kind {
             "Composite Document File V2 Document",
         );
     };
-    for entry in directory.chunks_exact(128) {
+    for entry in directory.as_chunks::<128>().0.iter() {
         if entry[66] != 2 {
             continue;
         }
@@ -80,7 +80,9 @@ fn compound(bytes: &[u8]) -> Kind {
             continue;
         };
         let units: Vec<u16> = name
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect();
         let name = String::from_utf16_lossy(&units);

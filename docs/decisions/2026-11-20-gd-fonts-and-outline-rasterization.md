@@ -1,3 +1,6 @@
+The outline dependency in this decision was replaced by the
+[Fontations decision](2026-11-20-gd-fontations-outline-parser.md).
+
 # Use libgd's bitmap fonts and Rust outline glyphs
 
 - Date: 2026-11-20

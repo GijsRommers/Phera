@@ -187,7 +187,7 @@ fn draw_arc(
             let angle = start + step as i32;
             if point.y != previous.y {
                 outline.push(point);
-            } else if (((angle > 270 || angle < 90) && point.x > previous.x)
+            } else if ((!(90..=270).contains(&angle) && point.x > previous.x)
                 || (angle > 90 && angle < 270 && point.x < previous.x))
                 && let Some(edge) = outline.last_mut()
             {

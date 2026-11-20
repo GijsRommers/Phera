@@ -1,8 +1,10 @@
 //! `imagettfbbox(14, 0, 'font.ttf', 'Hi')` lays out glyphs using a Rust rasterizer.
 
+mod path;
+
 use std::io::Read;
 
-use ab_glyph::{Font, FontVec, Point, PxScale, ScaleFont, point};
+use ab_glyph_rasterizer::{Point, point};
 use phera_ext_streams::file_io::{blocking, resolve};
 use phera_extension_api::{
     ArrayKey, ConstantValue as C, Context, FunctionEntry as F, LocalFuture, NativeResult,
@@ -11,6 +13,13 @@ use phera_extension_api::{
 
 use crate::core::{IMAGE, with_mut};
 use crate::pixels::{Color, Image};
+use skrifa::{
+    FontRef, MetadataProvider,
+    instance::{LocationRef, Size},
+    outline::DrawSettings,
+};
+
+use self::path::Path;
 
 const SIZE: P = P::new("size", T::Float);
 const ANGLE: P = P::new("angle", T::Float);
@@ -24,7 +33,6 @@ const OPTIONS: P = P::new("options", T::Array).with_default(C::EmptyArray);
 const BBOX: &[P] = &[SIZE, ANGLE, FONT, STRING, OPTIONS];
 const PAINT: &[P] = &[IMAGE, SIZE, ANGLE, X, Y, COLOR, FONT, TEXT, OPTIONS];
 const FONT_BYTES: u64 = 16 * 1024 * 1024;
-const GLYPH_PIXELS: f32 = 1_048_576.0;
 
 pub(super) fn register(registry: &mut Registry) {
     for entry in const {
@@ -87,8 +95,7 @@ fn run<'a>(
             if bytes.len() as u64 > FONT_BYTES || text.len() > 1_048_576 {
                 return Err("Text or font exceeds the rendering limit");
             }
-            let font = FontVec::try_from_vec(bytes).map_err(|_| "Could not read font")?;
-            Layout::new(font, &text, size, angle, line_space)
+            Layout::new(&bytes, &text, size, angle, line_space)
         })
         .await?;
         let layout = match glyphs {
@@ -115,14 +122,14 @@ fn run<'a>(
 }
 
 struct Layout {
-    glyphs: Vec<ab_glyph::OutlinedGlyph>,
+    glyphs: Vec<(Path, Point)>,
     angle: f32,
     bounds: [f32; 4],
 }
 
 impl Layout {
     fn new(
-        font: FontVec,
+        font: &[u8],
         text: &str,
         size: f32,
         angle: f32,
@@ -135,46 +142,55 @@ impl Layout {
         {
             return Err("Text layout is outside the rendering limit");
         }
-        let scale = font
-            .pt_to_px_scale(size)
-            .unwrap_or_else(|| PxScale::from(size * 4.0 / 3.0));
-        let font_scaled = font.as_scaled(scale);
+        let font = FontRef::new(font)
+            .or_else(|_| FontRef::from_index(font, 0))
+            .map_err(|_| "Could not read font")?;
+        let size = Size::new(size * (96.0 / 72.0));
+        let location = LocationRef::default();
+        let glyph_metrics = font.glyph_metrics(size, location);
+        let metrics = font.metrics(size, location);
+        let line_height = metrics.ascent - metrics.descent + metrics.leading;
+        let charmap = font.charmap();
+        let outlines = font.outline_glyphs();
         let mut pen = point(0.0, 0.0);
-        let mut previous = None;
         let mut bounds = [0f32; 4];
         let mut glyphs = Vec::new();
+        let mut segments = 0;
         for character in text.chars().take_while(|character| *character != '\0') {
             if character == '\r' {
                 continue;
             }
             if character == '\n' {
                 pen.x = 0.0;
-                pen.y += font_scaled.height() * line_spacing;
-                previous = None;
+                pen.y += line_height * line_spacing;
                 continue;
             }
-            let id = font_scaled.glyph_id(character);
-            if let Some(prior) = previous {
-                pen.x += font_scaled.kern(prior, id);
+            if !pen.x.is_finite()
+                || !pen.y.is_finite()
+                || pen.x.abs() > 1_048_576.0
+                || pen.y.abs() > 1_048_576.0
+            {
+                return Err("Text layout is outside the rendering limit");
             }
-            let glyph = id.with_scale_and_position(scale, pen);
-            pen.x += font_scaled.h_advance(id);
-            previous = Some(id);
-            if let Some(outline) = font.outline_glyph(glyph) {
-                let rect = outline.px_bounds();
-                let pixels = rect.width() * rect.height();
-                if !pixels.is_finite()
-                    || !(0.0..=GLYPH_PIXELS).contains(&pixels)
-                    || glyphs.len() >= 16384
-                {
-                    return Err("Glyph exceeds the rendering limit");
+            let id = charmap.map(character).unwrap_or_default();
+            if let Some(glyph) = outlines.get(id) {
+                let mut path = Path::new();
+                glyph
+                    .draw(DrawSettings::unhinted(size, location), &mut path)
+                    .map_err(|_| "Could not read glyph outline")?;
+                if let Some([left, top, right, bottom]) = path.bounds()? {
+                    segments += path.len();
+                    if segments > 1_048_576 || glyphs.len() >= 16_384 {
+                        return Err("Text layout is outside the rendering limit");
+                    }
+                    bounds[0] = bounds[0].min(left + pen.x);
+                    bounds[1] = bounds[1].min(top + pen.y);
+                    bounds[2] = bounds[2].max(right + pen.x);
+                    bounds[3] = bounds[3].max(bottom + pen.y);
+                    glyphs.push((path, pen));
                 }
-                bounds[0] = bounds[0].min(rect.min.x);
-                bounds[1] = bounds[1].min(rect.min.y);
-                bounds[2] = bounds[2].max(rect.max.x);
-                bounds[3] = bounds[3].max(rect.max.y);
-                glyphs.push(outline);
             }
+            pen.x += glyph_metrics.advance_width(id).unwrap_or_default();
             bounds[2] = bounds[2].max(pen.x);
         }
         Ok(Self {
@@ -203,45 +219,15 @@ impl Layout {
     fn draw(&self, image: &mut Image, origin: (i64, i64), color: i32) {
         let glyph_color = image.color(color.saturating_abs()).unwrap_or(Color::BLACK);
         let [r, g, b, a] = glyph_color.components();
-        let right = i64::from(image.width);
-        let bottom = i64::from(image.height);
-        for outline in &self.glyphs {
-            let rect = outline.px_bounds();
-            let corners = [
-                rect.min,
-                rect.max,
-                point(rect.min.x, rect.max.y),
-                point(rect.max.x, rect.min.y),
-            ]
-            .map(|p| self.rotate(p.x, p.y));
-            if corners
-                .iter()
-                .all(|p| (p.x as i64).saturating_add(origin.0) >= right)
-                || corners
-                    .iter()
-                    .all(|p| (p.x as i64).saturating_add(origin.0) < 0)
-                || corners
-                    .iter()
-                    .all(|p| (p.y as i64).saturating_add(origin.1) >= bottom)
-                || corners
-                    .iter()
-                    .all(|p| (p.y as i64).saturating_add(origin.1) < 0)
-            {
-                continue;
-            }
-            outline.draw(|x, y, coverage| {
+        for (path, offset) in &self.glyphs {
+            path.draw(self.angle, *offset, |x, y, coverage| {
                 if coverage <= 0.0 || (color < 0 && coverage < 0.5) {
                     return;
                 }
-                let p = self.rotate(rect.min.x + x as f32, rect.min.y + y as f32);
                 let opacity = f32::from(127 - a) * coverage.clamp(0.0, 1.0);
                 let pixel = Color::gd(r, g, b, 127 - opacity.round() as u8);
                 let index = image.resolve(pixel);
-                image.set(
-                    origin.0.saturating_add(p.x.round() as i64),
-                    origin.1.saturating_add(p.y.round() as i64),
-                    index,
-                );
+                image.set(origin.0 + x, origin.1 + y, index);
             });
         }
     }

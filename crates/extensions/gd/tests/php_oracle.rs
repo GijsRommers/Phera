@@ -36,6 +36,15 @@ fn gd_operations_match_php() {
         })
         .expect("compare getimagesize and exif_imagetype with real PHP");
     println!("{} metadata cases matched", metadata.stdout.lines().count());
+    let errors = comparison
+        .compare(&root.join("errors.php"), |_, command| {
+            command.arg(&inputs);
+        })
+        .expect("compare GD argument validation and warnings");
+    println!(
+        "{} GD diagnostic cases matched",
+        errors.stdout.lines().count()
+    );
 }
 
 #[test]
@@ -142,7 +151,9 @@ fn decode(
                 .next()
                 .expect("pixels")
                 .as_bytes()
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|hex| u8::from_str_radix(std::str::from_utf8(hex).unwrap(), 16).unwrap())
                 .collect();
             (

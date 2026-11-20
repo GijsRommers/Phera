@@ -207,7 +207,7 @@ fn tiff(bytes: &[u8]) -> Kind {
         && let Some(count) = u16_at(ifd, 0)
     {
         let _ = write!(description, ", direntries={count}");
-        for entry in ifd[2..].chunks_exact(12).take(usize::from(count)) {
+        for entry in ifd[2..].as_chunks::<12>().0.iter().take(usize::from(count)) {
             let name = match u16_at(entry, 0) {
                 Some(256) => "width",
                 Some(257) => "height",

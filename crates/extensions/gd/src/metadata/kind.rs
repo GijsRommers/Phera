@@ -138,7 +138,9 @@ fn heif(bytes: &[u8]) -> Option<Kind> {
     if matches!(primary, b"avif" | b"avis")
         || bytes.get(16..end.min(bytes.len())).is_some_and(|brands| {
             brands
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .any(|brand| matches!(brand, b"avif" | b"avis"))
         })
     {

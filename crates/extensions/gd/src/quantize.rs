@@ -1,6 +1,6 @@
 //! `imagetruecolortopalette($image, true, 128)` builds a bounded indexed color table.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 
 use phera_extension_api::{
     Context, FunctionEntry as F, NativeResult, Param as P, ParamType as T, Registry, Value, args,
@@ -67,11 +67,11 @@ fn exact(pixels: &[Color], count: usize) -> Option<(Vec<u8>, Vec<Color>)> {
     let mut palette = Vec::new();
     let mut indices = HashMap::new();
     for pixel in pixels {
-        if !indices.contains_key(&pixel.0) {
+        if let Entry::Vacant(entry) = indices.entry(pixel.0) {
             if palette.len() == count {
                 return None;
             }
-            indices.insert(pixel.0, palette.len() as u8);
+            entry.insert(palette.len() as u8);
             palette.push(*pixel);
         }
     }
