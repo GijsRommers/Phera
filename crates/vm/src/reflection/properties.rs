@@ -15,7 +15,7 @@ use crate::{
     classes::{Class, class::PropertyDefault},
 };
 
-use super::{exception, hook_calls::ReflectedHookCall};
+use super::{exception, hook_calls::ReflectedHookCall, members::VIRTUAL_PROPERTY};
 
 impl Vm {
     pub(super) fn reflection_property_read(
@@ -56,7 +56,9 @@ impl Vm {
                 let has_lazy_objects = self.classes.has_lazy_objects;
                 let resolved = has_lazy_objects.then(|| resolved_lazy_instance(object.clone()));
                 let object = resolved.as_ref().unwrap_or(&object);
-                if let Some(access) = self.native_virtual_access(property) {
+                if member.modifiers & VIRTUAL_PROPERTY != 0
+                    && let Some(access) = self.native_virtual_access(property)
+                {
                     if matches!(mode, PropertyRead::Initialized) {
                         return Ok(Value::Bool(true));
                     }
@@ -165,7 +167,8 @@ impl Vm {
             .filter(|_| has_lazy_objects)
             .map(|object| resolved_lazy_instance(object.clone()));
         let object = resolved.as_ref().or(object.as_ref());
-        if let Some(object) = object
+        if member.modifiers & VIRTUAL_PROPERTY != 0
+            && let Some(object) = object
             && let Some(access) = self.native_virtual_access(property)
             && (access.mutate)(
                 self,
@@ -256,6 +259,7 @@ impl Vm {
         Ok(Value::Null)
     }
 
+    #[cold]
     fn native_virtual_access(
         &self,
         property: &PropertyDefault,
