@@ -56,6 +56,54 @@ fn core_number_formats() {
 }
 
 #[test]
+fn english_spellout_and_ordinals() {
+    let mut matrix = Matrix::new();
+    for locale in ["en_US", "en_GB"] {
+        for style in [5, 6] {
+            let constructor = [Value::from(locale), Value::Int(style)];
+            for value in [
+                Value::Int(i64::MIN),
+                Value::Int(-1234),
+                Value::Int(0),
+                Value::Int(1),
+                Value::Int(11),
+                Value::Int(21),
+                Value::Int(102),
+                Value::Int(1042),
+                Value::Int(100_000_000),
+                Value::Float(1.25),
+                Value::Float(-0.125),
+                Value::Float(3.5),
+            ] {
+                matrix.instance("NumberFormatter", &constructor, "format", &[value], None);
+            }
+            matrix.instance(
+                "NumberFormatter",
+                &constructor,
+                "getTextAttribute",
+                &[Value::Int(6)],
+                None,
+            );
+            matrix.instance(
+                "NumberFormatter",
+                &constructor,
+                "setTextAttribute",
+                &[Value::Int(6), Value::from("invalid")],
+                None,
+            );
+        }
+        matrix.instance(
+            "NumberFormatter",
+            &[Value::from(locale), Value::Int(5)],
+            "setTextAttribute",
+            &[Value::Int(6), Value::from("%spellout-ordinal")],
+            None,
+        );
+    }
+    matrix.compare("intl-english-spellout-and-ordinals");
+}
+
+#[test]
 fn core_date_formats() {
     let mut matrix = Matrix::new();
     for &(locale, _) in LOCALES {

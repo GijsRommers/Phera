@@ -94,6 +94,51 @@ fn collation_and_transforms() {
 }
 
 #[test]
+fn unicode_character_and_property_names() {
+    let mut matrix = Matrix::new();
+    for code in [
+        0, 65, 0x1a2, 0x378, 0x2603, 0x4e00, 0xac00, 0xd800, 0x17000, 0x10ffff, -1,
+    ] {
+        for kind in [0, 1, 2, 3, 4] {
+            matrix.case("IntlChar::charName", &[Value::Int(code), Value::Int(kind)]);
+        }
+    }
+    for (name, kind) in [
+        ("SNOWMAN", 0),
+        ("snow-man", 0),
+        ("latin_capital-letter A", 0),
+        ("CJK unified ideograph-04E00", 0),
+        ("HANGUL SYLLABLE GA", 0),
+        ("LATIN CAPITAL LETTER GHA", 3),
+        ("<control-0>", 2),
+        ("<unassigned-0378>", 2),
+        ("<unassigned-2603>", 2),
+        ("snowman\0extra", 0),
+        ("", 0),
+        ("not a character name", 0),
+        ("SNOWMAN", 4),
+    ] {
+        matrix.case(
+            "IntlChar::charFromName",
+            &[Value::from(name), Value::Int(kind)],
+        );
+    }
+    for (property, value) in [(0, 1), (3, 0), (4098, 230), (4101, 1), (4106, 25), (-1, 0)] {
+        for kind in [0, 1, 2, 99] {
+            matrix.case(
+                "IntlChar::getPropertyName",
+                &[Value::Int(property), Value::Int(kind)],
+            );
+            matrix.case(
+                "IntlChar::getPropertyValueName",
+                &[Value::Int(property), Value::Int(value), Value::Int(kind)],
+            );
+        }
+    }
+    matrix.compare("intl-unicode-character-and-property-names");
+}
+
+#[test]
 fn message_format_arguments() {
     let mut matrix = Matrix::new();
     let inputs = [

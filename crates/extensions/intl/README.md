@@ -16,7 +16,7 @@ when it is a shared module.
 | `Normalizer`, `normalizer_*` | Five forms including NFKC casefold, normalization checks and raw decompositions |
 | `grapheme_*` | Length, substring, splitting, extraction, searching and weighted edit distance. Search uses grapheme sort keys and needs additional coverage for contractions spanning clusters. PHP 8.5.12 has no `grapheme_similar`. |
 | `Locale`, `locale_*` | Default locale, locale IDs, lookup, HTTP negotiation, likely subtags and localized names. Legacy ICU identifiers and display keywords have gaps. |
-| `NumberFormatter`, `numfmt_*` | Decimal, scientific, percent, currency and compact notation, with parsing and mutable settings. Custom rule-based formats, spellout, ordinal and duration raise unsupported errors. Pattern syntax, attributes and parse edge cases are partial. |
+| `NumberFormatter`, `numfmt_*` | Decimal, scientific, percent, currency and compact notation, with parsing and mutable settings. English spellout and ordinal formatting cover the default numeric and spelled-out rules used by Laravel. Other locales, duration and custom rule formats are unsupported. Rule-based parsing, patterns and attributes are partial. |
 | `IntlDateFormatter`, `datefmt_*` | Gregorian and relative day styles, patterns, PHP date objects, timestamps, local-time arrays and parsing. Relative text parsing, traditional calendars, calendar objects and unusual parse fields are partial. |
 | `idn_to_ascii`, `idn_to_utf8` | UTS #46 mapping, Punycode, transitional forms and error details. |
 | `intl_*error*`, `intl_is_failure`, `IntlException` | Request-local last error, ICU error names and numeric compatibility constants |
@@ -28,7 +28,7 @@ when it is a shared module.
 | `ResourceBundle`, `resourcebundle_*` | Selected compiled locale tables and native-endian standalone ResB directories with read-only indexing and iteration. Shared pools, aliases, complete locale inheritance and many built-in keys remain incomplete. |
 | `IntlBreakIterator`, `IntlIterator`, `IntlPartsIterator` | Character, code point, word, line and sentence iteration, with PHP byte offsets and parts. Title and custom ICU break rules are unsupported. |
 | `IntlListFormatter` | PHP 8.5 conjunction, disjunction and unit patterns in wide, short and narrow widths. |
-| `IntlChar` | Code points, case mapping, combining classes, digit conversion and common Unicode categories and predicates. The full ICU property and name APIs are unsupported. |
+| `IntlChar` | Code points, case mapping, combining classes, digit conversion, common Unicode predicates, character names and callback-driven enumeration, and property aliases. Other ICU property queries remain incomplete. |
 | `Spoofchecker` | Reports unsupported. ICU4X does not supply the corresponding ICU spoof checker. |
 
 The two normalization mapping files under `data/` are derived from Unicode
@@ -38,6 +38,11 @@ The two normalization mapping files under `data/` are derived from Unicode
 (`NFKC_CF` property). The Unicode data license is included alongside them.
 The ICU numeric constants and error names are the public PHP intl and ICU
 error-code tables as exposed by PHP 8.5.12 with ICU 79.1.
+Character names use Unicode 18.0's
+[DerivedName.txt](https://www.unicode.org/Public/18.0.0/ucd/extracted/DerivedName.txt)
+and correction aliases from
+[NameAliases.txt](https://www.unicode.org/Public/18.0.0/ucd/NameAliases.txt).
+The property alias table uses ICU 79.1's public IntlChar property identifiers.
 
 CLDR 49's number patterns, locale display patterns, Gregorian date styles, relative day terms,
 currency-region map and reverse Windows zone map are compiled into the

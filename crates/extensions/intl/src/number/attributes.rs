@@ -7,7 +7,7 @@
 
 use phera_extension_api::{Context, NativeResult, Value, args};
 
-use super::{Call, Formatter, Operation, Style, affixes, render};
+use super::{Call, Formatter, Operation, Style, affixes, render, spellout};
 
 #[derive(Clone)]
 pub struct Attributes {
@@ -235,6 +235,7 @@ fn text_attribute(state: &mut Formatter, key: i64) -> Option<String> {
         }
         4 => Some(" ".to_owned()),
         5 => Some(state.currency.clone()),
+        6 => spellout::default_rule(state.style).map(str::to_owned),
         _ => None,
     }
 }
@@ -258,7 +259,17 @@ pub fn apply(
             let Ok(value) = std::str::from_utf8(args::bytes(input, 1)) else {
                 return call.fail(context, state, 10, "Error converting value to UTF-16");
             };
-            if key == 5 {
+            if key == 6 && spellout::default_rule(state.style).is_some() {
+                if !spellout::accepts_rule(state.style, value) {
+                    return call.fail(context, state, 1, "Error setting text attribute");
+                }
+                if value.is_empty() {
+                    state.text_attributes.remove(&key);
+                } else {
+                    state.text_attributes.insert(key, value.to_owned());
+                }
+                Some(Value::Bool(true))
+            } else if key == 5 {
                 state.currency = value.to_ascii_uppercase();
                 Some(Value::Bool(true))
             } else if (0..=4).contains(&key) {
