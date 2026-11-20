@@ -20,6 +20,10 @@ cleanup. A disconnect can end PHP at an output boundary and still let it
 run shutdown callbacks. In the ordinary case there is a single task for
 both the HTTP connection and the script.
 
+PHP-FPM completes the response before an output handler's exception
+reaches the caller of `fastcgi_finish_request()`. The body retains the
+untransformed bytes from that handler. Phera follows the same order.
+
 ## Turned down
 
 Spawning a second task for every request. Canceling PHP immediately when

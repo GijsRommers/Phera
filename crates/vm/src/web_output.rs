@@ -119,16 +119,28 @@ impl Vm {
         {
             return Ok(Value::Bool(false));
         }
-        self.check_output_handler("fastcgi_finish_request", &[])?;
-        self.finish_buffers().await;
+        let buffered = self.finish_response_buffers().await;
+        if buffered.as_ref().is_err_and(|error| {
+            crate::request_end::ScriptEnd::of(error) == crate::request_end::ScriptEnd::Fatal
+        }) {
+            return buffered.map(|()| Value::Bool(false));
+        }
         self.commit_response_headers().await?;
         if self.is_streaming_response() {
             self.flush_response_body().await?;
+        } else if self
+            .output_writer
+            .response
+            .as_ref()
+            .is_some_and(|response| response.transport.is_disconnected())
+        {
+            self.abort_response()?;
+            return Ok(Value::Bool(false));
         }
         self.finish_transport();
         // The response can end even if the script's next operation is CPU work.
         tokio::task::yield_now().await;
-        Ok(Value::Bool(true))
+        buffered.map(|()| Value::Bool(true))
     }
 
     pub(crate) async fn complete_streamed_response(&mut self) {

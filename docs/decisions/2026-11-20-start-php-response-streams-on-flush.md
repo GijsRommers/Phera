@@ -17,7 +17,14 @@ they release them.
 A script can send partial output through its existing framework API. The
 server passes an unknown-length body to Hyper with one queued chunk of at
 most 64 KiB. Hyper selects the framing and slow clients suspend the
-producer. Ordinary responses send their exact length with no chunk queue.
+producer. Native functions that read and emit a series of chunks can wait
+at the same output boundary before reading more. Ordinary responses send
+their exact length with no chunk queue.
+
+The installed PHP development server releases transport-bound output when
+an output buffer is explicitly flushed. PHP-FPM can hold those bytes until
+its transport is flushed. Phera sends those bytes promptly on either HTTP
+version. Empty transport flushes commit the headers immediately.
 
 ## Turned down
 

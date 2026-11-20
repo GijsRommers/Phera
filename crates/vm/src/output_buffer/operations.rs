@@ -18,6 +18,7 @@ pub(crate) enum Operation {
     EndFlush,
     GetClean,
     GetFlush,
+    FinishResponse,
     Shutdown,
 }
 
@@ -28,7 +29,7 @@ impl Operation {
             Self::Clean => 2,
             Self::Flush => 4,
             Self::EndClean | Self::GetClean => 8 | 2,
-            Self::EndFlush | Self::GetFlush | Self::Shutdown => 8,
+            Self::EndFlush | Self::GetFlush | Self::FinishResponse | Self::Shutdown => 8,
         }
     }
 
@@ -49,14 +50,19 @@ impl Operation {
             Self::GetClean => OutputFunction::GetClean.name(),
             Self::GetFlush => OutputFunction::GetFlush.name(),
             Self::Chunk(caller) => return caller,
-            Self::Shutdown => return None,
+            Self::FinishResponse | Self::Shutdown => return None,
         })
     }
 
     fn removes(self) -> bool {
         matches!(
             self,
-            Self::EndClean | Self::EndFlush | Self::GetClean | Self::GetFlush | Self::Shutdown
+            Self::EndClean
+                | Self::EndFlush
+                | Self::GetClean
+                | Self::GetFlush
+                | Self::FinishResponse
+                | Self::Shutdown
         )
     }
 
@@ -214,6 +220,27 @@ impl Vm {
         self.output_writer.buffers.finalizing = false;
     }
 
+    pub(crate) async fn finish_response_buffers(&mut self) -> Result<(), NativeError> {
+        if self.output_writer.buffers.running.is_some() {
+            // Closing the response inside its own output handler ends
+            // the script and discards the active buffers.
+            self.output_writer.buffers.lock_broken = true;
+            return Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
+                crate::request_end::FatalStop,
+            ))));
+        }
+        while let Some(index) = self.output_writer.buffers.len().checked_sub(1) {
+            let result = self.apply_buffer(index, Operation::FinishResponse).await;
+            if let Err(error) = result {
+                self.output_writer.buffers.stack.clear();
+                self.output_writer.buffers.pending = None;
+                return Err(error);
+            }
+            self.drain_output().await?;
+        }
+        Ok(())
+    }
+
     async fn apply_buffer(
         &mut self,
         index: usize,
@@ -317,7 +344,9 @@ impl Vm {
                 deprecation
             }
             Err(error) => {
-                if !operation.discards() && !matches!(operation, Operation::Shutdown) {
+                if matches!(operation, Operation::FinishResponse) {
+                    self.out_below(0, &original);
+                } else if !operation.discards() && !matches!(operation, Operation::Shutdown) {
                     self.out_below(index, &original);
                 }
                 Err(error)

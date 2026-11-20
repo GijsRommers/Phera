@@ -52,6 +52,13 @@ pub trait Context {
     /// Appends to the request's output, as `echo` does.
     fn write(&mut self, bytes: &[u8]);
 
+    /// Write a piece of an asynchronous transfer, waiting for the web
+    /// transport when it needs to send that piece before the next read.
+    fn write_chunk(&mut self, bytes: &[u8]) -> Option<LocalFuture<'_, Result<(), NativeError>>> {
+        self.write(bytes);
+        None
+    }
+
     /// PHP's connection status, a bitmask of client abort and script timeout.
     fn connection_status(&self) -> i64 {
         0

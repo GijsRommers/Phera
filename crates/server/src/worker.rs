@@ -14,7 +14,7 @@ use tokio::sync::{Semaphore, watch};
 use crate::config::{ConnectionLimits, ServerConfig};
 use crate::connection::handle_connection;
 use crate::handler::HandlerFactory;
-use crate::response_task::ConnectionWork;
+use crate::response_task::{ConnectionWork, DetachedRequests};
 
 const BACKLOG: i32 = 1024;
 const ACCEPT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
@@ -109,7 +109,7 @@ pub(super) fn run(
         let limits = ConnectionLimits::from(&config);
         let free_slots = Arc::new(Semaphore::new(config.max_connections_per_worker.max(1)));
         let graceful = GracefulShutdown::new();
-        let detached = Rc::new(watch::channel(()).0);
+        let detached = Rc::new(DetachedRequests::new());
         loop {
             // A slot first, then a connection: beyond the limit, clients
             // wait in the operating system's queue instead of being
@@ -150,8 +150,9 @@ pub(super) fn run(
         // give up if something (a stuck upload) refuses to leave in time.
         let _ = tokio::time::timeout(config.shutdown_timeout, async {
             graceful.shutdown().await;
-            detached.closed().await;
+            detached.drain().await;
         })
         .await;
+        detached.stop();
     }));
 }

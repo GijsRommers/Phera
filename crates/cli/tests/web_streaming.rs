@@ -1,6 +1,6 @@
 //! A real client reads `flush()` output while its PHP request is still running.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::net::{Shutdown, TcpStream};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -190,6 +190,32 @@ register_shutdown_function(function () use ($started, $finish) {{
         std::fs::remove_file(status).unwrap();
         std::fs::remove_file(marker).unwrap();
     }
+}
+
+#[test]
+fn an_output_handler_exception_escapes_an_early_finish() {
+    let (root, server) = serve(&format!(
+        r#"{WAIT_FOR_CLIENT}
+ob_start(fn ($body) => "outer[$body]");
+ob_start(fn () => throw new RuntimeException('handler'));
+echo 'response';
+try {{
+    fastcgi_finish_request();
+}} catch (RuntimeException $error) {{
+    wait_for_client();
+    $report = [$error->getMessage(), ob_get_level(), headers_sent()];
+    file_put_contents(__DIR__ . '/status', json_encode($report));
+}}
+echo 'late output';
+"#
+    ));
+    let response = server.get_one("/");
+    assert_eq!(response.split_once("\r\n\r\n").unwrap().1, "response");
+    std::fs::write(root.path().join("continue"), "").unwrap();
+    assert_eq!(
+        wait_for_file(&root.path().join("status")),
+        r#"["handler",0,true]"#
+    );
 }
 
 #[test]

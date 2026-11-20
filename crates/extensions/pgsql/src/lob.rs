@@ -193,7 +193,9 @@ async fn descriptor_operation<const OP: usize>(
                     break;
                 }
                 written = written.saturating_add(bytes.len() as i64);
-                context.write(&bytes);
+                if let Some(flush) = context.write_chunk(&bytes) {
+                    flush.await?;
+                }
             }
             return Ok(Value::Int(written));
         }

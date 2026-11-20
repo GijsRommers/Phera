@@ -2,6 +2,7 @@
 //! `fastcgi_finish_request(); do_more_work();` keeps running on the worker
 //! after the client has received the response.
 
+use std::cell::Cell;
 use std::future::{Future, poll_fn};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::pin::Pin;
@@ -18,7 +19,29 @@ use crate::{Handler, Request, Response};
 /// graceful shutdown even after its socket is gone.
 pub(crate) struct ConnectionWork {
     pub(crate) _slot: OwnedSemaphorePermit,
-    pub(crate) detached: Rc<watch::Sender<()>>,
+    pub(crate) detached: Rc<DetachedRequests>,
+}
+
+pub(crate) struct DetachedRequests {
+    tasks: watch::Sender<()>,
+    stopping: Cell<bool>,
+}
+
+impl DetachedRequests {
+    pub(crate) fn new() -> Self {
+        Self {
+            tasks: watch::channel(()).0,
+            stopping: Cell::new(false),
+        }
+    }
+
+    pub(crate) async fn drain(&self) {
+        self.tasks.closed().await;
+    }
+
+    pub(crate) fn stop(&self) {
+        self.stopping.set(true);
+    }
 }
 
 type ResponseFuture = Pin<Box<dyn Future<Output = Response>>>;
@@ -33,7 +56,7 @@ impl ResponseTask {
     fn detach(&mut self) {
         if let Some(future) = self.future.take() {
             let connection = self.connection.clone();
-            let guard = connection.detached.subscribe();
+            let guard = connection.detached.tasks.subscribe();
             tokio::task::spawn_local(async move {
                 let _ = future.await;
                 drop((guard, connection));
@@ -44,7 +67,10 @@ impl ResponseTask {
 
 impl Drop for ResponseTask {
     fn drop(&mut self) {
-        if self.future.is_some() && self.slot.disconnect() {
+        if self.future.is_some()
+            && !self.connection.detached.stopping.get()
+            && self.slot.disconnect()
+        {
             self.detach();
         }
     }

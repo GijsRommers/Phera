@@ -45,6 +45,15 @@ impl Context for Vm {
         self.out(bytes)
     }
 
+    fn write_chunk(&mut self, bytes: &[u8]) -> Option<LocalFuture<'_, Result<(), NativeError>>> {
+        self.out(bytes);
+        if self.output_writer.response.is_some() && self.output_pending() {
+            Some(Box::pin(self.drain_output()))
+        } else {
+            None
+        }
+    }
+
     fn connection_status(&self) -> i64 {
         i64::from(self.client_aborted()) | (i64::from(self.timed_out()) << 1)
     }

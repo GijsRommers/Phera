@@ -218,7 +218,9 @@ pub(crate) async fn fpassthru_arguments(
             Ok(bytes) if bytes.is_empty() => break,
             Ok(bytes) => {
                 total += bytes.len();
-                context.write(&bytes);
+                if let Some(flush) = context.write_chunk(&bytes) {
+                    flush.await?;
+                }
             }
             Err(error) => {
                 read_notice(context, function, &error, read_amount(None));

@@ -18,29 +18,42 @@ use hyper_util::rt::TokioTimer;
 use tokio::time::{Instant, Sleep as TokioSleep};
 
 /// Hyper owns the header timer. Remember its start for the body reader.
-#[derive(Clone, Default)]
-pub(crate) struct HeadTimer(Arc<Mutex<Option<Instant>>>);
+#[derive(Clone)]
+pub(crate) struct HeadTimer(Arc<Mutex<HeadStart>>);
+
+struct HeadStart {
+    accepted: Instant,
+    current: Option<Instant>,
+}
 
 impl HeadTimer {
+    pub(crate) fn new(accepted: Instant) -> Self {
+        Self(Arc::new(Mutex::new(HeadStart {
+            accepted,
+            current: None,
+        })))
+    }
+
     pub(crate) fn has_started(&self) -> bool {
-        self.0.lock().is_ok_and(|start| start.is_some())
+        self.0.lock().is_ok_and(|start| start.current.is_some())
     }
 
     pub(crate) fn started(&self) -> Instant {
         self.0
             .lock()
             .ok()
-            .and_then(|start| *start)
+            .and_then(|start| start.current)
             .unwrap_or_else(Instant::now)
     }
 }
 
 impl Timer for HeadTimer {
     fn now(&self) -> StdInstant {
-        let now = Instant::now();
-        if let Ok(mut start) = self.0.lock() {
-            *start = Some(now);
-        }
+        let Ok(mut start) = self.0.lock() else {
+            return StdInstant::now();
+        };
+        let now = start.current.map_or(start.accepted, |_| Instant::now());
+        start.current = Some(now);
         now.into_std()
     }
 
@@ -123,11 +136,11 @@ struct Preface {
 }
 
 impl PrefaceTimeout {
-    pub(crate) fn new(stream: TimeoutStream, timeout: Duration) -> Self {
+    pub(crate) fn new(stream: TimeoutStream, deadline: Instant) -> Self {
         Self {
             stream,
             probe: Some(Preface {
-                deadline: Instant::now() + timeout,
+                deadline,
                 delay: None,
                 matched: 0,
             }),

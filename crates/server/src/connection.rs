@@ -38,7 +38,8 @@ pub(super) async fn handle_connection(
     limits: ConnectionLimits,
     work: Rc<ConnectionWork>,
 ) {
-    let timer = HeadTimer::default();
+    let accepted = Instant::now();
+    let timer = HeadTimer::new(accepted);
     let head_timer = timer.clone();
     let service = service_fn(move |hyper_request: HyperRequest<Incoming>| {
         let handler = handler.clone();
@@ -78,7 +79,7 @@ pub(super) async fn handle_connection(
         .http2()
         .timer(TokioTimer::new())
         .keep_alive_interval(Some(limits.idle_timeout));
-    let io = PrefaceTimeout::new(stream.clone(), read_limit);
+    let io = PrefaceTimeout::new(stream.clone(), accepted + read_limit);
     let connection = builder.serve_connection(TokioIo::new(io), service);
     if let Err(error) = graceful.watch(connection).await {
         let http = error.downcast_ref::<hyper::Error>();
