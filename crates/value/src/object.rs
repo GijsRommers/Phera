@@ -271,6 +271,23 @@ impl ObjectIds {
         }
     }
 
+    /// A new pool in the state of this one, for the copies of a fork (see
+    /// `crate::fork`): the same ids are taken and the same ones are free,
+    /// in the same order. Nothing is waiting for its destructor in it yet.
+    pub(crate) fn fork(&self) -> Rc<Self> {
+        let state = self.state.borrow();
+        Rc::new(ObjectIds {
+            state: RefCell::new(IdState {
+                highest: state.highest,
+                free: state.free.clone(),
+                no_reuse: false,
+                releasing: Vec::new(),
+            }),
+            doomed: DoomedObjects::default(),
+            incarnations: RefCell::new(HashMap::new()),
+        })
+    }
+
     /// From now on every object gets a new id.
     pub fn stop_reuse(&self) {
         self.state.borrow_mut().no_reuse = true;

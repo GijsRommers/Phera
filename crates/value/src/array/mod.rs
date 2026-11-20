@@ -30,6 +30,7 @@ mod key;
 mod lookup;
 mod mutation;
 mod pointer;
+mod separation;
 mod storage;
 #[cfg(test)]
 mod tests;
@@ -39,7 +40,7 @@ pub use key::ArrayKey;
 use std::fmt;
 use storage::Storage;
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct PhpArray {
     storage: Storage,
     /// The key `$a[]` uses next: one more than the largest integer key ever

@@ -5,10 +5,11 @@ use phera_extension_api::{
     ParamType, PropertyEntry, Registry, Visibility,
 };
 
-use crate::{attributes, connection, constants, fetch, statement, transactions};
+use crate::{attributes, connection, constants, statement, transactions};
 
 static UNCOPYABLE_CONNECTION: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    fork: Some(refuse_fork),
     ..ClassHooks::EMPTY
 };
 
@@ -272,13 +273,13 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         &[Param::new("column", ParamType::Int).optional()],
         crate::drivers::sqlite::fetch::column,
     ),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "setFetchMode",
         &[
             Param::new("mode", ParamType::Int),
             Param::new("args", ParamType::Mixed).variadic(),
         ],
-        fetch::set_mode,
+        crate::drivers::sqlite::fetch::set_mode,
     ),
     MethodEntry::public_async("closeCursor", &[], crate::drivers::sqlite::fetch::close),
     MethodEntry::public("columnCount", &[], statement::column_count),
@@ -332,3 +333,14 @@ const SQLITE_METHODS: &[MethodEntry] = &[MethodEntry::public(
     &[Param::new("name", ParamType::String)],
     crate::drivers::sqlite::methods::load,
 )];
+
+/// A connection (and its statements) belongs to the request that opened it:
+/// a fork of a snapshot cannot share one. Laravel and Doctrine connect on
+/// first use, after `Phera\snapshot()`.
+fn refuse_fork(
+    _object: &phera_extension_api::Object,
+    _state: &dyn std::any::Any,
+    _fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    Err("a database connection opened before the call belongs to one request; connect after Phera\\snapshot()".into())
+}

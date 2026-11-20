@@ -75,7 +75,7 @@ impl Vm {
             for continuation in pending.into_iter().rev() {
                 match continuation {
                     Continuation::Constant(constant, _) => {
-                        Self::cancel_class_constant(&constant);
+                        self.cancel_class_constant(&constant);
                     }
                     Continuation::Case(class, name) => {
                         self.cancel_enum_case(&class, name);

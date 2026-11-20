@@ -55,7 +55,7 @@ impl Vm {
         let [Some(value)] = self.registers.window(slot, 1) else {
             return None;
         };
-        (parameters.by_reference(parameter) && !value.is_reference()).then(|| {
+        (parameters.requires_reference(parameter) && !value.is_reference()).then(|| {
             (
                 slot,
                 format!(

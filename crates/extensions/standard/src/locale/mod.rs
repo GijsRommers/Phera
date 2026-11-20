@@ -17,7 +17,7 @@ use phera_extension_api::{
     Registry, Value, args,
 };
 
-mod state;
+pub(crate) mod state;
 
 pub(crate) use state::ctype_name;
 use state::{ALL_ID, Category, c_string, select};

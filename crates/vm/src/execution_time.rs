@@ -31,6 +31,14 @@ impl ExecutionTime {
             .set((seconds > 0 && self.polling.get()).then(thread_cpu_time));
     }
 
+    /// A fork's clock: the limit in force at the snapshot, as the boot code
+    /// would have set it in each request, and no time used yet.
+    pub(crate) fn forked(&self) -> Self {
+        let clock = ExecutionTime::default();
+        clock.seconds.set(self.seconds.get());
+        clock
+    }
+
     fn elapsed(&self) -> Duration {
         self.charged.get().saturating_add(self.process_waits.get())
     }
@@ -117,7 +125,6 @@ impl Vm {
         let suffix = if seconds == 1 { "" } else { "s" };
         self.execution_time.timed_out.set(true);
         self.set_hidden_fatal_status();
-        self.mark_timed_out_objects();
         self.fatal_error(
             1,
             format!("Maximum execution time of {seconds} second{suffix} exceeded"),

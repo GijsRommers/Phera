@@ -7,6 +7,7 @@ use phera_extension_api::{Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
 pub use native_tables::NativeTables;
+pub use snapshot::{BootOutcome, Snapshot, SnapshotMode};
 
 use crate::calls::frame::{Frame, FrameView};
 use crate::path::AccessPath;
@@ -26,6 +27,7 @@ mod arrays;
 mod attribute_diagnostics;
 mod autoload;
 mod builtin_calls;
+mod bundled_classes;
 mod callable_classes;
 mod callable_introspection;
 mod callables;
@@ -165,12 +167,12 @@ mod request_end;
 mod scope_intrinsics;
 mod sensitive_parameters;
 mod serialization;
+mod snapshot;
 mod spl_autoload;
 mod static_variables;
 mod string_comparison;
 mod string_offsets;
 mod stringable;
-mod timeout_shutdown;
 mod traversable_foreach;
 mod traversable_unpack;
 mod traversal;
@@ -225,6 +227,8 @@ pub struct Vm {
     function_table: function_table::FunctionTable,
     /// Every loaded file and function of the request, by number.
     code: code_table::CodeTable,
+    /// Static properties and evaluated class constants of this request.
+    class_states: classes::class_state::ClassStates,
     globals: globals::Globals,
     extension_values: std::collections::HashMap<&'static str, Value>,
     static_variables: static_variables::StaticVariables,
@@ -264,10 +268,11 @@ pub struct Vm {
     cycles: cycles::CycleCollector,
     ini_overrides: ini::IniOverrides,
     execution_time: Rc<execution_time::ExecutionTime>,
-    timed_out_objects: Option<Vec<std::rc::Weak<phera_value::Object>>>,
     active_fiber: Option<Box<fibers::Active>>,
     fiber_bailout: bool,
     suspended_fibers: fibers::SuspendedFibers,
+    /// What `Phera\snapshot()` does here, and the state it kept.
+    snapshot: snapshot::SnapshotState,
 }
 
 impl Vm {
@@ -294,10 +299,10 @@ impl Vm {
             autoload: Default::default(),
             ini_overrides: Default::default(),
             execution_time: Default::default(),
-            timed_out_objects: None,
             active_fiber: None,
             fiber_bailout: false,
             suspended_fibers: Default::default(),
+            snapshot: Default::default(),
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
@@ -315,6 +320,7 @@ impl Vm {
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::default(),
+            class_states: Default::default(),
             globals: globals::Globals::new(),
             extension_values: Default::default(),
             static_variables: static_variables::StaticVariables::new(),
@@ -371,7 +377,13 @@ impl Vm {
     /// Defines a global variable before the script starts, such as a
     /// superglobal the runtime fills from the request.
     pub fn set_global(&mut self, name: &str, value: Value) {
-        self.globals.insert(name.to_string(), value);
+        self.publish_global(name.into(), value);
+    }
+
+    /// The value of a global variable (seen through a reference), such as
+    /// a superglobal the script may have changed.
+    pub fn global(&self, name: &str) -> Option<Value> {
+        self.globals.get(name).map(|value| value.deref().clone())
     }
 
     /// The extensions' per-request state, for the runtime to read once the
@@ -402,7 +414,6 @@ impl Vm {
 
     async fn run_request(&mut self, unit: Arc<CompiledUnit>) -> i32 {
         let main = self.code.load(&unit);
-        self.request_end.main = Some(main);
         for id in &unit.hoisted {
             if let Some(function) = unit.functions.get(id.index()) {
                 let index = self.code.declared(main, id.index());
@@ -414,36 +425,45 @@ impl Vm {
         let registers = unit.main.registers as usize;
         self.registers.grow_to(registers);
         self.call_stack.push(Frame::new(main, 0, None));
-        for (name, value) in self.globals.iter() {
-            if let Some(i) = unit
-                .main
-                .locals
-                .iter()
-                .position(|candidate| unit.names.get(candidate.index()) == Some(name))
-            {
-                self.registers.window_mut(i, 1)[0] = Some(value.clone());
+        for (index, name) in unit.main.locals.iter().enumerate() {
+            if let Some(name) = unit.names.get(name.index()) {
+                self.globals.declare(name);
+                self.registers.window_mut(index, 1)[0] = self.globals.take(name);
             }
         }
         self.publish_declaration_warnings(&unit);
-        let end = if let Err(error) = self.hoist_classes(&unit, main) {
+        if let Err(error) = self.hoist_classes(&unit, main) {
             self.unwind(error);
-            request_end::ScriptEnd::Fatal
-        } else {
-            match self.interpret(0).await {
-                Ok(_) => request_end::ScriptEnd::Destructible,
-                Err(error) => {
-                    let mut error = self.materialize_error(error);
-                    // The frames the error left released their variables;
-                    // PHP runs those destructors before it reports the error.
-                    if let Err(failure) = self.run_destructors().await {
-                        error = self.materialize_error(failure);
-                    }
-                    let end = request_end::ScriptEnd::of(&error);
-                    self.report_uncaught(error).await;
-                    end
+            return self.end_script(request_end::ScriptEnd::Fatal).await;
+        }
+        self.run_script_body().await
+    }
+
+    /// Runs the script from where its frames are to its end, then ends the
+    /// request. A fork of a snapshot starts here (see `crate::snapshot`).
+    async fn run_script_body(&mut self) -> i32 {
+        let end = match self.interpret(0).await {
+            Ok(_) => request_end::ScriptEnd::Destructible,
+            // A boot run stopped at `Phera\snapshot()`: its state is kept,
+            // and nothing more of it runs.
+            Err(_) if self.snapshot.taken.is_some() => return self.status,
+            Err(error) => {
+                let mut error = self.materialize_error(error);
+                // The frames the error left released their variables;
+                // PHP runs those destructors before it reports the error.
+                if let Err(failure) = self.run_destructors().await {
+                    error = self.materialize_error(failure);
                 }
+                let end = request_end::ScriptEnd::of(&error);
+                self.report_uncaught(error).await;
+                end
             }
         };
+        self.end_script(end).await
+    }
+
+    /// Output, shutdown functions, destructors and headers at the end.
+    async fn end_script(&mut self, end: request_end::ScriptEnd) -> i32 {
         if self.output_pending()
             && let Err(error) = self.drain_output().await
         {
@@ -517,16 +537,7 @@ impl Vm {
             .get_mut(register.index())
     }
 
-    /// A register of the script's top-level code, where globals live.
-    fn main_slot_mut(&mut self, register: Reg) -> Option<&mut Option<Value>> {
-        let frame = self.frame_at(0)?;
-        let (base, count) = (frame.base(), frame.count());
-        self.registers
-            .window_mut(base, count)
-            .get_mut(register.index())
-    }
-
-    #[inline(always)]
+    #[inline]
     fn set(&mut self, register: Reg, value: Value) {
         if let Some(frame) = self.current() {
             let (base, count) = (frame.base(), frame.count());

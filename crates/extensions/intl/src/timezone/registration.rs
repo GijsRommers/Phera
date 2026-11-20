@@ -54,6 +54,7 @@ const RULES: &[Param] = &[OTHER];
 const FN_RULES: &[Param] = &[ZONE, OTHER];
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::copy::<State>()),
+    fork: Some(phera_extension_api::fork_clone::<State>),
     ..ClassHooks::EMPTY
 };
 

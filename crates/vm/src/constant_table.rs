@@ -178,3 +178,26 @@ pub(crate) enum ConstantOrigin {
     Declaration(FunctionIndex),
     Define(FunctionIndex),
 }
+
+impl crate::snapshot::ForkCopy for GlobalConstant {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        GlobalConstant {
+            value: fork.value(&self.value),
+            deprecated: self.deprecated.clone(),
+        }
+    }
+}
+
+/// A constant can hold an object (an enum case); the fork's is its copy.
+/// The resolved sites are a cache of the same constants.
+impl crate::snapshot::ForkCopy for ConstantTable {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        ConstantTable {
+            native: self.native.clone(),
+            values: self.values.fork_copy(fork),
+            user_order: self.user_order.clone(),
+            origins: self.origins.clone(),
+            resolved: Default::default(),
+        }
+    }
+}

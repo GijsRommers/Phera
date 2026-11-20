@@ -82,7 +82,27 @@ pub struct Registry {
     /// In registration order, which puts every parent before its children.
     classes: Vec<ClassEntry>,
     class_modules: HashMap<&'static str, &'static str>,
+    /// How a fork of a snapshot gets each extension's request state.
+    state_forks: HashMap<std::any::TypeId, crate::state::StateFork>,
+    /// How a fork copies an open resource, by the resource's kind.
+    resource_forks: HashMap<&'static str, ResourceFork>,
+    /// Classes Phera ships written in PHP, by lowercase name: the file name
+    /// their code reports and its source.
+    bundled_classes: HashMap<String, BundledSource>,
 }
+
+/// PHP source that Phera ships for a class in its own namespace.
+#[derive(Clone, Copy)]
+pub struct BundledSource {
+    /// The file name the code reports (`__FILE__`, traces).
+    pub file: &'static str,
+    pub source: &'static str,
+}
+
+/// Copies the data of an open resource of one kind for a fork of a
+/// snapshot, or says why it cannot be copied (an open file, a socket).
+pub type ResourceFork =
+    fn(&dyn std::any::Any, &mut phera_value::Fork<'_>) -> Result<Box<dyn std::any::Any>, String>;
 
 #[derive(Clone)]
 struct NativeConstant {
@@ -94,6 +114,40 @@ struct NativeConstant {
 impl Registry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Says how a fork of a snapshot gets the request state of type `T`
+    /// (see [`crate::RequestState::fork`]). Every state type an extension
+    /// stores must be registered, or a snapshot that holds it is refused.
+    pub fn fork_state<T: 'static>(&mut self, fork: crate::state::StateFork) {
+        self.state_forks.insert(std::any::TypeId::of::<T>(), fork);
+    }
+
+    /// Ships a class written in PHP: when a script uses `name` and no class
+    /// of that name is declared, the VM compiles `source` and runs it.
+    pub fn bundled_class(&mut self, name: &str, source: BundledSource) {
+        self.bundled_classes
+            .insert(name.to_ascii_lowercase(), source);
+    }
+
+    /// The PHP source of a bundled class, by lowercase name.
+    pub fn bundled_source(&self, lowercase_name: &str) -> Option<BundledSource> {
+        self.bundled_classes.get(lowercase_name).copied()
+    }
+
+    /// Says how a fork copies an open resource of this kind (`"stream"`).
+    pub fn fork_resource(&mut self, kind: &'static str, fork: ResourceFork) {
+        self.resource_forks.insert(kind, fork);
+    }
+
+    /// How a fork copies a resource of this kind, if it can.
+    pub fn resource_fork(&self, kind: &str) -> Option<ResourceFork> {
+        self.resource_forks.get(kind).copied()
+    }
+
+    /// The registered forks of request state, by type.
+    pub fn state_forks(&self) -> &HashMap<std::any::TypeId, crate::state::StateFork> {
+        &self.state_forks
     }
 
     /// Runs the extension's registration against this registry.
@@ -333,7 +387,12 @@ impl Registry {
         handler: crate::SyncFn,
     ) {
         self.function(entry);
-        self.extra_named_handlers.insert(entry.name, handler);
+        self.register_extra_named_handler(entry.name, handler);
+    }
+
+    /// Attach the extra-name handler independently of the function's frame policy.
+    pub fn register_extra_named_handler(&mut self, name: &'static str, handler: crate::SyncFn) {
+        self.extra_named_handlers.insert(name, handler);
     }
 
     pub fn extra_named_handler(&self, name: &str) -> Option<crate::SyncFn> {

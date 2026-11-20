@@ -9,6 +9,7 @@ mod breaks;
 mod calendar;
 mod character;
 mod collator;
+mod converter;
 mod date;
 mod error;
 mod grapheme;
@@ -42,6 +43,8 @@ impl Extension for Intl {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this request state: intl_get_error_code() reports this request.
+        registry.fork_state::<crate::error::ErrorState>(phera_extension_api::fresh_state);
         registry.class(ClassEntry {
             parent: Some("Exception"),
             ..ClassEntry::class("IntlException")
@@ -53,6 +56,7 @@ impl Extension for Intl {
         locale::register(registry);
         idn::register(registry);
         collator::register(registry);
+        converter::register(registry);
         list::register(registry);
         message::register(registry);
         transliterator::register(registry);

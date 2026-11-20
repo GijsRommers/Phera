@@ -1,5 +1,7 @@
 //! Common IntlChar operations use ICU4X Unicode categories and simple case mapping.
 
+mod names;
+mod property_names;
 mod registration;
 
 use icu_casemap::CaseMapper;

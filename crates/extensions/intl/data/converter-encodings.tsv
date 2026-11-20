@@ -1,0 +1,312 @@
+UTF-8	4	efbfbd	-
+	UTF-8
+	ibm-1208
+	ibm-1209
+	ibm-5304
+	ibm-5305
+	ibm-13496
+	ibm-13497
+	ibm-17592
+	ibm-17593
+	windows-65001
+	cp1208
+	x-UTF_8J
+	unicode-1-1-utf-8
+	unicode-2-0-utf-8
+UTF-16	29	fdff	-
+	UTF-16
+	ISO-10646-UCS-2
+	ibm-1204
+	ibm-1205
+	unicode
+	csUnicode
+	ucs-2
+UTF-16BE	5	fffd	-
+	UTF-16BE
+	x-utf-16be
+	UnicodeBigUnmarked
+	ibm-1200
+	ibm-1201
+	ibm-13488
+	ibm-13489
+	ibm-17584
+	ibm-17585
+	ibm-21680
+	ibm-21681
+	ibm-25776
+	ibm-25777
+	ibm-29872
+	ibm-29873
+	ibm-61955
+	ibm-61956
+	windows-1201
+	cp1200
+	cp1201
+	UTF16_BigEndian
+UTF-16LE	6	fdff	-
+	UTF-16LE
+	x-utf-16le
+	UnicodeLittleUnmarked
+	ibm-1202
+	ibm-1203
+	ibm-13490
+	ibm-13491
+	ibm-17586
+	ibm-17587
+	ibm-21682
+	ibm-21683
+	ibm-25778
+	ibm-25779
+	ibm-29874
+	ibm-29875
+	UTF16_LittleEndian
+	windows-1200
+UTF-32	30	fdff0000	-
+	UTF-32
+	ISO-10646-UCS-4
+	ibm-1236
+	ibm-1237
+	csUCS4
+	ucs-4
+UTF-32BE	7	0000fffd	-
+	UTF-32BE
+	UTF32_BigEndian
+	ibm-1232
+	ibm-1233
+	ibm-9424
+UTF-32LE	8	fdff0000	-
+	UTF-32LE
+	UTF32_LittleEndian
+	ibm-1234
+	ibm-1235
+US-ASCII	26	1a	0
+	US-ASCII
+	ASCII
+	ANSI_X3.4-1968
+	ANSI_X3.4-1986
+	ISO_646.irv:1991
+	iso_646.irv:1983
+	ISO646-US
+	us
+	csASCII
+	iso-ir-6
+	cp367
+	ascii7
+	646
+	windows-20127
+	ibm-367
+	IBM367
+ISO-8859-1	3	1a	1
+	ISO-8859-1
+	ibm-819
+	IBM819
+	cp819
+	latin1
+	8859_1
+	csISOLatin1
+	iso-ir-100
+	ISO_8859-1:1987
+	l1
+	819
+ibm-912_P100-1995	0	1a	2
+	ibm-912_P100-1995
+	ibm-912
+	ISO-8859-2
+	ISO_8859-2:1987
+	latin2
+	csISOLatin2
+	iso-ir-101
+	l2
+	8859_2
+	cp912
+	912
+	windows-28592
+ibm-913_P100-2000	0	1a	3
+	ibm-913_P100-2000
+	ibm-913
+	ISO-8859-3
+	ISO_8859-3:1988
+	latin3
+	csISOLatin3
+	iso-ir-109
+	l3
+	8859_3
+	cp913
+	913
+	windows-28593
+ibm-914_P100-1995	0	1a	4
+	ibm-914_P100-1995
+	ibm-914
+	ISO-8859-4
+	latin4
+	csISOLatin4
+	iso-ir-110
+	ISO_8859-4:1988
+	l4
+	8859_4
+	cp914
+	914
+	windows-28594
+ibm-915_P100-1995	0	1a	5
+	ibm-915_P100-1995
+	ibm-915
+	ISO-8859-5
+	cyrillic
+	csISOLatinCyrillic
+	iso-ir-144
+	ISO_8859-5:1988
+	8859_5
+	cp915
+	915
+	windows-28595
+ibm-1089_P100-1995	0	1a	6
+	ibm-1089_P100-1995
+	ibm-1089
+	ISO-8859-6
+	arabic
+	csISOLatinArabic
+	iso-ir-127
+	ISO_8859-6:1987
+	ECMA-114
+	ASMO-708
+	8859_6
+	cp1089
+	1089
+	windows-28596
+	ISO-8859-6-I
+	ISO-8859-6-E
+	x-ISO-8859-6S
+ibm-9005_X110-2007	0	1a	7
+	ibm-9005_X110-2007
+	ibm-9005
+	ISO-8859-7
+	8859_7
+	greek
+	greek8
+	ELOT_928
+	ECMA-118
+	csISOLatinGreek
+	iso-ir-126
+	ISO_8859-7:1987
+	windows-28597
+	sun_eu_greek
+ibm-5012_P100-1999	0	1a	8
+	ibm-5012_P100-1999
+	ibm-5012
+	ISO-8859-8
+	hebrew
+	csISOLatinHebrew
+	iso-ir-138
+	ISO_8859-8:1988
+	ISO-8859-8-I
+	ISO-8859-8-E
+	8859_8
+	windows-28598
+	hebrew8
+ibm-920_P100-1995	0	1a	9
+	ibm-920_P100-1995
+	ibm-920
+	ISO-8859-9
+	latin5
+	csISOLatin5
+	iso-ir-148
+	ISO_8859-9:1989
+	l5
+	8859_9
+	cp920
+	920
+	windows-28599
+	ECMA-128
+	turkish8
+	turkish
+iso-8859_10-1998	0	1a	10
+	iso-8859_10-1998
+	ISO-8859-10
+	iso-ir-157
+	l6
+	ISO_8859-10:1992
+	csISOLatin6
+	latin6
+iso-8859_11-2001	0	1a	11
+	iso-8859_11-2001
+	ISO-8859-11
+	thai8
+	x-iso-8859-11
+ibm-921_P100-1995	0	1a	12
+	ibm-921_P100-1995
+	ibm-921
+	ISO-8859-13
+	8859_13
+	windows-28603
+	cp921
+	921
+	x-IBM921
+iso-8859_14-1998	0	1a	13
+	iso-8859_14-1998
+	ISO-8859-14
+	iso-ir-199
+	ISO_8859-14:1998
+	latin8
+	iso-celtic
+	l8
+ibm-923_P100-1998	0	1a	14
+	ibm-923_P100-1998
+	ibm-923
+	ISO-8859-15
+	Latin-9
+	l9
+	8859_15
+	latin0
+	csisolatin0
+	csisolatin9
+	iso8859_15_fdis
+	cp923
+	923
+	windows-28605
+ibm-5346_P100-1998	0	1a	15
+	ibm-5346_P100-1998
+	ibm-5346
+	!windows-1250
+	cp1250
+ibm-5347_P100-1998	0	1a	16
+	ibm-5347_P100-1998
+	ibm-5347
+	!windows-1251
+	cp1251
+	ANSI1251
+ibm-5348_P100-1997	0	1a	17
+	ibm-5348_P100-1997
+	ibm-5348
+	!windows-1252
+	cp1252
+ibm-5349_P100-1998	0	1a	18
+	ibm-5349_P100-1998
+	ibm-5349
+	!windows-1253
+	cp1253
+ibm-5350_P100-1998	0	1a	19
+	ibm-5350_P100-1998
+	ibm-5350
+	!windows-1254
+	cp1254
+ibm-9447_P100-2002	0	1a	20
+	ibm-9447_P100-2002
+	ibm-9447
+	!windows-1255
+	cp1255
+ibm-9448_X100-2005	0	1a	21
+	ibm-9448_X100-2005
+	ibm-9448
+	!windows-1256
+	cp1256
+	x-windows-1256S
+ibm-9449_P100-2002	0	1a	22
+	ibm-9449_P100-2002
+	ibm-9449
+	!windows-1257
+	cp1257
+ibm-5354_P100-1998	0	1a	23
+	ibm-5354_P100-1998
+	ibm-5354
+	!windows-1258
+	cp1258

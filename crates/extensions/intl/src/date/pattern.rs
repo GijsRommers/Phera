@@ -30,7 +30,7 @@ impl Style {
         }
     }
 
-    fn index(self) -> Option<usize> {
+    pub fn index(self) -> Option<usize> {
         match self {
             Self::Full => Some(0),
             Self::Long => Some(1),
@@ -42,19 +42,11 @@ impl Style {
 }
 
 pub fn select(locale: &Locale, date: Style, time: Style) -> String {
-    let identifier = locale.id.to_string();
-    let windows = |tag: &str| {
-        include_str!("../../data/cldr-gregorian-styles.tsv")
-            .lines()
-            .find_map(|row| {
-                let (locale, fields) = row.split_once('\t')?;
-                (tag == locale).then_some(fields)
-            })
-    };
-    let fields = windows(&identifier)
-        .or_else(|| windows(locale.id.language.as_str()))
-        .or_else(|| windows("en"));
-    let Some(fields) = fields else {
+    select_with_join(locale, date, time, None)
+}
+
+pub fn select_with_join(locale: &Locale, date: Style, time: Style, join: Option<&str>) -> String {
+    let Some(fields) = fields(locale) else {
         return "yMMdd hh:mm a".to_owned();
     };
     let fields: Vec<_> = fields.split('\t').collect();
@@ -65,17 +57,40 @@ pub fn select(locale: &Locale, date: Style, time: Style) -> String {
         .copied();
     match (date_text, time_text) {
         (Some(date_text), Some(time_text)) => {
-            let join = date
-                .index()
-                .and_then(|index| fields.get(8 + index))
-                .copied()
-                .unwrap_or("{1}, {0}");
+            let join = join.unwrap_or_else(|| join_field(&fields, date));
             join.replace("{1}", date_text).replace("{0}", time_text)
         }
         (Some(date), None) => date.to_owned(),
         (None, Some(time)) => time.to_owned(),
         (None, None) => "yMMdd hh:mm a".to_owned(),
     }
+}
+
+pub fn join(locale: &Locale, date: Style) -> &'static str {
+    let fields: Vec<_> = fields(locale).unwrap_or_default().split('\t').collect();
+    join_field(&fields, date)
+}
+
+fn join_field<'a>(fields: &[&'a str], date: Style) -> &'a str {
+    date.index()
+        .and_then(|index| fields.get(8 + index))
+        .copied()
+        .unwrap_or("{1}, {0}")
+}
+
+fn fields(locale: &Locale) -> Option<&'static str> {
+    let identifier = locale.id.to_string();
+    let windows = |tag: &str| {
+        include_str!("../../data/cldr-gregorian-styles.tsv")
+            .lines()
+            .find_map(|row| {
+                let (locale, fields) = row.split_once('\t')?;
+                (tag == locale).then_some(fields)
+            })
+    };
+    windows(&identifier)
+        .or_else(|| windows(locale.id.language.as_str()))
+        .or_else(|| windows("en"))
 }
 
 pub fn actual_locale(locale: &Locale) -> String {

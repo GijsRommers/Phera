@@ -18,6 +18,7 @@ struct Config {
 }
 
 pub(super) fn register(registry: &mut Registry) {
+    registry.fork_state::<Config>(fork_config);
     registry.function(FunctionEntry::sync(
         "libxml_set_external_entity_loader",
         const { &[Param::new("resolver_function", ParamType::Callable).nullable()] },
@@ -33,7 +34,7 @@ pub(super) fn register(registry: &mut Registry) {
         const { &[Param::new("context", ParamType::Mixed)] },
         stream_context,
     ));
-    registry.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::deprecated_sync(
         "libxml_disable_entity_loader",
         const { &[Param::new("disable", ParamType::Bool).with_default(ConstantValue::Bool(true))] },
         disable,
@@ -56,13 +57,6 @@ fn get_resolver(context: &mut dyn Context, _: &[Value]) -> NativeResult {
 }
 
 fn disable(context: &mut dyn Context, args: &[Value]) -> NativeResult {
-    context.deprecated(
-        concat!(
-            "Function libxml_disable_entity_loader() is deprecated since 8.0, ",
-            "as external entity loading is disabled by default"
-        )
-        .into(),
-    );
     let disabled = &mut context.state().get_or_default::<Config>().disabled;
     Ok(Value::Bool(std::mem::replace(
         disabled,
@@ -89,4 +83,20 @@ fn stream_context(context: &mut dyn Context, arguments: &[Value]) -> NativeResul
             value.type_name(),
         ))),
     }
+}
+
+/// The entity loader a boot set stays set in each fork, on the fork's copy.
+fn fork_config(
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Option<Box<dyn std::any::Any>> {
+    let config = state.downcast_ref::<Config>()?;
+    Some(Box::new(Config {
+        resolver: config.resolver.as_ref().map(|value| fork.value(value)),
+        stream_context: config
+            .stream_context
+            .as_ref()
+            .map(|value| fork.value(value)),
+        disabled: config.disabled,
+    }))
 }

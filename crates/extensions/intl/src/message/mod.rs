@@ -62,6 +62,9 @@ fn create(
     site: &str,
 ) -> NativeResult {
     error::clear(context);
+    if args::bytes(values, 0).len() > locale::MAX_LEN {
+        return locale::too_long_for(context, site, object.is_some());
+    }
     let Some(state) = State::new(context, values) else {
         let detail = "message formatter creation failed";
         if object.is_some() {
@@ -130,6 +133,9 @@ fn dispatch(
 
 fn standalone(context: &mut dyn Context, values: &[Value], site: &str, op: Op) -> NativeResult {
     error::clear(context);
+    if args::bytes(values, 0).len() > locale::MAX_LEN {
+        return locale::too_long(context, site);
+    }
     let Some(mut state) = State::new(context, values) else {
         return error::fail(
             context,

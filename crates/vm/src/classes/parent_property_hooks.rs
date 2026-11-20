@@ -81,6 +81,7 @@ impl Vm {
                 name: "value".into(),
                 ty: None,
                 by_reference: false,
+                requires_reference: false,
                 variadic: false,
             }],
         };

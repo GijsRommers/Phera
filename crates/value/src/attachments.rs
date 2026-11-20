@@ -104,7 +104,10 @@ impl Object {
     /// Runs `use_them` on the attachments. They are taken out of the cell
     /// for the call and put back after, so no borrow is held; nothing in
     /// `use_them` reaches this object's attachments again.
-    fn with_attachments<R>(&self, use_them: impl FnOnce(&mut Vec<(usize, Value)>) -> R) -> R {
+    pub(crate) fn with_attachments<R>(
+        &self,
+        use_them: impl FnOnce(&mut Vec<(usize, Value)>) -> R,
+    ) -> R {
         let mut attached = self.attachments.take().unwrap_or_default();
         let result = use_them(&mut attached);
         if !attached.is_empty() {

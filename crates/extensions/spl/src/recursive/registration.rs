@@ -12,7 +12,10 @@ use phera_extension_api::{
 use super::{CLASS, TREE, methods as m, tree};
 
 const ITERATOR: Param = Param::new("iterator", ParamType::Class("Traversable"));
-const TREE_ITERATOR: Param = Param::new("iterator", ParamType::RecursiveOrAggregate);
+const TREE_ITERATOR: Param = Param::new(
+    "iterator",
+    ParamType::ClassUnion("RecursiveIterator|IteratorAggregate"),
+);
 const MODE: Param = Param::new("mode", ParamType::Int);
 const FLAGS: Param = Param::new("flags", ParamType::Int);
 const CACHE_FLAGS: Param = Param::new("cachingIteratorFlags", ParamType::Int);

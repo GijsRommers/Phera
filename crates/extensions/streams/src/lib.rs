@@ -41,6 +41,7 @@ mod select;
 mod source_tools;
 mod stream;
 mod stream_copy;
+mod stream_fork;
 mod stream_options;
 mod temporary;
 mod terminal;
@@ -75,6 +76,13 @@ impl Extension for Streams {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<request::Files>(request::fork_files);
+        registry.fork_resource("stream", stream_fork::fork_stream);
+        registry.fork_resource("stream-context", context_options::fork_context);
+        registry.fork_state::<phera_extension_api::WorkingDirectory>(
+            phera_extension_api::copy_state::<phera_extension_api::WorkingDirectory>,
+        );
         context_options::register(registry);
         crypto_constants::register(registry);
         copy::register(registry);

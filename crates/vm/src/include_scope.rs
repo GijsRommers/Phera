@@ -86,32 +86,46 @@ impl Vm {
         let names = self.include_names(unit);
         let static_count = unit.main.locals.len();
         let mut bindings = Vec::with_capacity(names.len());
+        let global = self.in_global_scope();
+        let register_count = usize::from(unit.main.registers) + names.len() - static_count;
+        if register_count > usize::from(u16::MAX) + 1 {
+            return Err(NativeError::error("Phera register limit exceeded"));
+        }
         for (index, name) in names.into_iter().enumerate() {
-            let register = self.named_slot(&name)?;
-            let slot = self
-                .current_slot_mut(register)
-                .ok_or_else(|| internal_error!("include variable slot"))?;
-            let reference = slot.take().map(|value| {
-                if value.is_reference() {
-                    value
-                } else {
-                    Value::Reference(Rc::new(RefCell::new(value)))
-                }
-            });
-            *slot = reference.clone();
             let destination = if index < static_count {
                 index
             } else {
-                unit.main.registers as usize + index - static_count
+                usize::from(unit.main.registers) + index - static_count
+            };
+            let value = if global {
+                self.globals.declare(&name);
+                self.take_request_global(&name)
+            } else {
+                self.share_include_local(&name)?
             };
             bindings.push(ScopeBinding {
-                register: Reg(u16::try_from(destination)
-                    .map_err(|_| NativeError::error("Phera register limit exceeded"))?),
+                register: Reg(destination as u16),
                 name: (index >= static_count).then_some(name),
-                value: reference,
+                value,
             });
         }
         Ok(bindings)
+    }
+
+    fn share_include_local(&mut self, name: &str) -> Result<Option<Value>, NativeError> {
+        let register = self.named_slot(name)?;
+        let slot = self
+            .current_slot_mut(register)
+            .ok_or_else(|| internal_error!("include variable slot"))?;
+        let reference = slot.take().map(|value| {
+            if value.is_reference() {
+                value
+            } else {
+                Value::Reference(Rc::new(RefCell::new(value)))
+            }
+        });
+        *slot = reference.clone();
+        Ok(reference)
     }
 
     /// Caller-only names remain accessible through variable variables, compact, and extract.
@@ -123,13 +137,7 @@ impl Vm {
             .filter_map(|name| unit.names.get(name.index()).cloned())
             .collect();
         if let Some(parent) = self.current() {
-            let parent_names = parent
-                .function()
-                .locals
-                .iter()
-                .filter_map(|name| parent.unit().names.get(name.index()))
-                .chain(parent.extras.dynamic.iter().map(|(name, _)| name));
-            for name in parent_names {
+            for (name, _) in parent.named_registers() {
                 if !names.contains(name) {
                     names.push(name.clone());
                 }
@@ -143,9 +151,14 @@ impl Vm {
         let Some(frame) = self.current() else {
             return Ok(());
         };
-        if frame.function_id().is_some() || self.call_stack.depth() == 1 {
+        if frame.function_id().is_some() {
             return Ok(());
         }
+        if self.call_stack.depth() == 1 {
+            self.park_global_registers();
+            return Ok(());
+        }
+        let global = self.in_global_scope();
         let entries = scope_entries(frame, &self.registers);
         let frame = self
             .call_stack
@@ -153,6 +166,10 @@ impl Vm {
             .ok_or_else(|| internal_error!("include return without frame"))?;
         self.registers.truncate(frame.start());
         for ScopeEntry { name, value } in entries {
+            if global {
+                self.store_request_global(name, value);
+                continue;
+            }
             let register = self.named_slot(&name)?;
             if let Some(slot) = self.current_slot_mut(register) {
                 *slot = value;
@@ -171,24 +188,7 @@ fn scope_entries(
     registers: &crate::calls::registers::Registers,
 ) -> Vec<ScopeEntry> {
     frame
-        .function()
-        .locals
-        .iter()
-        .enumerate()
-        .filter_map(|(index, name)| {
-            frame
-                .unit()
-                .names
-                .get(name.index())
-                .map(|name| (name, Reg(index as u16)))
-        })
-        .chain(
-            frame
-                .extras
-                .dynamic
-                .iter()
-                .map(|(name, register)| (name, *register)),
-        )
+        .named_registers()
         .map(|(name, register)| ScopeEntry {
             name: name.clone(),
             value: frame

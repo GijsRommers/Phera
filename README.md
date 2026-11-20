@@ -82,7 +82,8 @@ includes it. The Zend-specific `opcache.preload` directive is unsupported.
 Built in, each checked call by call against real PHP: core, standard, ctype,
 [curl](crates/extensions/curl/README.md) (HTTP and HTTPS, including HTTP/2,
 connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`,
-`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, intl, json, mbstring, openssl, pcre,
+`DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, intl, json, mbstring, openssl, pcre
+(`MARK` in match arrays, including Symfony's compiled route patterns),
 PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.
@@ -104,9 +105,18 @@ For example, `json_decode($json, flags: JSON_THROW_ON_ERROR)` uses the default
 depth. Reflection reads the same defaults, and native errors include the
 function or method that raised them in the exception trace.
 
+`min()`, `max()`, and loose array searches use native object comparisons,
+including comparisons inside nested arrays. `range()` accepts Stringable
+endpoints in weak mode.
+`array_multisort()` sorts parallel arrays by their columns and accepts sort
+flags as literals. Writable arguments receive the sorted arrays.
+
 Unix scripts can launch programs with `shell_exec()`, backticks, and the process
-functions. Backticks emit PHP 8.5's compile-time deprecation. To disable program
-launching for web requests, run `phera serve --no-process public`.
+functions. Backticks emit PHP 8.5's compile-time deprecation. On Unix, `mail()`
+and `mb_send_mail()` pipe the message to the command in `sendmail_path`.
+`phera serve --no-process public` disables program launches for web requests,
+including `mail()` and `mb_send_mail()`.
+The standard library retains PHP’s deprecated `utf8_encode()` Latin-1 conversion.
 
 BCMath provides arbitrary-precision decimal functions and the immutable
 `BcMath\Number` class. Set the default procedural scale with `bcmath.scale`
@@ -146,10 +156,15 @@ rejects secret keys whose embedded public half cannot be decoded as a point.
 ### intl
 
 The intl extension includes ICU4X normalization, grapheme operations, IDNA,
-locale queries, number and date formatting, collation, list and message
-formatting, transliteration, break iteration, resource bundles, and calendar
-and timezone objects. See the [intl coverage notes](crates/extensions/intl/README.md) for
-the APIs that still differ from PHP.
+locale queries, number formatting including significant digits and English
+spellout and ordinals, date formatting including relative days and skeletons,
+collation, list and message formatting, transliteration with category-filtered
+accent removal, break iteration, Unicode character names, UTF and single-byte
+conversion, resource bundles, and calendar and timezone objects. Character-name
+lookup and the standalone hour patterns covered by the oracle follow PHP
+8.5.13 with ICU 78.2. See the
+[intl coverage notes](crates/extensions/intl/README.md) for the APIs that still
+differ from PHP.
 
 ## ✨ Goals
 
@@ -221,6 +236,47 @@ An HTTPS mirror can set `PHERA_RELEASE_BASE_URL` for both commands. Serve
 `latest` as JSON with a `tag_name` field and put the archives and
 `SHA256SUMS` under `download/<tag>/`, for example `download/v0.1.0/`.
 The upgrader expects the mirror to serve these files directly.
+
+## ⏩ Boot once, fork every request
+
+`phera serve` can boot an application once per worker thread, before the
+first connection, and start every request as a copy of that booted state.
+Laravel and Symfony applications get this with no change:
+
+- **Laravel** (a project with `artisan` and `bootstrap/app.php`): Phera runs
+  its own entry script for `public/index.php`, which bootstraps the
+  application and its service providers, then handles the request.
+- **Symfony** with `symfony/runtime`: Phera sets `APP_RUNTIME` to its own
+  runtime class (unless something else chose one), which boots the kernel
+  and then handles the request.
+- **Any other application** marks the point itself:
+
+  ```php
+  $kernel = new Kernel('prod', false);
+  $kernel->boot();                 // once per worker, at server start
+  Phera\snapshot();                // true in every request; false on the command line
+  $kernel->handle(Request::createFromGlobals())->send();   // per request
+  ```
+
+  The first start serves such a script from the top until it reaches the
+  call; later starts boot it before the first connection.
+
+The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
+are empty and `$_SERVER` holds the environment and the script's paths. Each
+request gets its own copy of every object, static property and global, so
+nothing one request does reaches another. What cannot be copied (an open
+file or socket, a started session, a database transaction) makes
+`Phera\snapshot()` throw `Phera\SnapshotException`, naming the class and
+where it was found; the worker then serves the application from the top.
+A changed file boots the worker again in the background, following
+`opcache.validate_timestamps` and `opcache.revalidate_freq`. The boot's
+objects are never destroyed; each request's copies are destroyed at its end,
+as PHP-FPM destroys a request's objects. `--no-snapshot` turns all of it off.
+
+A Laravel API request took 525 million instructions run from the top, and
+102 million as a fork (PHP 8.5 with opcache: 48 million). The design is in
+[`docs/architecture.md`](docs/architecture.md) section 5.4, the decisions
+in [`docs/decisions/`](docs/decisions/).
 
 ## 🛠️ Building
 

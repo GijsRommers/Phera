@@ -30,7 +30,7 @@ use crate::Vm;
 
 mod effects;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct IniOverrides {
     startup: Vec<Option<PhpString>>,
     values: Vec<Option<PhpString>>,
@@ -94,6 +94,11 @@ impl Vm {
     pub(crate) fn ini_get(&self, name: &[u8]) -> Option<PhpString> {
         let (slot, entry) = self.registry.ini_entry(name)?;
         Some(self.ini_local(slot, entry).unwrap_or_default())
+    }
+
+    pub(crate) fn ini_value(&self, name: &[u8]) -> Option<PhpString> {
+        let (slot, entry) = self.registry.ini_entry(name)?;
+        self.ini_local(slot, entry)
     }
 
     /// Directives with a null default can be explicitly set to the empty string.

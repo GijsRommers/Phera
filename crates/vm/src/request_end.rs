@@ -32,19 +32,14 @@
 //! shutdown functions create do, as in any request. Whatever is still alive
 //! afterwards is freed without its destructor: the id pool is closed.
 //!
-//! The variables of the main script are its frame's registers. They are not
-//! released when the script's code ends, so that phase 2 can visit them; the
-//! main frame is put back on the call stack for the end of the request, so
-//! that destructors see the globals.
-
-use std::rc::Rc;
+//! The main script's registers publish their bindings to the ordered request
+//! symbol table before the stack is released. Shutdown callbacks and
+//! destructors both see that table.
 
 use phera_extension_api::NativeError;
-use phera_value::{Destruction, Value};
+use phera_value::Destruction;
 
 use crate::Vm;
-use crate::calls::frame::Frame;
-use crate::code_table::FunctionIndex;
 
 /// The payload of the error that `exit` unwinds with.
 pub(crate) struct Exit;
@@ -64,10 +59,8 @@ pub(crate) enum ScriptEnd {
 }
 
 /// The request's state for its end.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct RequestEnd {
-    /// The main script's code; its frame keeps its registers until the end.
-    pub(crate) main: Option<FunctionIndex>,
     /// The destructor phases have begun: PHP runs destructors there with no
     /// calling code, so a private destructor is skipped with a warning.
     pub(crate) shutting_down: bool,
@@ -90,63 +83,15 @@ impl ScriptEnd {
 }
 
 impl Vm {
-    /// Empties the registers of a frame that ends, except those of the main
-    /// script, which are the globals and live until the end of the request.
-    pub(crate) fn release_frame_registers(&mut self, frame: &Frame) {
-        if frame.start() == 0 && Some(frame.function) == self.request_end.main {
-            return;
-        }
-        self.registers.release_frame(frame.start(), frame.base());
-    }
-
-    /// An exception leaves the main script: its temporaries are released
-    /// on the way out, as PHP frees an unwound frame's live temporaries,
-    /// before the uncaught exception is reported. Its variables stay.
-    ///
-    /// ```php
-    /// Missing::$property = new Owner;   // Owner goes before "Fatal error"
-    /// ```
-    pub(crate) fn release_main_temporaries(&mut self, frame: &Frame) {
-        if frame.start() != 0 || Some(frame.function) != self.request_end.main {
-            return;
-        }
-        let variables = self.code.function(frame.function).locals.len();
-        self.registers.truncate(frame.base() + variables);
-    }
-
-    /// The main script's variable in `register` was unset while it shared a
-    /// cell with the globals table: the global goes too.
-    pub(crate) fn forget_global_cell(
-        &mut self,
-        register: phera_bytecode::Reg,
-        cell: &Rc<std::cell::RefCell<Value>>,
-    ) {
-        let Some(frame) = self.current() else {
-            return;
-        };
-        if frame.frame.start() != 0 || Some(frame.frame.function) != self.request_end.main {
-            return;
-        }
-        let name = frame
-            .function()
-            .locals
-            .get(register.index())
-            .and_then(|name| frame.unit().names.get(name.index()))
-            .cloned();
-        if let Some(name) = name {
-            self.globals.forget_cell(&name, cell);
-        }
-    }
-
     /// `exit` leaves every function: their variables are released, the
-    /// innermost frame first. The main script's variables stay for the end
-    /// of the request.
+    /// innermost frame first. File-scope symbols stay in the request table.
     pub(crate) fn release_frames_for_exit(&mut self) {
+        self.park_global_registers();
         while let Some(frame) = self.call_stack.pop() {
             self.call_stack.abandon_calls_from(frame.start());
             self.closure_captures
                 .retain(|capture| capture.base < frame.base());
-            self.release_frame_registers(&frame);
+            self.registers.release_frame(frame.start(), frame.base());
         }
     }
 
@@ -154,6 +99,7 @@ impl Vm {
     /// ended.
     pub(crate) async fn finish_request(&mut self, end: ScriptEnd) {
         if end == ScriptEnd::Fatal {
+            self.fiber_bailout = true;
             self.forget_destructors();
         }
         // 1. Shutdown functions; they run after a fatal error too.
@@ -188,15 +134,9 @@ impl Vm {
         drop(self.object_ids.take_doomed());
     }
 
-    /// The destructor phases, with the main script's frame back on the
-    /// call stack so that destructors see the globals.
+    /// Shutdown and destructor callbacks share the parked request globals.
     async fn run_request_destructors(&mut self) {
         self.call_stack.clear();
-        if let Some(main) = self.request_end.main {
-            let mut frame = Frame::new(main, 0, None);
-            frame.set_ip(self.code.function(main).instructions.len());
-            self.call_stack.push(frame);
-        }
         self.request_end.shutting_down = true;
         let outcome = match self.destroy_globals().await {
             Ok(()) => self.destroy_remaining_objects().await,
@@ -219,27 +159,13 @@ impl Vm {
         if !self.end_phases_have_work() {
             return Ok(());
         }
-        let count = self
-            .request_end
-            .main
-            .map_or(0, |main| self.code.function(main).locals.len());
         loop {
-            let before = self.defined_globals(count);
+            let before = self.globals.iter().count();
             for name in self.globals.sole_object_owners() {
-                self.globals.remove(&name);
+                self.globals.release_sole_object(&name);
                 self.run_destructors().await?;
             }
-            for index in (0..count).rev() {
-                let sole_owner = matches!(
-                    self.registers.window(index, 1),
-                    [Some(Value::Object(object))] if Rc::strong_count(object) == 1
-                );
-                if sole_owner {
-                    drop(self.registers.take(index));
-                    self.run_destructors().await?;
-                }
-            }
-            if self.defined_globals(count) == before {
+            if self.globals.iter().count() == before {
                 return Ok(());
             }
         }
@@ -250,17 +176,6 @@ impl Vm {
     /// `finally` blocks).
     fn end_phases_have_work(&self) -> bool {
         self.object_ids.has_due() || self.generator_releases.is_some()
-    }
-
-    /// How many globals exist, PHP's test for "the pass changed something".
-    fn defined_globals(&self, count: usize) -> usize {
-        let variables = self
-            .registers
-            .window(0, count)
-            .iter()
-            .filter(|slot| slot.is_some())
-            .count();
-        variables + self.globals.len()
     }
 
     /// Phase 3: every object whose destructor has not run, by id, including

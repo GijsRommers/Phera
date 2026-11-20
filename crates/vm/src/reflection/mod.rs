@@ -23,7 +23,7 @@ mod callables;
 mod constants;
 mod functions;
 pub(crate) mod hook_calls;
-mod initializers;
+pub(crate) mod initializers;
 mod lazy;
 mod members;
 mod properties;
@@ -37,7 +37,7 @@ enum Construction {
 }
 
 #[derive(Default)]
-struct AttributeCallSite(Option<Rc<AttributeSite>>);
+pub(crate) struct AttributeCallSite(Option<Rc<AttributeSite>>);
 
 pub(super) fn exception(message: impl Into<String>) -> NativeError {
     NativeError::throw("ReflectionException", message)
@@ -535,7 +535,10 @@ impl Vm {
             )));
         }
         let args = match args {
-            Some(args) => args,
+            Some(args) => {
+                Self::check_script_construction(&class)?;
+                args
+            }
             None => {
                 if class.has_native_layout && class.is_final {
                     return Err(exception(format!(
@@ -629,7 +632,7 @@ impl Vm {
         Ok(created)
     }
 
-    fn reflection_callee(
+    pub(crate) fn reflection_callee(
         &self,
         called: Rc<Class>,
         scope: Rc<Class>,

@@ -129,6 +129,8 @@ impl Vm {
                 self.reflect_user_signature(reflected, *function, scope, AttributeTarget::Function);
             }
             CallTarget::Native(entry) => {
+                use phera_source::deprecations::{ItemKind, kept_notice};
+                reflected.deprecated = kept_notice(ItemKind::Function, entry.name).is_some();
                 reflected.parameters = native_parameters(entry.name, entry.params);
                 reflected.extension = self.registry.function_module(entry.name).map(str::to_owned);
                 reflected.return_type = self
@@ -183,6 +185,12 @@ impl Vm {
                 );
             }
             MethodBody::Native(entry) => {
+                use phera_source::deprecations::{ItemKind, kept_notice};
+                reflected.deprecated = kept_notice(
+                    ItemKind::Method,
+                    &format!("{}::{}", method.declaring, method.name),
+                )
+                .is_some();
                 reflected.parameters =
                     native_parameters(&method.signature(&self.code).name, entry.params);
                 reflected.extension = self
@@ -289,6 +297,7 @@ impl Vm {
                     position,
                     declared_type,
                     by_reference: param.by_reference,
+                    can_pass_by_value: !param.by_reference,
                     variadic: param.variadic,
                     optional,
                     promoted: metadata.is_some_and(|meta| meta.promoted),
@@ -371,6 +380,7 @@ fn native_parameter(position: usize, param: Param, stub: Option<StubParameter>) 
         position,
         declared_type,
         by_reference: stub.map_or(param.by_ref, |parameter| parameter.by_ref),
+        can_pass_by_value: !param.requires_ref(),
         variadic: stub.map_or(param.variadic, |parameter| parameter.variadic),
         optional: stub.map_or(param.optional, |parameter| parameter.optional),
         promoted: false,

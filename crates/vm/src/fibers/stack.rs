@@ -134,6 +134,10 @@ impl Vm {
         swap(&mut self.code, &mut other.code);
         swap(&mut self.globals, &mut other.globals);
         swap(&mut self.static_variables, &mut other.static_variables);
+        // Static properties and evaluated constants, and what
+        // `Phera\snapshot()` does, belong to the request too.
+        swap(&mut self.class_states, &mut other.class_states);
+        swap(&mut self.snapshot, &mut other.snapshot);
         swap(&mut self.include_state, &mut other.include_state);
         swap(&mut self.generator_releases, &mut other.generator_releases);
         swap(
@@ -147,7 +151,6 @@ impl Vm {
         swap(&mut self.frame_limit, &mut other.frame_limit);
         swap(&mut self.status, &mut other.status);
         swap(&mut self.fiber_bailout, &mut other.fiber_bailout);
-        swap(&mut self.timed_out_objects, &mut other.timed_out_objects);
         swap(
             &mut self.error_handlers.exception,
             &mut other.error_handlers.exception,

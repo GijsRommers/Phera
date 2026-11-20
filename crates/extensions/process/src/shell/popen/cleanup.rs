@@ -85,3 +85,25 @@ fn finish(context: &mut dyn Context, _: Vec<Value>) -> LocalFuture<'_, NativeRes
         failure.map_or(Ok(Value::Null), Err)
     })
 }
+
+/// A child process started before `Phera\snapshot()` belongs to one
+/// request: a fork of a snapshot refuses it, and starts without children.
+pub(crate) fn register_fork(registry: &mut phera_extension_api::Registry) {
+    registry.fork_state::<Children>(fork_children);
+}
+
+fn fork_children(
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Option<Box<dyn std::any::Any>> {
+    if state
+        .downcast_ref::<Children>()
+        .is_some_and(|children| !children.0.is_empty())
+    {
+        fork.refuse_state(
+            "process",
+            "a child process started before the call belongs to one request",
+        );
+    }
+    None
+}

@@ -31,6 +31,15 @@ pub(crate) enum LinkedFunction {
     NamespaceFallback,
 }
 
+impl crate::snapshot::ForkCopy for LinkedFunction {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        match self {
+            LinkedFunction::Other(callee) => LinkedFunction::Other(callee.fork_copy(fork)),
+            LinkedFunction::Php(_) | LinkedFunction::NamespaceFallback => self.clone(),
+        }
+    }
+}
+
 impl Vm {
     /// Resolve the callee before argument evaluation so reference parameters are known.
     pub(crate) fn init_call(&mut self, symbol: SymbolId) -> Result<(), NativeError> {
@@ -189,6 +198,10 @@ impl Vm {
                         ty: None,
                         by_reference: matches!(intrinsic, crate::intrinsics::Intrinsic::IsCallable)
                             && *name == "callable_name",
+                        requires_reference: matches!(
+                            intrinsic,
+                            crate::intrinsics::Intrinsic::IsCallable
+                        ) && *name == "callable_name",
                         variadic: matches!(
                             (intrinsic, *name),
                             (crate::intrinsics::Intrinsic::CallUserFunc, "args")

@@ -337,3 +337,19 @@ impl CallStack {
         self.frames.capacity()
     }
 }
+
+/// The fork's stack is the snapshot's: the same frames at the same
+/// positions, including calls whose arguments were being evaluated.
+impl crate::snapshot::ForkCopy for CallStack {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        CallStack {
+            frames: self.frames.clone(),
+            extras: self.extras.fork_copy(fork),
+            empty: FrameExtras::new(),
+            preparing: self.preparing.clone(),
+            details: self.details.fork_copy(fork),
+            callback_depth: self.callback_depth,
+            native_arguments: Vec::new(),
+        }
+    }
+}

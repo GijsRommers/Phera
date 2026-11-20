@@ -226,6 +226,7 @@ pub(super) fn register(registry: &mut Registry) {
         iterator: Some(cursor::iterator),
         count: Some(count),
         property_access: Some(&NativePropertyAccess {
+            string_property: None,
             read,
             mutate: write,
         }),

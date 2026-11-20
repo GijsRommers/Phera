@@ -164,7 +164,10 @@ impl Vm {
         exchange.caller_depth.set(depth);
         self.export_main_globals();
         exchange.input.set(Some(input));
-        exchange.transfer(self)?;
+        if let Err(error) = exchange.transfer(self) {
+            self.import_main_globals();
+            return Err(error);
+        }
         if exchange
             .site
             .borrow()
@@ -222,13 +225,12 @@ impl Vm {
                 let state = match &result {
                     Ok(value) => State::Returned(value.clone()),
                     Err(NativeError::Unwind(payload))
-                        if payload.0.is::<()>()
+                        if payload.0.is::<crate::request_end::Exit>()
+                            || payload.0.is::<crate::request_end::FatalStop>()
                             || payload.0.is::<crate::last_error::FatalDiagnostic>()
                             || payload.0.is::<crate::error_traces::DeclarationFailure>() =>
                     {
-                        self.fiber_bailout = self.status == 255
-                            || payload.0.is::<crate::last_error::FatalDiagnostic>()
-                            || payload.0.is::<crate::error_traces::DeclarationFailure>();
+                        self.fiber_bailout = !payload.0.is::<crate::request_end::Exit>();
                         State::Exited
                     }
                     Err(_) => State::Failed,

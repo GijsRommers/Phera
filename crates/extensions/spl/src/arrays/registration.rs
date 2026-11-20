@@ -26,6 +26,8 @@ const CONSTANTS: &[(&str, ConstantValue)] = &[
 ];
 
 const ARRAY_HOOKS: ClassHooks = ClassHooks {
+    legacy_unserialize: Some(serialization::decode_legacy_payload),
+    fork: Some(crate::native_state::fork_spl),
     clone: Some(NativeClone::Copy(properties::clone_state)),
     properties: Some(properties::view),
     property_access: Some(&properties::ACCESS),
@@ -35,6 +37,7 @@ const ARRAY_HOOKS: ClassHooks = ClassHooks {
 };
 
 const ITERATOR_HOOKS: ClassHooks = ClassHooks {
+    fork: Some(crate::native_state::fork_spl),
     iterator: Some(cursor::create),
     iterator_by_reference: Some(cursor::create_by_reference),
     ..ARRAY_HOOKS

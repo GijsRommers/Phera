@@ -25,7 +25,7 @@ mod substitute;
 mod substring;
 mod tags;
 mod text;
-mod tokens;
+pub(crate) mod tokens;
 mod trim;
 pub(crate) mod url;
 
@@ -67,6 +67,7 @@ pub(crate) fn register(registry: &mut Registry) {
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
+    registry.describe_function("utf8_encode", "string", None);
     replace::register_sync_selectors(registry);
 }
 

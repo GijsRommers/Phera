@@ -6,7 +6,7 @@ use phera_extension_api::{
     NativePropertyRead, Object, Value,
 };
 
-const ACCESS: NativePropertyAccess = NativePropertyAccess { read, mutate };
+const ACCESS: NativePropertyAccess = NativePropertyAccess::new(read, mutate);
 const HOOKS: ClassHooks = ClassHooks {
     property_access: Some(&ACCESS),
     ..ClassHooks::EMPTY

@@ -11,7 +11,7 @@ use crate::Vm;
 use crate::classes::{Class, class::PropertyDefault};
 
 #[derive(Default)]
-struct PropertyCache(HashMap<String, Rc<PropertyIndex>>);
+pub(crate) struct PropertyCache(HashMap<String, Rc<PropertyIndex>>);
 
 #[derive(Default)]
 struct PropertyIndex {
