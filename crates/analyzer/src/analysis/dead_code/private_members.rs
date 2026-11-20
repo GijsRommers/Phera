@@ -104,6 +104,24 @@ impl Analyzer<'_> {
                     attributes,
                     ..
                 } if is_private(*modifiers) => {
+                    if !uses.dynamic_property {
+                        let written_by_extension =
+                            crate::framework_knowledge::configured_property_write(
+                                attributes,
+                                &self.context.names,
+                                self.options,
+                            );
+                        for item in items
+                            .iter()
+                            .filter(|item| !item.has_hook_list && !uses.writes.contains(&item.name))
+                        {
+                            self.check_property_initializer_type(
+                                &class,
+                                item,
+                                written_by_extension,
+                            );
+                        }
+                    }
                     if attributes_use(
                         attributes,
                         &self.context.names,

@@ -183,6 +183,9 @@ fn parameters(
             "checkMissingTypehints" => {
                 options.check_missing_typehints = value.parse().ok();
             }
+            "checkPhpDocMissingReturn" => {
+                options.check_phpdoc_missing_return = value.parse().ok();
+            }
             "featureToggles" => {
                 for (line, _) in blocks(children) {
                     match key_value(line) {

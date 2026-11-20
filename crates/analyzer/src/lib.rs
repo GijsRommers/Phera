@@ -103,6 +103,7 @@ fn analyze_types(
         && (options.level >= 2
             || options.strict
             || options.check_missing_typehints == Some(true)
+            || options.check_phpdoc_missing_return == Some(true)
             || options.level >= 1 && options.unnecessary_null_coalesce);
     if options.level >= 7 {
         builtins::analysis_facts::refine(&mut index);

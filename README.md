@@ -58,7 +58,7 @@ results open and narrows InputBag and HeaderBag results with non-null defaults.
 
 The checker reads `phpstan.neon`, `phpstan.neon.dist`, or `phpstan.dist.neon`
 in that order. It uses analysis paths, exclusions, levels, included baselines,
-and `ignoreErrors`. It honors `checkMissingTypehints`,
+and `ignoreErrors`. It honors `checkMissingTypehints`, `checkPhpDocMissingReturn`,
 `reportAlwaysTrueInLastCondition`, and `reportUnmatchedIgnoredErrors`.
 Unmatched PHPStan inline ignores are reported by default.
 With `treatPhpDocTypesAsCertain: false`, constant-condition checks require

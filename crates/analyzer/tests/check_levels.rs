@@ -35,6 +35,64 @@ fn phpstan_level_fixtures() {
 }
 
 #[test]
+fn phpstan_core_offset_return_and_property_thresholds() {
+    // PHPStan 2.3.7, with phpVersion 80500.
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/offset_and_property_defaults.php");
+    let oracle = [
+        (
+            4,
+            5,
+            "property.unusedType",
+            "Property OptionalCount::$count (int|null) is never assigned int so it can be removed from the property type.",
+        ),
+        (
+            2,
+            23,
+            "return.missing",
+            "Method Lookup::find() should return int|null but return statement is missing.",
+        ),
+        (
+            3,
+            30,
+            "offsetAccess.invalidOffset",
+            "Invalid array key type float.",
+        ),
+        (
+            3,
+            30,
+            "offsetAccess.notFound",
+            "Offset float does not exist on list<string>.",
+        ),
+    ];
+    for level in 0..=10 {
+        let report = check(&Options {
+            level,
+            paths: vec![fixture.to_string_lossy().into_owned()],
+            ..Options::default()
+        })
+        .unwrap();
+        let actual: Vec<_> = report
+            .diagnostics
+            .iter()
+            .map(|finding| {
+                (
+                    finding.line,
+                    finding.identifier.as_str(),
+                    finding.message.as_str(),
+                )
+            })
+            .collect();
+        let expected: Vec<_> = oracle
+            .iter()
+            .filter(|(first, ..)| *first <= level)
+            .map(|&(_, line, identifier, message)| (line, identifier, message))
+            .collect();
+        assert_eq!(actual, expected, "level {level}");
+    }
+}
+
+#[test]
 fn phpstan_configured_rules() {
     // PHPStan 2.3.7 with strict-rules and bleedingEdge.neon.
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/configured_rules.php");

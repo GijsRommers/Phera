@@ -93,11 +93,32 @@ pub(crate) fn attributes_use(
     names: &Names,
     effect: AttributeUse,
 ) -> bool {
+    attributes_with_effect(attributes, names, effect, |_| true)
+}
+
+pub(crate) fn configured_property_write(
+    attributes: &[Attribute],
+    names: &Names,
+    options: &crate::config::Options,
+) -> bool {
+    attributes_with_effect(attributes, names, WriteProperty, |class| {
+        options.doctrine_stubs && class.starts_with("Doctrine\\")
+            || options.symfony_stubs && class.starts_with("Symfony\\")
+    })
+}
+
+fn attributes_with_effect(
+    attributes: &[Attribute],
+    names: &Names,
+    effect: AttributeUse,
+    enabled: impl Fn(&str) -> bool,
+) -> bool {
     attributes.iter().any(|attribute| {
         let resolved = names.resolve(&attribute.name, UseKind::Class);
         ATTRIBUTES.iter().any(|(class, use_kind)| {
             (*use_kind == effect || (*use_kind == ReadWriteProperty && effect == WriteProperty))
                 && class.eq_ignore_ascii_case(&resolved[0])
+                && enabled(class)
         })
     })
 }

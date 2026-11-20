@@ -105,7 +105,7 @@ fn is_string(ty: &ValueType) -> bool {
     )
 }
 
-fn is_array(ty: &ValueType) -> bool {
+pub(super) fn is_array(ty: &ValueType) -> bool {
     match ty {
         ValueType::Array => true,
         ValueType::Collection(collection) => {

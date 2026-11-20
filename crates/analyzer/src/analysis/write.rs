@@ -164,7 +164,7 @@ impl Analyzer<'_> {
                     },
                 );
             }
-            if self.level >= 9 {
+            if self.level >= 3 {
                 receiver = old.ty.clone();
             }
             Some((name, old))
@@ -184,13 +184,18 @@ impl Analyzer<'_> {
             }
             None
         };
-        for (span, key, specified) in keys.into_iter().rev() {
+        for (depth, (span, key, specified)) in keys.into_iter().rev().enumerate() {
             let key = key.map(|key| self.expression(key, scope, false));
             if key == Some(ValueType::Never) {
                 return Evaluation::Never;
             }
             if !specified {
                 self.mixed_offset(&receiver, key.as_ref(), span);
+            }
+            if depth == 0
+                && let Some(key) = &key
+            {
+                self.invalid_array_offset(&receiver, key, span);
             }
         }
         if let Some((name, old)) = variable {

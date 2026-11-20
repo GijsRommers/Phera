@@ -184,19 +184,15 @@ impl Analyzer<'_> {
             self.void_returns(body);
             return;
         }
-        let requires_value = self.context.declared_return
-            || self.level >= 3
-                && self
-                    .context
-                    .documented_return
-                    .as_ref()
-                    .is_some_and(|ty| !allows_empty_return(ty));
         if self.context.incomplete
             || flow != Flow::Next
-            || !requires_value
             || self.context.generator
             || (self.context.returns == ValueType::Never && self.level == 0)
         {
+            return;
+        }
+        let documented = self.fallthrough_doc_type();
+        if !self.context.declared_return && documented.is_none() {
             return;
         }
         let mut blocks = vec![body];
@@ -212,7 +208,7 @@ impl Analyzer<'_> {
         }
         let span = body.last().map_or_else(
             || {
-                if self.level >= 3 && !self.context.declared_return {
+                if documented.is_some() {
                     empty_body_location(&self.file.source, span)
                 } else {
                     span
@@ -220,7 +216,11 @@ impl Analyzer<'_> {
             },
             |statement| statement.span,
         );
-        self.report(Finding::MissingReturn(self.context.function.clone()), span);
+        if let Some(documented) = documented {
+            self.report_doc_fallthrough(&documented, span);
+        } else {
+            self.report(Finding::MissingReturn(self.context.function.clone()), span);
+        }
     }
     fn void_returns(&mut self, body: &[Statement]) {
         let mut pending = vec![body];

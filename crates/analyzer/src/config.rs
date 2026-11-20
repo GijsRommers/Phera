@@ -23,6 +23,7 @@ pub struct Options {
     pub report_unmatched_ignores: bool,
     pub treat_phpdoc_types_as_certain: bool,
     pub check_missing_typehints: Option<bool>,
+    pub check_phpdoc_missing_return: Option<bool>,
     pub unnecessary_null_coalesce: bool,
     pub internal_tag: bool,
     pub symfony_stubs: bool,
@@ -47,6 +48,7 @@ impl Default for Options {
             report_unmatched_ignores: true,
             treat_phpdoc_types_as_certain: true,
             check_missing_typehints: None,
+            check_phpdoc_missing_return: None,
             unnecessary_null_coalesce: false,
             internal_tag: false,
             symfony_stubs: false,
@@ -151,6 +153,9 @@ impl Options {
             }
             "check_missing_typehints" if !array => {
                 self.check_missing_typehints = Some(boolean(key, scalar()?)?);
+            }
+            "check_phpdoc_missing_return" if !array => {
+                self.check_phpdoc_missing_return = Some(boolean(key, scalar()?)?);
             }
             "paths" if array => {
                 self.paths = values.iter().map(|s| string(s)).collect::<Result<_, _>>()?

@@ -82,7 +82,7 @@ pub(super) fn receiver_name(ty: &ValueType) -> String {
     }
 }
 
-fn type_order(ty: &ValueType) -> u8 {
+pub(super) fn type_order(ty: &ValueType) -> u8 {
     match ty {
         ValueType::Class(_) | ValueType::Generic(_) | ValueType::Intersection(_) => 1,
         ValueType::Null => 2,

@@ -10,6 +10,7 @@ mod discarded_results;
 mod null_checks;
 mod private_members;
 mod type_tests;
+mod unused_property_type;
 
 pub use booleans::Side;
 pub use null_checks::NullCheck;
