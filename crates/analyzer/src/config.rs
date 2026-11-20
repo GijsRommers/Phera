@@ -431,6 +431,32 @@ parameters:
     }
 
     #[test]
+    fn phpstan_applies_package_includes_in_configuration_order() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        fs::write(
+            root.join("local.neon"),
+            "parameters:\n    featureToggles:\n        unusedVariable: false\n",
+        )
+        .unwrap();
+        let package = "vendor/phpstan/phpstan/conf/bleedingEdge.neon";
+        for (first, second, enabled) in [
+            ("local.neon", package, true),
+            (package, "local.neon", false),
+        ] {
+            fs::write(
+                root.join("phpstan.neon"),
+                format!(
+                    "includes:\n    - {first}\n    - {second}\nparameters:\n    paths: [src]\n"
+                ),
+            )
+            .unwrap();
+            let options = Options::parse_at(root, std::iter::empty()).unwrap();
+            assert_eq!(options.unused_variables, enabled);
+        }
+    }
+
+    #[test]
     fn phpstan_ignore_counts_apply_by_identifier_and_path() {
         let project = tempfile::tempdir().unwrap();
         let root = project.path();

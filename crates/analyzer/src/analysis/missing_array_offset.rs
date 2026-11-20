@@ -38,9 +38,16 @@ impl Analyzer<'_> {
             }
             _ => false,
         };
-        let perhaps_absent = self.level >= 7 && possible_missing_offset(array, key);
+        let nullable_class_key = self.level >= 7 && nullable_class_key(array, key);
+        let perhaps_absent =
+            nullable_class_key || self.level >= 7 && possible_missing_offset(array, key);
         if (absent || perhaps_absent) && !scope.facts.has_expression(expression) {
             let verb = if absent { "does" } else { "might" };
+            let key = if nullable_class_key {
+                super::member_checks::receiver_name(key)
+            } else {
+                key.to_string()
+            };
             self.diagnose(
                 "offsetAccess.notFound",
                 expression.span,
@@ -48,6 +55,13 @@ impl Analyzer<'_> {
             );
         }
     }
+}
+
+fn nullable_class_key(array: &ValueType, key: &ValueType) -> bool {
+    matches!(array, ValueType::Collection(collection) if
+        collection.kind == CollectionKind::Array && matches!(collection.key, ValueType::ClassString(_)))
+        && matches!(key, ValueType::Union(arms) if
+            arms.contains(&ValueType::Null) && arms.iter().any(|ty| *ty == ValueType::String))
 }
 
 fn possible_missing_offset(array: &ValueType, key: &ValueType) -> bool {

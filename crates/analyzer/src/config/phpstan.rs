@@ -15,6 +15,7 @@ const CONFIG_NAMES: &[&str] = &["phpstan.neon", "phpstan.neon.dist", "phpstan.di
 enum Visit {
     Read(PathBuf),
     Apply(PathBuf, String),
+    Package(String, PathBuf),
 }
 
 pub(super) fn read(directory: &Path, options: &mut Options) -> Result<(), String> {
@@ -67,6 +68,7 @@ pub(super) fn read(directory: &Path, options: &mut Options) -> Result<(), String
                     }
                 }
             }
+            Visit::Package(package, path) => apply_package(&package, &path, options),
         }
     }
     Ok(())
@@ -80,26 +82,7 @@ fn include_visit(
 ) -> Option<Visit> {
     let path = Path::new(include);
     if let Some(package) = composer_package(path) {
-        match package.as_str() {
-            "phpstan/phpstan-strict-rules" if path.ends_with("rules.neon") => options.strict = true,
-            "phpstan/phpstan-doctrine" if path.ends_with("extension.neon") => {
-                options.doctrine_stubs = true;
-            }
-            "phpstan/phpstan-doctrine" => {}
-            "phpstan/phpstan-symfony" if path.ends_with("extension.neon") => {
-                options.symfony_stubs = true;
-            }
-            "phpstan/phpstan-symfony" => {}
-            "phpstan/phpstan" if path.ends_with("bleedingEdge.neon") => {
-                options.unnecessary_null_coalesce = true;
-                options.internal_tag = true;
-                options.unused_parameters = true;
-                options.unused_variables = true;
-                notice(options, "remaining bleeding-edge features");
-            }
-            _ => notice(options, &package),
-        }
-        return None;
+        return Some(Visit::Package(package, path.to_path_buf()));
     }
     let filename = resolve(include, directory, parent);
     if filename.extension().is_some_and(|ext| ext == "php") || !filename.is_file() {
@@ -111,6 +94,28 @@ fn include_visit(
         return None;
     }
     Some(Visit::Read(filename))
+}
+
+fn apply_package(package: &str, path: &Path, options: &mut Options) {
+    match package {
+        "phpstan/phpstan-strict-rules" if path.ends_with("rules.neon") => options.strict = true,
+        "phpstan/phpstan-doctrine" if path.ends_with("extension.neon") => {
+            options.doctrine_stubs = true;
+        }
+        "phpstan/phpstan-doctrine" => {}
+        "phpstan/phpstan-symfony" if path.ends_with("extension.neon") => {
+            options.symfony_stubs = true;
+        }
+        "phpstan/phpstan-symfony" => {}
+        "phpstan/phpstan" if path.ends_with("bleedingEdge.neon") => {
+            options.unnecessary_null_coalesce = true;
+            options.internal_tag = true;
+            options.unused_parameters = true;
+            options.unused_variables = true;
+            notice(options, "remaining bleeding-edge features");
+        }
+        _ => notice(options, package),
+    }
 }
 
 fn composer_package(path: &Path) -> Option<String> {

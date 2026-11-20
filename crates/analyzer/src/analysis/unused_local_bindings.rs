@@ -2,7 +2,7 @@
 //! In `foreach ($items as $key => $item)`, also report an unread key.
 
 use super::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 enum Binding {
     Assignment,
@@ -23,6 +23,7 @@ impl Analyzer<'_> {
         let mut statements: Vec<_> = body.iter().collect();
         let mut expressions = Vec::new();
         let mut mentions = BTreeMap::new();
+        let mut has_aliases = false;
         while !statements.is_empty() || !expressions.is_empty() {
             if let Some(statement) = statements.pop() {
                 statements.extend(
@@ -66,10 +67,12 @@ impl Analyzer<'_> {
                 ExpressionKind::Variable(Variable::Dynamic(_))
                 | ExpressionKind::Include { .. }
                 | ExpressionKind::Eval(_) => return,
+                ExpressionKind::AssignReference { .. } => has_aliases = true,
                 ExpressionKind::ArrowFunction(arrow) => expressions.push(&arrow.body),
                 ExpressionKind::Closure(closure) => {
                     for capture in &closure.uses {
                         *mentions.entry(capture.name.as_str()).or_insert(0) += 1;
+                        has_aliases |= capture.by_reference;
                     }
                 }
                 ExpressionKind::Call { callee, .. } if dynamic_variable_access(callee) => return,
@@ -77,17 +80,25 @@ impl Analyzer<'_> {
             }
             expressions.extend(crate::walk::children(expression));
         }
+        let mut writes = BTreeMap::new();
         for (binding, target) in candidates {
             let ExpressionKind::Variable(Variable::Named(name)) = &target.kind else {
                 continue;
             };
+            let parameter = parameters.iter().find(|parameter| parameter.name == *name);
+            let capture = captures.iter().find(|capture| capture.name == *name);
             if name.starts_with('_')
                 || name == "GLOBALS"
                 || name == "this"
-                || mentions.get(name.as_str()) != Some(&1)
-                || parameters.iter().any(|parameter| parameter.name == *name)
-                || captures.iter().any(|capture| capture.name == *name)
+                || parameter.is_some_and(|parameter| parameter.by_reference)
+                || capture.is_some_and(|capture| capture.by_reference)
             {
+                continue;
+            }
+            if matches!(binding, Binding::Assignment) {
+                *writes.entry(name.as_str()).or_insert(0usize) += 1;
+            }
+            if parameter.is_some() || capture.is_some() || mentions.get(name.as_str()) != Some(&1) {
                 continue;
             }
             let (identifier, label) = match binding {
@@ -99,6 +110,16 @@ impl Analyzer<'_> {
                 target.span,
                 format!("{label} ${name} is never read."),
             );
+        }
+        if !has_aliases {
+            let watched = writes
+                .into_iter()
+                .filter(|(name, writes)| {
+                    *writes >= 2 && mentions.get(name).is_some_and(|m| m > writes)
+                })
+                .map(|(name, _)| name)
+                .collect::<BTreeSet<_>>();
+            self.check_overwritten_assignments(body, &watched);
         }
     }
 }

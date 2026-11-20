@@ -250,6 +250,28 @@ fn phpstan_unused_local_bindings_are_opt_in() {
 }
 
 #[test]
+fn phpstan_overwrites_captured_values() {
+    // PHPStan 2.3.7 with featureToggles.unusedVariable enabled.
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/overwritten_capture.php");
+    let report = check(&Options {
+        level: 4,
+        unused_variables: true,
+        paths: vec![fixture.to_string_lossy().into_owned()],
+        ..Options::default()
+    })
+    .unwrap();
+    assert_eq!(report.diagnostics.len(), 1);
+    let finding = &report.diagnostics[0];
+    assert_eq!(finding.line, 8);
+    assert_eq!(finding.identifier, "assign.overwritten");
+    assert_eq!(
+        finding.message,
+        "Value assigned to variable $label is never read before being overwritten."
+    );
+}
+
+#[test]
 fn phpstan_unused_private_method_parameter_is_opt_in() {
     // PHPStan 2.3.7 with featureToggles.unusedParameters enabled.
     let fixture =

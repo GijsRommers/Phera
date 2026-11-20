@@ -31,6 +31,8 @@ impl Analyzer<'_> {
             )
             .value_choices();
         let name = &self.context.function;
+        let template =
+            expression.and_then(|expr| self.mismatched_template_return(expr, &expected, given));
         match (expression, &expected) {
             (_, ValueType::Never) => self.diagnose(
                 "return.never",
@@ -52,7 +54,8 @@ impl Analyzer<'_> {
             }
             (Some(expr), _)
                 if expected != ValueType::Void
-                    && self.incompatible(&expected, given, self.value_policy()) =>
+                    && (template.is_some()
+                        || self.incompatible(&expected, given, self.value_policy())) =>
             {
                 let provenance = self.narrowed_at(expr, scope);
                 let callable = if name == "Closure" {
@@ -63,6 +66,7 @@ impl Analyzer<'_> {
                     format!("Function {name}()")
                 };
                 let given = super::argument_contracts::type_for_message(given, &expected);
+                let expected = template.unwrap_or_else(|| expected.to_string());
                 self.diagnose(
                     "return.type",
                     span,

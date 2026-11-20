@@ -73,6 +73,10 @@
   "template_key_append.php": [
     [7, 15, "assign.propertyType", "Property Store<K of (int|string),V>::$entries (array<K of (int|string), V>) does not accept array<int|K of (int|string), V>."]
   ],
+  "template_return_contract.php": [
+    [7, 12, "return.type", "Function readEntry() should return T of Entry but returns Entry."],
+    [7, 18, "offsetAccess.notFound", "Offset string|null might not exist on array<class-string, string>."]
+  ],
   "implicit_callable_result.php": [
     [10, 6, "return.type", "Function readClosure() should return string but returns mixed."],
     [10, 11, "return.type", "Function readCallable() should return string but returns mixed."],
