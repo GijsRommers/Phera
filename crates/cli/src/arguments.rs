@@ -42,6 +42,13 @@ Usage:
   phera --dump <file.php>                 print the compiled bytecode
   phera check [OPTIONS] <paths...>        type-check PHP (see check --help)
   phera lint [OPTIONS] [paths...]         lint PHP (see lint --help)
+  phera install [--no-dev] [--frozen-lockfile] [--offline] [-o]
+  phera update [--no-install] [--offline] [--prefer-lowest]
+  phera add vendor/package[:constraint] [--dev]
+  phera remove vendor/package
+  phera why vendor/package
+  phera outdated
+  phera dump-autoload [-o] [--no-dev]
   phera --version
 
 ENV OPTIONS: --env-file PATH (repeatable) or --no-env-file";
@@ -58,6 +65,7 @@ pub(crate) enum Command {
         script: String,
     },
     Serve(ServeOptions),
+    Packages(Vec<String>),
     Help(&'static str),
     Check(phera_analyzer::config::Options),
     Lint(phera_analyzer::lint::Command),
@@ -126,6 +134,9 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         Some("new") => {
             arguments.next();
             parse_new(arguments).map(Command::New)
+        }
+        Some("install" | "update" | "add" | "remove" | "why" | "outdated" | "dump-autoload") => {
+            Ok(Command::Packages(arguments.collect()))
         }
         Some(_) => {
             // `phera run file.php` and `phera file.php` mean the same.

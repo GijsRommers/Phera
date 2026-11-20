@@ -43,10 +43,18 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | `phera new shop` | Starts a project: a small JSON application, or Symfony's or Laravel's official one |
 | `phera check src` | Type-checks PHP with PHPStan's levels and identifiers; reads a PHPStan baseline |
 | `phera lint src` | Finds unused code and suspicious constructs; `--fix` applies the safe fixes |
+| `phera install` | Installs dependencies from `composer.lock` or resolves `composer.json` |
 | `phera --dump file.php` | Prints the compiled bytecode |
 
 `phera <command> --help` lists the options. There is no formatter and no test
 runner yet.
+
+### Installing dependencies
+
+The package manager is in development. Try `phera install --frozen-lockfile
+--no-scripts` to install the versions in an existing Composer lock and generate
+`vendor/autoload.php`. See [package compatibility](crates/packages/README.md)
+for the supported commands and current gaps.
 
 ### Serving a site
 

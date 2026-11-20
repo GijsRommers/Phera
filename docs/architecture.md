@@ -1472,6 +1472,12 @@ crate against the extension API.
 
 ### 11.5 `phera install`: packages, as fast as the JavaScript and Python tools made it
 
+The initial implementation lives in `crates/packages`. The CLI passes platform
+versions from Phera's runtime registry. The package crate handles resolution,
+archive downloads, the global store and Composer-compatible autoloader files.
+See [package compatibility](../crates/packages/README.md) for implementation
+status. The list below describes the intended scope.
+
 Composer is written in PHP, resolves dependencies on one core, downloads
 with limited parallelism and unpacks every package into every project. pnpm,
 Bun and uv showed what the same job looks like when it is done natively:
