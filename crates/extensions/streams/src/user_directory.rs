@@ -63,8 +63,10 @@ impl UserDirectory {
                 missing(context, &self.object, function, "dir_readdir", "");
                 Ok(Value::Bool(false))
             }
-            Some(Value::Bool(_)) => Ok(Value::Bool(false)),
             Some(value) => {
+                if matches!(&*value.deref(), Value::Null | Value::Bool(_)) {
+                    return Ok(Value::Bool(false));
+                }
                 let name = context.stringify(&value).await?;
                 let bytes = name
                     .as_bytes()
