@@ -29,10 +29,20 @@ impl Analyzer<'_> {
             {
                 return ValueType::Never;
             }
-            return if self.arguments(arguments, None, "method", scope, span, CallKind::Direct)
+            let invalid_mixed_receiver = matches!(name, MemberName::Identifier(_))
+                && !matches!(access, Access::Guarded | Access::GuardedStatic)
+                && self.strict_mixed(ty);
+            let kind = if invalid_mixed_receiver {
+                CallKind::InvalidReceiver
+            } else {
+                CallKind::Direct
+            };
+            return if self.arguments(arguments, None, "method", scope, span, kind)
                 == Evaluation::Never
             {
                 ValueType::Never
+            } else if invalid_mixed_receiver {
+                ValueType::ImplicitMixed
             } else {
                 ValueType::Mixed
             };

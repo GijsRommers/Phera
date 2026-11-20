@@ -6,6 +6,7 @@ use phera_ast::Expression;
 use std::collections::{BTreeMap, BTreeSet};
 
 mod definition_guards;
+mod offset_expression;
 pub(crate) use definition_guards::GuardKey;
 mod facts;
 pub(crate) use facts::SELF_PROPERTIES;

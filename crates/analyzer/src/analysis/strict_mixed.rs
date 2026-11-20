@@ -24,12 +24,14 @@ impl Analyzer<'_> {
 impl Analyzer<'_> {
     pub fn mixed_offset(&mut self, target: &ValueType, key: Option<&ValueType>, span: Span) {
         if self.strict_mixed(target) {
-            let key = key.map_or_else(|| "mixed".into(), ValueType::to_string);
-            self.diagnose(
-                "offsetAccess.nonOffsetAccessible",
-                span,
-                format!("Cannot access offset {key} on mixed."),
-            );
+            let message = match key {
+                Some(ValueType::OverflowingInt) => {
+                    "Cannot access offset (float|int) on mixed.".into()
+                }
+                Some(key) => format!("Cannot access offset {key} on mixed."),
+                None => "Cannot access an offset on mixed.".into(),
+            };
+            self.diagnose("offsetAccess.nonOffsetAccessible", span, message);
         }
     }
 

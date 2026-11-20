@@ -2,7 +2,10 @@
 //! `$bag->get('name') !== null` refines another lookup of the same key.
 //! Reassigning the root or replacing the property invalidates its facts.
 
-use super::{Scope, ValueType};
+use super::{
+    Scope, ValueType,
+    offset_expression::{OffsetToken, arithmetic_offset},
+};
 use phera_ast::{
     Argument, Arguments, Expression, ExpressionKind, Literal, MemberName, NameKind, Variable,
 };
@@ -27,6 +30,7 @@ pub enum AccessStep {
     IntegerOffset(i64),
     StringOffset(Vec<u8>),
     VariableOffset(String),
+    ArithmeticOffset(Vec<OffsetToken>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -155,6 +159,9 @@ impl Place {
                         ExpressionKind::Variable(Variable::Named(key)) => {
                             AccessStep::VariableOffset(key.clone())
                         }
+                        ExpressionKind::Binary { .. } => {
+                            AccessStep::ArithmeticOffset(arithmetic_offset(index)?)
+                        }
                         _ => return None,
                     };
                     members.push(step);
@@ -199,6 +206,9 @@ impl Place {
             || self.members.iter().any(|step| {
                 match step {
                 AccessStep::VariableOffset(variable) => variable == name,
+                AccessStep::ArithmeticOffset(tokens) => tokens.iter().any(
+                    |token| matches!(token, OffsetToken::Variable(variable) if variable == name),
+                ),
                 AccessStep::Method(_, arguments) => arguments.iter().any(|argument| {
                     matches!(&argument.value, ArgumentValue::Variable(variable) if variable == name)
                 }),
@@ -289,6 +299,11 @@ impl Facts {
                 || place.members.len() <= receiver.members.len()
                 || !place.members.starts_with(&receiver.members)
         });
+    }
+
+    pub fn has_expression(&self, expression: &Expression) -> bool {
+        !self.types.is_empty()
+            && Place::of(expression).is_some_and(|place| self.types.contains_key(&place))
     }
 
     pub fn forget_write(&mut self, target: Option<&Place>) {
@@ -418,7 +433,7 @@ impl Facts {
                 };
                 if other.ty != fact.ty {
                     let joined = fact.ty.join(&other.ty);
-                    if joined.is_mixed() {
+                    if joined == ValueType::Mixed {
                         return false;
                     }
                     fact.ty = joined.limit_complexity();

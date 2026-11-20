@@ -158,10 +158,18 @@ impl Analyzer<'_> {
             chain.ty = key;
             return chain;
         }
-        self.mixed_offset(&chain.ty, index.as_ref().map(|_| &key), expression.span);
-        if !self.strict_mixed(&chain.ty) {
-            chain.ty = super::arrays::offset_type(&chain.ty, &key);
+        if self.strict_mixed(&chain.ty) && !scope.facts.has_expression(expression) {
+            self.mixed_offset(&chain.ty, index.as_ref().map(|_| &key), expression.span);
         }
+        chain.ty = self.offset_value(&chain.ty, &key);
         chain
+    }
+
+    pub(super) fn offset_value(&self, target: &ValueType, key: &ValueType) -> ValueType {
+        if self.strict_mixed(target) {
+            target.clone()
+        } else {
+            super::arrays::offset_type(target, key)
+        }
     }
 }

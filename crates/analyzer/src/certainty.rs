@@ -45,6 +45,7 @@ pub(crate) fn retain_native(findings: &mut Vec<Diagnostic>, native: &[Diagnostic
             finding.file.clone(),
             finding.line,
             finding.identifier.clone(),
+            finding.source_range,
         )
     };
     let mut confirmed = BTreeMap::new();

@@ -371,6 +371,7 @@ impl Access {
 pub enum CallKind {
     Direct,
     Callable,
+    InvalidReceiver,
 }
 
 #[derive(Clone, Copy)]

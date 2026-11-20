@@ -117,6 +117,11 @@ impl Analyzer<'_> {
                 "foreach.nonIterable", subject.span,
                 "Argument of an invalid type mixed supplied for foreach, only iterables are supported.".into(),
             );
+            if matches!(subject.kind, ExpressionKind::Index { .. })
+                && let Some(place) = crate::scope::Place::of(subject)
+            {
+                scope.facts.record(place, subject_type.clone(), None);
+            }
         }
         if self.level >= 4
             && matches!(&subject_type, ValueType::Shape(shape) if shape.fields.is_empty()

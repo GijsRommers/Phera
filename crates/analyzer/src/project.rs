@@ -173,6 +173,7 @@ pub fn parse_file(path: &Path) -> Result<Result<ParsedFile, Diagnostic>, String>
             line: lines.line(error.span.start),
             identifier: "phpstan.parse".into(),
             message: error.message,
+            source_range: None,
         }),
     })
 }

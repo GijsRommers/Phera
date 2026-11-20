@@ -84,11 +84,13 @@ impl Analyzer<'_> {
             return None;
         }
         let place = Place::of(tested)?;
-        if place
-            .members
-            .iter()
-            .any(|member| matches!(member, crate::scope::AccessStep::VariableOffset(_)))
-        {
+        if place.members.iter().any(|member| {
+            matches!(
+                member,
+                crate::scope::AccessStep::VariableOffset(_)
+                    | crate::scope::AccessStep::ArithmeticOffset(_)
+            )
+        }) {
             return None;
         }
         let key = GuardKey::EnumCase {

@@ -63,6 +63,7 @@ impl Analyzer<'_> {
                     identifier: identifier.into(),
                     severity: crate::diagnostic::Severity::Error,
                     message,
+                    source_range: Some((span.start, span.end)),
                 },
             ));
         } else {

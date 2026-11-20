@@ -94,6 +94,19 @@ impl Analyzer<'_> {
             if narrowed != ValueType::Never {
                 scope.facts.record(place, narrowed, span);
             }
+        } else if self.strict_mixed(&original)
+            && matches!(
+                place.members.last(),
+                Some(
+                    AccessStep::IntegerOffset(_)
+                        | AccessStep::StringOffset(_)
+                        | AccessStep::VariableOffset(_)
+                        | AccessStep::ArithmeticOffset(_)
+                )
+            )
+            && scope.facts.get(&place).is_none()
+        {
+            scope.facts.record(place, original, None);
         }
     }
 
@@ -186,16 +199,20 @@ impl Analyzer<'_> {
                     continue;
                 }
                 AccessStep::IntegerOffset(key) => {
-                    ty = super::arrays::offset_type(&ty, &ValueType::IntLiteral(*key));
+                    ty = self.offset_value(&ty, &ValueType::IntLiteral(*key));
                     continue;
                 }
                 AccessStep::StringOffset(key) => {
                     let key = ValueType::StringLiteral(key.as_slice().into());
-                    ty = super::arrays::offset_type(&ty, &key);
+                    ty = self.offset_value(&ty, &key);
                     continue;
                 }
                 AccessStep::VariableOffset(key) => {
-                    ty = super::arrays::offset_type(&ty, &scope.get(key).ty);
+                    ty = self.offset_value(&ty, &scope.get(key).ty);
+                    continue;
+                }
+                AccessStep::ArithmeticOffset(_) => {
+                    ty = self.offset_value(&ty, &ValueType::Mixed);
                     continue;
                 }
                 AccessStep::Property(name) | AccessStep::Method(name, _) => name,
@@ -211,6 +228,9 @@ impl Analyzer<'_> {
         name: &str,
         property: bool,
     ) -> ValueType {
+        if self.strict_mixed(receiver) {
+            return ValueType::ImplicitMixed;
+        }
         let arms = match receiver {
             ValueType::Union(arms) | ValueType::BenevolentUnion(arms) => arms.as_ref(),
             other => std::slice::from_ref(other),

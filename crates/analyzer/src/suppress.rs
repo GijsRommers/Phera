@@ -145,6 +145,7 @@ pub fn filter(
             identifier: identifier.into(),
             message,
             severity: Default::default(),
+            source_range: None,
         }
     }));
 }

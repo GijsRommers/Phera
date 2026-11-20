@@ -58,7 +58,9 @@ impl Analyzer<'_> {
                     ty = property.effective_type(self.index);
                     continue;
                 }
-                AccessStep::Method(..) | AccessStep::ClassName(..) => return None,
+                AccessStep::Method(..)
+                | AccessStep::ClassName(..)
+                | AccessStep::ArithmeticOffset(_) => return None,
             };
             let key = super::arrays::shape_key(&key)?;
             let ValueType::Shape(shape) = &ty else {

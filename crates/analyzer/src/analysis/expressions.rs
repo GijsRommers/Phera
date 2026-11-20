@@ -133,6 +133,13 @@ impl Analyzer<'_> {
             }
         }
         if self.level >= 3 {
+            if matches!(
+                operator,
+                BinaryOperator::Subtract | BinaryOperator::Multiply | BinaryOperator::Divide
+            ) && (self.strict_mixed(&left_ty) || self.strict_mixed(&right_ty))
+            {
+                return ValueType::OverflowingInt;
+            }
             return super::operators::binary_type(operator, &left_ty, &right_ty);
         }
         match operator {

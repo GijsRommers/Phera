@@ -163,6 +163,10 @@ impl Analyzer<'_> {
                 span,
                 format!("Cannot access property ${name} on {receiver}."),
             );
+            if self.strict_mixed(ty) {
+                // An unresolved member has no declared type, even on explicit mixed.
+                return ValueType::ImplicitMixed;
+            }
             return ValueType::Mixed;
         }
         if !quiet && self.missing_property_arm(ty, name) {

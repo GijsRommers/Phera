@@ -57,7 +57,16 @@ impl Analyzer<'_> {
                                 })
                         }));
         let types = collect.then_some(&mut facts.types);
-        if self.evaluate_arguments(arguments, signature, label, scope, types) == Evaluation::Never {
+        let unknown_references = signature.is_none() && !matches!(kind, CallKind::InvalidReceiver);
+        if self.evaluate_arguments(
+            arguments,
+            signature,
+            label,
+            scope,
+            types,
+            unknown_references,
+        ) == Evaluation::Never
+        {
             facts.evaluation = Evaluation::Never;
             return facts;
         }
@@ -87,6 +96,7 @@ impl Analyzer<'_> {
         label: &str,
         scope: &mut Scope,
         mut types: Option<&mut Vec<ValueType>>,
+        unknown_references: bool,
     ) -> Evaluation {
         for (position, argument) in arguments.iter().enumerate() {
             let parameter =
@@ -115,7 +125,7 @@ impl Analyzer<'_> {
                     scope,
                 );
             }
-            let ty = self.expression(&argument.value, scope, signature.is_none());
+            let ty = self.expression(&argument.value, scope, unknown_references);
             self.pending_callback_types = previous_callback;
             let explicitly_bound = self
                 .pending_binding
@@ -146,13 +156,13 @@ impl Analyzer<'_> {
             if let Some(types) = &mut types {
                 types.push(ty);
             }
-            if (signature.is_none() || parameter.is_some_and(|p| p.by_reference))
+            if (unknown_references || parameter.is_some_and(|p| p.by_reference))
                 && let ExpressionKind::Variable(Variable::Named(name)) = &argument.value.kind
             {
                 scope.external_references.insert(name.clone());
                 let definition = scope.get(name).definition;
                 scope.define(name, ValueType::Mixed);
-                if signature.is_none()
+                if unknown_references
                     && definition != Definition::Definite
                     && let Some(variable) = scope.variables.get_mut(name)
                 {
@@ -183,7 +193,9 @@ impl Analyzer<'_> {
                     supplied.insert(index);
                 } else if !variadic {
                     let finding = match kind {
-                        CallKind::Direct => Finding::NamedArgument(label.into(), name.name.clone()),
+                        CallKind::Direct | CallKind::InvalidReceiver => {
+                            Finding::NamedArgument(label.into(), name.name.clone())
+                        }
                         CallKind::Callable => {
                             Finding::KnownNamedArgument(label.into(), name.name.clone())
                         }
