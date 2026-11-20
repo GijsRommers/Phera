@@ -60,12 +60,12 @@ impl Vm {
             .get(rhs.index())
             .and_then(Option::as_ref);
         let (Some(left), Some(right)) = (left, right) else {
-            return Ok(Some(BatchExit::Instruction(Instruction::Binary {
+            return Ok(Some(BatchExit::UndefinedBinary {
                 dst: destination,
                 op: operator,
                 lhs,
                 rhs,
-            })));
+            }));
         };
         let left = left.deref();
         let right = right.deref();
@@ -138,6 +138,38 @@ impl Vm {
         }
         self.set(destination, result?);
         Ok(None)
+    }
+
+    pub(crate) async fn binary_with_undefined_operand(
+        &mut self,
+        op: BinaryOp,
+        destination: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    ) -> Result<(), NativeError> {
+        // Zend emits `right < left` for `left > right` after compiling both
+        // operand expressions in source order.
+        let (left_missing, right_missing) =
+            if matches!(op, BinaryOp::Greater | BinaryOp::GreaterEqual) {
+                let right = self.warn_missing_operand(rhs).await?;
+                (self.warn_missing_operand(lhs).await?, right)
+            } else {
+                let left = self.warn_missing_operand(lhs).await?;
+                (left, self.warn_missing_operand(rhs).await?)
+            };
+        let left = if left_missing {
+            Value::Null
+        } else {
+            self.get(lhs)
+        };
+        let right = if right_missing {
+            Value::Null
+        } else {
+            self.get(rhs)
+        };
+        let value = self.binary_with_strings(op, left, right).await?;
+        self.set(destination, value);
+        Ok(())
     }
 
     /// Append directly to strings, including referenced strings, to retain amortized growth.
