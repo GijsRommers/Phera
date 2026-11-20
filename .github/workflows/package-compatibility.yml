@@ -19,7 +19,6 @@ jobs:
     timeout-minutes: 40
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target/package-build
-      PHERA_PACKAGES_COMPARISON_DIR: ${{ runner.temp }}/phera-package-comparison
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
@@ -43,6 +42,7 @@ jobs:
         run: cargo test -p phera-packages --test network -- --nocapture
         env:
           PHERA_PACKAGES_NETWORK: '1'
+          PHERA_PACKAGES_COMPARISON_DIR: ${{ runner.temp }}/phera-package-comparison
           PHERA_BIN: ${{ github.workspace }}/target/package-build/release/phera
           PHERA_COMPOSER: ${{ runner.temp }}/composer.phar
       - name: Preserve comparison diagnostics
