@@ -122,20 +122,25 @@ impl<'n> Fork<'n> {
     }
 
     /// Copy native backing shared by several PHP objects once for this fork.
-    /// For example, two views of one XML document must keep sharing its copied tree.
+    /// For example, two views of one XML document, and every node object of
+    /// a DOM document, must keep sharing the fork's one copied tree. `copy`
+    /// gets the fork, to copy the objects the backing refers to.
     pub fn shared_native<T: 'static>(
         &mut self,
         source: &Rc<T>,
-        copy: impl FnOnce(&T) -> T,
+        copy: impl FnOnce(&T, &mut Self) -> T,
     ) -> Rc<T> {
         let key = (TypeId::of::<T>(), Rc::as_ptr(source) as usize);
-        let copies = self.native_copies.get_or_insert_with(HashMap::new);
-        if let Some(copied) = copies.get(&key)
+        if let Some(copied) = self
+            .native_copies
+            .as_ref()
+            .and_then(|copies| copies.get(&key))
             && let Ok(value) = copied.copy.clone().downcast::<T>()
         {
             return value;
         }
-        let value = Rc::new(copy(source));
+        let value = Rc::new(copy(source, self));
+        let copies = self.native_copies.get_or_insert_with(HashMap::new);
         copies.insert(
             key,
             NativeCopy {

@@ -30,7 +30,7 @@ pub fn escape<const OP: usize>(
             connection::default_handle(c)?
         };
         let standard = if let Some(state) = state {
-            let lease = state.borrow().lease()?;
+            let lease = connection::lease(&state).await?;
             if matches!(OP, STRING | BYTEA) {
                 connection::run(&lease, |driver| {
                     Box::pin(

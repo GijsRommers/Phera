@@ -16,13 +16,16 @@ use phera_value::{PhpArray, Value};
 pub(crate) struct UnitCache {
     /// Throwable properties and trace entries share the unit's immutable filename.
     trace_file: OnceCell<phera_value::PhpString>,
-    pub(crate) names: Vec<phera_value::PhpString>,
+    /// The file's names, literals and class names as PHP values: made once
+    /// when the file is loaded, never changed, and shared by every fork of
+    /// a snapshot that holds the file.
+    pub(crate) names: Rc<[phera_value::PhpString]>,
     /// What each function symbol of the file was linked to, once its first call
     /// resolved it.
     pub(crate) symbols: RefCell<Vec<Option<crate::calls::pending::LinkedFunction>>>,
     pub(crate) direct_natives: OnceCell<Box<[Cell<Option<crate::calls::sync_native::NativeLink>>]>>,
-    pub(crate) constants: Vec<phera_value::Value>,
-    pub(crate) class_names: Vec<phera_value::Value>,
+    pub(crate) constants: Rc<[phera_value::Value]>,
+    pub(crate) class_names: Rc<[phera_value::Value]>,
     pub(crate) classes: Vec<RefCell<Option<Rc<crate::classes::Class>>>>,
     /// Keyed by immutable unit TypeId and made at first unit use; spelling cannot
     /// change, so scope classification needs no invalidation. Relative types resolve per call.

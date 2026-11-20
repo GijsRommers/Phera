@@ -13,7 +13,7 @@ use phera_extension_api::{Context, NativeResult, Object, value::Fork};
 use crate::document::{Document, ParseError};
 use crate::tree::{Arena, Kind, NodeId};
 
-use super::{DomState, Location, libxml, location};
+use super::{Location, libxml, location};
 
 /// A pinned arena index whose descendants remain available after DOM removes it.
 #[derive(Clone)]
@@ -53,26 +53,10 @@ impl SharedNode {
         self.id() == other.id() && self.location.same_document(&other.location)
     }
 
-    /// Preserve the node index in this request's copy of the shared document.
+    /// Preserve the node index in this request's copy of the shared document:
+    /// the same copy the fork's DOM node objects of that document point into.
     pub fn fork(&self, fork: &mut Fork<'_>) -> Self {
-        let shared = fork.shared_native(&self.location.shared, |state| {
-            let state = state.borrow();
-            std::cell::RefCell::new(DomState {
-                document: Document {
-                    arena: state.document.arena.clone(),
-                    settings: state.document.settings.clone(),
-                },
-                owned: state.owned,
-                wrappers: Default::default(),
-                node_classes: state.node_classes.clone(),
-                class_lists: Default::default(),
-                detached: state.detached.fork(),
-            })
-        });
-        Self::new(Location {
-            shared,
-            id: self.id(),
-        })
+        Self::new(self.location.forked(fork))
     }
 
     pub fn owns_document(&self) -> bool {

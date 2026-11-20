@@ -115,6 +115,41 @@ fn handle(object: &Object) -> Result<Handle, NativeError> {
         .ok_or_else(|| NativeError::error("mysqli_result object is not fully initialized"))
 }
 
+/// The fork hook of `mysqli_result`: a stored result is rows in memory, and
+/// each fork reads its own copy from the same position. A result still
+/// streaming from the server (`MYSQLI_USE_RESULT`) belongs to its session.
+///
+/// ```php
+/// $options = $db->query('SELECT * FROM options');   // stored
+/// Phera\snapshot();
+/// $options->fetch_assoc();   // every request: the first row
+/// ```
+pub fn fork_result(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    _fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    let handle = state
+        .downcast_ref::<Handle>()
+        .ok_or("its built-in state is not initialized")?;
+    let copy = match handle.borrow().as_ref() {
+        None => None,
+        Some(set) if set.stream.is_some() => {
+            return Err("it is still being read from the server (MYSQLI_USE_RESULT); read it to the end or free it before Phera\\snapshot()".into());
+        }
+        Some(set) => Some(ResultSet {
+            rows: set.rows.clone(),
+            position: set.position,
+            last: set.last,
+            field: set.field,
+            unbuffered: set.unbuffered,
+            stream: None,
+            stream_count: set.stream_count,
+        }),
+    };
+    Ok(Box::new(Rc::new(RefCell::new(copy))) as Box<dyn std::any::Any>)
+}
+
 fn closed() -> NativeError {
     NativeError::error("mysqli_result object is already closed")
 }
@@ -129,7 +164,7 @@ pub fn construct(
         let connection = crate::connection::handle(args::object(&arguments, 0))?;
         let (pending, native) = {
             let mut connection = connection.borrow_mut();
-            connection.lease()?;
+            connection.ensure_open()?;
             let pending = connection.pending.take().ok_or_else(|| {
                 NativeError::error("mysqli_result object is not fully initialized")
             })?;

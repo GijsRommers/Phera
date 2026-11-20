@@ -48,7 +48,7 @@ pub struct Column {
 }
 
 /// A result as PHP values, kept by the statement for its fetch calls.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Rows {
     pub columns: Vec<Column>,
     pub values: Vec<Vec<Value>>,

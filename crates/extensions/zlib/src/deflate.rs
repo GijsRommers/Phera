@@ -56,6 +56,19 @@ impl Encoder {
         }
     }
 
+    /// A fresh encoder with the same settings, for a fork of a snapshot,
+    /// while nothing was compressed yet; `None` once compression started.
+    pub(crate) fn unstarted_copy(&self) -> Option<Self> {
+        (!self.started).then(|| {
+            Self::new(
+                self.encoding,
+                self.level,
+                self.window,
+                self.dictionary.clone(),
+            )
+        })
+    }
+
     pub(crate) fn add(&mut self, input: &[u8], flush: Flush) -> Result<Vec<u8>, ()> {
         if input.is_empty() && flush != Flush::Finish {
             return Ok(Vec::new());

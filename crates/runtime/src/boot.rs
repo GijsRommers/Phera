@@ -65,7 +65,7 @@ impl WebWorker {
         tokio::task::spawn_local(async move {
             if let BootReport::Failed(message) = worker.boot(&script, &document_root).await {
                 eprintln!(
-                    "phera: worker {}: booting {} failed: {message}",
+                    "phera: worker {}: DEFECT: {} cannot be snapshotted, its requests run from the top: {message}",
                     worker.index,
                     script.display()
                 );

@@ -20,10 +20,19 @@ pub(super) struct Detached {
 }
 
 impl Detached {
-    pub(super) fn fork(&self) -> Self {
-        Self {
+    /// The copy for a fork: a pin that is alive becomes the fork's copy of
+    /// that pin, which the fork's copy of its holder shares.
+    pub(super) fn forked(&self, fork: &mut phera_extension_api::value::Fork<'_>) -> Self {
+        Detached {
             roots: self.roots.clone(),
-            pins: HashMap::new(),
+            pins: self
+                .pins
+                .iter()
+                .filter_map(|(id, pin)| {
+                    let pin = pin.upgrade()?;
+                    Some((*id, Rc::downgrade(&fork.shared_native(&pin, |_, _| ()))))
+                })
+                .collect(),
         }
     }
 }

@@ -63,7 +63,7 @@ function	enchant_broker_get_dict_path	8.0		omit
 function	enchant_broker_set_dict_path	8.0		omit
 function	enchant_dict_add_to_personal	8.0	use enchant_dict_add() instead	omit
 function	enchant_dict_is_in_session	8.0	use enchant_dict_is_added() instead	omit
-function	finfo_close	8.5	as finfo objects are freed automatically	omit
+function	finfo_close	8.5	as finfo objects are freed automatically	keep
 function	gmstrftime	8.1	use IntlDateFormatter::format() instead	omit
 function	imagedestroy	8.5	as it has no effect since PHP 8.0	keep
 function	intlcal_set	8.4	use IntlCalendar::set(), IntlCalendar::setDate(), or IntlCalendar::setDateTime() instead	omit

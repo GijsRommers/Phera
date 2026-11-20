@@ -336,7 +336,7 @@ changes afterwards. A request's class table points at the shared class. What a
 request can change moves out of the class into a table of the request, indexed
 by the class's number: static properties, static variables of functions and
 methods, and constant values that are objects (enum cases, `new` in
-initializers). This is what opcache's inheritance cache does for PHP. Include
+initializers). Include
 resolution (path to compiled unit) is cached per worker as well. Whether a
 changed file is noticed follows `opcache.validate_timestamps` and
 `opcache.revalidate_freq`; `phera serve --dev` checks on every request. Step 1
@@ -481,6 +481,56 @@ classes yet (see `docs/decisions/`). Measured on a Laravel 13 API request:
 PHP with opcache. Built-in classes fork through `ClassHooks::fork` (SPL,
 dates, closures, reflection, WeakMap and WeakReference, OpenSSL keys);
 generators, fibers, PDO and Redis handles and DOM documents refuse for now.
+
+**Step 1 again, at the cause: linked code as data of the process.** A fork
+skips the boot; it does not make loading and linking a class cheap. That
+cost stays wherever code still loads a class: in every fork for the classes
+the boot never touched, in each boot (and again after every edit under
+`--dev`), on the command line, and in the first request. Measured on
+2026-11-20 with `crates/runtime/examples/engine_cost.rs` (one worker):
+
+| | boot, first worker | boot, later worker | from the top | forked |
+| --- | ---: | ---: | ---: | ---: |
+| Laravel production `/api/hello` | 2,628M | 296M | 325M | 76M |
+| Laravel production `/api/posts` | | | 492M | 246M |
+| Symfony prod `/api/products` | 646M | 73M | 208M | 153M |
+
+In the forked Symfony request about 37% of the time is spent under class
+autoloading: the autoloader's PHP code, path checks, `CodeTable::load` (about
+11%, half of it numbering every name of every file again) and linking (about
+8%). The design, by the rules of 10.1 (flat tables addressed by number, no
+cache in front of a slow structure):
+
+| Structure | Was | Becomes |
+| --- | --- | --- |
+| Name keys | a SipHash map from every lowercased name to a number, built per request and copied per fork | numbered once per process when a file is compiled (`phera_bytecode::name_keys`); the file carries its key arrays; done |
+| Finding a loaded file | a linear scan over the request's files | a flat array indexed by the file revision's process number (`UnitMetadata::id`); done |
+| Function numbering | per request: files numbered in the order the request loads them | per file revision: a function is (file number, local number), so the same function has the same number in every request |
+| Function facts | a vector per request, copied per fork | one immutable array per file revision, shared; a request keeps only what it adds (trait imports, declaring class) |
+| Linked classes | an `Rc` graph per worker (methods in a `HashMap<String, Rc<Method>>`, ancestors in a `HashSet<String>`), linked again by each request that declares the class after the boot | one table of linked classes for the worker (later the process), each entry addressed by a stable index; methods in a flat array in the order PHP lists them, property declarations in a flat array |
+| A request's declared classes | a map from name to `Rc<Class>`, plus per-file resolution slots copied per fork | a bitset over the worker's table of which entries the request has declared, the name's slot, and the request's own statics |
+
+When two requests may use the same entry is a fact of the language, not
+a lookup: a class declaration yields the same linked class when it is the
+same declaration (the same revision of the same file, the same class in
+it) and its parent, its interfaces and its traits are the same linked
+classes, and every class its method signatures name in type checks that
+decide whether a signature is compatible resolves to the same linked
+class. An entry records those identities, as indexes of the same table,
+when it is made. A request that declares the class finds the entry made
+from its declaration whose recorded identities are the entries that
+request has declared under those names; a conditional declaration or a
+`class_alias` only changes which entries a request has declared, so it
+picks another entry or makes a new one, never a wrong one. Warnings that
+linking emits belong to the entry and are emitted again for each request
+that declares it, as a request from the top would see them.
+
+What is still in the way of the table being the process's rather than each
+worker's: a linked class holds PHP values (default property values,
+constant literals, the class name as a `Value`), and values are `Rc`, which
+cannot cross threads. A process table would hold the declaration's literal
+values in the compiled file's own form, and each worker would make its
+`Value`s from them once per entry. Native hooks are `&'static` already.
 
 **Code caches and snapshots: one design.** Three layers hold code, from the
 widest to the narrowest:

@@ -48,7 +48,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let key = self.code.unit_name_key(position.frame.function, name);
-        let Some(found) = self.classes.method_table(class, self.code).get(key) else {
+        let Some(found) = self.classes.method_table(class).get(key) else {
             return Step::Slow;
         };
         let method = found.method;
@@ -142,7 +142,7 @@ impl Machine<'_> {
             },
         };
         let key = self.code.unit_symbol_key(function, method_symbol);
-        let Some(found) = self.classes.method_table(&class, self.code).get(key) else {
+        let Some(found) = self.classes.method_table(&class).get(key) else {
             return Step::Slow;
         };
         let receiver = match (found.method.is_static, relative) {
@@ -235,7 +235,7 @@ impl Machine<'_> {
     ) -> bool {
         scope.is_some_and(|scope| {
             self.classes
-                .method_table(scope, self.code)
+                .method_table(scope)
                 .private(key)
                 .is_some_and(|found| !Rc::ptr_eq(found.method, method))
         })

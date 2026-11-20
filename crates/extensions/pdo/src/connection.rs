@@ -95,6 +95,41 @@ impl Session {
     }
 }
 
+/// The fork hook of `PDO`: each fork's copy borrows its own session on
+/// first use (see [`crate::pool::Lease::forked`]). Laravel and Doctrine
+/// connect after `Phera\snapshot()` anyway; WordPress plugins and plain
+/// scripts often connect before it.
+pub fn fork_session(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    let session = state
+        .downcast_ref::<Rc<Session>>()
+        .ok_or("its built-in state is not initialized")?;
+    if session.transaction.get() {
+        return Err("a transaction is open on it (beginTransaction()); commit it before Phera\\snapshot(), or connect after the call".into());
+    }
+    let driver = session
+        .driver
+        .try_lock()
+        .map_err(|_| "it is busy with an operation".to_owned())?
+        .forked()?;
+    let mut attributes = session.attributes.borrow().clone();
+    attributes.statement_class = attributes.statement_class.forked(fork);
+    let copy = Session {
+        driver: Mutex::new(driver),
+        name: session.name,
+        version: session.version.clone(),
+        attributes: RefCell::new(attributes),
+        error: RefCell::new(session.error.borrow().clone()),
+        last_error: RefCell::new(session.last_error.borrow().clone()),
+        transaction: Cell::new(false),
+        statement_sequence: Cell::new(session.statement_sequence.get()),
+    };
+    Ok(Box::new(Rc::new(copy)) as Box<dyn std::any::Any>)
+}
+
 pub fn session(this: Option<&Rc<Object>>) -> Result<Rc<Session>, NativeError> {
     let object = this.ok_or_else(|| NativeError::error("PDO object is missing"))?;
     object
