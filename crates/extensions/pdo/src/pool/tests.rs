@@ -66,7 +66,7 @@ impl TestPool {
 
 /// A connection outside every pool, to watch or kill the pooled ones.
 async fn direct(name: &str) -> Lease {
-    acquire(&dsn(name), USER, USER, Policy::Unpooled)
+    acquire(&dsn(name), USER, USER, Policy::Unpooled, false)
         .await
         .unwrap()
 }
@@ -128,15 +128,15 @@ async fn process_pool_live_contract() {
         threads::slow_query_yields_to_another_connection(name).await;
         let mut other_dsn = dsn(name);
         other_dsn.fields.insert("host".into(), "localhost".into());
-        let mut first = acquire(&dsn(name), USER, USER, Policy::Pooled)
+        let mut first = acquire(&dsn(name), USER, USER, Policy::Pooled, false)
             .await
             .unwrap();
-        let mut other = acquire(&other_dsn, USER, USER, Policy::Pooled)
+        let mut other = acquire(&other_dsn, USER, USER, Policy::Pooled, false)
             .await
             .unwrap();
         assert_ne!(id(&mut first, name).await, id(&mut other, name).await);
         assert!(
-            acquire(&dsn(name), USER, "incorrect", Policy::Pooled)
+            acquire(&dsn(name), USER, "incorrect", Policy::Pooled, false)
                 .await
                 .is_err()
         );

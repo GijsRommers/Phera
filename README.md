@@ -243,10 +243,11 @@ another worker is waiting for a turn. `PHERA_PDO_POOL_IDLE_SECONDS` (60),
 `PHERA_PDO_POOL_LIFETIME_SECONDS` (1800) and
 `PHERA_PDO_POOL_WAIT_SECONDS` (30) control the pool's timeouts.
 `PHERA_PDO_IO_THREADS` is accepted for compatibility and has no effect.
-Unpooled connections, including PDO with `PHERA_ATTR_POOL => false`
-and nonpersistent mysqli and pgsql connections, are outside the pool limit.
-Connections opened during a snapshot boot replay their session changes after
-each fork opens its own socket on first use.
+Unpooled connections, including PDO with `PHERA_ATTR_POOL => false` and
+nonpersistent mysqli and pgsql connections opened by a request, are outside
+the pool limit. Each fork reconnects a boot connection on first use and
+replays the boot's session changes. The fork can borrow a pooled socket for
+a nonpersistent mysqli or pgsql connection opened during boot.
 
 ### Sodium
 
