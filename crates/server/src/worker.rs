@@ -3,6 +3,7 @@
 
 use std::io;
 use std::net::{SocketAddr, TcpListener as StdListener};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use hyper_util::server::graceful::GracefulShutdown;
@@ -13,6 +14,7 @@ use tokio::sync::{Semaphore, watch};
 use crate::config::{ConnectionLimits, ServerConfig};
 use crate::connection::handle_connection;
 use crate::handler::HandlerFactory;
+use crate::response_task::ConnectionWork;
 
 const BACKLOG: i32 = 1024;
 const ACCEPT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(50);
@@ -107,6 +109,7 @@ pub(super) fn run(
         let limits = ConnectionLimits::from(&config);
         let free_slots = Arc::new(Semaphore::new(config.max_connections_per_worker.max(1)));
         let graceful = GracefulShutdown::new();
+        let detached = Rc::new(watch::channel(()).0);
         loop {
             // A slot first, then a connection: beyond the limit, clients
             // wait in the operating system's queue instead of being
@@ -122,10 +125,13 @@ pub(super) fn run(
                     Ok((stream, peer)) => {
                         let handler = handler.clone();
                         let watcher = graceful.watcher();
+                        let work = Rc::new(ConnectionWork {
+                            _slot: slot,
+                            detached: detached.clone(),
+                        });
                         tokio::task::spawn_local(async move {
-                            handle_connection(stream, peer, local_addr, handler, watcher, limits)
+                            handle_connection(stream, peer, local_addr, handler, watcher, limits, work)
                                 .await;
-                            drop(slot);
                         });
                     }
                     // A client that hung up before we accepted it is normal.
@@ -142,6 +148,10 @@ pub(super) fn run(
         drop(listener);
         // Finish in-flight requests and close idle keep-alive connections;
         // give up if something (a stuck upload) refuses to leave in time.
-        let _ = tokio::time::timeout(config.shutdown_timeout, graceful.shutdown()).await;
+        let _ = tokio::time::timeout(config.shutdown_timeout, async {
+            graceful.shutdown().await;
+            detached.closed().await;
+        })
+        .await;
     }));
 }

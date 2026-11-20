@@ -34,6 +34,7 @@ impl Vm {
             }
             "fatal_error_backtraces" => self.error_handlers.fatal_error_backtraces = boolean(bytes),
             "max_execution_time" => self.execution_time.restart(integer(bytes)),
+            "implicit_flush" => self.output_writer.set_implicit_flush(boolean(bytes)),
             "opcache.validate_timestamps"
             | "opcache.revalidate_freq"
             | "opcache.revalidate_path" => {

@@ -4,6 +4,7 @@ use phera_bytecode::Reg;
 use phera_extension_api::{NativeError, RequestState};
 use phera_value::to_php_string;
 
+use crate::web_output::ResponseOutput;
 use crate::{OutputSink, Vm, diagnostics::SourceLocation, output_buffer::Buffers};
 
 impl Vm {
@@ -30,6 +31,7 @@ pub(crate) struct Output {
     queued_origin: Option<SourceLocation>,
     pub(crate) chunk_caller: Option<&'static str>,
     queued: Vec<u8>,
+    pub(crate) response: Option<ResponseOutput>,
 }
 
 impl Output {
@@ -46,6 +48,7 @@ impl Output {
             queued_origin: None,
             chunk_caller: None,
             queued: Vec::new(),
+            response: None,
         }
     }
 
@@ -58,14 +61,26 @@ impl Output {
     }
 
     /// Forward first, then retain the bytes, matching the existing sink observation order.
-    pub(crate) fn write(&mut self, captured: &mut Vec<u8>, bytes: &[u8]) {
+    fn write(&mut self, captured: &mut Vec<u8>, bytes: &[u8]) -> bool {
         if let Some(sink) = &mut self.sink {
             sink.write(bytes);
             if self.implicit_flush {
                 sink.flush();
             }
         }
+        if let Some(response) = &mut self.response {
+            if response.is_ended() {
+                return false;
+            }
+            let flush = self.implicit_flush || response.writes_immediately();
+            if flush {
+                response.pending = true;
+            }
+            captured.extend_from_slice(bytes);
+            return flush;
+        }
         captured.extend_from_slice(bytes);
+        false
     }
 }
 
@@ -117,8 +132,12 @@ impl Vm {
         if self.output_writer.origin.is_none() {
             self.begin_output(bytes);
         } else {
-            self.output_writer.write(&mut self.output, bytes);
+            self.write_output(bytes);
         }
+    }
+
+    fn write_output(&mut self, bytes: &[u8]) {
+        self.pending_callbacks |= self.output_writer.write(&mut self.output, bytes);
     }
 
     #[cold]
@@ -132,12 +151,18 @@ impl Vm {
         } else {
             self.prepare_response_headers();
             self.output_writer.origin = Some(self.location());
-            self.output_writer.write(&mut self.output, bytes);
+            self.write_output(bytes);
         }
     }
 
     pub(crate) fn output_pending(&self) -> bool {
-        self.headers_pending() || self.output_writer.buffers.pending.is_some()
+        self.headers_pending()
+            || self.output_writer.buffers.pending.is_some()
+            || self
+                .output_writer
+                .response
+                .as_ref()
+                .is_some_and(|response| response.pending)
     }
 
     pub(crate) fn headers_pending(&self) -> bool {
@@ -145,6 +170,14 @@ impl Vm {
     }
 
     pub(crate) async fn flush_transport(&mut self) -> Result<(), NativeError> {
+        self.commit_response_headers().await?;
+        if let Some(sink) = &mut self.output_writer.sink {
+            sink.flush();
+        }
+        self.flush_response_body().await
+    }
+
+    pub(crate) async fn commit_response_headers(&mut self) -> Result<(), NativeError> {
         if self.output_writer.web && self.output_writer.origin.is_none() {
             if self.output_writer.queued_origin.is_none() {
                 self.output_writer.queued_origin = Some(SourceLocation {
@@ -153,9 +186,6 @@ impl Vm {
                 });
             }
             self.finish_headers().await?;
-        }
-        if let Some(sink) = &mut self.output_writer.sink {
-            sink.flush();
         }
         Ok(())
     }
@@ -215,7 +245,7 @@ impl Vm {
             self.output_writer.origin = origin.or_else(|| Some(self.location()));
         }
         if !bytes.is_empty() {
-            self.output_writer.write(&mut self.output, bytes);
+            self.write_output(bytes);
         }
     }
 }

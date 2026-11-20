@@ -182,10 +182,12 @@ mod types;
 mod unit_caches;
 mod unpacking;
 mod unsupported_items;
+mod web_output;
 
 pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
 };
+pub use web_output::WebOutput;
 
 /// Receives each PHP output write while Vm also retains its output buffer.
 pub trait OutputSink {
@@ -472,6 +474,7 @@ impl Vm {
         self.finish_request(end).await;
         self.finish_request_headers().await;
         self.finish_resource_finalizers().await;
+        self.complete_streamed_response().await;
         self.status
     }
 

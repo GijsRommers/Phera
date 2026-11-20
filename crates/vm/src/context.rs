@@ -45,6 +45,14 @@ impl Context for Vm {
         self.out(bytes)
     }
 
+    fn connection_status(&self) -> i64 {
+        i64::from(self.client_aborted()) | (i64::from(self.timed_out()) << 1)
+    }
+
+    fn finish_response(&mut self) -> LocalFuture<'_, NativeResult> {
+        Box::pin(Vm::finish_response_early(self))
+    }
+
     fn backtrace(&mut self, objects: bool, arguments: bool, limit: i32) -> Value {
         Value::from(self.capture_trace(phera_value::PhpArray::new(), objects, arguments, limit))
     }

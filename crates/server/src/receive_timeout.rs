@@ -2,6 +2,7 @@
 //! the body so a client cannot renew the base allowance with each read.
 
 use std::cell::RefCell;
+use std::future::Future;
 use std::io::{self, IoSlice};
 use std::rc::Rc;
 use std::task::{Context, Poll};
@@ -14,13 +15,17 @@ use std::time::{Duration, Instant as StdInstant};
 
 use hyper::rt::{Sleep, Timer};
 use hyper_util::rt::TokioTimer;
-use tokio::time::Instant;
+use tokio::time::{Instant, Sleep as TokioSleep};
 
 /// Hyper owns the header timer. Remember its start for the body reader.
 #[derive(Clone, Default)]
 pub(crate) struct HeadTimer(Arc<Mutex<Option<Instant>>>);
 
 impl HeadTimer {
+    pub(crate) fn has_started(&self) -> bool {
+        self.0.lock().is_ok_and(|start| start.is_some())
+    }
+
     pub(crate) fn started(&self) -> Instant {
         self.0
             .lock()
@@ -101,5 +106,97 @@ impl AsyncWrite for TimeoutStream {
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut *self.0.borrow_mut()).poll_shutdown(cx)
+    }
+}
+
+/// Hyper starts its HTTP/1 head timer after it identifies the protocol. Give
+/// the protocol preface its own deadline so a silent peer still times out.
+pub(crate) struct PrefaceTimeout {
+    stream: TimeoutStream,
+    probe: Option<Preface>,
+}
+
+struct Preface {
+    deadline: Instant,
+    delay: Option<Pin<Box<TokioSleep>>>,
+    matched: usize,
+}
+
+impl PrefaceTimeout {
+    pub(crate) fn new(stream: TimeoutStream, timeout: Duration) -> Self {
+        Self {
+            stream,
+            probe: Some(Preface {
+                deadline: Instant::now() + timeout,
+                delay: None,
+                matched: 0,
+            }),
+        }
+    }
+}
+
+impl AsyncRead for PrefaceTimeout {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let original_len = buffer.filled().len();
+        let result = Pin::new(&mut self.stream).poll_read(cx, buffer);
+        let Some(probe) = &mut self.probe else {
+            return result;
+        };
+        match &result {
+            Poll::Pending => {
+                let delay = probe
+                    .delay
+                    .get_or_insert_with(|| Box::pin(tokio::time::sleep_until(probe.deadline)));
+                if delay.as_mut().poll(cx).is_ready() {
+                    return Poll::Ready(Err(io::ErrorKind::TimedOut.into()));
+                }
+            }
+            Poll::Ready(Ok(())) => {
+                const HTTP2: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+                let bytes = &buffer.filled()[original_len..];
+                let rest = &HTTP2[probe.matched..];
+                if bytes.is_empty() || bytes.len() >= rest.len() || !rest.starts_with(bytes) {
+                    self.probe = None;
+                } else {
+                    probe.matched += bytes.len();
+                }
+            }
+            Poll::Ready(Err(_)) => {}
+        }
+        result
+    }
+}
+
+impl AsyncWrite for PrefaceTimeout {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_write(cx, buffer)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffers: &[IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.stream).poll_write_vectored(cx, buffers)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.stream.is_write_vectored()
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.stream).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.stream).poll_shutdown(cx)
     }
 }

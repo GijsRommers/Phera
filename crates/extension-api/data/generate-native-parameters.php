@@ -123,6 +123,10 @@ foreach (explode("\n", git('ls-tree', '-r', '--name-only', $commit)) as $file) {
         continue;
     }
     foreach (signatures(git('show', "$commit:$file")) as [$name, $parameters, $line]) {
+        if ((str_starts_with($file, 'sapi/fpm/') || str_starts_with($file, 'sapi/litespeed/'))
+            && !in_array($name, ['fastcgi_finish_request', 'litespeed_finish_request'], true)) {
+            continue;
+        }
         $namespace = str_contains($name, '\\')
             ? substr($name, 0, strrpos($name, '\\'))
             : '';
@@ -200,7 +204,7 @@ function is_runtime_stub(string $file): bool {
     }
     $parts = explode('/', $file);
     return in_array($parts[0], ['Zend', 'main'], true)
-        || ($parts[0] === 'sapi' && $parts[1] === 'cli')
+        || ($parts[0] === 'sapi' && in_array($parts[1], ['cli', 'fpm', 'litespeed'], true))
         || ($parts[0] === 'ext' && in_array($parts[1], [
             'bcmath', 'ctype', 'curl', 'date', 'dom', 'filter', 'gmp', 'hash', 'iconv', 'intl',
             'json', 'libxml', 'mbstring', 'mysqli', 'openssl', 'pcntl', 'pcre', 'pdo', 'pdo_mysql',

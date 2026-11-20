@@ -52,6 +52,16 @@ pub trait Context {
     /// Appends to the request's output, as `echo` does.
     fn write(&mut self, bytes: &[u8]);
 
+    /// PHP's connection status, a bitmask of client abort and script timeout.
+    fn connection_status(&self) -> i64 {
+        0
+    }
+
+    /// Finish the HTTP response while the PHP request keeps running.
+    fn finish_response(&mut self) -> LocalFuture<'_, NativeResult> {
+        Box::pin(async { Ok(Value::Bool(false)) })
+    }
+
     /// Snapshot PHP callers without retaining references to live parameter slots.
     fn backtrace(&mut self, _objects: bool, _arguments: bool, _limit: i32) -> Value {
         Value::from(PhpArray::new())

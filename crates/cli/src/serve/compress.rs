@@ -111,7 +111,7 @@ pub(crate) async fn php_response(
     let content_type = text_header(&response, "content-type");
     let length = match &response.body {
         Body::Bytes(bytes) => bytes.len(),
-        Body::File(_) => return response,
+        Body::File(_) | Body::Stream(_) => return response,
     };
     if !has_whole_plain_body(&response) || !is_worthwhile(&content_type, length as u64) {
         return response;
@@ -250,6 +250,7 @@ mod tests {
         match &response.body {
             Body::Bytes(bytes) => bytes.len(),
             Body::File(file) => file.length as usize,
+            Body::Stream(_) => panic!("expected a buffered test response"),
         }
     }
 

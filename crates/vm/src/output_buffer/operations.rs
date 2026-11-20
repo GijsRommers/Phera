@@ -179,6 +179,14 @@ impl Vm {
         if self.headers_pending() {
             self.finish_headers().await?;
         }
+        if self
+            .output_writer
+            .response
+            .as_ref()
+            .is_some_and(|response| response.pending)
+        {
+            self.flush_response_body().await?;
+        }
         Ok(())
     }
 
@@ -297,7 +305,14 @@ impl Vm {
         match replacement {
             Ok(bytes) => {
                 if !operation.discards() {
-                    self.out_below(index, &bytes.unwrap_or(original));
+                    let bytes = bytes.unwrap_or(original);
+                    self.out_below(index, &bytes);
+                    if index == 0
+                        && !bytes.is_empty()
+                        && matches!(operation, Operation::Flush | Operation::EndFlush)
+                    {
+                        self.queue_response_flush();
+                    }
                 }
                 deprecation
             }

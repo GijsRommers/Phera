@@ -215,10 +215,9 @@ certificates, speaks HTTP/2 and HTTP/3 to browsers, and sends plain
 HTTP/1.1 to a container. So the work that matters most is being a good
 upstream, not being an edge server.
 
-The list below is the order of work. Built so far (2026-11-18): steps 1,
-2, 3 and 8, and of step 5 the platform's `PORT`, the health path and the
-graceful end on `SIGTERM`. The server speaks HTTP/1.1 with keep-alive and
-runs one worker per core.
+The server speaks HTTP/1.1 with keep-alive and cleartext HTTP/2 with
+prior knowledge on the same port. It runs one worker per core. The
+steps below describe what the server does and what remains planned.
 
 1. **Limits and timeouts** (5.1). A proxy does not protect a worker from a
    script that never ends or a body that is too large.
@@ -248,9 +247,9 @@ runs one worker per core.
    per worker and every request starts from that state. Because a request
    works on a fork, it cannot leak state into the next one, which is the
    known risk of those worker modes.
-7. **Finishing early.** `fastcgi_finish_request()` (send the response, keep
-   working), which Symfony calls when it exists, and Early Hints (103),
-   which the proxy passes on.
+7. **Finishing early.** `fastcgi_finish_request()` sends the response and
+   keeps the script running. Symfony calls it when available. Early Hints
+   (103) remain planned.
 8. **Compression** of PHP's responses (gzip, zstd, brotli) where the proxy
    does not compress.
 9. **Operations.** A `phera.toml`, an access log, metrics, reloading code
@@ -267,6 +266,24 @@ Not planned: speaking FastCGI, that is, being a drop-in for PHP-FPM behind
 an existing nginx `fastcgi_pass`. A proxy reaches Phera over HTTP like any
 other upstream. This can be revisited if someone needs to keep an nginx
 configuration unchanged.
+
+#### Streaming PHP output
+
+`flush()` commits the response head, even if there are no body bytes. PHP
+output buffers keep their nesting rules. When `ob_flush()` or
+`ob_end_flush()` releases bytes to the transport, the server sends them.
+`ob_implicit_flush()` does the same for each write to the transport.
+Hyper writes HTTP/1.1 chunks or HTTP/2 DATA frames. The streaming body has
+one queued chunk of at most 64 KiB and waits asynchronously for room.
+The normal buffered path returns a body with its exact length.
+
+The connection polls PHP directly until the response starts. On an explicit
+handoff it moves pending PHP work into a task on the same worker. The task
+keeps its original deadline and takes part in graceful shutdown even if the
+socket has gone away. PHP sees a disconnect on the next transport write.
+With `ignore_user_abort(false)`, PHP stops and runs its shutdown functions.
+`fastcgi_finish_request()` finalizes PHP's output buffers and ends the body
+while the task continues. Output after that point has no recipient.
 
 #### PHP diagnostics
 

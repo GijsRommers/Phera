@@ -4,6 +4,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 
+use crate::ResponseWriter;
 use crate::request::Request;
 use crate::response::Response;
 
@@ -14,6 +15,15 @@ use crate::response::Response;
 /// returned future borrows the handler and is polled on that same thread.
 pub trait Handler: 'static {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>>;
+
+    /// A handler can publish headers or the whole response before it returns.
+    fn handle_with_response(
+        &self,
+        request: Request,
+        _writer: ResponseWriter,
+    ) -> Pin<Box<dyn Future<Output = Response> + '_>> {
+        self.handle(request)
+    }
 
     /// Runs once on the worker's thread before it accepts connections, for
     /// work no request should wait for (booting an application). Clients

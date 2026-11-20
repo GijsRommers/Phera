@@ -1,4 +1,4 @@
-//! The Phera HTTP server: HTTP/1.1 on Tokio, thread per core.
+//! The Phera HTTP server: HTTP/1 and HTTP/2 on Tokio, thread per core.
 //!
 //! One worker thread per core. Each worker runs its own current-thread
 //! Tokio runtime with a `LocalSet` and its own listening socket bound with
@@ -21,6 +21,8 @@ pub mod handler;
 mod receive_timeout;
 pub mod request;
 pub mod response;
+mod response_stream;
+mod response_task;
 mod server;
 mod shutdown;
 mod worker;
@@ -29,4 +31,5 @@ pub use config::ServerConfig;
 pub use handler::{Handler, HandlerFactory};
 pub use request::{HttpVersion, Request};
 pub use response::{Body, FileSlice, Response};
+pub use response_stream::{ResponseWriter, StreamBody, StreamWriter};
 pub use server::{Server, ServerHandle};

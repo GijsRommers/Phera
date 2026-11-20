@@ -13,6 +13,7 @@ mod forwarded;
 mod precompressed;
 mod site;
 mod static_file;
+mod web_output;
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -22,7 +23,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use phera_runtime::{HttpRequest, HttpResponse, Runtime, WebWorker};
-use phera_server::{Handler, HandlerFactory, HttpVersion, Request, Response, Server, ServerConfig};
+use phera_server::{
+    Handler, HandlerFactory, HttpVersion, Request, Response, ResponseWriter, Server, ServerConfig,
+};
 
 use crate::arguments::ServeOptions;
 use forwarded::TrustedProxies;
@@ -248,7 +251,15 @@ struct SiteHandler {
 
 impl Handler for SiteHandler {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>> {
-        Box::pin(self.respond(request))
+        Box::pin(self.respond(request, None))
+    }
+
+    fn handle_with_response(
+        &self,
+        request: Request,
+        writer: ResponseWriter,
+    ) -> Pin<Box<dyn Future<Output = Response> + '_>> {
+        Box::pin(self.respond(request, Some(writer)))
     }
 
     fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
@@ -286,7 +297,7 @@ impl SiteHandler {
         }
     }
 
-    async fn respond(&self, request: Request) -> Response {
+    async fn respond(&self, request: Request, writer: Option<ResponseWriter>) -> Response {
         // A platform asks "are you alive?" every few seconds. The answer
         // must not depend on the application, its database or a free worker
         // slot in PHP.
@@ -310,14 +321,21 @@ impl SiteHandler {
         .await;
         match found {
             Ok(Found::Script(script)) => {
-                let response = self
-                    .runtime
-                    .handle_request(
-                        &script,
-                        self.site.document_root(),
-                        to_runtime(request, &self.trusted_proxies),
-                    )
-                    .await;
+                let request = to_runtime(request, &self.trusted_proxies);
+                let root = self.site.document_root();
+                let response = match writer {
+                    Some(writer) => {
+                        self.runtime
+                            .handle_streaming_request(
+                                &script,
+                                root,
+                                request,
+                                web_output::HttpOutput::new(writer),
+                            )
+                            .await
+                    }
+                    None => self.runtime.handle_request(&script, root, request).await,
+                };
                 let response = from_runtime(response);
                 if self.compress {
                     compress::php_response(response, accept_encoding.as_deref()).await
@@ -365,6 +383,7 @@ fn to_runtime(mut request: Request, trusted_proxies: &TrustedProxies) -> HttpReq
         protocol: match request.version {
             HttpVersion::Http10 => "HTTP/1.0",
             HttpVersion::Http11 => "HTTP/1.1",
+            HttpVersion::Http2 => "HTTP/2.0",
         }
         .to_string(),
         headers: request.headers,

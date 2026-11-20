@@ -33,7 +33,7 @@ use std::sync::Arc;
 
 use phera_bytecode::CompiledUnit;
 use phera_dotenv::Environment;
-use phera_ext_http::{RequestHeaders, ResponseHead, Sapi, UploadedFiles};
+use phera_ext_http::{RequestHeaders, Sapi, UploadedFiles};
 use phera_ext_standard::environment::{RequestEnvironment, php_array};
 use phera_extension_api::Registry;
 use phera_value::{PhpArray, Value};
@@ -44,7 +44,8 @@ use worker_code_cache::{RequestCodeCache, WorkerCodeCache};
 
 pub use boot::BootReport;
 pub use error::RuntimeError;
-pub use http::{HttpRequest, HttpResponse};
+pub use http::{HttpRequest, HttpResponse, web_output::WebOutput};
+pub use phera_ext_http::ResponseHead;
 pub use phera_vm::OutputSink;
 pub use preload::PreloadSummary;
 pub use snapshots::remembered as snapshot_remembered;
@@ -105,7 +106,21 @@ impl WebWorker {
         request: HttpRequest,
     ) -> HttpResponse {
         self.runtime
-            .handle_web_request(self, script, document_root, request)
+            .handle_web_request(self, script, document_root, request, None)
+            .await
+    }
+
+    /// Run a request with a transport that accepts an early response.
+    pub async fn handle_streaming_request(
+        &self,
+        script: &Path,
+        document_root: &Path,
+        request: HttpRequest,
+        output: impl WebOutput + 'static,
+    ) -> HttpResponse {
+        let transport = Box::new(http::web_output::Transport(output));
+        self.runtime
+            .handle_web_request(self, script, document_root, request, Some(transport))
             .await
     }
 }
@@ -356,6 +371,7 @@ impl Runtime {
         script: &Path,
         document_root: &Path,
         request: HttpRequest,
+        transport: Option<Box<dyn phera_vm::WebOutput>>,
     ) -> HttpResponse {
         let code = Rc::new(RequestCodeCache::new(worker.code.clone()));
         let compiled = match self.entry_unit(&code, script).await {
@@ -428,6 +444,9 @@ impl Runtime {
             protocol: request.protocol,
         };
         vm.prepare_web_headers_with(ResponseHead::prepare, ResponseHead::set_error_status);
+        if let Some(transport) = transport {
+            vm.set_web_output(transport);
+        }
         vm.configure_web_diagnostics(self.web_development, RequestHeaders::request_line);
         *vm.state_mut().get_or_default::<UploadedFiles>() = UploadedFiles::new(uploads);
         phera_ext_streams::set_request(
