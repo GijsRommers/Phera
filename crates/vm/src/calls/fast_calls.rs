@@ -293,6 +293,7 @@ impl Machine<'_> {
                     && self.accepts_argument(function, index, &value)
             }
             PreparedCallee::General => self.general_accepts(index),
+            PreparedCallee::Native(id) => self.native_accepts(id, index),
             PreparedCallee::Constructed => false,
         };
         if !accepted {
@@ -343,6 +344,16 @@ impl Machine<'_> {
         })
     }
 
+    /// The same for a lean native call: a by-value parameter that is not
+    /// variadic. Its type is the function's to check, at the call.
+    #[inline(never)]
+    fn native_accepts(&self, id: phera_extension_api::NativeId, index: usize) -> bool {
+        self.registry
+            .function_at(id)
+            .and_then(|entry| entry.params.get(index))
+            .is_some_and(|parameter| !parameter.by_ref && !parameter.variadic)
+    }
+
     /// `Call` of a prepared function, method or closure written in PHP whose
     /// arguments all arrived positionally and passed their checks: push the
     /// frame. `$this` and a closure's captures are in the window already.
@@ -357,6 +368,8 @@ impl Machine<'_> {
             PreparedCallee::General => {
                 return self.finish_direct_method(position, destination, call);
             }
+            // The batch loop runs it (`Vm::call_lean_native`).
+            PreparedCallee::Native(_) => return Step::Slow,
         };
         let facts = self.code.facts(function);
         let sent = call.sent as usize;

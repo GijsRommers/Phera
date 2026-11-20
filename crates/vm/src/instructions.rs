@@ -32,6 +32,7 @@ impl Vm {
         if self.object_ids.has_due() && self.release_and_store(instruction) {
             return Ok(None);
         }
+        self.describe_native_call(&instruction);
         match instruction {
             I::AssignPathFromLocal { .. }
             | I::MakeReference { .. }

@@ -41,6 +41,7 @@ pub(crate) mod frame_view;
 mod further_steps;
 pub(crate) mod magic_dispatch;
 mod native;
+mod native_calls;
 mod native_defaults;
 pub(crate) mod native_frames;
 mod native_function;

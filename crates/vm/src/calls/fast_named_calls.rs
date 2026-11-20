@@ -17,11 +17,15 @@
 
 use phera_bytecode::SymbolId;
 
-use crate::calls::call_state::CallTarget;
+use phera_extension_api::{NativeFn, NativeId};
+
+use crate::calls::call_state::{CallTarget, Callee};
+use crate::calls::callback_binding::ArgumentBinding;
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::pending::{LinkedFunction, prepare_general};
 use crate::calls::php_windows::push_php_call;
 use crate::calls::prepared_call::CallKind;
+use crate::calls::prepared_call::{PreparedCall, PreparedCallee};
 use crate::unit_caches::CachedSite;
 
 impl Machine<'_> {
@@ -35,6 +39,21 @@ impl Machine<'_> {
         match linked {
             LinkedFunction::Php(function) => {
                 push_php_call(self.code, parts, function, CallKind::Function, []);
+            }
+            // A synchronous native function linked from a name: a lean
+            // record (see `calls::native_calls`).
+            LinkedFunction::Other(Callee {
+                argument_binding: ArgumentBinding::Caller,
+                target: CallTarget::Native(entry),
+                ..
+            }) if matches!(entry.handler, NativeFn::Sync(_)) && entry.id != NativeId::NONE => {
+                let (stack, registers) = parts;
+                let base = registers.len();
+                registers.grow_to(base + entry.params.len().max(1));
+                stack.push_call(
+                    PreparedCall::new(PreparedCallee::Native(entry.id), base),
+                    None,
+                );
             }
             LinkedFunction::Other(callee)
                 if matches!(

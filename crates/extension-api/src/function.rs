@@ -296,6 +296,20 @@ pub struct FunctionEntry {
     pub name: &'static str,
     pub params: &'static [Param],
     pub handler: NativeFn,
+    /// Its position in the registry's list of functions, given when it is
+    /// registered (see [`crate::Registry::function_at`]).
+    pub id: NativeId,
+}
+
+/// The number of a registered native function: its index in the registry's
+/// flat list, so that a prepared call can name the function in four bytes
+/// and find it again without hashing its name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeId(pub u32);
+
+impl NativeId {
+    /// A function not (yet) in a registry.
+    pub const NONE: Self = Self(u32::MAX);
 }
 
 impl FunctionEntry {
@@ -304,6 +318,7 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Sync(handler),
+            id: NativeId::NONE,
         }
     }
 
@@ -317,6 +332,7 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::DeprecatedSync(handler),
+            id: NativeId::NONE,
         }
     }
 
@@ -329,6 +345,7 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::Async(handler),
+            id: NativeId::NONE,
         }
     }
 

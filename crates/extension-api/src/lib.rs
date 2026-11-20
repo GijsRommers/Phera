@@ -36,7 +36,7 @@ pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, Reques
 mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{
-    AsyncFn, FunctionEntry, NativeFn, NativeNumericParameter, Param, ParamType, SyncFn,
+    AsyncFn, FunctionEntry, NativeFn, NativeId, NativeNumericParameter, Param, ParamType, SyncFn,
     SyncSelector, deprecated_method,
 };
 pub use object_handlers::{

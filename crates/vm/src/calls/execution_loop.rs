@@ -90,6 +90,8 @@ pub(super) struct Machine<'a> {
     pub(super) frame_limit: usize,
     /// The request's object ids, which say whether a destructor is due.
     pub(super) ids: &'a phera_value::ObjectIds,
+    /// The native functions, for the parameters of a lean native call.
+    pub(super) registry: &'a phera_extension_api::Registry,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -136,6 +138,7 @@ impl Vm {
                 stop,
                 frame_limit: self.frame_limit,
                 ids: &self.object_ids,
+                registry: &self.registry,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
@@ -159,7 +162,7 @@ impl Vm {
                 // general handler would only find that out and come here.
                 Instruction::Call { dst, .. } if !TRACK_GENERATORS && self.calls_plain_native() => {
                     *work += 1;
-                    self.call_native(dst)
+                    self.call_lean_native(dst)
                 }
                 _ => self.execute::<TRACK_GENERATORS>(instruction, stop, work),
             };
@@ -185,11 +188,14 @@ impl Vm {
     /// argument expansion first (a magic `__call` does).
     #[inline]
     fn calls_plain_native(&self) -> bool {
+        use crate::calls::prepared_call::PreparedCallee;
         self.call_stack.last_call().is_some_and(|call| {
-            call.callee == crate::calls::prepared_call::PreparedCallee::General
-                && !call
-                    .flags
-                    .contains(crate::calls::prepared_call::CallFlags::MAGIC)
+            matches!(
+                call.callee,
+                PreparedCallee::General | PreparedCallee::Native(_)
+            ) && !call
+                .flags
+                .contains(crate::calls::prepared_call::CallFlags::MAGIC)
         })
     }
 }

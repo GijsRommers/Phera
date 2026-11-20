@@ -228,7 +228,12 @@ impl Vm {
         result
     }
 
-    fn accepts_sync_call(&self, entry: FunctionEntry, base: usize, count: usize) -> bool {
+    pub(crate) fn accepts_sync_call(
+        &self,
+        entry: FunctionEntry,
+        base: usize,
+        count: usize,
+    ) -> bool {
         let slots = self.registers.window(base, count);
         slots.len() == count
             && accepts(entry.params, slots)
@@ -236,7 +241,7 @@ impl Vm {
                 || self.registry.object_handler(entry.name).is_none())
     }
 
-    fn invoke_sync_function(
+    pub(crate) fn invoke_sync_function(
         &mut self,
         name: &'static str,
         handler: SyncFn,

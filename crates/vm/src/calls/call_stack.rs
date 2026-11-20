@@ -4,7 +4,7 @@ use phera_extension_api::NativeError;
 
 use crate::calls::frame::Frame;
 use crate::calls::frame_extras::FrameExtras;
-use crate::calls::prepared_call::{CallDetails, CallFlags, PreparedCall};
+use crate::calls::prepared_call::{CallDetails, CallFlags, PreparedCall, PreparedCallee};
 
 pub(crate) const MAX_CALLBACK_DEPTH: usize = 32;
 
@@ -178,6 +178,16 @@ impl CallStack {
             self.details.push(details);
         }
         self.preparing.push(call);
+    }
+
+    /// Gives the innermost prepared call the details it did not need so far:
+    /// it becomes a `General` call described by `details`.
+    pub(crate) fn describe_top_call(&mut self, details: CallDetails) {
+        if let Some(call) = self.preparing.last_mut() {
+            call.callee = PreparedCallee::General;
+            call.flags.insert(CallFlags::DETAILS);
+            self.details.push(details);
+        }
     }
 
     /// The innermost prepared call, if there is one.
