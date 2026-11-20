@@ -143,6 +143,7 @@ impl WorkerSnapshots {
                 (Plan::Classic, stale)
             }
             Some(ScriptState::Failed(at)) => {
+                count_from_the_top();
                 (Plan::Classic, !booting && at.elapsed() >= RETRY_AFTER)
             }
             None => (Plan::Classic, false),
@@ -212,4 +213,19 @@ pub(crate) fn remember(script: &Path) {
     {
         let _ = std::fs::write(marker, script.as_os_str().as_encoded_bytes());
     }
+}
+
+/// Requests of this process that ran from the top although their script
+/// snapshots: its boot failed or was refused, or a fork could not be made.
+/// Snapshots are the only mode; each of these is a defect to fix, which the
+/// server's log names and `--health` reports (`Phera-From-The-Top`).
+static FROM_THE_TOP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub(crate) fn count_from_the_top() {
+    FROM_THE_TOP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// How many requests ran from the top so far (see [`count_from_the_top`]).
+pub fn requests_from_the_top() -> u64 {
+    FROM_THE_TOP.load(std::sync::atomic::Ordering::Relaxed)
 }

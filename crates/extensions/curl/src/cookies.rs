@@ -12,7 +12,7 @@ use url::Url;
 
 pub(crate) type CookieJar = Rc<RefCell<Cookies>>;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct Cookies {
     pub(crate) enabled: bool,
     store: CookieStore,

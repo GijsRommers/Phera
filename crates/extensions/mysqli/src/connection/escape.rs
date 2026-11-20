@@ -5,7 +5,7 @@ use phera_extension_api::{NativeError, NativeResult, Value};
 
 pub fn escape(handle: Handle, bytes: &[u8]) -> NativeResult {
     let state = handle.borrow();
-    state.lease()?;
+    state.ensure_open()?;
     let charset = state.charset.as_deref().unwrap_or("utf8mb4");
     if matches!(
         charset,

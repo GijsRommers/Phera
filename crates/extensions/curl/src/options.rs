@@ -137,6 +137,36 @@ pub(crate) struct Settings {
     pub(crate) private: Option<Value>,
 }
 
+impl Output {
+    fn forked(&self, fork: &mut phera_extension_api::value::Fork<'_>) -> Self {
+        match self {
+            Output::Stream(resource) => Output::Stream(fork.resource(resource)),
+            Output::Callback(callback) => Output::Callback(fork.value(callback)),
+            other => other.clone(),
+        }
+    }
+}
+
+impl Settings {
+    /// The copy for a fork of a snapshot: callbacks, streams and the values
+    /// a script set are the fork's own copies.
+    pub(crate) fn forked(&self, fork: &mut phera_extension_api::value::Fork<'_>) -> Self {
+        let mut copy = self.clone();
+        copy.body = match &self.body {
+            Some(Body::Multipart(parts)) => Some(Body::Multipart(fork.array(parts))),
+            other => other.clone(),
+        };
+        copy.input = self.input.as_ref().map(|input| fork.resource(input));
+        copy.stderr = self.stderr.as_ref().map(|stderr| fork.resource(stderr));
+        copy.read = self.read.as_ref().map(|read| fork.value(read));
+        copy.progress = self.progress.as_ref().map(|progress| fork.value(progress));
+        copy.private = self.private.as_ref().map(|private| fork.value(private));
+        copy.output = self.output.forked(fork);
+        copy.header = self.header.as_ref().map(|header| header.forked(fork));
+        copy
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
