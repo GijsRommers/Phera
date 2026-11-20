@@ -166,11 +166,18 @@ pub(crate) fn value(constant: &Constant) -> Value {
 /// are copied (see `crate::snapshot`).
 impl crate::snapshot::ForkCopy for UnitCache {
     fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
-        let sites = |sites: &Vec<RefCell<CachedSite>>, fork: &mut phera_value::Fork<'_>| {
-            sites
-                .iter()
-                .map(|site| RefCell::new(site.borrow().fork_copy(fork)))
-                .collect::<Vec<_>>()
+        // Only the functions that used a site before the snapshot have cells.
+        let sites = |sites: &Sites, fork: &mut phera_value::Fork<'_>| {
+            let copy = Sites::new();
+            if let Some(cells) = sites.get() {
+                let _ = copy.set(
+                    cells
+                        .iter()
+                        .map(|site| RefCell::new(site.borrow().fork_copy(fork)))
+                        .collect(),
+                );
+            }
+            copy
         };
         UnitCache {
             trace_file: self.trace_file.clone(),

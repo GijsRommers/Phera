@@ -281,7 +281,6 @@ impl ObjectIds {
                 highest: state.highest,
                 free: state.free.clone(),
                 no_reuse: false,
-                releasing: Vec::new(),
             }),
             doomed: DoomedObjects::default(),
             incarnations: RefCell::new(HashMap::new()),
@@ -319,7 +318,7 @@ impl ObjectIds {
 #[derive(Debug)]
 pub(crate) struct PoolHold {
     pub(crate) pool: Rc<ObjectIds>,
-    id: u32,
+    pub(crate) id: u32,
     /// The object took over another's contents for its destructor (see
     /// `crate::weak_object`).
     pub(crate) incarnated: bool,
