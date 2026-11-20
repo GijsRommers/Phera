@@ -281,6 +281,7 @@ const SECURE: ClassEntry = ClassEntry {
 /// PHP's seeded native engines disallow dynamic properties, including clone-with updates.
 const ENGINE_PROPERTIES: phera_extension_api::NativePropertyAccess =
     phera_extension_api::NativePropertyAccess {
+        string_property: None,
         read: |_, _, _, _| Ok(None),
         mutate: |_, object, name, operation| match operation {
             phera_extension_api::NativePropertyMutation::Assign(_) => {

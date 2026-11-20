@@ -229,6 +229,7 @@ const VALUE: Param = Param::new("value", ParamType::Mixed);
 const TARGET: Param = Param::new("object", ParamType::Object);
 
 const NO_DYNAMIC_PROPERTIES: NativePropertyAccess = NativePropertyAccess {
+    string_property: None,
     read: |_, _, _, _| Ok(None),
     mutate: |_, object, name, mutation| match mutation {
         NativePropertyMutation::Unset => Ok(false),

@@ -85,7 +85,11 @@ pub(super) fn class(node: &Node, html: bool) -> &'static str {
 
 pub(super) const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::CopyWithHandle(node::clone_object)),
-    property_access: Some(&NativePropertyAccess { read, mutate }),
+    property_access: Some(&NativePropertyAccess {
+        read,
+        mutate,
+        string_property: Some(string_property),
+    }),
     properties: Some(properties::view::view),
     ..ClassHooks::EMPTY
 };
@@ -149,6 +153,31 @@ fn read(
         _ => return (properties::ACCESS.read)(context, object, name, mode),
     };
     Ok(Some(value))
+}
+
+fn string_property(
+    object: &Object,
+    name: &str,
+) -> Option<phera_extension_api::NativeStringProperty> {
+    let (declaring, nullable) = match name {
+        "textContent" => ("Dom\\Node", true),
+        "documentURI" if object.class.is_instance_of("Dom\\Document") => ("Dom\\Document", false),
+        "innerHTML" | "className" | "id" if object.class.is_instance_of("Dom\\Element") => {
+            ("Dom\\Element", false)
+        }
+        "data" if object.class.is_instance_of("Dom\\ProcessingInstruction") => {
+            ("Dom\\ProcessingInstruction", false)
+        }
+        "data" if object.class.is_instance_of("Dom\\CharacterData") => {
+            ("Dom\\CharacterData", false)
+        }
+        "value" if object.class.is_instance_of("Dom\\Attr") => ("Dom\\Attr", false),
+        _ => return None,
+    };
+    Some(phera_extension_api::NativeStringProperty {
+        declaring,
+        nullable,
+    })
 }
 
 fn mutate(

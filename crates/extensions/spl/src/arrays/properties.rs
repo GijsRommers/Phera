@@ -16,7 +16,7 @@ use phera_extension_api::{
 use super::dimensions;
 use super::state::{self, Storage, Target};
 
-pub(super) const ACCESS: NativePropertyAccess = NativePropertyAccess { read, mutate };
+pub(super) const ACCESS: NativePropertyAccess = NativePropertyAccess::new(read, mutate);
 
 pub(super) fn view(
     _: &mut dyn Context,
