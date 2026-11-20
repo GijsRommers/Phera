@@ -22,6 +22,7 @@
 /// The session changes of one connection.
 #[derive(Clone, Debug, Default)]
 pub struct SessionLog {
+    recording: bool,
     statements: Vec<Vec<u8>>,
     /// A transaction was started with a statement and not ended yet.
     transaction: bool,
@@ -32,6 +33,25 @@ pub struct SessionLog {
 }
 
 impl SessionLog {
+    pub fn new(recording: bool) -> Self {
+        Self {
+            recording,
+            ..Self::default()
+        }
+    }
+
+    pub fn is_recording(&self) -> bool {
+        self.recording
+    }
+
+    /// The frozen log is replayed but the fork never adds to it.
+    pub fn forked(&self) -> Self {
+        Self {
+            recording: false,
+            ..self.clone()
+        }
+    }
+
     /// The statements to replay, in order.
     pub fn statements(&self) -> &[Vec<u8>] {
         &self.statements
@@ -39,32 +59,36 @@ impl SessionLog {
 
     /// Whether [`SessionLog::ran`] would note `sql`, so that a caller keeps
     /// a copy of only these.
-    pub fn concerns(sql: &[u8]) -> bool {
-        matches!(
-            keywords(sql).next().as_deref(),
-            Some(
-                "SET"
-                    | "USE"
-                    | "PRAGMA"
-                    | "ATTACH"
-                    | "DETACH"
-                    | "LOCK"
-                    | "UNLOCK"
-                    | "CREATE"
-                    | "PREPARE"
-                    | "DECLARE"
-                    | "LISTEN"
-                    | "BEGIN"
-                    | "START"
-                    | "COMMIT"
-                    | "ROLLBACK"
-                    | "END"
+    pub fn concerns(&self, sql: &[u8]) -> bool {
+        self.recording
+            && matches!(
+                keywords(sql).next().as_deref(),
+                Some(
+                    "SET"
+                        | "USE"
+                        | "PRAGMA"
+                        | "ATTACH"
+                        | "DETACH"
+                        | "LOCK"
+                        | "UNLOCK"
+                        | "CREATE"
+                        | "PREPARE"
+                        | "DECLARE"
+                        | "LISTEN"
+                        | "BEGIN"
+                        | "START"
+                        | "COMMIT"
+                        | "ROLLBACK"
+                        | "END"
+                )
             )
-        )
     }
 
     /// Notes a statement the script ran successfully.
     pub fn ran(&mut self, sql: &[u8]) {
+        if !self.recording {
+            return;
+        }
         let mut words = keywords(sql);
         let first = words.next();
         let second = words.next();
@@ -88,12 +112,17 @@ impl SessionLog {
     /// Notes statements run together (`multi_query()`), which are not
     /// replayed.
     pub fn ran_several(&mut self) {
-        self.lost = Some("it ran statements with multi_query()");
+        if self.recording {
+            self.lost = Some("it ran statements with multi_query()");
+        }
     }
 
     /// Notes a statement that an API call ran for the script, such as the
     /// `SET NAMES` of `mysqli::set_charset()`.
     pub fn record(&mut self, statement: Vec<u8>) {
+        if !self.recording {
+            return;
+        }
         // A statement run again replaces the earlier one, so the list stays
         // as short as the distinct settings.
         self.statements.retain(|earlier| *earlier != statement);
@@ -152,7 +181,7 @@ mod tests {
 
     #[test]
     fn notes_session_statements_once_each_in_order() {
-        let mut log = SessionLog::default();
+        let mut log = SessionLog::new(true);
         log.ran(b"SET NAMES utf8mb4");
         log.ran(b"  /* wp */ set session sql_mode = ''");
         log.ran(b"SELECT 1");
@@ -169,7 +198,7 @@ mod tests {
 
     #[test]
     fn notes_state_a_replay_cannot_make() {
-        let mut log = SessionLog::default();
+        let mut log = SessionLog::new(true);
         log.ran(b"LOCK TABLES t WRITE");
         assert!(log.unreplayable().is_some());
         log.ran(b"-- done\nUNLOCK TABLES");
@@ -185,8 +214,10 @@ mod tests {
 
     #[test]
     fn concerns_only_what_it_notes() {
-        assert!(SessionLog::concerns(b"\n# x\nPRAGMA foreign_keys = ON"));
-        assert!(!SessionLog::concerns(b"SELECT 1"));
-        assert!(!SessionLog::concerns(b"INSERT INTO t VALUES (1)"));
+        let log = SessionLog::new(true);
+        assert!(log.concerns(b"\n# x\nPRAGMA foreign_keys = ON"));
+        assert!(!log.concerns(b"SELECT 1"));
+        assert!(!log.concerns(b"INSERT INTO t VALUES (1)"));
+        assert!(!log.forked().concerns(b"SET TIME ZONE 'UTC'"));
     }
 }

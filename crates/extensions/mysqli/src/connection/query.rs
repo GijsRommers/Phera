@@ -58,7 +58,7 @@ pub async fn execute<const OP: usize>(
         )));
     }
     // A fork replays what the script changed about its session.
-    let noted = phera_db_drivers::session_log::SessionLog::concerns(&sql).then(|| sql.clone());
+    let noted = state.borrow().session.concerns(&sql).then(|| sql.clone());
     let mode = args::int(arguments, 1).unwrap_or_default();
     if OP == QUERY {
         if mode & 8 != 0 {

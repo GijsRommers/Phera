@@ -64,7 +64,7 @@ pub fn get<'a>(
             }
             return Ok(Value::Bool(false));
         };
-        let result = connection.driver.lock().await.metadata(&column).await;
+        let result = connection.driver.metadata(&column).await;
         match result {
             Ok(values) => Ok(Value::from(values)),
             Err(error) => connection.fail(context, error, "PDOStatement::getColumnMeta"),

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tokio::task::LocalSet;
 
-use super::{TestPool, direct, id, options, rows};
+use super::{TestPool, direct, id, isolation, options, rows, threads};
 
 pub async fn fifo_timeout_cancellation(name: &'static str) {
     LocalSet::new()
@@ -33,36 +33,38 @@ pub async fn fifo_timeout_cancellation(name: &'static str) {
             for waiter in waiters {
                 waiter.await.unwrap();
             }
-            let mut connection = pool.connect().await;
-            let original = id(&mut connection, name).await;
-            drop(connection);
-            // Drop a request while a query is in flight. Its operation retains the
-            // lease until the driver protocol completes, then rollback/reset runs.
-            let request = async {
-                let mut connection = pool.connect().await;
-                connection.run_unprepared("BEGIN").await.unwrap();
-                let query = if name == "pgsql" {
-                    "SELECT pg_sleep(0.08)"
-                } else {
-                    "SELECT SLEEP(0.08)"
-                };
-                rows(&mut connection, query).await;
-            };
-            assert!(
-                tokio::time::timeout(Duration::from_millis(20), request)
-                    .await
-                    .is_err()
-            );
-            let mut next = pool.connect().await;
-            assert_eq!(id(&mut next, name).await, original);
-            next.run_unprepared("CREATE TEMPORARY TABLE after_cancel(id INT)")
-                .await
-                .unwrap();
-            eprintln!(
-                "{name}: FIFO 8 waiters, cancelled waiter and in-flight request, timeout passed"
-            );
+            eprintln!("{name}: FIFO, cancelled waiter and wait timeout passed");
         })
         .await;
+}
+
+pub async fn interrupted_socket_is_retired(name: &'static str) {
+    let mut observer = direct(name).await;
+    threads::wait_for_socket_count(&mut observer, name, 0).await;
+    let pool = TestPool::new(name, options(1));
+    let mut connection = pool.connect().await;
+    let original = id(&mut connection, name).await;
+    isolation::dirty(&mut connection, name).await;
+    assert_eq!(connection.transaction_state().await, Some(true));
+    assert_eq!(threads::socket_count(&mut observer, name).await, 1);
+    let query = if name == "pgsql" {
+        "SELECT pg_sleep(0.3)"
+    } else {
+        "SELECT SLEEP(0.3)"
+    };
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), rows(&mut connection, query))
+            .await
+            .is_err()
+    );
+    drop(connection);
+    threads::wait_for_socket_count(&mut observer, name, 0).await;
+    let mut next = pool.connect().await;
+    assert_eq!(threads::socket_count(&mut observer, name).await, 1);
+    assert_ne!(id(&mut next, name).await, original);
+    assert_eq!(next.transaction_state().await, Some(false));
+    isolation::clean(&mut next, name).await;
+    eprintln!("{name}: interrupted socket closed and replacement has a clean session");
 }
 
 pub async fn expiry_and_killed(name: &'static str) {

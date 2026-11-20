@@ -15,12 +15,11 @@ use phera_db_drivers::drivers::mysql::{Mysql, Outcome, Reply};
 use phera_db_drivers::drivers::{Driver, connection_error};
 use phera_db_drivers::dsn::{DriverName, Dsn};
 use phera_db_drivers::errors::DbError;
-use phera_db_drivers::pool::{self, Policy};
+use phera_db_drivers::pool::{self, Lease, Operation, Policy};
 use phera_db_drivers::session_log::SessionLog;
 use phera_extension_api::{
     Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
-use phera_io_pool::{Lease, Operation};
 
 use crate::{errors, options};
 
@@ -52,9 +51,8 @@ pub struct Connection {
 enum Status {
     #[default]
     Initialized,
-    Open(Lease<Driver>),
-    /// A fork of a connection the boot made: it connects again on first use
-    /// (see [`fork`]).
+    Open(Lease),
+    /// A fork of a connection the boot made. It connects again on first use.
     Reconnect(Rc<fork::Origin>),
     Closed,
 }
@@ -137,7 +135,7 @@ pub async fn lease(
     context: &mut dyn Context,
     handle: &Handle,
     call: &str,
-) -> Result<Lease<Driver>, NativeResult> {
+) -> Result<Lease, NativeResult> {
     let origin = {
         let state = handle.borrow();
         match &state.status {
@@ -165,16 +163,16 @@ pub async fn lease(
     }
 }
 
-pub async fn run<T, F>(lease: &Lease<Driver>, operation: F) -> Result<T, DbError>
+pub async fn run<T, F>(lease: &Lease, operation: F) -> Result<T, DbError>
 where
-    T: Send + 'static,
-    F: for<'a> FnOnce(&'a mut Mysql) -> Operation<'a, Result<T, DbError>> + Send + 'static,
+    F: for<'a> FnOnce(&'a mut Mysql) -> Operation<'a, Result<T, DbError>>,
 {
-    pool::run(lease, |driver| match driver {
-        Driver::Mysql(mysql) => operation(mysql),
-        _ => Box::pin(async { Err(connection_error("Mismatched database driver")) }),
-    })
-    .await
+    lease
+        .run(async move |driver| match driver {
+            Driver::Mysql(mysql) => operation(mysql).await,
+            _ => Err(connection_error("Mismatched database driver")),
+        })
+        .await
 }
 
 pub fn construct<'a>(
@@ -293,8 +291,9 @@ pub async fn connect(
         state.charset = Some(connection_info.3);
         state.backslashes = connection_info.4;
         state.status = Status::Open(lease);
-        state.origin = Some(Rc::new(fork::Origin::new(dsn, user, password, policy)));
-        state.session = SessionLog::default();
+        let recording = context.is_snapshot_boot();
+        state.origin = recording.then(|| Rc::new(fork::Origin::new(dsn, user, password, policy)));
+        state.session = SessionLog::new(recording);
         state.error = None;
     }
     errors::set_connect_error(context, None);

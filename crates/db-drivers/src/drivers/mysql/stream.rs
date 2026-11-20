@@ -49,6 +49,18 @@ struct Header {
 }
 
 impl Mysql {
+    pub(super) async fn abort_stream(&mut self) {
+        if let Some(mut active) = self.active.take() {
+            active.task.abort();
+            let _ = (&mut active.task).await;
+            if let Some(returned) = active.connection.take()
+                && let Ok(connection) = returned.await
+            {
+                self.connection = Some(connection);
+            }
+        }
+    }
+
     pub(super) async fn stream(
         &mut self,
         query: Query,

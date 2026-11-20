@@ -4,7 +4,7 @@ use mysql_async::consts::ColumnType;
 use mysql_async::{Row, Value as MysqlValue};
 use phera_extension_api::Value;
 
-use crate::drivers::{Column, Rows};
+use crate::drivers::{Column, RowBuffer, Rows};
 use crate::parameters::BoundValue;
 
 pub fn parameter(value: &BoundValue) -> MysqlValue {
@@ -41,21 +41,39 @@ fn convert_rows(
     affected: u64,
     numeric: NumericTypes,
 ) -> Rows {
-    let values: Vec<Vec<Value>> = rows
-        .into_iter()
-        .map(|row| {
-            // `unwrap_raw` instead of `unwrap`, which panics for a value that
-            // was taken out of the row; nothing here takes one.
-            row.unwrap_raw()
-                .into_iter()
-                .map(|value| value.unwrap_or(MysqlValue::NULL))
-                .zip(&columns)
-                .map(|(value, column)| {
-                    cell(value, column.column_type(), column.decimals(), numeric)
-                })
-                .collect()
-        })
-        .collect();
+    let mut values = RowBuffer::with_capacity(columns.len(), rows.len());
+    for row in rows {
+        push_row(&mut values, row, &columns, numeric);
+    }
+    finish(columns, values, affected)
+}
+
+pub(super) fn push_pdo_row(values: &mut RowBuffer, row: Row, columns: &[mysql_async::Column]) {
+    push_row(values, row, columns, NumericTypes::Pdo);
+}
+
+fn push_row(
+    values: &mut RowBuffer,
+    row: Row,
+    columns: &[mysql_async::Column],
+    numeric: NumericTypes,
+) {
+    values.push(
+        row.unwrap_raw()
+            .into_iter()
+            .zip(columns)
+            .map(|(value, column)| {
+                cell(
+                    value.unwrap_or(MysqlValue::NULL),
+                    column.column_type(),
+                    column.decimals(),
+                    numeric,
+                )
+            }),
+    );
+}
+
+pub(super) fn finish(columns: Vec<mysql_async::Column>, values: RowBuffer, affected: u64) -> Rows {
     let affected = if columns.is_empty() {
         affected
     } else {
@@ -63,10 +81,10 @@ fn convert_rows(
     };
     Rows {
         columns: columns
-            .iter()
+            .into_iter()
             .map(|column| Column {
                 name: column.name_str().into_owned(),
-                metadata: crate::metadata::Metadata::Mysql(column.clone()),
+                metadata: crate::metadata::Metadata::Mysql(column),
             })
             .collect(),
         values,
@@ -109,7 +127,6 @@ fn cell(value: MysqlValue, kind: ColumnType, decimals: u8, numeric: NumericTypes
             if !native || (mysqlnd && kind == ColumnType::MYSQL_TYPE_YEAR) {
                 return Value::from(bytes);
             }
-            let text = String::from_utf8_lossy(&bytes);
             match kind {
                 ColumnType::MYSQL_TYPE_TINY
                 | ColumnType::MYSQL_TYPE_SHORT
@@ -117,12 +134,16 @@ fn cell(value: MysqlValue, kind: ColumnType, decimals: u8, numeric: NumericTypes
                 | ColumnType::MYSQL_TYPE_LONGLONG
                 | ColumnType::MYSQL_TYPE_INT24
                 | ColumnType::MYSQL_TYPE_YEAR => {
-                    if let Ok(number) = text.parse::<i64>() {
+                    if let Ok(text) = std::str::from_utf8(&bytes)
+                        && let Ok(number) = text.parse::<i64>()
+                    {
                         return Value::Int(number);
                     }
                 }
                 ColumnType::MYSQL_TYPE_FLOAT | ColumnType::MYSQL_TYPE_DOUBLE => {
-                    if let Ok(number) = text.parse::<f64>() {
+                    if let Ok(text) = std::str::from_utf8(&bytes)
+                        && let Ok(number) = text.parse::<f64>()
+                    {
                         return Value::Float(number);
                     }
                 }

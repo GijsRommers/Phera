@@ -27,6 +27,10 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn is_snapshot_boot(&self) -> bool {
+        self.snapshot.mode == crate::SnapshotMode::Boot
+    }
+
     fn set_protocol_property(
         &mut self,
         object: &phera_value::Object,
