@@ -3,6 +3,7 @@ resolver = "3"
 
 members = [
     "crates/cli",
+    "crates/packages",
     "crates/dotenv",
     "crates/analyzer",
     "crates/lexer",
@@ -62,6 +63,7 @@ itoa = "1"
 regex = "1"
 phera-analyzer = { path = "crates/analyzer" }
 phera-lexer = { path = "crates/lexer" }
+phera-packages = { path = "crates/packages" }
 phera-parser = { path = "crates/parser" }
 phera-ast = { path = "crates/ast" }
 phera-source = { path = "crates/source" }

@@ -5,6 +5,7 @@ mod arguments;
 mod check;
 mod lint;
 mod new;
+mod packages;
 mod run;
 mod serve;
 mod upgrade;
@@ -38,6 +39,7 @@ fn main() -> ExitCode {
         Ok(Command::Check(options)) => check::check(options),
         Ok(Command::Lint(command)) => lint::command(command),
         Ok(Command::New(options)) => new::project(&options),
+        Ok(Command::Packages(arguments)) => packages::run(arguments),
         Ok(Command::Upgrade(options)) => upgrade::command(options),
         Ok(Command::Version) => {
             println!("Phera {}", env!("CARGO_PKG_VERSION"));
