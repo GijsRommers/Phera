@@ -103,3 +103,19 @@ pub(crate) async fn legacy_attach(
     let key = hash(context, storage, &item).await?;
     attach(storage, key, item, info)
 }
+
+/// Keys are object ids, which a fork keeps.
+impl crate::native_state::ForkValues for Storage {
+    fn fork_values(
+        &mut self,
+        fork: &mut phera_extension_api::value::Fork<'_>,
+    ) -> Result<(), String> {
+        for entry in self.entries.values_mut() {
+            crate::native_state::fork_value(&mut entry.object, fork);
+            crate::native_state::fork_value(&mut entry.info, fork);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) const FORK: crate::native_state::StoredFork = crate::native_state::fork_as::<Storage>;

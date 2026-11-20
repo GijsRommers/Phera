@@ -26,7 +26,8 @@ pub fn register(registry: &mut Registry) {
 
 /// The `iconv.*_encoding` settings, which `iconv_set_encoding` changes for
 /// the rest of the request.
-struct Settings {
+#[derive(Clone)]
+pub(crate) struct Settings {
     input: String,
     output: String,
     internal: String,

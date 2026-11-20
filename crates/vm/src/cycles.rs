@@ -44,6 +44,7 @@ const THRESHOLD_MAX: usize = 1_000_000_000;
 const PRODUCTIVE_RUN: usize = 100;
 
 /// Allocations left before the next automatic run.
+#[derive(Clone)]
 pub(crate) struct Countdown(usize);
 
 impl Countdown {
@@ -112,6 +113,7 @@ impl GcFunction {
 }
 
 /// The collector's settings and counters for one request.
+#[derive(Clone)]
 pub(crate) struct CycleCollector {
     enabled: bool,
     /// Allocations after which the next automatic run starts.

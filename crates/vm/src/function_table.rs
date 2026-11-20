@@ -65,3 +65,15 @@ impl FunctionTable {
             .insert(name.clone(), callee.clone());
     }
 }
+
+impl FunctionTable {
+    /// A fork declares the same functions; resolved callables are a cache it
+    /// fills again.
+    pub(crate) fn forked(&self) -> Self {
+        Self {
+            functions: self.functions.clone(),
+            order: self.order.clone(),
+            resolved: RefCell::new(HashMap::new()),
+        }
+    }
+}

@@ -35,6 +35,7 @@ pub(crate) const CLASS: ClassEntry = ClassEntry {
     ],
     hooks: Some(&ClassHooks {
         clone: Some(NativeClone::copy::<BigInt>()),
+        fork: Some(phera_extension_api::fork_clone::<BigInt>),
         compare: Some(operators::compare_objects),
         binary: Some(operators::binary),
         unary: Some(operators::unary),

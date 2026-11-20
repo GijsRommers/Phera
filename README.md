@@ -28,11 +28,11 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | What | State |
 | --- | --- |
 | Laravel 13 JSON API with Eloquent | Runs. `artisan migrate` and 20 API requests (validation, create, read, update, delete, pagination, relations, a transaction) give PHP's answers on SQLite, MySQL and PostgreSQL |
-| Symfony 7.4 | A skeleton route runs. An application with Doctrine does not yet: it needs destructors that run at the end of a statement, which is being built |
-| WordPress | Compatibility testing in progress for the new `mysqli` extension |
-| PHP's own test suite (php-src, 13,388 tests) | 8,704 pass |
+| Symfony 7.4 with Doctrine | Runs. `doctrine:schema:create` and 22 API requests (routes with parameters, validation, relations, aggregate queries) give PHP's answers on SQLite. One known defect: under a long run of requests on one worker a request can hang until the time limit; it is being fixed |
+| WordPress | `mysqli` and the engine fixes it needed are in. The end-to-end comparison with PHP has not been repeated since |
+| PHP's own test suite (php-src) | 9,052 of the 13,388 core tests pass. Of 4,542 tests for the later extensions (dom, openssl, session, curl, intl and others) 1,436 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | Roughly 10 times slower than PHP with opcache (one Laravel API request: about 150 ms against 9 to 17 ms). Phera links every class again for each request; sharing linked code between requests, forking a booted application and a worker mode with FrankenPHP's interface are designed ([architecture, 5.4](docs/architecture.md)) and not built. Measured CPU per request for a Laravel route with two MySQL queries: 34 million cycles on PHP with opcache, 369 million on Phera |
+| Speed of a framework request | About 4 times PHP's CPU for one Laravel API request in production mode: 63 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 204 million against 27 million. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
 
 ## 🧰 The `phera` command
 
@@ -84,7 +84,8 @@ on `@internal` classes from other root namespaces. The checker reports
 an informational notice for remaining bleeding-edge features.
 
 `phera <command> --help` lists the options. There is no formatter and no test
-runner yet.
+runner yet. A package manager (`phera install`) and a step debugger are being
+built; until then packages are installed with Composer.
 
 ### Serving a site
 
@@ -273,6 +274,47 @@ An HTTPS mirror can set `PHERA_RELEASE_BASE_URL` for both commands. Serve
 `latest` as JSON with a `tag_name` field and put the archives and
 `SHA256SUMS` under `download/<tag>/`, for example `download/v0.1.0/`.
 The upgrader expects the mirror to serve these files directly.
+
+## ⏩ Boot once, fork every request
+
+`phera serve` can boot an application once per worker thread, before the
+first connection, and start every request as a copy of that booted state.
+Laravel and Symfony applications get this with no change:
+
+- **Laravel** (a project with `artisan` and `bootstrap/app.php`): Phera runs
+  its own entry script for `public/index.php`, which bootstraps the
+  application and its service providers, then handles the request.
+- **Symfony** with `symfony/runtime`: Phera sets `APP_RUNTIME` to its own
+  runtime class (unless something else chose one), which boots the kernel
+  and then handles the request.
+- **Any other application** marks the point itself:
+
+  ```php
+  $kernel = new Kernel('prod', false);
+  $kernel->boot();                 // once per worker, at server start
+  Phera\snapshot();                // true in every request; false on the command line
+  $kernel->handle(Request::createFromGlobals())->send();   // per request
+  ```
+
+  The first start serves such a script from the top until it reaches the
+  call; later starts boot it before the first connection.
+
+The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
+are empty and `$_SERVER` holds the environment and the script's paths. Each
+request gets its own copy of every object, static property and global, so
+nothing one request does reaches another. What cannot be copied (an open
+file or socket, a started session, a database transaction) makes
+`Phera\snapshot()` throw `Phera\SnapshotException`, naming the class and
+where it was found; the worker then serves the application from the top.
+A changed file boots the worker again in the background, following
+`opcache.validate_timestamps` and `opcache.revalidate_freq`. The boot's
+objects are never destroyed; each request's copies are destroyed at its end,
+as PHP-FPM destroys a request's objects. `--no-snapshot` turns all of it off.
+
+A Laravel API request took 525 million instructions run from the top, and
+102 million as a fork (PHP 8.5 with opcache: 48 million). The design is in
+[`docs/architecture.md`](docs/architecture.md) section 5.4, the decisions
+in [`docs/decisions/`](docs/decisions/).
 
 ## 🛠️ Building
 

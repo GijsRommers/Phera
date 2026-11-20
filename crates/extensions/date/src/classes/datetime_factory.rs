@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[derive(Default)]
-struct LastErrors(Option<Value>);
+pub(crate) struct LastErrors(Option<Value>);
 
 pub fn remember(context: &mut dyn Context, parsed: &Parsed) {
     let errors = (!parsed.errors.is_empty() || !parsed.warnings.is_empty())

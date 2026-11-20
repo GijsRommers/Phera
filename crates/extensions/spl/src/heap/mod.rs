@@ -123,3 +123,20 @@ fn update<T>(object: &Object, f: impl FnOnce(&mut Heap) -> T) -> Result<T, Nativ
 fn runtime(message: &str) -> NativeError {
     NativeError::throw("RuntimeException", message)
 }
+
+impl crate::native_state::ForkValues for Heap {
+    fn fork_values(
+        &mut self,
+        fork: &mut phera_extension_api::value::Fork<'_>,
+    ) -> Result<(), String> {
+        for entry in &mut self.items {
+            crate::native_state::fork_value(&mut entry.data, fork);
+            if let Some(priority) = &mut entry.priority {
+                crate::native_state::fork_value(priority, fork);
+            }
+        }
+        Ok(())
+    }
+}
+
+pub(crate) const FORK: crate::native_state::StoredFork = crate::native_state::fork_as::<Heap>;

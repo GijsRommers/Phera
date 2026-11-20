@@ -20,6 +20,9 @@ pub(crate) struct CodeCache {
     units: Arc<Mutex<HashMap<PathBuf, FileSlot>>>,
     registry: Arc<phera_extension_api::Registry>,
     mode: FileMode,
+    /// PHP that Phera ships (an adapter's entry script, a bundled class), by
+    /// the name it is compiled under. It has no file to check for changes.
+    shipped: Arc<Mutex<HashMap<String, Arc<CompiledUnit>>>>,
 }
 
 type FileSlot = Arc<Mutex<Option<CachedRevision>>>;
@@ -75,6 +78,7 @@ impl CodeCache {
             units: Arc::default(),
             registry,
             mode,
+            shipped: Arc::default(),
         }
     }
 
@@ -168,6 +172,25 @@ impl CodeCache {
         compiled.map_err(RuntimeError::Compile)
     }
 
+    /// Compiles PHP source that Phera ships under the name `file`, once (see
+    /// `crate::adapters`). The name may be the path of a real file, such as
+    /// the Laravel entry's `public/index.php`; the file is not read.
+    pub(crate) fn compile_shipped(
+        &self,
+        source: &str,
+        file: &str,
+    ) -> Result<Arc<CompiledUnit>, RuntimeError> {
+        let mut shipped = self.shipped.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(unit) = shipped.get(file) {
+            return Ok(unit.clone());
+        }
+        let unit = self
+            .compile_source(source.as_bytes(), file, CompileStack::Dedicated)
+            .map_err(RuntimeError::Compile)?;
+        shipped.insert(file.to_owned(), unit.clone());
+        Ok(unit)
+    }
+
     fn compile_source(
         &self,
         source: &[u8],
@@ -241,6 +264,17 @@ impl phera_vm::CodeLoader for CodeCache {
     ) -> phera_extension_api::LocalFuture<'_, Result<Arc<CompiledUnit>, phera_vm::CodeLoadError>>
     {
         Box::pin(async move { self.compile(path).await.map_err(include_error) })
+    }
+
+    fn load_bundled(
+        &self,
+        source: phera_extension_api::BundledSource,
+    ) -> phera_extension_api::LocalFuture<'_, Result<Arc<CompiledUnit>, phera_vm::CodeLoadError>>
+    {
+        Box::pin(async move {
+            self.compile_shipped(source.source, source.file)
+                .map_err(include_error)
+        })
     }
 }
 

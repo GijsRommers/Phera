@@ -206,3 +206,20 @@ pub(super) fn value_at(array: &PhpArray, position: usize) -> Value {
         .entry_at(position)
         .map_or(Value::Null, |(_, value)| value.deref().clone())
 }
+
+/// An `ArrayObject` or `ArrayIterator` in a fork: its array, or the object
+/// whose properties it wraps, is the fork's.
+impl crate::native_state::ForkValues for State {
+    fn fork_values(
+        &mut self,
+        fork: &mut phera_extension_api::value::Fork<'_>,
+    ) -> Result<(), String> {
+        self.storage = match &self.storage {
+            Storage::Array(array) => Storage::Array(fork.array(array)),
+            Storage::Properties(object) => Storage::Properties(fork.object(object)),
+            Storage::Alias(object) => Storage::Alias(fork.object(object)),
+            Storage::OwnProperties => Storage::OwnProperties,
+        };
+        Ok(())
+    }
+}

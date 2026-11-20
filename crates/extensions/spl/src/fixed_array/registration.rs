@@ -21,6 +21,7 @@ const PRESERVE: Param =
     Param::new("preserveKeys", ParamType::Bool).with_default(ConstantValue::Bool(true));
 
 const HOOKS: ClassHooks = ClassHooks {
+    fork: Some(crate::native_state::fork_spl),
     clone: Some(NativeClone::Copy(super::clone_array)),
     properties: Some(super::view),
     iterator: Some(iteration::cursor),

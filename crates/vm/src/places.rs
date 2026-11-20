@@ -134,12 +134,18 @@ impl Vm {
     ) -> Result<(), NativeError> {
         if let PathBase::StaticProperty { class, name, .. } = place.base()? {
             let (class_name, name) = self.static_property_names(class, name)?;
+            let states = &mut self.class_states;
             if missing == Missing::Warn
                 && self.classes.get(&class_name).is_some_and(|class| {
                     class
                         .static_properties
                         .iter()
-                        .any(|property| property.name == name && !property.value_initialized.get())
+                        .filter(|property| property.name == name)
+                        .any(|property| {
+                            states
+                                .static_property(property)
+                                .is_some_and(|storage| !storage.value_initialized.get())
+                        })
                 })
             {
                 return Err(NativeError::error(format!(

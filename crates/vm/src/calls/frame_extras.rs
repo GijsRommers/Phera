@@ -91,3 +91,23 @@ impl FrameExtras {
         self.property_hook = None;
     }
 }
+
+impl crate::snapshot::ForkCopy for FrameExtras {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        if self.property_hook.is_some() {
+            fork.refuse_state(
+                "property hook",
+                "Phera\\snapshot() was called inside a property hook",
+            );
+        }
+        FrameExtras {
+            called: self.called,
+            dynamic: self.dynamic.clone(),
+            dynamic_count: self.dynamic_count,
+            iterators: self.iterators.fork_copy(fork),
+            arguments: self.arguments,
+            variadic: self.variadic.fork_copy(fork),
+            property_hook: None,
+        }
+    }
+}

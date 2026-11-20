@@ -118,7 +118,6 @@ impl Vm {
         }
         if !virtual_property && property.ty.is_none() {
             property.initialized = true;
-            property.value_initialized.set(true);
         }
         Ok(())
     }
