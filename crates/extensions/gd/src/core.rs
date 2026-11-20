@@ -1,12 +1,11 @@
 //! `$image = imagecreatetruecolor(3, 2); echo imagesx($image);`
 
 use std::cell::RefCell;
-use std::rc::Rc;
 
 use phera_extension_api::{
     ClassEntry, ClassHooks, ClassKind, ConstantValue as C, Context, FunctionEntry as F,
-    MethodEntry, NativeError, NativeResult, Object, Param as P, ParamType as T, PhpArray, Registry,
-    Value, args,
+    NativeComparison, NativeError, NativePropertyAccess, NativePropertyMutation, NativeResult,
+    Param as P, ParamType as T, PhpArray, Registry, Value, args,
 };
 
 use crate::pixels::{Image, MAX_PIXELS};
@@ -21,13 +20,33 @@ const RESOLUTION_Y: P = P::new("resolution_y", T::Int)
     .nullable()
     .with_default(C::Null);
 
+const NO_DYNAMIC_PROPERTIES: NativePropertyAccess = NativePropertyAccess::new(
+    |_, _, _, _| Ok(None),
+    |_, _, name, mutation| match mutation {
+        NativePropertyMutation::Unset => Ok(false),
+        _ => Err(NativeError::error(format!(
+            "Cannot create dynamic property GdImage::${name}"
+        ))),
+    },
+);
+
 pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
         kind: ClassKind::FinalClass,
-        methods: const { &[MethodEntry::public("__construct", &[], reject_construct)] },
         hooks: Some(&ClassHooks {
+            construction_error: Some(
+                "You cannot initialize a GdImage object except through helper functions",
+            ),
             clone: Some(phera_extension_api::NativeClone::Forbidden),
+            compare: Some(|left, right, _| {
+                Ok(if std::ptr::eq(left, right) {
+                    NativeComparison::Ordered(std::cmp::Ordering::Equal)
+                } else {
+                    NativeComparison::Uncomparable
+                })
+            }),
             forbid_serialization: true,
+            property_access: Some(&NO_DYNAMIC_PROPERTIES),
             ..ClassHooks::EMPTY
         }),
         ..ClassEntry::class("GdImage")
@@ -72,7 +91,10 @@ pub fn register(registry: &mut Registry) {
                 }),
                 "bool",
             ),
-            (F::sync("imagedestroy", &[IMAGE], destroy), "true"),
+            (
+                F::deprecated_sync("imagedestroy", &[IMAGE], |_, _| Ok(Value::Bool(true))),
+                "true",
+            ),
             (
                 F::sync("imageinterlace", &[IMAGE, ENABLE], interlace),
                 "bool",
@@ -90,19 +112,6 @@ pub fn register(registry: &mut Registry) {
         registry.function(function);
         registry.describe_function(function.name, result, None);
     }
-}
-
-fn reject_construct(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    Err(NativeError::error(
-        "You cannot initialize a GdImage object except through helper functions",
-    ))
-}
-
-fn destroy(context: &mut dyn Context, _: &[Value]) -> NativeResult {
-    context.deprecated(
-        "Function imagedestroy() is deprecated since 8.5, as it has no effect since PHP 8.0".into(),
-    );
-    Ok(Value::Bool(true))
 }
 
 fn create(

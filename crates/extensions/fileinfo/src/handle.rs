@@ -55,7 +55,10 @@ pub fn register(registry: &mut Registry) {
                 F::asynchronous("finfo_open", &[DEFAULT_FLAGS, DATABASE], open),
                 "finfo|false",
             ),
-            (F::sync("finfo_close", &[FINFO], close), "true"),
+            (
+                F::deprecated_sync("finfo_close", &[FINFO], |_, _| Ok(Value::Bool(true))),
+                "true",
+            ),
             (
                 F::sync("finfo_set_flags", &[FINFO, FLAGS], set_flags),
                 "true",
@@ -185,14 +188,6 @@ async fn invalid_database(
     } else {
         Database::Missing(display)
     }))
-}
-
-fn close(context: &mut dyn Context, _: &[Value]) -> NativeResult {
-    context.deprecated(
-        "Function finfo_close() is deprecated since 8.5, as finfo objects are freed automatically"
-            .into(),
-    );
-    Ok(Value::Bool(true))
 }
 
 fn setting<T>(

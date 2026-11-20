@@ -31,7 +31,6 @@ fn native_parameter_tables_match_php_stubs() {
             "CurlShareHandle::__construct",
             "CurlSharePersistentHandle::__construct",
             "DeflateContext::__construct",
-            "GdImage::__construct",
             "InflateContext::__construct",
             "OpenSSLAsymmetricKey::__construct",
             "OpenSSLCertificate::__construct",

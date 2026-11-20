@@ -6,6 +6,12 @@ foreach ([
 'dim-y' => fn() => imagecreate(2, -1),
 'max-x' => fn() => imagecreate(PHP_INT_MAX, 2),
 'object' => fn() => new GdImage(),
+'constructor-reflection' => fn() => (new ReflectionClass(GdImage::class))->getConstructor(),
+'construction-reflection' => fn() => (new ReflectionClass(GdImage::class))
+    ->newInstanceWithoutConstructor(),
+'dynamic-property' => fn() => $image->custom = true,
+'same-image' => fn() => $image == $image,
+'different-image' => fn() => $image == imagecreatetruecolor(5, 3),
 'clone' => fn() => clone $image,
 'serialize' => fn() => serialize($image),
 'type' => fn() => imagecolorsforindex(33, 0),
@@ -40,6 +46,8 @@ foreach ([
 'gamma-input' => fn() => imagegammacorrect($image, 0, 1),
 'resolution-x' => fn() => imageresolution($image, -1, 0),
 'imagedestroy' => fn() => imagedestroy($image),
+'imagedestroy-type' => fn() => imagedestroy(null),
+'imagedestroy-missing' => fn() => imagedestroy(),
 ] as $name => $case) {
     echo $name,'|';
     try { $value = $case(); echo $value===false?'false':($value===true?'true':gettype($value)); }
