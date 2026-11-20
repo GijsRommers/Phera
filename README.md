@@ -264,8 +264,13 @@ Laravel and Symfony applications get this with no change:
 The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
 are empty and `$_SERVER` holds the environment and the script's paths. Each
 request gets its own copy of every object, static property and global, so
-nothing one request does reaches another. What cannot be copied (an open
-file or socket, a started session, a database transaction) makes
+nothing one request does reaches another. A database or Redis connection
+made in the boot connects again on first use in each request, from the pool,
+with what the boot set on its session (`SET`, `USE`, the charset) replayed;
+an open file is opened again at the same position; DOM documents, generators,
+curl handles and temporary files are copied. What cannot be duplicated (an
+open transaction, a lock, a suspended Fiber, a pipe to a process, a directory
+handle, an open gzip file, an `SQLite3` object, a prepared statement) makes
 `Phera\snapshot()` throw `Phera\SnapshotException`, naming the class and
 where it was found; the worker then serves the application from the top.
 A changed file boots the worker again in the background, following
