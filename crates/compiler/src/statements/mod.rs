@@ -76,9 +76,13 @@ impl Compiler<'_> {
                 )?;
                 self.compile_constants(items, &metadata, line)?;
             }
-            StatementKind::Declare { directives, body } => {
-                self.compile_declare(directives, body, timing, line)?
-            }
+            StatementKind::Declare { directives, body } => self.compile_declare(
+                directives,
+                body,
+                timing,
+                line,
+                declarations::DeclarePosition::Body,
+            )?,
             StatementKind::Global(variables) => self.compile_globals(variables, line)?,
             StatementKind::Static(variables) => self.compile_statics(variables, line)?,
             StatementKind::Unset(expressions) => self.compile_unset(expressions, line)?,
