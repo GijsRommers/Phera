@@ -56,6 +56,15 @@ fn gd_codecs_match_php_pixels() {
     let codec = root.join("codec.php");
     let wire = root.join("wire.php");
     let source = root.join("corpus");
+    let lossless = comparison
+        .compare(&codec, |_, command| {
+            command.arg(&source).arg("--packed").args(LOSSLESS);
+        })
+        .expect("compare packed lossless pixels and palette indices");
+    println!(
+        "{} lossless packed rasters matched",
+        lossless.stdout.lines().count()
+    );
     let mut mismatches = Vec::new();
     let reference = decode(&comparison, Runtime::Php, &codec, &source, LOSSLESS, LOSSY);
     let decoded = decode(
