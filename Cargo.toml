@@ -80,11 +80,13 @@ phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-mbstring = { path = "crates/extensions/mbstring" }
 iconv-native = "0.1"
 encoding_rs = "0.8.35"
+base16ct = { version = "1", features = ["alloc"] }
 cssparser = "0.38"
 precomputed-hash = "0.1"
 selectors = "0.41"
 base64 = "0.22"
 phera-ext-json = { path = "crates/extensions/json" }
+phera-ext-sodium = { path = "crates/extensions/sodium" }
 phera-ext-openssl = { path = "crates/extensions/openssl" }
 phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-sqlite = { path = "crates/sqlite" }
@@ -100,6 +102,18 @@ command-fds = "0.3.3"
 phera-ext-process = { path = "crates/extensions/process" }
 phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+blake2b_simd = "1"
+curve25519-dalek = "5"
+hmac = "0.12"
+siphasher = "1"
+poly1305 = { version = "0.9", features = ["zeroize"] }
+crypto-bigint = { version = "0.7", features = ["alloc", "zeroize"] }
+zeroize = "1.9"
+salsa20 = "0.11"
+chacha20 = { version = "0.10", features = ["legacy", "xchacha", "zeroize"] }
+scrypt = "0.12"
+block-padding = "0.4"
 aes = "0.9"
 aes-gcm = { version = "0.11", features = ["hazmat"] }
 cbc = "0.2"

@@ -2440,6 +2440,116 @@ sleep	ext/standard/basic_functions.stub.php:1942	seconds	r--		-
 socket_get_status	ext/standard/basic_functions.stub.php:3521	stream	r--		-
 socket_set_blocking	ext/standard/basic_functions.stub.php:3508	stream	r--		-	enable	r--		-
 socket_set_timeout	ext/standard/basic_functions.stub.php:3567	stream	r--		-	seconds	r--		-	microseconds	o--	0	i0
+sodium_add	ext/sodium/libsodium.stub.php:775	string1	r-&		-	string2	r--		-
+sodium_base642bin	ext/sodium/libsodium.stub.php:796	string	r--		-	id	r--		-	ignore	o--	""	s
+sodium_bin2base64	ext/sodium/libsodium.stub.php:794	string	r--		-	id	r--		-
+sodium_bin2hex	ext/sodium/libsodium.stub.php:789	string	r--		-
+sodium_compare	ext/sodium/libsodium.stub.php:777	string1	r--		-	string2	r--		-
+sodium_crypto_aead_aegis128l_decrypt	ext/sodium/libsodium.stub.php:557	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis128l_encrypt	ext/sodium/libsodium.stub.php:559	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis128l_keygen	ext/sodium/libsodium.stub.php:561
+sodium_crypto_aead_aegis256_decrypt	ext/sodium/libsodium.stub.php:565	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis256_encrypt	ext/sodium/libsodium.stub.php:567	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aegis256_keygen	ext/sodium/libsodium.stub.php:569
+sodium_crypto_aead_aes256gcm_decrypt	ext/sodium/libsodium.stub.php:549	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aes256gcm_encrypt	ext/sodium/libsodium.stub.php:551	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_aes256gcm_is_available	ext/sodium/libsodium.stub.php:546
+sodium_crypto_aead_aes256gcm_keygen	ext/sodium/libsodium.stub.php:553
+sodium_crypto_aead_chacha20poly1305_decrypt	ext/sodium/libsodium.stub.php:572	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_encrypt	ext/sodium/libsodium.stub.php:574	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_ietf_decrypt	ext/sodium/libsodium.stub.php:578	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_ietf_encrypt	ext/sodium/libsodium.stub.php:580	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_chacha20poly1305_ietf_keygen	ext/sodium/libsodium.stub.php:582
+sodium_crypto_aead_chacha20poly1305_keygen	ext/sodium/libsodium.stub.php:576
+sodium_crypto_aead_xchacha20poly1305_ietf_decrypt	ext/sodium/libsodium.stub.php:585	ciphertext	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_xchacha20poly1305_ietf_encrypt	ext/sodium/libsodium.stub.php:589	message	r--		-	additional_data	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_aead_xchacha20poly1305_ietf_keygen	ext/sodium/libsodium.stub.php:587
+sodium_crypto_auth	ext/sodium/libsodium.stub.php:592	message	r--		-	key	r--		-
+sodium_crypto_auth_keygen	ext/sodium/libsodium.stub.php:594
+sodium_crypto_auth_verify	ext/sodium/libsodium.stub.php:596	mac	r--		-	message	r--		-	key	r--		-
+sodium_crypto_box	ext/sodium/libsodium.stub.php:598	message	r--		-	nonce	r--		-	key_pair	r--		-
+sodium_crypto_box_keypair	ext/sodium/libsodium.stub.php:600
+sodium_crypto_box_keypair_from_secretkey_and_publickey	ext/sodium/libsodium.stub.php:604	secret_key	r--		-	public_key	r--		-
+sodium_crypto_box_open	ext/sodium/libsodium.stub.php:606	ciphertext	r--		-	nonce	r--		-	key_pair	r--		-
+sodium_crypto_box_publickey	ext/sodium/libsodium.stub.php:608	key_pair	r--		-
+sodium_crypto_box_publickey_from_secretkey	ext/sodium/libsodium.stub.php:610	secret_key	r--		-
+sodium_crypto_box_seal	ext/sodium/libsodium.stub.php:612	message	r--		-	public_key	r--		-
+sodium_crypto_box_seal_open	ext/sodium/libsodium.stub.php:614	ciphertext	r--		-	key_pair	r--		-
+sodium_crypto_box_secretkey	ext/sodium/libsodium.stub.php:616	key_pair	r--		-
+sodium_crypto_box_seed_keypair	ext/sodium/libsodium.stub.php:602	seed	r--		-
+sodium_crypto_core_ristretto255_add	ext/sodium/libsodium.stub.php:619	p	r--		-	q	r--		-
+sodium_crypto_core_ristretto255_from_hash	ext/sodium/libsodium.stub.php:621	s	r--		-
+sodium_crypto_core_ristretto255_is_valid_point	ext/sodium/libsodium.stub.php:623	s	r--		-
+sodium_crypto_core_ristretto255_random	ext/sodium/libsodium.stub.php:625
+sodium_crypto_core_ristretto255_scalar_add	ext/sodium/libsodium.stub.php:627	x	r--		-	y	r--		-
+sodium_crypto_core_ristretto255_scalar_complement	ext/sodium/libsodium.stub.php:629	s	r--		-
+sodium_crypto_core_ristretto255_scalar_invert	ext/sodium/libsodium.stub.php:631	s	r--		-
+sodium_crypto_core_ristretto255_scalar_mul	ext/sodium/libsodium.stub.php:633	x	r--		-	y	r--		-
+sodium_crypto_core_ristretto255_scalar_negate	ext/sodium/libsodium.stub.php:635	s	r--		-
+sodium_crypto_core_ristretto255_scalar_random	ext/sodium/libsodium.stub.php:637
+sodium_crypto_core_ristretto255_scalar_reduce	ext/sodium/libsodium.stub.php:639	s	r--		-
+sodium_crypto_core_ristretto255_scalar_sub	ext/sodium/libsodium.stub.php:641	x	r--		-	y	r--		-
+sodium_crypto_core_ristretto255_sub	ext/sodium/libsodium.stub.php:643	p	r--		-	q	r--		-
+sodium_crypto_generichash	ext/sodium/libsodium.stub.php:665	message	r--		-	key	o--	""	s	length	o--	SODIUM_CRYPTO_GENERICHASH_BYTES	i32
+sodium_crypto_generichash_final	ext/sodium/libsodium.stub.php:673	state	r-&		-	length	o--	SODIUM_CRYPTO_GENERICHASH_BYTES	i32
+sodium_crypto_generichash_init	ext/sodium/libsodium.stub.php:669	key	o--	""	s	length	o--	SODIUM_CRYPTO_GENERICHASH_BYTES	i32
+sodium_crypto_generichash_keygen	ext/sodium/libsodium.stub.php:667
+sodium_crypto_generichash_update	ext/sodium/libsodium.stub.php:671	state	r-&		-	message	r--		-
+sodium_crypto_kdf_derive_from_key	ext/sodium/libsodium.stub.php:675	subkey_length	r--		-	subkey_id	r--		-	context	r--		-	key	r--		-
+sodium_crypto_kdf_keygen	ext/sodium/libsodium.stub.php:677
+sodium_crypto_kx_client_session_keys	ext/sodium/libsodium.stub.php:657	client_key_pair	r--		-	server_key	r--		-
+sodium_crypto_kx_keypair	ext/sodium/libsodium.stub.php:646
+sodium_crypto_kx_publickey	ext/sodium/libsodium.stub.php:648	key_pair	r--		-
+sodium_crypto_kx_secretkey	ext/sodium/libsodium.stub.php:650	key_pair	r--		-
+sodium_crypto_kx_seed_keypair	ext/sodium/libsodium.stub.php:652	seed	r--		-
+sodium_crypto_kx_server_session_keys	ext/sodium/libsodium.stub.php:663	server_key_pair	r--		-	client_key	r--		-
+sodium_crypto_pwhash	ext/sodium/libsodium.stub.php:680	length	r--		-	password	r--		-	salt	r--		-	opslimit	r--		-	memlimit	r--		-	algo	o--	SODIUM_CRYPTO_PWHASH_ALG_DEFAULT	i2
+sodium_crypto_pwhash_scryptsalsa208sha256	ext/sodium/libsodium.stub.php:692	length	r--		-	password	r--		-	salt	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_scryptsalsa208sha256_str	ext/sodium/libsodium.stub.php:694	password	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_scryptsalsa208sha256_str_verify	ext/sodium/libsodium.stub.php:696	hash	r--		-	password	r--		-
+sodium_crypto_pwhash_str	ext/sodium/libsodium.stub.php:682	password	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_str_needs_rehash	ext/sodium/libsodium.stub.php:688	password	r--		-	opslimit	r--		-	memlimit	r--		-
+sodium_crypto_pwhash_str_verify	ext/sodium/libsodium.stub.php:684	hash	r--		-	password	r--		-
+sodium_crypto_scalarmult	ext/sodium/libsodium.stub.php:699	n	r--		-	p	r--		-
+sodium_crypto_scalarmult_base	ext/sodium/libsodium.stub.php:802	secret_key	r--		-
+sodium_crypto_scalarmult_ristretto255	ext/sodium/libsodium.stub.php:702	n	r--		-	p	r--		-
+sodium_crypto_scalarmult_ristretto255_base	ext/sodium/libsodium.stub.php:704	n	r--		-
+sodium_crypto_secretbox	ext/sodium/libsodium.stub.php:707	message	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_secretbox_keygen	ext/sodium/libsodium.stub.php:709
+sodium_crypto_secretbox_open	ext/sodium/libsodium.stub.php:711	ciphertext	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_secretstream_xchacha20poly1305_init_pull	ext/sodium/libsodium.stub.php:723	header	r--		-	key	r--		-
+sodium_crypto_secretstream_xchacha20poly1305_init_push	ext/sodium/libsodium.stub.php:719	key	r--		-
+sodium_crypto_secretstream_xchacha20poly1305_keygen	ext/sodium/libsodium.stub.php:714
+sodium_crypto_secretstream_xchacha20poly1305_pull	ext/sodium/libsodium.stub.php:726	state	r-&		-	ciphertext	r--		-	additional_data	o--	""	s
+sodium_crypto_secretstream_xchacha20poly1305_push	ext/sodium/libsodium.stub.php:721	state	r-&		-	message	r--		-	additional_data	o--	""	s	tag	o--	SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_MESSAGE	i0
+sodium_crypto_secretstream_xchacha20poly1305_rekey	ext/sodium/libsodium.stub.php:728	state	r-&		-
+sodium_crypto_shorthash	ext/sodium/libsodium.stub.php:731	message	r--		-	key	r--		-
+sodium_crypto_shorthash_keygen	ext/sodium/libsodium.stub.php:733
+sodium_crypto_sign	ext/sodium/libsodium.stub.php:735	message	r--		-	secret_key	r--		-
+sodium_crypto_sign_detached	ext/sodium/libsodium.stub.php:737	message	r--		-	secret_key	r--		-
+sodium_crypto_sign_ed25519_pk_to_curve25519	ext/sodium/libsodium.stub.php:739	public_key	r--		-
+sodium_crypto_sign_ed25519_sk_to_curve25519	ext/sodium/libsodium.stub.php:741	secret_key	r--		-
+sodium_crypto_sign_keypair	ext/sodium/libsodium.stub.php:743
+sodium_crypto_sign_keypair_from_secretkey_and_publickey	ext/sodium/libsodium.stub.php:745	secret_key	r--		-	public_key	r--		-
+sodium_crypto_sign_open	ext/sodium/libsodium.stub.php:747	signed_message	r--		-	public_key	r--		-
+sodium_crypto_sign_publickey	ext/sodium/libsodium.stub.php:749	key_pair	r--		-
+sodium_crypto_sign_publickey_from_secretkey	ext/sodium/libsodium.stub.php:753	secret_key	r--		-
+sodium_crypto_sign_secretkey	ext/sodium/libsodium.stub.php:751	key_pair	r--		-
+sodium_crypto_sign_seed_keypair	ext/sodium/libsodium.stub.php:755	seed	r--		-
+sodium_crypto_sign_verify_detached	ext/sodium/libsodium.stub.php:757	signature	r--		-	message	r--		-	public_key	r--		-
+sodium_crypto_stream	ext/sodium/libsodium.stub.php:759	length	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_stream_keygen	ext/sodium/libsodium.stub.php:761
+sodium_crypto_stream_xchacha20	ext/sodium/libsodium.stub.php:766	length	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_stream_xchacha20_keygen	ext/sodium/libsodium.stub.php:768
+sodium_crypto_stream_xchacha20_xor	ext/sodium/libsodium.stub.php:770	message	r--		-	nonce	r--		-	key	r--		-
+sodium_crypto_stream_xchacha20_xor_ic	ext/sodium/libsodium.stub.php:772	message	r--		-	nonce	r--		-	counter	r--		-	key	r--		-
+sodium_crypto_stream_xor	ext/sodium/libsodium.stub.php:763	message	r--		-	nonce	r--		-	key	r--		-
+sodium_hex2bin	ext/sodium/libsodium.stub.php:791	string	r--		-	ignore	o--	""	s
+sodium_increment	ext/sodium/libsodium.stub.php:779	string	r-&		-
+sodium_memcmp	ext/sodium/libsodium.stub.php:781	string1	r--		-	string2	r--		-
+sodium_memzero	ext/sodium/libsodium.stub.php:783	string	r-&		-
+sodium_pad	ext/sodium/libsodium.stub.php:785	string	r--		-	block_size	r--		-
+sodium_unpad	ext/sodium/libsodium.stub.php:787	string	r--		-	block_size	r--		-
 sort	ext/standard/basic_functions.stub.php:1572	array	r-&		-	flags	o--	SORT_REGULAR	i0
 soundex	ext/standard/basic_functions.stub.php:3361	string	r--		-
 spl_autoload	ext/spl/php_spl.stub.php:26	class	r--		-	file_extensions	o--	null	n

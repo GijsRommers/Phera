@@ -2,7 +2,7 @@
 
 - Date: 2026-11-19
 - Area: Safety and dependencies
-- Decided by: Owner
+- Decided by: Design
 
 ## Decision
 

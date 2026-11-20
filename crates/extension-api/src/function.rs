@@ -117,6 +117,7 @@ pub struct Param {
     /// The constant spelling PHP uses in a declaration, when the value is symbolic.
     pub default_name: Option<&'static str>,
     pub by_ref: bool,
+    pub(crate) raw_reference: bool,
     /// Replace the argument value in PHP traces.
     pub sensitive: bool,
     pub variadic: bool,
@@ -147,6 +148,7 @@ impl Param {
             default: None,
             default_name: None,
             by_ref: false,
+            raw_reference: false,
             sensitive: false,
             variadic: false,
         }
@@ -214,6 +216,14 @@ impl Param {
 
     pub const fn by_ref(mut self) -> Self {
         self.by_ref = true;
+        self
+    }
+
+    /// Preserve the declared type for reflection and let the native function check
+    /// the original referenced value and report its own diagnostic.
+    pub const fn raw_by_ref(mut self) -> Self {
+        self.by_ref = true;
+        self.raw_reference = true;
         self
     }
 

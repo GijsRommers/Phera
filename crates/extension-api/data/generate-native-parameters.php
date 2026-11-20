@@ -204,8 +204,8 @@ function is_runtime_stub(string $file): bool {
         || ($parts[0] === 'ext' && in_array($parts[1], [
             'bcmath', 'ctype', 'curl', 'date', 'dom', 'filter', 'gmp', 'hash', 'iconv', 'json',
             'libxml', 'mbstring', 'openssl', 'pcntl', 'pcre', 'pdo', 'pdo_mysql', 'pdo_pgsql',
-            'pdo_sqlite', 'posix', 'random', 'reflection', 'session', 'spl', 'sqlite3', 'standard',
-            'tokenizer', 'zlib',
+            'pdo_sqlite', 'posix', 'random', 'reflection', 'session', 'sodium', 'spl', 'sqlite3',
+            'standard', 'tokenizer', 'zlib',
         ], true));
 }
 

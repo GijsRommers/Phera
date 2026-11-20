@@ -66,6 +66,8 @@ pub struct Registry {
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
     sync_selectors: HashMap<&'static str, crate::SyncSelector>,
     extra_named_handlers: HashMap<&'static str, crate::SyncFn>,
+    trace_redacted_classes: HashSet<&'static str>,
+    trace_redacted_argument_errors: HashSet<&'static str>,
     callback_frames: HashSet<&'static str>,
     function_modules: HashMap<&'static str, &'static str>,
     function_return_types: HashMap<&'static str, &'static str>,
@@ -229,6 +231,26 @@ impl Registry {
             self.class_modules.insert(entry.name, module);
         }
         self.classes.push(entry);
+    }
+
+    /// Clear argument values in every frame of exceptions created by this class.
+    pub fn redact_exception_arguments(&mut self, class: &'static str) {
+        self.trace_redacted_classes.insert(class);
+    }
+
+    pub fn classes_with_redacted_exception_arguments(
+        &self,
+    ) -> impl Iterator<Item = &'static str> + '_ {
+        self.trace_redacted_classes.iter().copied()
+    }
+
+    /// Clear exception trace arguments when a native function rejects its parameter list.
+    pub fn redact_argument_error_trace(&mut self, function: &'static str) {
+        self.trace_redacted_argument_errors.insert(function);
+    }
+
+    pub fn argument_error_trace_is_redacted(&self, function: &str) -> bool {
+        self.trace_redacted_argument_errors.contains(function)
     }
 
     /// Registers a class implemented by a bundle on behalf of a PHP module.

@@ -178,8 +178,23 @@ impl Vm {
         let (file, line) = self.exception_location();
         object.set(Object::protected_key("file"), file);
         object.set(Object::protected_key("line"), Value::Int(line as i64));
-        let trace = self.throwable_trace(origin);
+        let redact = self.redact_exception_arguments(object, origin);
+        let trace = self.throwable_trace(origin, redact);
         object.set(Object::private_key(throwable_root(object), "trace"), trace);
+    }
+
+    fn redact_exception_arguments(&self, object: &Object, origin: TraceOrigin) -> bool {
+        let class_redacts = self.classes.for_object(object).is_some_and(|class| {
+            self.registry
+                .classes_with_redacted_exception_arguments()
+                .any(|name| class.is_a(name))
+        });
+        class_redacts
+            || matches!(origin, TraceOrigin::Engine)
+                && matches!(object.class.name(), "TypeError" | "ArgumentCountError")
+                && self.failed_native.as_ref().is_some_and(|native| {
+                    self.registry.argument_error_trace_is_redacted(&native.name)
+                })
     }
 
     /// Turn engine/native failures into the same transport as an explicit PHP throw.

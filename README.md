@@ -66,7 +66,7 @@ Built in, each checked call by call against real PHP: core, standard, ctype,
 connection reuse, and the easy and multi interfaces), date, dom (`DOMDocument`,
 `DOMNode`, `DOMElement`, `DOMXPath`), filter, hash, json, mbstring, openssl, pcre,
 PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
-session, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
+session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
@@ -102,8 +102,18 @@ gzip file functions, and the `compress.zlib://` wrapper. The
 `zlib.output_compression` directive stores its value. Use `ob_gzhandler` for
 PHP output-buffer compression or `phera serve --compress` for server compression.
 
-In progress: intl, mysqli, pgsql, sodium.
+In progress: intl, mysqli, pgsql.
 Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
+
+### Sodium
+
+Phera implements PHP's `sodium` module in Rust. It supports NaCl secret boxes
+and sealed boxes, Ed25519 signatures, X25519 and Ristretto255, ChaCha20-Poly1305
+and AES-256-GCM, BLAKE2b (including streaming) and SipHash, XChaCha20-Poly1305
+secretstream, key derivation and exchange, Argon2 and scrypt passwords, binary
+encodings, and ISO/IEC 7816-4 padding. The six AEGIS-128L and AEGIS-256 functions are
+absent pending a published audit of a pure Rust backend. Ed25519 signing
+rejects secret keys whose embedded public half cannot be decoded as a point.
 
 ## ✨ Goals
 
