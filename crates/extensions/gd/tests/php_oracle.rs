@@ -30,9 +30,21 @@ fn gd_operations_match_php() {
         operations.stdout.lines().count()
     );
     let inputs = root.join("corpus");
+    let fileinfo = root.join("../../fileinfo/tests/corpus");
     let metadata = comparison
         .compare(&root.join("metadata.php"), |_, command| {
-            command.arg(&inputs).args(LOSSLESS).args(LOSSY);
+            command
+                .args(LOSSLESS.iter().chain(LOSSY).map(|name| inputs.join(name)))
+                .args(
+                    [
+                        "sample.avif",
+                        "sample.heic",
+                        "sample.ico",
+                        "sample.tiff",
+                        "svg",
+                    ]
+                    .map(|name| fileinfo.join(name)),
+                );
         })
         .expect("compare getimagesize and exif_imagetype with real PHP");
     println!("{} metadata cases matched", metadata.stdout.lines().count());
