@@ -21,6 +21,7 @@ mod paths;
 mod php;
 mod platform;
 mod plugins;
+mod progress;
 mod project;
 mod registry;
 mod scripts;
@@ -123,6 +124,11 @@ fn materialise_packages(
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(16.min(std::thread::available_parallelism()?.get() * 2))
         .build()?;
+    let count = packages
+        .iter()
+        .filter(|package| package.kind() != "metapackage")
+        .count();
+    let preparing = progress::Progress::start("Preparing", count, options.verbose);
     let prepared = pool.install(|| {
         packages
             .par_iter()
@@ -133,12 +139,15 @@ fn materialise_packages(
                     .with_context(|| {
                         format!("Cannot install {} {}.", package.name, package.version)
                     })?;
+                preparing.complete();
                 Ok((package, source))
             })
             .collect::<Result<Vec<_>>>()
     })?;
+    drop(preparing);
     let vendor = project.vendor_dir()?;
     fs::create_dir_all(&vendor)?;
+    let installing = progress::Progress::start("Installing", count, options.verbose);
     pool.install(|| {
         prepared.par_iter().try_for_each(|(package, source)| {
             let destination = paths.destination(package)?;
@@ -150,6 +159,7 @@ fn materialise_packages(
             if options.verbose {
                 eprintln!("  {} {}: {method}", package.name, package.version);
             }
+            installing.complete();
             Ok(())
         })
     })

@@ -96,6 +96,8 @@ constraints, and `phera outdated --all` also includes transitive dependencies.
 `phera run-script name` runs a composer.json script. `phera run name` accepts
 the same script name when it is neither an existing file nor a PHP path.
 `phera exec name` runs a project binary from vendor/bin.
+The installer reports package progress in a terminal and prints elapsed time
+when it finishes.
 
 ### Serving a site
 
