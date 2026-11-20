@@ -77,6 +77,28 @@ impl PropertyEntry {
         })
     }
 
+    /// Stores `value` at `keys` of the array the property holds, for a
+    /// write from `scope`, when this entry was made for the object's class
+    /// and that scope, the property has no hooks and may hold an array, and
+    /// the write is a plain one (see `crate::element_writes`). Gives what
+    /// the element held; `None` with nothing changed otherwise.
+    pub(crate) fn write_element_matching(
+        &self,
+        object: &Object,
+        scope: Option<&Rc<crate::classes::Class>>,
+        keys: &[ArrayKey],
+        value: Value,
+    ) -> Option<Option<Value>> {
+        if !self.matches(object, scope)
+            || self.hooks.is_some()
+            || !self.write_rule.allows(TypeMask::ARRAY)
+            || object.lazy().is_some()
+        {
+            return None;
+        }
+        crate::property_storage::write_element_at(object, &self.key, self.slot(), keys, value)
+    }
+
     /// `++` or `--` of an integer property, for an increment from `scope`,
     /// as [`Vm::increment_property_site`] does: the expression's value, or
     /// `None` with nothing changed.

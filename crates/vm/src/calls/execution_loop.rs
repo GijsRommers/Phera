@@ -379,14 +379,13 @@ impl Machine<'_> {
             | Instruction::FetchIndex { .. }
             | Instruction::Fetch { .. }
             | Instruction::AssignPath { .. }
+            | Instruction::AssignPathFromLocal { .. }
             | Instruction::IncDecPath { .. }
             | Instruction::InitCall { .. }
             | Instruction::FetchClassName { .. }
             | Instruction::InstanceOf { .. }
             | Instruction::IterStart { .. }
-            | Instruction::IterEnd { .. } => {
-                self.further_step::<GUARDED>(instruction, position)
-            }
+            | Instruction::IterEnd { .. } => self.further_step::<GUARDED>(instruction, position),
             _ => Step::Slow,
         }
     }

@@ -70,6 +70,7 @@ mod dimension_instructions;
 mod dimensions;
 mod dispatch;
 mod dynamic_variables;
+mod element_writes;
 mod error_handler_signatures;
 mod error_handlers;
 mod error_traces;

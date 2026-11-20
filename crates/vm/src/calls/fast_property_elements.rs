@@ -93,7 +93,7 @@ impl Machine<'_> {
     }
 
     /// An integer or string key in a register, as PHP converts it.
-    fn array_key(&self, position: Position, register: Reg) -> Option<ArrayKey> {
+    pub(super) fn array_key(&self, position: Position, register: Reg) -> Option<ArrayKey> {
         match self
             .registers
             .window(position.frame.base() + register.index(), 1)

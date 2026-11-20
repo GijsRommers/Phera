@@ -29,6 +29,7 @@ mod fast_arguments;
 mod fast_calls;
 mod fast_class_names;
 mod fast_dimensions;
+mod fast_element_writes;
 mod fast_foreach;
 mod fast_instance_of;
 mod fast_methods;
