@@ -48,10 +48,15 @@ impl Compiler<'_> {
                 self.emit(crate::ir::Instruction::Throw { source }, line);
                 self.allocate_register()
             }
-            ExpressionKind::ClassConstant { .. }
-            | ExpressionKind::New { .. }
+            ExpressionKind::New { .. }
             | ExpressionKind::MethodCall { .. }
-            | ExpressionKind::StaticCall { .. }
+            | ExpressionKind::StaticCall { .. } => {
+                let start = self.temporaries_start();
+                let result = self.compile_object_expression(expression, line)?;
+                self.release_call_operands(start, result, line);
+                Ok(result)
+            }
+            ExpressionKind::ClassConstant { .. }
             | ExpressionKind::Clone { .. }
             | ExpressionKind::InstanceOf { .. } => self.compile_object_expression(expression, line),
             ExpressionKind::Variable(ast::Variable::Named(name)) if name == "this" => {
@@ -59,10 +64,17 @@ impl Compiler<'_> {
                 self.emit(crate::ir::Instruction::This { destination }, line);
                 Ok(destination)
             }
-            ExpressionKind::Variable(_)
-            | ExpressionKind::Index { .. }
-            | ExpressionKind::Property { .. }
-            | ast::ExpressionKind::StaticProperty { .. } => self.compile_read(expression),
+            ExpressionKind::Index { .. } | ExpressionKind::Property { .. } => {
+                // `(new T)->n`: the temporary goes right after the read,
+                // before the value is used, as in PHP.
+                let start = self.temporaries_start();
+                let result = self.compile_read(expression)?;
+                self.release_call_operands(start, result, line);
+                Ok(result)
+            }
+            ExpressionKind::Variable(_) | ast::ExpressionKind::StaticProperty { .. } => {
+                self.compile_read(expression)
+            }
             ExpressionKind::Assign { target, value } => {
                 self.compile_assignment(target, value, line)
             }
@@ -129,7 +141,10 @@ impl Compiler<'_> {
                             line: opening_line,
                         });
                 }
-                self.compile_call(callee, arguments, line, opening_line)
+                let start = self.temporaries_start();
+                let result = self.compile_call(callee, arguments, line, opening_line)?;
+                self.release_call_operands(start, result, line);
+                Ok(result)
             }
             ExpressionKind::Array(items) => self.compile_array(items, line),
             ExpressionKind::InterpolatedString(parts) => self.compile_interpolation(parts, line),
@@ -223,6 +238,7 @@ mod generators;
 pub(crate) mod matching;
 pub(crate) mod nullsafe;
 pub(crate) mod objects;
+pub(crate) mod operand_release;
 pub(crate) mod operators;
 mod parent_hooks;
 pub(crate) mod paths;

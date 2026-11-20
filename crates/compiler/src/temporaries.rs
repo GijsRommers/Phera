@@ -107,7 +107,16 @@ impl Compiler<'_> {
             .filter_map(|name| self.locals.get(name))
             .map(|register| register.index())
             .collect();
-        for index in (mark.next..end).filter(|index| !new_locals.contains(index)) {
+        // A register that a call's operands left (see
+        // `expressions::operand_release`) was cleared already, unless it was
+        // allocated again since.
+        let cleared: Vec<usize> = (mark.next..end)
+            .filter(|index| !new_locals.contains(index))
+            .filter(|index| {
+                !u16::try_from(*index).is_ok_and(|index| self.released.contains(&index))
+            })
+            .collect();
+        for index in cleared {
             if let Ok(index) = u16::try_from(index) {
                 self.emit(
                     Instruction::Clear {

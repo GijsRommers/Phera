@@ -127,7 +127,7 @@ impl Registers {
 
     /// Empty every slot from `base` up, releasing what they held: a frame
     /// or a prepared call leaves the stack.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn truncate(&mut self, base: usize) {
         if base < self.top {
             for slot in &mut self.slots[base..self.top] {
@@ -135,6 +135,36 @@ impl Registers {
             }
             self.top = base;
         }
+    }
+
+    /// Empty the registers of a frame that ends, from `start` (its window,
+    /// with `$this` or the closure below `base`) up. PHP releases a
+    /// function's variables first, in order, and `$this` after them, so a
+    /// destructor of a local runs before the destructor of `$this`.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn release_frame(&mut self, start: usize, base: usize) {
+        let prefix = [start, start + 1].map(|slot| {
+            if slot < base {
+                self.slots.get_mut(slot).and_then(Option::take)
+            } else {
+                None
+            }
+        });
+        self.truncate(start);
+        drop(prefix);
+    }
+
+    /// Whether a slot from `start` up to `base` holds the only reference to
+    /// an object: `$this` or the closure of a frame that is the last to
+    /// hold it.
+    #[inline]
+    pub(crate) fn holds_last_reference(&self, start: usize, base: usize) -> bool {
+        self.slots
+            .get(start..base)
+            .unwrap_or_default()
+            .iter()
+            .any(|slot| matches!(slot, Some(Value::Object(object)) if std::rc::Rc::strong_count(object) == 1))
     }
 
     /// Move the active tail into a generator without retaining the stack's capacity.
@@ -171,31 +201,31 @@ impl Registers {
     }
 
     /// Take the value out of a slot, leaving it empty.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn take(&mut self, index: usize) -> Value {
         self.slots[index].take().unwrap_or_default()
     }
 
     /// Store a value in a slot, dropping what it held.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn put(&mut self, index: usize, value: Value) {
         self.slots[index] = Some(value);
     }
 
     /// Bounded slices keep callers separate from unfinished callees.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn window(&self, base: usize, count: usize) -> &[Option<Value>] {
         self.slots.get(base..base + count).unwrap_or(&[])
     }
 
     /// Mutations are restricted to a single reserved region.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn window_mut(&mut self, base: usize, count: usize) -> &mut [Option<Value>] {
         self.slots.get_mut(base..base + count).unwrap_or(&mut [])
     }
 
     /// The scalar loop keeps the current frame's tail borrowed between slow instructions.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn tail_mut(&mut self, base: usize) -> &mut [Option<Value>] {
         &mut self.slots[base..]
     }
