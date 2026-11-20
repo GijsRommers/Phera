@@ -27,6 +27,21 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn break_into_debugger(&mut self) -> bool {
+        Vm::break_into_debugger(self)
+    }
+
+    fn debugger_output(&mut self, stderr: bool, bytes: &[u8]) -> bool {
+        self.output_writer.debugger.as_ref().is_none_or(|debugger| {
+            let stream = if stderr {
+                crate::debugger::Stream::Stderr
+            } else {
+                crate::debugger::Stream::Stdout
+            };
+            debugger.buffer(stream, bytes)
+        })
+    }
+
     fn extension_value(&self, key: &'static str) -> Option<Value> {
         self.extension_values.get(key).cloned()
     }

@@ -26,12 +26,39 @@ impl Vm {
     pub(crate) fn continue_execution(
         &mut self,
         stop: usize,
+        work: usize,
+        pending: Option<Result<BatchExit, NativeError>>,
+    ) -> LocalFuture<'_, NativeResult> {
+        if self.debugger.is_some() {
+            self.continue_debug_execution(stop, work, pending)
+        } else {
+            self.continue_execution_path::<false>(stop, work, pending)
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn continue_debug_execution(
+        &mut self,
+        stop: usize,
+        work: usize,
+        pending: Option<Result<BatchExit, NativeError>>,
+    ) -> LocalFuture<'_, NativeResult> {
+        self.continue_execution_path::<true>(stop, work, pending)
+    }
+
+    fn continue_execution_path<const DEBUG: bool>(
+        &mut self,
+        stop: usize,
         mut work: usize,
         mut pending: Option<Result<BatchExit, NativeError>>,
     ) -> LocalFuture<'_, NativeResult> {
         Box::pin(async move {
             loop {
-                match self.interpret_frames(stop, &mut work, pending.take()).await {
+                match self
+                    .interpret_frames::<DEBUG>(stop, &mut work, pending.take())
+                    .await
+                {
                     Ok(value) => return Ok(value),
                     Err(error) => {
                         let error = match crate::autoload::ClassMiss::take(error) {
@@ -40,6 +67,11 @@ impl Vm {
                                 Err(error) => error,
                             },
                             Err(error) => error,
+                        };
+                        let error = if DEBUG && self.debugger.is_some() {
+                            self.debug_exception(error).await
+                        } else {
+                            error
                         };
                         let error = if self.error_handlers.pending.is_empty() {
                             error
@@ -70,7 +102,7 @@ impl Vm {
 
 impl Vm {
     /// Await cold operations while the synchronous loop owns ordinary calls and scalar work.
-    async fn interpret_frames(
+    async fn interpret_frames<const DEBUG: bool>(
         &mut self,
         stop: usize,
         work: &mut usize,
@@ -79,6 +111,13 @@ impl Vm {
         loop {
             let exit = match pending.take() {
                 Some(exit) => exit?,
+                None if DEBUG && self.debugger.is_some() => {
+                    let Some(exit) = self.debug_batch(stop, work)? else {
+                        self.debugger_commands().await?;
+                        continue;
+                    };
+                    exit
+                }
                 None => self.run_batch(stop, work)?,
             };
             match exit {

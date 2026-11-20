@@ -30,6 +30,7 @@ pub(crate) fn script(
     arguments: &[String],
     files: FileSelection,
     ini: Vec<(String, String)>,
+    debug: bool,
 ) -> ExitCode {
     if !Path::new(script).is_file() {
         // PHP's own wording, on standard output as PHP prints it.
@@ -44,7 +45,21 @@ pub(crate) fn script(
             return ExitCode::FAILURE;
         }
     };
-    let runtime = Runtime::with_environment(loaded.environment).with_startup_ini(ini);
+    let project = crate::debug_settings::project_root(root);
+    let settings = crate::debug_settings::read_table(project).and_then(|(table, _)| {
+        crate::debug_settings::configure(debug, &table, &ini, &loaded.environment)
+    });
+    let debug = match settings {
+        Ok(debug) => debug,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut runtime = Runtime::with_environment(loaded.environment).with_startup_ini(ini);
+    if let Some(debug) = debug {
+        runtime = runtime.with_debug(debug);
+    }
     match runtime.run_file_blocking(script, arguments, Some(Box::new(Stdout))) {
         Ok(result) => {
             if std::env::var_os("PHERA_INSTRUCTION_COUNT").is_some() {

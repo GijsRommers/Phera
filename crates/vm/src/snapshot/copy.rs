@@ -160,6 +160,8 @@ impl Vm {
             fiber_bailout: false,
             suspended_fibers: Default::default(),
             snapshot: self.snapshot.forked(),
+            debugger: None,
+            debug_evaluating: false,
         })
     }
 

@@ -58,6 +58,7 @@ mod context;
 mod control_flow;
 mod cycles;
 mod debug_info;
+mod debugger;
 mod declaration_diagnostics;
 mod default_autoload;
 #[cfg(test)]
@@ -182,6 +183,8 @@ mod unit_caches;
 mod unpacking;
 mod unsupported_items;
 
+pub use debugger::{DebugConfig, DebugTimeLimit, Start as DebugStart};
+
 pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
 };
@@ -272,12 +275,19 @@ pub struct Vm {
     suspended_fibers: fibers::SuspendedFibers,
     /// What `Phera\snapshot()` does here, and the state it kept.
     snapshot: snapshot::SnapshotState,
+    debugger: Option<Box<debugger::Session>>,
+    debug_evaluating: bool,
 }
 
 impl Vm {
     /// Create isolated request state from an immutable native registry.
     pub fn new(registry: Arc<Registry>) -> Self {
         Self::with_native_tables(&NativeTables::new(registry))
+    }
+
+    /// Expose the debugger's PHP function and startup directives.
+    pub fn register_debugger(registry: &mut Registry) {
+        debugger::php_api::register(registry);
     }
 
     /// Register VM-owned fiber classes after Core and Reflection.
@@ -302,6 +312,8 @@ impl Vm {
             fiber_bailout: false,
             suspended_fibers: Default::default(),
             snapshot: Default::default(),
+            debugger: None,
+            debug_evaluating: false,
             native_callback_sites: Vec::new(),
             debug_objects: Vec::new(),
             property_guards: Vec::new(),
@@ -471,6 +483,9 @@ impl Vm {
         self.finish_request(end).await;
         self.finish_request_headers().await;
         self.finish_resource_finalizers().await;
+        if self.debugger.is_some() {
+            self.finish_debugger().await;
+        }
         self.status
     }
 

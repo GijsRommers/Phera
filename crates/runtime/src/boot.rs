@@ -40,6 +40,13 @@ pub enum BootReport {
 }
 
 impl WebWorker {
+    pub fn debug_boot_enabled(&self) -> bool {
+        self.runtime
+            .debug
+            .as_ref()
+            .is_some_and(|config| config.boot)
+    }
+
     /// Boots `script` and keeps the result for this worker's requests.
     pub async fn boot(&self, script: &Path, document_root: &Path) -> BootReport {
         if !self.snapshots.start_boot(script) {
@@ -104,6 +111,13 @@ impl Runtime {
             script.parent().map(Path::to_path_buf),
             Vec::new().into(),
         );
+        if let Some(debug) = &self.debug {
+            debug.apply_ini(&mut vm);
+            if debug.boot {
+                vm.connect_debugger(debug, &unit.file, &debug.idekey, None)
+                    .await;
+            }
+        }
         match vm.boot(unit).await {
             BootOutcome::Snapshot(snapshot) => {
                 let files = snapshot.included_files();

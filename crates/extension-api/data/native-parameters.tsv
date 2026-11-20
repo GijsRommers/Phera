@@ -3762,3 +3762,4 @@ zend_version	Zend/zend_builtin_functions.stub.php:19
 zlib_decode	ext/zlib/zlib.stub.php:186	data	r--		-	max_length	o--	0	i0
 zlib_encode	ext/zlib/zlib.stub.php:183	data	r--		-	encoding	r--		-	level	o--	-1	i-1
 zlib_get_coding_type	ext/zlib/zlib.stub.php:166
+xdebug_break	Xdebug 3.5.0 reflection

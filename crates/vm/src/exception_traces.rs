@@ -342,7 +342,7 @@ pub(crate) struct WarningSite {
 }
 
 /// A nested unit is shown as the construct that entered it.
-fn scoped_unit_name(frame: FrameView<'_>) -> Option<&'static str> {
+pub(crate) fn scoped_unit_name(frame: FrameView<'_>) -> Option<&'static str> {
     use phera_bytecode::{IncludeKind, Instruction};
     Some(
         match frame

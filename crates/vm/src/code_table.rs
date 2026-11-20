@@ -67,6 +67,10 @@ pub(crate) struct CodeTable {
 }
 
 impl CodeTable {
+    pub(crate) fn loaded_units(&self) -> impl Iterator<Item = &CompiledUnit> {
+        self.units.iter().map(|loaded| loaded.unit.as_ref())
+    }
+
     pub(crate) fn next_unit_index(&self) -> UnitIndex {
         UnitIndex(self.units.len() as u32)
     }
