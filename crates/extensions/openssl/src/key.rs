@@ -88,6 +88,7 @@ pub(crate) fn register(registry: &mut Registry) {
     const HOOKS: ClassHooks = ClassHooks {
         clone: Some(NativeClone::Forbidden),
         compare: Some(compare),
+        fork: Some(share_key),
         ..ClassHooks::EMPTY
     };
 
@@ -137,4 +138,20 @@ fn compare(
     _: &mut dyn Diagnostics,
 ) -> Result<NativeComparison, phera_extension_api::value::OpError> {
     Ok(NativeComparison::Uncomparable)
+}
+
+/// A key or certificate never changes once made, so a fork of a snapshot
+/// shares it.
+fn share_key(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    _fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    if let Some(key) = state.downcast_ref::<Rc<Key>>() {
+        return Ok(Box::new(key.clone()));
+    }
+    if let Some(certificate) = state.downcast_ref::<Rc<x509_cert::Certificate>>() {
+        return Ok(Box::new(certificate.clone()));
+    }
+    Err("a signing request belongs to one request".into())
 }

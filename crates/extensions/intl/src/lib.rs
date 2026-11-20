@@ -43,6 +43,8 @@ impl Extension for Intl {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this request state: intl_get_error_code() reports this request.
+        registry.fork_state::<crate::error::ErrorState>(phera_extension_api::fresh_state);
         registry.class(ClassEntry {
             parent: Some("Exception"),
             ..ClassEntry::class("IntlException")

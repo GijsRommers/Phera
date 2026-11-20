@@ -28,6 +28,12 @@ impl Extension for Date {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::classes::datetime_factory::LastErrors>(
+            phera_extension_api::fresh_state,
+        );
+        registry
+            .fork_state::<crate::zone::Zone>(phera_extension_api::copy_state::<crate::zone::Zone>);
         registry.ini_update("date.timezone", |context, name, value, function| {
             Ok(zone::update_ini(context, name, value, function))
         });

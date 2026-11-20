@@ -75,7 +75,8 @@ const LEVELS: [&str; 8] = [
 ];
 
 /// What `openlog()` set for the rest of the request.
-struct Opened {
+#[derive(Clone)]
+pub(crate) struct Opened {
     /// The name put in front of every message.
     prefix: Vec<u8>,
     /// Whether the process id follows the name.

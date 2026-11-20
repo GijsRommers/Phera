@@ -1,6 +1,7 @@
 //! Request-local class linking and method contexts keep shared bytecode free of PHP values.
 
 pub(crate) mod class;
+pub(crate) mod class_state;
 mod class_table;
 pub(crate) mod cloning;
 mod declaration_errors;

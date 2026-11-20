@@ -1,17 +1,13 @@
 //! A trait's declared properties and constants belong to each consuming class.
 
-use std::{
-    cell::{Cell, RefCell},
-    collections::HashMap,
-    rc::Rc,
-};
+use std::{collections::HashMap, rc::Rc};
 
 use phera_bytecode::{ClassDeclaration, CompiledUnit, Visibility};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object};
 
 use super::{
-    Class, ConstantState, LinkedConstant,
+    Class, LinkedConstant,
     class::{ConstantInitializer, PropertyDefault},
     trait_methods::display,
 };
@@ -81,7 +77,7 @@ impl Vm {
                     ConstantInitializer::Compiled { function, .. } => {
                         ConstantInitializer::Compiled {
                             function: *function,
-                            state: RefCell::new(ConstantState::Uninitialized),
+                            slot: self.class_states.new_constant(),
                         }
                     }
                 };
@@ -224,11 +220,10 @@ impl Vm {
                             }
                         }
                     }
-                    linked.static_storage = property.static_storage.as_ref().map(|_| {
-                        crate::reference_holders::StaticProperty::new(property.value.clone())
-                    });
-                    linked.static_initialized = Rc::new(Cell::new(false));
-                    linked.value_initialized = Rc::new(Cell::new(property.initialized));
+                    // Each class that uses the trait has its own static.
+                    linked.static_storage = property
+                        .static_storage
+                        .map(|_| self.class_states.new_static());
                     if let Some(inherited) =
                         target.iter_mut().find(|candidate| candidate.key == key)
                     {

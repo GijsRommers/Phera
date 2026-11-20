@@ -59,7 +59,7 @@ pub(crate) enum ScriptEnd {
 }
 
 /// The request's state for its end.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct RequestEnd {
     /// The destructor phases have begun: PHP runs destructors there with no
     /// calling code, so a private destructor is skipped with a warning.

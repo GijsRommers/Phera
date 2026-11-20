@@ -229,3 +229,16 @@ impl Vm {
         Some(Value::Object(object.clone()))
     }
 }
+
+/// The fork's case objects are the copies of the snapshot's, so that
+/// `Suit::Hearts === $card->suit` holds in the fork as it did before.
+impl crate::snapshot::ForkCopy for EnumCases {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        EnumCases {
+            objects: self.objects.fork_copy(fork),
+            initializing: Default::default(),
+            backed: self.backed.fork_copy(fork),
+            validating: Default::default(),
+        }
+    }
+}

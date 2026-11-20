@@ -25,6 +25,7 @@ const RULE_ARGS: &[Param] = &[
 ];
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::copy::<State>()),
+    fork: Some(phera_extension_api::fork_clone::<State>),
     iterator: Some(cursor::make),
     ..ClassHooks::EMPTY
 };

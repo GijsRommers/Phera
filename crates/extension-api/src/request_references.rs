@@ -47,3 +47,23 @@ impl Drop for CycleReferences {
         }
     }
 }
+
+/// A fork of a snapshot watches its own copies of the cells (see
+/// `phera_value::Fork`); a cell nothing reaches any more is left out.
+pub fn fork_cycle_references(
+    state: &dyn std::any::Any,
+    fork: &mut phera_value::Fork<'_>,
+) -> Option<Box<dyn std::any::Any>> {
+    let references = state.downcast_ref::<CycleReferences>()?;
+    let mut copies = HashMap::new();
+    for cell in references.0.values().filter_map(Weak::upgrade) {
+        let copy = fork.reference(&cell);
+        copies.insert(Rc::as_ptr(&copy), Rc::downgrade(&copy));
+    }
+    Some(Box::new(CycleReferences(copies)))
+}
+
+/// Registers [`fork_cycle_references`] for the cycle bookkeeping.
+pub fn register_cycle_fork(registry: &mut crate::Registry) {
+    registry.fork_state::<CycleReferences>(fork_cycle_references);
+}

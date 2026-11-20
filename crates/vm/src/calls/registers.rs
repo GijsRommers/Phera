@@ -248,3 +248,12 @@ impl Registers {
         &mut self.slots[base..]
     }
 }
+
+impl crate::snapshot::ForkCopy for Registers {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        Registers {
+            slots: self.slots.fork_copy(fork),
+            top: self.top,
+        }
+    }
+}

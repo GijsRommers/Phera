@@ -72,3 +72,33 @@ impl Iterators {
         self.slots.get_mut(index as usize)?.as_mut()
     }
 }
+
+/// A `foreach` over an array goes on in the fork over the fork's array; one
+/// over an object's own iterator cannot be copied.
+impl crate::snapshot::ForkCopy for Iterators {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        let slots = self
+            .slots
+            .iter()
+            .map(|slot| {
+                let state = slot.as_ref()?;
+                if state.traversal.is_some() || state.property_hooks.is_some() {
+                    fork.refuse_state(
+                        "foreach",
+                        "Phera\\snapshot() was called inside a foreach over an object",
+                    );
+                }
+                Some(crate::calls::frame::IteratorState {
+                    snapshot: state.snapshot.fork_copy(fork),
+                    traversal: None,
+                    traversal_mode: state.traversal_mode,
+                    property_hooks: None,
+                    source: state.source.clone(),
+                    position: state.position,
+                    started: state.started,
+                })
+            })
+            .collect();
+        Iterators { slots }
+    }
+}

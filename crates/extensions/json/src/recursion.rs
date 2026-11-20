@@ -9,7 +9,7 @@ use std::{cell::RefCell, collections::HashSet, rc::Rc};
 use phera_extension_api::{Context, Object};
 
 #[derive(Default)]
-struct Active(Rc<RefCell<HashSet<usize>>>);
+pub(crate) struct Active(Rc<RefCell<HashSet<usize>>>);
 
 pub(crate) struct Serializing {
     set: Rc<RefCell<HashSet<usize>>>,

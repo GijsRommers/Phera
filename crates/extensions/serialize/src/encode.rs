@@ -43,7 +43,7 @@ struct Encoder {
 
 /// Serializable methods may call serialize() with the parent's slot table.
 #[derive(Default)]
-struct SerializationSlots {
+pub(crate) struct SerializationSlots {
     identities: HashMap<Identity, (usize, Value)>,
     count: usize,
 }
