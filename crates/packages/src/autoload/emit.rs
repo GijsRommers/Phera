@@ -3,7 +3,7 @@
 //! After `require 'vendor/autoload.php'`, PHP uses the bundled Composer ClassLoader.
 
 use super::Maps;
-use crate::{Options, Project, php};
+use crate::{Lock, Options, Project, php};
 use anyhow::Result;
 use md5::{Digest, Md5};
 use std::fs;
@@ -57,6 +57,10 @@ pub(super) fn write(project: &Project, maps: &Maps, options: &Options) -> Result
                 .collect(),
         ),
     ] {
+        if filename == "autoload_files.php" && mappings.is_empty() {
+            remove_optional(&composer.join(filename))?;
+            continue;
+        }
         let mut code = php::header(&vendor, &project.directory, filename);
         code.push_str("return array(\n");
         for (name, path) in mappings {
@@ -69,17 +73,20 @@ pub(super) fn write(project: &Project, maps: &Maps, options: &Options) -> Result
         code.push_str(");\n");
         fs::write(composer.join(filename), code)?;
     }
-    let suffix = format!(
-        "{:x}",
-        Md5::digest(fs::read(project.directory.join("composer.lock"))?)
-    );
+    let suffix = loader_suffix(project, &vendor)?;
     let static_code = static_file(maps, &vendor, &suffix);
     fs::write(composer.join("autoload_static.php"), static_code)?;
     let authoritative = options.authoritative(project);
     let include_paths = write_include_paths(project, &vendor, &maps.include_paths)?;
+    let check_platform = if super::platform::write(project, options)? {
+        "        require __DIR__ . '/platform_check.php';\n"
+    } else {
+        ""
+    };
     let real = include_str!("../../resources/autoload_real.php.in")
         .replace("@SUFFIX@", &suffix)
         .replace("@INCLUDE_PATHS@", include_paths)
+        .replace("@PLATFORM_CHECK@", check_platform)
         .replace(
             "@AUTHORITATIVE@",
             if authoritative { "true" } else { "false" },
@@ -91,11 +98,55 @@ pub(super) fn write(project: &Project, maps: &Maps, options: &Options) -> Result
         return ComposerAutoloaderInit{suffix}::getLoader();\n"
     );
     fs::write(vendor.join("autoload.php"), autoload)?;
-    super::platform::write(project, options)?;
     if options.verbose {
         eprintln!("Generated autoloader: {} classes.", maps.classes.len());
     }
     Ok(())
+}
+
+pub(super) fn remove_optional(path: &Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn loader_suffix(project: &Project, vendor: &Path) -> Result<String> {
+    let valid = |text: &str| {
+        !text.is_empty()
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    };
+    if let Some(configured) = project.data["config"]["autoloader-suffix"].as_str()
+        && !configured.is_empty()
+    {
+        anyhow::ensure!(
+            valid(configured),
+            "config.autoloader-suffix must be a PHP identifier suffix."
+        );
+        return Ok(configured.to_owned());
+    }
+    if let Ok(existing) = fs::read_to_string(vendor.join("autoload.php"))
+        && let Some(initializer) = existing.split_once("return ComposerAutoloaderInit")
+        && let Some((suffix, _)) = initializer.1.split_once("::getLoader(")
+        && valid(suffix)
+    {
+        return Ok(suffix.to_owned());
+    }
+    let hash = Lock::read(&project.directory)?.content_hash;
+    if !hash.is_empty()
+        && hash
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    {
+        return Ok(hash);
+    }
+    Ok(format!(
+        "{:x}",
+        Md5::digest(fs::read(project.directory.join("composer.lock"))?)
+    ))
 }
 
 fn write_include_paths(
@@ -106,11 +157,7 @@ fn write_include_paths(
     let filename = "include_paths.php";
     let destination = vendor.join("composer").join(filename);
     if paths.is_empty() {
-        if let Err(error) = fs::remove_file(destination)
-            && error.kind() != std::io::ErrorKind::NotFound
-        {
-            return Err(error.into());
-        }
+        remove_optional(&destination)?;
         return Ok("");
     }
     let mut code = php::header(vendor, &project.directory, filename);

@@ -71,7 +71,7 @@ exact generated-file differences, benchmarks and the readiness gate.
   the project with vendor/bin on PATH; `@php` uses the current Phera binary.
   PHP callable scripts use a generated bootstrap and still need Composer Event
   objects and framework tests. Package events, aliases with arguments and PHP
-  `-r` forwarding are unfinished. Composer plugins are listed and skipped.
+  `-r` forwarding are unfinished.
 - The PHP 8.5 binary proxies expose Composer's globals. Older-PHP stream wrappers,
   PHPUnit process-isolation special cases, Windows batch proxies and bash-sourcing
   behavior have not been ported from Composer's proxy generator.
@@ -79,6 +79,22 @@ exact generated-file differences, benchmarks and the readiness gate.
   relative project-local paths.
 - Default platform capability reporting is conservative. Complete extension-driver
   and library-version reporting and platform virtual-package providers need more work.
+
+## Composer plugins
+
+Native hooks use the project's ordered `config.allow-plugins` rules.
+`--no-plugins` disables them. Other plugin effects need explicit project setup.
+
+| Plugin | Current coverage |
+| --- | --- |
+| `symfony/runtime` | Generates the runtime autoloader from the installed template after autoload generation. |
+| `symfony/flex` | Skipped. Apply and commit the required recipes and declare the framework packages in the project manifest. |
+| `composer/installers` | Resolves Drupal and WordPress package types and project path overrides. Other framework types still need their Composer installer. |
+| `roots/wordpress-core-installer` | Uses the declared WordPress core directory. |
+| `drupal/core-composer-scaffold` | Copies missing mapped assets and creates the web-root loader references. Existing project files are preserved. |
+| `phpstan/extension-installer` | Skipped. Include the installed extensions' configuration in `phpstan.neon`. |
+| `dealerdirect/phpcodesniffer-composer-installer` | Skipped. Configure PHP_CodeSniffer's `installed_paths` for external standards. |
+| `php-http/discovery` | Skipped. Declare a concrete HTTP client and PSR-17 factory implementation in the project. |
 
 ## Verification and licensing
 
@@ -89,7 +105,9 @@ fetches the 25 original fixtures by commit and runs the pinned project sources
 with scripts and plugins disabled. `PHERA_PACKAGES_COMPARISON_DIR` sets the
 location for logs, results and caches outside the checkout.
 `PHERA_PACKAGES_INSTALL_ONLY=1` runs the locked-install comparisons on their
-own. The registry CI job runs both install and resolution checks.
+own. Add `PHERA_PACKAGES_STRICT_BYTES=1` to fail on any generated PHP or
+installed JSON byte difference. The registry CI job runs both install and
+resolution checks and reports the byte differences.
 
 Composer's ClassLoader.php and InstalledVersions.php are included verbatim under
 their MIT license. See [resources/README.md](resources/README.md) for source commits

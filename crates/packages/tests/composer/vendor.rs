@@ -84,3 +84,102 @@ pub(super) fn differences(left: &Path, right: &Path) -> Result<(Vec<String>, Vec
     }
     Ok((package, generated))
 }
+
+/// Keep byte comparisons separate from the semantic loader probes.
+#[derive(serde::Serialize)]
+pub(super) struct ByteDifference {
+    path: String,
+    composer_bytes: Option<usize>,
+    phera_bytes: Option<usize>,
+    first_byte: Option<usize>,
+    cause: &'static str,
+}
+
+pub(super) fn generated_bytes(left: &Path, right: &Path) -> Result<Vec<ByteDifference>> {
+    let mut names = BTreeSet::from([
+        PathBuf::from("autoload.php"),
+        PathBuf::from("autoload_runtime.php"),
+        PathBuf::from("composer/installed.json"),
+    ]);
+    for vendor in [left, right] {
+        for entry in fs::read_dir(vendor.join("composer"))? {
+            let entry = entry?;
+            if entry.file_type()?.is_file()
+                && entry.path().extension().is_some_and(|ext| ext == "php")
+            {
+                names.insert(Path::new("composer").join(entry.file_name()));
+            }
+        }
+    }
+    let mut differences = Vec::new();
+    for path in names {
+        let expected = bytes_if_present(&left.join(&path))?;
+        let actual = bytes_if_present(&right.join(&path))?;
+        if expected == actual {
+            continue;
+        }
+        let first_byte = expected.as_ref().zip(actual.as_ref()).map(|(left, right)| {
+            left.iter()
+                .zip(right)
+                .position(|(left, right)| left != right)
+                .unwrap_or_else(|| left.len().min(right.len()))
+        });
+        let name = path.to_string_lossy().into_owned();
+        let cause = match (expected.is_some(), actual.is_some()) {
+            (true, false) => "Only Composer generated this file.",
+            (false, true) => "Only Phera generated this file.",
+            _ => generation_cause(&name),
+        };
+        differences.push(ByteDifference {
+            path: name,
+            composer_bytes: expected.as_ref().map(Vec::len),
+            phera_bytes: actual.as_ref().map(Vec::len),
+            first_byte,
+            cause,
+        });
+    }
+    Ok(differences)
+}
+
+fn bytes_if_present(path: &Path) -> Result<Option<Vec<u8>>> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn generation_cause(path: &str) -> &'static str {
+    match path {
+        "autoload.php" | "composer/autoload_real.php" | "composer/autoload_static.php" => {
+            "Bootstrap template, initializer suffix or path expression."
+        }
+        "composer/installed.json" => "JSON field order, formatting or installed metadata.",
+        "composer/installed.php" => "PHP array formatting, paths or installed metadata.",
+        "composer/platform_check.php" => "Generated platform guard or diagnostic formatting.",
+        "composer/autoload_psr4.php"
+        | "composer/autoload_namespaces.php"
+        | "composer/autoload_classmap.php"
+        | "composer/autoload_files.php"
+        | "composer/include_paths.php" => "Map formatting, path expressions or map contents.",
+        _ => "Unclassified byte difference. Inspect the generated file.",
+    }
+}
+
+#[test]
+fn generated_byte_report_includes_missing_files_and_first_difference() {
+    let left = tempfile::tempdir().unwrap();
+    let right = tempfile::tempdir().unwrap();
+    for directory in [&left, &right] {
+        fs::create_dir(directory.path().join("composer")).unwrap();
+    }
+    fs::write(left.path().join("autoload.php"), b"abc").unwrap();
+    fs::write(right.path().join("autoload.php"), b"ax").unwrap();
+    fs::write(right.path().join("composer/autoload_files.php"), b"extra").unwrap();
+    let result = generated_bytes(left.path(), right.path()).unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].first_byte, Some(1));
+    assert_eq!(result[0].composer_bytes, Some(3));
+    assert_eq!(result[1].composer_bytes, None);
+    assert_eq!(result[1].phera_bytes, Some(5));
+}

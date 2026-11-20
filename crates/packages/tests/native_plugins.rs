@@ -176,3 +176,30 @@ fn framework_locations_are_shared_by_install_metadata_and_autoload() {
     let psr4 = fs::read_to_string(root.join("vendor/composer/autoload_psr4.php")).unwrap();
     assert!(psr4.contains("/web/core/lib"));
 }
+
+#[test]
+fn empty_file_map_and_disabled_platform_check_are_omitted() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    let suffix = "aabbccddeeff00112233445566778899";
+    fs::write(root.join("composer.json"), "{}").unwrap();
+    fs::write(
+        root.join("composer.lock"),
+        json!({
+            "content-hash": suffix, "packages": [], "packages-dev": []
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let options = Options {
+        ignore_platform: true,
+        ..options(root)
+    };
+    install(root, &options).unwrap();
+    let vendor = root.join("vendor");
+    assert!(!vendor.join("composer/autoload_files.php").exists());
+    assert!(!vendor.join("composer/platform_check.php").exists());
+    let loader = fs::read_to_string(vendor.join("composer/autoload_real.php")).unwrap();
+    assert!(loader.contains(&format!("class ComposerAutoloaderInit{suffix}")));
+    assert!(!loader.contains("platform_check.php"));
+}

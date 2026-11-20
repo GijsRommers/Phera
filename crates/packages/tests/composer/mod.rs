@@ -32,6 +32,7 @@ pub(super) fn compare() -> Result<()> {
         composer: required_path("PHERA_COMPOSER")?,
         probe: oracle::write_probe(&work)?,
         install_only: std::env::var("PHERA_PACKAGES_INSTALL_ONLY").as_deref() == Ok("1"),
+        strict_bytes: std::env::var("PHERA_PACKAGES_STRICT_BYTES").as_deref() == Ok("1"),
         work,
     };
     let only = std::env::var("PHERA_PACKAGES_FIXTURE").ok();
@@ -73,6 +74,7 @@ struct Tools {
     composer: PathBuf,
     probe: PathBuf,
     install_only: bool,
+    strict_bytes: bool,
     work: PathBuf,
 }
 
@@ -126,6 +128,8 @@ impl Tools {
         let right_vendor = right.join(vendor);
         let (package_differences, generated_differences) =
             vendor::differences(&left_vendor, &right_vendor)?;
+        let byte_differences = vendor::generated_bytes(&left_vendor, &right_vendor)?;
+        let byte_parity = byte_differences.is_empty();
         let installed_json = |vendor: &Path| -> Result<Value> {
             Ok(serde_json::from_slice(&fs::read(
                 vendor.join("composer/installed.json"),
@@ -172,12 +176,14 @@ impl Tools {
             "fixture": fixture.name,
             "package_differences": package_differences,
             "generated_differences": generated_differences,
+            "generated_byte_differences": byte_differences,
+            "generated_byte_parity": byte_parity,
             "installed_json_identical": installed_identical,
             "installed_php_identical": installed_php_identical,
             "autoload_identical_under_php": autoload_identical,
             "autoload_identical_under_phera": phera_autoload_identical,
             "draft_checks_pass": package_differences.is_empty()
-                && installed_identical && autoload_identical,
+                && installed_identical && autoload_identical && (!self.strict_bytes || byte_parity),
         });
         if self.install_only {
             return Ok(row);
