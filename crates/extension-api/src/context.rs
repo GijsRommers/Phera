@@ -73,6 +73,16 @@ pub trait Context {
         None
     }
 
+    /// Try the native overload of an operator, for built-ins such as pow().
+    fn native_binary(
+        &mut self,
+        _operator: crate::NativeBinaryOp,
+        _left: &Value,
+        _right: &Value,
+    ) -> Result<Option<Value>, NativeError> {
+        Ok(None)
+    }
+
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
 
@@ -112,6 +122,13 @@ pub trait Context {
 
     /// Flushes an extension after user shutdown callbacks and output finalization.
     fn register_request_finalizer(&mut self, _callback: crate::AsyncFn) {}
+
+    /// Private per-request data owned by an extension.
+    fn extension_value(&self, _key: &'static str) -> Option<Value> {
+        None
+    }
+
+    fn set_extension_value(&mut self, _key: &'static str, _value: Value) {}
 
     /// Releases resources after output and extension finalizers have run.
     fn register_resource_finalizer(&mut self, _key: &'static str, _callback: crate::AsyncFn) {}

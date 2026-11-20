@@ -6,6 +6,7 @@ mod options;
 mod plain;
 mod plain_object;
 pub(crate) mod sequence;
+mod unfinished;
 
 use std::{borrow::Cow, rc::Rc};
 
@@ -93,6 +94,9 @@ pub async fn unserialize(context: &mut dyn Context, arguments: &[Value]) -> Nati
     };
     let root = decoder.graph.new_place();
     let build = decoder.build(context, root).await;
+    if build.is_err() {
+        decoder.abandon_unfinished(context);
+    }
     match build {
         Ok(()) => report_extra(context, decoder.reader.offset(), input.len()),
         Err(Failure::Native(error)) => return Err(error),
@@ -250,21 +254,30 @@ impl Decoder<'_> {
         // PHP gives the delayed magic callbacks an independent decoder.
         let previous = ActiveUnserializePolicy::replace(context, None);
         let result = async {
-            for hook in hooks {
-                match hook {
-                    Delayed::Legacy(hook) => hook.invoke(context).await?,
-                    Delayed::Wakeup(object) => {
-                        context
-                            .call_serialization_method(object, "__wakeup", Vec::new())
-                            .await?
-                    }
+            let mut hooks = hooks.into_iter();
+            while let Some(hook) = hooks.next() {
+                let woken = hook.object();
+                let outcome = match hook {
+                    Delayed::Legacy(hook) => hook.invoke(context).await.map(drop),
+                    Delayed::Wakeup(object) => context
+                        .call_serialization_method(object, "__wakeup", Vec::new())
+                        .await
+                        .map(drop),
                     Delayed::Unserialize(object, members) => {
                         let argument = Value::Array(Rc::new(self.graph.array(members)));
                         context
                             .call_serialization_method(object, "__unserialize", vec![argument])
-                            .await?
+                            .await
+                            .map(drop)
                     }
                 };
+                if let Err(error) = outcome {
+                    if let Some(object) = woken {
+                        object.mark_destructed();
+                    }
+                    hooks.for_each(|rest| rest.abandon());
+                    return Err(error);
+                }
             }
             Ok(())
         }

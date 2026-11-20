@@ -34,6 +34,11 @@ impl Vm {
             }
             "fatal_error_backtraces" => self.error_handlers.fatal_error_backtraces = boolean(bytes),
             "max_execution_time" => self.execution_time.restart(integer(bytes)),
+            "opcache.validate_timestamps"
+            | "opcache.revalidate_freq"
+            | "opcache.revalidate_path" => {
+                self.include_state.policy.set_ini(entry.name, bytes);
+            }
             "zend.exception_ignore_args" => {
                 self.error_handlers.trace_ignore_args = boolean(bytes);
             }

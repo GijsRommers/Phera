@@ -9,6 +9,7 @@
 mod child_pipe;
 mod context_options;
 mod copy;
+mod crypto_constants;
 mod csv;
 mod data_uri;
 mod directory;
@@ -18,6 +19,8 @@ mod file_attributes;
 pub mod file_io;
 mod formatted;
 mod glob;
+mod gzip;
+pub use gzip::register as register_gzip_functions;
 mod handles;
 mod include_path;
 mod ini;
@@ -81,6 +84,7 @@ impl Extension for Streams {
             phera_extension_api::copy_state::<phera_extension_api::WorkingDirectory>,
         );
         context_options::register(registry);
+        crypto_constants::register(registry);
         copy::register(registry);
         csv::register(registry);
         directory::register(registry);

@@ -49,7 +49,7 @@ impl Vm {
 
     async fn run_bundled(
         &mut self,
-        loader: std::sync::Arc<dyn crate::CodeLoader>,
+        loader: std::rc::Rc<dyn crate::CodeLoader>,
         source: phera_extension_api::BundledSource,
     ) -> Result<(), NativeError> {
         let unit = match loader.load_bundled(source).await {

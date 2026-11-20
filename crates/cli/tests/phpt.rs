@@ -46,9 +46,13 @@ const SUPPORTED_SECTIONS: &[&str] = &[
 
 /// Directives exercised by this runner. Other INI cases still need php-src's harness.
 const SUPPORTED_INI: &[&str] = &[
+    "date.timezone",
     "display_errors",
     "fatal_error_backtraces",
     "hard_timeout",
+    "intl.default_locale",
+    "intl.error_level",
+    "intl.use_exceptions",
     "log_errors",
     "max_execution_time",
     "zend.exception_ignore_args",

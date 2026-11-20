@@ -149,7 +149,8 @@ async fn write_owned(
     stream
         .write_policy(bytes.len() as u64)
         .run(move || {
-            let result = write_bytes(&mut stream, &bytes);
+            let result =
+                write_bytes(&mut stream, &bytes).and_then(|count| stream.finish().map(|()| count));
             (bytes, result)
         })
         .await

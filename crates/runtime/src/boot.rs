@@ -82,11 +82,15 @@ impl Runtime {
         document_root: &Path,
         started: Instant,
     ) -> (ScriptState, BootReport) {
-        let unit = match self.entry_unit(script).await {
+        let code = std::rc::Rc::new(crate::worker_code_cache::RequestCodeCache::new(
+            worker.code.clone(),
+        ));
+        let unit = match self.entry_unit(&code, script).await {
             Ok(unit) => unit,
             Err(error) => return failed(error.to_string()),
         };
         let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
+        vm.set_local_loader(code);
         crate::http::define_boot_superglobals(
             &mut vm,
             script,

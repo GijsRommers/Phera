@@ -84,7 +84,7 @@ impl Vm {
             match exit {
                 BatchExit::Returned(value) => {
                     if self.generator_releases_pending() {
-                        self.drain_generator_releases().await?;
+                        self.drain_released_generators().await?;
                     }
                     return Ok(value);
                 }
@@ -94,7 +94,7 @@ impl Vm {
                         Box::pin(self.drain_pending_callbacks()).await?;
                     }
                     if self.generator_releases_pending() {
-                        self.drain_generator_releases().await?;
+                        self.drain_released_generators().await?;
                     }
                     self.generator_suspension = suspension;
                     return Ok(phera_value::Value::Null);
@@ -154,9 +154,20 @@ impl Vm {
                 Box::pin(self.drain_pending_callbacks()).await?;
             }
             if self.generator_releases_pending() {
-                self.drain_generator_releases().await?;
+                self.drain_released_generators().await?;
             }
         }
+    }
+
+    /// Closes released generators, then runs the destructors that closing
+    /// them made due (the generators' variables), before the script goes
+    /// on: `unset($generator); echo ...;` destructs its locals first.
+    async fn drain_released_generators(&mut self) -> Result<(), NativeError> {
+        self.drain_generator_releases().await?;
+        if self.destructors_due() {
+            self.run_destructors().await?;
+        }
+        Ok(())
     }
 
     async fn drain_pending_callbacks(&mut self) -> Result<(), NativeError> {

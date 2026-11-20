@@ -104,6 +104,14 @@ impl Vm {
             })));
         }
         let (register, keys, left) = self.read_indexed_update(&place)?;
+        let right = self.operand(source).clone();
+        if (left.is_object() || right.is_object())
+            && let Some(value) = self.native_binary(operator, &left, &right)?
+        {
+            self.finish_indexed_update(&place, register, keys, value.clone())?;
+            self.set(destination, value);
+            return Ok(None);
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = ops::binary(
             operator,

@@ -266,9 +266,11 @@ impl ClassDefinitions {
                     has_native_layout: true,
                     is_final: matches!(
                         entry.kind,
-                        NativeKind::FinalClass | NativeKind::UnitEnum(_)
+                        NativeKind::FinalClass
+                            | NativeKind::FinalReadonlyClass
+                            | NativeKind::UnitEnum(_)
                     ),
-                    is_readonly: false,
+                    is_readonly: entry.kind == NativeKind::FinalReadonlyClass,
                     allows_dynamic_properties: false,
                     constructor: methods.get("__construct").cloned(),
                     magic: super::magic::MagicMethods::link(&methods),

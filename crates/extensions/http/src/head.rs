@@ -97,6 +97,12 @@ impl ResponseHead {
         self.lines.iter().map(Vec::as_slice)
     }
 
+    /// Set the coding applied by PHP's output handler.
+    pub fn set_content_coding(&mut self, coding: &str) {
+        self.apply(format!("Content-Encoding: {coding}").as_bytes(), true);
+        self.apply(b"Vary: Accept-Encoding", false);
+    }
+
     /// The value of a header, if the script set it.
     pub fn header(&self, name: &str) -> Option<&[u8]> {
         self.headers

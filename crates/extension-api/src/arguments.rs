@@ -93,6 +93,9 @@ fn prepare_argument(
         param,
     };
     if param.by_ref {
+        if param.raw_reference {
+            return Ok(());
+        }
         // The function sees the caller's variable, so the conversion has
         // to happen inside the reference.
         if let Value::Reference(cell) = argument {
@@ -148,12 +151,17 @@ impl Site<'_> {
     /// deprecation, but only for native functions and only without
     /// `strict_types`.
     fn null_deprecated(&self, context: &mut dyn Context) {
+        // PHP names the declared type here, also where the class's own type
+        // error words it differently ("int, string, or BcMath\Number").
+        let expected = match self.param.ty {
+            ParamType::NativeNumeric(numeric) => format!("of type {}", numeric.declaration),
+            _ => expected(self.param),
+        };
         context.deprecated(format!(
-            "{}(): Passing null to parameter #{}{} {} is deprecated",
+            "{}(): Passing null to parameter #{}{} {expected} is deprecated",
             self.function,
             self.number,
             self.name(),
-            expected(self.param)
         ));
     }
 }
@@ -161,7 +169,7 @@ impl Site<'_> {
 /// The type as PHP writes it in messages.
 pub(crate) fn type_text(ty: ParamType) -> &'static str {
     match ty {
-        ParamType::Mixed => "mixed",
+        ParamType::Untyped | ParamType::Mixed => "mixed",
         ParamType::Bool => "bool",
         ParamType::Int => "int",
         ParamType::Float => "float",
@@ -177,6 +185,7 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
         ParamType::Iterable => "Traversable|array",
         ParamType::Number => "int|float",
         ParamType::IntOrString => "string|int",
+        ParamType::NativeNumeric(numeric) => numeric.declaration,
         ParamType::ArrayOrString => "array|string",
         ParamType::ObjectOrString => "object|string",
         ParamType::CertificateOrString => "OpenSSLCertificate|string",
@@ -191,6 +200,9 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
 }
 
 fn expected(param: &Param) -> String {
+    if let ParamType::NativeNumeric(numeric) = param.ty {
+        return format!("of type {}", numeric.type_error);
+    }
     // Zend's array-or-object parser reports "array" for other argument types.
     let text = if param.ty == ParamType::ArrayOrObject {
         "array"
@@ -226,7 +238,12 @@ fn convert(
     let converted = match site.param.ty {
         // Whether a value is callable depends on which functions and classes
         // exist, which only the VM knows; `Context::call` reports it.
-        ParamType::Mixed | ParamType::Callable | ParamType::ReflectedObject => return Ok(()),
+        ParamType::Untyped
+        | ParamType::Mixed
+        | ParamType::Callable
+        | ParamType::ReflectedObject => {
+            return Ok(());
+        }
         ParamType::Array => matches!(value, Value::Array(_)).then_some(None),
         ParamType::Class(name) => {
             matches!(value, Value::Object(obj) if obj.class.is_instance_of(name)).then_some(None)
@@ -273,6 +290,26 @@ fn convert(
             Value::Int(_) | Value::Float(_) => Some(None),
             _ if strict => None,
             _ => to_number(value, site, context).map(Some),
+        },
+        ParamType::NativeNumeric(numeric) => match value {
+            Value::Object(object) if object.class.is_instance_of(numeric.class) => Some(None),
+            Value::String(text) => {
+                if let Some(message) = numeric
+                    .string_error
+                    .and_then(|check| check(text.as_bytes()))
+                {
+                    return Err(NativeError::value_error(format!(
+                        "{}(): Argument #{}{} {message}",
+                        site.function,
+                        site.number,
+                        site.name(),
+                    )));
+                }
+                Some(None)
+            }
+            Value::Int(_) => Some(None),
+            _ if strict => None,
+            _ => to_int(value, site, context).map(Some),
         },
         ParamType::IntOrString => match value {
             Value::Int(_) | Value::String(_) => Some(None),

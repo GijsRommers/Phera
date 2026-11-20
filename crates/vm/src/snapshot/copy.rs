@@ -61,6 +61,7 @@ impl Vm {
         let output_writer = self.output_writer.fork_copy(&mut fork);
         let code = self.code.fork_copy(&mut fork);
         let unset_typed_properties = self.unset_typed_properties.fork_copy(&mut fork);
+        let extension_values = self.extension_values.fork_copy(&mut fork);
         // Extensions' state may look objects up by identity: every object
         // reachable from the VM is copied first.
         fork.drain();
@@ -109,6 +110,7 @@ impl Vm {
             debug_objects: self.debug_objects.clone(),
             property_guards: Vec::new(),
             unset_typed_properties,
+            extension_values,
             clone_scopes: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,

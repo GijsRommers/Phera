@@ -3,7 +3,7 @@
 use std::{rc::Rc, sync::Arc};
 
 use phera_bytecode::{CompiledUnit, Reg};
-use phera_extension_api::{LocalFuture, Registry, RequestState};
+use phera_extension_api::{Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
 pub use native_tables::NativeTables;
@@ -98,6 +98,7 @@ mod globals;
 mod handler_installation;
 mod hooked_property_iteration;
 mod hooked_property_views;
+mod include_lookup;
 mod include_scope;
 mod include_state;
 mod includes;
@@ -137,6 +138,7 @@ mod native_property_views;
 mod native_tables;
 mod object_comparison;
 mod object_iteration;
+mod object_operators;
 mod operators;
 mod ops;
 mod output;
@@ -181,32 +183,9 @@ mod unit_caches;
 mod unpacking;
 mod unsupported_items;
 
-/// Resolves PHP includes through the embedding runtime code cache.
-pub trait CodeLoader: Send + Sync {
-    fn load(
-        &self,
-        path: std::path::PathBuf,
-    ) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>>;
-
-    /// Compiles PHP source that Phera ships (see
-    /// `phera_extension_api::BundledSource`), once.
-    fn load_bundled(
-        &self,
-        source: phera_extension_api::BundledSource,
-    ) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
-        Box::pin(async move {
-            phera_compiler::compile(source.source, source.file)
-                .map(Arc::new)
-                .map_err(CodeLoadError::Compile)
-        })
-    }
-}
-
-/// PHP retries missing include paths, while compilation errors abort that lookup.
-pub enum CodeLoadError {
-    Unavailable(String),
-    Compile(phera_compiler::CompileError),
-}
+pub use include_lookup::{
+    CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
+};
 
 /// Receives each PHP output write while Vm also retains its output buffer.
 pub trait OutputSink {
@@ -251,6 +230,7 @@ pub struct Vm {
     /// Static properties and evaluated class constants of this request.
     class_states: classes::class_state::ClassStates,
     globals: globals::Globals,
+    extension_values: std::collections::HashMap<&'static str, Value>,
     static_variables: static_variables::StaticVariables,
     diagnostic_reporter: diagnostic_reporter::DiagnosticReporter,
     diagnostic_location: Option<diagnostics::SourceLocation>,
@@ -344,6 +324,7 @@ impl Vm {
             code: code_table::CodeTable::default(),
             class_states: Default::default(),
             globals: globals::Globals::new(),
+            extension_values: Default::default(),
             static_variables: static_variables::StaticVariables::new(),
             diagnostic_reporter: diagnostic_reporter::DiagnosticReporter::new(),
             diagnostic_location: None,
@@ -373,7 +354,17 @@ impl Vm {
     }
 
     pub fn set_loader(&mut self, loader: Arc<dyn CodeLoader>) {
+        self.set_local_loader(Rc::new(loader))
+    }
+
+    /// A worker-local loader stays on the same thread as the VM.
+    pub fn set_local_loader(&mut self, loader: Rc<dyn CodeLoader>) {
         self.include_state.set_loader(loader)
+    }
+
+    /// The startup policy also governs the script that begins a web request.
+    pub fn include_cache_policy(&self) -> IncludeCachePolicy {
+        self.include_state.policy
     }
 
     pub fn set_sink(&mut self, sink: Box<dyn OutputSink>) {

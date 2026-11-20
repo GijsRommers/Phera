@@ -1,15 +1,16 @@
 //! Runtime loading and include-once history belong to the current PHP request.
 
-use std::sync::Arc;
+use std::rc::Rc;
 
 use indexmap::IndexSet;
 
-use crate::{CodeLoader, code_table::FunctionIndex};
+use crate::{CodeLoader, IncludeCachePolicy, code_table::FunctionIndex};
 
 /// The runtime supplies code; the VM remembers which files have executed.
 #[derive(Clone)]
 pub(crate) struct IncludeState {
-    loader: Option<Arc<dyn CodeLoader>>,
+    loader: Option<Rc<dyn CodeLoader>>,
+    pub(crate) policy: IncludeCachePolicy,
     included: IndexSet<String>,
     entry_script: Option<FunctionIndex>,
 }
@@ -18,17 +19,18 @@ impl IncludeState {
     pub(crate) fn new() -> Self {
         Self {
             loader: None,
+            policy: IncludeCachePolicy::default(),
             included: IndexSet::new(),
             entry_script: None,
         }
     }
 
-    pub(crate) fn set_loader(&mut self, loader: Arc<dyn CodeLoader>) {
+    pub(crate) fn set_loader(&mut self, loader: Rc<dyn CodeLoader>) {
         self.loader = Some(loader);
     }
 
     /// Clone the runtime handle so an include may await loading without borrowing state.
-    pub(crate) fn loader(&self) -> Option<Arc<dyn CodeLoader>> {
+    pub(crate) fn loader(&self) -> Option<Rc<dyn CodeLoader>> {
         self.loader.clone()
     }
 

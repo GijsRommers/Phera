@@ -30,6 +30,9 @@ impl Vm {
             .and_then(Option::as_ref)
             .cloned()
             .unwrap_or_default();
+        if let Value::Reference(reference) = &value {
+            self.state.track_cycle_reference(reference);
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let key = key
             .map(|key| {
@@ -65,5 +68,39 @@ impl Vm {
         }
         self.set(register, target);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    use phera_extension_api::Registry;
+    use phera_value::{PhpArray, Value};
+
+    use crate::{NativeTables, Vm};
+
+    #[tokio::test]
+    async fn cyclic_arrays_do_not_accumulate_across_requests() {
+        let unit = Arc::new(
+            phera_compiler::compile(
+                "<?php $a ??= []; $a['self'] =& $a; echo 'ok';",
+                "cyclic-array.php",
+            )
+            .unwrap(),
+        );
+        let native = NativeTables::new(Arc::new(Registry::new()));
+        for _ in 0..2_000 {
+            let cell = Rc::new(RefCell::new(Value::from(PhpArray::new())));
+            let weak = Rc::downgrade(&cell);
+            let mut vm = Vm::with_native_tables(&native);
+            vm.set_global("a", Value::Reference(cell));
+            assert_eq!(vm.run(unit.clone()).await, 0);
+            assert_eq!(vm.output, b"ok");
+            drop(vm);
+            assert_eq!(weak.strong_count(), 0);
+        }
     }
 }

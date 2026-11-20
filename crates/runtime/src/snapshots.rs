@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
 
-use phera_vm::Snapshot;
+use phera_vm::{IncludeCachePolicy, Snapshot};
 
 /// What a worker knows about one entry script.
 pub(crate) enum ScriptState {
@@ -67,11 +67,8 @@ impl FileStamps {
     }
 
     /// Whether some file changed. Looks at the disk only once per interval.
-    fn changed(&mut self, policy: Revalidation) -> bool {
-        let Revalidation::Every(interval) = policy else {
-            return false;
-        };
-        if self.checked.elapsed() < interval {
+    fn changed(&mut self, policy: IncludeCachePolicy) -> bool {
+        if !policy.validate_timestamps || self.checked.elapsed() < policy.revalidate_freq {
             return false;
         }
         self.checked = Instant::now();
@@ -85,36 +82,6 @@ fn modified(file: &Path) -> Option<SystemTime> {
     std::fs::metadata(file)
         .and_then(|meta| meta.modified())
         .ok()
-}
-
-/// When to look for changed files: opcache's two settings.
-#[derive(Clone, Copy)]
-pub(crate) enum Revalidation {
-    /// `opcache.validate_timestamps=0`: never.
-    Never,
-    /// At most once per `opcache.revalidate_freq` seconds (0: every request).
-    Every(Duration),
-}
-
-impl Revalidation {
-    pub(crate) fn from_ini(settings: &[(String, String)]) -> Self {
-        let setting = |name: &str| {
-            settings
-                .iter()
-                .rev()
-                .find(|(key, _)| key == name)
-                .map(|(_, value)| value.trim().to_ascii_lowercase())
-        };
-        let validate = setting("opcache.validate_timestamps")
-            .is_none_or(|value| !matches!(value.as_str(), "0" | "off" | "false" | "no" | ""));
-        if !validate {
-            return Revalidation::Never;
-        }
-        let seconds = setting("opcache.revalidate_freq")
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(2);
-        Revalidation::Every(Duration::from_secs(seconds))
-    }
 }
 
 /// How long a failed boot waits before it is tried again.
@@ -140,7 +107,7 @@ impl WorkerSnapshots {
     /// What to do for a request to `script`, and whether a boot should be
     /// started for it (the snapshot is out of date, a failed boot is due
     /// again, or a classic script's files changed).
-    pub(crate) fn plan(&self, script: &Path, policy: Revalidation) -> (Plan, bool) {
+    pub(crate) fn plan(&self, script: &Path, policy: IncludeCachePolicy) -> (Plan, bool) {
         let mut scripts = self.scripts.borrow_mut();
         let booting = self.booting.borrow().iter().any(|path| path == script);
         match scripts.get_mut(script) {

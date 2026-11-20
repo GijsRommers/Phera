@@ -21,9 +21,11 @@ mod ini_tests;
 mod native_parameter_tests;
 #[cfg(test)]
 mod native_trace_tests;
+mod preload;
 #[cfg(test)]
 mod process_oracle_tests;
 mod snapshots;
+mod worker_code_cache;
 
 use std::path::Path;
 use std::rc::Rc;
@@ -38,11 +40,13 @@ use phera_value::{PhpArray, Value};
 use phera_vm::{NativeTables, Vm};
 
 use cache::{CodeCache, FileMode};
+use worker_code_cache::{RequestCodeCache, WorkerCodeCache};
 
 pub use boot::BootReport;
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse};
 pub use phera_vm::OutputSink;
+pub use preload::PreloadSummary;
 pub use snapshots::remembered as snapshot_remembered;
 
 #[derive(Clone)]
@@ -55,8 +59,9 @@ pub struct Runtime {
     startup_ini: Arc<[(String, String)]>,
     web_development: bool,
     no_process: bool,
-    /// When a worker looks for changed files of its snapshots.
-    revalidation: snapshots::Revalidation,
+    /// When included files, and the files of a snapshot, are checked for
+    /// changes: opcache's settings from the start-up INI.
+    include_policy: phera_vm::IncludeCachePolicy,
     /// Scripts that run PHP source Phera ships in place of the file (an
     /// adapter's entry script), by the script's path.
     entry_scripts: Arc<std::collections::HashMap<std::path::PathBuf, &'static str>>,
@@ -76,6 +81,7 @@ pub struct WebWorker {
     /// Whether this worker runs on a `LocalSet`, where a boot can run in
     /// the background (`phera serve`); see [`WebWorker::with_background_boots`].
     background_boots: bool,
+    code: Rc<WorkerCodeCache>,
 }
 
 impl WebWorker {
@@ -150,16 +156,23 @@ impl Runtime {
         registry.load(&phera_ext_streams::Streams);
         registry.load(&phera_ext_process::Process);
         registry.load(&phera_ext_process::Posix);
+        registry.load(&phera_ext_zlib::Zlib);
+        registry.load(&phera_ext_bcmath::BcMath);
+        registry.load(&phera_ext_gmp::Gmp);
         registry.load(&phera_ext_ctype::Ctype);
         registry.load(&phera_ext_date::Date);
+        registry.load(&phera_ext_curl::Curl);
         registry.load(&phera_ext_dom::Libxml);
         registry.load(&phera_ext_dom::Dom);
         registry.load(&phera_ext_filter::Filter);
+        registry.load(&phera_ext_intl::Intl);
         registry.load(&phera_ext_json::Json);
         registry.load(&phera_ext_mbstring::Mbstring);
         registry.php_module("iconv");
         registry.load(&phera_ext_pcre::Pcre);
         registry.load(&phera_ext_pdo::Pdo);
+        registry.load(&phera_ext_mysqli::Mysqli);
+        registry.load(&phera_ext_pgsql::Pgsql);
         registry.php_module("pdo_mysql");
         registry.php_module("pdo_pgsql");
         registry.php_module("pdo_sqlite");
@@ -169,6 +182,7 @@ impl Runtime {
         http::register_request_parse_body(&mut registry);
         registry.load(&phera_ext_hash::Hash);
         registry.load(&phera_ext_openssl::OpenSsl);
+        registry.load(&phera_ext_sodium::Sodium);
         registry.load(&phera_ext_random::Random);
         registry.load(&phera_ext_reflection::Reflection);
         registry.load(&phera_ext_serialize::Serialize);
@@ -179,6 +193,7 @@ impl Runtime {
         adapters::register(&mut registry);
         let mut web_registry = registry.clone();
         phera_ext_http::register_web(&mut web_registry);
+        web_registry.sapi_ini("phera_server");
         phera_ext_process::register_cli_process_control(&mut registry);
         registry.constant("PHP_SAPI", Sapi::Cli.name());
         let registry = Arc::new(registry);
@@ -192,7 +207,7 @@ impl Runtime {
             startup_ini: Arc::new([]),
             web_development: false,
             no_process: false,
-            revalidation: snapshots::Revalidation::from_ini(&[]),
+            include_policy: phera_vm::IncludeCachePolicy::default(),
             entry_scripts: Arc::default(),
         }
     }
@@ -205,23 +220,29 @@ impl Runtime {
     }
 
     /// The compiled code a request to `script` runs.
-    async fn entry_unit(&self, script: &Path) -> Result<Arc<CompiledUnit>, RuntimeError> {
+    async fn entry_unit(
+        &self,
+        code: &RequestCodeCache,
+        script: &Path,
+    ) -> Result<Arc<CompiledUnit>, RuntimeError> {
         match self.entry_scripts.get(script) {
             Some(source) => self
                 .web_cache
                 .compile_shipped(source, &script.to_string_lossy()),
-            None => self.web_cache.compile(script.to_path_buf()).await,
+            None => code.entry(script, self.include_policy).await,
         }
     }
 
     /// Settings supplied by the host before each request begins.
     pub fn with_startup_ini(mut self, settings: Vec<(String, String)>) -> Self {
-        self.revalidation = snapshots::Revalidation::from_ini(&settings);
+        for (name, value) in &settings {
+            self.include_policy.set_ini(name, value.as_bytes());
+        }
         self.startup_ini = settings.into();
         self
     }
 
-    /// Start web requests with display enabled for local development.
+    /// Display diagnostics and validate source files on each web request.
     pub fn with_web_development(mut self, enabled: bool) -> Self {
         self.web_development = enabled;
         self
@@ -292,6 +313,7 @@ impl Runtime {
             environment: self.inherited_environment(),
             snapshots: Default::default(),
             background_boots: false,
+            code: Rc::new(WorkerCodeCache::new(self.web_cache.clone())),
         }
     }
 
@@ -314,7 +336,8 @@ impl Runtime {
         document_root: &Path,
         request: HttpRequest,
     ) -> HttpResponse {
-        let compiled = match self.entry_unit(script).await {
+        let code = Rc::new(RequestCodeCache::new(worker.code.clone()));
+        let compiled = match self.entry_unit(&code, script).await {
             Ok(unit) => Ok(unit),
             Err(RuntimeError::Compile(error)) => Err(error),
             Err(RuntimeError::Read { .. }) => return HttpResponse::plain(404, "File not found.\n"),
@@ -335,7 +358,7 @@ impl Runtime {
             http::Boundary::OtherMediaType => (None, None),
         };
 
-        let (plan, reboot) = worker.snapshots.plan(script, self.revalidation);
+        let (plan, reboot) = worker.snapshots.plan(script, self.include_policy);
         if reboot {
             worker.boot_in_background(script, document_root);
         }
@@ -358,6 +381,7 @@ impl Runtime {
             _ => self.new_classic_vm(worker),
         };
         let forked = vm.is_fork();
+        vm.set_local_loader(code);
         let uploads = http::define_superglobals(
             &mut vm,
             &request,
@@ -477,15 +501,17 @@ impl Runtime {
         for (name, value) in self.startup_ini.iter() {
             vm.set_startup_ini(name, value);
         }
+        if matches!(sapi, Sapi::Web) && self.web_development {
+            vm.set_startup_ini("opcache.validate_timestamps", "1");
+            vm.set_startup_ini("opcache.revalidate_freq", "0");
+        }
         // A script's writes copy the inherited array before changing it.
         vm.set_global("_ENV", Value::Array(environment));
         *vm.state_mut().get_or_default::<RequestEnvironment>() =
             RequestEnvironment::new(self.environment.clone());
-        let cache = match sapi {
-            Sapi::Cli => &self.cache,
-            Sapi::Web => &self.web_cache,
-        };
-        vm.set_loader(Arc::new(cache.clone()));
+        if matches!(sapi, Sapi::Cli) {
+            vm.set_local_loader(Rc::new(self.cache.clone()));
+        }
         vm
     }
 }

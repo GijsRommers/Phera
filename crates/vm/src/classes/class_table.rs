@@ -59,6 +59,12 @@ impl ClassDefinitions {
     }
 }
 
+// `Service::$instance = new Service` does not keep `Service` alive: the
+// static's value lives in the request's `ClassStates`, not in the class, so
+// no class owns an object that owns the class. That is also why dropping a
+// fork's definitions must not touch its classes: the snapshot and the other
+// forks share them.
+
 /// One request owns its class additions and objects. Built-ins keep their indices on the worker.
 pub(crate) struct ClassTable {
     native: Rc<ClassDefinitions>,
@@ -361,11 +367,30 @@ impl ClassTable {
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
+    use std::sync::Arc;
 
     use phera_extension_api::Registry;
     use phera_value::{ArrayKey, Value};
 
     use super::{ClassDefinitions, ClassTable};
+
+    #[tokio::test]
+    async fn static_singletons_and_cached_enum_cases_release_their_classes() {
+        let source = "<?php
+            class Singleton { public static $instance; }
+            Singleton::$instance = new Singleton;
+            enum Token { case Only; const ALIAS = self::Only; }
+            echo Token::ALIAS->name;";
+        let unit = Arc::new(phera_compiler::compile(source, "class-cycles.php").unwrap());
+        let mut vm = crate::Vm::new(Arc::new(Registry::new()));
+        assert_eq!(vm.run(unit).await, 0);
+        assert_eq!(vm.output, b"Only");
+        let singleton = Rc::downgrade(&vm.classes.get("Singleton").unwrap());
+        let token = Rc::downgrade(&vm.classes.get("Token").unwrap());
+        drop(vm);
+        assert_eq!(singleton.strong_count(), 0);
+        assert_eq!(token.strong_count(), 0);
+    }
 
     #[test]
     fn freed_object_ids_reuse_the_most_recently_freed_slot() {

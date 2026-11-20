@@ -4,6 +4,12 @@ mod construct;
 
 pub use construct::construct;
 
+#[cfg(test)]
+mod tls_tests;
+
+use crate::dsn::ParseDsn;
+use crate::errors::PdoError;
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
