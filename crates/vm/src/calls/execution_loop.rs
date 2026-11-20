@@ -381,7 +381,10 @@ impl Machine<'_> {
             | Instruction::AssignPath { .. }
             | Instruction::IncDecPath { .. }
             | Instruction::InitCall { .. }
-            | Instruction::FetchClassName { .. } => {
+            | Instruction::FetchClassName { .. }
+            | Instruction::InstanceOf { .. }
+            | Instruction::IterStart { .. }
+            | Instruction::IterEnd { .. } => {
                 self.further_step::<GUARDED>(instruction, position)
             }
             _ => Step::Slow,
