@@ -11,6 +11,9 @@ endpoint. POST URL-encoded indexed `packages` fields in batches of at most
 500 names. Match each result's `affectedVersions` against the locked version
 with Phera's Composer constraint matcher. Report active and individually
 ignored advisories independently. An unreachable endpoint is an audit error.
+Install and update use the same matcher and print a short summary. Offline
+operations skip the remote check. An unavailable feed after installation
+produces an advisory summary error while keeping a successful installation.
 
 ## Why
 
@@ -24,5 +27,4 @@ advertises the API URL.
 ## Turned down
 
 Treating an unavailable feed as a clean result or scraping human-facing CVE
-pages. Install/update audit summaries and repository-specific advisory feeds
-can share the request and matching code when added.
+pages. Repository-specific advisory feeds can use the same range matcher.

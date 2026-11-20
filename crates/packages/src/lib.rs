@@ -3,6 +3,7 @@
 //! `install(&project, &options)` installs an existing `composer.lock` without resolution.
 
 mod archive;
+mod audit;
 mod autoload;
 mod binaries;
 mod cleanup;
@@ -25,6 +26,7 @@ mod store;
 mod update;
 pub mod version;
 
+pub use audit::{AuditReport, check as audit};
 pub use commands::{add, add_many, outdated, remove, remove_many, why};
 pub use project::{Lock, Options, Package, Project};
 
@@ -94,6 +96,7 @@ fn install_locked(
         packages.len(),
         started.elapsed().as_secs_f64()
     );
+    audit::summary(&project, options, &packages);
     Ok(())
 }
 

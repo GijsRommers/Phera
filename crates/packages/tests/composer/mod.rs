@@ -114,7 +114,7 @@ impl Tools {
         )?;
         run(
             self.phera(&right, fixture)
-                .args(["install", "--frozen-lockfile", "--no-plugins"])
+                .args(["install", "--frozen-lockfile", "--no-plugins", "--no-audit"])
                 .args(INSTALL),
             &logs,
             "phera-install",
@@ -217,7 +217,7 @@ impl Tools {
         )?;
         run(
             self.phera(right, fixture)
-                .args(["update", "--no-plugins"])
+                .args(["update", "--no-plugins", "--no-audit"])
                 .args(UPDATE),
             logs,
             "phera-update",

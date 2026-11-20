@@ -43,9 +43,10 @@ Usage:
   phera check [OPTIONS] <paths...>        type-check PHP (see check --help)
   phera lint [OPTIONS] [paths...]         lint PHP (see lint --help)
   phera install [--no-dev] [--frozen-lockfile] [--offline] [-o]
-  phera update [--no-install] [--offline] [--prefer-lowest]
-  phera add vendor/package[:constraint] [--dev]
-  phera remove vendor/package
+  phera update [packages...] [-W] [--dry-run] [--lock]
+  phera add vendor/package[:constraint]... [--dev]
+  phera remove vendor/package...
+  phera audit [--locked] [--no-dev] [--format table|json]
   phera why vendor/package
   phera outdated
   phera dump-autoload [-o] [--no-dev]
@@ -138,7 +139,7 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             parse_new(arguments).map(Command::New)
         }
         Some(
-            "install" | "update" | "add" | "require" | "remove" | "why" | "outdated"
+            "install" | "update" | "add" | "require" | "remove" | "audit" | "why" | "outdated"
             | "dump-autoload",
         ) => Ok(Command::Packages(arguments.collect())),
         Some("upgrade") => {

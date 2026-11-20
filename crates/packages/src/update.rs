@@ -89,6 +89,7 @@ pub(crate) fn run(
         write_json(&path, &lock)?;
     }
     if options.no_install {
+        crate::audit::summary(&project, options, &next.packages(options.no_dev));
         return Ok(());
     }
     install_locked(&project.directory, options, true, &mut runner)

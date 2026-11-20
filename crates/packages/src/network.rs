@@ -129,6 +129,25 @@ impl Network {
         }
         bounded(response)
     }
+
+    pub(crate) fn packagist_advisories(&self, packages: &[&str]) -> Result<Value> {
+        let form: Vec<_> = packages
+            .iter()
+            .enumerate()
+            .map(|(index, name)| (format!("packages[{index}]"), name))
+            .collect();
+        let response = self
+            .client
+            .post("https://packagist.org/api/security-advisories/")
+            .timeout(Duration::from_secs(10))
+            .form(&form)
+            .send()
+            .map_err(|_| anyhow::anyhow!("Could not reach the Packagist advisories API."))?;
+        if !response.status().is_success() {
+            bail!("Packagist advisories returned HTTP {}.", response.status());
+        }
+        serde_json::from_slice(&bounded(response)?).context("Invalid Packagist advisory JSON.")
+    }
 }
 
 pub(crate) fn bounded(response: Response) -> Result<Vec<u8>> {

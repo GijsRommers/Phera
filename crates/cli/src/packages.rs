@@ -16,6 +16,7 @@ Install packages from composer.lock, or resolve composer.json and write a lock.
   --prefer-dist                  prefer distribution archives (default)
   --no-scripts                   skip composer.json scripts
   --no-plugins                   skip native Composer plugin hooks
+  --no-audit                     skip the Packagist advisory summary
   -o, --optimize-autoloader       build a class map from PSR mappings
   -a, --classmap-authoritative    look up classes only in the class map
   --ignore-platform-req PACKAGE   skip a named platform requirement
@@ -32,13 +33,24 @@ Resolve dependencies within composer.json constraints and refresh composer.lock.
   --dry-run                      print version changes without applying them
   --lock                         refresh only the existing lock's content hash
   --no-install                   write the lock without installing packages
+  --no-audit                     skip the Packagist advisory summary
   --offline                      use the local package cache
   --prefer-lowest                prefer the lowest allowed versions
 ";
 
+const AUDIT_HELP: &str = "\
+Usage: phera audit [OPTIONS]
+
+Check packages against Packagist security advisories.
+
+  --locked                       audit composer.lock instead of vendor
+  --no-dev                       omit development dependencies
+  --format table|json            choose the output format (default: table)
+";
+
 pub(crate) fn run(arguments: Vec<String>) -> ExitCode {
     match execute(&arguments) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(status) => status,
         Err(message) => {
             eprintln!("{message}");
             ExitCode::FAILURE
@@ -46,18 +58,22 @@ pub(crate) fn run(arguments: Vec<String>) -> ExitCode {
     }
 }
 
-fn execute(arguments: &[String]) -> Result<(), String> {
+fn execute(arguments: &[String]) -> Result<ExitCode, String> {
     let command = arguments[0].as_str();
     if arguments
         .iter()
         .any(|argument| matches!(argument.as_str(), "--help" | "-h"))
     {
         print!("{}", help(command));
-        return Ok(());
+        return Ok(ExitCode::SUCCESS);
     }
-    let mut options = Options::default();
+    let mut options = Options {
+        audit_summary: matches!(command, "install" | "update" | "add" | "require" | "remove"),
+        ..Options::default()
+    };
     let mut subjects = Vec::new();
     let mut development = false;
+    let mut format = "table";
     let mut remaining = arguments[1..].iter();
     while let Some(argument) = remaining.next() {
         match argument.as_str() {
@@ -70,6 +86,13 @@ fn execute(arguments: &[String]) -> Result<(), String> {
             "-v" | "--verbose" => options.verbose = true,
             "--no-scripts" => options.no_scripts = true,
             "--no-plugins" => options.no_plugins = true,
+            "--no-audit" => options.audit_summary = false,
+            "--format" if command == "audit" => {
+                format = remaining.next().ok_or("--format needs table or json.")?;
+            }
+            value if command == "audit" && value.starts_with("--format=") => {
+                format = &value["--format=".len()..];
+            }
             "--no-install" => options.no_install = true,
             "--dry-run" if matches!(command, "update" | "add" | "require" | "remove") => {
                 options.dry_run = true;
@@ -107,6 +130,21 @@ fn execute(arguments: &[String]) -> Result<(), String> {
     if !matches!(command, "update" | "add" | "require" | "remove" | "why") && !subjects.is_empty() {
         return Err(format!("Unexpected positional argument for {command}."));
     }
+    if command == "audit" {
+        if !matches!(format, "table" | "json") {
+            return Err("--format needs table or json.".into());
+        }
+        let report = phera_packages::audit(&directory, &options)
+            .map_err(|error| format!("Audit failed: {error:#}"))?;
+        let output = if format == "json" {
+            report.json()
+        } else {
+            report.table()
+        }
+        .map_err(|error| format!("Audit output failed: {error:#}"))?;
+        println!("{output}");
+        return Ok(ExitCode::from(u8::from(report.has_advisories())));
+    }
     let result = match command {
         "install" => phera_packages::install(&directory, &options),
         "update" => {
@@ -130,13 +168,16 @@ fn execute(arguments: &[String]) -> Result<(), String> {
         "dump-autoload" => phera_packages::dump_autoload(&directory, &options),
         other => return Err(format!("Unknown package command: {other}")),
     };
-    result.map_err(|error| format!("Package operation failed: {error:#}"))
+    result
+        .map(|()| ExitCode::SUCCESS)
+        .map_err(|error| format!("Package operation failed: {error:#}"))
 }
 
 fn help(command: &str) -> &'static str {
     match command {
         "install" => INSTALL_HELP,
         "update" => UPDATE_HELP,
+        "audit" => AUDIT_HELP,
         "add" | "require" => {
             "Usage: phera add [--dev] vendor/package[:constraint]...\n\n\
             Add production dependencies, or development dependencies with --dev.\n\

@@ -73,6 +73,12 @@ Use `phera update vendor/package` to update selected dependencies, or
 `phera update --lock` refreshes the content hash without resolving.
 `phera add` (also `phera require`) and `phera remove` accept several packages.
 
+`phera audit` checks installed packages against Packagist security advisories.
+Use `--locked` for composer.lock, `--no-dev` for production packages, and
+`--format json` for automation. Put reviewed advisory IDs in
+`config.audit.ignore` in composer.json. Installs and updates print a
+short advisory summary online unless you pass `--no-audit`.
+
 ### Serving a site
 
 Run `phera serve public` to serve a document root. PHP diagnostics, including

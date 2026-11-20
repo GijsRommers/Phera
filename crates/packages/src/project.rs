@@ -22,6 +22,7 @@ pub struct Options {
     pub dry_run: bool,
     pub refresh_lock: bool,
     pub with_all_dependencies: bool,
+    pub audit_summary: bool,
     pub prefer_lowest: bool,
     pub ignore_platform: bool,
     pub ignored_platform_requirements: Vec<glob::Pattern>,
