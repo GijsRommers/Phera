@@ -46,6 +46,7 @@ pub use boot::BootReport;
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse, web_output::WebOutput};
 pub use phera_ext_http::ResponseHead;
+pub use phera_extension_api::web_log::flush as flush_web_log;
 pub use phera_vm::OutputSink;
 pub use preload::PreloadSummary;
 pub use snapshots::remembered as snapshot_remembered;

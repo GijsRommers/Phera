@@ -48,11 +48,6 @@ impl Vm {
         lhs: Reg,
         rhs: Reg,
     ) -> Result<Option<BatchExit>, NativeError> {
-        // The compiler lets an operator read a variable directly
-        // (`$i < $n`); an unset one is null with PHP's warning, the left
-        // operand's first, as when it was copied into a temporary.
-        self.warn_if_unset(lhs);
-        self.warn_if_unset(rhs);
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("operator frame"))?;
@@ -64,9 +59,16 @@ impl Vm {
             .slots(&self.registers)
             .get(rhs.index())
             .and_then(Option::as_ref);
-        let null = Value::Null;
-        let left = left.unwrap_or(&null).deref();
-        let right = right.unwrap_or(&null).deref();
+        let (Some(left), Some(right)) = (left, right) else {
+            return Ok(Some(BatchExit::UndefinedBinary {
+                dst: destination,
+                op: operator,
+                lhs,
+                rhs,
+            }));
+        };
+        let left = left.deref();
+        let right = right.deref();
         let result = match fast_binary(operator, &left, &right) {
             None if crate::object_operators::has_binary(&left, &right) => {
                 return Ok(Some(BatchExit::Instruction(Instruction::Binary {
@@ -138,19 +140,36 @@ impl Vm {
         Ok(None)
     }
 
-    /// Raises "Undefined variable" when `register` is a named variable
-    /// that holds nothing.
-    fn warn_if_unset(&mut self, register: Reg) {
-        let unset = self.current().is_some_and(|frame| {
-            register.index() < frame.function().locals.len()
-                && frame
-                    .slots(&self.registers)
-                    .get(register.index())
-                    .is_some_and(Option::is_none)
-        });
-        if unset {
-            self.read_local(register);
-        }
+    pub(crate) async fn binary_with_undefined_operand(
+        &mut self,
+        op: BinaryOp,
+        destination: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    ) -> Result<(), NativeError> {
+        // Zend emits `right < left` for `left > right` after compiling both
+        // operand expressions in source order.
+        let (left_missing, right_missing) =
+            if matches!(op, BinaryOp::Greater | BinaryOp::GreaterEqual) {
+                let right = self.warn_missing_operand(rhs).await?;
+                (self.warn_missing_operand(lhs).await?, right)
+            } else {
+                let left = self.warn_missing_operand(lhs).await?;
+                (left, self.warn_missing_operand(rhs).await?)
+            };
+        let left = if left_missing {
+            Value::Null
+        } else {
+            self.get(lhs)
+        };
+        let right = if right_missing {
+            Value::Null
+        } else {
+            self.get(rhs)
+        };
+        let value = self.binary_with_strings(op, left, right).await?;
+        self.set(destination, value);
+        Ok(())
     }
 
     /// Append directly to strings, including referenced strings, to retain amortized growth.

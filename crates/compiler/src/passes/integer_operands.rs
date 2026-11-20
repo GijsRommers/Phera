@@ -2,8 +2,8 @@
 //!
 //! Input is lowered register bytecode. Output retains instruction offsets until
 //! the normal compaction pass removes Nops and remaps branch targets. Only a
-//! neighbouring local read and literal load may disappear: `$a + ($a = 5)` and
-//! `$i + $i++` therefore retain their snapshots and evaluation order.
+//! neighbouring copy and literal load may disappear. Lowering chooses which
+//! operations consume compiled variables directly.
 //!
 //! For example, LoadInt(r2, 1); Binary(Add, r1, r0, r2) can become
 //! Nop; BinaryInt(Add, r1, r0, 1) when r2 is dead after the operation.

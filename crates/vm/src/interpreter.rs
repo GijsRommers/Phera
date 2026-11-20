@@ -106,6 +106,9 @@ impl Vm {
                 BatchExit::Compare(pending) => {
                     Box::pin(self.continue_comparison(pending)).await?;
                 }
+                BatchExit::UndefinedBinary { op, dst, lhs, rhs } => {
+                    Box::pin(self.binary_with_undefined_operand(op, dst, lhs, rhs)).await?;
+                }
                 BatchExit::BindCall(destination) => {
                     self.coerce_call_strings(self.argument_origin).await?;
                     if !matches!(
