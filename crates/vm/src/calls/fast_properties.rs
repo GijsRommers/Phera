@@ -67,7 +67,7 @@ impl Machine<'_> {
         destination: Reg,
         path: PathId,
     ) -> Step {
-        let Some(value) = self.with_site(position, path, |entry, object, scope| {
+        let Some(value) = self.with_site(position, (path, Shape::Read), |entry, object, scope| {
             if entry.hooks.is_some() {
                 return None;
             }
@@ -101,7 +101,7 @@ impl Machine<'_> {
             [Some(value)] => value.deref().clone(),
             _ => return Step::Slow,
         };
-        let written = self.with_site(position, path, |entry, object, scope| {
+        let written = self.with_site(position, (path, Shape::Write), |entry, object, scope| {
             entry.write_matching(object, scope, &value).then_some(())
         });
         match written {
@@ -126,7 +126,7 @@ impl Machine<'_> {
             [held] if !(GUARDED && owns_heap_values(held)) => {}
             _ => return Step::Slow,
         }
-        let Some(value) = self.with_site(position, path, |entry, object, scope| {
+        let Some(value) = self.with_site(position, (path, Shape::Write), |entry, object, scope| {
             entry.increment_matching(object, scope, mode)
         }) else {
             return Step::Slow;
@@ -137,26 +137,33 @@ impl Machine<'_> {
 
     /// The value the instruction's property site gives for this read.
     fn cached_property(&self, position: Position, path: PathId) -> Option<Value> {
-        self.with_site(position, path, |entry, object, scope| {
+        self.with_site(position, (path, Shape::Read), |entry, object, scope| {
             entry.read_matching(object, scope)
         })
     }
 
     /// Runs `access` with the instruction's property site, the object the
-    /// path starts from and the class scope of the running code, when the
-    /// path is one declared property and the site has an entry.
+    /// path reaches and the class scope of the running code, when the path
+    /// is one declared property (of `$this`, of an object in a register,
+    /// or for a read, of an object at an integer index of an array) and
+    /// the site has an entry.
     fn with_site<R>(
         &self,
         position: Position,
-        path: PathId,
+        (path, shape): (PathId, Shape),
         access: impl FnOnce(&PropertyEntry, &Object, Option<&Rc<Class>>) -> Option<R>,
     ) -> Option<R> {
         let function = position.frame.function;
         let path = self.code.function(function).paths.get(path.index())?;
-        let [PathStep::Property(_)] = path.steps.as_slice() else {
-            return None;
+        let object = match (path.steps.as_slice(), path.base, shape) {
+            ([PathStep::Property(_)], base, _) => self.property_object(position, base)?,
+            (
+                [PathStep::Index(index), PathStep::Property(_)],
+                PathBase::Register(root),
+                Shape::Read,
+            ) => self.element_object(position, root, *index)?,
+            _ => return None,
         };
-        let object = self.property_object(position, path.base)?;
         // The VM keys the site by the position after the instruction,
         // which is where the loop stands now.
         let site = self
@@ -170,6 +177,22 @@ impl Machine<'_> {
         };
         let scope = self.current_context().and_then(|context| context.scope());
         access(entry, object, scope)
+    }
+
+    /// The object at integer index `index` of the array in register `root`
+    /// (`$items[$i]->key`), as the VM's indexed property reads find it.
+    fn element_object(&self, position: Position, root: Reg, index: Reg) -> Option<&Rc<Object>> {
+        let base = position.frame.base();
+        let [Some(Value::Int(index))] = self.registers.window(base + index.index(), 1) else {
+            return None;
+        };
+        let [Some(Value::Array(array))] = self.registers.window(base + root.index(), 1) else {
+            return None;
+        };
+        match crate::array_slots::read_integer(array, *index)? {
+            Value::Object(object) => Some(object),
+            _ => None,
+        }
     }
 
     /// The object a property path starts from.
@@ -188,4 +211,12 @@ impl Machine<'_> {
             _ => None,
         }
     }
+}
+
+/// Which paths an access takes: the VM writes only to a property reached
+/// directly, but reads also one of an object found at an array index.
+#[derive(Clone, Copy)]
+enum Shape {
+    Read,
+    Write,
 }
