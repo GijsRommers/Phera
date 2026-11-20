@@ -10,7 +10,8 @@
 //! here are frequent in framework code but rarer in tight loops: plain
 //! value operators (`crate::fast_values`), declared property reads and
 //! writes (`fast_properties`), calls by name (`fast_named_calls`), class
-//! names (`fast_class_names`), `instanceof` (`fast_instance_of`). They
+//! names (`fast_class_names`), `instanceof` (`fast_instance_of`), `foreach` start and end
+//! (`fast_foreach`). They
 //! are reached through this one function, kept out of line, because every
 //! case added to `step` itself changes how the compiler lays out the
 //! whole loop (measured: two to five percent on loops that never run
@@ -95,6 +96,10 @@ impl Machine<'_> {
             Instruction::FetchClassName { dst, class } => {
                 self.fetch_class_name::<GUARDED>(position, dst, class)
             }
+            Instruction::IterStart { iter, src, .. } => {
+                self.start_array_iteration::<GUARDED>(position, iter, src)
+            }
+            Instruction::IterEnd { iter } => self.end_array_iteration::<GUARDED>(position, iter),
             Instruction::InstanceOf { dst, src, class } => {
                 self.instance_of::<GUARDED>(position, dst, src, class)
             }
