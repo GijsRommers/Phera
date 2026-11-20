@@ -1,10 +1,11 @@
 //! A user filter takes a mutable `StreamBucket` from its input brigade.
 
-use std::collections::VecDeque;
+use std::{cell::RefCell, collections::VecDeque, rc::Weak};
 
 use phera_extension_api::{
     ArrayKey, ClassEntry, ClassKind, ConstantValue, Context, FunctionEntry, NativeError,
-    NativeResult, Param, ParamType, PhpArray, PropertyEntry, Registry, Value, Visibility, args,
+    NativeResult, Param, ParamType, PhpArray, PhpString, PropertyEntry, PropertyType, Registry,
+    Value, Visibility, args, value::Resource,
 };
 
 use crate::request::new_resource;
@@ -17,19 +18,33 @@ const CREATE: &[Param] = &[
 ];
 const BUCKET: Param = Param::new("bucket", ParamType::Class("StreamBucket"));
 
-pub(super) struct Brigade(VecDeque<Vec<u8>>, usize);
+pub(super) struct Brigade {
+    buckets: VecDeque<Bucket>,
+    size: usize,
+}
+
+struct Bucket {
+    id: Option<i64>,
+    data: PhpString,
+}
+
+#[derive(Default)]
+struct BucketLink(RefCell<Weak<Resource>>);
 
 pub(super) fn brigade(context: &mut dyn Context, input: Vec<u8>) -> Value {
     let size = input.len();
     let buckets = if input.is_empty() {
         VecDeque::new()
     } else {
-        VecDeque::from([input])
+        VecDeque::from([Bucket {
+            id: None,
+            data: PhpString::from(input),
+        }])
     };
     new_resource(
         context.state(),
         "userfilter.bucket brigade",
-        Brigade(buckets, size),
+        Brigade { buckets, size },
     )
 }
 
@@ -47,13 +62,23 @@ pub(super) fn finish(value: &Value) -> Option<Brigade> {
 
 impl Brigade {
     pub(super) fn empty(&self) -> bool {
-        self.0.is_empty()
+        self.buckets.is_empty()
     }
 
     pub(super) fn bytes(self) -> Vec<u8> {
-        let mut result = Vec::with_capacity(self.1);
-        result.extend(self.0.into_iter().flatten());
+        let mut result = Vec::with_capacity(self.size);
+        for bucket in self.buckets {
+            result.extend_from_slice(bucket.data.as_bytes());
+        }
         result
+    }
+
+    fn unlink(&mut self, id: i64) {
+        if let Some(index) = self.buckets.iter().position(|bucket| bucket.id == Some(id))
+            && let Some(bucket) = self.buckets.remove(index)
+        {
+            self.size -= bucket.data.as_bytes().len();
+        }
     }
 }
 
@@ -62,10 +87,10 @@ pub(super) fn register(registry: &mut Registry) {
         kind: ClassKind::FinalClass,
         properties: const {
             &[
-                PropertyEntry::new("bucket", ConstantValue::Null, Visibility::Public).readonly(),
-                PropertyEntry::new("data", ConstantValue::String(""), Visibility::Public),
-                PropertyEntry::new("datalen", ConstantValue::Int(0), Visibility::Public),
-                PropertyEntry::new("dataLength", ConstantValue::Int(0), Visibility::Public),
+                PropertyEntry::new("bucket", ConstantValue::Null, Visibility::Public),
+                PropertyEntry::typed("data", PropertyType::String, Visibility::Public),
+                PropertyEntry::typed("datalen", PropertyType::Int, Visibility::Public),
+                PropertyEntry::typed("dataLength", PropertyType::Int, Visibility::Public),
             ]
         },
         ..ClassEntry::class("StreamBucket")
@@ -83,10 +108,11 @@ pub(super) fn register(registry: &mut Registry) {
 }
 
 fn make_writeable(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let data = use_brigade(arguments, "stream_bucket_make_writeable", |brigade| {
-        let bucket = brigade.0.pop_front()?;
-        brigade.1 -= bucket.len();
-        Some(bucket)
+    let resource = brigade_argument(arguments, "stream_bucket_make_writeable")?;
+    let data = use_brigade(resource, "stream_bucket_make_writeable", |brigade| {
+        let bucket = brigade.buckets.pop_front()?;
+        brigade.size -= bucket.data.as_bytes().len();
+        Some(bucket.data)
     })?;
     data.map_or(Ok(Value::Null), |bytes| make_bucket(context, bytes))
 }
@@ -95,26 +121,32 @@ fn create(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     stream_arg(arguments, "stream_bucket_new")?;
     let data = args::bytes(arguments, 1);
     super::super::bounded(data.len()).map_err(|error| NativeError::error(error.to_string()))?;
-    make_bucket(context, data.to_vec())
+    make_bucket(context, PhpString::from(data.to_vec()))
 }
 
-fn make_bucket(context: &mut dyn Context, data: Vec<u8>) -> NativeResult {
+fn make_bucket(context: &mut dyn Context, data: PhpString) -> NativeResult {
     let mut properties = PhpArray::new();
-    let len = Value::Int(data.len() as i64);
-    let bucket = new_resource(context.state(), "userfilter.bucket", ());
+    let len = Value::Int(data.as_bytes().len() as i64);
+    let bucket = new_resource(context.state(), "userfilter.bucket", BucketLink::default());
     properties.insert(ArrayKey::str("bucket"), bucket);
-    properties.insert(ArrayKey::str("data"), Value::from(data));
+    properties.insert(ArrayKey::str("data"), Value::String(data));
     properties.insert(ArrayKey::str("datalen"), len.clone());
     properties.insert(ArrayKey::str("dataLength"), len);
     context.create_object("StreamBucket", properties)
 }
 
+fn brigade_argument<'a>(
+    arguments: &'a [Value],
+    function: &str,
+) -> Result<&'a std::rc::Rc<Resource>, NativeError> {
+    argument_resource(args::value(arguments, 0), function, "#1 ($brigade)")
+}
+
 fn use_brigade<T>(
-    arguments: &[Value],
+    resource: &Resource,
     function: &str,
     work: impl FnOnce(&mut Brigade) -> T,
 ) -> Result<T, NativeError> {
-    let resource = argument_resource(args::value(arguments, 0), function, "#1 ($brigade)")?;
     let mut data = resource.data.borrow_mut();
     let Some(brigade) = data
         .as_mut()
@@ -141,28 +173,60 @@ fn insert(arguments: &[Value], function: &str, prepend: bool) -> NativeResult {
             "Stream bucket argument did not contain an object",
         ));
     };
-    let Some(Value::String(data)) = bucket.get(&ArrayKey::str("data")) else {
+    let value = bucket.get(&ArrayKey::str("data")).ok_or_else(|| {
+        NativeError::error(
+            "Typed property StreamBucket::$data must not be accessed before initialization",
+        )
+    })?;
+    let Value::String(data) = &*value.deref() else {
         return Err(NativeError::error("Stream bucket data must be a string"));
     };
-    let data = data.as_bytes();
-    use_brigade(arguments, function, |brigade| {
+    let handle = bucket.get(&ArrayKey::str("bucket")).unwrap_or(Value::Null);
+    let handle = handle.deref();
+    let Value::Resource(handle) = &*handle else {
+        return Err(NativeError::type_error(format!(
+            "{function}(): supplied resource is not a valid stream bucket resource"
+        )));
+    };
+    let handle_data = handle.data.borrow();
+    let Some(link) = handle_data
+        .as_ref()
+        .and_then(|data| data.downcast_ref::<BucketLink>())
+    else {
+        return Err(NativeError::type_error(format!(
+            "{function}(): supplied resource is not a valid stream bucket resource"
+        )));
+    };
+    let target = brigade_argument(arguments, function)?;
+    let previous = link.0.borrow().upgrade();
+    if let Some(previous) = previous
+        && !previous.is_closed()
+    {
+        use_brigade(&previous, function, |brigade| brigade.unlink(handle.id))?;
+    }
+    use_brigade(target, function, |brigade| {
         // Account for queue entries even when a filter appends empty buckets.
-        if brigade.0.len() >= super::super::MAX_BUCKET / std::mem::size_of::<Vec<u8>>() {
+        if brigade.buckets.len() >= super::super::MAX_BUCKET / std::mem::size_of::<Bucket>() {
             return Err(super::super::limit());
         }
         let n = brigade
-            .1
-            .checked_add(data.len())
+            .size
+            .checked_add(data.as_bytes().len())
             .ok_or_else(super::super::limit)?;
         super::super::bounded(n)?;
+        let bucket = Bucket {
+            id: Some(handle.id),
+            data: data.clone(),
+        };
         if prepend {
-            brigade.0.push_front(data.to_vec());
+            brigade.buckets.push_front(bucket);
         } else {
-            brigade.0.push_back(data.to_vec());
+            brigade.buckets.push_back(bucket);
         }
-        brigade.1 = n;
+        brigade.size = n;
         Ok::<_, std::io::Error>(())
     })?
     .map_err(|error| NativeError::error(error.to_string()))?;
+    *link.0.borrow_mut() = std::rc::Rc::downgrade(target);
     Ok(Value::Null)
 }

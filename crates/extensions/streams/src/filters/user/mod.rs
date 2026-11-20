@@ -9,7 +9,8 @@ pub(crate) use chain::{close, close_released, lookup};
 
 use phera_extension_api::{
     ClassEntry, ConstantValue, Context, FunctionEntry, MethodEntry, NativeError, NativeResult,
-    Object, Param, ParamType, PhpArray, PropertyEntry, Registry, Value, Visibility, args,
+    Object, Param, ParamType, PhpArray, PropertyEntry, PropertyType, Registry, Value, Visibility,
+    args,
 };
 
 const FILTER_PARAMETERS: &[Param] = &[
@@ -43,8 +44,10 @@ pub(super) fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
         properties: const {
             &[
-                PropertyEntry::new("filtername", ConstantValue::String(""), Visibility::Public),
-                PropertyEntry::new("params", ConstantValue::String(""), Visibility::Public),
+                PropertyEntry::typed("filtername", PropertyType::String, Visibility::Public)
+                    .with_default(ConstantValue::String("")),
+                PropertyEntry::typed("params", PropertyType::Mixed, Visibility::Public)
+                    .with_default(ConstantValue::String("")),
                 PropertyEntry::new("stream", ConstantValue::Null, Visibility::Public),
             ]
         },

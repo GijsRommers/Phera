@@ -372,6 +372,13 @@ impl Flush {
         function: &str,
     ) -> NativeResult {
         let stream = stream_arg(arguments, function)?;
+        if matches!(self, Self::Buffers)
+            && let Some(chains) = crate::filters::user::lookup(context, stream.id)
+            && chains.writing()
+            && !chains.flush(context, stream, function).await?
+        {
+            return Ok(Value::Bool(false));
+        }
         if let Some(file) = crate::user_file::resource_file(stream) {
             if matches!(self, Self::Buffers) {
                 return Ok(Value::Bool(file.flush(context).await?));

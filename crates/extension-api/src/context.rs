@@ -525,6 +525,21 @@ pub trait Context {
         false
     }
 
+    /// Writes an existing property from the object's own scope for a native protocol callback.
+    fn set_protocol_property(
+        &mut self,
+        object: &Object,
+        name: &str,
+        value: Value,
+    ) -> Result<Option<crate::ArrayKey>, NativeError> {
+        let key = crate::ArrayKey::str(name);
+        if object.get(&key).is_none() {
+            return Ok(None);
+        }
+        object.set(key.clone(), value);
+        Ok(Some(key))
+    }
+
     /// The class selected by a native static method call, including inherited factories.
     fn called_class(&self) -> Option<&str> {
         None

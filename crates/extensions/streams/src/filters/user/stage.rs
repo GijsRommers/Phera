@@ -24,6 +24,12 @@ enum Kind {
     Native(Rc<RefCell<Filter>>),
 }
 
+pub(super) enum StageOutput {
+    Pass(Vec<u8>),
+    Feed,
+    Failed,
+}
+
 impl Stage {
     pub fn php(id: i64, filter: Rc<Object>) -> Self {
         Self {
@@ -54,7 +60,7 @@ impl Stage {
         data: Vec<u8>,
         flush: Flush,
         initial: bool,
-    ) -> Result<Option<Vec<u8>>, NativeError> {
+    ) -> Result<StageOutput, NativeError> {
         match &self.filter {
             Kind::Php(filter) => {
                 run(
@@ -94,10 +100,10 @@ impl Stage {
                     bounded(output.len())?;
                     Ok(output)
                 }) {
-                    Ok(output) => Ok(Some(output)),
+                    Ok(output) => Ok(StageOutput::Pass(output)),
                     Err(error) => {
                         context.warning(format!("{function}(): {error}"));
-                        Ok(None)
+                        Ok(StageOutput::Failed)
                     }
                 }
             }
@@ -120,7 +126,7 @@ async fn run(
     data: Vec<u8>,
     closing: bool,
     initial: bool,
-) -> Result<Option<Vec<u8>>, NativeError> {
+) -> Result<StageOutput, NativeError> {
     bounded(data.len()).map_err(|error| NativeError::error(error.to_string()))?;
     let input = buckets::brigade(context, data);
     let output = buckets::brigade(context, Vec::new());
@@ -129,23 +135,28 @@ async fn run(
     } else {
         Value::Null
     })));
-    let key = ArrayKey::str("stream");
-    if object.get(&key).is_some() {
-        object.set(key.clone(), stream.map_or(Value::Null, Value::Resource));
-    }
-    let _reset = StreamProperty { object, key };
-    let result = invoke(
-        context,
+    let result = match context.set_protocol_property(
         object,
-        "filter",
-        vec![
-            input.clone(),
-            output.clone(),
-            consumed,
-            Value::Bool(closing),
-        ],
-    )
-    .await;
+        "stream",
+        stream.map_or(Value::Null, Value::Resource),
+    ) {
+        Ok(key) => {
+            let _reset = StreamProperty { object, key };
+            invoke(
+                context,
+                object,
+                "filter",
+                vec![
+                    input.clone(),
+                    output.clone(),
+                    consumed,
+                    Value::Bool(closing),
+                ],
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
     if buckets::finish(&input).is_some_and(|input| !input.empty()) {
         context.warning(format!(
             "{function}(): Unprocessed filter buckets remaining on input brigade"
@@ -154,26 +165,30 @@ async fn run(
     let out = buckets::finish(&output);
     match result? {
         Some(value) => match to_int(&value, context.diagnostics())? {
-            PASS => Ok(Some(out.map_or_else(Vec::new, |out| out.bytes()))),
-            FEED => Ok(Some(Vec::new())),
-            _ => Ok(None),
+            PASS => Ok(StageOutput::Pass(
+                out.map_or_else(Vec::new, |out| out.bytes()),
+            )),
+            FEED => Ok(StageOutput::Feed),
+            _ => Ok(StageOutput::Failed),
         },
         _ => {
             context.warning(format!("{function}(): Failed to call filter function"));
-            Ok(None)
+            Ok(StageOutput::Failed)
         }
     }
 }
 
 struct StreamProperty<'a> {
     object: &'a Object,
-    key: ArrayKey,
+    key: Option<ArrayKey>,
 }
 
 impl Drop for StreamProperty<'_> {
     fn drop(&mut self) {
-        if self.object.get(&self.key).is_some() {
-            self.object.set(self.key.clone(), Value::Null);
+        if let Some(key) = self.key.take()
+            && self.object.get(&key).is_some()
+        {
+            self.object.set(key, Value::Null);
         }
     }
 }

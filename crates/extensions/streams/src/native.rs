@@ -155,6 +155,25 @@ impl FileStream {
             4
         };
         crate::context_options::validate(stream_context, function, parameter)?;
+        if crate::filters::is_filter_uri(name)
+            && let Some(value) = crate::filters::open_request_filter(
+                context,
+                function,
+                name,
+                mode,
+                include_path,
+                stream_context,
+            )
+            .await?
+        {
+            return match value {
+                Value::Resource(handle) => Ok(Self(handle)),
+                _ => Err(NativeError::throw(
+                    "RuntimeException",
+                    "Failed to open stream",
+                )),
+            };
+        }
         if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
             let supplied = if stream_context.is_null() {
                 crate::context_options::default_for_wrapper(context)

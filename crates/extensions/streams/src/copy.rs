@@ -30,7 +30,9 @@ pub fn register(registry: &mut Registry) {
 fn copy(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let (from, to) = endpoints(&arguments, "copy")?;
-        if crate::user_wrappers::locate(context, from).is_some()
+        if crate::filters::is_filter_uri(from)
+            || crate::filters::is_filter_uri(to)
+            || crate::user_wrappers::locate(context, from).is_some()
             || crate::user_wrappers::locate(context, to).is_some()
         {
             return copy_wrapped(context, from, to, args::value(&arguments, 2)).await;
@@ -288,6 +290,13 @@ async fn open_copy_resource(
         )
         .await?
         .map(|file| crate::user_resource::make_file(context, file)));
+    }
+    if crate::filters::is_filter_uri(path)
+        && let Some(stream) =
+            crate::filters::open_request_filter(context, "copy", path, mode, false, supplied)
+                .await?
+    {
+        return Ok(Some(stream));
     }
     Ok(open(context, "copy", path, mode, false)
         .await?
