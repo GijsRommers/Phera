@@ -19,7 +19,7 @@ use phera_extension_api::{
 use crate::document::ParseError;
 
 #[derive(Default)]
-struct Errors {
+pub(crate) struct Errors {
     internal: bool,
     last: Option<ParseError>,
     all: Vec<ParseError>,
@@ -115,6 +115,8 @@ pub(super) fn file_failure(context: &mut dyn Context, function: &str, path: &str
 }
 
 pub(super) fn register(registry: &mut Registry) {
+    // libxml_use_internal_errors() and its errors belong to one request.
+    registry.fork_state::<Errors>(phera_extension_api::fresh_state);
     use PropertyType::{Int, String};
     use Visibility::Public;
 

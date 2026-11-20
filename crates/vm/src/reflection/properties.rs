@@ -29,14 +29,14 @@ impl Vm {
         if matches!(mode, PropertyRead::Default) {
             return self.reflection_property_default(property);
         }
-        let value = match &property.static_storage {
+        let value = match self.class_states.static_property(property) {
             Some(storage) => {
-                if !property.static_initialized.get() {
+                if !storage.initialized.get() {
                     let initial = self.reflection_property_default(property)?;
                     *storage.reference.borrow().borrow_mut() = initial;
-                    property.static_initialized.set(true);
+                    storage.initialized.set(true);
                 }
-                property
+                storage
                     .value_initialized
                     .get()
                     .then(|| storage.reference.borrow().borrow().clone())
@@ -224,14 +224,14 @@ impl Vm {
             Some(ty) => self.coerce_property_in_mode(value, property, ty, Some(false))?,
             None => value,
         };
-        if let Some(storage) = &property.static_storage {
+        if let Some(storage) = self.class_states.static_property(property) {
             let reference = storage.reference.borrow().clone();
             let converted = self.check_reference_assignment(&reference, value)?;
             *reference
                 .try_borrow_mut()
                 .map_err(|_| exception("Property value is already in use"))? = converted;
-            property.static_initialized.set(true);
-            property.value_initialized.set(true);
+            storage.initialized.set(true);
+            storage.value_initialized.set(true);
         } else {
             let object = required_object(object)?;
             if property.is_readonly && object.has(&property.key) {

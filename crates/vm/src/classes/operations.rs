@@ -123,6 +123,7 @@ pub(super) fn inherit_hooks(
         release: own.release.or(base.release),
         forbid_serialization: own.forbid_serialization || base.forbid_serialization,
         redact_trace_arguments: own.redact_trace_arguments || base.redact_trace_arguments,
+        fork: own.fork.or(base.fork),
         properties: own.properties.or(base.properties),
         property_access: own.property_access.or(base.property_access),
         virtual_properties: own.virtual_properties,

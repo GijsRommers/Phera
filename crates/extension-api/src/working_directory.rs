@@ -3,6 +3,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone)]
 pub struct WorkingDirectory(Option<PathBuf>);
 
 impl Default for WorkingDirectory {

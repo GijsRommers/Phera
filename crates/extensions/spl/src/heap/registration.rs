@@ -25,6 +25,7 @@ const QUEUE_COMPARE: &[Param] = &[
 ];
 
 const HOOKS: ClassHooks = ClassHooks {
+    fork: Some(crate::native_state::fork_spl),
     clone: Some(NativeClone::Copy(views::clone_heap)),
     properties: Some(views::view),
     iterator: Some(heap::cursor),

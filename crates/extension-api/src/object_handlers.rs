@@ -159,6 +159,22 @@ pub type NativeUnary =
 pub type NativeCast = fn(&Object, crate::NativeCastKind) -> Option<Value>;
 pub type NativeRelease = for<'a> fn(&'a mut dyn Context, &'a Object) -> LocalFuture<'a, ()>;
 
+/// Copies an object's native state for a fork of a snapshot: every PHP value
+/// inside goes through the [`phera_value::Fork`] (`fork.value(...)`), so that
+/// objects inside are replaced by their copies. Returns why the object
+/// cannot be copied instead (an open connection, a running query).
+///
+/// ```php
+/// $stack = new SplStack;
+/// $stack->push(new Job);
+/// Phera\snapshot();   // each request gets its own stack with its own Job
+/// ```
+pub type NativeForkHook = fn(
+    &Object,
+    &dyn std::any::Any,
+    &mut phera_value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String>;
+
 #[derive(Clone, Copy, Default)]
 pub struct ClassHooks {
     /// The error for script allocation of a factory-only native object.
@@ -191,6 +207,9 @@ pub struct ClassHooks {
     pub count: Option<NativeCount>,
     /// Resolve an otherwise missing instance method on a wrapped receiver.
     pub forward_method: Option<MethodForwarder>,
+    /// Copies the native state for a fork; `None` means the class keeps no
+    /// state a fork could copy, and an object with state refuses.
+    pub fork: Option<NativeForkHook>,
 }
 
 impl ClassHooks {
@@ -214,5 +233,34 @@ impl ClassHooks {
         dimensions: None,
         count: None,
         forward_method: None,
+        fork: None,
     };
+}
+
+/// The fork hook of a class whose native state is plain data with no PHP
+/// value inside (a number, a formatter's settings): the fork gets a clone.
+///
+/// ```php
+/// $money = new NumberFormatter('nl_NL', NumberFormatter::CURRENCY);
+/// Phera\snapshot();   // each request formats with its own copy
+/// ```
+pub fn fork_clone<T: Clone + 'static>(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    _fork: &mut phera_value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    state
+        .downcast_ref::<T>()
+        .map(|state| Box::new(state.clone()) as Box<dyn std::any::Any>)
+        .ok_or_else(|| "its built-in state is not initialized".into())
+}
+
+/// The fork hook of a class whose objects hold a connection, a transfer or
+/// a compression in progress: one of those belongs to one request.
+pub fn fork_refused_handle(
+    _object: &Object,
+    _state: &dyn std::any::Any,
+    _fork: &mut phera_value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    Err("a connection, transfer or compression context made before the call belongs to one request; create it after Phera\\snapshot()".into())
 }

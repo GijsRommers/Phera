@@ -6,7 +6,7 @@ use phera_extension_api::NativeError;
 use crate::Vm;
 
 /// Trait imports have distinct function indices even when the source bytecode is shared.
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub(crate) struct StaticKey {
     pub(crate) function: crate::code_table::FunctionIndex,
     pub(crate) variable: u16,
