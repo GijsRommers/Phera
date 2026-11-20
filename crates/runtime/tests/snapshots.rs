@@ -407,3 +407,30 @@ async fn a_pgsql_connection_of_the_boot_gets_a_session_of_its_own_in_each_fork()
     .expect("snapshot");
     assert_eq!(answers, ["boot unset", "boot unset"]);
 }
+
+/// A Redis connection of the boot: each fork borrows its own socket, in the
+/// database the boot selected.
+#[tokio::test(flavor = "current_thread")]
+async fn a_redis_connection_of_the_boot_gets_a_socket_of_its_own_in_each_fork() {
+    let available = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:16399".parse().expect("address"),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok();
+    if !available {
+        eprintln!("SKIP: the test Redis on port 16399 is not running");
+        return;
+    }
+    let answers = boot_and_answer(
+        "redis",
+        "<?php $redis = new Redis(); $redis->connect('127.0.0.1', 16399); $redis->select(14);
+         $redis->set('phera:snapshot', 'boot');
+         Phera\\snapshot();
+         echo $redis->get('phera:snapshot'), ' ', $redis->getDbNum();
+         $redis->select(15);",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["boot 14", "boot 14"]);
+}
