@@ -14,16 +14,8 @@ impl Postgres {
         if state.copy {
             return Err(DbError::general("COPY is in progress"));
         }
-        if !name.is_empty() && state.statements.contains(name) {
-            return Err(DbError {
-                state: "42P05".into(),
-                code: None,
-                detail: format!("ERROR:  prepared statement \"{name}\" already exists"),
-            });
-        }
         self.client.prepare(name, sql).await?;
         self.finish(sql).await?;
-        self.native_mut()?.statements.insert(name.into());
         Ok(vec![NativeResult {
             command: "PREPARE".into(),
             ..NativeResult::default()

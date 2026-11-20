@@ -64,14 +64,15 @@ impl Postgres {
                 )
                 .await?;
             let hex = first_cell(row)?;
-            if hex.len() % 2 != 0 {
+            let (pairs, remainder) = hex.as_chunks::<2>();
+            if !remainder.is_empty() {
                 return Err(connection_error("Invalid PostgreSQL large object data"));
             }
-            let chunk = hex
-                .chunks_exact(2)
-                .map(|pair| {
-                    let high = hex_digit(pair[0])?;
-                    let low = hex_digit(pair[1])?;
+            let chunk = pairs
+                .iter()
+                .map(|&[high, low]| {
+                    let high = hex_digit(high)?;
+                    let low = hex_digit(low)?;
                     Ok(high * 16 + low)
                 })
                 .collect::<Result<Vec<_>, DbError>>()?;

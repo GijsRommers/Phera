@@ -140,7 +140,11 @@ impl Postgres {
         loop {
             match self.client.next().await? {
                 Message::DataRow(row) => return Ok(Some(row)),
-                Message::CommandComplete(_) | Message::CloseComplete => {}
+                Message::CommandComplete(_) => {
+                    self.finish_after_result(query).await?;
+                    return Ok(None);
+                }
+                Message::CloseComplete => {}
                 Message::ReadyForQuery(_) => return Ok(None),
                 Message::ErrorResponse(error) => {
                     return Err(self.client.failure(error, query, false).await);

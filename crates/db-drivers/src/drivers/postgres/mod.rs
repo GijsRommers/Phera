@@ -79,9 +79,6 @@ impl Postgres {
         }
         self.run_unprepared("DISCARD ALL").await?;
         self.statements.clear();
-        if let Some(native) = &mut self.native {
-            native.reset();
-        }
         self.client.clear_messages();
         Ok(())
     }
@@ -173,9 +170,11 @@ impl Postgres {
         statement: Option<&PdoStatement>,
     ) -> Result<Rows, DbError> {
         let mut rows = Rows::default();
+        let mut described = false;
         loop {
             match self.client.next().await? {
                 Message::RowDescription(body) => {
+                    described = true;
                     rows.columns = wire::rows::fields(&body)
                         .map_err(|error| self.client.invalid(error))?
                         .into_iter()
@@ -208,11 +207,21 @@ impl Postgres {
                     }
                 }
                 Message::CommandComplete(body) => {
-                    rows.affected = if rows.columns.is_empty() {
-                        affected(body.tag().map_err(|error| self.client.invalid(error))?)
+                    if described {
+                        rows.affected = rows.values.len() as u64;
                     } else {
-                        rows.values.len() as u64
-                    };
+                        rows = Rows {
+                            affected: affected(
+                                body.tag().map_err(|error| self.client.invalid(error))?,
+                            ),
+                            ..Rows::default()
+                        };
+                    }
+                    described = false;
+                    if owner.is_some() {
+                        self.finish_after_result(&query).await?;
+                        return Ok(rows);
+                    }
                 }
                 Message::ReadyForQuery(_) => return Ok(rows),
                 Message::ErrorResponse(error) => {
@@ -262,6 +271,15 @@ impl Postgres {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// A streamed query exposes its first result. Drain later commands when
+    /// emulation sent several statements in one simple Query message.
+    async fn finish_after_result(&mut self, query: &str) -> Result<(), DbError> {
+        match self.finish(query).await {
+            Err(error) if self.is_broken() => Err(error),
+            _ => Ok(()),
         }
     }
 

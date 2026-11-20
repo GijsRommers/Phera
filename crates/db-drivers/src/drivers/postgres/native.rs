@@ -4,8 +4,6 @@ mod copy;
 mod extended;
 mod lob_file;
 
-use std::collections::HashSet;
-
 use postgres_protocol::message::backend::Message;
 
 use super::wire::rows::Cells;
@@ -57,16 +55,10 @@ pub type NativeSequence = Vec<NativeResult>;
 
 #[derive(Default)]
 pub(super) struct State {
-    statements: HashSet<String>,
     copy: bool,
 }
 
 impl State {
-    pub fn reset(&mut self) {
-        self.statements.clear();
-        self.copy = false;
-    }
-
     pub fn copying(&self) -> bool {
         self.copy
     }
