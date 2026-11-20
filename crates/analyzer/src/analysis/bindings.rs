@@ -191,7 +191,14 @@ impl Analyzer<'_> {
         if self.level >= 2
             && !arrow.is_generator
             && (arrow.return_type.is_none()
-                || self.context.returns == ValueType::ExplicitMixed && !given.is_mixed())
+                || self.context.returns == ValueType::ExplicitMixed && !given.is_mixed()
+                || self.level >= 7
+                    && self.context.returns == ValueType::Array
+                    && self.context.returns.accepts(
+                        &given,
+                        self.index,
+                        crate::types::TypePolicy::Documentation,
+                    ) == crate::types::Compatibility::Accepts)
         {
             signature.returns = given;
         }

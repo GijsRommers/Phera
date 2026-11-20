@@ -11,7 +11,7 @@ pub struct Identifier {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NameKind {
     /// `Foo`
     Unqualified,

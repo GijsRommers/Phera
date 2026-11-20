@@ -36,6 +36,16 @@ pub fn refine(index: &mut Index) {
             }
         }
     }
+    // `$date->getTimezone()` returns a zone for an initialized native date.
+    for class in ["datetime", "datetimeimmutable", "datetimeinterface"] {
+        if let Some(method) = index
+            .classes
+            .get_mut(class)
+            .and_then(|class| class.methods.get_mut("gettimezone"))
+        {
+            method.returns = ValueType::Class("DateTimeZone".into());
+        }
+    }
     if let Some(period) = index.classes.get_mut("dateperiod") {
         let date =
             ValueType::Class("DateTime".into()).join(&ValueType::Class("DateTimeImmutable".into()));

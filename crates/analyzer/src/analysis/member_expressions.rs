@@ -136,6 +136,7 @@ impl Analyzer<'_> {
     ) -> ValueType {
         let late_static = matches!(&class.kind, ExpressionKind::Name(name)
                     if name.text.eq_ignore_ascii_case("static"));
+        let exact_class = matches!(class.kind, ExpressionKind::Name(_)) && !late_static;
         let class = self.class_expression(class, scope);
         if class.is_never() {
             return ValueType::Never;
@@ -162,7 +163,12 @@ impl Analyzer<'_> {
                 ))))
         {
             if let Some(constant) = self.index.constant(&class, &name.name) {
-                return self.relative_type(constant.ty.clone(), &class);
+                let ty = if self.level >= 7 && exact_class {
+                    constant.literal.as_ref().unwrap_or(&constant.ty)
+                } else {
+                    &constant.ty
+                };
+                return self.relative_type(ty.clone(), &class);
             }
             if let Some(item) =
                 self.omitted_builtin_member(ItemKind::ClassConstant, &class, &name.name)

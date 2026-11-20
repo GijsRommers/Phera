@@ -1,8 +1,13 @@
 {
+  "array_count_removals.php": [
+    [8, 15, "argument.type", "Parameter #1 $item of function storeRequired expects string, string|null given."]
+  ],
+  "arrow_array_shapes.php": [],
   "arrow_native_mixed.php": [
     [9, 21, "cast.int", "Cannot cast mixed to int."]
   ],
   "array_totals.php": [],
+  "bitwise_class_constants.php": [],
   "branch_and_key_types.php": [],
   "conditional_defaults.php": [],
   "docs.php": [],
@@ -50,6 +55,7 @@
   "date_interval_days.php": [
     [7, 14, "return.type", "Function anyDays() should return int but returns int|false."]
   ],
+  "date_timezone.php": [],
   "decryption_guard.php": [],
   "generic_array_callbacks.php": [],
   "method_arguments_guard.php": [
@@ -61,6 +67,9 @@
   "nullsafe_chain.php": [
     [8, 30, "method.nonObject", "Cannot call method id() on ChainRow|null."]
   ],
+  "null_test_flags.php": [
+    [8, 24, "method.nonObject", "Cannot call method text() on GuardedLabel|null."]
+  ],
   "return_annotations.php": [],
   "return_messages.php": [
     [5, 4, "return.type", "Anonymous function should return int but returns string."],
@@ -69,7 +78,11 @@
   "scalar_guards.php": [],
   "strict_context.php": [],
   "strict_lookup_constants.php": [],
+  "static_lookup_guards.php": [
+    [8, 22, "method.nonObject", "Cannot call method id() on OptionalLookup|null."]
+  ],
   "typed_overrides.php": [],
+  "union_property_guard.php": [],
   "typed_property_normal_write.php": [
     [8, 8, "assign.propertyType", "Property TextHolder::$text (string) does not accept string|null."],
     [8, 12, "assign.propertyType", "Property TextHolder::$text (string) does not accept string|null."],

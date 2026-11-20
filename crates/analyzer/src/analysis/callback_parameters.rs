@@ -3,12 +3,13 @@
 
 use super::*;
 use crate::index::{ParameterInfo, Signature};
+use crate::scope::{AccessStep, Place};
 use crate::types::{Collection, CollectionKind};
 use std::sync::Arc;
 
 impl Analyzer<'_> {
     pub(super) fn callback_parameter_types(
-        &self,
+        &mut self,
         label: &str,
         signature: Option<&Signature>,
         parameter: Option<&ParameterInfo>,
@@ -71,7 +72,7 @@ impl Analyzer<'_> {
 
     // Array filtering and reindexing keep the element type. Inspect those
     // inputs without re-evaluating arguments or their side effects.
-    fn array_map_element(&self, mut array: &Expression, scope: &Scope) -> ValueType {
+    fn array_map_element(&mut self, mut array: &Expression, scope: &Scope) -> ValueType {
         while let ExpressionKind::Call {
             callee,
             arguments: Arguments::List(arguments),
@@ -87,10 +88,35 @@ impl Analyzer<'_> {
         {
             array = &first.value;
         }
-        let Some(place) = crate::scope::Place::of(array) else {
+        let Some(place) = Place::of(array) else {
             return ValueType::Mixed;
         };
-        super::arrays::iteration_types(&self.place_type(&place, scope)).1
+        let ty = self.place_type(&place, scope);
+        let element = super::arrays::iteration_types(&ty).1;
+        if element.is_mixed() && !place.members.is_empty() {
+            let loaded = self.load_array_receiver_types(&place, scope);
+            super::arrays::iteration_types(&loaded).1
+        } else {
+            element
+        }
+    }
+
+    // The callback is processed before PHP evaluates its array argument.
+    // A documented receiver class may still need its Composer declarations.
+    fn load_array_receiver_types(&mut self, place: &Place, scope: &Scope) -> ValueType {
+        let mut ty = self.place_type(&Place::variable(&place.root), scope);
+        for member in &place.members {
+            let (name, property) = match member {
+                AccessStep::Property(name) => (name, true),
+                AccessStep::Method(name, _) => (name, false),
+                _ => return ValueType::Mixed,
+            };
+            for class in super::receiver_types::Receivers::of(&ty).classes {
+                self.dependencies.resolve(self.index, class);
+            }
+            ty = self.place_member_type(&ty, name, property);
+        }
+        ty
     }
 }
 

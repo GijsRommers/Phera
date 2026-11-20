@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 // A PHP variable name cannot contain a colon.
 pub(crate) const SELF_PROPERTIES: &str = ":self";
+pub(crate) const STATIC_CALLS: &str = ":static-call";
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Place {
@@ -20,6 +21,7 @@ pub struct Place {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AccessStep {
+    ClassName(NameKind, String),
     Property(String),
     Method(String, Vec<CallArgument>),
     IntegerOffset(i64),
@@ -110,6 +112,35 @@ impl Place {
                     ));
                     expression = target;
                 }
+                ExpressionKind::StaticCall {
+                    class,
+                    name: MemberName::Identifier(name),
+                    arguments: Arguments::List(arguments),
+                } => {
+                    let ExpressionKind::Name(class) = &class.kind else {
+                        return None;
+                    };
+                    if class.text.eq_ignore_ascii_case("static") {
+                        return None;
+                    }
+                    let arguments = arguments
+                        .iter()
+                        .map(CallArgument::of)
+                        .collect::<Option<_>>()?;
+                    members.push(AccessStep::Method(
+                        name.name.to_ascii_lowercase(),
+                        arguments,
+                    ));
+                    members.push(AccessStep::ClassName(
+                        class.kind,
+                        class.text.to_ascii_lowercase(),
+                    ));
+                    members.reverse();
+                    return Some(Self {
+                        root: STATIC_CALLS.into(),
+                        members,
+                    });
+                }
                 ExpressionKind::Index {
                     target,
                     index: Some(index),
@@ -187,12 +218,26 @@ pub struct Fact {
 pub struct Facts {
     types: BTreeMap<Place, Fact>,
     null_relations: BTreeSet<NullRelation>,
+    array_sizes: Option<Box<ArraySizes>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ArraySizes {
+    minimum: BTreeMap<String, usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum NullRelation {
     AtLeastOneNonNull(String, String),
-    NonNullResult { result: String, receiver: String },
+    NonNullResult {
+        result: String,
+        receiver: String,
+    },
+    Comparison {
+        flag: String,
+        variable: String,
+        non_null_when: bool,
+    },
 }
 
 impl NullRelation {
@@ -200,13 +245,14 @@ impl NullRelation {
         match self {
             Self::AtLeastOneNonNull(left, right) => left == name || right == name,
             Self::NonNullResult { result, receiver } => result == name || receiver == name,
+            Self::Comparison { flag, variable, .. } => flag == name || variable == name,
         }
     }
 }
 
 impl Facts {
     pub fn is_empty(&self) -> bool {
-        self.types.is_empty() && self.null_relations.is_empty()
+        self.types.is_empty() && self.null_relations.is_empty() && self.array_sizes.is_none()
     }
 
     pub fn get(&self, place: &Place) -> Option<&Fact> {
@@ -225,6 +271,7 @@ impl Facts {
 
     pub fn forget_variable(&mut self, name: &str) {
         self.types.retain(|place, _| !place.refers_to(name));
+        self.forget_array_size(name);
         self.null_relations
             .retain(|relation| !relation.depends_on(name));
     }
@@ -235,6 +282,9 @@ impl Facts {
 
     pub fn forget_receiver(&mut self, receiver: &Place) {
         self.types.retain(|place, _| {
+            if place.root == STATIC_CALLS && place.refers_to(&receiver.root) {
+                return false;
+            }
             place.root != receiver.root
                 || place.members.len() <= receiver.members.len()
                 || !place.members.starts_with(&receiver.members)
@@ -244,6 +294,67 @@ impl Facts {
     pub fn forget_write(&mut self, target: Option<&Place>) {
         self.types
             .retain(|place, _| !affected_by_write(place, target));
+        if let Some(target) = target {
+            self.forget_array_size(&target.root);
+        } else {
+            self.array_sizes = None;
+        }
+    }
+
+    pub fn minimum_array_size(&self, name: &str) -> usize {
+        self.array_sizes
+            .as_ref()
+            .and_then(|sizes| sizes.minimum.get(name))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub fn remember_array_size(&mut self, name: &str, minimum: usize) {
+        if minimum > 0 {
+            let bound = self
+                .array_sizes
+                .get_or_insert_with(Default::default)
+                .minimum
+                .entry(name.into())
+                .or_default();
+            *bound = (*bound).max(minimum);
+        }
+    }
+
+    fn forget_array_size(&mut self, name: &str) {
+        if let Some(sizes) = &mut self.array_sizes {
+            sizes.minimum.remove(name);
+            if sizes.minimum.is_empty() {
+                self.array_sizes = None;
+            }
+        }
+    }
+
+    pub fn remember_null_comparison(&mut self, flag: &str, variable: &str, non_null_when: bool) {
+        if self.null_relations.len() < 32 {
+            self.null_relations.insert(NullRelation::Comparison {
+                flag: flag.into(),
+                variable: variable.into(),
+                non_null_when,
+            });
+        }
+    }
+
+    pub fn non_null_from_flag<'a>(
+        &'a self,
+        flag: &'a str,
+        truth: bool,
+    ) -> impl Iterator<Item = &'a str> {
+        self.null_relations
+            .iter()
+            .filter_map(move |relation| match relation {
+                NullRelation::Comparison {
+                    flag: name,
+                    variable,
+                    non_null_when,
+                } if name == flag && *non_null_when == truth => Some(variable.as_str()),
+                _ => None,
+            })
     }
 
     pub fn remember_non_null_pair(&mut self, left: &str, right: &str) {
@@ -289,6 +400,17 @@ impl Facts {
     }
 
     pub fn retain_common(&mut self, paths: &[Scope]) {
+        if let Some(sizes) = &mut self.array_sizes {
+            sizes.minimum.retain(|name, minimum| {
+                for path in paths {
+                    *minimum = (*minimum).min(path.facts.minimum_array_size(name));
+                }
+                *minimum > 0
+            });
+            if sizes.minimum.is_empty() {
+                self.array_sizes = None;
+            }
+        }
         self.types.retain(|place, fact| {
             for path in paths {
                 let Some(other) = path.facts.get(place) else {
@@ -319,6 +441,9 @@ impl Facts {
 pub fn affected_by_write(place: &Place, target: Option<&Place>) -> bool {
     if place.members.is_empty() {
         return false;
+    }
+    if place.root == STATIC_CALLS {
+        return true;
     }
     let Some(written) = target.and_then(|target| target.members.last()) else {
         return true;

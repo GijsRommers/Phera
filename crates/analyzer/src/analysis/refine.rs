@@ -10,6 +10,7 @@ impl Analyzer<'_> {
             match &expression.kind {
                 ExpressionKind::Variable(Variable::Named(name)) => {
                     scope.refine_variable_guard(name, truth);
+                    self.refine_null_test_flag(name, truth, scope);
                     if truth {
                         if self.level >= 8 {
                             self.refine_other_non_null(expression, scope, false);
@@ -105,6 +106,7 @@ impl Analyzer<'_> {
                     left,
                     right,
                 } if self.level >= 8 => {
+                    self.refine_array_size(*operator, left, right, scope, truth);
                     self.refine_coalesced_comparison(*operator, left, right, scope, truth);
                 }
                 ExpressionKind::InstanceOf { value, class } if truth => {

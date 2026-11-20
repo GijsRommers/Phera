@@ -57,6 +57,11 @@ impl Analyzer<'_> {
             _ => None,
         };
         let inserted = probe.filter(|symbol| scope.known.insert(symbol.clone()));
+        let removal = if self.level >= 8 {
+            super::array_size::Removal::from_call(resolved.intrinsic.as_deref(), arguments, scope)
+        } else {
+            None
+        };
         let facts = self.argument_facts(
             arguments,
             resolved.signature.as_ref(),
@@ -113,6 +118,9 @@ impl Analyzer<'_> {
                     scope,
                 );
                 return signature.returns;
+            }
+            if let Some(removal) = removal {
+                return removal.apply(scope);
             }
             if self.level >= 2
                 && let Some(name) = &resolved.intrinsic

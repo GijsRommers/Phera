@@ -138,6 +138,31 @@ impl Analyzer<'_> {
         };
         for member in &place.members {
             let name = match member {
+                AccessStep::ClassName(kind, name) => {
+                    let class = match name.as_str() {
+                        "self" => self.context.class.clone(),
+                        "parent" => self
+                            .context
+                            .class
+                            .as_ref()
+                            .and_then(|class| self.index.class(class))
+                            .and_then(|class| class.parents.first())
+                            .cloned(),
+                        _ => Some(
+                            self.context.names.resolve(
+                                &Name {
+                                    kind: *kind,
+                                    text: name.clone(),
+                                    span: Span::new(0, 0),
+                                },
+                                UseKind::Class,
+                            )[0]
+                            .clone(),
+                        ),
+                    };
+                    ty = class.map_or(ValueType::Mixed, ValueType::Class);
+                    continue;
+                }
                 AccessStep::IntegerOffset(key) => {
                     ty = super::arrays::offset_type(&ty, &ValueType::IntLiteral(*key));
                     continue;
@@ -153,13 +178,34 @@ impl Analyzer<'_> {
                 }
                 AccessStep::Property(name) | AccessStep::Method(name, _) => name,
             };
-            let Some(class) = ty.class_name() else {
+            ty = self.place_member_type(&ty, name, matches!(member, AccessStep::Property(_)));
+        }
+        ty
+    }
+
+    pub(super) fn place_member_type(
+        &self,
+        receiver: &ValueType,
+        name: &str,
+        property: bool,
+    ) -> ValueType {
+        let arms = match receiver {
+            ValueType::Union(arms) | ValueType::BenevolentUnion(arms) => arms.as_ref(),
+            other => std::slice::from_ref(other),
+        };
+        let mut ty = ValueType::Never;
+        for arm in arms {
+            if arm == &ValueType::Null {
+                continue;
+            }
+            let Some(class) = arm.class_name() else {
                 return ValueType::Mixed;
             };
-            ty = if matches!(member, AccessStep::Property(_)) {
+            let member = if property {
                 self.index
                     .property(class, name)
                     .map(|property| property.effective_type(self.index))
+                    .or_else(|| self.index.doc_property_type(class, name).cloned())
             } else {
                 self.index
                     .method_owner(class, name)
@@ -167,7 +213,7 @@ impl Analyzer<'_> {
                         signature
                             .clone()
                             .typed(self.index)
-                            .for_receiver(self.index, owner, &ty)
+                            .for_receiver(self.index, owner, arm)
                             .returns
                     })
                     .or_else(|| {
@@ -175,10 +221,17 @@ impl Analyzer<'_> {
                             .doc_method(class, name)
                             .map(|signature| signature.clone().typed(self.index).returns)
                     })
-            }
-            .map_or(ValueType::Mixed, |ty| self.relative_type(ty, class));
+            };
+            let Some(member) = member else {
+                return ValueType::Mixed;
+            };
+            ty = ty.join(&self.relative_type(member, class));
         }
-        ty
+        if ty == ValueType::Never {
+            ValueType::Mixed
+        } else {
+            ty
+        }
     }
 
     pub fn refine_identical(

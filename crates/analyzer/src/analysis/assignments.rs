@@ -43,6 +43,7 @@ impl Analyzer<'_> {
                         branches.yes.as_ref(),
                         branches.no.as_ref(),
                     );
+                    self.remember_branch_null_tests(name, &branches, scope);
                     if let Some(value) = constant {
                         scope.values.insert(name.clone(), value);
                     }
@@ -57,6 +58,7 @@ impl Analyzer<'_> {
                 }
                 if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind {
                     self.remember_nullsafe_result(name, value, scope);
+                    self.remember_null_test_flag(name, value, scope);
                     if let Some(value) = constant {
                         scope.values.insert(name.clone(), value);
                     }

@@ -16,6 +16,7 @@ use phera_source::Span;
 
 mod argument_contracts;
 mod arguments;
+mod array_size;
 mod array_sum;
 mod arrays;
 mod assignments;
@@ -61,6 +62,7 @@ mod member_expressions;
 mod members;
 mod not_supported;
 mod null_pairs;
+mod null_test_flags;
 mod nullsafe_guards;
 mod operators;
 mod property_hooks;

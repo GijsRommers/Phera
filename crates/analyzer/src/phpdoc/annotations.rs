@@ -295,13 +295,20 @@ fn template_tag(tag: &str) -> bool {
 }
 
 fn tag_name(tag: &str) -> (Priority, &str) {
-    if let Some(name) = tag.strip_prefix("@phpstan-") {
+    let (priority, name) = if let Some(name) = tag.strip_prefix("@phpstan-") {
         (Priority::PhpStan, name)
     } else if let Some(name) = tag.strip_prefix("@psalm-") {
         (Priority::Psalm, name)
     } else {
         (Priority::Standard, tag.trim_start_matches('@'))
-    }
+    };
+    let name = match name {
+        "template-extends" => "extends",
+        "template-implements" => "implements",
+        "template-use" => "use",
+        name => name,
+    };
+    (priority, name)
 }
 
 fn detailed_tags(text: &str, start: usize) -> Vec<Tag<'_>> {
