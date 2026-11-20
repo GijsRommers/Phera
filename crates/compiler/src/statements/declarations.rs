@@ -22,6 +22,17 @@ impl Compiler<'_> {
                 ast::UseKind::Function => NameKind::Function,
                 ast::UseKind::Constant => NameKind::Constant,
             };
+            if key == NameKind::Class
+                && super::type_declarations::builtin_type(&alias.to_ascii_lowercase())
+            {
+                return Err(self.error(
+                    format!(
+                        "Cannot use {} as {alias} because '{alias}' is a special class name",
+                        i.name.text
+                    ),
+                    self.lines.line(i.name.span.start),
+                ));
+            }
             let imports = self.imports.get_or_insert_with(Default::default);
             Arc::make_mut(imports).insert((key, alias.to_ascii_lowercase()), i.name.text.clone());
         }

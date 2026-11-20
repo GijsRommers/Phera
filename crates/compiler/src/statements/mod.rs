@@ -133,3 +133,4 @@ pub(crate) mod gotos;
 pub(crate) mod class_default_types;
 mod class_errors;
 mod class_functions;
+mod type_declarations;

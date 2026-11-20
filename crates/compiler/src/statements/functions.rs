@@ -1,6 +1,7 @@
 //! Function declarations, parameter prologues, and nested declarations.
 
 use super::builtin_attributes::AttributePlacement;
+use super::type_declarations::{TypeScope, TypeSite};
 use phera_ast as ast;
 use phera_source::attributes::AttributeTarget;
 
@@ -75,6 +76,21 @@ impl<'ast> Compiler<'ast> {
             return Err(self.error(format!("Cannot redeclare function {name}()"), line));
         }
         let mut builder = self.function_builder(declaration, &name, captures, line)?;
+        if !declaration.name.contains("::") || declaration.name.starts_with("{closure:") {
+            let scope = TypeScope {
+                class: builder.class_scope.as_deref(),
+                trait_scope: builder.trait_scope.is_some(),
+                ..TypeScope::default()
+            };
+            for parameter in declaration.parameters {
+                if let Some(ty) = &parameter.ty {
+                    builder.validate_declared_type(ty, TypeSite::Parameter, scope)?;
+                }
+            }
+            if let Some(ty) = declaration.return_type {
+                builder.validate_declared_type(ty, TypeSite::Return, scope)?;
+            }
+        }
         if builder.has_builtin(declaration.attributes, "Deprecated")
             || builder.has_builtin(declaration.attributes, "NoDiscard")
         {
