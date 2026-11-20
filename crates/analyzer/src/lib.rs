@@ -101,6 +101,7 @@ fn analyze_types(
     let mut index = builtins::load_supported();
     index.read_type_docs = read_docs
         && (options.level >= 2
+            || options.strict
             || options.check_missing_typehints == Some(true)
             || options.level >= 1 && options.unnecessary_null_coalesce);
     if options.level >= 7 {

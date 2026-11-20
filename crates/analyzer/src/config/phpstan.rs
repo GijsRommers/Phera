@@ -29,7 +29,6 @@ pub(super) fn read(directory: &Path, options: &mut Options) -> Result<(), String
         return Ok(());
     };
 
-    options.report_unmatched_ignores = true;
     let mut visited = BTreeSet::new();
     let mut pending = vec![Visit::Read(config)];
     while let Some(visit) = pending.pop() {

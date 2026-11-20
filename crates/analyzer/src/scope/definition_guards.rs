@@ -15,6 +15,7 @@ struct GuardFacts {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum GuardKey {
     Variable(String),
+    NonEmptyArray(String),
     EnumCase {
         place: Place,
         class: String,
@@ -25,7 +26,7 @@ pub(crate) enum GuardKey {
 impl GuardKey {
     pub(crate) fn root(&self) -> &str {
         match self {
-            Self::Variable(name) => name,
+            Self::Variable(name) | Self::NonEmptyArray(name) => name,
             Self::EnumCase { place, .. } => &place.root,
         }
     }
@@ -86,6 +87,19 @@ impl Scope {
             .is_some_and(|facts| !facts.guards.is_empty())
         {
             self.refine_definitions(&GuardKey::Variable(name.into()), truth);
+            if truth {
+                self.refine_definitions(&GuardKey::NonEmptyArray(name.into()), true);
+            }
+        }
+    }
+
+    pub(crate) fn copy_array_guard(&mut self, from: &str, to: &str) {
+        if let Some(facts) = &mut self.definition_guards.0
+            && let Some(guard) = facts.guards.get(&GuardKey::NonEmptyArray(from.into()))
+        {
+            facts
+                .guards
+                .insert(GuardKey::NonEmptyArray(to.into()), guard.clone());
         }
     }
 
@@ -128,7 +142,7 @@ impl DefinitionGuards {
     pub fn forget_property_write(&mut self, place: Option<&Place>) {
         if let Some(facts) = &mut self.0 {
             facts.guards.retain(|guard, _| match guard {
-                GuardKey::Variable(_) => true,
+                GuardKey::Variable(_) | GuardKey::NonEmptyArray(_) => true,
                 GuardKey::EnumCase { place: guard, .. } => {
                     !super::facts::affected_by_write(guard, place)
                 }

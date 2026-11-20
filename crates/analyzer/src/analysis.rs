@@ -54,6 +54,7 @@ mod inherited_parameters;
 mod internal_methods;
 mod intrinsics;
 mod invocations;
+mod late_static_new;
 mod logical;
 mod loop_writes;
 mod loops;

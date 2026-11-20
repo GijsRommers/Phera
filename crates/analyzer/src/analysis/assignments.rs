@@ -57,6 +57,11 @@ impl Analyzer<'_> {
                     return ValueType::Never;
                 }
                 if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind {
+                    if self.options.strict
+                        && let ExpressionKind::Variable(Variable::Named(source)) = &value.kind
+                    {
+                        scope.copy_array_guard(source, name);
+                    }
                     self.remember_optional_result(name, value, scope);
                     self.remember_null_test_flag(name, value, scope);
                     if let Some(value) = constant {

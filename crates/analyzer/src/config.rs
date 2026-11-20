@@ -44,7 +44,7 @@ impl Default for Options {
             no_progress: false,
             strict: false,
             report_always_true_last_condition: false,
-            report_unmatched_ignores: false,
+            report_unmatched_ignores: true,
             treat_phpdoc_types_as_certain: true,
             check_missing_typehints: None,
             unnecessary_null_coalesce: false,

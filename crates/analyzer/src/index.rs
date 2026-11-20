@@ -32,6 +32,7 @@ pub struct Signature {
     pub location: Location,
     pub modifiers: Modifiers,
     pub abstract_body: bool,
+    pub documented_final: bool,
     pub accepts_extra: bool,
     pub pure: bool,
     pub closure_object: bool,
@@ -77,6 +78,7 @@ impl Signature {
             location,
             modifiers: Modifiers::default(),
             abstract_body: false,
+            documented_final: false,
             accepts_extra: false,
             pure: false,
             closure_object: true,
@@ -88,6 +90,7 @@ impl Signature {
     }
     pub fn apply_phpdoc(&mut self, doc: Option<&str>, names: &Names) {
         if let Some(doc) = doc {
+            self.documented_final = doc.split_whitespace().any(|tag| tag == "@final");
             self.pure = doc
                 .split_ascii_whitespace()
                 .any(|tag| matches!(tag, "@pure" | "@phpstan-pure" | "@psalm-pure"));

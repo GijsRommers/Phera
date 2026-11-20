@@ -109,7 +109,7 @@ impl Analyzer<'_> {
                 self.prepare_documented_binding(&argument.value, class);
             }
             let previous_callback = std::mem::take(&mut self.pending_callback_types);
-            if self.level >= 7
+            if (self.level >= 7 || self.options.unnecessary_null_coalesce && label == "array_map()")
                 && closure_binding::is_closure(&argument.value)
                 && !argument.spread
                 && arguments

@@ -287,6 +287,9 @@ impl Analyzer<'_> {
         });
         let late_static = matches!(&expression.kind, ExpressionKind::Name(n)
             if n.text.eq_ignore_ascii_case("static"));
+        if late_static && let Some(class) = class.as_deref() {
+            self.check_late_static_new(class, span);
+        }
         if !late_static
             && matches!(expression.kind, ExpressionKind::Name(_))
             && let Some(info) = class.as_ref().and_then(|c| self.index.class(c))

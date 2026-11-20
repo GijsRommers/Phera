@@ -25,6 +25,8 @@ pub struct Members {
     pub method_types: std::collections::BTreeMap<String, std::sync::Arc<crate::index::Signature>>,
     pub property_types: std::collections::BTreeMap<String, crate::types::ValueType>,
     pub generic_bases: Vec<crate::types::ValueType>,
+    pub final_class: bool,
+    pub consistent_constructor: bool,
 }
 
 pub fn text(source: &str, span: Option<Span>) -> Option<&str> {
@@ -55,6 +57,15 @@ pub fn internal(doc: &str) -> bool {
 
 pub fn members(doc: &str, names: &Names) -> Members {
     let mut members = Members::default();
+    for tag in doc.split_whitespace() {
+        match tag {
+            "@final" => members.final_class = true,
+            "@consistent-constructor"
+            | "@phpstan-consistent-constructor"
+            | "@psalm-consistent-constructor" => members.consistent_constructor = true,
+            _ => {}
+        }
+    }
     for (tag, rest) in tags(doc) {
         match tag {
             "@method" => {

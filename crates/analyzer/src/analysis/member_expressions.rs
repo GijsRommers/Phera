@@ -179,16 +179,22 @@ impl Analyzer<'_> {
                 .class(&class)
                 .is_some_and(|info| info.kind != ClassKind::Trait)
                 && self.index.complete(&class)
-                && !(late_static
-                    && self
-                        .index
-                        .class(&class)
-                        .is_some_and(|c| c.modifiers.is_abstract))
             {
-                self.report(
-                    Finding::UnknownClassConstant(format!("{class}::{}", name.name)),
-                    name.span,
-                );
+                if late_static {
+                    self.diagnose(
+                        "classConstant.notFound",
+                        name.span,
+                        format!(
+                            "Access to undefined constant static({class})::{}.",
+                            name.name
+                        ),
+                    );
+                } else {
+                    self.report(
+                        Finding::UnknownClassConstant(format!("{class}::{}", name.name)),
+                        name.span,
+                    );
+                }
             }
         }
         ValueType::Mixed

@@ -74,6 +74,9 @@ impl Analyzer<'_> {
                     if let Some((guard, inverted)) = self.enum_guard(expression, scope) {
                         scope.refine_definitions(&guard, truth != inverted);
                     }
+                    if self.options.strict && truth != (*operator == BinaryOperator::Identical) {
+                        self.refine_nonempty_array_guard(left, right, scope);
+                    }
                     if self.level < 2 {
                         continue;
                     }
@@ -123,6 +126,23 @@ impl Analyzer<'_> {
                     self.refine_truthy_place(expression, scope);
                 }
                 _ => {}
+            }
+        }
+    }
+
+    fn refine_nonempty_array_guard(
+        &self,
+        left: &Expression,
+        right: &Expression,
+        scope: &mut Scope,
+    ) {
+        for (array, empty) in [(left, right), (right, left)] {
+            if matches!(&empty.kind, ExpressionKind::Array(items) if items.is_empty())
+                && let ExpressionKind::Variable(Variable::Named(name)) = &array.kind
+            {
+                scope
+                    .refine_definitions(&crate::scope::GuardKey::NonEmptyArray(name.clone()), true);
+                return;
             }
         }
     }

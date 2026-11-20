@@ -113,6 +113,7 @@ fn signature(f: &[&str]) -> Signature {
         documentation: None,
         modifiers: modifiers(f[4]),
         abstract_body: f[5] == "true",
+        documented_final: false,
         accepts_extra: f[6] == "true",
         unbound_this: Vec::new(),
         global_effects: crate::global_effects::GlobalEffects::None,

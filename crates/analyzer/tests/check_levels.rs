@@ -75,15 +75,56 @@ fn phpstan_configured_rules() {
             ),
         ];
         if level >= 1 {
-            expected.push((
-                17,
-                "nullCoalesce.unnecessary",
-                "Coalesce operator ?? is unnecessary because the left side is always set \
-                 and the right side is null.",
-            ));
+            for line in [17, 23] {
+                expected.push((
+                    line,
+                    "nullCoalesce.unnecessary",
+                    "Coalesce operator ?? is unnecessary because the left side is always set \
+                     and the right side is null.",
+                ));
+            }
         }
+        expected.push((
+            39,
+            "foreach.valueOverwrite",
+            "Foreach overwrites $name with its value variable.",
+        ));
         assert_eq!(actual, expected, "level {level}");
     }
+}
+
+#[test]
+fn phpstan_late_static_contracts() {
+    // PHPStan 2.3.7 at level 0.
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/late_static_contracts.php");
+    let report = check(&Options {
+        level: 0,
+        paths: vec![path.to_string_lossy().into_owned()],
+        ..Options::default()
+    })
+    .unwrap();
+    let actual: Vec<_> = report
+        .diagnostics
+        .iter()
+        .map(|finding| {
+            (
+                finding.line,
+                finding.identifier.as_str(),
+                finding.message.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        actual,
+        [
+            (7, "new.static", "Unsafe usage of new static()."),
+            (
+                12,
+                "classConstant.notFound",
+                "Access to undefined constant static(ExtensibleFactory)::LIMIT."
+            ),
+        ]
+    );
 }
 
 #[test]

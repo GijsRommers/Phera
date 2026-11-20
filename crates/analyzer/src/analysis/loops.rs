@@ -151,7 +151,8 @@ impl Analyzer<'_> {
         self.widen_loop(body, [], scope);
         let nonempty = matches!(&subject.kind, ExpressionKind::Array(items)
             if items.iter().any(|item| !item.spread))
-            || self.level >= 7 && super::arrays::nonempty_array(&subject_type);
+            || (self.level >= 7 || self.options.strict)
+                && super::arrays::nonempty_array(&subject_type);
         let (key_type, value_type) = if self.level >= 2 && !by_reference {
             super::arrays::iteration_types(&subject_type)
         } else {
@@ -176,6 +177,16 @@ impl Analyzer<'_> {
             paths.push(scope.clone());
         }
         if !nonempty || self.options.strict && !paths.is_empty() {
+            if self.options.strict
+                && !nonempty
+                && !paths.is_empty()
+                && let Some(entered) = super::strict_rules::foreach_definitions(&before, &paths)
+            {
+                paths.push(before.clone());
+                let flow = Self::finish_paths(paths, scope);
+                super::strict_rules::remember_foreach_definitions(scope, &before, &entered);
+                return flow;
+            }
             paths.push(before);
         }
         Self::finish_paths(paths, scope)
