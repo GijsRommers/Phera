@@ -93,10 +93,14 @@ fn str_repeat(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         .checked_mul(times)
         .ok_or_else(|| NativeError::error("String size exceeds the maximum allowed size"))?;
     let mut result = buffer(length)?;
-    // An empty string repeated PHP_INT_MAX times is empty at once.
-    if !string.is_empty() {
-        for _ in 0..times {
-            result.extend_from_slice(string);
+    match string {
+        // An empty string repeated PHP_INT_MAX times is empty at once.
+        [] => {}
+        [byte] => result.resize(length, *byte),
+        _ => {
+            for _ in 0..times {
+                result.extend_from_slice(string);
+            }
         }
     }
     Ok(Value::from(result))
