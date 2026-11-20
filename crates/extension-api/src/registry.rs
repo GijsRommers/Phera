@@ -333,7 +333,12 @@ impl Registry {
         handler: crate::SyncFn,
     ) {
         self.function(entry);
-        self.extra_named_handlers.insert(entry.name, handler);
+        self.register_extra_named_handler(entry.name, handler);
+    }
+
+    /// Attach the extra-name handler independently of the function's frame policy.
+    pub fn register_extra_named_handler(&mut self, name: &'static str, handler: crate::SyncFn) {
+        self.extra_named_handlers.insert(name, handler);
     }
 
     pub fn extra_named_handler(&self, name: &str) -> Option<crate::SyncFn> {

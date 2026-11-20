@@ -33,7 +33,7 @@ pub(super) fn register(registry: &mut Registry) {
         const { &[Param::new("context", ParamType::Mixed)] },
         stream_context,
     ));
-    registry.function(FunctionEntry::sync(
+    registry.function(FunctionEntry::deprecated_sync(
         "libxml_disable_entity_loader",
         const { &[Param::new("disable", ParamType::Bool).with_default(ConstantValue::Bool(true))] },
         disable,
@@ -56,13 +56,6 @@ fn get_resolver(context: &mut dyn Context, _: &[Value]) -> NativeResult {
 }
 
 fn disable(context: &mut dyn Context, args: &[Value]) -> NativeResult {
-    context.deprecated(
-        concat!(
-            "Function libxml_disable_entity_loader() is deprecated since 8.0, ",
-            "as external entity loading is disabled by default"
-        )
-        .into(),
-    );
     let disabled = &mut context.state().get_or_default::<Config>().disabled;
     Ok(Value::Bool(std::mem::replace(
         disabled,

@@ -182,7 +182,7 @@ impl Equality {
     ) -> Result<bool, NativeError> {
         let result = match self {
             Self::Strict => strict_equals(left, right, context.diagnostics())?,
-            Self::Loose if super::ordering::can_invoke_string_comparison(left, right) => {
+            Self::Loose if super::ordering::needs_context_comparison(left, right) => {
                 Value::Bool(context.compare(left, right).await? == 0)
             }
             Self::Loose => loose_equals(left, right, context.diagnostics())?,

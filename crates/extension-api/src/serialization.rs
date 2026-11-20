@@ -149,11 +149,35 @@ pub async fn resolve_unserialize_class(
     }
 }
 
+/// Receives an allocated native object and a validated, length-delimited C: payload.
+pub type NativeLegacyUnserialize = for<'a> fn(
+    &'a mut dyn crate::Context,
+    Rc<crate::Object>,
+    &'a [u8],
+) -> crate::LocalFuture<'a, crate::NativeResult>;
+
+pub async fn invoke_legacy_payload(
+    context: &mut dyn crate::Context,
+    object: Rc<crate::Object>,
+    payload: &[u8],
+    native: Option<NativeLegacyUnserialize>,
+) -> crate::NativeResult {
+    match native {
+        Some(native) => native(context, object, payload).await,
+        None => {
+            context
+                .call_serialization_method(object, "unserialize", vec![crate::Value::from(payload)])
+                .await
+        }
+    }
+}
+
 /// A linked class examined before the serialized object body is read.
 pub struct SerializationClass {
     pub name: String,
     pub forbidden: bool,
     pub custom: bool,
+    pub legacy_native: Option<NativeLegacyUnserialize>,
     pub has_unserialize: bool,
     pub plain: Option<PlainSerializedClass>,
 }

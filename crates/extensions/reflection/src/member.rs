@@ -182,8 +182,5 @@ pub(crate) fn accessible(
     context: &mut dyn Context,
     class: &str,
 ) -> Result<phera_extension_api::MethodPreparation, phera_extension_api::NativeError> {
-    context.deprecated(format!(
-        "Method {class}::setAccessible() is deprecated since 8.5, as it has no effect since PHP 8.1"
-    ));
-    Ok(phera_extension_api::MethodPreparation::Default)
+    phera_extension_api::deprecated_method(context, &format!("{class}::setAccessible"))
 }

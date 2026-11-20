@@ -10,23 +10,21 @@ impl Vm {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("no variable frame"))?;
-        if let Some(i) = frame.function().locals.iter().position(|candidate| {
-            frame
-                .unit()
-                .names
-                .get(candidate.index())
-                .is_some_and(|value| value == name)
-        }) {
-            return Ok(Reg(i as u16));
-        }
-        if let Some(register) = frame.extras.dynamic.get(name) {
-            return Ok(*register);
+        if let Some(register) = frame.named_register(name) {
+            return Ok(register);
         }
         let count = frame.count();
         let register = Reg(u16::try_from(count)
             .map_err(|_| NativeError::error("Phera register limit exceeded"))?);
         let insertion = frame.base() + count;
+        let value = if self.in_global_scope() {
+            self.globals.declare(name);
+            self.globals.take(name)
+        } else {
+            None
+        };
         self.registers.insert_undefined(insertion);
+        self.registers.window_mut(insertion, 1)[0] = value;
         let extras = self.call_stack.current_extras_mut();
         if let Some(base) = &mut extras.arguments.saved {
             *base += 1;

@@ -2,7 +2,7 @@
 """Generate deprecations.tsv from the PHP stubs and the reference app's keep list.
 
 Run from this directory:
-    python3 generate-deprecations.py ~/php-src origin/PHP-8.5.12 > deprecations.tsv
+    python3 generate-deprecations.py ~/php-src php-8.5.13 > deprecations.tsv
 """
 
 import argparse

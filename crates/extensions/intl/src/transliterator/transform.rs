@@ -6,7 +6,10 @@ use icu_casemap::CaseMapper;
 use icu_experimental::transliterate::Transliterator;
 use icu_locale::LanguageIdentifier;
 use icu_normalizer::{ComposingNormalizer, DecomposingNormalizer};
-use icu_properties::{CodePointMapData, props::Script};
+use icu_properties::{
+    CodePointMapData, PropertyParser,
+    props::{GeneralCategory, GeneralCategoryGroup, Script},
+};
 
 const SCRIPTS: &[(Script, &str, &str)] = &[
     (Script::Arabic, "Arabic", "arab"),
@@ -64,12 +67,25 @@ pub enum Step {
     Nfd,
     Nfkc,
     Nfkd,
+    Remove,
+    RemoveCategory(GeneralCategoryGroup, bool),
     Null,
 }
 
 impl Step {
     pub fn load(id: &str) -> Option<Self> {
         let id = id.to_ascii_lowercase();
+        if let Some(filter) = id.strip_prefix("[:") {
+            let (property, transform) = filter.split_once(":]")?;
+            if !matches!(transform.trim(), "remove" | "any-remove") {
+                return None;
+            }
+            let property = property.trim();
+            let inverted = property.starts_with('^');
+            let category = property.trim_start_matches('^');
+            let category = PropertyParser::<GeneralCategoryGroup>::new().get_loose(category)?;
+            return Some(Self::RemoveCategory(category, inverted));
+        }
         let id = id.strip_prefix("any-").unwrap_or(&id);
         Some(match id {
             "lower" | "lower()" => Self::Lower,
@@ -78,6 +94,7 @@ impl Step {
             "nfd" => Self::Nfd,
             "nfkc" => Self::Nfkc,
             "nfkd" => Self::Nfkd,
+            "remove" => Self::Remove,
             "null" => Self::Null,
             "latin" => Self::Scripts(Rc::new(
                 SCRIPTS
@@ -116,7 +133,7 @@ impl Step {
         })
     }
 
-    pub fn apply(&self, input: String) -> String {
+    pub fn apply(&self, mut input: String) -> String {
         match self {
             Self::Rule(rule) => rule.transliterate(input),
             Self::Scripts(rules) => script_runs(&input, rules),
@@ -138,6 +155,12 @@ impl Step {
             Self::Nfkd => DecomposingNormalizer::new_nfkd()
                 .normalize(&input)
                 .into_owned(),
+            Self::Remove => String::new(),
+            Self::RemoveCategory(category, inverted) => {
+                let categories = CodePointMapData::<GeneralCategory>::new();
+                input.retain(|ch| category.contains(categories.get(ch)) == *inverted);
+                input
+            }
             Self::Null => input,
         }
     }
@@ -161,8 +184,18 @@ fn script_runs(input: &str, rules: &ScriptTransforms) -> String {
     let mut output = String::with_capacity(input.len());
     let mut active = Script::Unknown;
     let mut start = 0;
+    let mut common_start = None;
     let flush = |output: &mut String, script, text: &str| {
         if let Some((_, rule)) = rules.iter().find(|(key, _)| *key == script) {
+            if script == Script::Han
+                && text
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| scripts.get(ch) == Script::Han)
+                && output.chars().next_back().is_some_and(char::is_alphabetic)
+            {
+                output.push(' ');
+            }
             output.push_str(&rule.transliterate(text.to_owned()));
         } else {
             output.push_str(text);
@@ -170,11 +203,21 @@ fn script_runs(input: &str, rules: &ScriptTransforms) -> String {
     };
     for (offset, ch) in input.char_indices() {
         let script = scripts.get(ch);
-        if script != active && !matches!(script, Script::Inherited | Script::Common) {
-            flush(&mut output, active, &input[start..offset]);
-            active = script;
-            start = offset;
+        if script == Script::Common {
+            common_start.get_or_insert(offset);
+            continue;
         }
+        if script != active && !matches!(script, Script::Inherited | Script::Common) {
+            let boundary = if script == Script::Han {
+                common_start.unwrap_or(offset)
+            } else {
+                offset
+            };
+            flush(&mut output, active, &input[start..boundary]);
+            active = script;
+            start = boundary;
+        }
+        common_start = None;
     }
     flush(&mut output, active, &input[start..]);
     output

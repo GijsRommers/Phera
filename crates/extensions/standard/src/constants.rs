@@ -46,8 +46,8 @@ pub(crate) const SORT_NATURAL: i64 = 6;
 pub(crate) const SORT_FLAG_CASE: i64 = 8;
 
 /// `array_multisort`'s order arguments; registered for code that names them.
-const SORT_ASC: i64 = 4;
-const SORT_DESC: i64 = 3;
+pub(crate) const SORT_ASC: i64 = 4;
+pub(crate) const SORT_DESC: i64 = 3;
 
 /// `array_filter`'s `$mode`; 0, the default, passes the value only.
 pub(crate) const ARRAY_FILTER_USE_BOTH: i64 = 1;

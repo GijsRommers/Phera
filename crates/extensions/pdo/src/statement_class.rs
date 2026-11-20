@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use phera_extension_api::reflection::{ClassSelector, FunctionTarget, MemberKind};
+use phera_extension_api::reflection::{ClassSelector, MemberKind};
 use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, Value};
 
 use crate::attributes::AttributeCall;
@@ -10,7 +10,6 @@ use crate::attributes::AttributeCall;
 #[derive(Clone)]
 pub struct StatementClass {
     pub name: Rc<str>,
-    constructor: Option<Rc<str>>,
     arguments: Option<Rc<PhpArray>>,
 }
 
@@ -18,7 +17,6 @@ impl Default for StatementClass {
     fn default() -> Self {
         Self {
             name: Rc::from("PDOStatement"),
-            constructor: None,
             arguments: None,
         }
     }
@@ -81,7 +79,6 @@ impl StatementClass {
                              a public constructor"
                         )));
                     }
-                    result.constructor = Some(Rc::from(constructor.class.as_str()));
                 }
             }
         }
@@ -112,21 +109,10 @@ impl StatementClass {
         context: &mut dyn Context,
         object: Rc<Object>,
     ) -> Result<(), NativeError> {
-        if let Some(class) = &self.constructor {
-            let reflection = context
-                .reflection()
-                .ok_or_else(|| NativeError::error("PDOStatement reflection is unavailable"))?;
-            reflection
-                .reflect_invoke(
-                    FunctionTarget::Method {
-                        class: class.to_string(),
-                        name: "__construct".into(),
-                    },
-                    Some(object),
-                    self.arguments.as_deref().cloned().unwrap_or_default(),
-                )
-                .await?;
-        }
+        let empty = PhpArray::new();
+        context
+            .call_hydration_constructor(object, self.arguments.as_deref().unwrap_or(&empty))
+            .await?;
         Ok(())
     }
 }

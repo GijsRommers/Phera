@@ -231,6 +231,13 @@ impl<'a> Parameters<'a> {
         }
     }
 
+    pub(crate) fn requires_reference(self, index: usize) -> bool {
+        match self {
+            Self::Php { function, .. } => function.parameters[index].by_reference,
+            Self::Listed(parameters) => parameters[index].requires_reference,
+        }
+    }
+
     pub(crate) fn is_variadic(self, index: usize) -> bool {
         match self {
             Self::Php { function, .. } => function.parameters[index].variadic,

@@ -64,6 +64,13 @@ pub fn validate(
     } else {
         number & FETCH_GROUPING
     };
+    if matches!(mode, FetchMode::Class) {
+        return Ok(Configuration {
+            mode,
+            column: 0,
+            flags,
+        });
+    }
     let expected = offset + 1 + usize::from(matches!(mode, FetchMode::Column));
     let count = arguments.len();
     if matches!(method, Method::All) && count > 2 {

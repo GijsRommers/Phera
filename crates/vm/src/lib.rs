@@ -169,7 +169,6 @@ mod static_variables;
 mod string_comparison;
 mod string_offsets;
 mod stringable;
-mod timeout_shutdown;
 mod traversable_foreach;
 mod traversable_unpack;
 mod traversal;
@@ -263,7 +262,6 @@ pub struct Vm {
     cycles: cycles::CycleCollector,
     ini_overrides: ini::IniOverrides,
     execution_time: Rc<execution_time::ExecutionTime>,
-    timed_out_objects: Option<Vec<std::rc::Weak<phera_value::Object>>>,
     active_fiber: Option<Box<fibers::Active>>,
     fiber_bailout: bool,
     suspended_fibers: fibers::SuspendedFibers,
@@ -293,7 +291,6 @@ impl Vm {
             autoload: Default::default(),
             ini_overrides: Default::default(),
             execution_time: Default::default(),
-            timed_out_objects: None,
             active_fiber: None,
             fiber_bailout: false,
             suspended_fibers: Default::default(),
@@ -370,7 +367,7 @@ impl Vm {
     /// Defines a global variable before the script starts, such as a
     /// superglobal the runtime fills from the request.
     pub fn set_global(&mut self, name: &str, value: Value) {
-        self.globals.insert(name.to_string(), value);
+        self.publish_global(name.into(), value);
     }
 
     /// The extensions' per-request state, for the runtime to read once the
@@ -401,7 +398,6 @@ impl Vm {
 
     async fn run_request(&mut self, unit: Arc<CompiledUnit>) -> i32 {
         let main = self.code.load(&unit);
-        self.request_end.main = Some(main);
         for id in &unit.hoisted {
             if let Some(function) = unit.functions.get(id.index()) {
                 let index = self.code.declared(main, id.index());
@@ -413,14 +409,10 @@ impl Vm {
         let registers = unit.main.registers as usize;
         self.registers.grow_to(registers);
         self.call_stack.push(Frame::new(main, 0, None));
-        for (name, value) in self.globals.iter() {
-            if let Some(i) = unit
-                .main
-                .locals
-                .iter()
-                .position(|candidate| unit.names.get(candidate.index()) == Some(name))
-            {
-                self.registers.window_mut(i, 1)[0] = Some(value.clone());
+        for (index, name) in unit.main.locals.iter().enumerate() {
+            if let Some(name) = unit.names.get(name.index()) {
+                self.globals.declare(name);
+                self.registers.window_mut(index, 1)[0] = self.globals.take(name);
             }
         }
         self.publish_declaration_warnings(&unit);
@@ -516,16 +508,7 @@ impl Vm {
             .get_mut(register.index())
     }
 
-    /// A register of the script's top-level code, where globals live.
-    fn main_slot_mut(&mut self, register: Reg) -> Option<&mut Option<Value>> {
-        let frame = self.frame_at(0)?;
-        let (base, count) = (frame.base(), frame.count());
-        self.registers
-            .window_mut(base, count)
-            .get_mut(register.index())
-    }
-
-    #[inline(always)]
+    #[inline]
     fn set(&mut self, register: Reg, value: Value) {
         if let Some(frame) = self.current() {
             let (base, count) = (frame.base(), frame.count());

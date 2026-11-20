@@ -88,8 +88,14 @@ pub enum ObjectComparison {
     Projected(PhpArray, PhpArray),
 }
 
+/// Operands offered to the runtime's comparison hooks.
+pub enum ObjectOperands<'a> {
+    Pair(&'a Object, &'a Object),
+    Mixed(&'a Value, &'a Value),
+}
+
 pub type ObjectComparator<'a> =
-    dyn FnMut(&Object, &Object, &mut dyn Diagnostics) -> Result<ObjectComparison, OpError> + 'a;
+    dyn FnMut(ObjectOperands<'_>, &mut dyn Diagnostics) -> Result<ObjectComparison, OpError> + 'a;
 
 /// The same hook serves ordering and equality, including objects inside containers.
 pub fn compare_with_objects(
@@ -138,7 +144,10 @@ fn compare_resolved(
             )),
             structure::Pair::Tables(left, right) => compare_tables(left, right, comparison, d),
         },
-        _ => comparison.leaf(a, b, d),
+        _ => match comparison.mixed(a, b, d)? {
+            Some(order) => Ok(order),
+            None => comparison.leaf(a, b, d),
+        },
     }
 }
 
@@ -339,7 +348,7 @@ fn cmp3(o: std::cmp::Ordering) -> i8 {
 
 /// `ZEND_THREEWAY_COMPARE`: `a == b ? 0 : a < b ? -1 : 1`; NaN therefore
 /// compares as greater.
-fn threeway(x: f64, y: f64) -> i8 {
+pub fn threeway(x: f64, y: f64) -> i8 {
     if x == y {
         0
     } else if x < y {
@@ -351,7 +360,7 @@ fn threeway(x: f64, y: f64) -> i8 {
 
 /// `zendi_smart_strcmp`: numeric comparison when both strings are numeric
 /// (no trailing data), byte comparison otherwise.
-fn smart_strcmp(s1: &[u8], s2: &[u8]) -> i8 {
+pub fn smart_strcmp(s1: &[u8], s2: &[u8]) -> i8 {
     let p1 = parse_numeric(s1);
     let p2 = parse_numeric(s2);
     match (p1.value, p2.value) {

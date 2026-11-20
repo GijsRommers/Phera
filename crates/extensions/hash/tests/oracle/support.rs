@@ -23,7 +23,9 @@ pub async fn invoke(
     let entry = registry.get_function(name).expect("registered function");
     prepare_arguments(entry, &mut arguments, context)?;
     match entry.handler {
-        NativeFn::Sync(function) => function(context, &arguments),
+        NativeFn::Sync(function) | NativeFn::DeprecatedSync(function) => {
+            function(context, &arguments)
+        }
         NativeFn::Async(function) => function(context, arguments).await,
     }
 }

@@ -56,6 +56,7 @@ pub(crate) fn row(
     captures: &Captures,
     names: &[Option<String>],
     flags: CaptureFlags,
+    mark: Option<&[u8]>,
 ) -> Value {
     let length = if flags.unmatched_null {
         captures.len()
@@ -78,6 +79,9 @@ pub(crate) fn row(
         }
         result.insert(ArrayKey::Int(index as i64), value);
     }
+    if let Some(name) = mark {
+        result.insert(ArrayKey::str("MARK"), Value::from(name.to_vec()));
+    }
     Value::from(result)
 }
 
@@ -85,6 +89,7 @@ pub(crate) fn row(
 pub(crate) fn table(
     subject: &[u8],
     rows: &[Captures],
+    marks: &[Option<&[u8]>],
     names: &[Option<String>],
     flags: CaptureFlags,
     order: Order,
@@ -92,12 +97,25 @@ pub(crate) fn table(
     match order {
         Order::Single => rows.first().map_or_else(
             || Value::from(PhpArray::new()),
-            |captures| row(subject, captures, names, flags),
+            |captures| {
+                row(
+                    subject,
+                    captures,
+                    names,
+                    flags,
+                    marks.first().copied().flatten(),
+                )
+            },
         ),
-        Order::Set => list(
-            rows.iter()
-                .map(|captures| row(subject, captures, names, flags)),
-        ),
+        Order::Set => list(rows.iter().enumerate().map(|(index, captures)| {
+            row(
+                subject,
+                captures,
+                names,
+                flags,
+                marks.get(index).copied().flatten(),
+            )
+        })),
         Order::Pattern => {
             let mut result = PhpArray::new();
             for (index, name) in names.iter().enumerate() {
@@ -106,6 +124,18 @@ pub(crate) fn table(
                     result.insert(ArrayKey::str(name.as_str()), column.clone());
                 }
                 result.insert(ArrayKey::Int(index as i64), column);
+            }
+            if !marks.is_empty() {
+                let column: PhpArray = marks
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, mark)| {
+                        Some((ArrayKey::Int(index as i64), Value::from((*mark)?.to_vec())))
+                    })
+                    .collect();
+                if !column.is_empty() {
+                    result.insert(ArrayKey::str("MARK"), Value::from(column));
+                }
             }
             Value::from(result)
         }

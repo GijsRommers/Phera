@@ -64,8 +64,8 @@ pub fn instantiate(registry: &Registry, class: &str) -> Option<Rc<Object>> {
     Some(Rc::new(object))
 }
 
-/// Calls a sync method the way the VM does: found on the object's class or
-/// the nearest ancestor that defines it, arguments prepared first.
+/// Calls a method that completes immediately, with native arguments prepared
+/// against the declaration on the object's class or nearest ancestor.
 pub fn call_method(
     registry: &Registry,
     context: &mut TestContext,
@@ -91,11 +91,22 @@ pub fn call_method(
     prepare_call(&name, entry.params, &mut arguments, context)?;
     match entry.handler {
         NativeMethod::Sync(function) => function(context, Some(object), &arguments),
-        NativeMethod::Async(_)
-        | NativeMethod::AsyncNamed(_)
-        | NativeMethod::Window(_)
-        | NativeMethod::Abstract => Err(NativeError::error(format!(
-            "{name}() cannot be called from testing::call_method"
-        ))),
+        NativeMethod::Async(function) => {
+            let mut call = function(context, Some(Rc::clone(object)), arguments);
+            match call
+                .as_mut()
+                .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+            {
+                std::task::Poll::Ready(result) => result,
+                std::task::Poll::Pending => Err(NativeError::error(format!(
+                    "{name}() suspended without a test runtime"
+                ))),
+            }
+        }
+        NativeMethod::AsyncNamed(_) | NativeMethod::Window(_) | NativeMethod::Abstract => {
+            Err(NativeError::error(format!(
+                "{name}() cannot be called from testing::call_method"
+            )))
+        }
     }
 }

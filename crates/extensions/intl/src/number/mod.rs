@@ -12,6 +12,7 @@ mod constants;
 mod parse;
 mod registration;
 mod render;
+mod spellout;
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -41,6 +42,8 @@ enum Style {
     Currency,
     Percent,
     Scientific,
+    Spellout,
+    Ordinal,
     CurrencyIso,
     CurrencyPlural,
     CurrencyAccounting,
@@ -57,8 +60,8 @@ impl Style {
             2 | 16 => Self::Currency,
             3 => Self::Percent,
             4 => Self::Scientific,
-            5 => return Err(unsupported("NumberFormatter::SPELLOUT")),
-            6 => return Err(unsupported("NumberFormatter::ORDINAL")),
+            5 => Self::Spellout,
+            6 => Self::Ordinal,
             7 => return Err(unsupported("NumberFormatter::DURATION")),
             9 => return Err(unsupported("NumberFormatter::PATTERN_RULEBASED")),
             10 => Self::CurrencyIso,
@@ -86,6 +89,7 @@ impl Style {
     fn default_pattern(self, data: &number_data::NumberData) -> &str {
         match self {
             Self::Pattern | Self::CompactShort | Self::CompactLong => "#",
+            Self::Spellout | Self::Ordinal => "",
             Self::Decimal => data.decimal,
             Self::Percent => data.percent,
             Self::Scientific => data.scientific,
@@ -124,7 +128,7 @@ fn init(
     error::clear(context);
     let supplied = args::bytes(arguments, 0);
     if supplied.len() > locale::MAX_LEN {
-        return locale::too_long(context, site);
+        return locale::too_long_for(context, site, this.is_some());
     }
     let locale = locale::effective(context, supplied);
     let locale = locale.split('\0').next().unwrap_or_default();
@@ -136,6 +140,13 @@ fn init(
         return Err(NativeError::value_error(format!(
             "{site}(): Argument #1 ($locale) \"{locale}\" is invalid"
         )));
+    }
+    if modern.id.language.as_str() != "en" {
+        match style {
+            Style::Spellout => return Err(unsupported("NumberFormatter::SPELLOUT")),
+            Style::Ordinal => return Err(unsupported("NumberFormatter::ORDINAL")),
+            _ => {}
+        }
     }
     let Ok(pattern) = std::str::from_utf8(args::bytes(arguments, 2)) else {
         return creation_error(

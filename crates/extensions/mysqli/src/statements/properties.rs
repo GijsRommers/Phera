@@ -21,7 +21,7 @@ const NAMES: &[&str] = &[
     "id",
 ];
 
-pub static ACCESS: NativePropertyAccess = NativePropertyAccess { read, mutate };
+pub static ACCESS: NativePropertyAccess = NativePropertyAccess::new(read, mutate);
 
 fn read(
     _: &mut dyn Context,
