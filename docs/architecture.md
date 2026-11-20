@@ -1347,6 +1347,89 @@ What remains, in order of expected gain: the destination-driven compiler
 3) for `objects` and `calls`; native calls in the loop (item 2) for
 `closures`, whose `array_map` part calls back from native code.
 
+### 10.9 Fewer exits from the loop (`speed/interpreter-2`)
+
+```php
+if ($name === 'id') { ... }              // stayed in the loop: Binary on strings
+$value = $this->options['x'] ?? null;    // left it: [Property, Index] path
+```
+
+Measured on 20 November 2026 with a private per-opcode counter: one warm
+Laravel request ran 290,000 bytecodes inside the loop and 90,000 that left
+it for `Vm::execute`; Symfony 709,000 and 255,000. Leaving the loop costs
+250 machine instructions for an instruction that does nothing (`@`), and
+550 to 850 for an ordinary one (the general handler finds the frame, its
+registers and its code again, and both large `match`es mispredict). That
+was most of the "dispatch" cost of section 5's request profile. The
+counter was never committed.
+
+Done, each with every benchmark measured before and after (fat LTO, minimum
+of three runs) and `make phpt` on a release build:
+
+- **Plain values in the loop** (`vm/src/fast_values.rs`): operators on null,
+  booleans, integers, floats and strings through the value layer's own
+  operator with a sink that notes any diagnostic or use of `precision`
+  (then the VM runs the instruction); `JumpIfNull`, `!`, `[]`, array reads
+  with a string key, quiet reads (`??`, `isset`) of elements and variables.
+- **Property reads, writes and increments from their sites**
+  (`calls/fast_properties.rs`): `$this->x`, `$o->x`, `$items[$i]->x`, when
+  the instruction's property site matches the class and scope.
+- **Calls**: `InitCall` of an already linked function (`fast_named_calls`),
+  protected methods of related classes, the class scope computed once per
+  method call preparation, a per-table flag that skips the private-shadow
+  lookup, the called class computed only for static calls, `static::class`
+  and friends (`fast_class_names`).
+- **Fewer dependent loads**: a function's instructions are a shared `Code`
+  held by its facts (three loads instead of five on every call, return and
+  loop entry); the VM's general path reads a frame's register count there.
+- **Compiler**: an operator reads variables directly when they were copied
+  just before it (`$i < $n` is one instruction instead of three).
+- All new cases are reached through one out-of-line function
+  (`calls/further_steps.rs`): arms added to `Machine::step`, or a call from
+  the inner loop, changed the loop's layout and cost 2 to 12 percent on
+  benchmarks that never ran them.
+
+Exits per warm request after this: Laravel 54,500 (from 90,000), Symfony
+126,000 (from 255,000). Benchmarks in instructions, against the tip of
+`engine/destructors` (33e1c7b9) and against `php -n` (cycles were taken at
+a load average of 35 and are rough):
+
+| script | change | instructions vs PHP | cycles vs PHP | cycles vs PHP with JIT |
+| --- | ---: | ---: | ---: | ---: |
+| arithmetic | +0.7% | 1.04 | 1.14 | 1.28 |
+| fib | -1.5% | 1.37 | 1.49 | 1.84 |
+| natives | -2.7% | 2.06 | 2.46 | 2.90 |
+| objects | -16.9% | 2.52 | 3.19 | 4.09 |
+| calls | -12.4% | 3.70 | 4.85 | 6.01 |
+| methods | -8.8% | 3.84 | 6.56 | 18.1 |
+| properties | -26.8% | 2.42 | 2.44 | 2.62 |
+| typed-objects | -17.9% | 3.38 | 3.85 | 4.80 |
+| object-sort | -22.8% | 2.75 | 4.03 | 5.35 |
+| function-objects | -20.3% | 2.82 | 3.07 | 3.69 |
+| function-array | -12.5% | 1.28 | 1.40 | 1.58 |
+
+Every other script is between -5 and +0.9 percent. Requests: see the pull
+request (Laravel about -4 percent, Symfony about -6 percent of all
+instructions, a ninth of the interpreter's share).
+
+Not reached: `calls` and `methods` under 3 times PHP, `objects` under 2.5,
+`fib` under 1.5 (cycles noisy), and the interpreter's share of a request
+down by a third. What remains, in order of size:
+
+1. The round trip itself. About 55,000 (Laravel) and 126,000 (Symfony)
+   exits are left; the largest groups are calls to native functions
+   (`Call`, 36,000 per Symfony request), static property reads (statics
+   storage is being reworked on `speed/snapshot-and-fork`), `foreach`
+   start and end, `$this->items[$k]` paths, and returns into native code.
+   A native function needs the VM, so it cannot run inside the loop as it
+   is built; the loop borrowing the VM as a whole would allow it.
+2. A method call is still about 1,000 machine instructions in the loop,
+   spread over preparing the window, the frame push and pop, emptying the
+   callee's registers and checks; no single part is above 10 percent.
+3. Bytecodes per statement: `Clear`, `LoadConst`, `Move` are still half of
+   Symfony's bytecodes; a register-register compare-and-branch and the
+   optimiser for functions with `try` are the next compiler steps.
+
 ## 11. Tools built into the runtime
 
 Tools that PHP projects today get from separate packages written in PHP
