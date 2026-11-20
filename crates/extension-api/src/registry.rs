@@ -87,6 +87,7 @@ pub struct Registry {
     state_forks: HashMap<std::any::TypeId, crate::state::StateFork>,
     /// How a fork copies an open resource, by the resource's kind.
     resource_forks: HashMap<&'static str, ResourceFork>,
+    resource_releases: HashMap<&'static str, ResourceReleaseFn>,
     /// Classes Phera ships written in PHP, by lowercase name: the file name
     /// their code reports and its source.
     bundled_classes: HashMap<String, BundledSource>,
@@ -104,6 +105,11 @@ pub struct BundledSource {
 /// snapshot, or says why it cannot be copied (an open file, a socket).
 pub type ResourceFork =
     fn(&dyn std::any::Any, &mut phera_value::Fork<'_>) -> Result<Box<dyn std::any::Any>, String>;
+
+pub type ResourceReleaseFn = for<'a> fn(
+    &'a mut dyn crate::Context,
+    i64,
+) -> crate::LocalFuture<'a, Result<(), crate::NativeError>>;
 
 #[derive(Clone)]
 struct NativeConstant {
@@ -152,6 +158,14 @@ impl Registry {
     /// How a fork copies a resource of this kind, if it can.
     pub fn resource_fork(&self, kind: &str) -> Option<ResourceFork> {
         self.resource_forks.get(kind).copied()
+    }
+
+    pub fn register_resource_release(&mut self, kind: &'static str, release: ResourceReleaseFn) {
+        self.resource_releases.insert(kind, release);
+    }
+
+    pub fn resource_release(&self, kind: &str) -> Option<ResourceReleaseFn> {
+        self.resource_releases.get(kind).copied()
     }
 
     /// The registered forks of request state, by type.

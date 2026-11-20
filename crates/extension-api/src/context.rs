@@ -133,6 +133,15 @@ pub trait Context {
     /// Releases resources after output and extension finalizers have run.
     fn register_resource_finalizer(&mut self, _key: &'static str, _callback: crate::AsyncFn) {}
 
+    /// Schedule a native close callback when an application handle is dropped.
+    fn resource_release(
+        &self,
+        _kind: &'static str,
+        _id: i64,
+    ) -> Option<phera_value::ResourceRelease> {
+        None
+    }
+
     /// The PHP file making this call, for include-path lookups.
     fn script_path(&self) -> Option<std::path::PathBuf> {
         None

@@ -39,8 +39,8 @@ pub(crate) fn resource_file(resource: &Resource) -> Option<Rc<UserFile>> {
         .data
         .borrow()
         .as_ref()?
-        .downcast_ref::<Rc<UserFile>>()
-        .cloned()
+        .downcast_ref::<crate::user_resource::UserHandle<UserFile>>()
+        .map(|file| file.value.clone())
 }
 
 impl UserWrapper {

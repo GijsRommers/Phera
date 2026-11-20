@@ -134,8 +134,8 @@ mod tests {
         drop(target);
         let doomed = ids.take_doomed();
         let seen = weak.upgrade().expect("still alive while queued");
-        assert!(Rc::ptr_eq(&seen, &doomed[0]));
-        assert!(weak.refers_to(&doomed[0]));
+        assert!(Rc::ptr_eq(&seen, doomed[0].object()));
+        assert!(weak.refers_to(doomed[0].object()));
         drop((seen, doomed));
         assert!(!weak.is_alive());
     }
@@ -153,7 +153,7 @@ mod tests {
         let doomed = ids.take_doomed();
         assert_eq!(doomed.len(), 1);
         assert!(weak.upgrade().is_none());
-        assert!(!weak.refers_to(&doomed[0]));
+        assert!(!weak.refers_to(doomed[0].object()));
     }
 
     #[test]

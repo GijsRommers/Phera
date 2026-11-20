@@ -263,10 +263,11 @@ pub async fn close(context: &mut dyn Context, resource: &Resource) -> NativeResu
             "Directory is already executing a callback",
         ));
     }
-    resource.data.borrow_mut().take();
     if let Some(dir) = dir {
-        crate::user_resource::release(context, resource.id);
+        crate::user_resource::release(context, resource);
         dir.close(context).await?;
+    } else {
+        resource.data.borrow_mut().take();
     }
     Ok(Value::Null)
 }
@@ -314,11 +315,10 @@ fn handle(
 }
 
 pub fn is_open(resource: &Resource) -> bool {
-    resource
-        .data
-        .borrow()
-        .as_ref()
-        .is_some_and(|dir| dir.is::<Dir>() || dir.is::<Rc<crate::user_directory::UserDirectory>>())
+    resource.data.borrow().as_ref().is_some_and(|dir| {
+        dir.is::<Dir>()
+            || dir.is::<crate::user_resource::UserHandle<crate::user_directory::UserDirectory>>()
+    })
 }
 
 pub async fn read(context: &mut dyn Context, resource: &Resource, function: &str) -> NativeResult {

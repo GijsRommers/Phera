@@ -365,6 +365,16 @@ impl Drop for StreamProperty<'_> {
     }
 }
 
+pub(crate) async fn close_released(
+    context: &mut dyn Context,
+    resource: &Rc<Resource>,
+) -> Result<(), NativeError> {
+    if let Some(chains) = lookup(context, resource.id) {
+        *chains.stream.borrow_mut() = Rc::downgrade(resource);
+    }
+    close(context, resource).await
+}
+
 pub(crate) async fn close(
     context: &mut dyn Context,
     resource: &Resource,

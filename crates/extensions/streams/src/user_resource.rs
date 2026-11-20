@@ -1,13 +1,21 @@
-//! An unclosed user stream still receives `stream_close()` at request teardown.
+//! After `$file = null`, the last owner of a user handle queues `stream_close()`.
 
 use std::{
     collections::BTreeMap,
     rc::{Rc, Weak},
 };
 
-use phera_extension_api::{Context, LocalFuture, NativeResult, Value, value::Resource};
+use phera_extension_api::{
+    Context, LocalFuture, NativeError, NativeResult, Registry, Value,
+    value::{Resource, ResourceRelease},
+};
 
-use crate::{request::new_resource, user_directory::UserDirectory, user_file::UserFile};
+use crate::{request, user_directory::UserDirectory, user_file::UserFile};
+
+pub(crate) struct UserHandle<T> {
+    pub value: Rc<T>,
+    release: Option<ResourceRelease>,
+}
 
 enum Handle {
     File(Rc<UserFile>),
@@ -17,7 +25,8 @@ enum Handle {
 #[derive(Default)]
 struct OpenHandles(BTreeMap<i64, (Weak<Resource>, Handle)>);
 
-pub(crate) fn register_fork(registry: &mut phera_extension_api::Registry) {
+pub(crate) fn register(registry: &mut Registry) {
+    registry.register_resource_release("stream", close_released);
     registry.fork_state::<OpenHandles>(|state, fork| {
         let handles = state.downcast_ref::<OpenHandles>()?;
         if let Some((_, handle)) = handles.0.values().next() {
@@ -35,19 +44,19 @@ pub(crate) fn register_fork(registry: &mut phera_extension_api::Registry) {
 }
 
 pub(crate) fn make_file(context: &mut dyn Context, file: Rc<UserFile>) -> Value {
-    let resource = new_resource(context.state(), "stream", file.clone());
-    track(context, &resource, Handle::File(file));
-    resource
+    make(context, file.clone(), Handle::File(file))
 }
 
 pub(crate) fn make_directory(context: &mut dyn Context, dir: Rc<UserDirectory>) -> Value {
-    let resource = new_resource(context.state(), "stream", dir.clone());
-    track(context, &resource, Handle::Directory(dir));
-    resource
+    make(context, dir.clone(), Handle::Directory(dir))
 }
 
-fn track(context: &mut dyn Context, resource: &Value, handle: Handle) {
-    if let Value::Resource(resource) = resource {
+fn make<T: 'static>(context: &mut dyn Context, value: Rc<T>, handle: Handle) -> Value {
+    let id = request::files(context).claim_id();
+    let release = context.resource_release("stream", id);
+    let resource = request::resource(id, "stream", UserHandle { value, release });
+    request::track_standard(context.state(), &resource);
+    if let Value::Resource(resource) = &resource {
         context
             .state()
             .get_or_default::<OpenHandles>()
@@ -55,28 +64,93 @@ fn track(context: &mut dyn Context, resource: &Value, handle: Handle) {
             .insert(resource.id, (Rc::downgrade(resource), handle));
         context.register_resource_finalizer("user streams", finish);
     }
+    resource
 }
 
-pub(crate) fn release(context: &mut dyn Context, id: i64) {
+pub(crate) fn release(context: &mut dyn Context, resource: &Resource) {
+    retire(resource);
     context
         .state()
         .get_or_default::<OpenHandles>()
         .0
-        .remove(&id);
+        .remove(&resource.id);
+}
+
+fn retire(resource: &Resource) {
+    let mut data = resource.data.borrow_mut();
+    if let Some(mut data) = data.take() {
+        let release = if let Some(file) = data.downcast_mut::<UserHandle<UserFile>>() {
+            file.release.as_mut()
+        } else {
+            data.downcast_mut::<UserHandle<UserDirectory>>()
+                .and_then(|dir| dir.release.as_mut())
+        };
+        if let Some(release) = release {
+            release.cancel();
+        }
+    }
+}
+
+fn close_released(context: &mut dyn Context, id: i64) -> LocalFuture<'_, Result<(), NativeError>> {
+    Box::pin(async move {
+        let handle = context
+            .state()
+            .get_or_default::<OpenHandles>()
+            .0
+            .remove(&id);
+        if let Some((_, handle)) = handle {
+            close_handle(context, id, handle, None).await?;
+        }
+        Ok(())
+    })
+}
+
+async fn close_handle(
+    context: &mut dyn Context,
+    id: i64,
+    handle: Handle,
+    resource: Option<Rc<Resource>>,
+) -> Result<(), NativeError> {
+    match handle {
+        Handle::File(value) => {
+            let filtered = if crate::filters::user::lookup(context, id).is_some() {
+                let resource = resource.unwrap_or_else(|| {
+                    Rc::new(Resource::new(
+                        id,
+                        "stream",
+                        Some(Box::new(UserHandle {
+                            value: value.clone(),
+                            release: None,
+                        })),
+                    ))
+                });
+                let result = crate::filters::user::close_released(context, &resource).await;
+                retire(&resource);
+                result
+            } else {
+                if let Some(resource) = resource {
+                    retire(&resource);
+                }
+                Ok(())
+            };
+            let closed = value.close(context).await;
+            filtered.and(closed)
+        }
+        Handle::Directory(value) => {
+            if let Some(resource) = resource {
+                retire(&resource);
+            }
+            value.close(context).await.map(drop)
+        }
+    }
 }
 
 fn finish(context: &mut dyn Context, _: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let mut failure = None;
         if let Some(handles) = context.state().take::<OpenHandles>() {
-            for (_, (resource, handle)) in handles.0.into_iter().rev() {
-                if let Some(resource) = resource.upgrade() {
-                    resource.data.borrow_mut().take();
-                }
-                let result = match handle {
-                    Handle::File(file) => file.close(context).await,
-                    Handle::Directory(dir) => dir.close(context).await.map(|_| ()),
-                };
+            for (id, (resource, handle)) in handles.0.into_iter().rev() {
+                let result = close_handle(context, id, handle, resource.upgrade()).await;
                 if let Err(error) = result
                     && failure.is_none()
                 {

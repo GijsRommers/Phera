@@ -62,11 +62,10 @@ pub fn stream_argument<'a>(
         )));
     }
     // Directory handles share the PHP label, but have different operations.
-    let valid = resource
-        .data
-        .borrow()
-        .as_ref()
-        .is_some_and(|data| data.is::<Stream>() || data.is::<Rc<crate::user_file::UserFile>>());
+    let valid = resource.data.borrow().as_ref().is_some_and(|data| {
+        data.is::<Stream>()
+            || data.is::<crate::user_resource::UserHandle<crate::user_file::UserFile>>()
+    });
     if !valid {
         return Err(NativeError::type_error(format!(
             "{function}(): Argument {argument} must be an open stream resource"

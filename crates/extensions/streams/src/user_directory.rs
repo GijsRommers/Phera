@@ -51,8 +51,8 @@ pub(crate) fn of(resource: &Resource) -> Option<Rc<UserDirectory>> {
         .data
         .borrow()
         .as_ref()?
-        .downcast_ref::<Rc<UserDirectory>>()
-        .cloned()
+        .downcast_ref::<crate::user_resource::UserHandle<UserDirectory>>()
+        .map(|dir| dir.value.clone())
 }
 
 impl UserDirectory {

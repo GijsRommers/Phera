@@ -5,9 +5,15 @@ use crate::boot_and_answer;
 const REGISTER: &str = r#"<?php
 class VirtualStream {
     public $context;
+    private bool $read = false;
     public function stream_open($path, $mode, $flags, &$opened) { return true; }
-    public function stream_read($size) { return 'body'; }
-    public function stream_eof() { return true; }
+    public function stream_read($size) {
+        if ($this->read) return '';
+        $this->read = true;
+        return 'body';
+    }
+    public function stream_eof() { return $this->read; }
+    public function stream_stat() { return ['size' => 4]; }
 }
 class BootFilter extends php_user_filter {
     public function filter($in, $out, &$consumed, bool $closing): int {

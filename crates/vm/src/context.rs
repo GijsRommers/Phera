@@ -171,6 +171,18 @@ impl Context for Vm {
             .register(key, callback);
     }
 
+    fn resource_release(
+        &self,
+        kind: &'static str,
+        id: i64,
+    ) -> Option<phera_value::ResourceRelease> {
+        Some(phera_value::ResourceRelease::new(
+            &self.object_ids,
+            kind,
+            id,
+        ))
+    }
+
     fn script_path(&self) -> Option<std::path::PathBuf> {
         Some(self.location().file.into())
     }

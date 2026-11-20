@@ -4,7 +4,7 @@ mod buckets;
 mod chain;
 
 pub(super) use chain::{attach, remove};
-pub(crate) use chain::{close, lookup};
+pub(crate) use chain::{close, close_released, lookup};
 
 use phera_extension_api::{
     ClassEntry, ConstantValue, Context, FunctionEntry, MethodEntry, NativeError, NativeResult,

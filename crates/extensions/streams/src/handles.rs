@@ -160,8 +160,7 @@ pub(crate) async fn close_arguments(
             ));
             return Ok(Value::Bool(false));
         }
-        resource.data.borrow_mut().take();
-        crate::user_resource::release(context, resource.id);
+        crate::user_resource::release(context, resource);
         file.close(context).await?;
         return Ok(Value::Bool(true));
     }

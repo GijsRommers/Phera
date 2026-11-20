@@ -313,7 +313,7 @@ stream_wrapper_register('request-code', RequestSource::class);
 echo include 'request-code://source';
 "#,
     );
-    let worker = Runtime::new().web_worker();
+    let worker = Runtime::new().web_worker(0);
     for (value, output) in [(1, "fresh:1"), (2, "fresh:2")] {
         let path = format!("/index.php?value={value}");
         let response = worker
