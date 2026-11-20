@@ -78,6 +78,8 @@ fn gd_codecs_match_php_pixels() {
     compare_pixels(&reference, &decoded, 2, &mut mismatches);
     let outputs = [
         "rgba.png",
+        "interlaced.png",
+        "interlaced-indexed.png",
         "indexed.gif",
         "indexed.bmp",
         "rgb.bmp",

@@ -1,5 +1,7 @@
 //! `imagecreatefrompng` preserves palette indices and PNG alpha as GD colors.
 
+mod adam7;
+
 use std::io::Cursor;
 
 use ::png::{BitDepth, ColorType, DeflateCompression, Filter, Limits, PixelDimensions, Unit};
@@ -133,7 +135,9 @@ fn unpack(bytes: &[u8], width: u32, depth: BitDepth, stride: usize, count: usize
 
 pub(super) fn encode(image: &Image, options: Options) -> Result<Vec<u8>, String> {
     let mut result = Vec::new();
-    let mut encoder = ::png::Encoder::new(&mut result, image.width, image.height);
+    let mut header = ::png::Info::with_size(image.width, image.height);
+    header.interlaced = image.interlaced;
+    let mut encoder = ::png::Encoder::with_info(&mut result, header).map_err(to_string)?;
     encoder.set_depth(BitDepth::Eight);
     encoder.set_deflate_compression(match options.quality {
         0 => DeflateCompression::NoCompression,
@@ -207,7 +211,11 @@ pub(super) fn encode(image: &Image, options: Options) -> Result<Vec<u8>, String>
         }
     };
     let mut writer = encoder.write_header().map_err(to_string)?;
-    writer.write_image_data(raw).map_err(to_string)?;
+    if image.interlaced {
+        adam7::write(&mut writer, image.width, image.height, raw, options).map_err(to_string)?;
+    } else {
+        writer.write_image_data(raw).map_err(to_string)?;
+    }
     writer.finish().map_err(to_string)?;
     Ok(result)
 }

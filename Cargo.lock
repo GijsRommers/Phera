@@ -2883,6 +2883,7 @@ name = "phera-ext-gd"
 version = "0.1.0"
 dependencies = [
  "ab_glyph_rasterizer",
+ "flate2",
  "gif",
  "image",
  "jpeg-encoder",

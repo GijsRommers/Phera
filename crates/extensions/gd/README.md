@@ -16,8 +16,8 @@ of full decoding.
 - The built-in font bitmaps come from libgd. Outline text uses a Rust
   rasterizer and has different font hinting, glyph positions, and coverage
   from FreeType. The outline loader reads explicit font paths.
-- PNG output is non-interlaced. Metadata probes cover the main web image types
-  and a subset of the dimension parsers in PHP's catalog.
+- PNG output supports Adam7 interlacing. Metadata probes cover the main web
+  image types and a subset of the dimension parsers in PHP's catalog.
 - Images are limited to 16,777,216 pixels and 32,768 pixels on either axis.
   Named decoders read at most 64 MiB of encoded input.
 

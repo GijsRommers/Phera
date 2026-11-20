@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 ab_glyph_rasterizer.workspace = true
+flate2.workspace = true
 gif.workspace = true
 image.workspace = true
 jpeg-encoder.workspace = true
