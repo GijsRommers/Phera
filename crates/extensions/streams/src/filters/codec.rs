@@ -37,19 +37,16 @@ impl Codec {
             b"string.tolower" => Self::Lower,
             b"convert.base64-encode" => Self::Base64Encode(Base64Encode::new(params)),
             b"convert.base64-decode" => Self::Base64Decode(Vec::new()),
-            b"zlib.inflate" => Self::Zlib(Zlib::inflate(window(params))),
+            b"zlib.inflate" => Self::Zlib(Zlib::inflate(integer(params, "window").unwrap_or(-15))?),
             b"zlib.deflate" => {
                 let level = match params {
                     Value::Int(level) => *level,
                     _ => integer(params, "level").unwrap_or(-1),
                 };
                 Self::Zlib(Zlib::deflate(
-                    u32::try_from(level)
-                        .ok()
-                        .filter(|level| *level <= 9)
-                        .unwrap_or(6),
-                    window(params),
-                ))
+                    level,
+                    integer(params, "window").unwrap_or(-15),
+                )?)
             }
             b"consumed" => Self::Consumed {
                 start: None,
@@ -118,10 +115,6 @@ pub(super) fn integer(params: &Value, key: &str) -> Option<i64> {
         Value::String(value) => std::str::from_utf8(value.as_bytes()).ok()?.parse().ok(),
         _ => None,
     }
-}
-
-fn window(params: &Value) -> bool {
-    integer(params, "window").is_some_and(|window| window > 0)
 }
 
 pub(super) struct Base64Encode {

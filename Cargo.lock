@@ -3074,6 +3074,7 @@ dependencies = [
  "rustix",
  "tempfile",
  "tokio",
+ "zlib-rs",
 ]
 
 [[package]]
