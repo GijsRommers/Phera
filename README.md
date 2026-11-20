@@ -129,8 +129,14 @@ read, written, sought, truncated and unlinked in the current transaction.
 Native function return types are visible through reflection. Compatibility
 testing is in progress. MySQL LOCAL INFILE is disabled.
 
+Fileinfo is built in. Use `finfo` or `mime_content_type()` to identify common
+uploads from their contents. Fileinfo uses a bounded Rust classifier for images,
+documents, archives, media, fonts, and executables. It provides the MIME type,
+charset, known extensions, and a description. Custom magic databases and
+libmagic's complete signature catalog are outside this implementation.
+
 In progress: SimpleXML, XMLReader, XMLWriter.
-Not started: gd, fileinfo, zip, sockets.
+Not started: gd, zip, sockets.
 
 ### Sodium
 

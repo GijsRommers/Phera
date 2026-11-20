@@ -2718,6 +2718,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "phera-ext-fileinfo"
+version = "0.1.0"
+dependencies = [
+ "phera-ext-json",
+ "phera-ext-streams",
+ "phera-extension-api",
+]
+
+[[package]]
 name = "phera-ext-filter"
 version = "0.1.0"
 dependencies = [
@@ -3133,6 +3142,7 @@ dependencies = [
  "phera-ext-curl",
  "phera-ext-date",
  "phera-ext-dom",
+ "phera-ext-fileinfo",
  "phera-ext-filter",
  "phera-ext-gmp",
  "phera-ext-hash",

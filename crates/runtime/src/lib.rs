@@ -125,6 +125,7 @@ impl Runtime {
         registry.load(&phera_ext_curl::Curl);
         registry.load(&phera_ext_dom::Libxml);
         registry.load(&phera_ext_dom::Dom);
+        registry.load(&phera_ext_fileinfo::FileInfo);
         registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_intl::Intl);
         registry.load(&phera_ext_json::Json);

@@ -903,6 +903,15 @@ filteriterator::__construct	ext/spl/spl_iterators.stub.php:153	iterator	r--		-
 filteriterator::accept	ext/spl/spl_iterators.stub.php:151
 filteriterator::next	ext/spl/spl_iterators.stub.php:159
 filteriterator::rewind	ext/spl/spl_iterators.stub.php:156
+finfo::__construct	ext/fileinfo/fileinfo.stub.php:69	flags	o--	FILEINFO_NONE	i0	magic_database	o--	null	n
+finfo::buffer	ext/fileinfo/fileinfo.stub.php:83	string	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo::file	ext/fileinfo/fileinfo.stub.php:76	filename	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo::set_flags	ext/fileinfo/fileinfo.stub.php:89	flags	r--		-
+finfo_buffer	ext/fileinfo/fileinfo.stub.php:110	finfo	r--		-	string	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo_close	ext/fileinfo/fileinfo.stub.php:96	finfo	r--		-
+finfo_file	ext/fileinfo/fileinfo.stub.php:104	finfo	r--		-	filename	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo_open	ext/fileinfo/fileinfo.stub.php:93	flags	o--	FILEINFO_NONE	i0	magic_database	o--	null	n
+finfo_set_flags	ext/fileinfo/fileinfo.stub.php:98	finfo	r--		-	flags	r--		-
 floatval	ext/standard/basic_functions.stub.php:3592	value	r--		-
 flock	ext/standard/basic_functions.stub.php:2717	stream	r--		-	operation	r--		-	would_block	o-&	null	n
 floor	ext/standard/basic_functions.stub.php:3107	num	r--		-
@@ -1673,6 +1682,7 @@ mhash_get_block_size	ext/hash/hash.stub.php:74	algo	r--		-
 mhash_get_hash_name	ext/hash/hash.stub.php:80	algo	r--		-
 mhash_keygen_s2k	ext/hash/hash.stub.php:86	algo	r--		-	password	r--		-	salt	r--		-	length	r--		-
 microtime	ext/standard/basic_functions.stub.php:3266	as_float	o--	false	f
+mime_content_type	ext/fileinfo/fileinfo.stub.php:116	filename	r--		-
 min	ext/standard/basic_functions.stub.php:1601	value	r--		-	values	ov-		-
 mkdir	ext/standard/basic_functions.stub.php:2818	directory	r--		-	permissions	o--	0777	i511	recursive	o--	false	f	context	o--	null	n
 mktime	ext/date/php_date.stub.php:103	hour	r--		-	minute	o--	null	n	second	o--	null	n	month	o--	null	n	day	o--	null	n	year	o--	null	n

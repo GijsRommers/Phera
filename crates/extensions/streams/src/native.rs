@@ -214,3 +214,87 @@ pub async fn write_resource(
 ) -> NativeResult {
     crate::transfer::write(context, resource, bytes, function).await
 }
+
+/// Bounded contents of a named stream, or its directory status.
+pub enum StreamContents {
+    Directory,
+    Bytes { prefix: Vec<u8>, tail: Vec<u8> },
+}
+
+/// Open through PHP's wrappers and inspect bounded portions on the I/O pool.
+pub async fn inspect_path(
+    context: &mut dyn Context,
+    function: &str,
+    name: &[u8],
+    limit: u64,
+    tail_length: u64,
+) -> Result<Option<StreamContents>, phera_extension_api::NativeError> {
+    let Some(mut stream) = crate::wrapper::open(context, function, name, b"rb", false).await?
+    else {
+        return Ok(None);
+    };
+    let contents = crate::file_io::blocking(move || {
+        if stream.metadata().is_ok_and(|metadata| metadata.is_dir()) {
+            return Ok(StreamContents::Directory);
+        }
+        inspect(&mut stream, limit, tail_length)
+    })
+    .await?;
+    match contents {
+        Ok(contents) => Ok(Some(contents)),
+        Err(error) => {
+            context.warning(format!("{function}(): {}", reason(&error)));
+            Ok(None)
+        }
+    }
+}
+
+/// Probe a seekable PHP stream without consuming the caller's data.
+pub async fn inspect_resource(
+    resource: &phera_extension_api::value::Resource,
+    limit: u64,
+) -> Result<Option<StreamContents>, phera_extension_api::NativeError> {
+    use std::io::SeekFrom;
+
+    let result = crate::resource::operate(
+        resource,
+        crate::io_policy::IoPolicy::Blocking,
+        move |stream| {
+            let position = stream.position;
+            let eof = stream.eof;
+            if !stream.seekable {
+                return inspect(stream, limit, 0);
+            }
+            stream.seek(SeekFrom::Start(0))?;
+            let result = inspect(stream, limit, 0);
+            stream.seek(SeekFrom::Start(position))?;
+            stream.eof = eof;
+            result
+        },
+    )
+    .await?;
+    Ok(result.ok())
+}
+
+fn inspect(
+    stream: &mut crate::stream::Stream,
+    limit: u64,
+    tail_length: u64,
+) -> std::io::Result<StreamContents> {
+    use std::io::SeekFrom;
+
+    let prefix = stream.read(Some(limit))?;
+    let tail = if stream.seekable && tail_length > 0 && prefix.len() as u64 >= tail_length {
+        let offset = i64::try_from(tail_length).map_err(|_| std::io::ErrorKind::InvalidInput)?;
+        if stream.seek(SeekFrom::End(-offset)).is_ok() {
+            stream.read(Some(tail_length))?
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    Ok(StreamContents::Bytes { prefix, tail })
+}
+
+pub use crate::context_options::validate as validate_stream_context;

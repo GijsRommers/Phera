@@ -77,6 +77,7 @@ quick-xml = "0.42"
 html5ever = "0.40"
 phera-ext-curl = { path = "crates/extensions/curl" }
 phera-ext-date = { path = "crates/extensions/date" }
+phera-ext-fileinfo = { path = "crates/extensions/fileinfo" }
 phera-ext-filter = { path = "crates/extensions/filter" }
 phera-ext-hash = { path = "crates/extensions/hash" }
 icu_collator = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
