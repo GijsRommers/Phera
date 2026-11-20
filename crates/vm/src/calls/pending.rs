@@ -174,19 +174,19 @@ impl Vm {
         written: &str,
         policy_name: &str,
     ) -> Result<Callee, NativeError> {
-        let lower = name.trim_start_matches('\\').to_ascii_lowercase();
+        let lower = phera_extension_api::folded_name(name.trim_start_matches('\\'));
         if let Some(index) = self.function_table.get(&lower) {
             return Ok(self.function_callee(index));
         }
         let (name, target, parameters): (_, _, Vec<_>) = if let Some(entry) =
-            self.registry.get_function(name.trim_start_matches('\\'))
+            self.registry.get_folded_function(&lower)
         {
             (
                 entry.name.into(),
                 CallTarget::Native(*entry),
                 entry.params.iter().map(ParameterSpec::native).collect(),
             )
-        } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve(name) {
+        } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve_folded(&lower) {
             let parameters = if let Some(parameters) = intrinsic.parameters() {
                 parameters.iter().map(ParameterSpec::native).collect()
             } else {

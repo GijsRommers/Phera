@@ -352,7 +352,12 @@ impl Registry {
     }
 
     pub fn get_function(&self, name: &str) -> Option<&FunctionEntry> {
-        let id = self.function_ids.get(&name.to_ascii_lowercase())?;
+        self.get_folded_function(&folded_name(name))
+    }
+
+    /// [`Registry::get_function`] for a name already in lowercase.
+    pub fn get_folded_function(&self, lowercase_name: &str) -> Option<&FunctionEntry> {
+        let id = self.function_ids.get(lowercase_name)?;
         self.function_at(*id)
     }
 
@@ -514,5 +519,16 @@ mod tests {
         let mut registry = Registry::new();
         registry.load(&Demo);
         registry.load(&Demo);
+    }
+}
+
+/// A PHP function or class name in lowercase, the form name lookups use
+/// (PHP's names are case-insensitive). Most names are written in
+/// lowercase already, and are given back as they are, without a copy.
+pub fn folded_name(name: &str) -> std::borrow::Cow<'_, str> {
+    if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        std::borrow::Cow::Owned(name.to_ascii_lowercase())
+    } else {
+        std::borrow::Cow::Borrowed(name)
     }
 }

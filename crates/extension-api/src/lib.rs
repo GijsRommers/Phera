@@ -45,7 +45,7 @@ pub use object_handlers::{
     NativeIterator, PropertyProjection, PropertyPurpose, fork_clone, fork_refused_handle,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
-pub use registry::{BundledSource, ConstantValue, Registry, ResourceFork};
+pub use registry::{BundledSource, ConstantValue, Registry, ResourceFork, folded_name};
 pub use state::{ProcessCancellation, RequestState, StateFork, copy_state, fresh_state};
 pub use working_directory::WorkingDirectory;
 
