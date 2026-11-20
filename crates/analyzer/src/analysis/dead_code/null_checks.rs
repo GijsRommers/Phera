@@ -44,6 +44,14 @@ impl Analyzer<'_> {
                 expression.span,
                 format!("Variable ${name} {label} {reason}.{provenance}"),
             );
+        } else if let ExpressionKind::Index {
+            target,
+            index: Some(index),
+        } = &expression.kind
+        {
+            self.check_absent_null_check_offset(
+                expression, target, index, scope, identifier, label,
+            );
         } else if check == NullCheck::Coalesce
             && let ExpressionKind::Literal(literal) = &expression.kind
         {
@@ -56,6 +64,42 @@ impl Analyzer<'_> {
                 "nullCoalesce.expr",
                 expression.span,
                 format!("Expression {label} {reason}."),
+            );
+        }
+    }
+
+    fn check_absent_null_check_offset(
+        &mut self,
+        expression: &Expression,
+        target: &Expression,
+        index: &Expression,
+        scope: &Scope,
+        identifier: &str,
+        label: &str,
+    ) {
+        if scope.facts.has_expression(expression) {
+            return;
+        }
+        let (Some(place), Some(key)) = (
+            crate::scope::Place::of(target),
+            crate::constant_types::literal(index),
+        ) else {
+            return;
+        };
+        let ty = self.place_type(&place, scope);
+        let ValueType::Shape(shape) = &ty else {
+            return;
+        };
+        if shape.kind == crate::types::ShapeKind::Object || shape.remainder.is_some() {
+            return;
+        }
+        if super::super::arrays::shape_key(&key)
+            .is_some_and(|key| shape.fields.iter().all(|field| field.key != key))
+        {
+            self.diagnose_dead_code(
+                &format!("{identifier}.offset"),
+                expression.span,
+                format!("Offset {key} on {ty} {label} does not exist."),
             );
         }
     }
@@ -77,7 +121,9 @@ fn non_nullable(ty: &ValueType) -> bool {
             | ValueType::Intersection(_)
             | ValueType::Void
             | ValueType::Null
-            | ValueType::Mixed => return false,
+            | ValueType::Mixed
+            | ValueType::ExplicitMixed
+            | ValueType::ImplicitMixed => return false,
             _ => {}
         }
     }

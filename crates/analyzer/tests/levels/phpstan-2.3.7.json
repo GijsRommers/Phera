@@ -60,6 +60,10 @@
   "known_offset_receivers.php": [
     [7, 6, "offsetAccess.nonOffsetAccessible", "Cannot access offset 0 on list<string>|false."]
   ],
+  "proven_null_check.php": [
+    [4, 6, "nullCoalesce.offset", "Offset 'name' on array{label?: string} on left side of ?? does not exist."],
+    [4, 13, "booleanAnd.alwaysFalse", "Result of && is always false."]
+  ],
   "untyped_require.php": [
     [10, 6, "offsetAccess.nonOffsetAccessible", "Cannot access offset 'name' on mixed."],
     [10, 6, "return.type", "Function readData() should return string but returns mixed."]
