@@ -61,7 +61,7 @@ fn nullable_class_key(array: &ValueType, key: &ValueType) -> bool {
     matches!(array, ValueType::Collection(collection) if
         collection.kind == CollectionKind::Array && matches!(collection.key, ValueType::ClassString(_)))
         && matches!(key, ValueType::Union(arms) if
-            arms.contains(&ValueType::Null) && arms.iter().any(|ty| *ty == ValueType::String))
+            arms.contains(&ValueType::Null) && arms.contains(&ValueType::String))
 }
 
 fn possible_missing_offset(array: &ValueType, key: &ValueType) -> bool {
