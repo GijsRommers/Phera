@@ -117,10 +117,13 @@ impl Vm {
                 }
                 // A class miss from the handler loads the class and runs it
                 // again with the same arguments (see `calls::native_retries`).
+                // They come back with the miss: the synchronous handler only
+                // borrowed them, and the others' are the copy kept anyway for
+                // the native frame of a failure, so a call that does not miss
+                // copies nothing more.
                 let mut attempts = 0;
                 let result = loop {
-                    let again = self.has_autoloaders().then(|| arguments.clone());
-                    let outcome = match entry.handler {
+                    let (outcome, again) = match entry.handler {
                         phera_extension_api::NativeMethod::Sync(handler) => {
                             let track =
                                 self.error_handlers.error.is_some() && !self.error_handlers.active;
@@ -139,18 +142,27 @@ impl Vm {
                             if track {
                                 self.error_handlers.native_site = previous;
                             }
-                            if let Err(error) = &result {
-                                self.record_native_failure(
-                                    error,
-                                    NativeFrame::Method(method),
-                                    &arguments,
-                                );
+                            match result {
+                                Err(error) if crate::autoload::ClassMiss::is(&error) => {
+                                    (Err(error), Some(std::mem::take(&mut arguments)))
+                                }
+                                result => {
+                                    if let Err(error) = &result {
+                                        self.record_native_failure(
+                                            error,
+                                            NativeFrame::Method(method),
+                                            &arguments,
+                                        );
+                                    }
+                                    self.call_stack
+                                        .recycle_native_arguments(std::mem::take(&mut arguments));
+                                    (result, None)
+                                }
                             }
-                            self.call_stack.recycle_native_arguments(arguments);
-                            result
                         }
                         handler => {
                             let retained = self.retain_native_arguments(&arguments);
+                            let arguments = std::mem::take(&mut arguments);
                             let result = match handler {
                                 phera_extension_api::NativeMethod::Async(handler) => {
                                     handler(self, context.receiver.clone(), arguments).await
@@ -163,20 +175,30 @@ impl Vm {
                                 }
                                 _ => Err(NativeError::error("Cannot call abstract method")),
                             };
-                            self.finish_native_future(result, NativeFrame::Method(method), retained)
+                            match result {
+                                Err(error) if crate::autoload::ClassMiss::is(&error) => {
+                                    (Err(error), Some(retained.into_vec()))
+                                }
+                                result => (
+                                    self.finish_native_future(
+                                        result,
+                                        NativeFrame::Method(method),
+                                        retained,
+                                    ),
+                                    None,
+                                ),
+                            }
                         }
                     };
-                    match outcome {
-                        Err(error) if crate::autoload::ClassMiss::is(&error) => {
-                            match self
-                                .load_missed_class(error, &mut attempts, again.is_some())
-                                .await
-                            {
+                    match (outcome, again) {
+                        (Err(error), again) if crate::autoload::ClassMiss::is(&error) => {
+                            let retry = again.is_some();
+                            match self.load_missed_class(error, &mut attempts, retry).await {
                                 Ok(()) => arguments = again.unwrap_or_default(),
                                 Err(error) => break Err(error),
                             }
                         }
-                        outcome => break outcome,
+                        (outcome, _) => break outcome,
                     }
                 };
                 self.native_called_class = previous;

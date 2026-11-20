@@ -19,6 +19,17 @@ pub(super) enum NativeArguments {
 }
 
 impl NativeArguments {
+    /// The arguments again, for a native call that runs a second time (see
+    /// `calls::native_retries`): only then is a vector made.
+    pub(super) fn into_vec(self) -> Vec<Value> {
+        match self {
+            Self::Empty => Vec::new(),
+            Self::One(value) => vec![value],
+            Self::Two(values) => values.into(),
+            Self::Many(values) => values,
+        }
+    }
+
     fn as_slice(&self) -> &[Value] {
         match self {
             Self::Empty => &[],

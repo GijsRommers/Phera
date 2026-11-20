@@ -17,6 +17,13 @@
 //! can wait do it themselves ([`Vm::load_missed_class`]), and the synchronous
 //! ones in the batch loop put the call back as it was, so that the
 //! interpreter's own retry of the `Call` finds it ([`Vm::restore_native_call`]).
+//!
+//! None of this costs a call that does not miss: the arguments for the
+//! second call come back with the miss, from where they are anyway (the
+//! synchronous handler only borrowed them; an async one's are the copy kept
+//! for the native frame of a failure, or the trace of a native that calls
+//! back into PHP). A native called with neither (as a callback of another
+//! native) reports the missing class as an error instead.
 
 use phera_extension_api::NativeError;
 use phera_value::Value;
