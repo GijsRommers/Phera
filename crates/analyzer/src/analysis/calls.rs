@@ -70,8 +70,14 @@ impl Analyzer<'_> {
                 } else {
                     signature
                 };
-                if self.level >= 10 {
-                    signature.with_inherited_array_return(self.index, owner, &method.name, receiver)
+                if self.level >= 9 {
+                    signature.with_inherited_return(
+                        self.index,
+                        owner,
+                        &method.name,
+                        receiver,
+                        self.level,
+                    )
                 } else {
                     signature
                 }

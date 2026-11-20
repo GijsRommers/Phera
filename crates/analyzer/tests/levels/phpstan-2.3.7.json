@@ -68,6 +68,9 @@
     [10, 11, "return.type", "Function readCallable() should return string but returns mixed."],
     [10, 33, "return.type", "Function readOptional() should return string but returns mixed."]
   ],
+  "inherited_mixed_interpolation.php": [
+    [9, 21, "encapsedStringPart.nonString", "Part $value (mixed) of encapsed string cannot be cast to string."]
+  ],
   "runtime_regex_version.php": [
     [4, 3, "smaller.alwaysFalse", "Comparison operation \"<\" between 10 and 10 is always false."]
   ],

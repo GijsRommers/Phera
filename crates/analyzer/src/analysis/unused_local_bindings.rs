@@ -14,6 +14,7 @@ impl Analyzer<'_> {
         &mut self,
         body: &[Statement],
         parameters: &[Parameter],
+        captures: &[ClosureUse],
     ) {
         if self.level < 4 || !self.options.unused_variables {
             return;
@@ -85,6 +86,7 @@ impl Analyzer<'_> {
                 || name == "this"
                 || mentions.get(name.as_str()) != Some(&1)
                 || parameters.iter().any(|parameter| parameter.name == *name)
+                || captures.iter().any(|capture| capture.name == *name)
             {
                 continue;
             }

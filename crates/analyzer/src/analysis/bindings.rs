@@ -128,6 +128,7 @@ impl Analyzer<'_> {
             ValueType::declared(closure.return_type.as_ref(), &self.context.names);
         self.check_attributes(&closure.attributes, &mut inner);
         self.parameter_scope(&closure.parameters, &mut inner);
+        self.check_unused_local_bindings(&closure.body, &closure.parameters, &closure.uses);
         self.check_type(closure.return_type.as_ref());
         let flow = self.block(&closure.body, &mut inner);
         self.check_return_path(flow, &closure.body, span);

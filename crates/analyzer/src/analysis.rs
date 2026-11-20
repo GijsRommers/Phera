@@ -55,6 +55,7 @@ mod implicit_mixed;
 mod in_array_guards;
 mod inherited_parameters;
 mod internal_methods;
+mod interpolated_mixed;
 mod intrinsics;
 mod invalid_array_offset;
 mod invocations;

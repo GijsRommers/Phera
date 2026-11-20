@@ -14,3 +14,12 @@ function writeItems(array $items): void
         echo $item;
     }
 }
+
+function createWriter(): Closure
+{
+    return static function (array $items): void {
+        foreach ($items as $index => $item) {
+            echo $item;
+        }
+    };
+}

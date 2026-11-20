@@ -14,6 +14,9 @@ impl Analyzer<'_> {
     ) -> ValueType {
         match &expression.kind {
             ExpressionKind::Array(items) => self.array_literal(items, scope),
+            ExpressionKind::InterpolatedString(parts) => {
+                self.interpolated_string(parts, scope, quiet)
+            }
             ExpressionKind::Index { .. } => {
                 self.offset_chain(expression, scope, quiet).finish(scope)
             }
@@ -135,10 +138,7 @@ impl Analyzer<'_> {
                         return ValueType::Never;
                     }
                 }
-                match expression.kind {
-                    ExpressionKind::InterpolatedString(_) => ValueType::String,
-                    _ => ValueType::Mixed,
-                }
+                ValueType::Mixed
             }
         }
     }

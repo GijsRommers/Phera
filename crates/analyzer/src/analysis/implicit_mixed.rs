@@ -9,14 +9,16 @@ use crate::{
 use std::sync::Arc;
 
 impl Signature {
-    pub(super) fn with_inherited_array_return(
+    pub(super) fn with_inherited_return(
         mut self,
         index: &Index,
         owner: &ClassInfo,
         method: &str,
         receiver: &ValueType,
+        level: u8,
     ) -> Self {
-        if self.returns != ValueType::Array
+        let bare_array = level >= 10 && self.returns == ValueType::Array;
+        if !bare_array && self.returns != ValueType::Mixed
             || !index.read_type_docs
             || self.modifiers.visibility == Some(Visibility::Private)
             || self
@@ -47,11 +49,13 @@ impl Signature {
                 .typed(index)
                 .for_receiver(index, ancestor, receiver)
                 .returns;
-            if matches!(returns, ValueType::Shape(_) | ValueType::Collection(_))
-                && self
-                    .returns
-                    .accepts(&returns, index, TypePolicy::Documentation)
-                    == Compatibility::Accepts
+            if self.returns == ValueType::Mixed && returns == ValueType::ExplicitMixed
+                || bare_array
+                    && matches!(returns, ValueType::Shape(_) | ValueType::Collection(_))
+                    && self
+                        .returns
+                        .accepts(&returns, index, TypePolicy::Documentation)
+                        == Compatibility::Accepts
             {
                 self.returns = returns;
             }

@@ -236,6 +236,11 @@ fn phpstan_unused_local_bindings_are_opt_in() {
                         "foreach.unusedKey",
                         "Foreach key variable $position is never read."
                     ),
+                    (
+                        21,
+                        "foreach.unusedKey",
+                        "Foreach key variable $index is never read."
+                    ),
                 ]
             );
         } else {
