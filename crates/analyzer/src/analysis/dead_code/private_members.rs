@@ -72,6 +72,7 @@ impl Analyzer<'_> {
                     for param in &method.parameters {
                         if is_private(param.modifiers)
                             && !uses.forwarded_parameters.contains(&param.name)
+                            && !self.externally_mapped(&param.attributes)
                         {
                             self.check_private_property(
                                 &uses,
@@ -85,8 +86,11 @@ impl Analyzer<'_> {
                     }
                 }
                 ClassMemberKind::Property {
-                    modifiers, items, ..
-                } if is_private(*modifiers) => {
+                    modifiers,
+                    items,
+                    attributes,
+                    ..
+                } if is_private(*modifiers) && !self.externally_mapped(attributes) => {
                     for item in items.iter().filter(|item| !item.has_hook_list) {
                         self.check_private_property(
                             &uses,
@@ -115,6 +119,13 @@ impl Analyzer<'_> {
                 _ => {}
             }
         }
+    }
+
+    fn externally_mapped(&self, attributes: &[Attribute]) -> bool {
+        attributes.iter().any(|attribute| {
+            self.context.names.resolve(&attribute.name, UseKind::Class)[0]
+                .starts_with("Doctrine\\ORM\\Mapping\\")
+        })
     }
 
     fn check_private_property(
@@ -156,10 +167,15 @@ impl Uses {
         let mut uses = Self::default();
         let mut statements = Vec::new();
         let mut expressions = Vec::new();
+        attribute_expressions(&declaration.attributes, &mut expressions);
         for member in &declaration.members {
             match &member.kind {
                 ClassMemberKind::Method(method) => {
                     statements.extend(method.body.iter().flatten());
+                    attribute_expressions(&method.attributes, &mut expressions);
+                    for parameter in &method.parameters {
+                        attribute_expressions(&parameter.attributes, &mut expressions);
+                    }
                     expressions.extend(
                         method
                             .parameters
@@ -167,7 +183,10 @@ impl Uses {
                             .filter_map(|param| param.default.as_ref()),
                     );
                 }
-                ClassMemberKind::Property { items, .. } => {
+                ClassMemberKind::Property {
+                    items, attributes, ..
+                } => {
+                    attribute_expressions(attributes, &mut expressions);
                     for item in items {
                         expressions.extend(item.default.iter());
                         for hook in &item.hooks {
@@ -179,8 +198,17 @@ impl Uses {
                         }
                     }
                 }
-                ClassMemberKind::Constant { items, .. } => {
-                    expressions.extend(items.iter().map(|item| &item.value))
+                ClassMemberKind::Constant {
+                    items, attributes, ..
+                } => {
+                    attribute_expressions(attributes, &mut expressions);
+                    expressions.extend(items.iter().map(|item| &item.value));
+                }
+                ClassMemberKind::EnumCase {
+                    value, attributes, ..
+                } => {
+                    attribute_expressions(attributes, &mut expressions);
+                    expressions.extend(value);
                 }
                 _ => {}
             }
@@ -328,4 +356,12 @@ enum PropertyUse {
 
 fn is_private(modifiers: Modifiers) -> bool {
     modifiers.visibility == Some(Visibility::Private)
+}
+
+fn attribute_expressions<'a>(attributes: &'a [Attribute], expressions: &mut Vec<&'a Expression>) {
+    expressions.extend(
+        attributes
+            .iter()
+            .flat_map(|attribute| attribute.arguments.iter().map(|argument| &argument.value)),
+    );
 }

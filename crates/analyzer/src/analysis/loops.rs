@@ -99,6 +99,18 @@ impl Analyzer<'_> {
             );
             return Flow::Next;
         }
+        if self.level >= 2 && by_reference {
+            // Writes through the element alias can change the array's shape.
+            if let ExpressionKind::Variable(Variable::Named(name)) = &subject.kind {
+                if matches!(&subject_type, ValueType::Array | ValueType::Shape(_)) {
+                    scope.define(name, ValueType::Array);
+                } else {
+                    scope.define(name, ValueType::Mixed);
+                }
+            } else {
+                scope.forget_member_write(subject);
+            }
+        }
         let before = scope.clone();
         self.widen_loop(body, [], scope);
         let nonempty = matches!(&subject.kind, ExpressionKind::Array(items)

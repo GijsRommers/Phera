@@ -185,23 +185,24 @@ impl Scope {
             .retain(|key, value| paths.iter().all(|p| p.aliases.get(key) == Some(value)));
         for key in keys {
             let values: Vec<_> = paths.iter().map(|p| p.get(&key)).collect();
-            let definite = values.iter().all(|v| v.definition == Definition::Definite);
+            let definition = if values.iter().all(|v| v.definition == Definition::Definite) {
+                Definition::Definite
+            } else if values
+                .iter()
+                .all(|v| matches!(v.definition, Definition::Definite | Definition::Unknown))
+            {
+                Definition::Unknown
+            } else {
+                Definition::Possible
+            };
             let ty = values
                 .iter()
                 .map(|v| v.ty.clone())
                 .reduce(|a, b| a.join(&b))
                 .unwrap_or(ValueType::Mixed);
-            result.variables.insert(
-                key,
-                VariableInfo {
-                    definition: if definite {
-                        Definition::Definite
-                    } else {
-                        Definition::Possible
-                    },
-                    ty,
-                },
-            );
+            result
+                .variables
+                .insert(key, VariableInfo { definition, ty });
         }
         result
     }
