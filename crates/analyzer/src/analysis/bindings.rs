@@ -42,6 +42,8 @@ impl Analyzer<'_> {
             }
             let ty = if parameter.variadic {
                 ValueType::Array
+            } else if self.level >= 10 && parameter.ty.is_none() {
+                ValueType::ImplicitMixed
             } else {
                 ValueType::parameter(parameter, &self.context.names)
             };

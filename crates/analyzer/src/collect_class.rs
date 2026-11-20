@@ -25,6 +25,7 @@ pub fn class_info(
         methods: BTreeMap::new(),
         properties: BTreeMap::new(),
         constants: BTreeMap::new(),
+        enum_cases: Default::default(),
         location: location(class.span.start),
         open_properties: false,
         documented: crate::phpdoc::text(source, class.doc_comment)
@@ -87,6 +88,28 @@ fn add_member(
                 )
             });
             add_method(info, method, names, doc, member.span.start, location);
+            if read_docs {
+                for parameter in method
+                    .parameters
+                    .iter()
+                    .filter(|parameter| parameter.is_promoted())
+                {
+                    let parameter_docs = crate::phpdoc::read(
+                        source,
+                        parameter.doc_comment,
+                        names,
+                        &info.documented.templates,
+                    );
+                    if let Some(property) = info.properties.get_mut(&parameter.name) {
+                        property.documented_type = parameter_docs
+                            .variables
+                            .get(&None)
+                            .or_else(|| parameter_docs.variables.get(&Some(parameter.name.clone())))
+                            .or_else(|| documentation.as_ref()?.params.get(&parameter.name))
+                            .map(|annotation| annotation.ty.clone());
+                    }
+                }
+            }
             if let Some(documentation) = documentation
                 && let Some(signature) =
                     info.methods.get_mut(&method.name.name.to_ascii_lowercase())
@@ -138,6 +161,7 @@ fn add_member(
             ..
         } => add_constants(info, *modifiers, ty.as_ref(), items, names, location),
         ClassMemberKind::EnumCase { name, .. } => {
+            info.enum_cases.insert(name.name.clone());
             info.constants.insert(
                 name.name.clone(),
                 ConstantInfo {
@@ -185,7 +209,7 @@ fn add_method(
     info.methods
         .insert(method.name.name.to_ascii_lowercase(), signature);
     for p in &method.parameters {
-        if p.modifiers.visibility.is_some() {
+        if p.is_promoted() {
             info.properties.insert(
                 p.name.clone(),
                 PropertyInfo {

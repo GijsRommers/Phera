@@ -41,13 +41,14 @@ impl Display for ValueType {
                 Part::Type(ty) => ty,
             };
             let name = match ty {
-                Self::Mixed => "mixed",
+                Self::Mixed | Self::ExplicitMixed | Self::ImplicitMixed => "mixed",
                 Self::Null => "null",
                 Self::Bool => "bool",
                 Self::BoolLiteral(true) => "true",
                 Self::BoolLiteral(false) => "false",
                 Self::Int => "int",
                 Self::Float => "float",
+                Self::OverflowingInt => "float|int",
                 Self::String => "string",
                 Self::Array => "array",
                 Self::Iterable => "iterable",

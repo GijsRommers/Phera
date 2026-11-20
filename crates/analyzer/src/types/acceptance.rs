@@ -60,15 +60,22 @@ impl ValueType {
                     results.push(result);
                 }
                 Step::Compare(expected, given) => {
-                    if matches!(expected, Self::Mixed)
-                        || matches!(given, Self::Never)
-                        || expected == given
-                    {
+                    if expected.is_mixed() || matches!(given, Self::Never) || expected == given {
                         results.push(Accepts);
                         continue;
                     }
                     match (expected, given) {
-                        (_, Self::Mixed) => results.push(Uncertain),
+                        (_, given) if given.is_mixed() => results.push(Uncertain),
+                        (_, Self::OverflowingInt) => {
+                            let requirement = if policy == TypePolicy::Documentation {
+                                Requirement::All
+                            } else {
+                                Requirement::Any
+                            };
+                            pending.push(Step::Reduce(2, requirement));
+                            pending.push(Step::Compare(expected, &Self::Int));
+                            pending.push(Step::Compare(expected, &Self::Float));
+                        }
                         (_, Self::Void) if policy != TypePolicy::Documentation => {
                             pending.push(Step::Compare(expected, &Self::Null));
                         }

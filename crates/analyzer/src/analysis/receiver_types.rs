@@ -1,7 +1,7 @@
 //! A `Readable&Seekable` receiver can use both contracts.
 //! Levels through 5 accept a member available on at least one union arm.
 
-use super::*;
+use super::{member_checks::receiver_name, *};
 
 #[derive(Default)]
 pub struct Receivers<'a> {
@@ -31,6 +31,7 @@ impl<'a> Receivers<'a> {
                 | ValueType::Int
                 | ValueType::IntLiteral(_)
                 | ValueType::IntRange(..)
+                | ValueType::OverflowingInt
                 | ValueType::Float
                 | ValueType::String
                 | ValueType::StringLiteral(_)
@@ -68,6 +69,24 @@ impl Analyzer<'_> {
             return Some(name.clone());
         }
         if self.level < 2 {
+            return None;
+        }
+        if self.strict_receiver(ty) && !matches!(access, Access::Guarded | Access::GuardedStatic) {
+            let receiver = receiver_name(ty);
+            self.diagnose(
+                "method.nonObject",
+                span,
+                format!("Cannot call method {method}() on {receiver}."),
+            );
+            return None;
+        }
+        if self.missing_method_arm(ty, method, access) {
+            let receiver = receiver_name(ty);
+            self.diagnose(
+                "method.notFound",
+                span,
+                format!("Call to an undefined method {receiver}::{method}()."),
+            );
             return None;
         }
         let receivers = Receivers::of(ty);
@@ -125,6 +144,24 @@ impl Analyzer<'_> {
             if !quiet && shape.remainder.is_none() {
                 self.report(Finding::UnknownProperty(ty.to_string(), name.into()), span);
             }
+            return ValueType::Mixed;
+        }
+        if !quiet && self.strict_receiver(ty) {
+            let receiver = receiver_name(ty);
+            self.diagnose(
+                "property.nonObject",
+                span,
+                format!("Cannot access property ${name} on {receiver}."),
+            );
+            return ValueType::Mixed;
+        }
+        if !quiet && self.missing_property_arm(ty, name) {
+            let receiver = receiver_name(ty);
+            self.diagnose(
+                "property.notFound",
+                span,
+                format!("Access to an undefined property {receiver}::${name}."),
+            );
             return ValueType::Mixed;
         }
         let receivers = Receivers::of(ty);

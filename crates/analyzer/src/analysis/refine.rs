@@ -8,9 +8,22 @@ impl Analyzer<'_> {
         let mut pending = vec![(expression, truth)];
         while let Some((expression, truth)) = pending.pop() {
             match &expression.kind {
-                ExpressionKind::Variable(Variable::Named(name)) if truth => {
-                    let ty = scope.get(name).ty;
-                    scope.define(name, ty);
+                ExpressionKind::Variable(Variable::Named(name)) => {
+                    scope.refine_variable_guard(name, truth);
+                    if truth {
+                        let ty = scope.get(name).ty.without_null();
+                        if ty != ValueType::Never {
+                            if let Some(variable) = scope.variables.get_mut(name) {
+                                variable.definition = Definition::Definite;
+                                variable.ty = ty;
+                            } else {
+                                scope.define(name, ty);
+                            }
+                        }
+                    }
+                }
+                ExpressionKind::Assign { target, .. } if truth && self.level >= 2 => {
+                    pending.push((target, true));
                 }
                 ExpressionKind::Isset(items) if truth => {
                     for item in items {
@@ -47,7 +60,13 @@ impl Analyzer<'_> {
                     operator: operator @ (BinaryOperator::Identical | BinaryOperator::NotIdentical),
                     left,
                     right,
-                } if self.level >= 2 => {
+                } => {
+                    if let Some((guard, inverted)) = self.enum_guard(expression, scope) {
+                        scope.refine_definitions(&guard, truth != inverted);
+                    }
+                    if self.level < 2 {
+                        continue;
+                    }
                     self.refine_identical(
                         left,
                         right,

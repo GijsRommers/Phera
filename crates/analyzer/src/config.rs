@@ -211,8 +211,13 @@ fn level(value: &str) -> Result<u8, String> {
         "2" => Ok(2),
         "3" => Ok(3),
         "4" => Ok(4),
-        "5" | "max" => Ok(5),
-        _ => Err("Supported check levels are 0 through 5, or max".into()),
+        "5" => Ok(5),
+        "6" => Ok(6),
+        "7" => Ok(7),
+        "8" => Ok(8),
+        "9" => Ok(9),
+        "10" | "max" => Ok(10),
+        _ => Err("Supported check levels are 0 through 10, or max".into()),
     }
 }
 

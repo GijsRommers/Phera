@@ -24,6 +24,8 @@ pub fn binary_type(operator: BinaryOperator, left: &ValueType, right: &ValueType
         Op::BitwiseAnd | Op::BitwiseOr | Op::BitwiseXor => {
             if is_string(left) && is_string(right) {
                 T::String
+            } else if is_numeric(left) || is_numeric(right) {
+                T::Int
             } else {
                 T::Int.join(&T::String)
             }
@@ -45,7 +47,7 @@ pub fn binary_type(operator: BinaryOperator, left: &ValueType, right: &ValueType
                 if left == &T::Float || right == &T::Float {
                     T::Float
                 } else {
-                    T::Int.join(&T::Float)
+                    T::OverflowingInt
                 }
             } else {
                 T::Mixed
@@ -79,7 +81,11 @@ pub fn unary_type(operator: UnaryOperator, value: ValueType) -> ValueType {
 fn is_numeric(ty: &ValueType) -> bool {
     matches!(
         ty,
-        ValueType::Int | ValueType::IntLiteral(_) | ValueType::IntRange(..) | ValueType::Float
+        ValueType::Int
+            | ValueType::IntLiteral(_)
+            | ValueType::IntRange(..)
+            | ValueType::OverflowingInt
+            | ValueType::Float
     )
 }
 

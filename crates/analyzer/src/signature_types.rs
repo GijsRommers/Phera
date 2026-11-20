@@ -14,6 +14,9 @@ impl Signature {
             for parameter in &mut self.parameters {
                 if let Some(annotation) = doc.params.get(&parameter.name) {
                     parameter.ty = refine(&parameter.ty, &annotation.ty, index);
+                    if parameter.default_is_null {
+                        parameter.ty = parameter.ty.join(&ValueType::Null);
+                    }
                 }
             }
             if let Some(annotation) = &doc.returns {
@@ -152,71 +155,98 @@ fn infer_templates(
     index: &Index,
 ) {
     use ValueType as T;
-    let mut pending = vec![(expected, given)];
+    let mut pending = vec![(expected, given.clone())];
     while let Some((expected, given)) = pending.pop() {
-        match (expected, given) {
+        match (expected, &given) {
             (T::Union(arms), _) => {
                 // In `T|Closure(): T`, a known closure binds the result type
                 // through the callable arm before falling back to bare T.
                 let precise = arms.iter().any(|arm| {
                     matches!(
-                        (arm, given),
+                        (arm, &given),
                         (T::Callable(_), T::Callable(_))
                             | (T::Collection(_), T::Collection(_) | T::Shape(_))
                             | (T::ClassString(_), T::ClassString(_))
-                    ) && arm.accepts(given, index, TypePolicy::Documentation)
+                    ) && arm.accepts(&given, index, TypePolicy::Documentation)
                         != Compatibility::Rejects
                 });
                 pending.extend(
                     arms.iter()
                         .filter(|arm| {
                             (!precise || !matches!(arm, T::Template(_)))
-                                && arm.accepts(given, index, TypePolicy::Documentation)
+                                && arm.accepts(&given, index, TypePolicy::Documentation)
                                     != Compatibility::Rejects
                         })
-                        .map(|arm| (arm, given)),
+                        .map(|arm| (arm, given.clone())),
                 );
             }
             (T::Template(template), _)
                 if variables.contains(&template.name)
                     && template
                         .bound
-                        .accepts(given, index, TypePolicy::Documentation)
+                        .accepts(&given, index, TypePolicy::Documentation)
                         == Compatibility::Accepts =>
             {
                 bindings
                     .entry(template.name.clone())
-                    .and_modify(|old| *old = old.join(given))
+                    .and_modify(|old| *old = old.join(&given))
                     .or_insert_with(|| given.clone());
             }
-            (T::ClassString(expected), T::ClassString(given)) => pending.push((expected, given)),
+            (T::ClassString(expected), T::ClassString(given)) => {
+                pending.push((expected, (**given).clone()))
+            }
             (T::Callable(expected), T::Callable(given)) => {
-                pending.push((&expected.returns, &given.returns));
+                pending.push((&expected.returns, given.returns.clone()));
                 pending.extend(
                     expected
                         .parameters
                         .iter()
                         .zip(&given.parameters)
-                        .map(|(expected, given)| (&expected.ty, &given.ty)),
+                        .map(|(expected, given)| (&expected.ty, given.ty.clone())),
                 );
             }
-            (T::Collection(expected), T::Collection(given)) => {
-                pending.extend([(&expected.key, &given.key), (&expected.value, &given.value)])
-            }
+            (T::Collection(expected), T::Collection(given)) => pending.extend([
+                (&expected.key, given.key.clone()),
+                (&expected.value, given.value.clone()),
+            ]),
             (T::Collection(expected), T::Shape(given)) => pending.extend(
                 given
                     .fields
                     .iter()
-                    .map(|field| (&expected.value, &field.value)),
+                    .map(|field| (&expected.value, field.value.clone())),
             ),
             (T::Generic(expected), T::Generic(given))
                 if expected.base.eq_ignore_ascii_case(&given.base) =>
             {
-                pending.extend(expected.arguments.iter().zip(&given.arguments));
+                pending.extend(
+                    expected
+                        .arguments
+                        .iter()
+                        .zip(given.arguments.iter().cloned()),
+                );
+            }
+            (T::Generic(expected), given) if given.class_name().is_some() => {
+                if let Some(projected) = project_generic(index, &expected.base, given) {
+                    pending.extend(expected.arguments.iter().zip(projected));
+                }
             }
             _ => {}
         }
     }
+}
+
+fn project_generic(index: &Index, owner: &str, receiver: &ValueType) -> Option<Vec<ValueType>> {
+    let class = index.class(owner)?;
+    let bindings = class_bindings(index, owner, receiver);
+    if bindings.is_empty() {
+        return None;
+    }
+    class
+        .documented
+        .template_names
+        .iter()
+        .map(|name| bindings.get(name).cloned())
+        .collect()
 }
 
 fn class_bindings(index: &Index, owner: &str, receiver: &ValueType) -> BTreeMap<String, ValueType> {
@@ -339,6 +369,12 @@ fn conditional_relation(tested: &ValueType, subject: &ValueType, index: &Index) 
             return Compatibility::Rejects;
         }
         return Compatibility::Uncertain;
+    }
+    if let ValueType::Generic(generic) = tested
+        && let Some(arguments) = project_generic(index, &generic.base, subject)
+        && arguments == generic.arguments
+    {
+        return Compatibility::Accepts;
     }
     tested.accepts(subject, index, TypePolicy::Documentation)
 }

@@ -94,11 +94,19 @@ impl Analyzer<'_> {
                 }
             }
             StatementKind::Echo(expressions) => {
-                if expressions
-                    .iter()
-                    .any(|expr| self.expression(expr, scope, false) == ValueType::Never)
-                {
-                    return Flow::Terminal;
+                for (position, expr) in expressions.iter().enumerate() {
+                    let ty = self.expression(expr, scope, false);
+                    if ty == ValueType::Never {
+                        return Flow::Terminal;
+                    }
+                    if self.strict_mixed(&ty) {
+                        let position = position + 1;
+                        self.diagnose(
+                            "echo.nonString",
+                            expr.span,
+                            format!("Parameter #{position} (mixed) of echo cannot be converted to string."),
+                        );
+                    }
                 }
             }
             StatementKind::Global(_) | StatementKind::Static(_) | StatementKind::Unset(_) => {

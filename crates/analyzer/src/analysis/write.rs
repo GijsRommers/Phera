@@ -140,9 +140,15 @@ impl Analyzer<'_> {
             }
             None
         };
-        for key in keys.into_iter().rev() {
-            if self.expression(key, scope, false) == ValueType::Never {
+        for (depth, key) in keys.into_iter().rev().enumerate() {
+            let key = self.expression(key, scope, false);
+            if key == ValueType::Never {
                 return Evaluation::Never;
+            }
+            if depth == 0
+                && let Some((_, old)) = &variable
+            {
+                self.mixed_offset(&old.ty, Some(&key), target.span);
             }
         }
         if let Some((name, old)) = variable {

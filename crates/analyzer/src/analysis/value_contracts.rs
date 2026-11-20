@@ -84,14 +84,23 @@ impl Analyzer<'_> {
             ValueType::Union(types) => types.as_ref(),
             _ => std::slice::from_ref(&given),
         };
-        // Before PHPStan's union checks at level 7, a union with an
-        // acceptable value is sufficient. Level 8 adds nullable checks.
-        variants
-            .iter()
-            .filter(|ty| {
-                **ty != ValueType::Null || variants.len() == 1 || !expected.excludes_null()
-            })
-            .all(|ty| expected.accepts(ty, self.index, policy) == Compatibility::Rejects)
+        let checked = variants.iter().filter(|ty| {
+            self.level >= 8
+                || **ty != ValueType::Null
+                || variants.len() == 1
+                || !expected.excludes_null()
+        });
+        let rejects = |ty: &ValueType| {
+            if self.strict_mixed(ty) && !expected.is_mixed() {
+                return true;
+            }
+            expected.accepts(ty, self.index, policy) == Compatibility::Rejects
+        };
+        if self.level >= 7 {
+            checked.into_iter().any(rejects)
+        } else {
+            checked.into_iter().all(rejects)
+        }
     }
 
     pub fn narrowed_at(&self, expression: &Expression, scope: &Scope) -> String {
@@ -212,7 +221,7 @@ pub(super) fn allows_empty_return(ty: &ValueType) -> bool {
     let mut pending = vec![ty];
     while let Some(ty) = pending.pop() {
         match ty {
-            ValueType::Mixed | ValueType::Void => return true,
+            ty if ty.is_mixed() || *ty == ValueType::Void => return true,
             ValueType::Union(types) => pending.extend(types.iter()),
             ValueType::Template(template) => pending.push(&template.bound),
             ValueType::Conditional(conditional) => {

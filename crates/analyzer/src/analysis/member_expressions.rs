@@ -47,8 +47,13 @@ impl Analyzer<'_> {
                         expression.span,
                     );
                 }
+                let receiver = if self.level >= 8 && *nullsafe {
+                    ty.without_null()
+                } else {
+                    ty.clone()
+                };
                 let result = self.property(
-                    &ty,
+                    &receiver,
                     name,
                     scope,
                     expression.span,

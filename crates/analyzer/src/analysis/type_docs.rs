@@ -43,6 +43,9 @@ impl Analyzer<'_> {
                     &parameter.ty,
                     annotated.ty.clone(),
                 );
+                if parameter.default_is_null {
+                    ty = ty.join(&ValueType::Null);
+                }
                 if parameter.variadic {
                     ty = ValueType::Collection(std::sync::Arc::new(crate::types::Collection {
                         kind: crate::types::CollectionKind::Array,
@@ -112,6 +115,9 @@ impl Analyzer<'_> {
     ) -> bool {
         if annotation.ty == ValueType::Mixed {
             return false;
+        }
+        if annotation.ty == ValueType::ExplicitMixed && native.is_mixed() {
+            return true;
         }
         let known = self.check_doc_classes(&annotation.ty, span);
         let expected = self.context.class.as_ref().map_or_else(

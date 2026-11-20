@@ -16,6 +16,8 @@ pub use substitution::RelativeTypes;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValueType {
     Mixed,
+    ExplicitMixed,
+    ImplicitMixed,
     Null,
     Bool,
     BoolLiteral(bool),
@@ -23,6 +25,7 @@ pub enum ValueType {
     IntLiteral(i64),
     IntRange(i64, i64),
     Float,
+    OverflowingInt,
     String,
     StringLiteral(Arc<[u8]>),
     StringRefinement(StringKind),
@@ -175,8 +178,21 @@ impl ValueType {
         {
             return Self::Bool;
         }
-        if matches!(self, Self::Mixed) || matches!(other, Self::Mixed) {
-            return Self::Mixed;
+        match (self, other) {
+            (Self::Mixed, _) | (_, Self::Mixed) => return Self::Mixed,
+            (Self::ImplicitMixed, _) | (_, Self::ImplicitMixed) => return Self::ImplicitMixed,
+            (Self::ExplicitMixed, _) | (_, Self::ExplicitMixed) => return Self::ExplicitMixed,
+            (
+                Self::OverflowingInt,
+                Self::Int | Self::IntLiteral(_) | Self::IntRange(..) | Self::Float,
+            )
+            | (
+                Self::Int | Self::IntLiteral(_) | Self::IntRange(..) | Self::Float,
+                Self::OverflowingInt,
+            ) => {
+                return Self::OverflowingInt;
+            }
+            _ => {}
         }
         let mut values = match self {
             Self::Union(v) => v.to_vec(),
@@ -213,9 +229,18 @@ impl ValueType {
         }
     }
 
+    pub fn is_mixed(&self) -> bool {
+        matches!(
+            self,
+            Self::Mixed | Self::ExplicitMixed | Self::ImplicitMixed
+        )
+    }
+
     pub fn excludes_null(&self) -> bool {
         match self {
-            Self::Null | Self::Mixed | Self::Void => false,
+            Self::Null | Self::Mixed | Self::ExplicitMixed | Self::ImplicitMixed | Self::Void => {
+                false
+            }
             Self::Union(types) => types.iter().all(Self::excludes_null),
             Self::Intersection(types) => types.iter().any(Self::excludes_null),
             _ => true,
@@ -245,10 +270,10 @@ impl ValueType {
     }
 
     pub fn intersection(left: &Self, right: &Self) -> Self {
-        if left == right || right == &Self::Mixed {
+        if left == right || right.is_mixed() {
             return left.clone();
         }
-        if left == &Self::Mixed {
+        if left.is_mixed() {
             return right.clone();
         }
         if left == &Self::Never || right == &Self::Never {
@@ -306,7 +331,7 @@ impl ValueType {
                             "object" => Self::Object,
                             "void" => Self::Void,
                             "never" => Self::Never,
-                            "mixed" => Self::Mixed,
+                            "mixed" => Self::ExplicitMixed,
                             "callable" => Self::UnknownCallable,
                             "self" | "static" | "parent" => {
                                 Self::Class(name.text.to_ascii_lowercase())

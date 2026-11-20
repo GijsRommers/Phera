@@ -24,7 +24,12 @@ impl Analyzer<'_> {
                 if key == ValueType::Never {
                     return key;
                 }
-                super::arrays::offset_type(&target, &key)
+                self.mixed_offset(&target, index.as_ref().map(|_| &key), expression.span);
+                if self.strict_mixed(&target) {
+                    target
+                } else {
+                    super::arrays::offset_type(&target, &key)
+                }
             }
             ExpressionKind::Unary { operator, operand } if self.level >= 3 => {
                 let ty = self.expression(operand, scope, quiet);
@@ -45,6 +50,21 @@ impl Analyzer<'_> {
                 let ty = self.expression(operand, scope, quiet);
                 if ty == ValueType::Never {
                     return ty;
+                }
+                if self.strict_mixed(&ty) {
+                    let target = match kind {
+                        CastKind::Int => Some("int"),
+                        CastKind::Float => Some("float"),
+                        CastKind::String => Some("string"),
+                        _ => None,
+                    };
+                    if let Some(target) = target {
+                        self.diagnose(
+                            &format!("cast.{target}"),
+                            expression.span,
+                            format!("Cannot cast mixed to {target}."),
+                        );
+                    }
                 }
                 match kind {
                     CastKind::Int => ValueType::Int,
@@ -76,9 +96,31 @@ impl Analyzer<'_> {
             }
             ExpressionKind::Closure(closure) => self.closure(closure, scope, expression.span),
             ExpressionKind::ArrowFunction(arrow) => self.arrow(arrow, scope, expression.span),
+            ExpressionKind::Print(value) => {
+                let ty = self.expression(value, scope, false);
+                if ty == ValueType::Never {
+                    return ty;
+                }
+                if self.strict_mixed(&ty) {
+                    self.diagnose(
+                        "print.nonString",
+                        expression.span,
+                        "Parameter mixed of print cannot be converted to string.".into(),
+                    );
+                }
+                ValueType::Int
+            }
             ExpressionKind::Throw(value) => {
-                if self.expression(value, scope, false) == ValueType::Never {
-                    return ValueType::Never;
+                let ty = self.expression(value, scope, false);
+                if ty == ValueType::Never {
+                    return ty;
+                }
+                if self.strict_mixed(&ty) {
+                    self.diagnose(
+                        "throw.notThrowable",
+                        expression.span,
+                        "Invalid type mixed to throw.".into(),
+                    );
                 }
                 self.record_exception(scope);
                 ValueType::Never

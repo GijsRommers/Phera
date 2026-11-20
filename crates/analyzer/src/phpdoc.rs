@@ -7,6 +7,7 @@ use phera_ast::{Name, NameKind, UseKind};
 use phera_source::Span;
 
 mod annotations;
+pub(crate) mod assertions;
 mod token;
 mod type_parser;
 

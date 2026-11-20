@@ -16,6 +16,7 @@ pub struct Annotation {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Documentation {
     pub params: BTreeMap<String, Annotation>,
+    pub assertions: Vec<super::assertions::Assertion>,
     pub returns: Option<Annotation>,
     pub variables: BTreeMap<Option<String>, Annotation>,
     pub templates: Templates,
@@ -117,6 +118,14 @@ pub fn read(
     for tag in &tags {
         let (priority, name) = tag_name(tag.name);
         let span = Span::new(tag.offset, tag.offset);
+        if name == "assert" && priority != Priority::Standard {
+            if let Some(assertion) =
+                super::assertions::parse_assertion(&tag.body, names, &documentation.templates)
+            {
+                documentation.assertions.push(assertion);
+            }
+            continue;
+        }
         if name == "method" {
             match method(&tag.body, names, &documentation.templates) {
                 Some((name, ty)) => insert(

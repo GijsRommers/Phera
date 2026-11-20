@@ -66,13 +66,22 @@ impl Analyzer<'_> {
                 if *nullsafe {
                     self.check_nullsafe("method call", target, name, &ty, scope, expression.span);
                 }
-                let result = self.method_call(&ty, name, arguments, scope, expression.span, access);
+                let receiver = if self.level >= 8 && *nullsafe {
+                    ty.without_null()
+                } else {
+                    ty.clone()
+                };
+                let result =
+                    self.method_call(&receiver, name, arguments, scope, expression.span, access);
                 if self.level >= 2
                     && result == ValueType::Void
                     && !scope.facts.is_empty()
                     && let Some(receiver) = crate::scope::Place::of(target)
                 {
                     scope.facts.forget_receiver(&receiver);
+                }
+                if !*nullsafe && result != ValueType::Never {
+                    self.method_assertions(target, &receiver, name, arguments, scope);
                 }
                 if self.level >= 4 && *nullsafe && !ty.excludes_null() {
                     result.join(&ValueType::Null)
@@ -89,6 +98,19 @@ impl Analyzer<'_> {
                     self.parent_hook_call(class, name, arguments, scope, expression.span)
                 {
                     return result;
+                }
+                if self.level >= 9
+                    && let (
+                        ExpressionKind::Variable(Variable::Named(variable)),
+                        MemberName::Identifier(method),
+                    ) = (&class.kind, name)
+                    && self.strict_mixed(&scope.get(variable).ty)
+                {
+                    self.diagnose(
+                        "staticMethod.nonObject",
+                        expression.span,
+                        format!("Cannot call static method {}() on mixed.", method.name),
+                    );
                 }
                 let class_name = self.class_expression(class, scope);
                 if class_name.is_never() {

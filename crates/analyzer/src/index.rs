@@ -147,6 +147,7 @@ pub struct ClassInfo {
     pub methods: BTreeMap<String, Signature>,
     pub properties: BTreeMap<String, PropertyInfo>,
     pub constants: BTreeMap<String, ConstantInfo>,
+    pub enum_cases: BTreeSet<String>,
     pub location: Location,
     pub open_properties: bool,
     pub documented: crate::phpdoc::Members,

@@ -31,6 +31,8 @@ impl Analyzer<'_> {
             let ty = if !truth {
                 if matches == Compatibility::Accepts {
                     ValueType::Never
+                } else if let (ValueType::Bool, ValueType::BoolLiteral(value)) = (arm, &against) {
+                    ValueType::BoolLiteral(!value)
                 } else {
                     arm.clone()
                 }

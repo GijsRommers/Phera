@@ -13,7 +13,8 @@ pub fn from_name(
     use ValueType as T;
     let first = || arguments.first().cloned().unwrap_or(T::Mixed);
     match name {
-        "mixed" | "non-empty-mixed" | "empty" => T::Mixed,
+        "mixed" => T::ExplicitMixed,
+        "non-empty-mixed" | "empty" => T::Mixed,
         "never" | "never-return" | "never-returns" | "no-return" | "noreturn" => T::Never,
         "void" => T::Void,
         "null" => T::Null,

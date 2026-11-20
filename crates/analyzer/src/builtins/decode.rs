@@ -77,6 +77,7 @@ fn class(f: &[&str]) -> ClassInfo {
         methods: BTreeMap::new(),
         properties: BTreeMap::new(),
         constants: BTreeMap::new(),
+        enum_cases: Default::default(),
         location: location(f[9]),
         open_properties: f[8] == "true",
         documented: Default::default(),

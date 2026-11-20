@@ -28,6 +28,13 @@ impl Analyzer<'_> {
             if ty == ValueType::Never {
                 return ty;
             }
+            if self.strict_mixed(&ty) {
+                self.diagnose(
+                    "callable.nonCallable",
+                    span,
+                    "Trying to invoke mixed but it's not a callable.".into(),
+                );
+            }
             let label = if matches!(ty, ValueType::StringLiteral(_) | ValueType::Shape(_)) {
                 format!("callable {ty}")
             } else {

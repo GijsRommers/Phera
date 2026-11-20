@@ -6,28 +6,32 @@ use crate::types::{Collection, CollectionKind, Field, Shape, ShapeKey, ShapeKind
 use std::sync::Arc;
 
 pub fn takes_facts(label: &str) -> bool {
-    matches!(
-        label,
-        "array_values()"
-            | "array_keys()"
-            | "array_map()"
-            | "array_filter()"
-            | "array_pop()"
-            | "array_shift()"
-            | "array_column()"
-            | "array_search()"
-            | "array_slice()"
-            | "array_reverse()"
-            | "array_unique()"
-            | "array_diff()"
-            | "array_merge()"
-            | "count()"
-            | "sizeof()"
-            | "strlen()"
-            | "get_class()"
-            | "preg_match()"
-            | "preg_match_all()"
-    )
+    label
+        .strip_suffix("()")
+        .and_then(super::string_replacements::subject_position)
+        .is_some()
+        || matches!(
+            label,
+            "array_values()"
+                | "array_keys()"
+                | "array_map()"
+                | "array_filter()"
+                | "array_pop()"
+                | "array_shift()"
+                | "array_column()"
+                | "array_search()"
+                | "array_slice()"
+                | "array_reverse()"
+                | "array_unique()"
+                | "array_diff()"
+                | "array_merge()"
+                | "count()"
+                | "sizeof()"
+                | "strlen()"
+                | "get_class()"
+                | "preg_match()"
+                | "preg_match_all()"
+        )
 }
 
 impl Analyzer<'_> {
@@ -152,6 +156,7 @@ impl Analyzer<'_> {
                 }
                 .join(&T::BoolLiteral(false))
             }
+            _ if self.level >= 7 => super::string_replacements::result(name, types)?,
             _ => return None,
         })
     }

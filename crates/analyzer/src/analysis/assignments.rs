@@ -13,6 +13,41 @@ impl Analyzer<'_> {
         match &expression.kind {
             ExpressionKind::Assign { target, value } => {
                 let constant = crate::constants::value(value, scope);
+                if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind
+                    && matches!(
+                        value.kind,
+                        ExpressionKind::Binary {
+                            operator: BinaryOperator::And | BinaryOperator::Or,
+                            ..
+                        }
+                    )
+                {
+                    let branches = self.condition(value, std::mem::take(scope), false);
+                    let Some(after) = super::condition::Condition::merge(
+                        branches.yes.clone(),
+                        branches.no.clone(),
+                    ) else {
+                        return ValueType::Never;
+                    };
+                    *scope = after;
+                    let ty = if self.level >= 4 {
+                        branches
+                            .truth()
+                            .map_or(ValueType::Bool, ValueType::BoolLiteral)
+                    } else {
+                        ValueType::Bool
+                    };
+                    scope.define(name, ty.clone());
+                    scope.remember_definitions(
+                        crate::scope::GuardKey::Variable(name.clone()),
+                        branches.yes.as_ref(),
+                        branches.no.as_ref(),
+                    );
+                    if let Some(value) = constant {
+                        scope.values.insert(name.clone(), value);
+                    }
+                    return ty;
+                }
                 let ty = self.expression(value, scope, false);
                 if ty == ValueType::Never {
                     return ty;

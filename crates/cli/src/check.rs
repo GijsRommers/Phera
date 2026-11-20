@@ -14,7 +14,7 @@ Usage: phera check [OPTIONS] [paths...]
 Type-check PHP. Paths may also be set in [check].paths in phera.toml.
 
 Options:
-  --level LEVEL             Choose level 0, 1, 2 or 3 (default: 1).
+  --level LEVEL             Choose level 0 through 10, or max (default: 1).
   --format FORMAT           Print text, json or github output.
   --no-progress             Hide progress output.
   --generate-baseline FILE  Save a baseline. Load it through [check].baseline.

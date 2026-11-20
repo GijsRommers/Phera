@@ -87,6 +87,12 @@ impl Analyzer<'_> {
         if subject_type == ValueType::Never {
             return Flow::Terminal;
         }
+        if self.strict_mixed(&subject_type) {
+            self.diagnose(
+                "foreach.nonIterable", subject.span,
+                "Argument of an invalid type mixed supplied for foreach, only iterables are supported.".into(),
+            );
+        }
         if self.level >= 4
             && matches!(&subject_type, ValueType::Shape(shape) if shape.fields.is_empty()
                 && shape.remainder.is_none()
@@ -204,10 +210,12 @@ impl Analyzer<'_> {
             {
                 self.constant_condition("while", "While loop condition", condition, &branches);
             }
-            paths.extend(branches.no);
-            if !always_true(condition) {
-                // A later iteration can revisit the condition after changing
-                // a variable that made it true on the first pass.
+            if let Some(exited) = branches.no {
+                paths.push(exited);
+            } else if !always_true(condition) {
+                // A later iteration can revisit a condition that is true
+                // on the first pass. Use this fallback only if there is no
+                // false exit to carry the condition's effects.
                 paths.extend(branches.yes);
             }
         }
