@@ -298,24 +298,8 @@ impl Machine<'_> {
                     Step::Slow
                 }
             }
-            Instruction::FetchIndex {
-                dst,
-                base,
-                index,
-                mode: phera_bytecode::FetchMode::Read,
-                ..
-            } => match self.fetch_native_dimension(position, dst, base, index) {
-                Step::Slow => self.further_step::<GUARDED>(instruction, position),
-                done => done,
-            },
             Instruction::AppendLocal { local, src } => {
                 self.write_native_dimension(position, local, None, src)
-            }
-            Instruction::AssignPath { path, src } if self.classes.has_dimensions => {
-                match self.write_dimension_path(position, path, src) {
-                    Step::Slow => self.further_step::<GUARDED>(instruction, position),
-                    done => done,
-                }
             }
             Instruction::CallDirect {
                 function,

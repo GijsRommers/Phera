@@ -33,6 +33,17 @@ impl Machine<'_> {
         position: Position,
     ) -> Step {
         match instruction {
+            // An object with ArrayAccess first, then an array.
+            Instruction::FetchIndex {
+                dst,
+                base,
+                index,
+                mode: FetchMode::Read,
+                ..
+            } => match self.fetch_native_dimension(position, dst, base, index) {
+                Step::Slow => self.value_step::<GUARDED>(&instruction, position),
+                done => done,
+            },
             Instruction::Binary { .. }
             | Instruction::Unary { .. }
             | Instruction::JumpIfNull { .. }
@@ -52,8 +63,17 @@ impl Machine<'_> {
                 Some(found) => self.store_quiet::<GUARDED>(position, dst, found),
                 None => self.fetch_property_quietly::<GUARDED>(position, dst, path),
             },
+            // An element of an object with ArrayAccess, then a property.
             Instruction::AssignPath { path, src } => {
-                self.assign_property::<GUARDED>(position, path, src)
+                let written = if self.classes.has_dimensions {
+                    self.write_dimension_path(position, path, src)
+                } else {
+                    Step::Slow
+                };
+                match written {
+                    Step::Slow => self.assign_property::<GUARDED>(position, path, src),
+                    done => done,
+                }
             }
             Instruction::IncDecPath { mode, dst, path } => {
                 self.increment_property::<GUARDED>(position, (mode, dst), path)
