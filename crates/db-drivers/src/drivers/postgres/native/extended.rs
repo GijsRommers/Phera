@@ -1,11 +1,12 @@
 //! `pg_query_params($db, 'SELECT $1::integer', ['42'])` binds PostgreSQL text parameters.
 
 use tokio_postgres::Statement;
-use tokio_postgres::types::{ToSql, Type};
+use tokio_postgres::types::ToSql;
 
 use super::{NativeColumn, NativeResult, NativeSequence, Postgres, error};
 use crate::drivers::postgres::observations::Header;
 use crate::drivers::postgres::protocol::TextParameter;
+use crate::drivers::postgres::text;
 use crate::errors::DbError;
 use crate::parameters::BoundValue;
 
@@ -139,34 +140,7 @@ impl Postgres {
             error
         })?;
         result.affected = affected;
-        if !rows.is_empty() {
-            // The existing driver receives binary values. Ask PostgreSQL to
-            // render those values in its session's text format without
-            // re-executing the caller's statement.
-            let sql = format!(
-                "SELECT {}",
-                statement
-                    .columns()
-                    .iter()
-                    .enumerate()
-                    .map(|(index, col)| {
-                        let expression = format!("${}", index + 1);
-                        match *col.type_() {
-                            Type::BOOL => format!("pg_catalog.boolout({expression})::text"),
-                            Type::BPCHAR => format!("pg_catalog.bpcharout({expression})::text"),
-                            Type::INET => format!("pg_catalog.inet_out({expression})::text"),
-                            _ => format!("{expression}::text"),
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
-            for row in rows {
-                result
-                    .values
-                    .push(super::super::text::format_row(&self.client, &row, &sql).await?);
-            }
-        }
+        result.values = text::format_native(&self.client, &rows).await?;
         Ok(vec![result])
     }
 }

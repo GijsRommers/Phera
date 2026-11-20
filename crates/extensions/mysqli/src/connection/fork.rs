@@ -26,9 +26,8 @@ use std::rc::Rc;
 use phera_db_drivers::drivers::Driver;
 use phera_db_drivers::dsn::Dsn;
 use phera_db_drivers::errors::DbError;
-use phera_db_drivers::pool::{self, Policy};
+use phera_db_drivers::pool::{self, Lease, Policy};
 use phera_extension_api::Object;
-use phera_io_pool::Lease;
 
 use super::{Connection, Handle, Status, run};
 
@@ -66,10 +65,7 @@ impl Origin {
 
     /// Connects, replays `statements`, and returns the lease with the new
     /// session's thread id.
-    pub async fn reconnect(
-        &self,
-        statements: Vec<Vec<u8>>,
-    ) -> Result<(Lease<Driver>, u32), DbError> {
+    pub async fn reconnect(&self, statements: Vec<Vec<u8>>) -> Result<(Lease, u32), DbError> {
         let lease = pool::acquire(&self.dsn, &self.user, &self.password, self.policy).await?;
         let thread_id = run(&lease, move |mysql| {
             Box::pin(async move {
@@ -130,13 +126,13 @@ impl Connection {
             pending_stream: None,
             more: Default::default(),
             origin: self.origin.clone(),
-            session: self.session.clone(),
+            session: self.session.forked(),
         })
     }
 
     /// Whether a new session with the replayed statements is the same as
     /// this one; why not, if not.
-    fn replayable(&self, lease: &Lease<Driver>) -> Result<(), String> {
+    fn replayable(&self, lease: &Lease) -> Result<(), String> {
         const ADVICE: &str = "; finish it before Phera\\snapshot(), or connect after the call";
         if self.waiting_for_result() {
             return Err(format!(

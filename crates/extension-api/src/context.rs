@@ -107,6 +107,11 @@ pub trait Context {
     /// Per-request storage for extensions; see [`RequestState`].
     fn state(&mut self) -> &mut RequestState;
 
+    /// Whether this execution can still create an application snapshot.
+    fn is_snapshot_boot(&self) -> bool {
+        false
+    }
+
     /// The PHP source location of the current operation.
     fn source_location(&self) -> Option<(String, usize)> {
         None

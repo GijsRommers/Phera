@@ -8,9 +8,8 @@
 //! $statement->fetchAll();                                              // RawRows::into_php
 //! ```
 //!
-//! A driver's methods run on the I/O runtime (see `crate::pool`), so what
-//! goes in and comes out is plain data that may cross threads: SQL, bound
-//! values, and [`RawRows`], which the PHP worker turns into PHP values.
+//! A driver's methods run on the current PHP worker (see `crate::pool`).
+//! The extension shapes the driver's PHP cell values when it fetches a row.
 //!
 //! # Adding a driver
 //!
@@ -25,13 +24,14 @@
 
 pub mod mysql;
 pub mod postgres;
+mod row_buffer;
 pub mod sqlite;
 mod tls;
 
+pub use row_buffer::RowBuffer;
+
 use std::sync::Arc;
 use std::time::Duration;
-
-use phera_extension_api::Value;
 
 use crate::dsn::{DriverName, Dsn};
 use crate::errors::DbError;
@@ -51,7 +51,7 @@ pub struct Column {
 #[derive(Clone, Default)]
 pub struct Rows {
     pub columns: Vec<Column>,
-    pub values: Vec<Vec<Value>>,
+    pub values: RowBuffer,
     /// `rowCount()`: rows changed, or for a query the rows returned.
     pub affected: u64,
 }
@@ -84,8 +84,7 @@ pub enum Prepared {
     Sqlite(phera_sqlite::Statement),
 }
 
-/// A result as the driver returned it. It becomes PHP values on the worker,
-/// in [`RawRows::into_php`], because PHP values cannot cross threads.
+/// A result whose client rows still have to be converted into PHP cells.
 pub enum RawRows {
     /// No result set, only the number of rows changed.
     Affected(u64),
@@ -189,7 +188,7 @@ impl Driver {
         prepared: &Prepared,
         values: &[BoundValue],
         options: &Execution,
-    ) -> Result<RawRows, DbError> {
+    ) -> Result<Rows, DbError> {
         // Quoting a value into SQL text needs the value to be text.
         let binary = |value: &BoundValue| matches!(value, BoundValue::String(bytes) if std::str::from_utf8(bytes).is_err());
         if matches!(prepared, Prepared::Emulated) && values.iter().any(binary) {
@@ -198,7 +197,10 @@ impl Driver {
             ));
         }
         match self {
-            Self::Postgres(driver) => driver.execute(sql, prepared, values, options).await,
+            Self::Postgres(driver) => driver
+                .execute(sql, prepared, values, options)
+                .await?
+                .into_php(),
             Self::Mysql(driver) => driver.execute(sql, prepared, values, options).await,
             Self::Sqlite(_) => Err(connection_error(
                 "a SQLite statement is executed through its own handle",
@@ -207,26 +209,26 @@ impl Driver {
     }
 
     /// `$pdo->exec($sql)`: SQL text without placeholders, for its row count.
-    pub async fn exec(&mut self, sql: &str) -> Result<RawRows, DbError> {
+    pub async fn exec(&mut self, sql: &str) -> Result<Rows, DbError> {
         match self {
             Self::Postgres(driver) => {
                 driver.discard_lazy();
-                driver.run_unprepared(sql).await
+                driver.run_unprepared(sql).await?.into_php()
             }
             Self::Mysql(driver) => driver.exec(sql).await,
-            Self::Sqlite(driver) => driver.run_unprepared(sql).await,
+            Self::Sqlite(driver) => driver.run_unprepared(sql).await?.into_php(),
         }
     }
 
     /// SQL text sent as it is: `BEGIN`, `COMMIT` and `ROLLBACK`.
-    pub async fn run_unprepared(&mut self, sql: &str) -> Result<RawRows, DbError> {
+    pub async fn run_unprepared(&mut self, sql: &str) -> Result<Rows, DbError> {
         match self {
             Self::Postgres(driver) => {
                 driver.discard_lazy();
-                driver.run_unprepared(sql).await
+                driver.run_unprepared(sql).await?.into_php()
             }
             Self::Mysql(driver) => driver.run_unprepared(sql).await,
-            Self::Sqlite(driver) => driver.run_unprepared(sql).await,
+            Self::Sqlite(driver) => driver.run_unprepared(sql).await?.into_php(),
         }
     }
 

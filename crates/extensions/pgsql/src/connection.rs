@@ -10,22 +10,21 @@ use phera_db_drivers::drivers::{
 };
 use phera_db_drivers::dsn::{DriverName, Dsn, postgres};
 use phera_db_drivers::errors::DbError;
-use phera_db_drivers::pool::{self, Policy};
+use phera_db_drivers::pool::{self, BackgroundOperation, Lease, Operation, Policy};
 use phera_db_drivers::session_log::SessionLog;
 use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
-use phera_io_pool::{Lease, Operation};
 use tokio::task::JoinHandle;
 
 const DEFAULT: &str = "pgsql.default";
 const CACHE: &str = "pgsql.connections";
 
 pub type Handle = Rc<RefCell<Connection>>;
-pub type Pending = JoinHandle<Result<Result<Vec<Rows>, DbError>, String>>;
+pub type Pending = JoinHandle<Result<Vec<Rows>, DbError>>;
 
 pub struct Connection {
-    pub lease: Option<Lease<Driver>>,
+    pub lease: Option<Lease>,
     pub dsn: Dsn,
     pub busy: Option<Pending>,
     pub results: VecDeque<Rows>,
@@ -64,7 +63,7 @@ impl Connection {
 
 /// The connection's lease; a fork's copy of a connection the boot made
 /// connects now, and replays what the boot changed about its session.
-pub async fn lease(handle: &Handle) -> Result<Lease<Driver>, NativeError> {
+pub async fn lease(handle: &Handle) -> Result<Lease, NativeError> {
     let (dsn, credentials, policy, statements) = {
         let state = handle.borrow();
         state.ensure_open()?;
@@ -161,7 +160,7 @@ pub fn fork_connection(
             Policy::Pooled | Policy::Unpooled => Policy::Pooled,
         },
         reconnect: state.lease.is_some() || state.reconnect,
-        log: state.log.clone(),
+        log: state.log.forked(),
     };
     Ok(Box::new(Rc::new(RefCell::new(copy))) as Box<dyn std::any::Any>)
 }
@@ -200,42 +199,29 @@ pub fn object_handle(object: &Object) -> Result<Handle, NativeError> {
         .ok_or_else(|| NativeError::error("PostgreSQL connection has already been closed"))
 }
 
-pub async fn run<T, F>(lease: &Lease<Driver>, operation: F) -> Result<T, DbError>
+pub async fn run<T, F>(lease: &Lease, operation: F) -> Result<T, DbError>
 where
-    T: Send + 'static,
-    F: for<'a> FnOnce(&'a mut Postgres) -> Operation<'a, Result<T, DbError>> + Send + 'static,
+    F: for<'a> FnOnce(&'a mut Postgres) -> Operation<'a, Result<T, DbError>>,
 {
-    pool::run(lease, |driver| match driver {
-        Driver::Postgres(postgres) => operation(postgres),
-        _ => Box::pin(async { Err(connection_error("Mismatched database driver")) }),
+    lease
+        .run(async move |driver| match driver {
+            Driver::Postgres(postgres) => operation(postgres).await,
+            _ => Err(connection_error("Mismatched database driver")),
+        })
+        .await
+}
+
+pub async fn run_simple(lease: &Lease, sql: String) -> Result<Vec<Rows>, DbError> {
+    run(lease, move |driver| {
+        Box::pin(async move { driver.native_query(&sql).await })
     })
     .await
 }
 
-pub async fn run_simple(lease: &Lease<Driver>, sql: String) -> Result<Vec<Rows>, DbError> {
-    if !Postgres::can_cancel_native_query(&sql) {
-        return run(lease, move |driver| {
-            Box::pin(async move { driver.native_query(&sql).await })
-        })
-        .await;
-    }
-    lease
-        .run_cancellable(move |driver| {
-            Box::pin(async move {
-                match driver {
-                    Driver::Postgres(postgres) => postgres.native_query(&sql).await,
-                    _ => Err(connection_error("Mismatched database driver")),
-                }
-            })
-        })
-        .await
-        .map_err(connection_error)?
-}
-
 /// A pg_send_* operation can progress even when PHP immediately polls for it.
-pub fn start<F>(lease: &Lease<Driver>, operation: F) -> Pending
+pub fn start<F>(lease: &Lease, operation: F) -> Result<Pending, DbError>
 where
-    F: for<'a> FnOnce(&'a mut Postgres) -> Operation<'a, Result<Vec<Rows>, DbError>>
+    F: for<'a> FnOnce(&'a mut Postgres) -> BackgroundOperation<'a, Result<Vec<Rows>, DbError>>
         + Send
         + 'static,
 {
@@ -322,7 +308,7 @@ pub fn connect<const PERSISTENT: bool>(
                 credentials: Credentials { user, password },
                 policy,
                 reconnect: false,
-                log: SessionLog::default(),
+                log: SessionLog::new(context.is_snapshot_boot()),
             }));
             *object.native.borrow_mut() = Some(Box::new(state));
         }
@@ -370,7 +356,7 @@ pub fn reset(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
                 state.pid = pid;
                 state.server_version = version;
                 state.encoding = "UTF8".into();
-                state.log = SessionLog::default();
+                state.log = SessionLog::new(state.log.is_recording());
                 Ok(Value::Bool(true))
             }
             Err(error) => {

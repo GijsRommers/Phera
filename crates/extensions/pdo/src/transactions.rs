@@ -21,7 +21,7 @@ fn run<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         let session = session(this.as_ref())?;
-        let mut driver = session.driver.lock().await;
+        let driver = &session.driver;
         let active = driver
             .transaction_state()
             .await
@@ -105,8 +105,6 @@ pub fn active<'a>(
         let session = session(this.as_ref())?;
         let active = session
             .driver
-            .lock()
-            .await
             .transaction_state()
             .await
             .unwrap_or(session.transaction.get());
