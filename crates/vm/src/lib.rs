@@ -269,7 +269,7 @@ impl Vm {
         fibers::register(registry);
     }
 
-    /// Start a fresh request with the worker's already linked built-ins.
+    /// Start a fresh request sharing the worker's built-in definitions.
     pub fn with_native_tables(native: &NativeTables) -> Self {
         Self {
             enum_cases: classes::enums::EnumCases::default(),

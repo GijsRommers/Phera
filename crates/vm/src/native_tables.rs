@@ -1,28 +1,48 @@
 //! Built-in definitions shared by VMs on one thread. `new SessionHandler()` and
-//! `PHP_SESSION_ACTIVE` resolve against metadata linked when the worker starts.
+//! `PHP_SESSION_ACTIVE` initialize their respective tables on first lookup.
 
-use std::{rc::Rc, sync::Arc};
+use std::{cell::OnceCell, rc::Rc, sync::Arc};
 
 use phera_extension_api::Registry;
 
-use crate::{
-    classes::ClassDefinitions,
-    constant_table::{NativeConstants, native_constants},
-};
+use crate::{classes::ClassDefinitions, constant_table::NativeConstants};
+
+pub(crate) struct NativeClasses {
+    registry: Arc<Registry>,
+    definitions: OnceCell<ClassDefinitions>,
+}
+
+impl NativeClasses {
+    pub(crate) fn new(registry: Arc<Registry>) -> Self {
+        Self {
+            registry,
+            definitions: OnceCell::new(),
+        }
+    }
+
+    pub(crate) fn definitions(&self) -> &ClassDefinitions {
+        self.definitions
+            .get_or_init(|| ClassDefinitions::native(&self.registry))
+    }
+
+    pub(crate) fn initialized(&self) -> Option<&ClassDefinitions> {
+        self.definitions.get()
+    }
+}
 
 /// A worker shares these PHP values through `Rc`. The registry itself is process-wide.
 /// The linked native definitions contain no request objects or PHP static slots.
 pub struct NativeTables {
     pub(crate) registry: Arc<Registry>,
-    pub(crate) classes: Rc<ClassDefinitions>,
+    pub(crate) classes: Rc<NativeClasses>,
     pub(crate) constants: Rc<NativeConstants>,
 }
 
 impl NativeTables {
     pub fn new(registry: Arc<Registry>) -> Self {
         Self {
-            classes: Rc::new(ClassDefinitions::native(&registry)),
-            constants: Rc::new(native_constants(&registry)),
+            classes: Rc::new(NativeClasses::new(registry.clone())),
+            constants: Rc::new(NativeConstants::new(registry.clone())),
             registry,
         }
     }
@@ -58,7 +78,10 @@ mod tests {
         let tables = NativeTables::new(Arc::new(registry));
         let mut first = Vm::with_native_tables(&tables);
         let mut second = Vm::with_native_tables(&tables);
+        assert!(tables.classes.initialized().is_none());
+        assert!(!tables.constants.is_initialized());
         let class = first.classes.get("stdClass").unwrap();
+        assert!(!tables.constants.is_initialized());
         let same_class = second.classes.get("stdClass").unwrap();
         assert!(Rc::ptr_eq(&class, &same_class));
         assert!(std::ptr::eq(
