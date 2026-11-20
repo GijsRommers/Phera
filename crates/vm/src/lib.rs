@@ -260,6 +260,9 @@ pub struct Vm {
     /// Whether output or a diagnostic needs to invoke a PHP callback.
     pending_callbacks: bool,
     failed_native: Option<error_traces::NativeTrace>,
+    /// The arguments of a native call that missed a class, kept by the miss
+    /// for its second call (see `calls::native_retries`).
+    missed_native: Option<Vec<Value>>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
     reflection_cache: Option<Box<reflection::ReflectionCache>>,
@@ -347,6 +350,7 @@ impl Vm {
             error_handlers: error_handlers::ErrorHandlers::default(),
             pending_callbacks: false,
             failed_native: None,
+            missed_native: None,
             state: RequestState::default(),
             reflection_cache: None,
         }

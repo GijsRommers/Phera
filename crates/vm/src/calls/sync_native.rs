@@ -5,7 +5,7 @@
 //! abs('-12');     // the argument parser applies the calling file's coercion rules
 //! ```
 
-use phera_bytecode::{Reg, SymbolId, TypeMask};
+use phera_bytecode::{Instruction, Reg, SymbolId, TypeMask};
 use phera_extension_api::{
     FunctionEntry, NativeError, NativeFn, PropertyViewRequest, SyncFn, SyncSelector,
 };
@@ -120,39 +120,25 @@ impl Vm {
         {
             if count == 1 {
                 let argument = self.registers.take(base);
-                let result = self.invoke_sync_function(
+                return self.invoke_sync_function(
                     link.name,
                     handler,
                     std::slice::from_ref(&argument),
                     destination,
                     ArgumentBinding::Caller,
                 );
-                if let Err(error) = &result
-                    && crate::autoload::ClassMiss::is(error)
-                {
-                    self.return_direct_arguments(base, std::slice::from_mut(&mut { argument }));
-                }
-                return result;
             }
             let mut arguments = [const { Value::Null }; 4];
             for (offset, argument) in arguments[..count].iter_mut().enumerate() {
                 *argument = self.registers.take(base + offset);
             }
-            let result = self.invoke_sync_function(
+            return self.invoke_sync_function(
                 link.name,
                 handler,
                 &arguments[..count],
                 destination,
                 ArgumentBinding::Caller,
             );
-            // The interpreter runs `CallNativeDirect` again once the class
-            // is loaded (see `calls::native_retries`): its arguments go back.
-            if let Err(error) = &result
-                && crate::autoload::ClassMiss::is(error)
-            {
-                self.return_direct_arguments(base, &mut arguments[..count]);
-            }
-            return result;
         }
         self.call_native_direct_fallback(symbol, base, count, destination)
     }
@@ -193,7 +179,7 @@ impl Vm {
         if let Err(error) = &result
             && crate::autoload::ClassMiss::is(error)
         {
-            self.unprepare_direct_call(base, count);
+            self.unprepare_direct_call();
         }
         result
     }
@@ -201,29 +187,36 @@ impl Vm {
     /// After a class miss in `CallNativeDirect`, which the interpreter runs
     /// again once the class is loaded (see `calls::native_retries`): its
     /// arguments go back to the caller's registers it reads them from.
+    /// Nothing for any other instruction.
     #[cold]
     #[inline(never)]
-    fn return_direct_arguments(&mut self, base: usize, arguments: &mut [Value]) {
-        for (offset, argument) in arguments.iter_mut().enumerate() {
-            self.registers.put(base + offset, std::mem::take(argument));
+    fn return_direct_arguments(&mut self, arguments: &[Value]) {
+        let Some(frame) = self.current() else {
+            return;
+        };
+        let instruction = frame
+            .function()
+            .instructions
+            .get(frame.ip().wrapping_sub(1));
+        let Some(Instruction::CallNativeDirect { args, .. }) = instruction.copied() else {
+            return;
+        };
+        let base = frame.base() + args.index();
+        for (offset, argument) in arguments.iter().enumerate() {
+            self.registers.put(base + offset, argument.clone());
         }
     }
 
     /// The same when the direct call went through a prepared call:
     /// `call_native` put that call back, but `CallNativeDirect` prepares its
-    /// own when it runs again, so the prepared call goes and its arguments
-    /// return to the caller's registers.
+    /// own when it runs again, so the prepared call goes (its arguments are
+    /// back in the caller's registers already).
     #[cold]
     #[inline(never)]
-    fn unprepare_direct_call(&mut self, base: usize, count: usize) {
-        let Ok((call, _)) = self.call_stack.pop_call() else {
-            return;
-        };
-        for offset in 0..count {
-            let argument = self.registers.take(call.base() + offset);
-            self.registers.put(base + offset, argument);
+    fn unprepare_direct_call(&mut self) {
+        if let Ok((call, _)) = self.call_stack.pop_call() {
+            self.registers.truncate(call.start());
         }
-        self.registers.truncate(call.start());
     }
 
     /// Unhandled shapes keep their window intact for the ordinary native binder.
@@ -354,6 +347,9 @@ impl Vm {
         error: NativeError,
         binding: ArgumentBinding,
     ) -> Result<Option<BatchExit>, NativeError> {
+        if crate::autoload::ClassMiss::is(&error) {
+            self.return_direct_arguments(arguments);
+        }
         if binding.has_native_frame() {
             self.record_native_failure(
                 &error,

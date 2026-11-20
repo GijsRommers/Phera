@@ -154,6 +154,7 @@ impl Vm {
             error_handlers,
             pending_callbacks: false,
             failed_native: None,
+            missed_native: None,
             state,
             reflection_cache: None,
             property_references,

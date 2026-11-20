@@ -130,29 +130,22 @@ impl Vm {
                         } else {
                             None
                         };
-                        let mut result = handler(self, context.receiver.as_ref(), &arguments);
+                        let result = handler(self, context.receiver.as_ref(), &arguments);
                         if track {
                             self.error_handlers.native_site = previous;
                         }
+                        // Kept for a second call (see `calls::native_retries`).
+                        if let Err(error) = &result
+                            && crate::autoload::ClassMiss::is(error)
+                        {
+                            self.keep_missed_arguments(&arguments);
+                        }
                         if let Err(error) = &result {
-                            if crate::autoload::ClassMiss::is(error) {
-                                // Loads the class and runs the handler again
-                                // (see `calls::native_retries`).
-                                result = self
-                                    .retry_native_method(
-                                        method,
-                                        (entry.handler, context.receiver.clone()),
-                                        (arguments.clone(), named),
-                                        result,
-                                    )
-                                    .await;
-                            } else {
-                                self.record_native_failure(
-                                    error,
-                                    NativeFrame::Method(method),
-                                    &arguments,
-                                );
-                            }
+                            self.record_native_failure(
+                                error,
+                                NativeFrame::Method(method),
+                                &arguments,
+                            );
                         }
                         self.call_stack.recycle_native_arguments(arguments);
                         result
@@ -171,22 +164,13 @@ impl Vm {
                             }
                             _ => Err(NativeError::error("Cannot call abstract method")),
                         };
+                        // Kept for a second call (see `calls::native_retries`).
                         if let Err(error) = &result
                             && crate::autoload::ClassMiss::is(error)
                         {
-                            // Loads the class and runs the handler again with
-                            // the copy kept for the failure's frame (see
-                            // `calls::native_retries`).
-                            self.retry_native_method(
-                                method,
-                                (handler, context.receiver.clone()),
-                                (retained.into_vec(), named),
-                                result,
-                            )
-                            .await
-                        } else {
-                            self.finish_native_future(result, NativeFrame::Method(method), retained)
+                            self.keep_missed_arguments(retained.as_slice());
                         }
+                        self.finish_native_future(result, NativeFrame::Method(method), retained)
                     }
                 };
                 self.native_called_class = previous;

@@ -100,21 +100,21 @@ impl Vm {
         }
         match entry.handler {
             NativeFn::Sync(handler) | NativeFn::DeprecatedSync(handler) => {
-                let mut result = handler(self, &arguments);
-                if let Err(error) = &result {
-                    if crate::autoload::ClassMiss::is(error) {
-                        // Loads the class and runs the handler again (see
-                        // `calls::native_retries`).
-                        result = self
-                            .retry_sync_native(entry.name, handler, &arguments, binding, result)
-                            .await;
-                    } else if binding.has_native_frame() {
-                        self.record_native_failure(
-                            error,
-                            NativeFrame::Function(entry.name),
-                            &arguments,
-                        );
-                    }
+                let result = handler(self, &arguments);
+                // Kept for a second call (see `calls::native_retries`).
+                if let Err(error) = &result
+                    && crate::autoload::ClassMiss::is(error)
+                {
+                    self.keep_missed_arguments(&arguments);
+                }
+                if let Err(error) = &result
+                    && binding.has_native_frame()
+                {
+                    self.record_native_failure(
+                        error,
+                        NativeFrame::Function(entry.name),
+                        &arguments,
+                    );
                 }
                 self.call_stack.recycle_native_arguments(arguments);
                 result
@@ -179,14 +179,11 @@ impl Vm {
         }
         let retained = self.retain_native_arguments(&arguments);
         let result = handler(self, arguments).await;
+        // Kept for a second call (see `calls::native_retries`).
         if let Err(error) = &result
             && crate::autoload::ClassMiss::is(error)
         {
-            // Loads the class and runs the handler again with the copy kept
-            // for the failure's frame (see `calls::native_retries`).
-            return self
-                .retry_async_native(name, handler, retained.into_vec(), result)
-                .await;
+            self.keep_missed_arguments(retained.as_slice());
         }
         self.finish_native_future(result, NativeFrame::Function(name), retained)
     }
@@ -207,12 +204,15 @@ impl Vm {
                 });
             let result = handler(self, arguments).await;
             let site = self.native_callback_sites.pop();
+            // Kept for a second call (see `calls::native_retries`).
             if let Err(error) = &result
                 && crate::autoload::ClassMiss::is(error)
             {
-                // Loads the class and runs the handler again with the
-                // arguments of the frame's trace (see `calls::native_retries`).
-                return self.retry_traced_native(name, handler, site, result).await;
+                let trace = site.as_ref().and_then(|site| match &site.native {
+                    crate::error_traces::NativeCaller::Saved(trace) => Some(trace),
+                    _ => None,
+                });
+                self.keep_traced_arguments(name, trace);
             }
             if let Err(error) = &result
                 && self.needs_native_failure_frame(error)
