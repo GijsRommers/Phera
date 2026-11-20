@@ -2,6 +2,7 @@
 //! Levels through 5 accept a member available on at least one union arm.
 
 use super::{member_checks::receiver_name, *};
+use crate::types::{Field, Shape, ShapeKey, ShapeKind};
 
 #[derive(Default)]
 pub struct Receivers<'a> {
@@ -19,9 +20,10 @@ impl<'a> Receivers<'a> {
                 ValueType::Class(name) => receivers.classes.push(name),
                 ValueType::Generic(generic) => receivers.classes.push(&generic.base),
                 ValueType::Callable(_) => receivers.classes.push("Closure"),
-                ValueType::Union(types) | ValueType::Intersection(types) => {
-                    pending.extend(types.iter())
-                }
+                ValueType::Union(types) => pending.extend(types.iter()),
+                ValueType::Intersection(types) => pending.extend(types.iter().filter(
+                    |ty| !matches!(ty, ValueType::Shape(shape) if shape.kind == ShapeKind::Object),
+                )),
                 ValueType::Template(template) => pending.push(&template.bound),
                 ValueType::Conditional(conditional) => {
                     pending.extend([&conditional.yes, &conditional.no])
@@ -133,12 +135,20 @@ impl Analyzer<'_> {
         span: Span,
         quiet: bool,
     ) -> ValueType {
+        if let ValueType::Intersection(components) = ty
+            && let Some(field) = components.iter().find_map(|ty| match ty {
+                ValueType::Shape(shape) if shape.kind == ShapeKind::Object => {
+                    object_field(shape, name).filter(|field| !field.optional)
+                }
+                _ => None,
+            })
+        {
+            return field.value.clone();
+        }
         if let ValueType::Shape(shape) = ty
             && shape.kind == crate::types::ShapeKind::Object
         {
-            if let Some(field) = shape.fields.iter().find(|field|
-                matches!(&field.key, crate::types::ShapeKey::String(key) if key.as_ref() == name))
-            {
+            if let Some(field) = object_field(shape, name) {
                 return field.value.clone();
             }
             if !quiet && shape.remainder.is_none() {
@@ -201,4 +211,11 @@ impl Analyzer<'_> {
             ty_result
         }
     }
+}
+
+fn object_field<'a>(shape: &'a Shape, name: &str) -> Option<&'a Field> {
+    shape
+        .fields
+        .iter()
+        .find(|field| matches!(&field.key, ShapeKey::String(key) if key.as_ref() == name))
 }

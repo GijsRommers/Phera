@@ -1,5 +1,6 @@
 //! `$request?->query()->all()` skips both calls when the request is null.
 //! The skipped path remains distinct from null returned by an evaluated call.
+//! In `$node?->copy($node->name())`, the argument runs with a non-null receiver.
 
 use super::*;
 
@@ -13,13 +14,20 @@ impl ChainValue {
         Self { ty, skipped: None }
     }
 
-    pub fn skip_null(&mut self, scope: &Scope) {
+    pub fn skip_null(&mut self, target: &Expression, scope: &mut Scope) {
         if !self.ty.excludes_null() {
             self.skipped = Some(match self.skipped.take() {
                 Some(path) => Scope::join(&[path, scope.clone()]),
                 None => scope.clone(),
             });
-            self.ty = self.ty.without_null();
+            let non_null = self.ty.without_null();
+            if non_null != self.ty
+                && non_null != ValueType::Never
+                && let Some(place) = crate::scope::Place::of(target)
+            {
+                scope.facts.record(place, non_null.clone(), None);
+            }
+            self.ty = non_null;
         }
     }
 

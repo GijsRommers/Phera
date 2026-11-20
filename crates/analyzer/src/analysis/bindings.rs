@@ -188,7 +188,11 @@ impl Analyzer<'_> {
                 line: self.file.lines.line(span.start),
             },
         );
-        if self.level >= 2 && arrow.return_type.is_none() && !arrow.is_generator {
+        if self.level >= 2
+            && !arrow.is_generator
+            && (arrow.return_type.is_none()
+                || self.context.returns == ValueType::ExplicitMixed && !given.is_mixed())
+        {
             signature.returns = given;
         }
         signature.unbound_this = self.context.unbound_this.take().unwrap_or_default();

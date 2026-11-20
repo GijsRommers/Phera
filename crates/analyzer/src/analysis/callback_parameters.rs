@@ -54,10 +54,7 @@ impl Analyzer<'_> {
                 let [_, array] = arguments else {
                     return Vec::new();
                 };
-                let Some(place) = crate::scope::Place::of(&array.value) else {
-                    return Vec::new();
-                };
-                let element = super::arrays::iteration_types(&self.place_type(&place, scope)).1;
+                let element = self.array_map_element(&array.value, scope);
                 if element == T::Mixed {
                     Vec::new()
                 } else {
@@ -70,6 +67,30 @@ impl Analyzer<'_> {
             }
             _ => Vec::new(),
         }
+    }
+
+    // Array filtering and reindexing keep the element type. Inspect those
+    // inputs without re-evaluating arguments or their side effects.
+    fn array_map_element(&self, mut array: &Expression, scope: &Scope) -> ValueType {
+        while let ExpressionKind::Call {
+            callee,
+            arguments: Arguments::List(arguments),
+            ..
+        } = &array.kind
+            && let ExpressionKind::Name(name) = &callee.kind
+            && self
+                .builtin_predicate(name)
+                .is_some_and(|name| matches!(name.as_str(), "array_filter" | "array_values"))
+            && let Some(first) = arguments
+                .first()
+                .filter(|arg| !arg.spread && arg.name.is_none())
+        {
+            array = &first.value;
+        }
+        let Some(place) = crate::scope::Place::of(array) else {
+            return ValueType::Mixed;
+        };
+        super::arrays::iteration_types(&self.place_type(&place, scope)).1
     }
 }
 

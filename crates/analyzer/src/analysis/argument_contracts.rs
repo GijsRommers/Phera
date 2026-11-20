@@ -213,7 +213,7 @@ fn creates_reference_output(target: &str, parameter: &ParameterInfo) -> bool {
         )
 }
 
-fn type_for_message(given: &ValueType, expected: &ValueType) -> ValueType {
+pub(super) fn type_for_message(given: &ValueType, expected: &ValueType) -> ValueType {
     use ValueType as T;
     match (given, expected) {
         (T::Shape(_), T::Shape(_)) => given.clone(),

@@ -166,11 +166,12 @@ impl Analyzer<'_> {
                 ValueType::Mixed
             };
             let returns = if self.level >= 9 {
-                crate::framework_knowledge::doctrine::unresolved_result(
+                crate::framework_knowledge::doctrine::query_result(
                     self.index,
                     class,
                     &method.name,
                     returns,
+                    self.options.doctrine_stubs,
                 )
             } else {
                 returns

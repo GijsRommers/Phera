@@ -47,7 +47,7 @@ impl Analyzer<'_> {
         }
         if self.level >= 2 && *nullsafe && ty == ValueType::Null {
             if self.level >= 8 {
-                chain.skip_null(scope);
+                chain.skip_null(target, scope);
                 return chain;
             }
             if let MemberName::Identifier(property) = name {
@@ -69,7 +69,7 @@ impl Analyzer<'_> {
             self.check_nullsafe("property access", target, name, &ty, scope, expression.span);
         }
         let receiver = if self.level >= 8 && *nullsafe {
-            chain.skip_null(scope);
+            chain.skip_null(target, scope);
             chain.ty.clone()
         } else {
             ty.clone()

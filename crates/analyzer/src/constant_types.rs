@@ -8,6 +8,18 @@ use crate::{
 };
 use phera_ast::*;
 
+pub fn literal(expression: &Expression) -> Option<ValueType> {
+    Some(match &expression.kind {
+        ExpressionKind::Literal(Literal::Null) => ValueType::Null,
+        ExpressionKind::Literal(Literal::Int(value)) => ValueType::IntLiteral(*value),
+        ExpressionKind::Literal(Literal::Bool(value)) => ValueType::BoolLiteral(*value),
+        ExpressionKind::Literal(Literal::String(value)) => {
+            ValueType::StringLiteral(value.as_slice().into())
+        }
+        _ => return None,
+    })
+}
+
 pub fn infer(
     expression: &Expression,
     names: &Names,

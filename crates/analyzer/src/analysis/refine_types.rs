@@ -2,6 +2,7 @@
 //! A false guard subtracts only union arms that are entirely covered by its test.
 
 use super::*;
+use crate::constant_types::literal as literal_type;
 use crate::scope::{AccessStep, Place};
 use crate::types::{Compatibility, TypePolicy};
 
@@ -161,9 +162,19 @@ impl Analyzer<'_> {
                     .map(|property| property.effective_type(self.index))
             } else {
                 self.index
-                    .method(class, name)
-                    .or_else(|| self.index.doc_method(class, name))
-                    .map(|signature| signature.clone().typed(self.index).returns)
+                    .method_owner(class, name)
+                    .map(|(owner, signature)| {
+                        signature
+                            .clone()
+                            .typed(self.index)
+                            .for_receiver(self.index, owner, &ty)
+                            .returns
+                    })
+                    .or_else(|| {
+                        self.index
+                            .doc_method(class, name)
+                            .map(|signature| signature.clone().typed(self.index).returns)
+                    })
             }
             .map_or(ValueType::Mixed, |ty| self.relative_type(ty, class));
         }
@@ -193,38 +204,9 @@ impl Analyzer<'_> {
                 self.refine_type(left, ValueType::Class(class), scope, true, span);
             } else if let Some(class) = self.enum_case_class(left) {
                 self.refine_type(right, ValueType::Class(class), scope, true, span);
+            } else {
+                self.refine_nullsafe_comparison(left, right, scope);
             }
-        }
-    }
-
-    pub fn refine_in_array(
-        &self,
-        arguments: &[Argument],
-        scope: &mut Scope,
-        truth: bool,
-        span: Span,
-    ) {
-        let [subject, list, strict, ..] = arguments else {
-            return;
-        };
-        if !matches!(
-            strict.value.kind,
-            ExpressionKind::Literal(Literal::Bool(true))
-        ) {
-            return;
-        }
-        let ExpressionKind::Array(items) = &list.value.kind else {
-            return;
-        };
-        let mut possibilities = ValueType::Never;
-        for item in items {
-            let Some(literal) = literal_type(&item.value) else {
-                return;
-            };
-            possibilities = possibilities.join(&literal);
-        }
-        if possibilities != ValueType::Never {
-            self.refine_type(&subject.value, possibilities, scope, truth, span);
         }
     }
 }
@@ -241,18 +223,6 @@ pub fn predicate_type(function: &str) -> Option<ValueType> {
         "is_resource" => ValueType::Resource,
         "is_iterable" => ValueType::Iterable,
         "is_callable" => ValueType::UnknownCallable,
-        _ => return None,
-    })
-}
-
-fn literal_type(expression: &Expression) -> Option<ValueType> {
-    Some(match &expression.kind {
-        ExpressionKind::Literal(Literal::Null) => ValueType::Null,
-        ExpressionKind::Literal(Literal::Int(value)) => ValueType::IntLiteral(*value),
-        ExpressionKind::Literal(Literal::Bool(value)) => ValueType::BoolLiteral(*value),
-        ExpressionKind::Literal(Literal::String(value)) => {
-            ValueType::StringLiteral(value.as_slice().into())
-        }
         _ => return None,
     })
 }

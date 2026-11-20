@@ -32,14 +32,32 @@ const QUERY_RESULTS: &[(&str, &[&str])] = &[
 ];
 
 /// `(int) $query->getSingleScalarResult()` depends on the DQL and mapped fields.
-/// Leave this unresolved if the method signature alone provides only mixed.
-pub fn unresolved_result(index: &Index, class: &str, method: &str, result: ValueType) -> ValueType {
+/// The Doctrine stub establishes the scalar alternatives when configured.
+pub fn query_result(
+    index: &Index,
+    class: &str,
+    method: &str,
+    result: ValueType,
+    doctrine_stubs: bool,
+) -> ValueType {
     if !matches!(result, ValueType::ExplicitMixed | ValueType::ImplicitMixed) {
         return result;
     }
     let Some((owner, _)) = index.method_owner(class, method) else {
         return result;
     };
+    if doctrine_stubs
+        && owner
+            .name
+            .eq_ignore_ascii_case("Doctrine\\ORM\\AbstractQuery")
+        && method.eq_ignore_ascii_case("getSingleScalarResult")
+    {
+        return ValueType::Bool
+            .join(&ValueType::Float)
+            .join(&ValueType::Int)
+            .join(&ValueType::String)
+            .join(&ValueType::Null);
+    }
     if QUERY_RESULTS.iter().any(|(class, methods)| {
         class.eq_ignore_ascii_case(&owner.name)
             && methods.iter().any(|name| name.eq_ignore_ascii_case(method))

@@ -52,6 +52,7 @@ pub fn refine(index: &mut Index) {
         "imagecolorallocate",
         "imagecolorallocatealpha",
         "stream_get_contents",
+        "sodium_crypto_secretbox_open",
         "openssl_decrypt",
     ] {
         super::runtime_signatures::literal_false(index, name);

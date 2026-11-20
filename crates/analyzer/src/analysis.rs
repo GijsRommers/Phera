@@ -47,6 +47,7 @@ mod finally;
 mod function_calls;
 mod generators;
 mod if_ladder;
+mod in_array_guards;
 mod inherited_parameters;
 mod internal_methods;
 mod intrinsics;

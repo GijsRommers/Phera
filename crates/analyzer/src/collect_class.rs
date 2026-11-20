@@ -175,6 +175,7 @@ fn add_member(
                 name.name.clone(),
                 ConstantInfo {
                     ty: ValueType::Class(info.name.clone()),
+                    literal: None,
                     modifiers: Modifiers::default(),
                     location: location(name.span.start),
                 },
@@ -246,6 +247,7 @@ fn add_constants(
             c.name.name.clone(),
             ConstantInfo {
                 ty: ValueType::declared(ty, names),
+                literal: crate::constant_types::literal(&c.value),
                 modifiers,
                 location: location(c.span.start),
             },

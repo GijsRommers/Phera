@@ -5,6 +5,23 @@ use super::*;
 use crate::scope::Place;
 
 impl Analyzer<'_> {
+    /// `$node?->kind() === $kind` proves that the receiver exists when
+    /// `$kind` has a non-null type.
+    pub(super) fn refine_nullsafe_comparison(
+        &self,
+        left: &Expression,
+        right: &Expression,
+        scope: &mut Scope,
+    ) {
+        for (value, peer) in [(left, right), (right, left)] {
+            if let ExpressionKind::Variable(Variable::Named(name)) = &peer.kind
+                && scope.get(name).ty.excludes_null()
+            {
+                self.refine_nullsafe_receivers(value, scope);
+            }
+        }
+    }
+
     pub(super) fn remember_nullsafe_result(
         &self,
         variable: &str,

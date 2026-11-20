@@ -8,7 +8,10 @@ use crate::{
 use phera_ast::Arguments;
 
 const DENORMALIZER: &str = "Symfony\\Component\\Serializer\\Normalizer\\DenormalizerInterface";
-const INPUT_BAG: &str = "Symfony\\Component\\HttpFoundation\\InputBag";
+const DEFAULTING_BAGS: &[&str] = &[
+    "Symfony\\Component\\HttpFoundation\\InputBag",
+    "Symfony\\Component\\HttpFoundation\\HeaderBag",
+];
 
 fn unresolved_result(index: &Index, class: &str, method: &str) -> bool {
     method.eq_ignore_ascii_case("denormalize")
@@ -17,7 +20,7 @@ fn unresolved_result(index: &Index, class: &str, method: &str) -> bool {
             .is_some_and(|(owner, _)| owner.name.eq_ignore_ascii_case(DENORMALIZER))
 }
 
-/// `$request->query->get('sort', 'name')` excludes null with the Symfony extension.
+/// `$request->headers->get('Accept', 'text/plain')` excludes null with the Symfony extension.
 pub fn return_type(
     index: &Index,
     class: &str,
@@ -29,7 +32,13 @@ pub fn return_type(
     if unresolved_result(index, class, method) {
         return ValueType::Mixed;
     }
-    if !class.eq_ignore_ascii_case(INPUT_BAG) || !method.eq_ignore_ascii_case("get") {
+    if !method.eq_ignore_ascii_case("get")
+        || !index.method_owner(class, method).is_some_and(|(owner, _)| {
+            DEFAULTING_BAGS
+                .iter()
+                .any(|name| owner.name.eq_ignore_ascii_case(name))
+        })
+    {
         return result;
     }
     let Arguments::List(arguments) = arguments else {

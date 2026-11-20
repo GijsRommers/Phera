@@ -1,4 +1,7 @@
 {
+  "arrow_native_mixed.php": [
+    [9, 21, "cast.int", "Cannot cast mixed to int."]
+  ],
   "array_totals.php": [],
   "branch_and_key_types.php": [],
   "conditional_defaults.php": [],
@@ -41,17 +44,31 @@
     [8, 13, "argument.type", "Parameter #1 $value of function takeThing expects Thing, Thing|null given."]
   ],
   "nullsafe_and_coalesce_guards.php": [],
+  "nullsafe_arguments.php": [
+    [8, 13, "method.nonObject", "Cannot call method name() on LabelNode|null."]
+  ],
+  "date_interval_days.php": [
+    [7, 14, "return.type", "Function anyDays() should return int but returns int|false."]
+  ],
+  "decryption_guard.php": [],
+  "generic_array_callbacks.php": [],
   "method_arguments_guard.php": [
     [8, 18, "argument.type", "Parameter #1 $name of function takeName expects string, string|null given."],
     [8, 23, "argument.type", "Parameter #1 $name of function takeName expects string, string|null given."]
   ],
   "nullable_template.php": [],
+  "nullable_comparison_peer.php": [],
   "nullsafe_chain.php": [
     [8, 30, "method.nonObject", "Cannot call method id() on ChainRow|null."]
   ],
   "return_annotations.php": [],
+  "return_messages.php": [
+    [5, 4, "return.type", "Anonymous function should return int but returns string."],
+    [5, 7, "return.type", "Method ReturnSample::read() should return int but returns string."]
+  ],
   "scalar_guards.php": [],
   "strict_context.php": [],
+  "strict_lookup_constants.php": [],
   "typed_overrides.php": [],
   "typed_property_normal_write.php": [
     [8, 8, "assign.propertyType", "Property TextHolder::$text (string) does not accept string|null."],

@@ -87,6 +87,36 @@ fn phpstan_configured_rules() {
 }
 
 #[test]
+fn phpstan_doctrine_scalar_projection() {
+    // PHPStan 2.3.7 with phpstan-doctrine's AbstractQuery stub.
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/doctrine_scalar_closure.php");
+    let report = check(&Options {
+        level: 10,
+        doctrine_stubs: true,
+        paths: vec![path.to_string_lossy().into_owned()],
+        ..Options::default()
+    })
+    .unwrap();
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+}
+
+#[test]
+fn phpstan_symfony_header_defaults() {
+    // PHPStan 2.3.7 with phpstan-symfony's HeaderBag return type extension.
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/symfony_header_defaults.php");
+    let report = check(&Options {
+        level: 10,
+        symfony_stubs: true,
+        paths: vec![path.to_string_lossy().into_owned()],
+        ..Options::default()
+    })
+    .unwrap();
+    assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+}
+
+#[test]
 fn strict_loop_initializers_do_not_guarantee_later_overwrites() {
     // PHPStan 2.3.7 with strict-rules at level 0.
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/levels/strict_loops.php");

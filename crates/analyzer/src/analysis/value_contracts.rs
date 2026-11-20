@@ -55,10 +55,18 @@ impl Analyzer<'_> {
                     && self.incompatible(&expected, given, self.value_policy()) =>
             {
                 let provenance = self.narrowed_at(expr, scope);
+                let callable = if name == "Closure" {
+                    "Anonymous function".to_owned()
+                } else if let Some(class) = &self.context.class {
+                    format!("Method {class}::{name}()")
+                } else {
+                    format!("Function {name}()")
+                };
+                let given = super::argument_contracts::type_for_message(given, &expected);
                 self.diagnose(
                     "return.type",
                     span,
-                    format!("{name}() should return {expected}, but returns {given}.{provenance}"),
+                    format!("{callable} should return {expected} but returns {given}.{provenance}"),
                 );
             }
             _ => {}

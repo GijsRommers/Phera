@@ -124,6 +124,7 @@ fn signature(f: &[&str]) -> Signature {
 fn constant(f: &[&str]) -> ConstantInfo {
     ConstantInfo {
         ty: decode_type(f[2]),
+        literal: None,
         modifiers: modifiers(f[3]),
         location: location(f[4]),
     }

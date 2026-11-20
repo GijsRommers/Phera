@@ -121,6 +121,7 @@ pub struct PropertyInfo {
 #[derive(Clone, Debug)]
 pub struct ConstantInfo {
     pub ty: ValueType,
+    pub literal: Option<ValueType>,
     pub modifiers: Modifiers,
     pub location: Location,
 }
@@ -129,6 +130,7 @@ impl ConstantInfo {
     pub fn untyped(location: Location) -> Self {
         Self {
             ty: ValueType::Mixed,
+            literal: None,
             modifiers: Modifiers::default(),
             location,
         }
