@@ -276,7 +276,9 @@ Laravel and Symfony applications get this with no change:
 The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
 are empty and `$_SERVER` holds the environment and the script's paths. Each
 request gets its own copy of every object, static property and global, so
-nothing one request does reaches another. What cannot be copied (an open
+nothing one request does reaches another. A boot `GdImage` copies its pixels,
+palette and rendering options into each request. A boot `finfo` object copies
+its flags. What cannot be copied (an open
 file or socket, a started session, a database transaction) makes
 `Phera\snapshot()` throw `Phera\SnapshotException`, naming the class and
 where it was found; the worker then serves the application from the top.

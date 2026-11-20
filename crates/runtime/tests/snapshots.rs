@@ -7,6 +7,8 @@
 //! runs every request from the top, so each fork must print exactly what
 //! PHP prints for one run of the file: the oracle is real PHP.
 
+mod extension_state;
+
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;

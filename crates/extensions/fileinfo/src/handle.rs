@@ -45,6 +45,7 @@ pub fn register(registry: &mut Registry) {
         hooks: Some(&ClassHooks {
             clone: Some(phera_extension_api::NativeClone::Forbidden),
             forbid_serialization: true,
+            fork: Some(phera_extension_api::fork_clone::<Cell<i32>>),
             ..ClassHooks::EMPTY
         }),
         ..ClassEntry::class(CLASS)

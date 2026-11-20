@@ -47,6 +47,7 @@ pub fn register(registry: &mut Registry) {
             }),
             forbid_serialization: true,
             property_access: Some(&NO_DYNAMIC_PROPERTIES),
+            fork: Some(phera_extension_api::fork_clone::<RefCell<Image>>),
             ..ClassHooks::EMPTY
         }),
         ..ClassEntry::class("GdImage")
