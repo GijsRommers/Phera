@@ -183,7 +183,8 @@ impl Tools {
             "autoload_identical_under_php": autoload_identical,
             "autoload_identical_under_phera": phera_autoload_identical,
             "draft_checks_pass": package_differences.is_empty()
-                && installed_identical && autoload_identical && (!self.strict_bytes || byte_parity),
+                && installed_identical && installed_php_identical
+                && autoload_identical && (!self.strict_bytes || byte_parity),
         });
         if self.install_only {
             return Ok(row);

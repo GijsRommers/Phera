@@ -46,6 +46,36 @@ framework installs.
 Both PHP and Phera produce identical framework class probes for six projects.
 The Drupal probe differs only by the Composer-only cache class above.
 
+With Flex auto-scripts active, the basic Symfony and copied Symfony projects
+also complete their native console hooks. Put the comparison route in place
+before installation so Symfony's cache warmup includes it. The webapp's
+stock `cache:clear` stops under Phera at the Finder string conversion error.
+The webapp comparison tree installed with `--no-scripts` serves the same
+parameterized route under PHP 8.5.
+
+## Fresh dependency resolution and audit
+
+All 25 original projects resolved the same versions as Composer 2.11.2
+without their original locks. Composer accepted and installed all 25 locks
+from Phera. The seven framework manifests were resolved with the same
+platform exclusions and plugins disabled.
+
+| Framework | Packages selected by each tool | Version differences |
+| --- | ---: | ---: |
+| Drupal recommended project | 68 | 0 |
+| Laravel skeleton | 110 | 0 |
+| Copied Laravel application | 110 | 0 |
+| Copied Symfony application | 61 | 0 |
+| Roots Bedrock | 73 | 0 |
+| Symfony skeleton 8.1 | 32 | 0 |
+| Symfony webapp 8.1 | 128 | 0 |
+
+A Composer-generated lock pinning Symfony HttpFoundation 7.3.0 produced the
+same six advisory IDs in both tools. Both exited 1 with active advisories
+and exited 0 when all six IDs were configured under `config.audit.ignore`.
+Phera's `--no-dev` filtered those advisories when the fixture packages were
+in the lock's development section.
+
 ## Historical Composer differential results from PR #15
 
 Oracle: Composer 2.11.2 under PHP 8.5.12 on macOS, 2026-11-17. The manifests
