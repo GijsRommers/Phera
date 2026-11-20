@@ -1,8 +1,9 @@
-//! `dirname('a/b/c', 2)` is `'a'`; `pathinfo('a/b.txt')` separates the suffix.
+//! `dirname('a/b/c', 2)` is `'a'`; `basename('a/b.txt', '.txt')` is `'b'`;
+//! `pathinfo('a/b.txt')` separates the suffix.
 
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
-    PhpString, Registry, Value, args,
+    ArrayKey, ConstantValue, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType,
+    PhpArray, PhpString, Registry, Value, args,
 };
 
 use crate::mutations::PATH;
@@ -16,7 +17,12 @@ const ALL: i64 = DIRNAME | BASENAME | EXTENSION | FILENAME;
 pub fn register(registry: &mut Registry) {
     const DIR_PARAMS: &[Param] = &[PATH, Param::new("levels", ParamType::Int).optional()];
     const INFO_PARAMS: &[Param] = &[PATH, Param::new("flags", ParamType::Int).optional()];
+    const BASE_PARAMS: &[Param] = &[
+        PATH,
+        Param::new("suffix", ParamType::String).with_default(ConstantValue::String("")),
+    ];
     registry.function(FunctionEntry::sync("dirname", DIR_PARAMS, dirname));
+    registry.function(FunctionEntry::sync("basename", BASE_PARAMS, base_name));
     registry.function(FunctionEntry::sync("pathinfo", INFO_PARAMS, pathinfo));
     for (name, value) in [
         ("PATHINFO_DIRNAME", DIRNAME),
@@ -45,6 +51,18 @@ fn dirname(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         path = parent;
     }
     Ok(Value::from(PhpString::from(path)))
+}
+
+/// The suffix is removed only when something is left of the name.
+fn base_name(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let name = basename(args::bytes(arguments, 0));
+    let suffix = args::bytes(arguments, 1);
+    let name = if suffix.len() < name.len() {
+        name.strip_suffix(suffix).unwrap_or(name)
+    } else {
+        name
+    };
+    Ok(Value::from(PhpString::from(name)))
 }
 
 fn separator(byte: u8) -> bool {
