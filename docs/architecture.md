@@ -1430,6 +1430,49 @@ down by a third. What remains, in order of size:
    Symfony's bytecodes; a register-register compare-and-branch and the
    optimiser for functions with `try` are the next compiler steps.
 
+### 10.10 Where a forked framework request goes
+
+Measured on 20 November 2026 with this branch merged privately with the
+snapshot-and-fork branch (#109), `phera serve --workers 1`, the Laravel 13
+production app of the load test (`/api/hello`) and the Symfony app in
+production mode (`/api/ping`), instructions per warm request (difference of
+two server runs):
+
+| | #109 | #109 with this branch | and the warm snapshot experiment |
+| --- | ---: | ---: | ---: |
+| Laravel `/api/hello` | 71 to 75M | 59 to 61M | 35M |
+| Symfony `/api/ping` | 48M | 41 to 44M | not measured |
+
+Where the instructions of a forked Laravel request went, from a private
+opcode counter and samply profiles of the steady state:
+
+1. **Classes the request needs but the boot never loaded.** Every fork
+   autoloads, reads (path canonicalisation, metadata) and links the same 70
+   framework files (`Response`, `JsonResponse`, `Pipeline`, `Route`, the
+   middleware); the fork then throws them away. Symfony: 76 files and 74
+   `file_exists` calls from Composer's loader. Loading those classes before
+   `Phera\snapshot()` (an experiment in a private build, the class list
+   taken from one request) brought the Laravel request from 61M to 35M.
+   That belongs to the snapshot work and is reported there.
+2. **The fork itself**: copying the booted application and freeing the copy
+   at the end, about 45 percent of what is left. Part of it was the request's
+   site cells, one per instruction of every loaded file: a request now makes
+   a function's cells only when that function first uses one (most loaded
+   functions never run in a request), and a fork copies only those.
+3. **Elements of array properties** (`isset($this->instances[$id])`,
+   `$this->items[$group][$key] ?? $default`): the general path found the
+   property by name on every read (`property_key` alone was 4 percent).
+   The VM now records the property's site for these reads too, and the loop
+   reads the property from it and walks up to three integer or string keys
+   (`calls/fast_property_elements.rs`): 10M of the Laravel request.
+4. What is left of the interpreter: about 8,300 exits from the loop (native
+   function calls, `foreach` start and end, by-reference sends, `instanceof`),
+   about 5M; the ordinary in-loop bytecodes (56,000) about 3M; the rest is
+   PHP code run through `ArrayAccess::offsetGet` and native callbacks.
+
+`benchmarks/bench-framework-patterns.php` keeps these patterns: 9.7 times
+PHP's instructions before this round, 4.4 times after it.
+
 ## 11. Tools built into the runtime
 
 Tools that PHP projects today get from separate packages written in PHP
