@@ -2,7 +2,10 @@
 //! and arithmetic. See `docs/architecture.md`, section 3.
 
 mod array;
+mod attachments;
 mod convert;
+mod cycles;
+mod destruction;
 mod error;
 mod float_format;
 mod lazy_object;
@@ -10,12 +13,15 @@ mod object;
 mod ops;
 mod string;
 mod value;
+mod weak_object;
 
 pub use array::{ArrayKey, PhpArray};
 pub use convert::{
     NumVal, NumericParse, cast_to_bool, is_numeric, parse_numeric, strtod_prefix, to_array,
     to_bool, to_float, to_int, to_php_string,
 };
+pub use cycles::{Garbage, find_garbage};
+pub use destruction::Destruction;
 pub use error::{
     CollectDiagnostics, DiagnosticKind, Diagnostics, ErrorKind, NoDiagnostics, OpError,
 };
@@ -37,3 +43,4 @@ pub use ops::{
 };
 pub use string::PhpString;
 pub use value::{Value, ValueRef};
+pub use weak_object::WeakObject;
