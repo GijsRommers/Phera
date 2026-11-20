@@ -9,14 +9,14 @@
 //!
 //! The table is a small open-addressing hash table on those numbers, built
 //! the first time a call looks a method up in the class. Looking a method up
-//! is a multiplication, a mask and usually one comparison. A name no loaded
-//! file has used has no number, so such a method is not in the table; calls
-//! that miss take the general lookup, which finds every method.
+//! is a multiplication, a mask and usually one comparison. Keys are the
+//! process's (see `phera_bytecode::name_keys`), so every method is in the
+//! table and the table is valid in every request.
 
 use std::rc::{Rc, Weak};
 
 use super::{Class, Method};
-use crate::code_table::{CodeTable, NameKey};
+use crate::code_table::NameKey;
 
 /// One method of a class, with the class that declares it.
 #[derive(Clone)]
@@ -42,13 +42,9 @@ pub(crate) struct MethodTable {
 }
 
 impl MethodTable {
-    /// Number every method of `class` whose name some loaded file uses.
-    /// `scope_of` finds the class that declares a method.
-    pub(crate) fn build(
-        class: &Class,
-        code: &CodeTable,
-        scope_of: impl Fn(&Method) -> Option<Rc<Class>>,
-    ) -> Self {
+    /// Number every method of `class`. `scope_of` finds the class that
+    /// declares a method.
+    pub(crate) fn build(class: &Class, scope_of: impl Fn(&Method) -> Option<Rc<Class>>) -> Self {
         // A direct trait call emits a deprecation every time. Composed
         // methods have their own table on the consuming class.
         if class.kind == phera_bytecode::ClassKind::Trait {
@@ -58,10 +54,8 @@ impl MethodTable {
         }
         let size = (class.methods.len() * 2).next_power_of_two().max(4);
         let mut slots: Box<[Option<MethodSlot>]> = (0..size).map(|_| None).collect();
-        for (name, method) in &class.methods {
-            let Some(key) = code.name_key(name) else {
-                continue;
-            };
+        let keys = phera_bytecode::name_keys::keys(class.methods.keys().map(String::as_str));
+        for ((_, method), key) in class.methods.iter().zip(keys.iter().copied()) {
             let scope = scope_of(method).map_or_else(Weak::new, |scope| Rc::downgrade(&scope));
             let mut index = start(key, size);
             while slots[index].is_some() {

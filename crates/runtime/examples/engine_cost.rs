@@ -39,7 +39,9 @@ fn main() -> std::process::ExitCode {
     };
     let script = root.join("index.php");
     let runtime = runtime_for(&root, &script);
-    let threads = tokio::runtime::Builder::new_current_thread().enable_all().build();
+    let threads = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build();
     let Ok(threads) = threads else {
         eprintln!("cannot start the async runtime");
         return std::process::ExitCode::FAILURE;
@@ -52,7 +54,11 @@ fn main() -> std::process::ExitCode {
                     let worker = runtime.web_worker(index);
                     let started = Instant::now();
                     let report = worker.boot(&script, &root).await;
-                    eprintln!("boot {index}: {} ms, {}", started.elapsed().as_millis(), describe(&report));
+                    eprintln!(
+                        "boot {index}: {} ms, {}",
+                        started.elapsed().as_millis(),
+                        describe(&report)
+                    );
                 }
                 Ok(())
             }
@@ -61,7 +67,9 @@ fn main() -> std::process::ExitCode {
                 let worker = runtime.web_worker(0);
                 match worker.boot(&script, &root).await {
                     BootReport::Snapshot { .. } => {}
-                    report => return Err(format!("the boot did not snapshot: {}", describe(&report))),
+                    report => {
+                        return Err(format!("the boot did not snapshot: {}", describe(&report)));
+                    }
                 }
                 requests(&worker, &script, &root, route, count).await
             }
@@ -136,4 +144,3 @@ fn describe(report: &BootReport) -> String {
         BootReport::Failed(message) => format!("failed: {message}"),
     }
 }
-
