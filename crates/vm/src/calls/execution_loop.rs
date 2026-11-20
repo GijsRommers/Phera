@@ -154,7 +154,16 @@ impl Vm {
                 LoopExit::Destructors => return Ok(BatchExit::Destructors),
                 LoopExit::Invalid => return Err(internal_error!("invalid IP")),
             };
-            if let Some(exit) = self.execute::<TRACK_GENERATORS>(instruction, stop, work)? {
+            let exit = match instruction {
+                // A call of a native function goes straight to it: the
+                // general handler would only find that out and come here.
+                Instruction::Call { dst, .. } if !TRACK_GENERATORS && self.calls_plain_native() => {
+                    *work += 1;
+                    self.call_native(dst)
+                }
+                _ => self.execute::<TRACK_GENERATORS>(instruction, stop, work),
+            };
+            if let Some(exit) = exit? {
                 return Ok(exit);
             }
             if self.destructors_due() {
@@ -168,6 +177,20 @@ impl Vm {
                 return Ok(BatchExit::Yield);
             }
         }
+    }
+}
+
+impl Vm {
+    /// Whether the innermost prepared call is to native code that needs no
+    /// argument expansion first (a magic `__call` does).
+    #[inline]
+    fn calls_plain_native(&self) -> bool {
+        self.call_stack.last_call().is_some_and(|call| {
+            call.callee == crate::calls::prepared_call::PreparedCallee::General
+                && !call
+                    .flags
+                    .contains(crate::calls::prepared_call::CallFlags::MAGIC)
+        })
     }
 }
 
