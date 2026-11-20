@@ -260,7 +260,18 @@ jobs:
         env:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera
       - name: Compare XML extension scripts against PHP
-        run: cargo test -p phera-ext-xmlwriter -p phera-ext-simplexml -p phera-ext-xmlreader -p phera-ext-xml --test php_oracle
+        run: |
+          "$PHERA_PHP" -n -r 'echo "PHP ", PHP_VERSION, ", libxml ", LIBXML_LOADED_VERSION, "\n";'
+          if ! cargo test -p phera-ext-xmlwriter -p phera-ext-simplexml \
+            -p phera-ext-xmlreader -p phera-ext-xml --test php_oracle --no-fail-fast; then
+            for oracle in "${TMPDIR:-/tmp}"/phera-oracle/{simplexml,simplexml-lifetime,xml,xmlreader,xmlwriter,xmlwriter-destinations}/*.php.out; do
+              candidate="${oracle%.php.out}.phera.out"
+              if [[ -f "$candidate" ]] && ! cmp -s "$oracle" "$candidate"; then
+                diff -U1 "$oracle" "$candidate" | head -80 || true
+              fi
+            done
+            exit 1
+          fi
         env:
           PHERA_BIN: ${{ github.workspace }}/target/release/phera
       - name: Run the date class scripts through the release binary
