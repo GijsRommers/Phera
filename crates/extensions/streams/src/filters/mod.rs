@@ -20,7 +20,6 @@ use codec::Codec;
 
 pub(crate) const MAX_STAGES: usize = 16;
 pub(crate) const MAX_BUCKET: usize = 8 * 1024 * 1024;
-const MAX_OUTPUT: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Direction {
@@ -62,7 +61,6 @@ pub(crate) struct Filters {
 #[derive(Default)]
 pub(crate) struct Chain {
     stages: VecDeque<Filter>,
-    output: usize,
     failed: bool,
     seek_to: Option<u64>,
 }
@@ -92,12 +90,13 @@ impl Chain {
             .codec
             .seek_after(0, Flush::Closing, position);
         let mut data = self.stages[index].codec.apply(Vec::new(), Flush::Closing)?;
+        bounded(data.len())?;
         self.stages.remove(index);
         for filter in self.stages.iter_mut().skip(index) {
             filter.codec.seek_after(data.len(), Flush::No, position);
             data = filter.codec.apply(data, Flush::No)?;
+            bounded(data.len())?;
         }
-        self.account(data.len())?;
         Ok(Some(data))
     }
 
@@ -114,7 +113,6 @@ impl Chain {
                 data = filter.codec.apply(data, flush)?;
                 bounded(data.len())?;
             }
-            self.account(data.len())?;
             Ok(data)
         })();
         if result.is_err() {
@@ -125,14 +123,6 @@ impl Chain {
 
     pub fn take_seek(&mut self) -> Option<u64> {
         self.seek_to.take()
-    }
-
-    fn account(&mut self, size: usize) -> io::Result<()> {
-        self.output = self.output.saturating_add(size);
-        if self.output > MAX_OUTPUT {
-            return Err(limit());
-        }
-        Ok(())
     }
 }
 
@@ -151,6 +141,20 @@ pub(super) fn limit() -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chain_can_process_many_bounded_buckets() {
+        let mut chain = Chain::default();
+        chain.add(
+            Filter::new(1, b"consumed", &Value::Null, None).unwrap(),
+            false,
+        );
+        let mut block = vec![b'x'; 1024 * 1024];
+        for _ in 0..100 {
+            block = chain.run(block, Flush::No, 0).unwrap();
+            assert_eq!(block.len(), 1024 * 1024);
+        }
+    }
 
     #[test]
     fn chain_refuses_excessive_expansion_before_returning_output() {

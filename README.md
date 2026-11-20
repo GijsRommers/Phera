@@ -102,7 +102,7 @@ created after the snapshot.
 Use `php://filter` or `stream_filter_append()` to transform a native stream
 with built-in filters. Register user filters with `stream_filter_register()` and
 attach them to a stream resource with `stream_filter_append()`. Phera limits the chain to 16 stages, intermediate
-buckets to 8 MiB and output to 64 MiB per direction.
+buckets to 8 MiB.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 

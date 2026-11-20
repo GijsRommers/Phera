@@ -7,8 +7,8 @@
 ## Decision
 
 A filter chain accepts at most sixteen stages. A filter may produce at most
-8 MiB of intermediate output per bucket, and a chain may produce at most
-64 MiB per stream direction. The URI parser counts nested filter wrappers
+8 MiB of intermediate output per bucket. A stream can process any number
+of bounded buckets. The URI parser counts nested filter wrappers
 toward the depth limit and checks the limit before opening the resource.
 Filter output that exceeds the limit aborts the transformation.
 

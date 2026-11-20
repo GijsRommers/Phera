@@ -14,7 +14,7 @@ use phera_extension_api::{
 
 use crate::{request::new_resource, user_file::invoke};
 
-use super::super::{MAX_OUTPUT, MAX_STAGES, bounded};
+use super::super::{MAX_STAGES, bounded};
 use super::{FEED, PASS, buckets};
 
 #[derive(Default)]
@@ -49,7 +49,6 @@ pub(crate) struct Chains {
     busy: Cell<bool>,
     exhausted: Cell<bool>,
     buffered: RefCell<VecDeque<u8>>,
-    produced: Cell<usize>,
     stream: RefCell<Weak<Resource>>,
 }
 
@@ -281,11 +280,6 @@ impl Chains {
             };
             data = output;
         }
-        let total = self.produced.get().saturating_add(data.len());
-        if total > MAX_OUTPUT {
-            return Err(NativeError::error(super::super::limit().to_string()));
-        }
-        self.produced.set(total);
         Ok(Some(data))
     }
 
