@@ -36,6 +36,7 @@ url.workspace = true
 mimalloc.workspace = true
 
 [dev-dependencies]
+quick-xml.workspace = true
 phera-extension-api.workspace = true
 phera-phpt.workspace = true
 rcgen.workspace = true

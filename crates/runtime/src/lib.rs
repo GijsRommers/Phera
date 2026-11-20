@@ -163,6 +163,7 @@ impl Runtime {
         registry.load(&phera_ext_reflection::Reflection);
         registry.load(&phera_ext_serialize::Serialize);
         Vm::register_fiber_classes(&mut registry);
+        Vm::register_debugger(&mut registry);
         registry.load(&phera_ext_spl::Spl);
         registry.load(&phera_ext_session::Session);
         let mut web_registry = registry.clone();
@@ -413,6 +414,9 @@ impl Runtime {
         }
         for (name, value) in self.startup_ini.iter() {
             vm.set_startup_ini(name, value);
+        }
+        if let Some(debug) = &self.debug {
+            debug.apply_ini(&mut vm);
         }
         if matches!(sapi, Sapi::Web) && self.web_development {
             vm.set_startup_ini("opcache.validate_timestamps", "1");

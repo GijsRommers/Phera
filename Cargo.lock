@@ -2595,6 +2595,7 @@ dependencies = [
  "phera-phpt",
  "phera-runtime",
  "phera-server",
+ "quick-xml",
  "rcgen",
  "rustix",
  "semver",

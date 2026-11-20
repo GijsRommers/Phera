@@ -52,6 +52,16 @@ pub trait Context {
     /// Appends to the request's output, as `echo` does.
     fn write(&mut self, bytes: &[u8]);
 
+    /// Request a breakpoint if a debugger is attached to this context.
+    fn break_into_debugger(&mut self) -> bool {
+        false
+    }
+
+    /// Return whether a standard descriptor should also receive this write.
+    fn debugger_output(&mut self, _stderr: bool, _bytes: &[u8]) -> bool {
+        true
+    }
+
     /// Snapshot PHP callers without retaining references to live parameter slots.
     fn backtrace(&mut self, _objects: bool, _arguments: bool, _limit: i32) -> Value {
         Value::from(PhpArray::new())

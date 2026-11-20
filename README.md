@@ -102,6 +102,11 @@ Phera connects only to the configured IDE address. A server enabling
 debugging on a non-loopback listen address needs `--allow-remote-debug`.
 One worker can serve other requests while PHP waits for an IDE command.
 
+PHP exposes the active settings through `ini_get('xdebug.mode')` and the
+other `xdebug.*` directives above. PhpStorm's validator checks for the
+Xdebug PHP extension. Use **Start Listening for PHP Debug Connections**
+and a breakpoint to verify a Phera session.
+
 #### PhpStorm
 
 1. Open the PHP project in PhpStorm.

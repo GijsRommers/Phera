@@ -278,6 +278,11 @@ impl Vm {
         Self::with_native_tables(&NativeTables::new(registry))
     }
 
+    /// Expose the debugger's PHP function and startup directives.
+    pub fn register_debugger(registry: &mut Registry) {
+        debugger::php_api::register(registry);
+    }
+
     /// Register VM-owned fiber classes after Core and Reflection.
     pub fn register_fiber_classes(registry: &mut Registry) {
         fibers::register(registry);

@@ -148,6 +148,18 @@ pub async fn write(
     let (wrapper, policy) = with_stream(resource, |stream| {
         (stream.wrapper, stream.write_policy(length as u64))
     })?;
+    if wrapper == Wrapper::Standard {
+        let stderr = with_stream(resource, |stream| match stream.uri.as_slice() {
+            b"php://stdout" => Some(false),
+            b"php://stderr" => Some(true),
+            _ => None,
+        })?;
+        if let Some(stderr) = stderr
+            && !context.debugger_output(stderr, data)
+        {
+            return Ok(Value::Int(length as i64));
+        }
+    }
     let result = if let Some(pipe) = crate::child_pipe::of(resource)? {
         crate::child_pipe::bounded(context, resource, pipe.write(resource, data)).await??
     } else {

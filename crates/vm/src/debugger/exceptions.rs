@@ -31,6 +31,7 @@ impl Vm {
             let Some(class) = self.classes.for_object(&thrown.object) else {
                 return error;
             };
+            let location = self.location();
             let Some(debugger) = &mut self.debugger else {
                 return error;
             };
@@ -45,7 +46,6 @@ impl Vm {
                 return error;
             }
             debugger.last_exception = Some(thrown.object.id);
-            let location = thrown.location();
             let message = scalar(&thrown.object, "message");
             let code = scalar(&thrown.object, "code");
             debugger.stop = Some(Stop {
@@ -57,6 +57,7 @@ impl Vm {
                     escape(code),
                     escape(message),
                 ),
+                line: location.line as u32,
                 unconditional: false,
                 candidates,
             });

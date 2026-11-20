@@ -56,12 +56,15 @@ impl DebugConfig {
         if !force && !enabled {
             return Ok(None);
         }
-        let mut config = Self::default();
-        config.start = match (force, setting("xdebug.start_with_request")) {
+        let start = match (force, setting("xdebug.start_with_request")) {
             (true, _) | (_, Some("yes")) => Start::Always,
             (_, None | Some("trigger" | "default")) => Start::Trigger,
             (_, Some("no")) => return Ok(None),
             (_, Some(_)) => return Err("Invalid xdebug.start_with_request".into()),
+        };
+        let mut config = Self {
+            start,
+            ..Self::default()
         };
         for key in [
             "client_host",
@@ -80,6 +83,26 @@ impl DebugConfig {
             }
         }
         Ok(Some(config))
+    }
+
+    /// Report effective debugger settings to PHP's INI inspection functions.
+    pub fn apply_ini(&self, vm: &mut crate::Vm) {
+        let start = match self.start {
+            Start::Always => "yes",
+            Start::Trigger => "trigger",
+        };
+        vm.set_startup_ini("xdebug.mode", "debug");
+        vm.set_startup_ini("xdebug.start_with_request", start);
+        vm.set_startup_ini("xdebug.client_host", &self.host);
+        vm.set_startup_ini("xdebug.client_port", &self.port.to_string());
+        vm.set_startup_ini("xdebug.idekey", &self.idekey);
+        vm.set_startup_ini(
+            "xdebug.connect_timeout_ms",
+            &self.timeout.as_millis().to_string(),
+        );
+        if let Some(log) = &self.log {
+            vm.set_startup_ini("xdebug.log", &log.to_string_lossy());
+        }
     }
 
     fn apply(&mut self, key: &str, value: &str) -> Result<(), String> {

@@ -138,14 +138,18 @@ impl Vm {
                 }
                 Input::Begin | Input::Send(_) | Input::Complete(_) => {}
             }
-            let mut work = 0;
-            let result = match self.run_batch(stop, &mut work) {
-                Ok(BatchExit::GeneratorSuspended)
-                    if !self.pending_callbacks && !self.generator_releases_pending() =>
-                {
-                    Value::Null
+            let result = if self.debugger.is_some() {
+                self.interpret(stop).await?
+            } else {
+                let mut work = 0;
+                match self.run_batch(stop, &mut work) {
+                    Ok(BatchExit::GeneratorSuspended)
+                        if !self.pending_callbacks && !self.generator_releases_pending() =>
+                    {
+                        Value::Null
+                    }
+                    other => self.continue_execution(stop, work, Some(other)).await?,
                 }
-                other => self.continue_execution(stop, work, Some(other)).await?,
             };
             if self.call_stack.depth() == stop {
                 return Ok(Pause::Return(result));

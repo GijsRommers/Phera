@@ -20,7 +20,7 @@ pub(crate) struct Session {
     incoming: Option<Command>,
     disconnected: bool,
     polls: u16,
-    pub(super) position: Option<Position>,
+    positions: Vec<Option<Position>>,
     pub(super) force_break: bool,
     pub(super) breakpoints: Breakpoints,
     pub(super) features: Features,
@@ -29,12 +29,13 @@ pub(crate) struct Session {
     pub(super) last_exception: Option<u32>,
     pub(super) streams: Rc<Streams>,
     mode: Resume,
-    paused: bool,
+    pause_line: Option<u32>,
     time_limit: Option<DebugTimeLimit>,
 }
 
 pub(super) struct Stop {
     pub(super) location: String,
+    pub(super) line: u32,
     pub(super) unconditional: bool,
     pub(super) candidates: Vec<(u64, Option<Vec<u8>>)>,
 }
@@ -62,7 +63,7 @@ impl Session {
             incoming: None,
             disconnected: false,
             polls: 0,
-            position: None,
+            positions: Vec::new(),
             force_break: false,
             breakpoints: Breakpoints::default(),
             features: Features::default(),
@@ -71,7 +72,7 @@ impl Session {
             last_exception: None,
             streams: Rc::new(Streams::default()),
             mode: Resume::Run,
-            paused: false,
+            pause_line: None,
             time_limit,
         }
     }
@@ -85,6 +86,12 @@ impl Session {
         self.wire.write(&format!(
             r#"<init {NAMESPACES} fileuri="{file}" language="PHP" xdebug:language_version="{php}" protocol_version="1.0" appid="{pid}" idekey="{idekey}"><engine version="{version}">Phera</engine></init>"#
         )).await
+    }
+
+    /// Remember the caller's line when a callee runs and then returns.
+    pub(super) fn visit(&mut self, position: Position) -> Option<Position> {
+        self.positions.resize(position.depth, None);
+        self.positions.last_mut()?.replace(position)
     }
 
     pub(super) fn stepping(&self, depth: usize) -> bool {
@@ -124,7 +131,7 @@ impl Session {
             "status" => {
                 let status = if running {
                     "running"
-                } else if self.paused {
+                } else if self.pause_line.is_some() {
                     "break"
                 } else {
                     "starting"
@@ -183,7 +190,7 @@ impl Session {
             }
             _ if running => command.error(5, "command is unavailable while running"),
             _ => {
-                vm.debug_inspection(&command, &self.features, &self.file)
+                vm.debug_inspection(&command, &self.features, &self.file, self.pause_line)
                     .await
             }
         };
@@ -222,7 +229,7 @@ impl Session {
                 }
             }
             if should_stop && let Some(command) = self.pending.take() {
-                self.paused = true;
+                self.pause_line = Some(stop.line);
                 self.wire
                     .write(&command.response(r#" status="break" reason="ok""#, &stop.location))
                     .await?;

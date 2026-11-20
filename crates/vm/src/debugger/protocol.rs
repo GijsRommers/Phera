@@ -96,8 +96,16 @@ impl Command {
     }
 
     pub(super) fn error(&self, code: u16, message: &str) -> String {
+        self.error_response(code, message, "")
+    }
+
+    pub(super) fn error_with_status(&self, code: u16, message: &str, status: &str) -> String {
+        self.error_response(code, message, &format!(r#" status="{status}" reason="ok""#))
+    }
+
+    fn error_response(&self, code: u16, message: &str, attrs: &str) -> String {
         self.response(
-            "",
+            attrs,
             &format!(
                 r#"<error code="{code}"><message>{}</message></error>"#,
                 escape(message)

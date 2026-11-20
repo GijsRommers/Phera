@@ -10,7 +10,6 @@ use quick_xml::escape::escape;
 use crate::Vm;
 use crate::calls::execution_loop::{BatchExit, YIELD_AFTER_STEPS};
 use crate::code_table::FunctionIndex;
-use crate::fast::{ScalarStep, scalar_step};
 
 use super::breakpoints::Kind;
 use super::protocol::file_uri;
@@ -39,7 +38,7 @@ impl Vm {
         &mut self,
         stop: usize,
         work: &mut usize,
-    ) -> Result<BatchExit, NativeError> {
+    ) -> Result<Option<BatchExit>, NativeError> {
         loop {
             let frame = self
                 .current()
@@ -63,38 +62,23 @@ impl Vm {
                 .ok_or_else(|| internal_error!("missing debugger"))?;
             if self.debug_boundary(&mut debugger, position, instruction) {
                 self.debugger = Some(debugger);
-                return Ok(BatchExit::DebugCommand);
+                return Ok(None);
             }
             debugger.last_exception = None;
             self.debugger = Some(debugger);
-            let mut next = ip + 1;
-            let slots = self.registers.tail_mut(position.base);
-            let scalar = scalar_step::<true>(&instruction, slots, &mut next);
-            self.call_stack
-                .current_mut()
-                .ok_or_else(|| internal_error!("missing debug frame"))?
-                .set_ip(next);
-            self.executed_instructions += 1;
-            if scalar == ScalarStep::Fallback {
-                let exit = if self.generator_releases.is_some() {
-                    self.execute::<true>(instruction, stop, work)
-                } else {
-                    self.execute::<false>(instruction, stop, work)
-                }?;
-                if let Some(exit) = exit {
-                    return Ok(exit);
-                }
-            } else if next <= ip {
-                *work += 1;
+            if let Some(exit) = self.debug_instruction(instruction, stop, work)? {
+                return Ok(Some(exit));
             }
             if self.destructors_due() {
-                return Ok(BatchExit::Destructors);
+                return Ok(Some(BatchExit::Destructors));
             }
             if self.pending_callbacks || self.generator_releases_pending() {
-                return Ok(BatchExit::Handlers);
+                return Ok(Some(BatchExit::Handlers));
             }
             if *work >= YIELD_AFTER_STEPS {
-                return Ok(BatchExit::Yield);
+                *work = 0;
+                self.check_execution_time()?;
+                return Ok(Some(BatchExit::Yield));
             }
         }
     }
@@ -108,9 +92,13 @@ impl Vm {
         if debugger.poll_running() {
             return true;
         }
-        let previous = debugger.position.replace(position);
-        if previous
-            .is_some_and(|previous| position.same_frame(previous) && previous.ip == position.ip)
+        if !is_breakable(instruction) && !debugger.force_break {
+            return false;
+        }
+        let previous = debugger.visit(position);
+        if !debugger.force_break
+            && previous
+                .is_some_and(|previous| position.same_frame(previous) && previous.ip == position.ip)
         {
             return false;
         }
@@ -165,6 +153,7 @@ impl Vm {
                     escape(&file),
                     position.line,
                 ),
+                line: position.line,
                 unconditional: force || stepping,
                 candidates,
             });
@@ -178,18 +167,20 @@ impl Vm {
             .filter(|unit| file_uri(&unit.file) == file)
             .flat_map(|unit| std::iter::once(&unit.main).chain(&unit.functions))
             .flat_map(|function| function.instructions.iter().zip(&function.lines))
-            .filter(|(instruction, _)| {
-                !matches!(
-                    instruction,
-                    Instruction::Nop
-                        | Instruction::AttributeDiagnostics
-                        | Instruction::CheckType { .. }
-                        | Instruction::ReceiveDefault { .. }
-                        | Instruction::GeneratorStart
-                )
-            })
+            .filter(|(instruction, _)| is_breakable(**instruction))
             .map(|(_, line)| *line)
             .filter(|line| *line >= requested && *line != 0)
             .min()
     }
+}
+
+fn is_breakable(instruction: Instruction) -> bool {
+    !matches!(
+        instruction,
+        Instruction::AttributeDiagnostics
+            | Instruction::Nop
+            | Instruction::CheckType { .. }
+            | Instruction::ReceiveDefault { .. }
+            | Instruction::GeneratorStart
+    )
 }

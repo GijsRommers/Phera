@@ -1,15 +1,21 @@
 //! A VM owns one outgoing DBGp connection. Waiting for IDE commands suspends only that VM.
 
 mod breakpoints;
+mod closure;
 mod config;
+mod contexts;
 mod evaluate;
 mod exceptions;
 mod execution;
 mod features;
 mod inspection;
+pub(crate) mod php_api;
 mod properties;
+mod property_xml;
 mod protocol;
 mod session;
+mod source;
+mod stack;
 mod streams;
 mod time_limit;
 
