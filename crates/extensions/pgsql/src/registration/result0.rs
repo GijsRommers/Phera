@@ -60,7 +60,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         &[
             Param::new("result", ParamType::Class("PgSql\\Result")),
             Param::new("row", ParamType::Untyped),
-            Param::new("field", ParamType::IntOrString).with_default(ConstantValue::Null),
+            Param::new("field", ParamType::IntOrString).optional(),
         ],
         result::execute::<5>,
     ),
@@ -124,7 +124,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         &[
             Param::new("result", ParamType::Class("PgSql\\Result")),
             Param::new("row", ParamType::Untyped),
-            Param::new("field", ParamType::IntOrString).with_default(ConstantValue::Null),
+            Param::new("field", ParamType::IntOrString).optional(),
         ],
         result::execute::<15>,
     ),
@@ -133,7 +133,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         &[
             Param::new("result", ParamType::Class("PgSql\\Result")),
             Param::new("row", ParamType::Untyped),
-            Param::new("field", ParamType::IntOrString).with_default(ConstantValue::Null),
+            Param::new("field", ParamType::IntOrString).optional(),
         ],
         result::execute::<16>,
     ),

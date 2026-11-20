@@ -148,7 +148,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         "pg_parameter_status",
         &[
             Param::new("connection", ParamType::Untyped),
-            Param::new("name", ParamType::String).with_default(ConstantValue::Null),
+            Param::new("name", ParamType::String).optional(),
         ],
         information::asynchronous::<13>,
     ),
@@ -156,7 +156,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         "pg_set_client_encoding",
         &[
             Param::new("connection", ParamType::Untyped),
-            Param::new("encoding", ParamType::String).with_default(ConstantValue::Null),
+            Param::new("encoding", ParamType::String).optional(),
         ],
         information::asynchronous::<14>,
     ),

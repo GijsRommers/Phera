@@ -42,6 +42,12 @@ function rows($db) {
 }
 "#;
 const CALLS: &[(&str, &str)] = &[
+    (
+        "unknown-overload-defaults",
+        "array_map(fn($name) => array_map(fn($p) => $p->isDefaultValueAvailable(),
+            (new ReflectionFunction($name))->getParameters()),
+            ['pg_query', 'pg_execute', 'pg_escape_string', 'pg_fetch_result'])",
+    ),
     ("connection-status", "pg_connection_status($db)"),
     ("database", "pg_dbname($db)"),
     ("host", "pg_host($db)"),

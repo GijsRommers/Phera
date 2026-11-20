@@ -8,7 +8,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         "pg_escape_string",
         &[
             Param::new("connection", ParamType::Untyped),
-            Param::new("string", ParamType::String).with_default(ConstantValue::Null),
+            Param::new("string", ParamType::String).optional(),
         ],
         escape::escape::<0>,
     ),
@@ -16,7 +16,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         "pg_escape_literal",
         &[
             Param::new("connection", ParamType::Untyped),
-            Param::new("string", ParamType::String).with_default(ConstantValue::Null),
+            Param::new("string", ParamType::String).optional(),
         ],
         escape::escape::<1>,
     ),
@@ -24,7 +24,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         "pg_escape_identifier",
         &[
             Param::new("connection", ParamType::Untyped),
-            Param::new("string", ParamType::String).with_default(ConstantValue::Null),
+            Param::new("string", ParamType::String).optional(),
         ],
         escape::escape::<2>,
     ),
@@ -32,7 +32,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         "pg_escape_bytea",
         &[
             Param::new("connection", ParamType::Untyped),
-            Param::new("string", ParamType::String).with_default(ConstantValue::Null),
+            Param::new("string", ParamType::String).optional(),
         ],
         escape::escape::<3>,
     ),

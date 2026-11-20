@@ -8,7 +8,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         "pg_query",
         &[
             Param::new("connection", ParamType::Untyped),
-            Param::new("query", ParamType::String).with_default(ConstantValue::Null),
+            Param::new("query", ParamType::String).optional(),
         ],
         query::execute::<0, false>,
     ),
@@ -25,7 +25,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         &[
             Param::new("connection", ParamType::Untyped),
             Param::new("query", ParamType::Untyped),
-            Param::new("params", ParamType::Array).with_default(ConstantValue::Null),
+            Param::new("params", ParamType::Array).optional(),
         ],
         query::execute::<1, false>,
     ),
@@ -43,7 +43,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         &[
             Param::new("connection", ParamType::Untyped),
             Param::new("statement_name", ParamType::String),
-            Param::new("query", ParamType::String).with_default(ConstantValue::Null),
+            Param::new("query", ParamType::String).optional(),
         ],
         query::execute::<2, false>,
     ),
@@ -61,7 +61,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         &[
             Param::new("connection", ParamType::Untyped),
             Param::new("statement_name", ParamType::Untyped),
-            Param::new("params", ParamType::Array).with_default(ConstantValue::Null),
+            Param::new("params", ParamType::Array).optional(),
         ],
         query::execute::<3, false>,
     ),
