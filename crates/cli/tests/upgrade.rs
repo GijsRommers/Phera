@@ -42,6 +42,20 @@ async fn check_and_upgrade_a_copy_over_https() {
     );
     assert_eq!(fs::metadata(&executable).unwrap().ino(), original);
 
+    let current = run(&executable, &format!("{base}/current"), &ca, &["upgrade"]).await;
+    assert!(current.status.success(), "{current:?}");
+    assert!(String::from_utf8_lossy(&current.stdout).contains("already up to date"));
+
+    let missing = run(
+        &executable,
+        &base,
+        &ca,
+        &["upgrade", "--check", "--version", "888.0.0"],
+    )
+    .await;
+    assert!(!missing.status.success(), "{missing:?}");
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("404 Not Found"));
+
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o555)).unwrap();
     let refused = run(&executable, &base, &ca, &["upgrade"]).await;
     assert!(!refused.status.success(), "{refused:?}");
@@ -137,6 +151,12 @@ async fn release_server(
     assets.insert(
         "/latest".to_owned(),
         Bytes::from(format!(r#"{{"tag_name":"v{latest}"}}"#)),
+    );
+    assets.insert(
+        "/current/latest".to_owned(),
+        Bytes::from_static(
+            concat!(r#"{"tag_name":"v"#, env!("CARGO_PKG_VERSION"), r#""}"#).as_bytes(),
+        ),
     );
     for (version, corrupt) in [(latest, false), (previous, false), ("999.0.0", true)] {
         let platform = match (std::env::consts::OS, std::env::consts::ARCH) {

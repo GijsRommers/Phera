@@ -166,8 +166,8 @@ See [`docs/architecture.md`](docs/architecture.md) for the design and
 
 ## Install
 
-Once the first release is published, install Phera on macOS or glibc Linux
-(arm64 or x86_64) with:
+Once the first release is published, install Phera on macOS or Linux with
+glibc 2.35 or newer (arm64 or x86_64) with:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/GijsRommers/Phera/main/install.sh | sh
@@ -185,6 +185,7 @@ as `phera.old` next to the upgraded one.
 An HTTPS mirror can set `PHERA_RELEASE_BASE_URL` for both commands. Serve
 `latest` as JSON with a `tag_name` field and put the archives and
 `SHA256SUMS` under `download/<tag>/`, for example `download/v0.1.0/`.
+The upgrader expects the mirror to serve these files directly.
 
 ## 🛠️ Building
 

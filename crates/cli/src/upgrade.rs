@@ -108,7 +108,15 @@ async fn upgrade(options: Options) -> Result<()> {
         println!("Phera {current} is already up to date.");
         return Ok(());
     }
+
+    let archive_name = format!("phera-{target}-{platform}.tar.gz");
+    let release = base.join(&format!("download/v{target}/"))?;
+    let checksums = release.join("SHA256SUMS")?;
     if options.check {
+        if explicit {
+            let sums = client.get(checksums, METADATA_LIMIT).await?;
+            archive_checksum(str::from_utf8(&sums)?, &archive_name)?;
+        }
         println!("Installed Phera {current}. Available release: Phera {target}.");
         return Ok(());
     }
@@ -126,11 +134,7 @@ async fn upgrade(options: Options) -> Result<()> {
         )
     })?;
 
-    let archive_name = format!("phera-{target}-{platform}.tar.gz");
-    let release = base.join(&format!("download/v{target}/"))?;
-    let sums = client
-        .get(release.join("SHA256SUMS")?, METADATA_LIMIT)
-        .await?;
+    let sums = client.get(checksums, METADATA_LIMIT).await?;
     let archive = client
         .get(release.join(&archive_name)?, ARCHIVE_LIMIT)
         .await?;
@@ -164,6 +168,14 @@ fn platform(os: &str, arch: &str, glibc: bool) -> Option<&'static str> {
 }
 
 fn verify_checksum(sums: &str, name: &str, archive: &[u8]) -> Result<()> {
+    let digest = archive_checksum(sums, name)?;
+    if !digest.eq_ignore_ascii_case(&format!("{:x}", Sha256::digest(archive))) {
+        return Err(format!("SHA-256 verification failed for {name}.").into());
+    }
+    Ok(())
+}
+
+fn archive_checksum<'a>(sums: &'a str, name: &str) -> Result<&'a str> {
     let mut expected = sums.lines().filter_map(|line| {
         let (digest, filename) = line.split_once(char::is_whitespace)?;
         let filename = filename.trim_start();
@@ -174,11 +186,12 @@ fn verify_checksum(sums: &str, name: &str, archive: &[u8]) -> Result<()> {
         .next()
         .ok_or_else(|| format!("No SHA-256 for {name}."))?;
     if expected.next().is_some()
-        || !digest.eq_ignore_ascii_case(&format!("{:x}", Sha256::digest(archive)))
+        || digest.len() != 64
+        || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
     {
-        return Err(format!("SHA-256 verification failed for {name}.").into());
+        return Err(format!("Invalid SHA-256 entry for {name}.").into());
     }
-    Ok(())
+    Ok(digest)
 }
 
 fn check_install_location(executable: &Path, directory: &Path) -> Result<()> {

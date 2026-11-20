@@ -57,6 +57,7 @@ impl Client {
 
     async fn request(&self, url: &Url) -> Result<Response<Incoming>> {
         let host = url.host_str().ok_or("The release URL has no host.")?;
+        let host = host.trim_start_matches('[').trim_end_matches(']');
         let tcp = TcpStream::connect((host, url.port().unwrap_or(443))).await?;
         let stream = self.tls.connect(host.to_owned().try_into()?, tcp).await?;
         let (mut sender, connection) = http1::handshake(TokioIo::new(stream)).await?;
@@ -113,4 +114,30 @@ fn validate_redirect(url: &Url) -> Result<()> {
         return Err("Refused a release redirect outside GitHub HTTPS hosts.".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_github_https_redirects_are_allowed() {
+        for url in [
+            "http://github.com/",
+            "https://github.com.example.org/",
+            "https://github.com:1234/",
+            "https://user@github.com/",
+        ] {
+            assert!(
+                validate_redirect(&Url::parse(url).unwrap()).is_err(),
+                "{url}"
+            );
+        }
+        assert!(
+            validate_redirect(
+                &Url::parse("https://release-assets.githubusercontent.com/").unwrap()
+            )
+            .is_ok()
+        );
+    }
 }
