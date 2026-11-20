@@ -192,6 +192,35 @@ pub fn num_rows(_: &mut dyn Context, object: Option<&Rc<Object>>, _: &[Value]) -
     statements::properties::value(object.ok_or_else(missing)?, 2)
 }
 
+pub fn warnings<'a>(
+    context: &'a mut dyn Context,
+    object: Option<Rc<Object>>,
+    arguments: Vec<Value>,
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(async move {
+        let name = if object.is_some() {
+            "mysqli_stmt::get_warnings"
+        } else {
+            "mysqli_stmt_get_warnings"
+        };
+        let (receiver, _) = target(object.as_ref(), &arguments);
+        let handle = statements::handle(receiver.ok_or_else(missing)?)?;
+        let (connection, count) = {
+            let state = handle.borrow();
+            state.statement()?;
+            (state.connection.clone(), state.reply.warnings)
+        };
+        connection::commands::warnings(context, connection, count, name).await
+    })
+}
+
+pub fn warnings_function(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    warnings(context, None, arguments)
+}
+
 fn missing() -> NativeError {
     NativeError::error("mysqli_stmt object is missing")
 }

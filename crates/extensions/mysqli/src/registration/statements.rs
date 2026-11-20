@@ -5,7 +5,7 @@ mod functions1;
 mod methods0;
 
 use crate::statements;
-use phera_extension_api::{ClassEntry, MethodEntry, Registry};
+use phera_extension_api::{ClassEntry, FunctionEntry, MethodEntry, Param, ParamType, Registry};
 use phera_extension_api::{ClassHooks, NativeClone};
 
 const HOOKS: ClassHooks = ClassHooks {
@@ -26,10 +26,16 @@ pub fn register(registry: &mut Registry) {
     for &entry in functions1::ENTRIES {
         registry.function(entry);
     }
+    registry.function(FunctionEntry::asynchronous(
+        "mysqli_stmt_get_warnings",
+        const { &[Param::new("statement", ParamType::Class("mysqli_stmt"))] },
+        super::statement_dispatch::warnings_function,
+    ));
+    registry.describe_function("mysqli_stmt_get_warnings", "mysqli_warning|false", None);
 }
 
-const METHODS: [MethodEntry; 17] = {
-    let mut methods = [methods0::ENTRIES[0]; 17];
+const METHODS: [MethodEntry; 18] = {
+    let mut methods = [methods0::ENTRIES[0]; 18];
     let mut index = 0;
     let groups = [methods0::ENTRIES];
     let mut group = 0;

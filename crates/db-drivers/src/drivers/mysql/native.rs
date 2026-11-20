@@ -175,13 +175,14 @@ impl Mysql {
         }
 
         let columns = result.columns_ref().to_vec();
-        let reply = Reply {
+        let mut reply = Reply {
             affected: result.affected_rows(),
             insert_id: result.last_insert_id().unwrap_or(0),
             info: result.info().into_owned(),
             warnings: result.warnings(),
         };
         let rows = result.collect().await.map_err(error)?;
+        reply.warnings = result.warnings();
         result.drop_result().await.map_err(error)?;
         Ok(vec![Ok(buffered_outcome(columns, rows, reply))])
     }

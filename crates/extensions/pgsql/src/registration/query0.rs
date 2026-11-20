@@ -1,7 +1,7 @@
 //! PHP call signatures for query.
 
 use crate::query;
-use phera_extension_api::{ConstantValue, FunctionEntry, Param, ParamType};
+use phera_extension_api::{FunctionEntry, Param, ParamType};
 
 pub const ENTRIES: &[FunctionEntry] = &[
     FunctionEntry::asynchronous(

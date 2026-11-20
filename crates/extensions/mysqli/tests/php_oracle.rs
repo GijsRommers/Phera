@@ -48,6 +48,22 @@ function rows($db) {
 }
 "#;
 const CALLS: &[(&str, &str)] = &[
+    (
+        "prepared-insert-warnings",
+        "(function () use ($db) {
+            $db->query('CREATE TEMPORARY TABLE stmt_warnings_probe (n INT PRIMARY KEY)');
+            try {
+                $db->query('INSERT INTO stmt_warnings_probe VALUES (1)');
+                $stmt = $db->prepare('INSERT IGNORE INTO stmt_warnings_probe VALUES (1)');
+                $stmt->execute();
+                $method = $stmt->get_warnings();
+                $function = mysqli_stmt_get_warnings($stmt);
+                return [$method->errno, $method->sqlstate, $function->errno, $function->message];
+            } finally {
+                $db->query('DROP TEMPORARY TABLE stmt_warnings_probe');
+            }
+        })()",
+    ),
     ("deprecated-init-before-arity", "$db->init(0)"),
     ("deprecated-ping-before-arity", "$db->ping(0)"),
     (

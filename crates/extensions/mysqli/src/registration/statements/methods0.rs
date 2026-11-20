@@ -6,6 +6,8 @@ use phera_extension_api::{ConstantValue, MethodEntry, Param, ParamType};
 use super::super::statement_dispatch;
 
 pub const ENTRIES: &[MethodEntry] = &[
+    MethodEntry::public_async("get_warnings", &[], statement_dispatch::warnings)
+        .tentative_return("mysqli_warning|false"),
     MethodEntry::public("num_rows", &[], statement_dispatch::num_rows)
         .tentative_return("string|int"),
     MethodEntry::public_async(

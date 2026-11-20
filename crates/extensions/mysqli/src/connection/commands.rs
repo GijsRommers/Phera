@@ -46,8 +46,9 @@ pub async fn execute<const OP: usize>(
             "{call}(): Argument #{argument} ($process_id) must be greater than 0"
         )));
     }
-    if OP == WARNINGS && handle.borrow().reply.warnings == 0 {
-        return Ok(Value::Bool(false));
+    if OP == WARNINGS {
+        let count = handle.borrow().reply.warnings;
+        return warnings(context, handle, count, call).await;
     }
     if handle.borrow().waiting_for_result() {
         return failure(
@@ -73,12 +74,6 @@ pub async fn execute<const OP: usize>(
                         JOIN information_schema.COLLATIONS c USING (CHARACTER_SET_NAME) \
                         WHERE c.COLLATION_NAME = @@collation_connection";
                     return mysql.query_native(query, false).await.map(Answer::Results);
-                }
-                WARNINGS => {
-                    return mysql
-                        .query_native(b"SHOW WARNINGS", false)
-                        .await
-                        .map(Answer::Results);
                 }
                 _ => {
                     let sql = match OP {
@@ -111,21 +106,54 @@ pub async fn execute<const OP: usize>(
             let Some(Ok(outcome)) = results.pop() else {
                 return Ok(Value::Bool(false));
             };
-            if OP == WARNINGS || OP == GET_CHARSET {
+            if OP == GET_CHARSET {
                 let rows = outcome
                     .rows
                     .into_php()
                     .map_err(|error| NativeError::error(error.detail))?;
-                return if OP == WARNINGS {
-                    warning(context, rows.values)
-                } else {
-                    charset_object(context, &rows.values)
-                };
+                return charset_object(context, &rows.values);
             }
             state.observe(&outcome);
             Ok(Value::Bool(true))
         }
         Err(error) => failure(context, &mut state, error, call),
+    }
+}
+
+pub(crate) async fn warnings(
+    context: &mut dyn Context,
+    handle: Handle,
+    count: u16,
+    call: &str,
+) -> NativeResult {
+    let lease = handle.borrow().lease()?;
+    if count == 0 {
+        return Ok(Value::Bool(false));
+    }
+    if handle.borrow().waiting_for_result() {
+        return failure(
+            context,
+            &mut handle.borrow_mut(),
+            crate::errors::out_of_sync(),
+            call,
+        );
+    }
+    let fetched = run(&lease, |driver| {
+        Box::pin(async { driver.query_native(b"SHOW WARNINGS", false).await })
+    })
+    .await;
+    match fetched {
+        Ok(mut results) => {
+            let Some(Ok(outcome)) = results.pop() else {
+                return Ok(Value::Bool(false));
+            };
+            let rows = outcome
+                .rows
+                .into_php()
+                .map_err(|cause| NativeError::error(cause.detail))?;
+            warning(context, rows.values)
+        }
+        Err(error) => failure(context, &mut handle.borrow_mut(), error, call),
     }
 }
 
