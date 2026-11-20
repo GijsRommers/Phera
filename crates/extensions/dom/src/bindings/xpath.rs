@@ -126,13 +126,12 @@ fn evaluate<'a>(
         let (result, arena, id) = {
             let mut state_data = document.shared.borrow_mut();
             let original = &mut state_data.document.arena;
-            let id = context_node.as_ref().map(|node| node.id);
+            let element = context_node.as_ref().map(|node| node.id).or_else(|| {
+                original
+                    .children(Arena::DOCUMENT)
+                    .find(|&id| original[id].kind == Kind::Element)
+            });
             if state.auto && args::bool(&arguments, 2).unwrap_or(true) {
-                let element = id.or_else(|| {
-                    original
-                        .children(Arena::DOCUMENT)
-                        .find(|&id| original[id].kind == Kind::Element)
-                });
                 if let Some(element) = element {
                     let mut automatic = std::collections::HashSet::new();
                     for (prefix, uri) in node::namespace_scope(original, element) {
@@ -142,7 +141,7 @@ fn evaluate<'a>(
                     }
                 }
             }
-            let id = id.unwrap_or(Arena::DOCUMENT);
+            let id = element.unwrap_or(Arena::DOCUMENT);
             if callbacks {
                 if xpath::uses_namespace_axis(&source) {
                     original.prepare_xpath_namespaces(id);
