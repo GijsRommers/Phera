@@ -132,9 +132,11 @@ impl<'a> FrameView<'a> {
     /// How many registers belong to the frame: its declared registers plus
     /// variables created by name at run time.
     pub(crate) fn count(&self) -> usize {
+        // The facts hold the count, one load away; the function itself is
+        // reached through its file.
         self.extras
             .dynamic_count
-            .unwrap_or(self.function().registers as usize)
+            .unwrap_or(self.code.facts(self.frame.function).registers as usize)
     }
 
     /// Local operands address only this activation, excluding saved arguments.
@@ -226,6 +228,7 @@ impl<'a> FrameView<'a> {
     pub(crate) fn site_cache(
         &self,
     ) -> Option<&'a std::cell::RefCell<crate::unit_caches::CachedSite>> {
-        self.cache().site(self.function_id(), self.ip())
+        self.cache()
+            .site(self.code.facts(self.frame.function), self.ip())
     }
 }

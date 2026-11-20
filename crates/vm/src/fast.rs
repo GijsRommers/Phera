@@ -102,7 +102,7 @@ fn overwrite_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -
 
 /// Stores any result, dropping what the register held before.
 #[inline(always)]
-fn store<const GUARDED: bool>(
+pub(crate) fn store<const GUARDED: bool>(
     slots: &mut [Option<Value>],
     register: Reg,
     value: Value,
@@ -160,7 +160,7 @@ fn write_releasing(slot: &mut Option<Value>, value: Option<Value>) -> ScalarStep
 /// whose release can queue a callback. The four kinds are adjacent in `Value`,
 /// which makes this test a single comparison.
 #[inline(always)]
-fn owns_heap_values(slot: &Option<Value>) -> bool {
+pub(crate) fn owns_heap_values(slot: &Option<Value>) -> bool {
     matches!(
         slot,
         Some(Value::Array(_) | Value::Object(_) | Value::Resource(_) | Value::Reference(_))
