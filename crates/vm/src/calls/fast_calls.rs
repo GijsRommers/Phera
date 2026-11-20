@@ -330,7 +330,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let index = call.sent as usize;
-        let value = match self
+        let mut value = match self
             .registers
             .window(position.frame.base() + source.index(), 1)
         {
@@ -340,7 +340,8 @@ impl Machine<'_> {
         let accepted = match call.callee {
             PreparedCallee::Php(function) => {
                 !call.flags.contains(CallFlags::DETAILS)
-                    && self.accepts_argument(function, index, &value)
+                    && (self.accepts_argument(function, index, &value)
+                        || self.widen_argument(function, index, &mut value))
             }
             // One out-of-line arm for both, so that the match keeps the
             // shape the loop was laid out with.
@@ -358,6 +359,28 @@ impl Machine<'_> {
         self.registers.put(call.base() + index, value);
         call.mark_sent(index, true);
         Step::Done(position.ip)
+    }
+
+    /// An integer sent to a `float` parameter becomes that float, the one
+    /// conversion PHP makes in strict mode too, so that `new Vec($i, 0)`
+    /// for `float $x` stays in the loop. `false`, with `value` as it was,
+    /// for anything else.
+    #[cold]
+    #[inline(never)]
+    fn widen_argument(&self, function: FunctionIndex, index: usize, value: &mut Value) -> bool {
+        let facts = self.code.facts(function);
+        let Value::Int(integer) = *value else {
+            return false;
+        };
+        let widens = facts.takes_value(index)
+            && facts
+                .parameter_masks
+                .get(index)
+                .is_some_and(|mask| mask.intersects(phera_bytecode::TypeMask::FLOAT));
+        if widens {
+            *value = Value::Float(integer as f64);
+        }
+        widens
     }
 
     /// Whether parameter `index` of `function` takes `value` as it is, by
