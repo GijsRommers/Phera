@@ -1,6 +1,7 @@
 //! Compile statement constructs into ordered IR and patch their control-flow exits.
 
 use phera_ast as ast;
+use phera_bytecode::Reg;
 
 use crate::ir::{Constant, Instruction, Target};
 use crate::policies::DeclarationTiming;
@@ -54,6 +55,7 @@ impl Compiler<'_> {
         let key_register = key.as_ref().map(|_| self.allocate_register()).transpose()?;
         let value_register = self.allocate_register()?;
         let owned = self.temporaries_since(mark);
+        let subject_temporary = (!self.locals.values().any(|&local| local == src)).then_some(src);
         let place = if reference_subject {
             Some(if crate::writable(subject) {
                 self.place(subject)?
@@ -127,6 +129,7 @@ impl Compiler<'_> {
             cleanup: Some(super::exits::LoopCleanup::Foreach {
                 iterator: id,
                 owned,
+                subject: subject_temporary,
             }),
             breaks: vec![],
             continues: vec![],
@@ -139,8 +142,24 @@ impl Compiler<'_> {
         // PHP frees the loop's own copy of the subject and of the last
         // value when the loop ends (FE_FREE), so an object that only they
         // held is destroyed here.
-        self.clear_owning_temporaries(&owned, line);
+        self.clear_foreach_temporaries(&owned, subject_temporary, line);
 
         Ok(())
+    }
+
+    pub(super) fn clear_foreach_temporaries(
+        &mut self,
+        owned: &crate::expressions::operand_release::Temporaries,
+        subject: Option<Reg>,
+        line: usize,
+    ) {
+        let mut registers = self.owning_temporaries(owned);
+        // The body can overwrite the local from which the subject was copied.
+        if let Some(subject) = subject
+            && !registers.contains(&subject)
+        {
+            registers.insert(0, subject);
+        }
+        self.clear_registers(&registers, line);
     }
 }

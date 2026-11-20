@@ -22,7 +22,7 @@ pub use convert::{
     to_bool, to_float, to_int, to_php_string,
 };
 pub use cycles::{Garbage, find_garbage};
-pub use destruction::Destruction;
+pub use destruction::{Destruction, Doomed, ResourceRelease};
 pub use error::{
     CollectDiagnostics, DiagnosticKind, Diagnostics, ErrorKind, NoDiagnostics, OpError,
 };

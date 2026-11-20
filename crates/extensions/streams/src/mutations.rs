@@ -52,7 +52,29 @@ fn mkdir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let permissions = args::int(&arguments, 1).unwrap_or(0o777) as u32;
         let recursive = args::bool(&arguments, 2).unwrap_or(false);
         check_path("mkdir", "#1 ($directory)", name)?;
-        validate(args::value(&arguments, 3), "mkdir", 4)?;
+        let supplied = args::value(&arguments, 3);
+        validate(supplied, "mkdir", 4)?;
+        if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+            let supplied = if supplied.is_null() {
+                crate::context_options::default_for_wrapper(context)
+            } else {
+                supplied.clone()
+            };
+            let flags = crate::user_wrappers::REPORT_ERRORS | i64::from(recursive);
+            return crate::user_paths::method(
+                context,
+                wrapper,
+                "mkdir",
+                "mkdir",
+                vec![
+                    crate::user_paths::path(name),
+                    Value::Int(i64::from(permissions)),
+                    Value::Int(flags),
+                ],
+                supplied,
+            )
+            .await;
+        }
         let mask = files(context).mask;
         let result = local(context, "mkdir", name).map(|name| (name, permissions & !mask));
         let result = match result {
@@ -132,7 +154,21 @@ async fn remove(
         "#1 ($directory)"
     };
     check_path(function, parameter, name)?;
-    validate(args::value(&arguments, 1), function, 2)?;
+    let supplied = args::value(&arguments, 1);
+    validate(supplied, function, 2)?;
+    if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+        let supplied = if supplied.is_null() {
+            crate::context_options::default_for_wrapper(context)
+        } else {
+            supplied.clone()
+        };
+        let mut args = vec![crate::user_paths::path(name)];
+        if function == "rmdir" {
+            args.push(Value::Int(crate::user_wrappers::REPORT_ERRORS));
+        }
+        return crate::user_paths::method(context, wrapper, function, function, args, supplied)
+            .await;
+    }
     let result = match local(context, function, name) {
         Ok(name) => IoPolicy::Blocking.run(move || operation(name)).await?,
         Err(error) => Err(error),
@@ -169,7 +205,15 @@ pub fn local(context: &mut dyn Context, function: &str, name: &[u8]) -> io::Resu
         return Err(rustix::io::Errno::NOENT.into());
     }
     match Target::parse(name) {
-        Target::File(name) => directory(context).resolve(path(name)),
+        Target::File(name) if !crate::user_wrappers::file_disabled(context) => {
+            directory(context).resolve(path(name))
+        }
+        Target::File(_) => {
+            context.warning(format!(
+                "{function}(): file:// wrapper is disabled in the server configuration"
+            ));
+            Err(io::ErrorKind::Unsupported.into())
+        }
         Target::Unavailable(scheme) => {
             wrapper_warning(context, function, scheme);
             directory(context).resolve(path(name))

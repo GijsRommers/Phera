@@ -108,6 +108,12 @@ impl Vm {
         };
         let scope =
             self.with_argument_origin(origin, |vm| vm.closure_scope_argument(operation, scope))?;
+        if let Value::String(name) = &scope
+            && name.as_bytes() != b"static"
+            && self.classes.get(&name.to_string_lossy()).is_none()
+        {
+            self.lookup_class(&name.to_string_lossy()).await?;
+        }
         let Some(state) = self.rebind_closure(&object, new_this, &scope)? else {
             return Ok(Value::Null);
         };

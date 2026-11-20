@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use phera_bytecode::CompiledUnit;
-use phera_extension_api::LocalFuture;
 use phera_extension_api::ini::{boolean, integer};
+use phera_extension_api::{Context, LocalFuture, NativeError};
 
 /// The file spelling and the request state that affect its resolution.
 pub enum IncludeLookup<'a> {
@@ -155,6 +155,21 @@ pub(crate) fn path_spelling(bytes: &[u8]) -> std::borrow::Cow<'_, OsStr> {
 pub trait CodeLoader {
     fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>>;
 
+    fn wraps_include(&self, _context: &mut dyn Context, _path: &[u8]) -> bool {
+        false
+    }
+
+    /// A request stream can provide source without going through the filesystem cache.
+    fn load_stream<'a>(
+        &'a self,
+        _context: &'a mut dyn Context,
+        _path: &'a [u8],
+        _operation: &'a str,
+        _once: bool,
+    ) -> LocalFuture<'a, Result<StreamInclude, NativeError>> {
+        Box::pin(std::future::ready(Ok(StreamInclude::LocalFile)))
+    }
+
     fn load_include<'a>(
         &'a self,
         lookup: IncludeLookup<'a>,
@@ -186,6 +201,13 @@ pub trait CodeLoader {
     }
 }
 
+pub enum StreamInclude {
+    LocalFile,
+    Unavailable,
+    AlreadyIncluded,
+    Compiled(Result<Arc<CompiledUnit>, phera_compiler::CompileError>),
+}
+
 /// A cached include returns directly. Only unresolved paths need a future.
 pub enum IncludeLoad<'a> {
     Cached(Arc<CompiledUnit>),
@@ -210,6 +232,20 @@ pub enum CodeLoadError {
 impl<T: CodeLoader + ?Sized> CodeLoader for Arc<T> {
     fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
         self.as_ref().load(path)
+    }
+
+    fn wraps_include(&self, context: &mut dyn Context, path: &[u8]) -> bool {
+        self.as_ref().wraps_include(context, path)
+    }
+
+    fn load_stream<'a>(
+        &'a self,
+        context: &'a mut dyn Context,
+        path: &'a [u8],
+        operation: &'a str,
+        once: bool,
+    ) -> LocalFuture<'a, Result<StreamInclude, NativeError>> {
+        self.as_ref().load_stream(context, path, operation, once)
     }
 
     fn load_include<'a>(
