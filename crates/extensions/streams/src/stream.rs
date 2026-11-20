@@ -7,6 +7,7 @@ use std::io::{self, BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 
 use tempfile::TempPath;
 
+use crate::filters::{Filters, Flush};
 use crate::input::InputStream;
 use crate::io_policy::{CHUNK, IoPolicy};
 
@@ -60,6 +61,7 @@ pub struct Stream {
     pub path: Option<std::path::PathBuf>,
     /// `flock()` holds a lock through this stream's descriptor.
     pub locked: bool,
+    pub(crate) filters: Option<Box<Filters>>,
     appending: bool,
     writable: bool,
 }
@@ -89,6 +91,7 @@ impl Stream {
             data_header: None,
             path: None,
             locked: false,
+            filters: None,
             appending: mode.first() == Some(&b'a'),
             writable: mode.first() != Some(&b'r') || mode.contains(&b'+'),
         }
@@ -131,6 +134,11 @@ impl Stream {
     }
 
     pub fn unread(&self) -> usize {
+        if let Some(filters) = &self.filters
+            && (filters.read.active() || !filters.buffered.is_empty())
+        {
+            return filters.buffered.len();
+        }
         match &self.backing {
             Backing::File(file) => file.buffer().len(),
             Backing::Gzip(gzip) => gzip.unread(),
@@ -201,6 +209,57 @@ impl Stream {
     }
 
     fn read_bytes(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.filters.is_some() {
+            self.read_with_filters(buffer)
+        } else {
+            self.read_raw(buffer)
+        }
+    }
+
+    #[cold]
+    fn read_with_filters(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let Some(mut filters) = self.filters.take() else {
+            return self.read_raw(buffer);
+        };
+        let result = if filters.read.active() || !filters.buffered.is_empty() {
+            self.read_filtered(&mut filters, buffer)
+        } else {
+            self.read_raw(buffer)
+        };
+        self.filters = Some(filters);
+        result
+    }
+
+    fn read_filtered(&mut self, filters: &mut Filters, result: &mut [u8]) -> io::Result<usize> {
+        let mut block = [0; CHUNK];
+        let wanted = self.chunk_size.min(block.len());
+        while filters.buffered.len() < result.len().min(wanted) && !filters.read_closed {
+            let count = self.read_raw(&mut block[..wanted])?;
+            let flush = if count == 0 {
+                Flush::Closing
+            } else {
+                Flush::No
+            };
+            let bytes = filters
+                .read
+                .run(block[..count].to_vec(), flush, self.position)?;
+            filters.read_closed = count == 0;
+            if let Some(offset) = filters.read.take_seek()
+                && self.seek(SeekFrom::Start(offset)).is_ok()
+            {
+                filters.buffered.clear();
+            }
+            crate::filters::bounded(filters.buffered.len() + bytes.len())?;
+            filters.buffered.extend(bytes);
+        }
+        let count = result.len().min(filters.buffered.len());
+        for (output, byte) in result.iter_mut().zip(filters.buffered.drain(..count)) {
+            *output = byte;
+        }
+        Ok(count)
+    }
+
+    fn read_raw(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         match &mut self.backing {
             Backing::File(file) if !self.read_buffered && file.buffer().is_empty() => {
                 file.get_mut().read(buffer)
@@ -216,6 +275,25 @@ impl Stream {
     pub fn line(&mut self, limit: Option<u64>) -> io::Result<Vec<u8>> {
         let mut line = Vec::new();
         let limit = limit.unwrap_or(u64::MAX);
+        if self
+            .filters
+            .as_ref()
+            .is_some_and(|filters| filters.read.active() || !filters.buffered.is_empty())
+        {
+            let mut byte = [0];
+            while (line.len() as u64) < limit {
+                if self.read_bytes(&mut byte)? == 0 {
+                    self.eof = true;
+                    break;
+                }
+                line.push(byte[0]);
+                self.position += 1;
+                if byte[0] == b'\n' {
+                    break;
+                }
+            }
+            return Ok(line);
+        }
         match &mut self.backing {
             Backing::File(file) => file.take(limit).read_until(b'\n', &mut line)?,
             Backing::Gzip(gzip) => {
@@ -243,6 +321,62 @@ impl Stream {
     }
 
     pub fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self
+            .filters
+            .as_ref()
+            .is_some_and(|filters| filters.write.active())
+        {
+            self.filter_write(bytes, Flush::No)?;
+            return Ok(bytes.len());
+        }
+        self.write_raw(bytes)
+    }
+
+    pub(crate) fn filter_write(&mut self, bytes: &[u8], flush: Flush) -> io::Result<Vec<u8>> {
+        let Some(mut filters) = self.filters.take() else {
+            return Ok(Vec::new());
+        };
+        let result = (|| {
+            let mut output = Vec::new();
+            for chunk in bytes.chunks(CHUNK) {
+                let transformed = filters
+                    .write
+                    .run(chunk.to_vec(), Flush::No, self.position)?;
+                self.write_filter_output(&transformed)?;
+                if self.wrapper == Wrapper::Output {
+                    crate::filters::bounded(output.len() + transformed.len())?;
+                    output.extend(transformed);
+                }
+            }
+            if flush != Flush::No && filters.write.active() {
+                let transformed = filters.write.run(Vec::new(), flush, self.position)?;
+                if let Some(offset) = filters.write.take_seek() {
+                    let _ = self.seek(SeekFrom::Start(offset));
+                }
+                self.write_filter_output(&transformed)?;
+                if self.wrapper == Wrapper::Output {
+                    output.extend(transformed);
+                }
+            }
+            Ok(output)
+        })();
+        self.filters = Some(filters);
+        result
+    }
+
+    pub(crate) fn write_filter_output(&mut self, mut bytes: &[u8]) -> io::Result<()> {
+        while !bytes.is_empty() {
+            match self.write_raw(bytes) {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(written) => bytes = &bytes[written..],
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => (),
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    fn write_raw(&mut self, bytes: &[u8]) -> io::Result<usize> {
         if bytes.is_empty() {
             return Ok(0);
         }
@@ -323,10 +457,21 @@ impl Stream {
         };
         self.position = position;
         self.eof = false;
+        if let Some(filters) = &mut self.filters {
+            filters.buffered.clear();
+            filters.read_closed = false;
+        }
         Ok(position)
     }
 
     pub fn finish(&mut self) -> io::Result<()> {
+        if self
+            .filters
+            .as_ref()
+            .is_some_and(|filters| filters.write.active())
+        {
+            self.filter_write(&[], Flush::Closing)?;
+        }
         match &mut self.backing {
             Backing::Gzip(gzip) => gzip.finish(),
             _ => Ok(()),

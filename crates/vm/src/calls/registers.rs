@@ -7,6 +7,24 @@ use phera_value::Value;
 use crate::Vm;
 
 impl Vm {
+    /// An undefined CV supplies null. The warning handler can still change
+    /// the other operand before the operation uses it.
+    pub(crate) async fn warn_missing_operand(
+        &mut self,
+        register: Reg,
+    ) -> Result<bool, NativeError> {
+        if self
+            .current()
+            .and_then(|frame| frame.slots(&self.registers).get(register.index()))
+            .is_some_and(Option::is_some)
+        {
+            return Ok(false);
+        }
+        self.read_local(register);
+        self.drain_error_handlers().await?;
+        Ok(true)
+    }
+
     /// The value of a local variable, or `None` when it was never assigned.
     /// A PHP reference is followed to the value it points at.
     pub(crate) fn read_defined_local(&self, register: Reg) -> Option<Value> {

@@ -16,28 +16,36 @@ use crate::{This, receiver};
 
 pub(in crate::files) fn has_children(
     context: &mut dyn Context,
-    this: This<'_>,
-    arguments: &[Value],
-) -> NativeResult {
-    let (directory, location, follow) = get(receiver(this)?, |dir| {
-        (
-            !dir.filename().is_empty() && !dot(dir.filename()),
-            dir.location(),
-            dir.flags & FOLLOW_LINKS != 0,
-        )
-    })?;
-    if !directory {
-        return Ok(Value::Bool(false));
-    }
-    let pathname = location.pathname.as_bytes();
-    let method = "RecursiveDirectoryIterator::hasChildren";
-    if !follow
-        && !args::bool(arguments, 0).unwrap_or_default()
-        && to_bool(&FileStatus::IsLink.get(context, pathname, method)?)
-    {
-        return Ok(Value::Bool(false));
-    }
-    FileStatus::IsDirectory.get(context, pathname, method)
+    this: Option<Rc<Object>>,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let (directory, location, follow) = get(receiver(this.as_ref())?, |dir| {
+            (
+                !dir.filename().is_empty() && !dot(dir.filename()),
+                dir.location(),
+                dir.flags & FOLLOW_LINKS != 0,
+            )
+        })?;
+        if !directory {
+            return Ok(Value::Bool(false));
+        }
+        let pathname = location.pathname.as_bytes();
+        let method = "RecursiveDirectoryIterator::hasChildren";
+        if !follow
+            && !args::bool(&arguments, 0).unwrap_or_default()
+            && to_bool(
+                &FileStatus::IsLink
+                    .get_async(context, pathname, method)
+                    .await?,
+            )
+        {
+            return Ok(Value::Bool(false));
+        }
+        FileStatus::IsDirectory
+            .get_async(context, pathname, method)
+            .await
+    })
 }
 
 pub(in crate::files) fn children(

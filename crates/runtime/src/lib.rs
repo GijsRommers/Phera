@@ -21,6 +21,7 @@ mod ini_tests;
 mod native_parameter_tests;
 #[cfg(test)]
 mod native_trace_tests;
+mod platform;
 mod preload;
 #[cfg(test)]
 mod process_oracle_tests;
@@ -45,6 +46,7 @@ use worker_code_cache::{RequestCodeCache, WorkerCodeCache};
 pub use boot::BootReport;
 pub use error::RuntimeError;
 pub use http::{HttpRequest, HttpResponse};
+pub use phera_extension_api::web_log::flush as flush_web_log;
 pub use phera_vm::OutputSink;
 pub use preload::PreloadSummary;
 pub use snapshots::{remembered as snapshot_remembered, requests_from_the_top};

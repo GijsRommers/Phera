@@ -42,6 +42,20 @@ Usage:
   phera --dump <file.php>                 print the compiled bytecode
   phera check [OPTIONS] <paths...>        type-check PHP (see check --help)
   phera lint [OPTIONS] [paths...]         lint PHP (see lint --help)
+  phera install [--no-dev] [--frozen-lockfile] [--offline] [-o]
+  phera update [packages...] [-W] [--dry-run] [--lock]
+  phera add vendor/package[:constraint]... [--dev]
+  phera remove vendor/package...
+  phera audit [--locked] [--no-dev] [--format table|json]
+  phera why vendor/package
+  phera why-not vendor/package version
+  phera outdated [--all]
+  phera show [vendor/package]
+  phera licenses
+  phera validate
+  phera run-script name [arguments...]
+  phera exec binary [arguments...]
+  phera dump-autoload [-o] [--no-dev]
   phera upgrade [OPTIONS]                 update Phera (see upgrade --help)
   phera --version
 
@@ -59,6 +73,7 @@ pub(crate) enum Command {
         script: String,
     },
     Serve(ServeOptions),
+    Packages(Vec<String>),
     Help(&'static str),
     Check(phera_analyzer::config::Options),
     Lint(phera_analyzer::lint::Command),
@@ -129,6 +144,11 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             arguments.next();
             parse_new(arguments).map(Command::New)
         }
+        Some(
+            "install" | "update" | "add" | "require" | "remove" | "audit" | "why" | "why-not"
+            | "outdated" | "show" | "licenses" | "validate" | "run-script" | "exec"
+            | "dump-autoload",
+        ) => Ok(Command::Packages(arguments.collect())),
         Some("upgrade") => {
             arguments.next();
             command_with_help(arguments, crate::upgrade::HELP, |args| {
@@ -136,8 +156,19 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             })
         }
         Some(_) => {
-            // `phera run file.php` and `phera file.php` mean the same.
-            arguments.next_if(|argument| argument == "run");
+            let named = arguments.next_if(|argument| argument == "run").is_some();
+            if named
+                && matches!(&files, FileSelection::Automatic)
+                && ini.is_empty()
+                && arguments
+                    .peek()
+                    .is_some_and(|name| crate::packages::is_script(name))
+            {
+                let args = std::iter::once("run-script".to_owned())
+                    .chain(arguments)
+                    .collect();
+                return Ok(Command::Packages(args));
+            }
             leading_options(&mut arguments, &mut files, &mut ini)?;
             let arguments: Vec<String> = arguments.collect();
             let script = arguments.first().cloned().ok_or("No script given.")?;

@@ -13,6 +13,10 @@ use std::process::Command;
 
 use phera_runtime::{BootReport, HttpRequest, Runtime, WebWorker};
 
+mod snapshots {
+    mod streams;
+}
+
 /// A directory of PHP files that is removed when the test ends.
 struct Site {
     root: PathBuf,

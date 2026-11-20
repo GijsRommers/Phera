@@ -17,12 +17,16 @@ mod directory_class;
 mod errors;
 mod file_attributes;
 pub mod file_io;
+mod filtered_files;
+mod filters;
 mod formatted;
 mod glob;
 mod gzip;
 pub use gzip::register as register_gzip_functions;
 mod handles;
 mod include_path;
+mod include_stream;
+pub use include_stream::{IncludeSource, include_source, wraps_include};
 mod ini;
 mod input;
 mod io_policy;
@@ -46,6 +50,12 @@ mod stream_options;
 mod temporary;
 mod terminal;
 mod transfer;
+mod user_directory;
+mod user_file;
+mod user_paths;
+mod user_resource;
+mod user_stat;
+mod user_wrappers;
 mod whole_file;
 mod whole_write;
 mod wrapper;
@@ -80,6 +90,9 @@ impl Extension for Streams {
         registry.fork_state::<request::Files>(request::fork_files);
         registry.fork_resource("stream", stream_fork::fork_stream);
         registry.fork_resource("stream-context", context_options::fork_context);
+        user_file::register_fork(registry);
+        user_stat::register_fork(registry);
+        user_resource::register(registry);
         registry.fork_state::<phera_extension_api::WorkingDirectory>(
             phera_extension_api::copy_state::<phera_extension_api::WorkingDirectory>,
         );
@@ -90,6 +103,7 @@ impl Extension for Streams {
         directory::register(registry);
         directory_class::register(registry);
         file_attributes::register(registry);
+        filters::register(registry);
         formatted::register(registry);
         glob::register(registry);
         handles::register(registry);
@@ -108,6 +122,7 @@ impl Extension for Streams {
         select::register(registry);
         temporary::register(registry);
         transfer::register(registry);
+        user_wrappers::register(registry);
         whole_file::register(registry);
     }
 }
