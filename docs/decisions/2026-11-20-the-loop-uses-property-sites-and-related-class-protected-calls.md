@@ -27,6 +27,6 @@ PHP's rule accepts.
 
 ## Turned down
 
-A second, loop-owned cache (two records of one decision); making the VM
-fill sites for `$this->items[$k]` reads (its error paths differ and would
-need their own review).
+A second, loop-owned cache (two records of one decision). (Sites for
+`$this->items[$k]` reads were first left out; see
+`2026-11-20-the-vm-records-sites-for-property-element-reads.md`.)
