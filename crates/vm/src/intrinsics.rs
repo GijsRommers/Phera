@@ -11,7 +11,6 @@ pub(crate) enum Intrinsic {
     /// Request-level PHP handlers use VM callable resolution.
     Handler(crate::error_handlers::HandlerFunction),
     /// Path basename is needed to inspect portable Throwable locations.
-    Basename,
     /// Linked class introspection needs VM metadata.
     Class(crate::class_intrinsics::ClassFunction),
     /// SPL loaders belong to the current request.
@@ -75,7 +74,6 @@ impl Intrinsic {
             }
             "clone" => Self::Clone,
             "array_map" => Self::ArrayMap,
-            "basename" => Self::Basename,
             "is_callable" => Self::IsCallable,
             "call_user_func" => Self::CallUserFunc,
             "call_user_func_array" => Self::CallUserFuncArray,
@@ -126,7 +124,6 @@ impl Intrinsic {
             Self::CallUserFuncArray => &["callback", "args"],
             Self::Clone => &["object", "withProperties"],
             Self::ArrayMap => &["callback", "array", "arrays"],
-            Self::Basename => &["path", "suffix"],
             Self::Compact => &["var_name", "var_names"],
             Self::Extract => &["array", "flags", "prefix"],
             Self::Define => &["constant_name", "value", "case_insensitive"],
@@ -154,7 +151,6 @@ impl Intrinsic {
     pub(crate) fn names() -> impl Iterator<Item = &'static str> {
         [
             "array_map",
-            "basename",
             "is_callable",
             "call_user_func",
             "call_user_func_array",
