@@ -847,6 +847,10 @@ exception::getprevious	Zend/zend_exceptions.stub.php:61
 exception::gettrace	Zend/zend_exceptions.stub.php:59
 exception::gettraceasstring	Zend/zend_exceptions.stub.php:63
 exec	ext/standard/basic_functions.stub.php:2687	command	r--		-	output	o-&	null	n	result_code	o-&	null	n
+exif_imagetype	ext/exif/exif.stub.php:30	filename	r--		-
+exif_read_data	ext/exif/exif.stub.php:19	file	r--		-	required_sections	o--	null	n	as_arrays	o--	false	f	read_thumbnail	o--	false	f
+exif_tagname	ext/exif/exif.stub.php:12	index	r--		-
+exif_thumbnail	ext/exif/exif.stub.php:28	file	r--		-	width	o-&	null	n	height	o-&	null	n	image_type	o-&	null	n
 exit	Zend/zend_builtin_functions.stub.php:13	status	o--	0	i0
 exp	ext/standard/basic_functions.stub.php:3187	num	r--		-
 explode	ext/standard/basic_functions.stub.php:2329	separator	r--		-	string	r--		-	limit	o--	PHP_INT_MAX	i9223372036854775807
@@ -903,6 +907,15 @@ filteriterator::__construct	ext/spl/spl_iterators.stub.php:153	iterator	r--		-
 filteriterator::accept	ext/spl/spl_iterators.stub.php:151
 filteriterator::next	ext/spl/spl_iterators.stub.php:159
 filteriterator::rewind	ext/spl/spl_iterators.stub.php:156
+finfo::__construct	ext/fileinfo/fileinfo.stub.php:69	flags	o--	FILEINFO_NONE	i0	magic_database	o--	null	n
+finfo::buffer	ext/fileinfo/fileinfo.stub.php:83	string	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo::file	ext/fileinfo/fileinfo.stub.php:76	filename	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo::set_flags	ext/fileinfo/fileinfo.stub.php:89	flags	r--		-
+finfo_buffer	ext/fileinfo/fileinfo.stub.php:110	finfo	r--		-	string	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo_close	ext/fileinfo/fileinfo.stub.php:96	finfo	r--		-
+finfo_file	ext/fileinfo/fileinfo.stub.php:104	finfo	r--		-	filename	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo_open	ext/fileinfo/fileinfo.stub.php:93	flags	o--	FILEINFO_NONE	i0	magic_database	o--	null	n
+finfo_set_flags	ext/fileinfo/fileinfo.stub.php:98	finfo	r--		-	flags	r--		-
 floatval	ext/standard/basic_functions.stub.php:3592	value	r--		-
 flock	ext/standard/basic_functions.stub.php:2717	stream	r--		-	operation	r--		-	would_block	o-&	null	n
 floor	ext/standard/basic_functions.stub.php:3107	num	r--		-
@@ -937,6 +950,7 @@ gc_enable	Zend/zend_builtin_functions.stub.php:211
 gc_enabled	Zend/zend_builtin_functions.stub.php:209
 gc_mem_caches	Zend/zend_builtin_functions.stub.php:205
 gc_status	Zend/zend_builtin_functions.stub.php:219
+gd_info	ext/gd/gd.stub.php:478
 generator::__debuginfo	Zend/zend_generators.stub.php:27
 generator::current	Zend/zend_generators.stub.php:15
 generator::getreturn	Zend/zend_generators.stub.php:25
@@ -1146,6 +1160,113 @@ idn_to_utf8	ext/intl/php_intl.stub.php:457	domain	r--		-	flags	o--	IDNA_DEFAULT	
 ignore_user_abort	ext/standard/basic_functions.stub.php:2023	enable	o--	null	n
 image_type_to_extension	ext/standard/basic_functions.stub.php:3020	image_type	r--		-	include_dot	o--	true	t
 image_type_to_mime_type	ext/standard/basic_functions.stub.php:3014	image_type	r--		-
+imageaffine	ext/gd/gd.stub.php:762	image	r--		-	affine	r--		-	clip	o--	null	n
+imageaffinematrixconcat	ext/gd/gd.stub.php:775	matrix1	r--		-	matrix2	r--		-
+imageaffinematrixget	ext/gd/gd.stub.php:769	type	r--		-	options	r--		-
+imagealphablending	ext/gd/gd.stub.php:501	image	r--		-	enable	r--		-
+imageantialias	ext/gd/gd.stub.php:750	image	r--		-	enable	r--		-
+imagearc	ext/gd/gd.stub.php:665	image	r--		-	center_x	r--		-	center_y	r--		-	width	r--		-	height	r--		-	start_angle	r--		-	end_angle	r--		-	color	r--		-
+imageavif	ext/gd/gd.stub.php:595	image	r--		-	file	o--	null	n	quality	o--	-1	i-1	speed	o--	-1	i-1
+imagebmp	ext/gd/gd.stub.php:624	image	r--		-	file	o--	null	n	compressed	o--	true	t
+imagechar	ext/gd/gd.stub.php:689	image	r--		-	font	r--		-	x	r--		-	y	r--		-	char	r--		-	color	r--		-
+imagecharup	ext/gd/gd.stub.php:691	image	r--		-	font	r--		-	x	r--		-	y	r--		-	char	r--		-	color	r--		-
+imagecolorallocate	ext/gd/gd.stub.php:629	image	r--		-	red	r--		-	green	r--		-	blue	r--		-
+imagecolorallocatealpha	ext/gd/gd.stub.php:507	image	r--		-	red	r--		-	green	r--		-	blue	r--		-	alpha	r--		-
+imagecolorat	ext/gd/gd.stub.php:633	image	r--		-	x	r--		-	y	r--		-
+imagecolorclosest	ext/gd/gd.stub.php:635	image	r--		-	red	r--		-	green	r--		-	blue	r--		-
+imagecolorclosestalpha	ext/gd/gd.stub.php:511	image	r--		-	red	r--		-	green	r--		-	blue	r--		-	alpha	r--		-
+imagecolorclosesthwb	ext/gd/gd.stub.php:637	image	r--		-	red	r--		-	green	r--		-	blue	r--		-
+imagecolordeallocate	ext/gd/gd.stub.php:639	image	r--		-	color	r--		-
+imagecolorexact	ext/gd/gd.stub.php:643	image	r--		-	red	r--		-	green	r--		-	blue	r--		-
+imagecolorexactalpha	ext/gd/gd.stub.php:513	image	r--		-	red	r--		-	green	r--		-	blue	r--		-	alpha	r--		-
+imagecolormatch	ext/gd/gd.stub.php:493	image1	r--		-	image2	r--		-
+imagecolorresolve	ext/gd/gd.stub.php:641	image	r--		-	red	r--		-	green	r--		-	blue	r--		-
+imagecolorresolvealpha	ext/gd/gd.stub.php:509	image	r--		-	red	r--		-	green	r--		-	blue	r--		-	alpha	r--		-
+imagecolorset	ext/gd/gd.stub.php:645	image	r--		-	color	r--		-	red	r--		-	green	r--		-	blue	r--		-	alpha	o--	0	i0
+imagecolorsforindex	ext/gd/gd.stub.php:651	image	r--		-	color	r--		-
+imagecolorstotal	ext/gd/gd.stub.php:673	image	r--		-
+imagecolortransparent	ext/gd/gd.stub.php:675	image	r--		-	color	o--	null	n
+imageconvolution	ext/gd/gd.stub.php:746	image	r--		-	matrix	r--		-	divisor	r--		-	offset	r--		-
+imagecopy	ext/gd/gd.stub.php:697	dst_image	r--		-	src_image	r--		-	dst_x	r--		-	dst_y	r--		-	src_x	r--		-	src_y	r--		-	src_width	r--		-	src_height	r--		-
+imagecopymerge	ext/gd/gd.stub.php:699	dst_image	r--		-	src_image	r--		-	dst_x	r--		-	dst_y	r--		-	src_x	r--		-	src_y	r--		-	src_width	r--		-	src_height	r--		-	pct	r--		-
+imagecopymergegray	ext/gd/gd.stub.php:701	dst_image	r--		-	src_image	r--		-	dst_x	r--		-	dst_y	r--		-	src_x	r--		-	src_y	r--		-	src_width	r--		-	src_height	r--		-	pct	r--		-
+imagecopyresampled	ext/gd/gd.stub.php:515	dst_image	r--		-	src_image	r--		-	dst_x	r--		-	dst_y	r--		-	src_x	r--		-	src_y	r--		-	dst_width	r--		-	dst_height	r--		-	src_width	r--		-	src_height	r--		-
+imagecopyresized	ext/gd/gd.stub.php:703	dst_image	r--		-	src_image	r--		-	dst_x	r--		-	dst_y	r--		-	src_x	r--		-	src_y	r--		-	dst_width	r--		-	dst_height	r--		-	src_width	r--		-	src_height	r--		-
+imagecreate	ext/gd/gd.stub.php:535	width	r--		-	height	r--		-
+imagecreatefromavif	ext/gd/gd.stub.php:545	filename	r--		-
+imagecreatefrombmp	ext/gd/gd.stub.php:587	filename	r--		-
+imagecreatefromgd	ext/gd/gd.stub.php:578	filename	r--		-
+imagecreatefromgd2	ext/gd/gd.stub.php:581	filename	r--		-
+imagecreatefromgd2part	ext/gd/gd.stub.php:584	filename	r--		-	x	r--		-	y	r--		-	width	r--		-	height	r--		-
+imagecreatefromgif	ext/gd/gd.stub.php:549	filename	r--		-
+imagecreatefromjpeg	ext/gd/gd.stub.php:553	filename	r--		-
+imagecreatefrompng	ext/gd/gd.stub.php:558	filename	r--		-
+imagecreatefromstring	ext/gd/gd.stub.php:541	data	r--		-
+imagecreatefromtga	ext/gd/gd.stub.php:589	filename	r--		-
+imagecreatefromwbmp	ext/gd/gd.stub.php:575	filename	r--		-
+imagecreatefromwebp	ext/gd/gd.stub.php:563	filename	r--		-
+imagecreatefromxbm	ext/gd/gd.stub.php:567	filename	r--		-
+imagecreatefromxpm	ext/gd/gd.stub.php:571	filename	r--		-
+imagecreatetruecolor	ext/gd/gd.stub.php:485	width	r--		-	height	r--		-
+imagecrop	ext/gd/gd.stub.php:753	image	r--		-	rectangle	r--		-
+imagecropauto	ext/gd/gd.stub.php:756	image	r--		-	mode	o--	IMG_CROP_DEFAULT	i0	threshold	o--	0.5	d0.5	color	o--	-1	i-1
+imagedashedline	ext/gd/gd.stub.php:659	image	r--		-	x1	r--		-	y1	r--		-	x2	r--		-	y2	r--		-	color	r--		-
+imagedestroy	ext/gd/gd.stub.php:627	image	r--		-
+imageellipse	ext/gd/gd.stub.php:667	image	r--		-	center_x	r--		-	center_y	r--		-	width	r--		-	height	r--		-	color	r--		-
+imagefill	ext/gd/gd.stub.php:671	image	r--		-	x	r--		-	y	r--		-	color	r--		-
+imagefilledarc	ext/gd/gd.stub.php:499	image	r--		-	center_x	r--		-	center_y	r--		-	width	r--		-	height	r--		-	start_angle	r--		-	end_angle	r--		-	color	r--		-	style	r--		-
+imagefilledellipse	ext/gd/gd.stub.php:497	image	r--		-	center_x	r--		-	center_y	r--		-	width	r--		-	height	r--		-	color	r--		-
+imagefilledpolygon	ext/gd/gd.stub.php:683	image	r--		-	points	r--		-	num_points_or_color	r--		-	color	o--	null	n
+imagefilledrectangle	ext/gd/gd.stub.php:663	image	r--		-	x1	r--		-	y1	r--		-	x2	r--		-	y2	r--		-	color	r--		-
+imagefilltoborder	ext/gd/gd.stub.php:669	image	r--		-	x	r--		-	y	r--		-	border_color	r--		-	color	r--		-
+imagefilter	ext/gd/gd.stub.php:744	image	r--		-	filter	r--		-	args	ov-		-
+imageflip	ext/gd/gd.stub.php:748	image	r--		-	mode	r--		-
+imagefontheight	ext/gd/gd.stub.php:687	font	r--		-
+imagefontwidth	ext/gd/gd.stub.php:685	font	r--		-
+imageftbbox	ext/gd/gd.stub.php:722	size	r--		-	angle	r--		-	font_filename	r--		-	string	r--		-	options	o--	[]	a
+imagefttext	ext/gd/gd.stub.php:728	image	r--		-	size	r--		-	angle	r--		-	x	r--		-	y	r--		-	color	r--		-	font_filename	r--		-	text	r--		-	options	o--	[]	a
+imagegammacorrect	ext/gd/gd.stub.php:653	image	r--		-	input_gamma	r--		-	output_gamma	r--		-
+imagegd	ext/gd/gd.stub.php:619	image	r--		-	file	o--	null	n
+imagegd2	ext/gd/gd.stub.php:621	image	r--		-	file	o--	null	n	chunk_size	o--	128	i128	mode	o--	IMG_GD2_RAW	i1
+imagegetclip	ext/gd/gd.stub.php:715	image	r--		-
+imagegetinterpolation	ext/gd/gd.stub.php:777	image	r--		-
+imagegif	ext/gd/gd.stub.php:599	image	r--		-	file	o--	null	n
+imagegrabscreen	ext/gd/gd.stub.php:523
+imagegrabwindow	ext/gd/gd.stub.php:520	handle	r--		-	client_area	o--	false	f
+imageinterlace	ext/gd/gd.stub.php:677	image	r--		-	enable	o--	null	n
+imageistruecolor	ext/gd/gd.stub.php:487	image	r--		-
+imagejpeg	ext/gd/gd.stub.php:613	image	r--		-	file	o--	null	n	quality	o--	-1	i-1
+imagelayereffect	ext/gd/gd.stub.php:505	image	r--		-	effect	r--		-
+imageline	ext/gd/gd.stub.php:657	image	r--		-	x1	r--		-	y1	r--		-	x2	r--		-	y2	r--		-	color	r--		-
+imageloadfont	ext/gd/gd.stub.php:480	filename	r--		-
+imageopenpolygon	ext/gd/gd.stub.php:681	image	r--		-	points	r--		-	num_points_or_color	r--		-	color	o--	null	n
+imagepalettecopy	ext/gd/gd.stub.php:631	dst	r--		-	src	r--		-
+imagepalettetotruecolor	ext/gd/gd.stub.php:491	image	r--		-
+imagepng	ext/gd/gd.stub.php:603	image	r--		-	file	o--	null	n	quality	o--	-1	i-1	filters	o--	-1	i-1
+imagepolygon	ext/gd/gd.stub.php:679	image	r--		-	points	r--		-	num_points_or_color	r--		-	color	o--	null	n
+imagerectangle	ext/gd/gd.stub.php:661	image	r--		-	x1	r--		-	y1	r--		-	x2	r--		-	y2	r--		-	color	r--		-
+imageresolution	ext/gd/gd.stub.php:785	image	r--		-	resolution_x	o--	null	n	resolution_y	o--	null	n
+imagerotate	ext/gd/gd.stub.php:528	image	r--		-	angle	r--		-	background_color	r--		-
+imagesavealpha	ext/gd/gd.stub.php:503	image	r--		-	enable	r--		-
+imagescale	ext/gd/gd.stub.php:759	image	r--		-	width	r--		-	height	o--	-1	i-1	mode	o--	IMG_BILINEAR_FIXED	i3
+imagesetbrush	ext/gd/gd.stub.php:532	image	r--		-	brush	r--		-
+imagesetclip	ext/gd/gd.stub.php:709	image	r--		-	x1	r--		-	y1	r--		-	x2	r--		-	y2	r--		-
+imagesetinterpolation	ext/gd/gd.stub.php:779	image	r--		-	method	o--	IMG_BILINEAR_FIXED	i3
+imagesetpixel	ext/gd/gd.stub.php:655	image	r--		-	x	r--		-	y	r--		-	color	r--		-
+imagesetstyle	ext/gd/gd.stub.php:482	image	r--		-	style	r--		-
+imagesetthickness	ext/gd/gd.stub.php:495	image	r--		-	thickness	r--		-
+imagesettile	ext/gd/gd.stub.php:530	image	r--		-	tile	r--		-
+imagestring	ext/gd/gd.stub.php:693	image	r--		-	font	r--		-	x	r--		-	y	r--		-	string	r--		-	color	r--		-
+imagestringup	ext/gd/gd.stub.php:695	image	r--		-	font	r--		-	x	r--		-	y	r--		-	string	r--		-	color	r--		-
+imagesx	ext/gd/gd.stub.php:705	image	r--		-
+imagesy	ext/gd/gd.stub.php:707	image	r--		-
+imagetruecolortopalette	ext/gd/gd.stub.php:489	image	r--		-	dither	r--		-	num_colors	r--		-
+imagettfbbox	ext/gd/gd.stub.php:734	size	r--		-	angle	r--		-	font_filename	r--		-	string	r--		-	options	o--	[]	a
+imagettftext	ext/gd/gd.stub.php:740	image	r--		-	size	r--		-	angle	r--		-	x	r--		-	y	r--		-	color	r--		-	font_filename	r--		-	text	r--		-	options	o--	[]	a
+imagetypes	ext/gd/gd.stub.php:538
+imagewbmp	ext/gd/gd.stub.php:617	image	r--		-	file	o--	null	n	foreground_color	o--	null	n
+imagewebp	ext/gd/gd.stub.php:608	image	r--		-	file	o--	null	n	quality	o--	-1	i-1
+imagexbm	ext/gd/gd.stub.php:591	image	r--		-	filename	r--		-	foreground_color	o--	null	n
 implode	ext/standard/basic_functions.stub.php:2336	separator	r--		-	array	o--	null	n
 in_array	ext/standard/basic_functions.stub.php:1618	needle	r--		-	haystack	r--		-	strict	o--	false	f
 inet_ntop	ext/standard/basic_functions.stub.php:2211	ip	r--		-
@@ -1673,6 +1794,7 @@ mhash_get_block_size	ext/hash/hash.stub.php:74	algo	r--		-
 mhash_get_hash_name	ext/hash/hash.stub.php:80	algo	r--		-
 mhash_keygen_s2k	ext/hash/hash.stub.php:86	algo	r--		-	password	r--		-	salt	r--		-	length	r--		-
 microtime	ext/standard/basic_functions.stub.php:3266	as_float	o--	false	f
+mime_content_type	ext/fileinfo/fileinfo.stub.php:116	filename	r--		-
 min	ext/standard/basic_functions.stub.php:1601	value	r--		-	values	ov-		-
 mkdir	ext/standard/basic_functions.stub.php:2818	directory	r--		-	permissions	o--	0777	i511	recursive	o--	false	f	context	o--	null	n
 mktime	ext/date/php_date.stub.php:103	hour	r--		-	minute	o--	null	n	second	o--	null	n	month	o--	null	n	day	o--	null	n	year	o--	null	n

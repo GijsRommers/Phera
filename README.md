@@ -28,11 +28,11 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | What | State |
 | --- | --- |
 | Laravel 13 JSON API with Eloquent | Runs. `artisan migrate` and 20 API requests (validation, create, read, update, delete, pagination, relations, a transaction) give PHP's answers on SQLite, MySQL and PostgreSQL |
-| Symfony 7.4 with Doctrine | Runs. `doctrine:schema:create` and 22 API requests (routes with parameters, validation, relations, aggregate queries) give PHP's answers on SQLite. One known defect: under a long run of requests on one worker a request can hang until the time limit; it is being fixed |
+| Symfony 7.4 with Doctrine | Runs. `doctrine:schema:create` and 22 API requests (routes with parameters, validation, relations, aggregate queries) give PHP's answers on SQLite |
 | WordPress | `mysqli` and the engine fixes it needed are in. The end-to-end comparison with PHP has not been repeated since |
-| PHP's own test suite (php-src) | 9,052 of the 13,388 core tests pass. Of 4,542 tests for the later extensions (dom, openssl, session, curl, intl and others) 1,436 pass |
+| PHP's own test suite (php-src) | 9,136 of the 13,388 core tests pass. Of 4,542 tests for the later extensions (dom, the XML family, openssl, session, curl, intl and others) 1,737 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | About 4 times PHP's CPU for one Laravel API request in production mode: 63 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 204 million against 27 million. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
+| Speed of a framework request | About 2.6 times PHP's instruction count for one Laravel API request in production mode: 43 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 173 million against 27 million, 6.3 times. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
 
 ## 🧰 The `phera` command
 
@@ -221,7 +221,18 @@ read, written, sought, truncated and unlinked in the current transaction.
 Native function return types are visible through reflection. Compatibility
 testing is in progress. MySQL LOCAL INFILE is disabled.
 
-Not started: gd, fileinfo, zip, sockets.
+Fileinfo is built in. Use `finfo` or `mime_content_type()` to identify common
+uploads from their contents. Fileinfo uses a bounded Rust classifier for images,
+documents, archives, media, fonts, and executables. It provides the MIME type,
+charset, known extensions, and a description. Custom magic databases and
+libmagic's complete signature catalog are outside this implementation.
+
+GD provides image buffers, PNG, JPEG, GIF, BMP and WebP codecs, drawing,
+thumbnail operations, filters, and the five built-in fonts. The same build
+includes `getimagesize()` and `exif_imagetype()`. Compatibility limits are
+listed in the [GD coverage notes](crates/extensions/gd/README.md).
+
+Not started: zip, sockets.
 
 ### Sodium
 
@@ -348,7 +359,8 @@ nothing one request does reaches another. A database or Redis connection
 made in the boot connects again on first use in each request, from the pool,
 with what the boot set on its session (`SET`, `USE`, the charset) replayed;
 an open file is opened again at the same position; DOM documents, generators,
-curl handles and temporary files are copied. What cannot be duplicated (an
+curl handles and temporary files are copied; a `GdImage` copies its pixels,
+palette and rendering options, and a `finfo` object its flags. What cannot be duplicated (an
 open transaction, a lock, a suspended Fiber, a pipe to a process, a directory
 handle, an open gzip file, an `SQLite3` object, a prepared statement) makes
 `Phera\snapshot()` throw `Phera\SnapshotException`, naming the class and

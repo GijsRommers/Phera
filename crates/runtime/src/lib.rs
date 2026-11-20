@@ -169,6 +169,10 @@ impl Runtime {
         registry.load(&phera_ext_xml::Xml);
         registry.load(&phera_ext_xmlreader::XmlReader);
         registry.load(&phera_ext_xmlwriter::XmlWriter);
+        registry.load(&phera_ext_fileinfo::FileInfo);
+        registry.load(&phera_ext_gd::Gd);
+        registry.load(&phera_ext_gd::ImageMetadata);
+        registry.load(&phera_ext_gd::ExifImageType);
         registry.load(&phera_ext_filter::Filter);
         registry.load(&phera_ext_intl::Intl);
         registry.load(&phera_ext_json::Json);
