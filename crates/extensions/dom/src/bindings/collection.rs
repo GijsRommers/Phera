@@ -7,25 +7,31 @@
 //! ```
 
 mod cursor;
+mod dimensions;
+mod registration;
+
+pub(super) use registration::register;
 
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, ClassEntry, ClassHooks, Context, MethodEntry, NativeDimensions, NativeError,
-    NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeResult, Object, Param,
-    ParamType, PhpArray, PropertyPurpose, Registry, Value, args,
+    ArrayKey, Context, NativeError, NativePropertyMutation, NativePropertyRead, NativeResult,
+    Object, PhpArray, PropertyPurpose, Value, args,
 };
 
 use crate::tree::{Arena, Kind, NodeId};
 use crate::xml::names::XMLNS;
 
-use super::{Location, This, location, native, receiver};
+use super::{Location, NodeHandle, This, location, native, receiver};
 
 #[derive(Clone)]
 enum Selection {
     Children,
+    Elements,
     Attributes,
+    Declarations(Kind),
     Snapshot(Rc<[NodeId]>),
+    Located(Rc<[Location]>),
     Tags {
         namespace: Option<Option<String>>,
         name: String,
@@ -35,23 +41,52 @@ enum Selection {
 #[derive(Clone)]
 struct Collection {
     root: Location,
+    document_handle: Option<NodeHandle>,
     selection: Selection,
+    modern: bool,
+    _pins: Vec<Rc<()>>,
 }
 
 impl Collection {
+    fn root(&self) -> Location {
+        self.document_handle
+            .as_ref()
+            .map_or_else(|| self.root.clone(), NodeHandle::current)
+    }
+
     fn ids(&self, arena: &Arena) -> Vec<NodeId> {
         let id = self.root.id;
         match &self.selection {
             Selection::Snapshot(nodes) => nodes.to_vec(),
-            Selection::Children => arena.children(id).collect(),
+            Selection::Located(nodes) => (0..nodes.len()).map(NodeId::from_index).collect(),
+            Selection::Children if arena[id].kind == Kind::EntityReference => {
+                std::iter::successors(arena.reference_declaration(id), |&id| {
+                    arena[id]
+                        .next_sibling()
+                        .filter(|&id| arena[id].kind == Kind::Entity)
+                })
+                .collect()
+            }
+            Selection::Children => arena
+                .children(id)
+                .filter(|&id| arena[id].kind != Kind::Notation)
+                .collect(),
+            Selection::Elements => arena
+                .children(id)
+                .filter(|&id| arena[id].kind == Kind::Element)
+                .collect(),
+            Selection::Declarations(kind) => arena
+                .children(id)
+                .filter(|&id| arena[id].kind == *kind)
+                .collect(),
             Selection::Attributes => arena[id]
                 .attributes()
                 .iter()
                 .copied()
-                .filter(|&id| arena[id].name.namespace.as_deref() != Some(XMLNS))
+                .filter(|&id| self.modern || arena[id].name.namespace.as_deref() != Some(XMLNS))
                 .collect(),
             Selection::Tags { namespace, name } => arena
-                .descendants(id)
+                .content_descendants(id)
                 .filter(|&id| {
                     let node = &arena[id];
                     node.kind == Kind::Element
@@ -69,16 +104,26 @@ impl Collection {
     }
 
     fn wrap_node(&self, context: &mut dyn Context, id: Option<NodeId>) -> NativeResult {
+        let root = self.root();
+        if let Selection::Located(nodes) = &self.selection {
+            return match id.and_then(|id| nodes.get(id.index())) {
+                Some(node) => super::namespace::wrap(context, node.clone()),
+                None => Ok(Value::Null),
+            };
+        }
         match id {
-            Some(id) if matches!(self.selection, Selection::Snapshot(_)) => {
-                super::namespace::wrap(context, self.root.at(id))
+            Some(id)
+                if matches!(self.selection, Selection::Snapshot(_))
+                    && !root.shared.borrow().document.settings.modern =>
+            {
+                super::namespace::wrap(context, root.at(id))
             }
-            id => self.root.wrap_optional(context, id),
+            id => root.wrap_optional(context, id),
         }
     }
 
     fn snapshot(&self) -> Vec<NodeId> {
-        self.ids(&self.root.shared.borrow().document.arena)
+        self.ids(&self.root().shared.borrow().document.arena)
     }
 }
 
@@ -95,12 +140,38 @@ pub(super) fn snapshot(
     )
 }
 
+pub(super) fn located(
+    context: &mut dyn Context,
+    root: Location,
+    nodes: Vec<Location>,
+) -> NativeResult {
+    wrap(
+        context,
+        root,
+        Selection::Located(nodes.into()),
+        "DOMNodeList",
+    )
+}
+
 pub(super) fn children(context: &mut dyn Context, root: Location) -> NativeResult {
     wrap(context, root, Selection::Children, "DOMNodeList")
 }
 
+pub(super) fn elements(context: &mut dyn Context, root: Location) -> NativeResult {
+    wrap(context, root, Selection::Elements, "Dom\\HTMLCollection")
+}
+
 pub(super) fn attributes(context: &mut dyn Context, root: Location) -> NativeResult {
     wrap(context, root, Selection::Attributes, "DOMNamedNodeMap")
+}
+
+pub(super) fn declarations(context: &mut dyn Context, root: Location, kind: Kind) -> NativeResult {
+    wrap(
+        context,
+        root,
+        Selection::Declarations(kind),
+        "DOMNamedNodeMap",
+    )
 }
 
 fn wrap(
@@ -109,18 +180,68 @@ fn wrap(
     selection: Selection,
     class: &str,
 ) -> NativeResult {
+    let modern = root.shared.borrow().document.settings.modern;
+    let class = if modern {
+        match &selection {
+            Selection::Attributes => "Dom\\NamedNodeMap",
+            Selection::Declarations(_) => "Dom\\DtdNamedNodeMap",
+            Selection::Tags { .. } | Selection::Elements => "Dom\\HTMLCollection",
+            _ => "Dom\\NodeList",
+        }
+    } else {
+        class
+    };
     let value = context.create_object(class, PhpArray::new())?;
     if let Value::Object(object) = &value {
-        *object.native.borrow_mut() = Some(Box::new(Collection { root, selection }));
+        let document_handle = if root.id == Arena::DOCUMENT
+            && !matches!(selection, Selection::Snapshot(_) | Selection::Located(_))
+        {
+            root.shared
+                .borrow()
+                .wrappers
+                .get(&root.id)
+                .and_then(std::rc::Weak::upgrade)
+                .and_then(|object| native(&object))
+        } else {
+            None
+        };
+        let pins = {
+            let mut state = root.shared.borrow_mut();
+            let mut pins = vec![state.pin(root.id)];
+            if let Selection::Snapshot(nodes) = &selection {
+                let arena = &state.document.arena;
+                let owners: std::collections::HashSet<_> = nodes
+                    .iter()
+                    .filter(|&&id| arena[id].kind == Kind::Namespace)
+                    .filter_map(|&id| arena[id].parent())
+                    .collect();
+                pins.extend(owners.into_iter().map(|id| state.pin(id)));
+            }
+            pins
+        };
+        *object.native.borrow_mut() = Some(Box::new(Collection {
+            root,
+            document_handle,
+            selection,
+            modern,
+            _pins: pins,
+        }));
     }
     Ok(value)
 }
 
 pub(super) fn tags(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
-    let name = String::from_utf8_lossy(args::bytes(arguments, 0)).into_owned();
+    let object = receiver(this)?;
+    let name = path_parameter(
+        object,
+        "getElementsByTagName",
+        arguments,
+        0,
+        "qualifiedName",
+    )?;
     wrap(
         context,
-        location(receiver(this)?)?,
+        location(object)?,
         Selection::Tags {
             namespace: None,
             name,
@@ -134,19 +255,41 @@ pub(super) fn tags_ns(
     this: This<'_>,
     arguments: &[Value],
 ) -> NativeResult {
-    let namespace = args::string(arguments, 0)
-        .filter(|value| !value.as_bytes().is_empty())
-        .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned());
-    let name = String::from_utf8_lossy(args::bytes(arguments, 1)).into_owned();
+    let object = receiver(this)?;
+    let namespace = path_parameter(object, "getElementsByTagNameNS", arguments, 0, "namespace")?;
+    let namespace = (!namespace.is_empty()).then_some(namespace);
+    let name = path_parameter(object, "getElementsByTagNameNS", arguments, 1, "localName")?;
     wrap(
         context,
-        location(receiver(this)?)?,
+        location(object)?,
         Selection::Tags {
             namespace: Some(namespace),
             name,
         },
         "DOMNodeList",
     )
+}
+
+fn path_parameter(
+    object: &Object,
+    method: &str,
+    arguments: &[Value],
+    index: usize,
+    name: &str,
+) -> Result<String, NativeError> {
+    let bytes = args::bytes(arguments, index);
+    if bytes.contains(&0) {
+        let class = if object.class.is_instance_of("DOMDocument") {
+            "DOMDocument"
+        } else {
+            "DOMElement"
+        };
+        return Err(NativeError::value_error(format!(
+            "{class}::{method}(): Argument #{} (${name}) must not contain any null bytes",
+            index + 1,
+        )));
+    }
+    Ok(String::from_utf8_lossy(bytes).into_owned())
 }
 
 fn collection(object: &Object) -> Result<Collection, NativeError> {
@@ -162,15 +305,21 @@ fn count_hook(_: &mut dyn Context, object: &Object) -> Result<i64, NativeError> 
 }
 
 fn item(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
-    item_at(
-        context,
-        receiver(this)?,
-        args::int(arguments, 0).unwrap_or_default(),
-    )
+    let object = receiver(this)?;
+    let index = args::int(arguments, 0).unwrap_or_default();
+    if !dimensions::valid_index(index) && dimensions::is_map(object) {
+        return Err(NativeError::value_error(format!(
+            "DOMNamedNodeMap::item(): Argument #1 ($index) {}",
+            dimensions::INDEX_BOUNDS,
+        )));
+    }
+    item_at(context, object, index)
 }
 
 fn item_at(context: &mut dyn Context, object: &Object, index: i64) -> NativeResult {
-    let collection = collection(object)?;
+    let Some(collection): Option<Collection> = native(object) else {
+        return Ok(Value::Null);
+    };
     let id = usize::try_from(index)
         .ok()
         .and_then(|index| collection.snapshot().get(index).copied());
@@ -178,15 +327,31 @@ fn item_at(context: &mut dyn Context, object: &Object, index: i64) -> NativeResu
 }
 
 fn named(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
-    let collection = collection(receiver(this)?)?;
     let name = String::from_utf8_lossy(args::bytes(arguments, 0));
+    named_item(context, receiver(this)?, &name)
+}
+
+fn named_item(context: &mut dyn Context, object: &Object, name: &str) -> NativeResult {
+    let collection = collection(object)?;
     let id = {
-        let state = collection.root.shared.borrow();
+        let root = collection.root();
+        let state = root.shared.borrow();
         let arena = &state.document.arena;
-        collection
-            .ids(arena)
-            .into_iter()
-            .find(|&id| arena[id].name.local == name)
+        collection.ids(arena).into_iter().find(|&id| {
+            if matches!(
+                collection.selection,
+                Selection::Elements | Selection::Tags { .. }
+            ) {
+                ["id", "name"].into_iter().any(|key| {
+                    super::attributes::find(arena, id, Some(None), key)
+                        .is_some_and(|attribute| arena[attribute].value == name)
+                })
+            } else if collection.modern {
+                arena[id].name.qualified() == name
+            } else {
+                arena[id].name.local == name
+            }
+        })
     };
     collection.wrap_node(context, id)
 }
@@ -198,7 +363,8 @@ fn named_ns(context: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> N
         .map(|value| String::from_utf8_lossy(value.as_bytes()));
     let name = String::from_utf8_lossy(args::bytes(arguments, 1));
     let id = {
-        let state = collection.root.shared.borrow();
+        let root = collection.root();
+        let state = root.shared.borrow();
         let arena = &state.document.arena;
         collection.ids(arena).into_iter().find(|&id| {
             arena[id].name.namespace.as_deref() == namespace.as_deref()
@@ -236,60 +402,6 @@ fn mutate(
     Ok(false)
 }
 
-fn dimension_get(context: &mut dyn Context, object: &Object, index: Value) -> NativeResult {
-    match index {
-        Value::Int(index) => item_at(context, object, index),
-        Value::String(value) if object.class.is_instance_of("DOMNamedNodeMap") => {
-            let collection = collection(object)?;
-            let name = String::from_utf8_lossy(value.as_bytes());
-            let id = {
-                let state = collection.root.shared.borrow();
-                let arena = &state.document.arena;
-                collection
-                    .ids(arena)
-                    .into_iter()
-                    .find(|&id| arena[id].name.local == name)
-            };
-            collection.wrap_node(context, id)
-        }
-        Value::String(value) => {
-            let index = String::from_utf8_lossy(value.as_bytes()).parse::<i64>();
-            match index {
-                Ok(index) => item_at(context, object, index),
-                Err(_) => Ok(Value::Null),
-            }
-        }
-        _ => Ok(Value::Null),
-    }
-}
-
-fn dimension_exists(
-    context: &mut dyn Context,
-    object: &Object,
-    index: Value,
-) -> Result<bool, NativeError> {
-    Ok(!matches!(
-        dimension_get(context, object, index)?,
-        Value::Null
-    ))
-}
-
-fn dimension_set(
-    context: &mut dyn Context,
-    object: &Object,
-    index: Value,
-    _: Value,
-) -> Result<(), NativeError> {
-    dimension_unset(context, object, index)
-}
-
-fn dimension_unset(_: &mut dyn Context, object: &Object, _: Value) -> Result<(), NativeError> {
-    Err(NativeError::error(format!(
-        "Cannot modify readonly object of class {}",
-        object.class.name()
-    )))
-}
-
 fn projection(
     context: &mut dyn Context,
     object: &Object,
@@ -303,70 +415,4 @@ fn projection(
         );
     }
     Ok(table)
-}
-
-const HOOKS: ClassHooks = ClassHooks {
-    iterator: Some(cursor::iterator),
-    properties: Some(projection),
-    property_access: Some(&NativePropertyAccess { read, mutate }),
-    count: Some(count_hook),
-    dimensions: Some(NativeDimensions {
-        fallback_if_overridden: &[],
-        get: dimension_get,
-        exists: dimension_exists,
-        set: dimension_set,
-        unset: dimension_unset,
-        reference: None,
-        bind: None,
-        direct: None,
-    }),
-    ..ClassHooks::EMPTY
-};
-
-pub(super) fn register(registry: &mut Registry) {
-    const ITEM: MethodEntry = MethodEntry::public(
-        "item",
-        const { &[Param::new("index", ParamType::Int)] },
-        item,
-    );
-    const COUNT: MethodEntry = MethodEntry::public("count", &[], count).tentative_return("int");
-    const ITERATOR: MethodEntry =
-        MethodEntry::public("getIterator", &[], cursor::get_iterator).returning("Iterator");
-    registry.class(ClassEntry {
-        interfaces: &["IteratorAggregate", "Countable"],
-        methods: const { &[ITEM, COUNT, ITERATOR] },
-        hooks: Some(&HOOKS),
-        ..ClassEntry::class("DOMNodeList")
-    });
-    registry.class(ClassEntry {
-        interfaces: &["IteratorAggregate", "Countable"],
-        methods: const {
-            const {
-                &[
-                    ITEM.tentative_return("?DOMNode"),
-                    COUNT,
-                    ITERATOR,
-                    MethodEntry::public(
-                        "getNamedItem",
-                        const { &[Param::new("qualifiedName", ParamType::String)] },
-                        named,
-                    )
-                    .tentative_return("?DOMNode"),
-                    MethodEntry::public(
-                        "getNamedItemNS",
-                        const {
-                            &[
-                                Param::new("namespace", ParamType::String).nullable(),
-                                Param::new("localName", ParamType::String),
-                            ]
-                        },
-                        named_ns,
-                    )
-                    .tentative_return("?DOMNode"),
-                ]
-            }
-        },
-        hooks: Some(&HOOKS),
-        ..ClassEntry::class("DOMNamedNodeMap")
-    });
 }

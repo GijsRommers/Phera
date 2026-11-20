@@ -8,15 +8,22 @@ use std::time::Duration;
 
 pub(crate) const USAGE: &str = "\
 Usage:
-  phera [run] [ENV OPTIONS] [-d name=value] <file.php> [arguments...]   run a script
+  phera [run] [ENV OPTIONS] [-d NAME=VALUE] <file.php> [arguments...]   run a script
   phera serve [OPTIONS] [PATH]            serve PATH (a directory, or one
                                           script that answers every request)
     --listen ADDRESS                      default 127.0.0.1:8080, or
                                           0.0.0.0:$PORT when PORT is set
     --workers N                           default: one per CPU core
-    -d name=value                         set a PHP INI value
+    --no-process                          forbid starting external programs
     --request-timeout SECONDS             stop a request after this long
                                           (default 60; 0: never)
+    --request-read-timeout SECONDS        receive headers and body in this
+                                          many seconds (default 60), plus
+                                          one second per 16 KiB of body read
+                                          so large uploads can keep going
+    --dev                                 show PHP diagnostics in responses
+                                          (off by default, logged to stderr)
+    -d NAME=VALUE                         set a startup PHP INI value
     --compress                            gzip or brotli for clients that
                                           accept it
     --trusted-proxies LIST                believe X-Forwarded-* from these
@@ -60,6 +67,7 @@ pub(crate) enum Command {
 pub(crate) struct ServeOptions {
     pub files: FileSelection,
     pub ini: Vec<(String, String)>,
+    pub dev: bool,
     /// `None`: `0.0.0.0:$PORT` when a platform sets `PORT`, else
     /// `127.0.0.1:8080`.
     pub listen: Option<SocketAddr>,
@@ -68,9 +76,11 @@ pub(crate) struct ServeOptions {
     /// `--compress`: gzip or brotli for clients that accept it. Off unless
     /// given, since the proxy in front usually compresses.
     pub compress: bool,
+    pub no_process: bool,
     /// `--request-timeout`: `None` keeps the server's default, and
     /// `Some(None)` (given as 0) lets a request run without a limit.
     pub request_timeout: Option<Option<Duration>>,
+    pub request_read_timeout: Option<Duration>,
     /// `--trusted-proxies`, not yet parsed into ranges.
     pub trusted_proxies: Option<String>,
     /// `--health`: a path the server answers itself.
@@ -86,6 +96,7 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
     match arguments.peek().map(String::as_str) {
         None => Err("No script given.".to_string()),
         Some("--version") => Ok(Command::Version),
+        Some("--help" | "-h") => Ok(Command::Help(USAGE)),
         Some("--dump") => {
             arguments.next();
             let script = arguments.next().ok_or("--dump needs a file.")?;
@@ -105,6 +116,9 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
         }
         Some("serve") => {
             arguments.next();
+            if matches!(arguments.peek().map(String::as_str), Some("--help" | "-h")) {
+                return Ok(Command::Help(USAGE));
+            }
             parse_serve(arguments, files, ini).map(Command::Serve)
         }
         Some("new") => {
@@ -226,10 +240,13 @@ fn parse_serve(
     let mut options = ServeOptions {
         files,
         ini,
+        dev: false,
         listen: None,
         workers: None,
         compress: false,
+        no_process: false,
         request_timeout: None,
+        request_read_timeout: None,
         trusted_proxies: None,
         health_path: None,
         path: PathBuf::from("."),
@@ -257,6 +274,8 @@ fn parse_serve(
                 options.workers = Some(workers);
             }
             "--compress" => options.compress = true,
+            "--dev" => options.dev = true,
+            "--no-process" => options.no_process = true,
             "--trusted-proxies" => {
                 let list = arguments
                     .next()
@@ -269,6 +288,17 @@ fn parse_serve(
                     .filter(|path| path.starts_with('/'))
                     .ok_or("--health needs a path like /healthz.")?;
                 options.health_path = Some(path);
+            }
+            "--request-read-timeout" => {
+                let value = arguments
+                    .next()
+                    .ok_or("--request-read-timeout needs a number of seconds.")?;
+                let seconds: u64 = value
+                    .parse()
+                    .ok()
+                    .filter(|&seconds| seconds > 0)
+                    .ok_or_else(|| format!("Not a positive number of seconds: {value}"))?;
+                options.request_read_timeout = Some(Duration::from_secs(seconds));
             }
             "--request-timeout" => {
                 let value = arguments

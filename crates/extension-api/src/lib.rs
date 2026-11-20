@@ -9,6 +9,7 @@ mod class;
 mod context;
 mod error;
 mod function;
+pub mod native_parameters;
 mod object_handlers;
 mod registry;
 pub mod serialization;
@@ -38,7 +39,7 @@ pub use object_handlers::{
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
 pub use registry::{ConstantValue, Registry};
-pub use state::RequestState;
+pub use state::{ProcessCancellation, RequestState};
 pub use working_directory::WorkingDirectory;
 
 /// The PHP version exposed by the engine and its built-in modules.

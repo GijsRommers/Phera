@@ -3,7 +3,10 @@
 use phera_extension_api::reflection::{
     AttributeTarget, FunctionInfo, FunctionTarget, MemberInfo, ParameterDefault, ParameterInfo,
 };
-use phera_extension_api::{MethodReturn, NativeError, Param};
+use phera_extension_api::{
+    MethodReturn, NativeError, Param,
+    native_parameters::{StubDefault, StubParameter, signature},
+};
 use std::rc::Rc;
 
 use crate::Vm;
@@ -98,6 +101,7 @@ impl Vm {
                     for parameter in &mut reflected.parameters {
                         parameter.default = None;
                         parameter.default_constant = None;
+                        parameter.default_display = None;
                     }
                     return Ok(reflected);
                 }
@@ -125,7 +129,7 @@ impl Vm {
                 self.reflect_user_signature(reflected, *function, scope, AttributeTarget::Function);
             }
             CallTarget::Native(entry) => {
-                reflected.parameters = native_parameters(entry.params);
+                reflected.parameters = native_parameters(entry.name, entry.params);
                 reflected.extension = self.registry.function_module(entry.name).map(str::to_owned);
                 reflected.return_type = self
                     .registry
@@ -146,11 +150,13 @@ impl Vm {
                                 native_parameter(
                                     position,
                                     Param::new(name, phera_extension_api::ParamType::Mixed),
+                                    signature(&reflected.name)
+                                        .and_then(|stub| stub.parameters().nth(position)),
                                 )
                             })
                             .collect()
                     },
-                    native_parameters,
+                    |parameters| native_parameters(&reflected.name, parameters),
                 );
                 reflected.extension = Some("Core".into());
             }
@@ -177,7 +183,8 @@ impl Vm {
                 );
             }
             MethodBody::Native(entry) => {
-                reflected.parameters = native_parameters(entry.params);
+                reflected.parameters =
+                    native_parameters(&method.signature(&self.code).name, entry.params);
                 reflected.extension = self
                     .reflection_class_module(&method.declaring)
                     .map(str::to_owned);
@@ -191,7 +198,7 @@ impl Vm {
             }
             MethodBody::Enum(operation) => {
                 use crate::classes::enums::EnumMethod;
-                reflected.parameters = native_parameters(operation.parameters());
+                reflected.parameters = native_parameters("", operation.parameters());
                 reflected.return_type = Some(
                     match operation {
                         EnumMethod::Cases => "array",
@@ -202,7 +209,8 @@ impl Vm {
                 );
             }
             MethodBody::Closure(operation) => {
-                reflected.parameters = native_parameters(operation.parameters());
+                reflected.parameters =
+                    native_parameters(&method.signature(&self.code).name, operation.parameters());
                 reflected.extension = Some("Core".into());
             }
         }
@@ -287,7 +295,11 @@ impl Vm {
                     default: metadata
                         .and_then(|meta| meta.default.as_ref())
                         .filter(|_| optional)
-                        .map(|default| super::initializers::reflected_value(default, first, scope)),
+                        .map(|default| {
+                            super::initializers::reflected_value(default, first, scope).into()
+                        }),
+                    default_display: param.default_display.clone(),
+                    internal: false,
                     default_constant: metadata
                         .filter(|_| optional)
                         .and_then(|meta| meta.default_constant.clone()),
@@ -305,16 +317,23 @@ impl Vm {
     }
 }
 
-fn native_parameters(parameters: &[Param]) -> Vec<ParameterInfo> {
+fn native_parameters(name: &str, parameters: &[Param]) -> Vec<ParameterInfo> {
+    let stub = signature(name);
     parameters
         .iter()
         .copied()
         .enumerate()
-        .map(|(position, param)| native_parameter(position, param))
+        .map(|(position, param)| {
+            native_parameter(
+                position,
+                param,
+                stub.and_then(|stub| stub.parameters().nth(position)),
+            )
+        })
         .collect()
 }
 
-fn native_parameter(position: usize, param: Param) -> ParameterInfo {
+fn native_parameter(position: usize, param: Param, stub: Option<StubParameter>) -> ParameterInfo {
     let name = param.ty.name();
     let declared_type = if param.nullable && name != "mixed" {
         if name.contains('|') {
@@ -325,18 +344,38 @@ fn native_parameter(position: usize, param: Param) -> ParameterInfo {
     } else {
         name.into()
     };
+    let (default, default_constant, default_display) = match stub {
+        Some(parameter) => (
+            parameter.default().and_then(|default| match default {
+                StubDefault::EnumCase(class, case) => {
+                    Some(ParameterDefault::NativeEnumCase { class, case })
+                }
+                default => default.literal().map(ParameterDefault::Literal),
+            }),
+            parameter.constant_name().map(str::to_owned),
+            (!parameter.expression.is_empty() && parameter.expression != "UNKNOWN")
+                .then(|| parameter.expression.to_owned()),
+        ),
+        None => (
+            param
+                .default
+                .map(|value| ParameterDefault::Literal(value.to_value())),
+            param.default_name.map(str::to_owned),
+            param.default_name.map(str::to_owned),
+        ),
+    };
     ParameterInfo {
-        name: param.name.into(),
+        name: stub.map_or(param.name, |parameter| parameter.name).into(),
         position,
         declared_type: Some(declared_type),
-        by_reference: param.by_ref,
-        variadic: param.variadic,
-        optional: param.optional,
+        by_reference: stub.map_or(param.by_ref, |parameter| parameter.by_ref),
+        variadic: stub.map_or(param.variadic, |parameter| parameter.variadic),
+        optional: stub.map_or(param.optional, |parameter| parameter.optional),
         promoted: false,
-        default: param
-            .default
-            .map(|value| ParameterDefault::Literal(value.to_value())),
-        default_constant: None,
+        default,
+        default_constant,
+        default_display,
+        internal: true,
         attributes: Vec::new(),
     }
 }

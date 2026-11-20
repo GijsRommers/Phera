@@ -17,7 +17,7 @@
 
 mod socket;
 
-pub use socket::Endpoint;
+pub use socket::{Endpoint, Socket};
 
 use std::future::Future;
 use std::time::Duration;
@@ -25,7 +25,6 @@ use std::time::Duration;
 use phera_io_pool::{AcquireError, IoRuntime, Options, Pool};
 use redis::aio::ConnectionLike;
 use redis::{Cmd, RedisError, RedisResult, Value};
-use socket::Socket;
 use tokio::runtime::Handle;
 use tokio::time::timeout;
 

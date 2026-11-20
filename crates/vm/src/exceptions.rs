@@ -99,21 +99,25 @@ impl Vm {
         parameters: &[phera_extension_api::Param],
         arguments: &mut [Value],
     ) -> Result<(), NativeError> {
-        let call_name = format!("{}::{}", method.declaring, method.name);
+        let call_name = method.signature(&self.code).name.as_ref();
         let tracking = self.error_handlers.error.is_some() && !self.error_handlers.active;
         let previous = if tracking {
             self.error_handlers
                 .native_site
-                .replace(crate::error_traces::NativeTrace::new(&call_name, arguments))
+                .replace(crate::error_traces::NativeTrace::new(call_name, arguments))
         } else {
             None
         };
-        let prepared = self.prepare_throwable_constructor(&call_name, parameters, arguments);
+        let prepared = self.prepare_throwable_constructor(call_name, parameters, arguments);
         if tracking {
             self.error_handlers.native_site = previous;
         }
-        if prepared.is_err() {
-            self.failed_native = Some(crate::error_traces::NativeTrace::method(method, arguments));
+        if let Err(error) = &prepared {
+            self.record_native_failure(
+                error,
+                crate::calls::native_frames::NativeFrame::Method(method),
+                arguments,
+            );
         }
         prepared
     }
@@ -245,7 +249,13 @@ impl Vm {
         }
         self.initialize_throwable(&object, TraceOrigin::Engine);
         object.set(Object::protected_key("message"), Value::from(message));
-        object.set(Object::protected_key("code"), code);
+        let public_code = phera_value::ArrayKey::str("code");
+        let code_key = if object.has(&public_code) {
+            public_code
+        } else {
+            Object::protected_key("code")
+        };
+        object.set(code_key, code);
         for (key, value) in declared_properties {
             object.set(key, value);
         }

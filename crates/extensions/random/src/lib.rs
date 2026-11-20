@@ -33,6 +33,7 @@ impl Extension for Random {
         for &class in ERRORS.iter().chain(engine_classes::CLASSES) {
             registry.class(class);
         }
+        registry.class(floats::INTERVAL_BOUNDARY);
         registry.class(randomizer::RANDOMIZER);
         for functions in [procedural::FUNCTIONS, collections::FUNCTIONS] {
             for &entry in functions {

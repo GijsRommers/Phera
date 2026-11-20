@@ -387,3 +387,37 @@ fn unclaimed_uploads_are_deleted_after_the_request() {
         "{path} is still there"
     );
 }
+
+/// The request's upload still exists in PHP, then disappears before the 504.
+#[test]
+fn unclaimed_upload_is_deleted_when_the_script_times_out() {
+    let served = Served::start_in(
+        "uploads-timeout",
+        1,
+        &[(
+            "sleep.php",
+            r#"<?php
+            $path = $_FILES['doc']['tmp_name'];
+            if (is_uploaded_file($path) && file_exists($path)) {
+                file_put_contents(__DIR__ . '/upload-path.txt', $path);
+            }
+            usleep(20000000);
+        "#,
+        )],
+        ".",
+        &["--request-timeout", "1"],
+    );
+    let body = form(
+        &[("form-data; name=\"doc\"; filename=\"n.txt\"", None, "n")],
+        true,
+    );
+    let headers = format!("Content-Type: multipart/form-data; boundary={BOUNDARY}\r\n");
+    let (status, _) = served.request("POST", "/sleep.php", &headers, &body);
+    assert_eq!(status, 504);
+    let path = std::fs::read_to_string(served.root.join("upload-path.txt"))
+        .expect("the script saw an existing upload before timing out");
+    assert!(
+        !std::path::Path::new(&path).exists(),
+        "{path} is still there"
+    );
+}

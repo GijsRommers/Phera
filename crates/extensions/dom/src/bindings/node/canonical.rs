@@ -64,11 +64,11 @@ fn canonicalize(
             ));
         }
     }
-    let state = node.shared.borrow();
+    let mut state = node.shared.borrow_mut();
     if !state.owned {
         return Ok(Value::Bool(false));
     }
-    let document = &state.document;
+    let document = &mut state.document;
     let mut selection = None;
     if let Some(query) = args::array(arguments, offset + 2) {
         let number = 3 + offset;
@@ -99,7 +99,7 @@ fn canonicalize(
             }
         }
         let result = xpath::evaluate(
-            &document.arena,
+            &mut document.arena,
             node.id,
             &namespaces,
             &String::from_utf8_lossy(expression.as_bytes()),

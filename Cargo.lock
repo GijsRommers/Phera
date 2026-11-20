@@ -467,6 +467,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "command-fds"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b60b5124979fccd9addd89d8b97a1d6eebb4950694520c75ddd722535ea443f"
+dependencies = [
+ "nix",
+ "thiserror",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -601,6 +611,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "cssparser"
+version = "0.38.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11119743ad110e8c1bdccd930d7f5c30c99e5fc76a7b63ec9807e84eef0c5f59"
+dependencies = [
+ "cssparser-macros",
+ "dtoa-short",
+ "itoa",
+ "phf 0.14.0",
+ "smallvec",
+]
+
+[[package]]
+name = "cssparser-macros"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
+dependencies = [
+ "quote",
+ "syn 3.0.10",
+]
+
+[[package]]
 name = "ctr"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -697,6 +730,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e9de72ce2ad1f90dc62fa25f0f430ef85eb4b0d8fa0be4f30373bc40a21d28e"
 
 [[package]]
+name = "derive_more"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134"
+dependencies = [
+ "derive_more-impl",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rustc_version",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "des"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -747,6 +801,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+]
+
+[[package]]
+name = "dtoa"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c3cf4824e2d5f025c7b531afcb2325364084a16806f6d47fbc1f5fbd9960590"
+
+[[package]]
+name = "dtoa-short"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd1511a7b6a56299bd043a9c167a6d2bfb37bf84a6dfceaba651168adfb43c87"
+dependencies = [
+ "dtoa",
 ]
 
 [[package]]
@@ -1882,12 +1951,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "paste"
-version = "1.0.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
-
-[[package]]
 name = "pbkdf2"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2050,9 +2113,13 @@ dependencies = [
 name = "phera-ext-dom"
 version = "0.1.0"
 dependencies = [
+ "cssparser",
+ "encoding_rs",
  "html5ever",
  "phera-extension-api",
+ "precomputed-hash",
  "quick-xml",
+ "selectors",
  "tokio",
 ]
 
@@ -2099,6 +2166,7 @@ dependencies = [
  "chrono",
  "phera-ext-streams",
  "phera-extension-api",
+ "tempfile",
  "tokio",
 ]
 
@@ -2184,14 +2252,25 @@ dependencies = [
  "rcgen",
  "rsa",
  "rustls",
- "rustls-native-certs",
- "rustls-rustcrypto",
  "sha1 0.11.0",
  "tempfile",
  "tokio",
  "tokio-postgres",
  "tokio-rustls",
- "webpki-roots",
+]
+
+[[package]]
+name = "phera-ext-process"
+version = "0.1.0"
+dependencies = [
+ "command-fds",
+ "nix",
+ "phera-ext-standard",
+ "phera-ext-streams",
+ "phera-extension-api",
+ "rustix",
+ "rustix-libc-wrappers",
+ "tokio",
 ]
 
 [[package]]
@@ -2210,11 +2289,14 @@ dependencies = [
 name = "phera-ext-redis"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "phera-extension-api",
  "phera-io-pool",
  "redis",
- "rustls-rustcrypto",
+ "rustls",
+ "tempfile",
  "tokio",
+ "tokio-rustls",
 ]
 
 [[package]]
@@ -2316,7 +2398,10 @@ dependencies = [
 name = "phera-io-pool"
 version = "0.1.0"
 dependencies = [
+ "rustls",
+ "rustls-native-certs",
  "tokio",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -2349,6 +2434,7 @@ dependencies = [
 name = "phera-runtime"
 version = "0.1.0"
 dependencies = [
+ "memchr",
  "phera-bytecode",
  "phera-compiler",
  "phera-dotenv",
@@ -2364,6 +2450,7 @@ dependencies = [
  "phera-ext-openssl",
  "phera-ext-pcre",
  "phera-ext-pdo",
+ "phera-ext-process",
  "phera-ext-random",
  "phera-ext-redis",
  "phera-ext-reflection",
@@ -2375,6 +2462,7 @@ dependencies = [
  "phera-ext-streams",
  "phera-ext-tokenizer",
  "phera-extension-api",
+ "phera-io-pool",
  "phera-value",
  "phera-vm",
  "tempfile",
@@ -2419,6 +2507,7 @@ dependencies = [
 name = "phera-vm"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "indexmap",
  "phera-bytecode",
  "phera-compiler",
@@ -2447,6 +2536,7 @@ version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "010378780309880b08997fae13be7834dba947d36393bd372f2b1556deb2a2f6"
 dependencies = [
+ "phf_macros",
  "phf_shared 0.14.0",
  "serde",
 ]
@@ -2469,6 +2559,19 @@ checksum = "aeb62e0959d5a1bebc965f4d15d9e2b7cea002b6b0f5ba8cde6cc26738467100"
 dependencies = [
  "fastrand",
  "phf_shared 0.14.0",
+]
+
+[[package]]
+name = "phf_macros"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fa8d0ca26d424d27630da600c6624696e7dec8bf7b3b492b383c5dc49e5e085"
+dependencies = [
+ "phf_generator",
+ "phf_shared 0.14.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2778,15 +2881,11 @@ dependencies = [
  "itoa",
  "percent-encoding",
  "pin-project-lite",
- "rustls",
- "rustls-native-certs",
  "ryu",
  "socket2",
  "tokio",
- "tokio-rustls",
  "tokio-util",
  "url",
- "webpki-roots",
  "xxhash-rust",
 ]
 
@@ -2925,6 +3024,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustc-hash"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
+
+[[package]]
 name = "rustc_version"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2956,12 +3061,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustix-libc-wrappers"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdd97be0a7cf7b87085442067b6caa72b2f9b0ddd4a4df537d7225cd40498937"
+dependencies = [
+ "libc",
+ "rustix",
+]
+
+[[package]]
 name = "rustls"
 version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "once_cell",
+ "ring",
  "rustls-pki-types",
  "rustls-webpki",
  "subtle",
@@ -2987,35 +3103,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "102f35f7de7b06d8c61f1cff6592f5253e0dea431c74867aad5dfd70f44663fb"
 dependencies = [
  "zeroize",
-]
-
-[[package]]
-name = "rustls-rustcrypto"
-version = "0.1.0-pre.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2856ab13701744c79101d343f8cebb5164eec3aafcf3ee1867b5b6033587daa"
-dependencies = [
- "aead",
- "aes-gcm",
- "chacha20poly1305",
- "crypto-common 0.2.2",
- "der",
- "digest 0.11.3",
- "ecdsa",
- "ed25519-dalek",
- "getrandom 0.4.3",
- "hmac 0.13.0",
- "p256",
- "p384",
- "paste",
- "pkcs8",
- "rsa",
- "rustls",
- "rustls-pki-types",
- "sec1",
- "sha2 0.11.1",
- "signature",
- "x25519-dalek",
 ]
 
 [[package]]
@@ -3122,6 +3209,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "selectors"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8322aebea94a6cc288ff884e8a49bdbceef60206c400c6c46d22e62fc4fd91a6"
+dependencies = [
+ "bitflags",
+ "cssparser",
+ "derive_more",
+ "log",
+ "new_debug_unreachable",
+ "precomputed-hash",
+ "rustc-hash",
+ "servo_arc",
+ "smallvec",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3178,6 +3282,15 @@ checksum = "66cf8fedced2fcf12406bcb34223dffb92eaf34908ede12fed414c82b7f00b3e"
 dependencies = [
  "base16ct",
  "serde",
+]
+
+[[package]]
+name = "servo_arc"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4eceb519ec34d8290aaf6e46f435102f2bfa63f22b05a144fb16ab266d3b198"
+dependencies = [
+ "stable_deref_trait",
 ]
 
 [[package]]

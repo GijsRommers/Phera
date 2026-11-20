@@ -10,8 +10,8 @@ echo $redis->get('greeting');
 ```
 
 It stands on the `redis` crate (1.0.5) with Tokio: RESP2 for commands, RESP3
-for subscriptions. `tls://` hosts use rustls with the RustCrypto provider (a
-pre-release crate) and WebPKI roots, verifying certificates and host names.
+for subscriptions. `tls://` hosts use rustls with ring's default TLS 1.2 and
+1.3 cipher suites and WebPKI roots, verifying certificates and host names.
 Unix sockets work as a path, `unix://` or `file://`.
 
 ## How it runs

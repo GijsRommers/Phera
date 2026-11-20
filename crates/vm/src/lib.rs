@@ -61,6 +61,7 @@ mod default_autoload;
 #[cfg(test)]
 mod destructor_tests;
 mod destructors;
+mod diagnostic_output;
 mod diagnostic_reporter;
 mod diagnostics;
 mod dimension_instructions;
@@ -446,6 +447,7 @@ impl Vm {
         }
         self.finish_request(end).await;
         self.finish_request_headers().await;
+        self.finish_resource_finalizers().await;
         self.status
     }
 

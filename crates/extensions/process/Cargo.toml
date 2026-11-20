@@ -1,0 +1,21 @@
+[package]
+name = "phera-ext-process"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+command-fds.workspace = true
+nix = { workspace = true, features = ["fs", "signal", "term"] }
+phera-extension-api.workspace = true
+phera-ext-standard.workspace = true
+phera-ext-streams.workspace = true
+rustix = { workspace = true, features = ["pty"] }
+tokio = { workspace = true, features = ["io-util", "process"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix-libc-wrappers.workspace = true
+
+[lints]
+workspace = true

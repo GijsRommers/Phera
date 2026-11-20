@@ -94,6 +94,8 @@ fn request_buffers_stay_isolated_on_one_worker() {
     std::fs::write(
         &script,
         r#"<?php
+ini_set('display_errors', '1');
+ini_set('html_errors', '0');
 echo ob_get_level(), ':';
 ob_start();
 $id = $_GET['id'];
@@ -101,6 +103,7 @@ echo $id, ':';
 if ($id === 'failed') {
     error_log('ready', 3, __DIR__ . '/ready');
     usleep(500000);
+    http_response_code(500);
     throw new Exception('request failure');
 }
 echo ob_get_clean(), 'ok';
