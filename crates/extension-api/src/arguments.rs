@@ -106,8 +106,11 @@ fn prepare_argument(
                 ))
             })?;
             convert(&mut target, &site, strict, context)?;
+            return Ok(());
         }
-        return Ok(());
+        if param.requires_ref() {
+            return Ok(());
+        }
     }
     if argument.is_reference() {
         let plain = argument.deref().clone();

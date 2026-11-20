@@ -75,7 +75,7 @@ pub(crate) fn register(registry: &mut Registry) {
                     data(o, |p| Value::Bool(p.by_reference))
                 }),
                 MethodEntry::public("canBePassedByValue", &[], |_, o, _| {
-                    data(o, |p| Value::Bool(!p.by_reference))
+                    data(o, |p| Value::Bool(p.can_pass_by_value))
                 }),
                 MethodEntry::public("isPromoted", &[], |_, o, _| {
                     data(o, |p| Value::Bool(p.promoted))

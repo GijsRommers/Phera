@@ -2,6 +2,7 @@
 //! the comparison that a `SORT_*` flag selects.
 
 use std::cmp::Ordering;
+use std::rc::Rc;
 
 use phera_extension_api::value::{compare, to_float, to_php_string};
 use phera_extension_api::{Context, NativeError, Value};
@@ -34,6 +35,30 @@ pub(super) enum SortFlags {
 }
 
 impl SortFlags {
+    /// The regular comparator used by PHP's multisort and unique passes
+    /// groups enum cases by identity.
+    pub(super) async fn compare_unstable(
+        self,
+        context: &mut dyn Context,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Ordering, NativeError> {
+        let order = self.compare_with_objects(context, left, right).await?;
+        if matches!(self, Self::Regular)
+            && order == Ordering::Greater
+            && let Value::Object(right) = &*right.deref()
+            && right.class.is_enum()
+        {
+            return Ok(match &*left.deref() {
+                Value::Object(left) if left.class.is_enum() => {
+                    Rc::as_ptr(left).cmp(&Rc::as_ptr(right))
+                }
+                _ => Ordering::Less,
+            });
+        }
+        Ok(order)
+    }
+
     /// `SORT_STRING`, the comparison of `array_diff`, `array_intersect` and
     /// `array_unique` by default.
     pub(super) const STRING: Self = Self::String { ignore_case: false };

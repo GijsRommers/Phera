@@ -147,6 +147,7 @@ pub struct Param {
     /// The constant spelling PHP uses in a declaration, when the value is symbolic.
     pub default_name: Option<&'static str>,
     pub by_ref: bool,
+    reference_mode: ReferenceMode,
     pub(crate) raw_reference: bool,
     /// Replace the argument value in PHP traces.
     pub sensitive: bool,
@@ -165,6 +166,12 @@ enum ArgumentCount {
     Handler,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReferenceMode {
+    Required,
+    Preferred,
+}
+
 impl Param {
     pub const fn new(name: &'static str, ty: ParamType) -> Self {
         Self {
@@ -178,6 +185,7 @@ impl Param {
             default: None,
             default_name: None,
             by_ref: false,
+            reference_mode: ReferenceMode::Required,
             raw_reference: false,
             sensitive: false,
             variadic: false,
@@ -246,13 +254,25 @@ impl Param {
 
     pub const fn by_ref(mut self) -> Self {
         self.by_ref = true;
+        self.reference_mode = ReferenceMode::Required;
         self
+    }
+
+    /// Bind a writable argument, but accept a temporary by value.
+    pub const fn prefer_ref(mut self) -> Self {
+        self.by_ref = true;
+        self.reference_mode = ReferenceMode::Preferred;
+        self
+    }
+
+    pub const fn requires_ref(self) -> bool {
+        self.by_ref && matches!(self.reference_mode, ReferenceMode::Required)
     }
 
     /// Preserve the declared type for reflection and let the native function check
     /// the original referenced value and report its own diagnostic.
     pub const fn raw_by_ref(mut self) -> Self {
-        self.by_ref = true;
+        self = self.by_ref();
         self.raw_reference = true;
         self
     }

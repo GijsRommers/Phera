@@ -1,5 +1,7 @@
 # Multisort needs preferred-reference parameters
 
+Replaced by [Multisort binds writable arguments and accepts temporaries](2026-11-20-multisort-binds-writable-arguments-and-accepts-temporaries.md).
+
 - Date: 2026-11-20
 - Area: Scope and compatibility
 - Decided by: Design
