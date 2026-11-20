@@ -21,8 +21,9 @@ use phera_extension_api::{
 use crate::collections::{list, pick_keys, shuffle, shuffled_list};
 use crate::engine_classes;
 use crate::engines::{ATTEMPTS, Engine, broken_engine};
+use crate::floats::{self, Boundary};
+use crate::given;
 use crate::procedural::zeroed;
-use crate::{floats, given};
 
 /// `nextFloat()` keeps 53 bits, a double's precision, and divides by 2^53.
 const TWO_TO_53: f64 = 9007199254740992.0;
@@ -67,7 +68,7 @@ pub const RANDOMIZER: ClassEntry = ClassEntry {
             &[
                 Param::new("min", ParamType::Float),
                 Param::new("max", ParamType::Float),
-                Param::new("boundary", ParamType::Mixed).optional(),
+                Param::new("boundary", ParamType::Class(floats::INTERVAL_BOUNDARY.name)).optional(),
             ],
             get_float,
         ),
@@ -228,8 +229,7 @@ fn get_int(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) 
 }
 
 /// `getFloat(float $min, float $max, Random\IntervalBoundary $boundary =
-/// IntervalBoundary::ClosedOpen): float`. Phera has no enums yet, so only
-/// the default boundary works and any `$boundary` is a `TypeError`.
+/// IntervalBoundary::ClosedOpen): float`.
 fn get_float(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]) -> NativeResult {
     let min = args::float(arguments, 0).unwrap_or_default();
     let max = args::float(arguments, 1).unwrap_or_default();
@@ -240,21 +240,19 @@ fn get_float(_: &mut dyn Context, this: Option<&Rc<Object>>, arguments: &[Value]
             )));
         }
     }
-    if max <= min {
-        return Err(NativeError::value_error(
-            "Random\\Randomizer::getFloat(): Argument #2 ($max) must be greater than \
-             argument #1 ($min)",
-        ));
-    }
-    if let Some(boundary) = arguments.get(2) {
-        return Err(NativeError::type_error(format!(
-            "Random\\Randomizer::getFloat(): Argument #3 ($boundary) must be of type \
-             Random\\IntervalBoundary, {} given",
-            given(boundary)
+    let boundary = Boundary::argument(arguments.get(2))?;
+    if max < min || (max == min && boundary != Boundary::ClosedClosed) {
+        let requirement = if boundary == Boundary::ClosedClosed {
+            "greater than or equal to"
+        } else {
+            "greater than"
+        };
+        return Err(NativeError::value_error(format!(
+            "Random\\Randomizer::getFloat(): Argument #2 ($max) must be {requirement} argument #1 ($min)"
         )));
     }
     with_engine(this, |engine| {
-        Ok(Value::Float(floats::closed_open(engine, min, max)?))
+        floats::draw(engine, min, max, boundary).map(Value::Float)
     })
 }
 

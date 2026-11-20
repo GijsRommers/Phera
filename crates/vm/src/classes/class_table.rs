@@ -59,6 +59,16 @@ impl ClassDefinitions {
     }
 }
 
+impl Drop for ClassDefinitions {
+    fn drop(&mut self) {
+        // A static singleton or a cached enum case can keep its own class
+        // alive. Release those PHP values before dropping the class owners.
+        for class in &self.numbered {
+            class.release_values();
+        }
+    }
+}
+
 /// One request owns its class additions and objects. Built-ins keep their indices on the worker.
 pub(crate) struct ClassTable {
     native: Rc<ClassDefinitions>,
@@ -70,6 +80,10 @@ pub(crate) struct ClassTable {
     native_methods: OnceCell<NativeMethodTables>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
+    /// Allocations left before the cycle collector should run (see
+    /// `crate::cycles`).
+    allocations_before_collection: crate::cycles::Countdown,
+    collection_requested: bool,
 }
 
 impl ClassTable {
@@ -88,6 +102,8 @@ impl ClassTable {
             local: ClassDefinitions::default(),
             objects: Vec::new(),
             ids: Rc::default(),
+            allocations_before_collection: Default::default(),
+            collection_requested: false,
         }
     }
 
@@ -217,26 +233,85 @@ impl ClassTable {
         properties: PhpArray,
     ) -> Rc<Object> {
         self.has_dimensions |= class.operations.has(ClassOperations::DIMENSIONS);
-        let object = Rc::new(Object::allocate_with_properties(
-            &self.ids, class, properties,
-        ));
-        // Record the already assigned id only for request-end cycle cleanup.
-        // No weak handle's liveness participates in allocation or id selection.
+        let has_destructor = class
+            .magic
+            .as_ref()
+            .is_some_and(|magic| magic.destruct.is_some());
+        let object = Object::allocate_with_properties(&self.ids, class, properties);
+        if has_destructor {
+            object.expect_destructor();
+        }
+        let object = Rc::new(object);
+        self.track(&object);
+        self.count_allocation();
+        object
+    }
+
+    /// One more allocation towards the next automatic cycle collection.
+    /// When it is due, the interpreter's check for due destructors fires.
+    #[inline]
+    fn count_allocation(&mut self) {
+        if self.allocations_before_collection.tick() {
+            self.collection_requested = true;
+            self.ids.wake_interpreter();
+        }
+    }
+
+    /// Whether a collection was asked for; clears the request.
+    pub(crate) fn take_collection_request(&mut self) -> bool {
+        std::mem::take(&mut self.collection_requested)
+    }
+
+    /// The next automatic collection comes after `allocations` more objects.
+    pub(crate) fn request_collection_after(&mut self, allocations: usize) {
+        self.allocations_before_collection = crate::cycles::Countdown::new(allocations);
+    }
+
+    /// Every live object, each handle made as it is taken, for the cycle
+    /// collector.
+    pub(crate) fn live_objects(&self) -> impl Iterator<Item = Rc<Object>> + '_ {
+        self.objects.iter().filter_map(Weak::upgrade)
+    }
+
+    /// Records a live object under its id, for the end of the request: its
+    /// destructor phase and the cleanup of cycles. No weak handle's liveness
+    /// takes part in allocation or id selection.
+    #[inline]
+    pub(crate) fn track(&mut self, object: &Rc<Object>) {
         let index = object.id.saturating_sub(1) as usize;
         if let Some(slot) = self.objects.get_mut(index) {
-            *slot = Rc::downgrade(&object);
+            *slot = Rc::downgrade(object);
         } else {
-            self.objects.push(Rc::downgrade(&object));
+            self.objects.resize_with(index, Weak::new);
+            self.objects.push(Rc::downgrade(object));
         }
-        object
+    }
+
+    /// A handle on the request's object ids, for the interpreter loop.
+    #[inline]
+    pub(crate) fn ids_handle(&self) -> Rc<ObjectIds> {
+        self.ids.clone()
+    }
+
+    /// The request's object ids, which also hold the objects whose
+    /// destructor is due.
+    #[inline]
+    pub(crate) fn ids(&self) -> &ObjectIds {
+        &self.ids
     }
 }
 
 impl Drop for ClassTable {
     /// Break request-local object cycles without retaining objects during normal execution.
     fn drop(&mut self) {
+        // A request that ended without its destructor phase (stopped by the
+        // server's timeout) frees its objects without destructors. Closing
+        // the pool first matters: an object queued for its destructor holds
+        // the pool, which holds the queue, so an unclosed queue would leak.
+        drop(self.ids.close());
         for object in self.objects.iter().filter_map(Weak::upgrade) {
             object.update(|properties| *properties = phera_value::PhpArray::new());
+            drop(object.take_attachments());
             if let Ok(mut native) = object.native.try_borrow_mut() {
                 *native = None;
             }
@@ -260,11 +335,30 @@ impl ClassTable {
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
+    use std::sync::Arc;
 
     use phera_extension_api::Registry;
     use phera_value::{ArrayKey, Value};
 
     use super::{ClassDefinitions, ClassTable};
+
+    #[tokio::test]
+    async fn static_singletons_and_cached_enum_cases_release_their_classes() {
+        let source = "<?php
+            class Singleton { public static $instance; }
+            Singleton::$instance = new Singleton;
+            enum Token { case Only; const ALIAS = self::Only; }
+            echo Token::ALIAS->name;";
+        let unit = Arc::new(phera_compiler::compile(source, "class-cycles.php").unwrap());
+        let mut vm = crate::Vm::new(Arc::new(Registry::new()));
+        assert_eq!(vm.run(unit).await, 0);
+        assert_eq!(vm.output, b"Only");
+        let singleton = Rc::downgrade(&vm.classes.get("Singleton").unwrap());
+        let token = Rc::downgrade(&vm.classes.get("Token").unwrap());
+        drop(vm);
+        assert_eq!(singleton.strong_count(), 0);
+        assert_eq!(token.strong_count(), 0);
+    }
 
     #[test]
     fn freed_object_ids_reuse_the_most_recently_freed_slot() {

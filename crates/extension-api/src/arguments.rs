@@ -19,7 +19,7 @@
 //! guarantees.
 
 use phera_value::{
-    NumVal, PhpString, Value, cast_to_bool, float_repr, parse_numeric, to_php_string,
+    NumVal, ObjectCast, PhpString, Value, cast_to_bool, float_repr, parse_numeric, to_php_string,
 };
 
 use crate::{Context, FunctionEntry, NativeError, Param, ParamType};
@@ -43,7 +43,11 @@ pub fn prepare_call(
     arguments: &mut [Value],
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
-    check_count(name, params, arguments.len())?;
+    if let Err(error) = check_count(name, params, arguments.len())
+        && params.first().is_none_or(Param::uses_parameter_arity)
+    {
+        return Err(error);
+    }
     let strict = context.strict_types();
     for (index, argument) in arguments.iter_mut().enumerate() {
         // Arguments past the declared list belong to the variadic parameter.
@@ -89,6 +93,9 @@ fn prepare_argument(
         param,
     };
     if param.by_ref {
+        if param.raw_reference {
+            return Ok(());
+        }
         // The function sees the caller's variable, so the conversion has
         // to happen inside the reference.
         if let Value::Reference(cell) = argument {
@@ -99,8 +106,11 @@ fn prepare_argument(
                 ))
             })?;
             convert(&mut target, &site, strict, context)?;
+            return Ok(());
         }
-        return Ok(());
+        if param.requires_ref() {
+            return Ok(());
+        }
     }
     if argument.is_reference() {
         let plain = argument.deref().clone();
@@ -144,12 +154,17 @@ impl Site<'_> {
     /// deprecation, but only for native functions and only without
     /// `strict_types`.
     fn null_deprecated(&self, context: &mut dyn Context) {
+        // PHP names the declared type here, also where the class's own type
+        // error words it differently ("int, string, or BcMath\Number").
+        let expected = match self.param.ty {
+            ParamType::NativeNumeric(numeric) => format!("of type {}", numeric.declaration),
+            _ => expected(self.param),
+        };
         context.deprecated(format!(
-            "{}(): Passing null to parameter #{}{} of type {} is deprecated",
+            "{}(): Passing null to parameter #{}{} {expected} is deprecated",
             self.function,
             self.number,
             self.name(),
-            type_text(self.param.ty)
         ));
     }
 }
@@ -157,7 +172,7 @@ impl Site<'_> {
 /// The type as PHP writes it in messages.
 pub(crate) fn type_text(ty: ParamType) -> &'static str {
     match ty {
-        ParamType::Mixed => "mixed",
+        ParamType::Untyped | ParamType::Mixed => "mixed",
         ParamType::Bool => "bool",
         ParamType::Int => "int",
         ParamType::Float => "float",
@@ -173,6 +188,7 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
         ParamType::Iterable => "Traversable|array",
         ParamType::Number => "int|float",
         ParamType::IntOrString => "string|int",
+        ParamType::NativeNumeric(numeric) => numeric.declaration,
         ParamType::ArrayOrString => "array|string",
         ParamType::ObjectOrString => "object|string",
         ParamType::CertificateOrString => "OpenSSLCertificate|string",
@@ -182,11 +198,14 @@ pub(crate) fn type_text(ty: ParamType) -> &'static str {
         ParamType::ArrayOrFloat => "array|float",
         ParamType::ArrayOrBool => "array|bool",
         ParamType::ArrayOrObject => "array|object",
-        ParamType::RecursiveOrAggregate => "RecursiveIterator|IteratorAggregate",
+        ParamType::ClassUnion(declaration) => declaration,
     }
 }
 
 fn expected(param: &Param) -> String {
+    if let ParamType::NativeNumeric(numeric) = param.ty {
+        return format!("of type {}", numeric.type_error);
+    }
     // Zend's array-or-object parser reports "array" for other argument types.
     let text = if param.ty == ParamType::ArrayOrObject {
         "array"
@@ -216,13 +235,18 @@ fn convert(
     strict: bool,
     context: &mut dyn Context,
 ) -> Result<(), NativeError> {
-    if value.is_null() && site.param.nullable {
+    if value.is_null() && site.param.accepts_null() {
         return Ok(());
     }
     let converted = match site.param.ty {
         // Whether a value is callable depends on which functions and classes
         // exist, which only the VM knows; `Context::call` reports it.
-        ParamType::Mixed | ParamType::Callable | ParamType::ReflectedObject => return Ok(()),
+        ParamType::Untyped
+        | ParamType::Mixed
+        | ParamType::Callable
+        | ParamType::ReflectedObject => {
+            return Ok(());
+        }
         ParamType::Array => matches!(value, Value::Array(_)).then_some(None),
         ParamType::Class(name) => {
             matches!(value, Value::Object(obj) if obj.class.is_instance_of(name)).then_some(None)
@@ -270,6 +294,26 @@ fn convert(
             _ if strict => None,
             _ => to_number(value, site, context).map(Some),
         },
+        ParamType::NativeNumeric(numeric) => match value {
+            Value::Object(object) if object.class.is_instance_of(numeric.class) => Some(None),
+            Value::String(text) => {
+                if let Some(message) = numeric
+                    .string_error
+                    .and_then(|check| check(text.as_bytes()))
+                {
+                    return Err(NativeError::value_error(format!(
+                        "{}(): Argument #{}{} {message}",
+                        site.function,
+                        site.number,
+                        site.name(),
+                    )));
+                }
+                Some(None)
+            }
+            Value::Int(_) => Some(None),
+            _ if strict => None,
+            _ => to_int(value, site, context).map(Some),
+        },
         ParamType::IntOrString => match value {
             Value::Int(_) | Value::String(_) => Some(None),
             _ if strict => None,
@@ -282,6 +326,7 @@ fn convert(
         ParamType::StringOrNumber => match value {
             Value::String(_) | Value::Int(_) | Value::Float(_) => Some(None),
             _ if strict => None,
+            Value::Object(object) => object.class.cast(object, ObjectCast::String).map(Some),
             _ => to_number(value, site, context).map(Some),
         },
         ParamType::ArrayOrNumber => match value {
@@ -295,10 +340,12 @@ fn convert(
             _ if strict => None,
             _ => to_float(value, site, context).map(Some),
         },
-        ParamType::RecursiveOrAggregate => matches!(value, Value::Object(object)
-            if object.class.is_instance_of("RecursiveIterator")
-                || object.class.is_instance_of("IteratorAggregate"))
-        .then_some(None),
+        ty @ ParamType::ClassUnion(_) => match value {
+            Value::Object(object) if ty.union_accepts_class(object.class.as_ref()) => Some(None),
+            Value::String(_) if ty.union_accepts_string() => Some(None),
+            _ if !strict && ty.union_accepts_string() => to_string(value, site, context).map(Some),
+            _ => None,
+        },
         ParamType::ArrayOrObject => {
             matches!(value, Value::Array(_) | Value::Object(_)).then_some(None)
         }

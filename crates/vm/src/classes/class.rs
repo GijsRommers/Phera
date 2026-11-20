@@ -5,7 +5,7 @@ use std::{any::Any, collections::HashMap, rc::Rc};
 use crate::calls::call_state::ParameterSpec;
 use phera_bytecode::{ClassKind, Visibility};
 use phera_extension_api::MethodEntry;
-use phera_value::{ArrayKey, ClassHandle, Object, ScalarCast, Value};
+use phera_value::{ArrayKey, ClassHandle, Object, Value};
 
 /// A linked class is immutable; its parent keeps inherited metadata alive.
 pub(crate) struct Class {
@@ -146,8 +146,9 @@ impl ClassHandle for Class {
             .is_some_and(|hooks| hooks.properties.is_some())
     }
 
-    fn native_scalar_cast(&self, object: &Object, kind: ScalarCast) -> Option<Value> {
-        (self.hooks.as_ref()?.scalar_cast?)(object, kind)
+    #[cold]
+    fn cast(&self, object: &phera_value::Object, target: phera_value::ObjectCast) -> Option<Value> {
+        self.hooks.as_ref()?.cast?(object, target)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -300,6 +301,24 @@ pub(crate) fn ancestor_names(
 }
 
 impl Class {
+    /// `Service::$instance = new Service` points back to this class.
+    pub(super) fn release_values(&self) {
+        for property in &self.static_properties {
+            if let Some(storage) = &property.static_storage {
+                storage.release_value();
+            }
+        }
+        for constant in self.constants.values() {
+            if let ConstantInitializer::Compiled { state, .. } = &constant.initializer {
+                let previous = state
+                    .try_borrow_mut()
+                    .ok()
+                    .map(|mut state| std::mem::replace(&mut *state, ConstantState::Uninitialized));
+                drop(previous);
+            }
+        }
+    }
+
     /// Avoid repeated lowercase allocation for names from compiled type declarations.
     pub(crate) fn matches_declaration(&self, name: &str) -> bool {
         if self.name.eq_ignore_ascii_case(name) {

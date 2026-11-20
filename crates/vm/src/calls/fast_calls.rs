@@ -11,10 +11,11 @@
 //! [`Step::Slow`] without having changed anything, so that `Vm::execute`
 //! runs the instruction with every PHP rule.
 
-use phera_bytecode::{FunctionId, Reg};
+use phera_bytecode::{FunctionId, Instruction, Reg};
 use phera_value::Value;
 
 use crate::calls::call_state::CallTarget;
+use crate::calls::discarded_results::{frees_on_drop, result_discarded};
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::frame::Frame;
 use crate::calls::prepared_call::{CallFlags, CallKind, PreparedCallee};
@@ -86,7 +87,7 @@ impl Machine<'_> {
     /// return type's bit test: write the value (for a constructor, the new
     /// object) into the caller's register and empty the callee's.
     #[inline(always)]
-    pub(super) fn leave_plain(&mut self, source: Option<Reg>) -> Step {
+    pub(super) fn leave_plain<const GUARDED: bool>(&mut self, source: Option<Reg>) -> Step {
         let Some(frame) = self.stack.current().copied() else {
             return Step::Slow;
         };
@@ -139,6 +140,14 @@ impl Machine<'_> {
             (_, Some(source)) => self.registers.take(frame.base() + source.index()),
             (_, None) => Value::Null,
         };
+        // Where the order of releases can be seen, the slower way out.
+        if GUARDED
+            && ((kind != CallKind::Constructor && frees_on_drop(&value))
+                || (start != frame.base()
+                    && self.registers.holds_last_reference(start, frame.base())))
+        {
+            return self.leave_in_order(frame, caller, (source, destination), value);
+        }
         self.stack.pop();
         self.registers.truncate(start);
         self.registers
@@ -151,6 +160,36 @@ impl Machine<'_> {
 }
 
 impl Machine<'_> {
+    /// A plain return whose releases PHP orders visibly: an unused
+    /// temporary result is freed first (see `discarded_results`), then the
+    /// variables, then `$this` and the closure.
+    #[cold]
+    #[inline(never)]
+    fn leave_in_order(
+        &mut self,
+        frame: Frame,
+        caller: Frame,
+        (source, destination): (Option<Reg>, Reg),
+        value: Value,
+    ) -> Step {
+        let value = if self.discards_result(frame, caller, source, destination) {
+            drop(value);
+            None
+        } else {
+            Some(value)
+        };
+        self.stack.pop();
+        self.registers.release_frame(frame.start(), frame.base());
+        if let Some(value) = value {
+            self.registers
+                .put(caller.base() + destination.index(), value);
+        }
+        Step::Switched(Position {
+            frame: caller,
+            ip: caller.ip(),
+        })
+    }
+
     /// A setter with no suspended caller action returns without publishing a result.
     #[inline(never)]
     fn leave_discarded(&mut self, frame: Frame, source: Option<Reg>) -> Step {
@@ -187,6 +226,48 @@ impl Machine<'_> {
             frame: caller,
             ip: caller.ip(),
         })
+    }
+
+    /// Whether the caller throws away the temporary that `frame` returns.
+    #[inline(never)]
+    fn discards_result(
+        &self,
+        frame: Frame,
+        caller: Frame,
+        source: Option<Reg>,
+        destination: Reg,
+    ) -> bool {
+        matches!(
+            frame.kind(),
+            CallKind::Function | CallKind::Method | CallKind::Closure
+        ) && source
+            .is_some_and(|source| source.index() >= self.code.function(frame.function).locals.len())
+            && result_discarded(
+                self.code.instructions(caller.function),
+                caller.ip(),
+                destination,
+            )
+    }
+}
+
+impl crate::Vm {
+    /// A simple instruction that fell back only because the register it
+    /// writes holds an array or an object: do it here, with the old value
+    /// taken out and dropped (see `crate::fast`). Kept out of the machine
+    /// loop, whose code a call here would slow down even where unused.
+    #[inline(never)]
+    pub(crate) fn release_and_store(&mut self, instruction: Instruction) -> bool {
+        let Some(frame) = self.call_stack.current().copied() else {
+            return false;
+        };
+        let slots = self.registers.tail_mut(frame.base());
+        match crate::fast::releasing_step(instruction, slots) {
+            Some(released) => {
+                drop(released);
+                true
+            }
+            None => false,
+        }
     }
 }
 
@@ -228,6 +309,7 @@ impl Machine<'_> {
     /// Whether parameter `index` of `function` takes `value` as it is, by
     /// value: no declared type, a built-in type the value has, or a class
     /// type the unit's cache knows the value's class satisfies.
+    #[inline(always)]
     fn accepts_argument(&self, function: FunctionIndex, index: usize, value: &Value) -> bool {
         let facts = self.code.facts(function);
         if !facts.takes_value(index) {
@@ -247,6 +329,7 @@ impl Machine<'_> {
     /// The same for a general callee, which is native code: any value, for
     /// an untyped by-value parameter. A pending named argument takes the
     /// general path.
+    #[inline(always)]
     fn general_accepts(&self, index: usize) -> bool {
         let Some(details) = self.stack.top_details() else {
             return false;

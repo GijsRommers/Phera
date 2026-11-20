@@ -1,4 +1,4 @@
-//! Register the DOMNodeList and DOMNamedNodeMap PHP hooks and methods.
+//! Register the PHP hooks and methods of the DOM collection classes.
 //!
 //! ```php
 //! foreach ($root->attributes as $name => $attribute) echo $name;
@@ -16,7 +16,7 @@ use super::{
 const HOOKS: ClassHooks = ClassHooks {
     iterator: Some(cursor::iterator),
     properties: Some(projection),
-    property_access: Some(&NativePropertyAccess { read, mutate }),
+    property_access: Some(&NativePropertyAccess::new(read, mutate)),
     count: Some(count_hook),
     dimensions: Some(NativeDimensions {
         fallback_if_overridden: &[],
@@ -76,5 +76,24 @@ pub(in crate::bindings) fn register(registry: &mut Registry) {
         },
         hooks: Some(&HOOKS),
         ..ClassEntry::class("DOMNamedNodeMap")
+    });
+    // `Dom\HTMLCollection` looks an element up by its `id` or `name` attribute.
+    registry.class(ClassEntry {
+        interfaces: &["IteratorAggregate", "Countable"],
+        methods: const {
+            &[
+                ITEM.returning("?Dom\\Element"),
+                MethodEntry::public(
+                    "namedItem",
+                    const { &[Param::new("key", ParamType::String)] },
+                    named,
+                )
+                .returning("?Dom\\Element"),
+                COUNT.returning("int"),
+                ITERATOR,
+            ]
+        },
+        hooks: Some(&HOOKS),
+        ..ClassEntry::class("Dom\\HTMLCollection")
     });
 }

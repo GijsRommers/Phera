@@ -39,9 +39,15 @@ impl Compiler<'_> {
             self.emit(Instruction::Write { place, source }, line);
             return Ok(source);
         }
+        if matches!(target.kind, ast::ExpressionKind::Index { .. }) {
+            return self.compile_index_assignment(target, value, line);
+        }
+        if let ast::ExpressionKind::Variable(ast::Variable::Named(name)) = &target.kind {
+            self.declare_file_symbol(name);
+        }
         let references = super::places::contains_reference(target);
-        let src = if references && writable(value) {
-            let place = self.place(value)?;
+        let src = if references && (writable(value) || crate::helpers::is_this(value)) {
+            let place = self.reference_source(value, line)?;
             let dst = self.allocate_register()?;
             self.emit(
                 Instruction::Reference {
@@ -56,6 +62,31 @@ impl Compiler<'_> {
         };
         self.assign(target, src, line)?;
         Ok(src)
+    }
+
+    /// Index expressions run before the right-hand side. A compiled local
+    /// key is looked up by the write, after that side has run.
+    fn compile_index_assignment(
+        &mut self,
+        target: &ast::Expression,
+        value: &ast::Expression,
+        line: usize,
+    ) -> Result<Reg, CompileError> {
+        let mut indexes = Vec::new();
+        let place = self.assignment_place(target, &mut indexes)?;
+        let source = self.compile_expression(value)?;
+        for index in indexes {
+            self.emit(
+                Instruction::Read {
+                    destination: index.destination,
+                    place: index.source,
+                    mode: phera_bytecode::FetchMode::Read,
+                },
+                index.line,
+            );
+        }
+        self.emit(Instruction::Write { place, source }, line);
+        Ok(source)
     }
 
     /// Bind references while retaining the original target evaluation order.

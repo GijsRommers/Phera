@@ -66,6 +66,7 @@ pub struct Registry {
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
     sync_selectors: HashMap<&'static str, crate::SyncSelector>,
     extra_named_handlers: HashMap<&'static str, crate::SyncFn>,
+    trace_redacted_argument_errors: HashSet<&'static str>,
     callback_frames: HashSet<&'static str>,
     function_modules: HashMap<&'static str, &'static str>,
     function_return_types: HashMap<&'static str, &'static str>,
@@ -128,6 +129,11 @@ impl Registry {
         }
         self.ini.register(name);
         self.extensions.push(name);
+    }
+
+    /// Register SAPI settings without reporting them as a loaded extension.
+    pub fn sapi_ini(&mut self, name: &str) {
+        self.ini.register(name);
     }
 
     /// Names and defaults for INI settings of modules loaded by this runtime.
@@ -231,6 +237,15 @@ impl Registry {
         self.classes.push(entry);
     }
 
+    /// Clear exception trace arguments when a native function rejects its parameter list.
+    pub fn redact_argument_error_trace(&mut self, function: &'static str) {
+        self.trace_redacted_argument_errors.insert(function);
+    }
+
+    pub fn argument_error_trace_is_redacted(&self, function: &str) -> bool {
+        self.trace_redacted_argument_errors.contains(function)
+    }
+
     /// Registers a class implemented by a bundle on behalf of a PHP module.
     pub fn class_in_module(&mut self, module: &'static str, entry: ClassEntry) {
         self.class(entry);
@@ -318,7 +333,12 @@ impl Registry {
         handler: crate::SyncFn,
     ) {
         self.function(entry);
-        self.extra_named_handlers.insert(entry.name, handler);
+        self.register_extra_named_handler(entry.name, handler);
+    }
+
+    /// Attach the extra-name handler independently of the function's frame policy.
+    pub fn register_extra_named_handler(&mut self, name: &'static str, handler: crate::SyncFn) {
+        self.extra_named_handlers.insert(name, handler);
     }
 
     pub fn extra_named_handler(&self, name: &str) -> Option<crate::SyncFn> {
@@ -332,8 +352,13 @@ impl Registry {
         params: &'static [crate::Param],
         handler: crate::AsyncFn,
     ) {
-        self.function(FunctionEntry::asynchronous(name, params, handler));
-        self.callback_frames.insert(name);
+        self.function_with_native_frame(FunctionEntry::asynchronous(name, params, handler));
+    }
+
+    /// Keep this function in PHP exception traces when its async body throws or calls PHP.
+    pub fn function_with_native_frame(&mut self, entry: FunctionEntry) {
+        self.function(entry);
+        self.callback_frames.insert(entry.name);
     }
 
     pub fn has_callback_frame(&self, name: &str) -> bool {

@@ -6,14 +6,15 @@
 //! ```
 
 use phera_extension_api::{
-    ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, PropertyPurpose, Value, args,
+    ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, PropertyPurpose,
+    Value, args,
 };
 use std::rc::Rc;
 
 use super::{CLASS, List, Mode, dimensions::arg, range, read, update};
 use crate::{
     This,
-    legacy::{Reader, Writer},
+    legacy::{self, PayloadKind, Writer},
     receiver,
 };
 
@@ -239,32 +240,40 @@ pub(super) fn legacy_serialize(_: &mut dyn Context, this: This<'_>, _: &[Value])
 
 pub(super) fn legacy_unserialize(
     context: &mut dyn Context,
-    this: This<'_>,
-    args: &[Value],
-) -> NativeResult {
-    let object = receiver(this)?;
-    let input =
-        args::string(args, 0).ok_or_else(|| NativeError::error("Missing serialized list data"))?;
-    let mut reader = Reader::new(input.as_bytes());
-    if reader.is_empty() {
-        return Ok(Value::Null);
-    }
-    update(object, |list| list.entries.clear())?;
-    let Value::Int(flags) = reader.value(context)? else {
-        return Err(reader.error());
-    };
+    this: Option<Rc<Object>>,
+    args: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let object = receiver(this.as_ref())?;
+        let input = args::string(&args, 0)
+            .ok_or_else(|| NativeError::error("Missing serialized list data"))?;
+        decode_legacy_payload(context, object.clone(), input.as_bytes()).await
+    })
+}
+
+pub(super) fn decode_legacy_payload<'a>(
+    context: &'a mut dyn Context,
+    object: Rc<Object>,
+    bytes: &'a [u8],
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(legacy::decode(
+        context,
+        object,
+        bytes,
+        PayloadKind::LinkedList,
+    ))
+}
+
+pub(crate) fn legacy_clear(object: &Object) -> Result<(), NativeError> {
+    update(object, |list| list.entries.clear())
+}
+
+pub(crate) fn legacy_set_mode(object: &Object, flags: i64) -> Result<(), NativeError> {
     update(object, |list| {
         list.mode = Some(Mode::parse(i64::from(flags as i32)))
-    })?;
-    while reader.take(b":") {
-        let value = reader.value(context)?;
-        update(object, |list| {
-            let entry = list.entry(value);
-            list.entries.push_back(entry);
-        })?;
-    }
-    if !reader.is_empty() {
-        return Err(reader.error());
-    }
-    Ok(Value::Null)
+    })
+}
+
+pub(crate) fn legacy_push(object: &Object, value: Value) -> Result<(), NativeError> {
+    push_value(object, value).map(|_| ())
 }

@@ -1,18 +1,23 @@
 //! Objects and resources: handle semantics (clones share the instance).
 
 use std::any::Any;
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::rc::{Rc, Weak};
 
 use crate::array::{ArrayKey, PhpArray};
+use crate::destruction::{Destruction, DoomedObjects};
 use crate::value::Value;
 
-/// Scalar casts that a native class may define for its own instances.
-#[derive(Clone, Copy)]
-pub enum ScalarCast {
+/// Scalar casts supported by PHP's native classes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ObjectCast {
     Bool,
     Int,
     Float,
+    /// An int when the value fits one, a float otherwise: what `array_sum()` asks for.
+    Number,
+    String,
 }
 
 /// The VM's per-class data. Implemented by other crates; tests use a dummy.
@@ -40,7 +45,8 @@ pub trait ClassHandle: Any {
         false
     }
 
-    fn native_scalar_cast(&self, _object: &Object, _kind: ScalarCast) -> Option<Value> {
+    /// A native object may supply its own scalar conversion.
+    fn cast(&self, _object: &Object, _target: ObjectCast) -> Option<Value> {
         None
     }
 
@@ -77,13 +83,20 @@ pub struct Object {
     pub(crate) properties: RefCell<PhpArray>,
     /// Native state for built-in classes (closures, PDO handles, ...).
     pub native: RefCell<Option<Box<dyn Any>>>,
-    /// Gives the id back to its pool when the object is freed. A separate
-    /// field rather than a `Drop` on `Object` itself, because a type with
-    /// its own `Drop` cannot have its fields moved out, and freeing long
-    /// chains of objects without recursion relies on moving the properties
-    /// out. The underscore says the field is never read: it exists only
-    /// to be dropped.
-    _lease: Option<IdLease>,
+    /// Whether `__destruct` still has to run; see `crate::destruction`.
+    pub(crate) destruction: Cell<Destruction>,
+    /// Values `WeakMap`s keep for this object; see `crate::attachments`.
+    pub(crate) attachments: crate::attachments::Attachments,
+    /// The pool the id goes back to when the object is freed. Moved, not
+    /// copied, into the object that waits for its destructor, so the id
+    /// stays taken until that object is really gone. `None` for an object
+    /// made without a pool. Declared after the fields that hold values:
+    /// fields are dropped in order, and the id goes back last (see
+    /// [`PoolHold`]).
+    pub(crate) pool: Option<PoolHold>,
+    /// This object took over another's contents for its destructor, and is
+    /// registered in the pool's incarnations (see `crate::weak_object`).
+    pub(crate) incarnated: bool,
 }
 
 impl Object {
@@ -94,7 +107,10 @@ impl Object {
             class,
             properties: RefCell::new(PhpArray::new()),
             native: RefCell::new(None),
-            _lease: None,
+            destruction: Cell::new(Destruction::Never),
+            attachments: Cell::new(None),
+            pool: None,
+            incarnated: false,
         }
     }
 
@@ -106,21 +122,21 @@ impl Object {
     }
 
     /// Install the property table before publishing the object.
+    #[inline]
     pub fn allocate_with_properties(
         ids: &Rc<ObjectIds>,
         class: Rc<dyn ClassHandle>,
         properties: PhpArray,
     ) -> Self {
-        let lease = IdLease {
-            id: ids.take(),
-            pool: ids.clone(),
-        };
         Object {
-            id: lease.id,
+            id: ids.take(),
             class,
             properties: RefCell::new(properties),
             native: RefCell::new(None),
-            _lease: Some(lease),
+            destruction: Cell::new(Destruction::Never),
+            attachments: Cell::new(None),
+            pool: Some(PoolHold(ids.clone())),
+            incarnated: false,
         }
     }
 
@@ -203,6 +219,12 @@ impl Object {
 #[derive(Debug, Default)]
 pub struct ObjectIds {
     state: RefCell<IdState>,
+    /// Objects whose destructor is due; see `crate::destruction`.
+    pub(crate) doomed: DoomedObjects,
+    /// The object that now carries each id whose object was handed over
+    /// for its destructor, with the identity (address) of the object it
+    /// took over from; see `crate::weak_object`.
+    pub(crate) incarnations: RefCell<HashMap<u32, (usize, Weak<Object>)>>,
 }
 
 #[derive(Debug, Default)]
@@ -211,6 +233,12 @@ struct IdState {
     highest: u32,
     /// Ids of freed objects; the last one pushed is reused first.
     free: Vec<u32>,
+    /// PHP stops reusing ids while it destroys the objects left at the end
+    /// of a request.
+    no_reuse: bool,
+    /// The objects being freed, innermost last, with whether each is an
+    /// incarnation; see [`PoolHold`].
+    releasing: Vec<(u32, bool)>,
 }
 
 impl ObjectIds {
@@ -218,22 +246,49 @@ impl ObjectIds {
         Rc::new(ObjectIds::default())
     }
 
-    fn take(&self) -> u32 {
+    /// A free id.
+    pub(crate) fn take(&self) -> u32 {
         let mut state = self.state.borrow_mut();
-        if let Some(id) = state.free.pop() {
+        if !state.no_reuse
+            && let Some(id) = state.free.pop()
+        {
             return id;
         }
         state.highest = state.highest.saturating_add(1);
         state.highest
     }
 
-    fn give_back(&self, id: u32) {
+    /// An object is being freed: its id goes back when what it holds has
+    /// been freed too ([`PoolHold`]'s drop).
+    pub(crate) fn begin_release(&self, id: u32, incarnated: bool) {
         // Nothing borrows the state across a call that could free an
         // object, so this cannot fail; if it ever did, the id would simply
         // not be reused.
         if let Ok(mut state) = self.state.try_borrow_mut() {
-            state.free.push(id);
+            state.releasing.push((id, incarnated));
         }
+    }
+
+    /// The innermost object being freed is gone: its id is free for
+    /// reuse. An object that took over another's contents for its
+    /// destructor is unregistered first.
+    fn finish_release(&self) {
+        let Ok(mut state) = self.state.try_borrow_mut() else {
+            return;
+        };
+        let Some((id, incarnated)) = state.releasing.pop() else {
+            return;
+        };
+        state.free.push(id);
+        drop(state);
+        if incarnated && let Ok(mut incarnations) = self.incarnations.try_borrow_mut() {
+            incarnations.remove(&id);
+        }
+    }
+
+    /// From now on every object gets a new id.
+    pub fn stop_reuse(&self) {
+        self.state.borrow_mut().no_reuse = true;
     }
 
     /// How many objects are alive.
@@ -243,15 +298,36 @@ impl ObjectIds {
     }
 }
 
-/// Returns an object's id to the pool when dropped.
-struct IdLease {
-    id: u32,
-    pool: Rc<ObjectIds>,
+/// An object's hold on its request's id pool; the last field of
+/// [`Object`].
+///
+/// PHP frees what an object holds before it gives back the object's id, so
+/// the outer object's id is the next to be reused:
+///
+/// ```php
+/// $outer = new Box(new Item);   // #1 holds #2
+/// $outer = null;                // frees #2, then #1
+/// var_dump(new Item);           // #1
+/// ```
+///
+/// `Object`'s `Drop` (see `crate::destruction`) notes the id with
+/// [`ObjectIds::begin_release`]; then Rust drops the fields in order, the
+/// values first (whatever they free notes and gives back its own id in
+/// between), and this hold last, which gives the id back.
+#[derive(Debug)]
+pub(crate) struct PoolHold(pub(crate) Rc<ObjectIds>);
+
+impl std::ops::Deref for PoolHold {
+    type Target = Rc<ObjectIds>;
+
+    fn deref(&self) -> &Rc<ObjectIds> {
+        &self.0
+    }
 }
 
-impl Drop for IdLease {
+impl Drop for PoolHold {
     fn drop(&mut self) {
-        self.pool.give_back(self.id);
+        self.0.finish_release();
     }
 }
 

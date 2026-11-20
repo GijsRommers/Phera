@@ -14,6 +14,9 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         for expression in expressions {
+            if crate::helpers::is_this(expression) {
+                return Err(self.error("Cannot unset $this", line));
+            }
             let parameter = self.place(expression)?;
             if parameter
                 .path
@@ -40,15 +43,17 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         let reference_subject = binding == crate::policies::IterationBinding::Reference
             || crate::expressions::places::contains_reference(value);
-        let first_source_slot = self.next;
+        let mark = self.temporaries_start();
         let src = if reference_subject && crate::writable(subject) {
             self.literal(Constant::Null, line)?
         } else {
             self.compile_expression(subject)?
         };
+        // The subject, and the registers the loop itself copies values into.
         let id = self.allocate_register()?;
         let key_register = key.as_ref().map(|_| self.allocate_register()).transpose()?;
         let value_register = self.allocate_register()?;
+        let owned = self.temporaries_since(mark);
         let place = if reference_subject {
             Some(if crate::writable(subject) {
                 self.place(subject)?
@@ -121,8 +126,7 @@ impl Compiler<'_> {
             start: self.position(),
             cleanup: Some(super::exits::LoopCleanup::Foreach {
                 iterator: id,
-                subject: src,
-                value: value_register,
+                owned,
             }),
             breaks: vec![],
             continues: vec![],
@@ -131,21 +135,11 @@ impl Compiler<'_> {
         self.emit(Instruction::Jump(Target(start)), line);
         self.patch(jump, self.position());
         self.loop_end(start);
-
-        // Foreach result registers must not keep the last key or value alive
-        // after the loop leaves scope. The PHP targets keep their own values.
-        self.emit(
-            Instruction::Clear {
-                register: value_register,
-            },
-            line,
-        );
-        if let Some(register) = key_register {
-            self.emit(Instruction::Clear { register }, line);
-        }
-        if src.index() >= first_source_slot && !self.locals.values().any(|local| *local == src) {
-            self.emit(Instruction::Clear { register: src }, line);
-        }
+        self.emit(Instruction::IterEnd(id), line);
+        // PHP frees the loop's own copy of the subject and of the last
+        // value when the loop ends (FE_FREE), so an object that only they
+        // held is destroyed here.
+        self.clear_owning_temporaries(&owned, line);
 
         Ok(())
     }

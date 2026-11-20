@@ -2,7 +2,7 @@
 
 use phera_bytecode::Reg;
 use phera_extension_api::NativeError;
-use phera_value::Value;
+use phera_value::{PhpString, Value};
 
 use crate::calls::call_state::CallTarget;
 use crate::calls::call_view::CallView;
@@ -26,7 +26,9 @@ impl Vm {
         let reference = receiving.is_some_and(|parameter| parameters.by_reference(parameter))
             || (index == 0 && !matches!(argument, SentArgument::Value(_)) && view.is_extract());
         let value = match (reference, argument) {
-            (true, SentArgument::Value(_)) => {
+            (true, SentArgument::Value(_))
+                if receiving.is_some_and(|parameter| parameters.requires_reference(parameter)) =>
+            {
                 return Err(NativeError::error(format!(
                     "{}(): Argument #{} (${}) could not be passed by reference",
                     view.name(),
@@ -40,7 +42,7 @@ impl Vm {
             (false, SentArgument::Path(place)) => {
                 self.read_place(&place, crate::access_mode::Missing::Warn)?
             }
-            (false, SentArgument::Value(source)) => self.get(source),
+            (_, SentArgument::Value(source)) => self.get(source),
         };
         self.store_sent_value(index, value)
     }
@@ -99,29 +101,18 @@ impl Vm {
         mut value: Value,
     ) -> Result<(), NativeError> {
         let view = CallView::top(&self.code, &self.call_stack)?;
-        let slot = view.slots().slot(index);
         let parameters = view.parameters();
-        let named = view.details.and_then(|details| details.named.clone());
-        let mut extra = false;
-        if let Some(name) = &named {
-            extra = parameters.position_of(name.as_bytes()).is_none();
-            let duplicate = match extra {
-                true => view
-                    .details
-                    .is_some_and(|details| details.extra_named.iter().any(|(_, key)| key == name)),
-                false => self
-                    .registers
-                    .window(slot, 1)
-                    .first()
-                    .is_some_and(Option::is_some),
-            };
-            if duplicate {
-                return Err(NativeError::error(format!(
-                    "Named parameter ${} overwrites previous argument",
-                    name.to_string_lossy()
-                )));
-            }
-        }
+        // Declared parameter slots are reserved at the start of the window.
+        let slot = if index < parameters.len() {
+            view.call.base() + index
+        } else {
+            view.slots().slot(index)
+        };
+        let named = view.details.and_then(|details| details.named.as_ref());
+        let extra = match named {
+            Some(name) => self.check_named_send(&view, slot, name)?,
+            None => false,
+        };
         let mut deferred = None;
         if let Some(declaration) = parameters
             .receiving(index)
@@ -142,12 +133,8 @@ impl Vm {
         let was_named = named.is_some();
         self.registers.grow_to(slot + 1);
         self.registers.put(slot, value);
-        if let Some(name) = named {
-            let details = self.call_stack.top_details_mut()?;
-            details.named = None;
-            if extra {
-                details.extra_named.push((index, name));
-            }
+        if was_named {
+            self.finish_named_send(index, extra)?;
         }
         let call = self.call_stack.top_call_mut()?;
         call.mark_sent(index, !extra);
@@ -159,6 +146,47 @@ impl Vm {
         }
         if was_named {
             call.flags.insert(CallFlags::NAMED);
+        }
+        Ok(())
+    }
+
+    /// Named sends may overwrite a parameter or a previous variadic key.
+    #[cold]
+    #[inline(never)]
+    fn check_named_send(
+        &self,
+        view: &CallView<'_>,
+        slot: usize,
+        name: &PhpString,
+    ) -> Result<bool, NativeError> {
+        let extra = view.parameters().position_of(name.as_bytes()).is_none();
+        let duplicate = match extra {
+            true => view
+                .details
+                .is_some_and(|details| details.extra_named.iter().any(|(_, key)| key == name)),
+            false => self
+                .registers
+                .window(slot, 1)
+                .first()
+                .is_some_and(Option::is_some),
+        };
+        if duplicate {
+            return Err(NativeError::error(format!(
+                "Named parameter ${} overwrites previous argument",
+                name.to_string_lossy()
+            )));
+        }
+        Ok(extra)
+    }
+
+    /// Move a variadic name into the window after the corresponding value is ready.
+    #[cold]
+    #[inline(never)]
+    fn finish_named_send(&mut self, index: usize, extra: bool) -> Result<(), NativeError> {
+        let details = self.call_stack.top_details_mut()?;
+        let name = details.named.take();
+        if extra && let Some(name) = name {
+            details.extra_named.push((index, name));
         }
         Ok(())
     }

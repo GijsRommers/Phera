@@ -110,9 +110,10 @@ pub enum Value {
 - **Objects** hold a class handle, a property table, and an optional slot of
   native state for built-in classes such as `Closure`, `ArrayObject` or `PDO`.
 - **Memory.** Reference counting frees most things at once, which also gives
-  PHP's destructor timing. Cycles are handled per request: the `Vm` keeps a weak
-  list of the objects it created and clears their properties when the request
-  ends. A cycle collector inside long requests can come later.
+  PHP's destructor timing (section 9.6). Cycles of objects are found by a
+  collector that runs on `gc_collect_cycles()` and after every 10,000
+  allocations (section 9.7); what is left is broken apart when the request
+  ends, through the `Vm`'s weak list of the objects it created.
 
 ## 4. Bytecode and VM
 
@@ -173,14 +174,23 @@ change:
 
 | Limit | Default | Where it is enforced | Built |
 | --- | --- | --- | --- |
-| Whole request, waiting included (`--request-timeout`) | 60 s | a timer around the request's task. The task is stopped at its next wait or hand-over point and the client gets 504 | yes |
-| A silent connection: before its first request, between two requests, and while a request head arrives | 75 s | hyper's header read timer, which covers all three. Longer than the 60 s after which proxies commonly drop idle connections, so that Phera is never the side that closes a connection the proxy is about to reuse | yes |
+| Running a complete request (`--request-timeout`) | 60 s | a timer around the request's task. The task is stopped at its next wait or hand-over point and the client gets 504 | yes |
+| Receiving headers and body (`--request-read-timeout`) | 60 s plus one second per 16 KiB of body received | measured from when the server starts waiting for the request head. The server sends 408 and closes the connection on expiry | yes |
+| Waiting for a request head | 75 s | hyper's header read timer uses the lesser of this limit and the receive deadline | yes |
 | Pause between two pieces of a request body | 30 s | a timer on each read; 408 and the connection is closed | yes |
 | Size of a request body (`post_max_size`) | 8 MiB | while reading; 413 beyond it | yes |
 | Open connections per worker | 10,000 | a worker takes a free slot before it accepts; beyond the limit, connections wait in the operating system's queue | yes |
 | Running time of a script (`max_execution_time`, `set_time_limit()`) | 30 s under `serve`, none on the command line | the interpreter samples the request's CPU time at handoffs after 65,536 loop rounds or calls. Time spent suspended for I/O is excluded. A timeout ends the script with PHP's fatal diagnostic. | yes |
 | Memory of one request (`memory_limit`) | 128 MiB | to be decided | no |
 | Buffered response | 64 KiB, then it streams | output is handed to the connection in chunks once the buffer passes the threshold, and the script waits while the client is slow (so a slow reader costs a suspended task, not memory) | no; static files are sent in pieces already |
+
+The receive budget grows with the number of body bytes read, following
+[Apache's minimum-rate approach](https://httpd.apache.org/docs/current/mod/mod_reqtimeout.html).
+A steady upload can take longer than the initial 60 seconds. A trickle
+earns little additional time, and the body size cap bounds the maximum
+extension. The 30-second body idle limit also applies between reads, as in
+[nginx](https://nginx.org/en/docs/http/ngx_http_core_module.html#client_body_timeout)
+and [Caddy](https://caddyserver.com/docs/caddyfile/options#timeouts).
 
 The request timeout and PHP's own `max_execution_time` are two limits, as
 with nginx and PHP-FPM: the first counts everything, waiting for a database
@@ -257,6 +267,23 @@ Not planned: speaking FastCGI, that is, being a drop-in for PHP-FPM behind
 an existing nginx `fastcgi_pass`. A proxy reaches Phera over HTTP like any
 other upstream. This can be revisited if someone needs to keep an nginx
 configuration unchanged.
+
+#### PHP diagnostics
+
+`phera serve` starts with `display_errors` off and `log_errors` on. Fatal
+errors and uncaught exceptions produce an empty 500 if the script has not
+sent output or chosen another status. The server's standard error includes
+the request line. Use `phera serve --dev` to turn display on in a local
+development server. Command-line scripts display errors by default.
+
+Both commands accept `-d NAME=VALUE` before the script or document root.
+`error_reporting` selects which diagnostics are displayed and logged.
+`html_errors` controls display formatting, `display_startup_errors` controls
+display during request startup, and `error_log` can direct logging to a
+file. On the command line, `display_errors=stderr` sends plain diagnostics
+to standard error. In the web server it displays them in the response.
+`fatal_error_backtraces` controls optional PHP fatal traces, which follow the
+same display and logging settings as their diagnostic.
 
 ### 5.3 PHP file sessions
 
@@ -425,9 +452,9 @@ The three ways to run an application, side by side:
 | Works for | every application | an application with a boot phase and a snapshot point | an application written for long-running use |
 | Change to the application | none | none with an adapter, one line otherwise | none if it already supports FrankenPHP or Octane |
 
-Order: step 1 first, because it helps every application; then worker mode
-(step 5), which is the smallest change for the largest gain on Symfony and
-Laravel; then the snapshot (steps 2 and 3). They follow the destructors work
+Order: steps 1 to 3 first (shared linked code, the snapshot, the adapters).
+Worker mode (step 5) is built only if a forked application still falls short
+of what long-running applications need; see `docs/decisions/`. They follow the destructors work
 (9.1), which changes the same object lifetime code.
 
 ### 5.5 Child processes
@@ -451,7 +478,7 @@ and returns the child's exit status.
 
 Phera gives each web child its own process group and terminates abandoned
 children at request cleanup while their leader is still tracked. Programs
-that explicitly detach can keep running. [Process decisions](decisions.md)
+that explicitly detach can keep running. [Process decisions](decisions/README.md)
 
 ## 6. Scope
 
@@ -795,12 +822,7 @@ each with its own fixtures checked against real PHP.
   engine itself understands (`ArrayAccess`, `Countable`, `Iterator`,
   `IteratorAggregate`, `Stringable`) are flags on the linked class, checked
   only on the slow path of an operation that failed the ordinary way.
-- **Destructors.** Rust drops an object when its last reference goes, but a
-  `Drop` cannot run PHP code: it has no VM and cannot await. So dropping an
-  object whose class has `__destruct` moves its contents into a queue owned
-  by the request. The VM empties the queue at the next instruction boundary
-  and runs the destructors there. The timing is PHP's to within one
-  instruction.
+- **Destructors.** See section 9.6.
 - **`__toString` and native functions.** A native function declared with a
   string parameter must accept a stringable object. The VM converts such
   arguments before `prepare_arguments`, because calling a PHP method needs
@@ -854,10 +876,8 @@ each with its own fixtures checked against real PHP.
   directly. A shared leaf that finishes or delegates again returns to the
   stack walk.
 - A generator dropped while suspended inside a `try` runs its `finally`
-  blocks through a request-local release queue. The VM drains it at an
-  instruction boundary. A temporary that Phera still owns can delay that
-  release compared with PHP. References kept by closures or reference
-  cycles can also outlive the script's last explicit use of the generator.
+  blocks through a request-local release queue, which the VM drains with
+  the destructors (section 9.6), at the same instruction boundaries.
 
 ### 9.5 Fibers
 
@@ -912,6 +932,76 @@ are released.
 3. Closures, arrow functions, callables.
 4. Traits, enums, readonly, magic methods, the engine's interfaces.
 5. Generators.
+
+### 9.6 Object lifetime and destructors
+
+```php
+class Lock { function __destruct() { echo "released\n"; } }
+function work() { $lock = new Lock; echo "working\n"; }
+work();             // working, released
+echo "done\n";      // done
+```
+
+PHP destroys an object when its reference count reaches zero, and runs
+`__destruct` right then, before the next statement. Phera does the same.
+
+- **The hand-over.** A Rust `Drop` cannot run PHP code (no VM, no await,
+  and the `Rc` is already gone, so there is no `$this`). An object whose
+  class declares `__destruct` is created with `Destruction::Due`; when it
+  is dropped, its `Drop` moves its contents (class, properties, native
+  state, the lease on its id) into a new `Rc<Object>` marked `Done` and
+  queues it on the request's id pool (`phera_value::destruction`). An
+  object without a destructor pays one comparison when it is freed and
+  nothing while it lives. No `unsafe`; no destructor is lost (the queue owns
+  the object) or run twice (only a `Due` object is queued).
+- **Running them** (`vm::destructors`). After each instruction that can
+  release a value, the interpreter tests one flag and, if set, awaits the
+  queued destructors in release order, then continues. Simple scalar
+  instructions test nothing unless the register they overwrote held an
+  array, object or reference. A destructor is ordinary PHP code: it can
+  call anything, suspend, throw (the exception surfaces at the point of
+  release; a second one gets the first as its previous), `exit`, or store
+  `$this` (the object lives on, and is not destructed again). A non-public
+  destructor called from the wrong scope throws PHP's error; at the end of
+  the request it is skipped with PHP's warning. An object whose constructor
+  (or a constructor argument) threw gets no destructor.
+- **When values are released.** A frame releases its variables in order,
+  then `$this`. Unwinding releases the frames it leaves before the `catch`
+  runs. The compiler clears the temporaries a call was built from right
+  after the call, the temporaries of a condition on each way out of the
+  branch, and a `foreach` subject when the loop ends; a temporary that
+  provably holds a scalar is left alone, and a plain local receiver is not
+  copied at all. An unused temporary result is freed at the `return`,
+  before the callee's variables (`calls::discarded_results`).
+- **The end of a request** (`vm::request_end`). After the last statement,
+  `exit` or an uncaught exception: shutdown functions; then the globals
+  holding the only reference to an object, last to first, repeated until a
+  pass changes nothing; then every remaining object by id, including ones
+  created meanwhile, with ids no longer reused; then output buffers. A
+  destructor that throws there ends the request with "Fatal error: Uncaught
+  ..." and no further destructors; a fatal error (not an exception) skips
+  all of them. The main script's registers are its globals and live until
+  this phase. Finally the id pool is closed and everything left is freed
+  without destructors. Under `phera serve` this all happens before the
+  response is complete; a request stopped by the server's timeout drops its
+  task, and with it the `Vm`: the closed pool frees every object without a
+  destructor, and nothing of it reaches the next request.
+
+### 9.7 Cycles
+
+`phera_value::find_garbage` does PHP's trial deletion on `Rc` counts: from
+every live object it walks properties, arrays and PHP references, counting
+for each value how many owners it met; a value with more owners than that
+is held from outside and alive, with everything it reaches; the rest is
+garbage. Iterative, linear in the live objects and what they hold. A run
+(`vm::cycles`) calls the destructors of garbage objects first, searches
+again (a destructor may resurrect), then empties the garbage's properties
+and references so that reference counting frees it. Values held only in a
+built-in object's native state (a closure's captures) are not looked into,
+and cycles made only of arrays and references (no object) are not found;
+both are freed at the end of the request. Automatic runs come after 10,000
+allocations; a run that frees fewer than 100 values raises that by
+10,000, as PHP raises its threshold.
 
 ## 10. Speed
 

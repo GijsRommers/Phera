@@ -49,6 +49,7 @@ impl Extension for Xml {
 
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    forbid_serialization: true,
     ..ClassHooks::EMPTY
 };
 

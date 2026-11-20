@@ -95,7 +95,9 @@ impl Vm {
     /// The cached delegate can be shared. It qualifies only while it still has
     /// a local yield; finishing or delegating again requires the iterative driver.
     fn run_in_place(&mut self, generator: &mut Generator, sent: &Value) -> Option<()> {
-        if generator.reference {
+        // While a destructor is due somewhere, a simple instruction may
+        // release its object: the regular driver, whose loop looks, runs.
+        if generator.reference || self.object_ids.has_due() {
             return None;
         }
         let State::Yielded(frame, received) = &mut generator.state else {
@@ -113,7 +115,7 @@ impl Vm {
                 break None;
             };
             let mut next = ip + 1;
-            if scalar_step(&instruction, registers, &mut next) == ScalarStep::Complete {
+            if scalar_step::<false>(&instruction, registers, &mut next) == ScalarStep::Complete {
                 executed += 1;
                 if next <= ip {
                     work += 1;

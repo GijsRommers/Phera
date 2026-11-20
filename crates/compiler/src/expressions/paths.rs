@@ -6,15 +6,37 @@ use crate::{CompileError, Compiler};
 use phera_ast as ast;
 use phera_bytecode::{FetchMode, Reg};
 
-#[derive(PartialEq, Eq)]
-enum Access {
+enum Access<'a> {
     Place,
     Read,
+    Assignment(&'a mut Vec<DeferredIndex>),
+}
+
+pub(super) struct DeferredIndex {
+    pub(super) source: Place,
+    pub(super) destination: Reg,
+    pub(super) line: usize,
 }
 
 impl Compiler<'_> {
     /// Lower every postfix access into one path, including object roots produced by calls.
     pub(crate) fn place(&mut self, expression: &ast::Expression) -> Result<Place, CompileError> {
+        self.writable_place(expression, Access::Place)
+    }
+
+    pub(super) fn assignment_place(
+        &mut self,
+        expression: &ast::Expression,
+        indexes: &mut Vec<DeferredIndex>,
+    ) -> Result<Place, CompileError> {
+        self.writable_place(expression, Access::Assignment(indexes))
+    }
+
+    fn writable_place(
+        &mut self,
+        expression: &ast::Expression,
+        access: Access<'_>,
+    ) -> Result<Place, CompileError> {
         if crate::expressions::nullsafe::contains_nullsafe(expression) {
             return Err(self.error(
                 "Can't use nullsafe operator in write context",
@@ -56,7 +78,29 @@ impl Compiler<'_> {
                 self.lines.line(expression.span.start),
             ));
         }
-        self.readable_place(expression)
+        self.access_path(expression, access).map(|(place, _)| place)
+    }
+
+    /// The place a reference is taken from: `[&$x]`, `$a = &$x`.
+    ///
+    /// `$this` cannot be rebound, so PHP takes the reference from a copy of
+    /// it: `[&$this]` holds a reference to the object, and assigning through
+    /// that reference leaves `$this` alone.
+    pub(crate) fn reference_source(
+        &mut self,
+        expression: &ast::Expression,
+        line: usize,
+    ) -> Result<Place, CompileError> {
+        if !crate::helpers::is_this(expression) {
+            return self.place(expression);
+        }
+        let copy = self.allocate_register()?;
+        self.emit(Instruction::This { destination: copy }, line);
+        Ok(Place {
+            base: copy,
+            scope: PlaceScope::Local,
+            path: Vec::new(),
+        })
     }
 
     /// Evaluate the root first and each dynamic key once in source order.
@@ -107,7 +151,7 @@ impl Compiler<'_> {
     fn access_path(
         &mut self,
         expression: &ast::Expression,
-        usage: Access,
+        mut usage: Access<'_>,
     ) -> Result<(Place, usize), CompileError> {
         let line = self.lines.line(expression.span.start);
         let mut node = expression;
@@ -192,7 +236,7 @@ impl Compiler<'_> {
             path: Vec::new(),
         };
         for access in postfix.into_iter().rev() {
-            if usage == Access::Read {
+            if matches!(usage, Access::Read) {
                 let access_line = self.access_line(access);
                 if fetch_line != access_line
                     && (!place.path.is_empty()
@@ -209,7 +253,29 @@ impl Compiler<'_> {
             }
             let step = match &access.kind {
                 ast::ExpressionKind::Index { index, .. } => match index {
-                    Some(index) => Step::Index(self.compile_expression(index)?),
+                    Some(index) => {
+                        if let Access::Assignment(indexes) = &mut usage
+                            && matches!(
+                                index.kind,
+                                ast::ExpressionKind::Variable(ast::Variable::Named(_))
+                            )
+                        {
+                            let source = self.readable_place(index)?;
+                            if source.scope == PlaceScope::Local && source.path.is_empty() {
+                                let destination = self.allocate_register()?;
+                                indexes.push(DeferredIndex {
+                                    source,
+                                    destination,
+                                    line: self.lines.line(index.span.start),
+                                });
+                                Step::Index(destination)
+                            } else {
+                                Step::Index(self.compile_expression(index)?)
+                            }
+                        } else {
+                            Step::Index(self.compile_expression(index)?)
+                        }
+                    }
                     None => Step::Append,
                 },
                 ast::ExpressionKind::Property { name, .. } => match name {

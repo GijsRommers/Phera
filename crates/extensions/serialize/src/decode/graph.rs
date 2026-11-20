@@ -3,12 +3,11 @@
 //! PHP numbers locations, including overwritten keys. Values and their locations
 //! are stored separately so overwriting a key can leave earlier aliases alive.
 
-use std::{
-    cell::RefCell,
-    rc::{Rc, Weak},
-};
+use std::{cell::RefCell, rc::Rc};
 
-use phera_extension_api::{ArrayKey, Context, NativeError, Object, PhpArray, Value};
+use phera_extension_api::{
+    ArrayKey, Context, NativeError, Object, PhpArray, Value, serialization::LegacyUnserializeState,
+};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(super) struct Place(usize);
@@ -108,6 +107,47 @@ impl Graph {
         content
     }
 
+    pub(super) fn legacy_object_slots(&self, payload: &[u8]) -> LegacyUnserializeState {
+        let mut slots = LegacyUnserializeState {
+            count: self.slots.len(),
+            ..LegacyUnserializeState::default()
+        };
+        // An r: token can name an earlier object. Scan the payload to collect
+        // only those slots, so sibling C: tokens never copy the graph prefix.
+        for start in memchr::memmem::find_iter(payload, b"r:") {
+            let digits = &payload[start + 2..];
+            let Some(end) = digits.iter().position(|byte| !byte.is_ascii_digit()) else {
+                continue;
+            };
+            if digits[end] != b';' {
+                continue;
+            }
+            let number = std::str::from_utf8(&digits[..end])
+                .ok()
+                .and_then(|digits| digits.parse::<usize>().ok());
+            let Some(slot) = number.and_then(|number| number.checked_sub(1)) else {
+                continue;
+            };
+            if let Some(place) = self.slots.get(slot)
+                && let Some(binding) = self.places[place.0]
+                && let Value::Object(object) = &self.values[binding.content().0].value
+            {
+                slots.objects.insert(slot + 1, object.clone());
+            }
+        }
+        slots
+    }
+
+    pub(super) fn import_legacy_object_slots(&mut self, mut slots: LegacyUnserializeState) {
+        for index in self.slots.len()..slots.count {
+            let place = self.new_place();
+            self.slots.push(place);
+            if let Some(object) = slots.objects.remove(&(index + 1)) {
+                self.value(place, Value::Object(object));
+            }
+        }
+    }
+
     pub(super) fn reference(&mut self, place: Place, slot: usize, by_ref: bool) -> Option<()> {
         let target = *self.slots.get(slot.checked_sub(1)?)?;
         if target == place {
@@ -177,13 +217,8 @@ impl Graph {
     }
 
     pub(super) fn retain_array_cycles(&mut self, context: &mut dyn Context) {
-        let cycles = std::mem::take(&mut self.cyclic_references);
-        if !cycles.is_empty() {
-            let state = context.state().get_or_default::<RequestCycles>();
-            if state.0.len() == state.0.capacity() {
-                state.0.retain(|entry| entry.strong_count() != 0);
-            }
-            state.0.extend(cycles.iter().map(Rc::downgrade));
+        for cell in self.cyclic_references.drain(..) {
+            context.state().track_cycle_reference(&cell);
         }
     }
 }
@@ -193,19 +228,6 @@ impl Drop for Graph {
         // If an error stopped construction before a PHP hook could see these
         // arrays, no other code owns the back edges.
         for cell in &self.cyclic_references {
-            if let Ok(mut value) = cell.try_borrow_mut() {
-                *value = Value::Null;
-            }
-        }
-    }
-}
-
-#[derive(Default)]
-struct RequestCycles(Vec<Weak<RefCell<Value>>>);
-
-impl Drop for RequestCycles {
-    fn drop(&mut self) {
-        for cell in self.0.iter().filter_map(Weak::upgrade) {
             if let Ok(mut value) = cell.try_borrow_mut() {
                 *value = Value::Null;
             }

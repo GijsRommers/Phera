@@ -10,9 +10,10 @@ pub mod incdec;
 pub use arithmetic::{add, div, modulo, mul, negate, pow, sub, unary_plus};
 pub use bitwise::{bitwise_and, bitwise_not, bitwise_or, bitwise_xor, shift_left, shift_right};
 pub use compare::{
-    LazyComparison, ObjectComparator, ObjectComparison, StringComparison, StringComparisonStep,
-    compare, compare_after_error, compare_op, compare_with_objects, compare_with_string_objects,
-    less, less_equal, loose_equals, loose_equals_with_objects, strict_equals,
+    LazyComparison, ObjectComparator, ObjectComparison, ObjectOperands, StringComparison,
+    StringComparisonStep, compare, compare_after_error, compare_op, compare_with_objects,
+    compare_with_string_objects, less, less_equal, loose_equals, loose_equals_with_objects,
+    strict_equals,
 };
 pub use concat::concat;
 pub use incdec::{decrement, increment};
@@ -31,7 +32,7 @@ pub(crate) fn deref_clone(v: &Value) -> Value {
 }
 
 /// `zend_binop_error`: PHP's TypeError for mismatched operand types.
-pub(crate) fn binop_type_error(sigil: &str, a: &Value, b: &Value) -> OpError {
+pub fn binop_type_error(sigil: &str, a: &Value, b: &Value) -> OpError {
     OpError::type_error(format!(
         "Unsupported operand types: {} {} {}",
         a.type_name(),
@@ -42,7 +43,7 @@ pub(crate) fn binop_type_error(sigil: &str, a: &Value, b: &Value) -> OpError {
 
 /// Conversion failure marker: the caller builds PHP's TypeError, naming the
 /// original operands which it alone knows in the right order.
-pub(crate) struct ConvFail;
+pub struct ConvFail;
 
 /// `_zendi_try_convert_scalar_to_number`: null/bool become ints, strings
 /// become numbers (warning on trailing data), everything else fails.
@@ -84,7 +85,7 @@ pub(crate) fn to_number2(
 
 /// `zendi_try_get_long`: int-like coercion used by `%`, shifts and bitwise
 /// ops. `Err` means PHP's TypeError path.
-pub(crate) fn try_get_long(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, ConvFail> {
+pub fn try_get_long(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, ConvFail> {
     match &v {
         Value::Int(i) => Ok(*i),
         Value::Bool(b) => Ok(*b as i64),

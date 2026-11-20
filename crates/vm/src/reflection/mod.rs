@@ -535,7 +535,10 @@ impl Vm {
             )));
         }
         let args = match args {
-            Some(args) => args,
+            Some(args) => {
+                Self::check_script_construction(&class)?;
+                args
+            }
             None => {
                 if class.has_native_layout && class.is_final {
                     return Err(exception(format!(
@@ -620,15 +623,16 @@ impl Vm {
                     .invoke_array_callback_origin(callee, &args, ArgumentOrigin::Attribute)
                     .await;
                 self.state.get_or_default::<AttributeCallSite>().0 = previous;
-                result?;
+                constructed(object, result)?;
             } else {
-                self.invoke_array_callback(callee, &args).await?;
+                let result = self.invoke_array_callback(callee, &args).await;
+                constructed(object, result)?;
             }
         }
         Ok(created)
     }
 
-    fn reflection_callee(
+    pub(crate) fn reflection_callee(
         &self,
         called: Rc<Class>,
         scope: Rc<Class>,
@@ -677,4 +681,14 @@ fn source_info(
         end_line: line(metadata.span.end.saturating_sub(1)),
         doc_comment,
     }
+}
+
+/// The result of a constructor that Reflection called. An object whose
+/// constructor failed gets no destructor, as after a failed `new` (see
+/// `crate::failed_construction`).
+fn constructed(object: &Object, result: NativeResult) -> NativeResult {
+    if result.is_err() {
+        object.mark_destructed();
+    }
+    result
 }

@@ -3,7 +3,7 @@
 use std::{rc::Rc, sync::Arc};
 
 use phera_bytecode::{CompiledUnit, Reg};
-use phera_extension_api::{LocalFuture, Registry, RequestState};
+use phera_extension_api::{Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
 pub use native_tables::NativeTables;
@@ -54,9 +54,14 @@ mod constant_table;
 mod constants;
 mod context;
 mod control_flow;
+mod cycles;
 mod debug_info;
 mod declaration_diagnostics;
 mod default_autoload;
+#[cfg(test)]
+mod destructor_tests;
+mod destructors;
+mod diagnostic_output;
 mod diagnostic_reporter;
 mod diagnostics;
 mod dimension_instructions;
@@ -77,6 +82,7 @@ mod exception_unwind;
 mod exceptions;
 mod execution_time;
 mod extract;
+mod failed_construction;
 mod fast;
 mod fibers;
 mod finally;
@@ -90,6 +96,7 @@ mod globals;
 mod handler_installation;
 mod hooked_property_iteration;
 mod hooked_property_views;
+mod include_lookup;
 mod include_scope;
 mod include_state;
 mod includes;
@@ -129,6 +136,7 @@ mod native_property_views;
 mod native_tables;
 mod object_comparison;
 mod object_iteration;
+mod object_operators;
 mod operators;
 mod ops;
 mod output;
@@ -152,6 +160,7 @@ mod reference_holders;
 mod references;
 mod reflection;
 mod request_callbacks;
+mod request_end;
 mod scope_intrinsics;
 mod sensitive_parameters;
 mod serialization;
@@ -160,7 +169,6 @@ mod static_variables;
 mod string_comparison;
 mod string_offsets;
 mod stringable;
-mod timeout_shutdown;
 mod traversable_foreach;
 mod traversable_unpack;
 mod traversal;
@@ -171,19 +179,9 @@ mod unit_caches;
 mod unpacking;
 mod unsupported_items;
 
-/// Resolves PHP includes through the embedding runtime code cache.
-pub trait CodeLoader: Send + Sync {
-    fn load(
-        &self,
-        path: std::path::PathBuf,
-    ) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>>;
-}
-
-/// PHP retries missing include paths, while compilation errors abort that lookup.
-pub enum CodeLoadError {
-    Unavailable(String),
-    Compile(phera_compiler::CompileError),
-}
+pub use include_lookup::{
+    CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
+};
 
 /// Receives each PHP output write while Vm also retains its output buffer.
 pub trait OutputSink {
@@ -203,6 +201,9 @@ pub const DEFAULT_FRAME_LIMIT: usize = 250_000;
 /// One request interpreter; PHP calls use heap frames rather than Rust recursion.
 pub struct Vm {
     classes: classes::ClassTable,
+    /// The class table's id pool, held here as well so that the
+    /// interpreter loop can read it while it borrows the class table.
+    object_ids: Rc<phera_value::ObjectIds>,
     enum_cases: classes::enums::EnumCases,
     native_callback_sites: Vec<error_traces::NativeCallbackSite>,
     debug_objects: Vec<u32>,
@@ -223,6 +224,7 @@ pub struct Vm {
     /// Every loaded file and function of the request, by number.
     code: code_table::CodeTable,
     globals: globals::Globals,
+    extension_values: std::collections::HashMap<&'static str, Value>,
     static_variables: static_variables::StaticVariables,
     diagnostic_reporter: diagnostic_reporter::DiagnosticReporter,
     diagnostic_location: Option<diagnostics::SourceLocation>,
@@ -256,9 +258,10 @@ pub struct Vm {
     reflection_cache: Option<Box<reflection::ReflectionCache>>,
     property_references: std::rc::Rc<std::cell::RefCell<reference_holders::ReferenceHolders>>,
     autoload: autoload::Autoloaders,
+    request_end: request_end::RequestEnd,
+    cycles: cycles::CycleCollector,
     ini_overrides: ini::IniOverrides,
     execution_time: Rc<execution_time::ExecutionTime>,
-    timed_out_objects: Option<Vec<std::rc::Weak<phera_value::Object>>>,
     active_fiber: Option<Box<fibers::Active>>,
     fiber_bailout: bool,
     suspended_fibers: fibers::SuspendedFibers,
@@ -277,13 +280,17 @@ impl Vm {
 
     /// Start a fresh request with the worker's already linked built-ins.
     pub fn with_native_tables(native: &NativeTables) -> Self {
+        let classes = classes::ClassTable::new(native.classes.clone());
+        let object_ids = classes.ids_handle();
         Self {
             enum_cases: classes::enums::EnumCases::default(),
-            classes: classes::ClassTable::new(native.classes.clone()),
+            object_ids,
+            classes,
+            request_end: Default::default(),
+            cycles: Default::default(),
             autoload: Default::default(),
             ini_overrides: Default::default(),
             execution_time: Default::default(),
-            timed_out_objects: None,
             active_fiber: None,
             fiber_bailout: false,
             suspended_fibers: Default::default(),
@@ -305,6 +312,7 @@ impl Vm {
             function_table: function_table::FunctionTable::new(),
             code: code_table::CodeTable::default(),
             globals: globals::Globals::new(),
+            extension_values: Default::default(),
             static_variables: static_variables::StaticVariables::new(),
             diagnostic_reporter: diagnostic_reporter::DiagnosticReporter::new(),
             diagnostic_location: None,
@@ -334,7 +342,17 @@ impl Vm {
     }
 
     pub fn set_loader(&mut self, loader: Arc<dyn CodeLoader>) {
+        self.set_local_loader(Rc::new(loader))
+    }
+
+    /// A worker-local loader stays on the same thread as the VM.
+    pub fn set_local_loader(&mut self, loader: Rc<dyn CodeLoader>) {
         self.include_state.set_loader(loader)
+    }
+
+    /// The startup policy also governs the script that begins a web request.
+    pub fn include_cache_policy(&self) -> IncludeCachePolicy {
+        self.include_state.policy
     }
 
     pub fn set_sink(&mut self, sink: Box<dyn OutputSink>) {
@@ -349,7 +367,7 @@ impl Vm {
     /// Defines a global variable before the script starts, such as a
     /// superglobal the runtime fills from the request.
     pub fn set_global(&mut self, name: &str, value: Value) {
-        self.globals.insert(name.to_string(), value);
+        self.publish_global(name.into(), value);
     }
 
     /// The extensions' per-request state, for the runtime to read once the
@@ -391,36 +409,38 @@ impl Vm {
         let registers = unit.main.registers as usize;
         self.registers.grow_to(registers);
         self.call_stack.push(Frame::new(main, 0, None));
-        for (name, value) in self.globals.iter() {
-            if let Some(i) = unit
-                .main
-                .locals
-                .iter()
-                .position(|candidate| unit.names.get(candidate.index()) == Some(name))
-            {
-                self.registers.window_mut(i, 1)[0] = Some(value.clone());
+        for (index, name) in unit.main.locals.iter().enumerate() {
+            if let Some(name) = unit.names.get(name.index()) {
+                self.globals.declare(name);
+                self.registers.window_mut(index, 1)[0] = self.globals.take(name);
             }
         }
         self.publish_declaration_warnings(&unit);
-        if let Err(error) = self.hoist_classes(&unit, main) {
+        let end = if let Err(error) = self.hoist_classes(&unit, main) {
             self.unwind(error);
-        } else if let Err(error) = self.interpret(0).await {
-            let error = self.materialize_error(error);
-            self.report_uncaught(error).await;
-        }
+            request_end::ScriptEnd::Fatal
+        } else {
+            match self.interpret(0).await {
+                Ok(_) => request_end::ScriptEnd::Destructible,
+                Err(error) => {
+                    let mut error = self.materialize_error(error);
+                    // The frames the error left released their variables;
+                    // PHP runs those destructors before it reports the error.
+                    if let Err(failure) = self.run_destructors().await {
+                        error = self.materialize_error(failure);
+                    }
+                    let end = request_end::ScriptEnd::of(&error);
+                    self.report_uncaught(error).await;
+                    end
+                }
+            }
+        };
         if self.output_pending()
             && let Err(error) = self.drain_output().await
         {
             self.unwind(error);
         }
-        self.run_shutdown_callbacks().await;
-        if let Some(before) = self.timed_out_objects.take() {
-            self.destroy_objects_after_timeout(before).await;
-        }
-        if !self.suspended_fibers.is_empty() {
-            Box::pin(self.close_fibers()).await;
-        }
-        self.finish_buffers().await;
+        self.finish_request(end).await;
         self.finish_request_headers().await;
         self.finish_resource_finalizers().await;
         self.status
@@ -482,15 +502,6 @@ impl Vm {
     #[inline]
     fn current_slot_mut(&mut self, register: Reg) -> Option<&mut Option<Value>> {
         let frame = self.current()?;
-        let (base, count) = (frame.base(), frame.count());
-        self.registers
-            .window_mut(base, count)
-            .get_mut(register.index())
-    }
-
-    /// A register of the script's top-level code, where globals live.
-    fn main_slot_mut(&mut self, register: Reg) -> Option<&mut Option<Value>> {
-        let frame = self.frame_at(0)?;
         let (base, count) = (frame.base(), frame.count());
         self.registers
             .window_mut(base, count)

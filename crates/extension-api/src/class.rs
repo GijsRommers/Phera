@@ -83,6 +83,8 @@ pub enum ClassKind {
     AbstractClass,
     /// A class that cannot be extended.
     FinalClass,
+    /// An immutable class that cannot be extended.
+    FinalReadonlyClass,
     Interface,
     /// An internal, unbacked enum with its cases in declaration order.
     UnitEnum(&'static [&'static str]),
@@ -326,9 +328,26 @@ pub type ReadNativeProperty =
 pub type MutateNativeProperty =
     fn(&mut dyn Context, &Object, &str, NativePropertyMutation<'_>) -> Result<bool, NativeError>;
 
+/// The declared type of a writable virtual string property.
+pub struct NativeStringProperty {
+    pub declaring: &'static str,
+    pub nullable: bool,
+}
+
 pub struct NativePropertyAccess {
     pub read: ReadNativeProperty,
     pub mutate: MutateNativeProperty,
+    pub string_property: Option<fn(&Object, &str) -> Option<NativeStringProperty>>,
+}
+
+impl NativePropertyAccess {
+    pub const fn new(read: ReadNativeProperty, mutate: MutateNativeProperty) -> Self {
+        Self {
+            read,
+            mutate,
+            string_property: None,
+        }
+    }
 }
 
 /// A class or interface provided by an extension.

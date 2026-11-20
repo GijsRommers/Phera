@@ -4,7 +4,7 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     rc::Rc,
 };
 
@@ -59,6 +59,8 @@ pub(super) struct Compiler<'ast> {
     /// [`crate::expressions::chains`].
     pub(super) compiled_operand: Option<crate::expressions::chains::CompiledOperand>,
     pub(super) locals: HashMap<String, Reg>,
+    /// File-scope declaration order is independent of register allocation.
+    file_symbols: Option<HashMap<String, usize>>,
     pub(super) loops: Vec<Loop>,
     /// Lexical cleanup scopes decide which finally blocks a structured exit crosses.
     pub(super) finalies: Vec<crate::statements::exceptions::FinallyScope>,
@@ -71,6 +73,10 @@ pub(super) struct Compiler<'ast> {
     pub(super) uses_hook_backing: bool,
     pub(super) imports: Option<Imports>,
     pub(super) reflection: &'ast ReflectionInputs,
+    /// Temporaries cleared right after the call that consumed them (see
+    /// `expressions::operand_release`), which the statement's end need not
+    /// clear again until they are allocated anew.
+    pub(super) released: HashSet<u16>,
     pub(super) native_functions: Option<&'ast crate::NativeFunctions<'ast>>,
 }
 impl<'ast> Compiler<'ast> {
@@ -106,6 +112,7 @@ impl<'ast> Compiler<'ast> {
             reach: 0,
             compiled_operand: None,
             locals: HashMap::new(),
+            file_symbols: (name == "{main}").then(HashMap::new),
             loops: vec![],
             finalies: vec![],
             labels: None,
@@ -116,6 +123,7 @@ impl<'ast> Compiler<'ast> {
             uses_hook_backing: false,
             imports: None,
             reflection,
+            released: HashSet::new(),
             native_functions: None,
         }
     }
@@ -141,6 +149,7 @@ impl<'ast> Compiler<'ast> {
         self.next += 1;
         self.peak = self.peak.max(self.next);
         self.reach = self.reach.max(self.next);
+        self.released.remove(&index);
         Ok(Reg(index))
     }
 
@@ -149,6 +158,7 @@ impl<'ast> Compiler<'ast> {
         if let Some(register) = self.locals.get(name) {
             return Ok(*register);
         }
+        self.declare_file_symbol(name);
         // A new local must never reuse a slot mentioned by earlier temporary code.
         self.next = self.next.max(self.peak);
         let register = self.allocate_register()?;
@@ -157,9 +167,24 @@ impl<'ast> Compiler<'ast> {
         Ok(register)
     }
 
+    /// PHP declares a named assignment target before its right-hand side,
+    /// while Phera allocates the register when it emits the write.
+    pub(super) fn declare_file_symbol(&mut self, name: &str) {
+        if let Some(symbols) = &mut self.file_symbols
+            && !symbols.contains_key(name)
+        {
+            symbols.insert(name.into(), symbols.len());
+        }
+    }
+
     /// Renumber locals before temporaries without changing instruction order.
     pub(super) fn finish(&mut self) -> Result<Function, CompileError> {
         self.finish_gotos()?;
+        if let Some(symbols) = &self.file_symbols {
+            self.function
+                .locals
+                .sort_unstable_by_key(|name| symbols.get(name).copied().unwrap_or(usize::MAX));
+        }
         let mut mapping = vec![Reg(0); self.peak];
         let mut named = vec![false; self.peak];
         for (i, name) in self.function.locals.iter().enumerate() {

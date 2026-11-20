@@ -131,7 +131,7 @@ impl Vm {
                 (!(start <= target && target < end.index())).then_some(iterator)
             })
             .collect();
-        self.call_stack.abandon_calls_from(end);
+        self.abandon_calls_unconstructed(end);
         self.closure_captures.retain(|capture| capture.base < base);
         self.registers.truncate(end);
         for register in &handler.cleanup {
@@ -145,12 +145,23 @@ impl Vm {
                 extras.iterators.remove(&iterator.0);
             }
         }
+        self.restore_lexical_silence(Some(target));
+    }
+
+    fn restore_lexical_silence(&mut self, target: Option<usize>) {
+        if self.diagnostic_reporter.silence() == 0 {
+            return;
+        }
         let depth =
             self.frames()
                 .rev()
                 .enumerate()
                 .map(|(index, frame)| {
-                    let end = if index == 0 { target } else { frame.ip() };
+                    let end = if index == 0 {
+                        target.unwrap_or_else(|| frame.ip())
+                    } else {
+                        frame.ip()
+                    };
                     frame.function().instructions.iter().take(end).fold(
                         0usize,
                         |depth, instruction| match instruction {
@@ -161,7 +172,7 @@ impl Vm {
                     )
                 })
                 .sum();
-        self.diagnostic_reporter.restore_silence(depth);
+        self.restore_silence(depth);
     }
 
     /// Include symbol-table changes survive exceptional exit just as normal return.
@@ -171,9 +182,11 @@ impl Vm {
         if let Some(frame) = self.call_stack.pop() {
             self.closure_captures
                 .retain(|capture| capture.base < frame.base());
-            self.registers.truncate(frame.start());
-            self.call_stack.abandon_calls_from(frame.start());
+            self.abandon_calls_unconstructed(frame.start());
+            self.mark_failed_constructor(&frame);
+            self.registers.release_frame(frame.start(), frame.base());
         }
+        self.restore_lexical_silence(None);
         Ok(())
     }
 

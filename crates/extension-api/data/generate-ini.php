@@ -62,6 +62,7 @@ $storageOnly = ($argv[1] ?? null) === '--storage-only';
 $applied = explode(' ', 'arg_separator.output assert.active assert.exception assert.warning '
     . 'date.timezone default_charset display_errors error_reporting fiber.stack_size ignore_user_abort '
     . 'include_path internal_encoding output_encoding mbstring.detect_order '
+    . 'mail.add_x_header mail.cr_lf_mode mail.force_extra_parameters mail.log mail.mixed_lf_and_crlf sendmail_path '
     . 'mbstring.http_output mbstring.internal_encoding mbstring.language mbstring.substitute_character '
     . 'pcre.backtrack_limit pcre.jit pcre.recursion_limit precision serialize_precision '
     . 'unserialize_callback_func unserialize_max_depth zend.assertions zend.exception_ignore_args '
@@ -85,7 +86,7 @@ if ($storageOnly) {
 }
 foreach ($all as $name => $entry) {
     $module = $owners[$name] ?? 'core';
-    // Phera has no OPcache or JIT module.
+    // Phera supplies its server cache settings separately.
     if ($module !== 'core' && !in_array($module, $modules, true)) {
         continue;
     }
@@ -117,4 +118,11 @@ foreach ($all as $name => $entry) {
     };
     printf("%s\t%s\t%s\t%d\t%s\n", $module, $name, $kind, $entry['access'],
         match ($default) { null => '-', '' => '=', default => bin2hex($default) });
+}
+
+if (!$storageOnly) {
+    // These PHP directives control Phera's own request file cache.
+    echo "phera_server\topcache.revalidate_freq\tint\t7\t32\n";
+    echo "phera_server\topcache.revalidate_path\tbool\t7\t30\n";
+    echo "phera_server\topcache.validate_timestamps\tbool\t7\t31\n";
 }

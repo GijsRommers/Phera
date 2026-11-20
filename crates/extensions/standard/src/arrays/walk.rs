@@ -135,7 +135,7 @@ impl Frame {
                 let Some(element) = Rc::make_mut(array).get_mut(key) else {
                     return Ok(None);
                 };
-                Ok(Some(reference(element)))
+                Ok(Some(reference(context, element)))
             }
             Value::Object(object) => {
                 let lazy_source = self
@@ -146,7 +146,7 @@ impl Frame {
                 let Some(mut element) = object.get(key) else {
                     return Ok(None);
                 };
-                let reference = reference(&mut element);
+                let reference = reference(context, &mut element);
                 if lazy_source.is_some() {
                     context.track_iterated_property(object, key, &reference)?;
                 }
@@ -158,11 +158,12 @@ impl Frame {
     }
 }
 
-fn reference(value: &mut Value) -> Cell {
+fn reference(context: &mut dyn Context, value: &mut Value) -> Cell {
     if let Value::Reference(cell) = value {
         return cell.clone();
     }
     let cell = Rc::new(RefCell::new(value.clone()));
+    context.state().track_cycle_reference(&cell);
     *value = Value::Reference(cell.clone());
     cell
 }

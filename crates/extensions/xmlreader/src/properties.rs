@@ -36,7 +36,7 @@ const fn property(name: &'static str, ty: PropertyType) -> PropertyEntry {
     PropertyEntry::typed(name, ty, Visibility::Public)
 }
 
-pub const ACCESS: NativePropertyAccess = NativePropertyAccess { read, mutate };
+pub const ACCESS: NativePropertyAccess = NativePropertyAccess::new(read, mutate);
 
 fn read(
     _: &mut dyn Context,

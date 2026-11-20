@@ -6,7 +6,7 @@ use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType
 use super::buffer;
 use super::url::hex_digit;
 
-pub(super) const FUNCTIONS: &[FunctionEntry] = &[BIN2HEX, HEX2BIN, CRC32, ORD, CHR];
+pub(super) const FUNCTIONS: &[FunctionEntry] = &[BIN2HEX, HEX2BIN, CRC32, ORD, CHR, UTF8_ENCODE];
 
 /// `bin2hex(string $string): string`, two lowercase hexadecimal digits per
 /// byte.
@@ -135,4 +135,22 @@ fn chr(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     // Truncating to the low byte is the same as modulo 256, also for
     // negative numbers in two's complement.
     Ok(Value::from(vec![codepoint as u8]))
+}
+
+/// `utf8_encode("caf\xE9")` interprets the input as ISO-8859-1 regardless of locale.
+const UTF8_ENCODE: FunctionEntry = FunctionEntry::deprecated_sync(
+    "utf8_encode",
+    &[Param::new("string", ParamType::String)],
+    utf8_encode,
+);
+
+fn utf8_encode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let bytes = args::bytes(arguments, 0);
+    let non_ascii = bytes.iter().filter(|byte| !byte.is_ascii()).count();
+    let mut output = buffer(bytes.len().saturating_add(non_ascii))?;
+    for byte in bytes {
+        let mut encoded = [0; 2];
+        output.extend_from_slice(char::from(*byte).encode_utf8(&mut encoded).as_bytes());
+    }
+    Ok(Value::from(output))
 }

@@ -73,6 +73,16 @@ pub trait Context {
         None
     }
 
+    /// Try the native overload of an operator, for built-ins such as pow().
+    fn native_binary(
+        &mut self,
+        _operator: crate::NativeBinaryOp,
+        _left: &Value,
+        _right: &Value,
+    ) -> Result<Option<Value>, NativeError> {
+        Ok(None)
+    }
+
     /// Where warnings, notices and deprecations go.
     fn diagnostics(&mut self) -> &mut dyn Diagnostics;
 
@@ -113,6 +123,13 @@ pub trait Context {
     /// Flushes an extension after user shutdown callbacks and output finalization.
     fn register_request_finalizer(&mut self, _callback: crate::AsyncFn) {}
 
+    /// Private per-request data owned by an extension.
+    fn extension_value(&self, _key: &'static str) -> Option<Value> {
+        None
+    }
+
+    fn set_extension_value(&mut self, _key: &'static str, _value: Value) {}
+
     /// Releases resources after output and extension finalizers have run.
     fn register_resource_finalizer(&mut self, _key: &'static str, _callback: crate::AsyncFn) {}
 
@@ -139,6 +156,11 @@ pub trait Context {
     /// Return the current string value of a registered INI directive.
     fn ini_get(&self, _name: &[u8]) -> Option<PhpString> {
         None
+    }
+
+    /// A registered INI string before PHP's public ini_get() maps null to empty.
+    fn ini_value(&self, name: &[u8]) -> Option<PhpString> {
+        self.ini_get(name)
     }
 
     /// Decimal precision for serialization and PHP variable dumps.
@@ -603,6 +625,16 @@ pub trait Context {
         Err(NativeError::error(format!(
             "An object of class {class} cannot be created here"
         )))
+    }
+
+    /// Invoke an allocated object's constructor in its declaring scope.
+    /// Factories may call this after hydrating properties, including for private constructors.
+    fn call_hydration_constructor(
+        &mut self,
+        _object: Rc<Object>,
+        _arguments: &PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(Ok(Value::Null)))
     }
 
     /// Access to the runtime's cold reflection queries.

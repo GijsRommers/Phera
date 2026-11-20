@@ -1,0 +1,41 @@
+[package]
+name = "phera-ext-curl"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-compression.workspace = true
+base64.workspace = true
+bytes.workspace = true
+cookie_store.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+http-body-util.workspace = true
+httpdate.workspace = true
+hyper = { workspace = true, features = ["client", "http2"] }
+hyper-util = { workspace = true, features = ["client-legacy", "http2"] }
+phera-extension-api.workspace = true
+phera-ext-streams.workspace = true
+phera-io-pool.workspace = true
+percent-encoding.workspace = true
+pkcs8.workspace = true
+psl.workspace = true
+rustls.workspace = true
+sha2.workspace = true
+socket2.workspace = true
+tokio = { workspace = true, features = ["io-util", "io-std"] }
+tokio-rustls.workspace = true
+tokio-util.workspace = true
+tower-service.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+phera-runtime.workspace = true
+rcgen.workspace = true
+tempfile.workspace = true
+flate2.workspace = true
+
+[lints]
+workspace = true

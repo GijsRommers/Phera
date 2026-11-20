@@ -15,6 +15,7 @@ mod combine_recursive;
 mod filter;
 mod find;
 mod keys;
+mod multisort;
 mod ordering;
 mod pointer;
 mod range;
@@ -38,6 +39,7 @@ mod walk;
 pub(crate) mod zend_sort;
 
 pub(crate) fn register(registry: &mut Registry) {
+    multisort::register(registry);
     let modules = [
         build::FUNCTIONS,
         callback_sets::FUNCTIONS,

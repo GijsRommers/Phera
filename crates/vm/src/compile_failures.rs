@@ -18,7 +18,12 @@ impl Vm {
             line: error.line,
         };
         if error.parse {
-            self.report_diagnostic(4, "Parse error", error.message.into(), location);
+            let message = if error.message.starts_with("unexpected token ") {
+                format!("syntax error, {}", error.message)
+            } else {
+                error.message
+            };
+            self.report_diagnostic(4, "Parse error", message.into(), location);
         } else {
             self.report_fatal(64, error.message, location);
         }

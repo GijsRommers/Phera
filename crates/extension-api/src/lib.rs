@@ -9,31 +9,38 @@ mod class;
 mod context;
 mod error;
 mod function;
+pub mod native_parameters;
 mod object_handlers;
 mod registry;
+mod request_references;
 pub mod serialization;
 mod state;
 pub mod testing;
 pub mod traversal;
 mod working_directory;
 
+pub use phera_bytecode::{BinaryOp as NativeBinaryOp, UnaryOp as NativeUnaryOp};
 pub use phera_source::{CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite};
 pub use phera_value as value;
+pub use phera_value::ObjectCast as NativeCastKind;
 pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
 
 pub use arguments::{args, prepare_arguments, prepare_call, prepare_single_argument};
 pub use class::{
     AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
-    NativePropertyAccess, NativePropertyMutation, NativePropertyRead, PrepareMethod, PropertyEntry,
-    PropertyType, SyncMethod, Visibility, WindowMethod,
+    NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeStringProperty,
+    PrepareMethod, PropertyEntry, PropertyType, SyncMethod, Visibility, WindowMethod,
 };
 pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
-pub use function::{AsyncFn, FunctionEntry, NativeFn, Param, ParamType, SyncFn, SyncSelector};
+pub use function::{
+    AsyncFn, FunctionEntry, NativeFn, NativeNumericParameter, Param, ParamType, SyncFn,
+    SyncSelector, deprecated_method,
+};
 pub use object_handlers::{
-    ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeClone,
-    NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,
+    ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeBinary,
+    NativeClone, NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeIterator,
     PropertyProjection, PropertyPurpose,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};

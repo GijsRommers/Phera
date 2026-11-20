@@ -69,38 +69,48 @@ impl Source {
 
 /// The options that decide what `$` and `#` mean at a point of the pattern.
 #[derive(Clone, Copy)]
-struct Mode {
+pub(crate) struct Mode {
     multiline: bool,
-    extended: bool,
+    pub extended: bool,
+    pub extended_more: bool,
+    pub no_auto_capture: bool,
 }
 
 /// An option setting at the start of a group: `(?m)`, `(?-x:`, `(?^:`.
-struct InlineOptions {
-    mode: Mode,
+pub(crate) struct InlineOptions {
+    pub mode: Mode,
     /// Bytes from the `(` to the `)` or `:` that ends the setting.
-    length: usize,
+    pub length: usize,
     /// `(?m:...)` sets them for its group only; `(?m)` for the rest of the
     /// enclosing group.
-    scoped: bool,
+    pub scoped: bool,
 }
 
 /// Reads an option setting at the start of `tail`, from mode `current`.
-fn inline_options(tail: &[u8], current: Mode) -> Option<InlineOptions> {
+pub(crate) fn inline_options(tail: &[u8], current: Mode) -> Option<InlineOptions> {
     let tail = tail.strip_prefix(b"(?")?;
     let mut mode = current;
     let mut enabled = true;
-    for (index, &byte) in tail.iter().enumerate() {
+    let mut flags = tail.iter().enumerate().peekable();
+    while let Some((index, &byte)) = flags.next() {
         match byte {
             b'^' => {
                 mode = Mode {
                     multiline: false,
                     extended: false,
+                    extended_more: false,
+                    no_auto_capture: false,
                 };
             }
             b'-' => enabled = false,
             b'm' => mode.multiline = enabled,
-            b'x' => mode.extended = enabled,
-            b'i' | b's' | b'n' | b'r' | b'J' | b'U' | b'a' | b'T' | b'P' | b'S' | b'W' => {}
+            b'x' => {
+                let more = flags.next_if(|(_, next)| **next == b'x').is_some();
+                mode.extended = enabled;
+                mode.extended_more = enabled && more;
+            }
+            b'n' => mode.no_auto_capture = enabled,
+            b'i' | b's' | b'r' | b'J' | b'U' | b'a' | b'T' | b'P' | b'S' | b'W' => {}
             b':' | b')' if index > 0 => {
                 return Some(InlineOptions {
                     mode,
@@ -121,10 +131,7 @@ pub(crate) fn source(body: &[u8], options: &Options) -> Result<Source, String> {
         offsets: Vec::new(),
         closing: "",
     };
-    let mut mode = Mode {
-        multiline: options.multiline,
-        extended: options.extended,
-    };
+    let mut mode = Mode::new(options);
     let mut scopes = Vec::new();
     let mut class = false;
     let mut class_initial = false;
@@ -235,6 +242,17 @@ pub(crate) fn source(body: &[u8], options: &Options) -> Result<Source, String> {
     }
     source.offsets.push(body.len());
     Ok(source)
+}
+
+impl Mode {
+    pub(crate) fn new(options: &Options) -> Self {
+        Self {
+            multiline: options.multiline,
+            extended: options.extended,
+            extended_more: false,
+            no_auto_capture: options.inline.contains('n'),
+        }
+    }
 }
 
 /// Length of the directives that open the pattern, such as `(*UTF)` and

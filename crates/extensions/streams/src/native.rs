@@ -22,16 +22,6 @@ pub fn is_stream(resource: &Resource) -> bool {
     crate::resource::with_stream(resource, |_| ()).is_ok()
 }
 
-/// Write through the stream's existing backing, scheduling and output policy.
-pub async fn write_resource(
-    context: &mut dyn Context,
-    stream: &Resource,
-    bytes: &[u8],
-    function: &str,
-) -> NativeResult {
-    crate::transfer::write(context, stream, bytes, function).await
-}
-
 /// File status queries shared with SplFileInfo.
 #[derive(Clone, Copy)]
 pub enum FileStatus {
@@ -210,4 +200,22 @@ pub fn scan_line(line: &[u8], arguments: &[Value]) -> NativeResult {
     let format =
         crate::scan_format::Format::parse(args::bytes(&scan, 1), scan.len().saturating_sub(2))?;
     crate::scan::scan_line(line, format, &scan)
+}
+
+/// Reads from the PHP stream provided to another native extension.
+pub async fn read_resource(
+    resource: &phera_extension_api::value::Resource,
+    length: u64,
+) -> Result<std::io::Result<Vec<u8>>, phera_extension_api::NativeError> {
+    crate::transfer::read(resource, Some(length)).await
+}
+
+/// Writes to the PHP stream provided to another native extension.
+pub async fn write_resource(
+    context: &mut dyn Context,
+    resource: &phera_extension_api::value::Resource,
+    bytes: &[u8],
+    function: &str,
+) -> NativeResult {
+    crate::transfer::write(context, resource, bytes, function).await
 }

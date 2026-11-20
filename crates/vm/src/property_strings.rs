@@ -9,6 +9,45 @@ use crate::classes::Class;
 use crate::{AccessPath, Vm};
 
 impl Vm {
+    /// A native setter runs synchronously. Perform any Stringable call in the
+    /// VM before handing the converted value to the setter.
+    pub(crate) async fn native_string_assignment(
+        &mut self,
+        access: &phera_extension_api::NativePropertyAccess,
+        object: &Object,
+        name: &str,
+        value: &Value,
+    ) -> Result<Option<Value>, NativeError> {
+        let Some(property) = access
+            .string_property
+            .and_then(|lookup| lookup(object, name))
+        else {
+            return Ok(None);
+        };
+        let strict = self
+            .current()
+            .is_some_and(|frame| frame.function().strict_types);
+        match &*value.deref() {
+            Value::String(_) => return Ok(None),
+            Value::Null if property.nullable => return Ok(None),
+            Value::Int(_) | Value::Float(_) | Value::Bool(_) if !strict => return Ok(None),
+            Value::Object(_) if !strict && Self::has_string_conversion(value) => {}
+            _ => {
+                let expected = if property.nullable {
+                    "?string"
+                } else {
+                    "string"
+                };
+                return Err(NativeError::type_error(format!(
+                    "Cannot assign {} to property {}::${name} of type {expected}",
+                    value.type_name(),
+                    property.declaring
+                )));
+            }
+        }
+        self.coerce_stringable(value.clone()).await.map(Some)
+    }
+
     /// Static properties verify visibility before a weak string cast runs PHP.
     pub(crate) async fn cast_static_property_value(
         &mut self,

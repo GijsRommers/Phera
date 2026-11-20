@@ -6,17 +6,19 @@ mod options;
 mod plain;
 mod plain_object;
 pub(crate) mod sequence;
+mod unfinished;
 
 use std::{borrow::Cow, rc::Rc};
 
-use phera_extension_api::serialization::SerializationClass;
+use phera_extension_api::serialization::{
+    ActiveUnserializePolicy, SerializationClass, UnserializeHook, UnserializePolicy,
+};
 use phera_extension_api::{
     ArrayKey, Context, NativeError, NativeResult, Object, PhpString, Value, args,
 };
 
 use crate::wire::{Diagnostic, ParseError, Reader, Token};
 use graph::{Content, Graph, Members, Place};
-use options::Options;
 
 struct Decoder<'a> {
     diagnostic_function: &'a str,
@@ -24,7 +26,7 @@ struct Decoder<'a> {
     graph: Graph,
     frames: Vec<Frame>,
     delayed: Vec<Delayed>,
-    options: Options,
+    options: UnserializePolicy,
     last_class: Option<(&'a [u8], Rc<SerializationClass>)>,
     tracks_references: bool,
 }
@@ -44,6 +46,7 @@ enum Container {
 enum Delayed {
     Wakeup(Rc<Object>),
     Unserialize(Rc<Object>, Members),
+    Legacy(UnserializeHook),
 }
 
 enum Failure {
@@ -75,9 +78,9 @@ pub async fn unserialize(context: &mut dyn Context, arguments: &[Value]) -> Nati
     if input.is_empty() {
         return Ok(Value::Bool(false));
     }
-    let options = Options::read(context, args::array(arguments, 1).map(Rc::as_ref)).await?;
+    let options = options::read(context, args::array(arguments, 1).map(Rc::as_ref)).await?;
     if plain::applies(input.as_bytes()) {
-        return plain::read(context, input.as_bytes(), options.max_depth);
+        return plain::read(context, input.as_bytes(), &options);
     }
     let mut decoder = Decoder {
         diagnostic_function: "unserialize",
@@ -91,6 +94,9 @@ pub async fn unserialize(context: &mut dyn Context, arguments: &[Value]) -> Nati
     };
     let root = decoder.graph.new_place();
     let build = decoder.build(context, root).await;
+    if build.is_err() {
+        decoder.abandon_unfinished(context);
+    }
     match build {
         Ok(()) => report_extra(context, decoder.reader.offset(), input.len()),
         Err(Failure::Native(error)) => return Err(error),
@@ -206,9 +212,8 @@ impl Decoder<'_> {
         count: usize,
         kind: Container,
     ) -> BuildResult<()> {
-        let limit = self.options.max_depth;
-        if limit != 0 && self.frames.len() >= limit {
-            report_depth(context, limit);
+        if self.options.depth_exceeded(self.frames.len()) {
+            context.warning(self.options.depth_warning(self.diagnostic_function));
             return Err(Failure::Parse);
         }
         self.frames.push(Frame {
@@ -242,22 +247,43 @@ impl Decoder<'_> {
     }
 
     async fn run_hooks(&mut self, context: &mut dyn Context) -> Result<(), NativeError> {
-        for hook in std::mem::take(&mut self.delayed) {
-            match hook {
-                Delayed::Wakeup(object) => {
-                    context
+        let hooks = std::mem::take(&mut self.delayed);
+        if hooks.is_empty() {
+            return Ok(());
+        }
+        // PHP gives the delayed magic callbacks an independent decoder.
+        let previous = ActiveUnserializePolicy::replace(context, None);
+        let result = async {
+            let mut hooks = hooks.into_iter();
+            while let Some(hook) = hooks.next() {
+                let woken = hook.object();
+                let outcome = match hook {
+                    Delayed::Legacy(hook) => hook.invoke(context).await.map(drop),
+                    Delayed::Wakeup(object) => context
                         .call_serialization_method(object, "__wakeup", Vec::new())
-                        .await?;
-                }
-                Delayed::Unserialize(object, members) => {
-                    let argument = Value::Array(Rc::new(self.graph.array(members)));
-                    context
-                        .call_serialization_method(object, "__unserialize", vec![argument])
-                        .await?;
+                        .await
+                        .map(drop),
+                    Delayed::Unserialize(object, members) => {
+                        let argument = Value::Array(Rc::new(self.graph.array(members)));
+                        context
+                            .call_serialization_method(object, "__unserialize", vec![argument])
+                            .await
+                            .map(drop)
+                    }
+                };
+                if let Err(error) = outcome {
+                    if let Some(object) = woken {
+                        object.mark_destructed();
+                    }
+                    hooks.for_each(|rest| rest.abandon());
+                    return Err(error);
                 }
             }
+            Ok(())
         }
-        Ok(())
+        .await;
+        ActiveUnserializePolicy::replace(context, previous);
+        result
     }
 }
 
@@ -273,13 +299,6 @@ fn report_extra(context: &mut dyn Context, offset: usize, length: usize) {
             "unserialize(): Extra data starting at offset {offset} of {length} bytes"
         ));
     }
-}
-
-fn report_depth(context: &mut dyn Context, limit: usize) {
-    context.warning(format!(
-        "unserialize(): Maximum depth of {limit} exceeded. The depth limit can be changed \
-         using the max_depth unserialize() option or the unserialize_max_depth ini setting"
-    ));
 }
 
 fn php_string(bytes: Cow<'_, [u8]>) -> PhpString {

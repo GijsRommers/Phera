@@ -201,9 +201,11 @@ pub(super) fn unset(
     })
 }
 
-pub(super) fn element_reference(slot: &mut Value) -> Value {
+pub(super) fn element_reference(context: &mut dyn Context, slot: &mut Value) -> Value {
     if !slot.is_reference() {
-        *slot = Value::Reference(Rc::new(RefCell::new(std::mem::take(slot))));
+        let cell = Rc::new(RefCell::new(std::mem::take(slot)));
+        context.state().track_cycle_reference(&cell);
+        *slot = Value::Reference(cell);
     }
     slot.clone()
 }
@@ -237,7 +239,7 @@ fn reference(
         }
         array
             .get_mut(&key)
-            .map(element_reference)
+            .map(|slot| element_reference(context, slot))
             .ok_or_else(|| NativeError::error("SPL array entry vanished"))
     })
 }
@@ -263,7 +265,10 @@ fn bind(
         .transpose()?;
     target.update(|array| {
         let mut value = value;
-        let value = element_reference(&mut value);
+        let value = element_reference(context, &mut value);
+        if let Value::Reference(cell) = &value {
+            context.state().track_cycle_reference(cell);
+        }
         if let Some(key) = key {
             array.insert(key, value);
         } else {

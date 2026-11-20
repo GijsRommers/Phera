@@ -27,7 +27,7 @@ pub struct Deprecation {
     pub message: &'static str,
     pub policy: Policy,
     kind: ItemKind,
-    constant_notice: OnceLock<String>,
+    notice: OnceLock<String>,
 }
 
 impl Deprecation {
@@ -51,9 +51,18 @@ impl Deprecation {
         message
     }
 
-    fn constant_notice(&self) -> &str {
-        self.constant_notice.get_or_init(|| {
-            let mut message = format!("Constant {} is deprecated since {}", self.name, self.since);
+    fn php_notice(&self) -> &str {
+        self.notice.get_or_init(|| {
+            let (kind, suffix) = match self.kind {
+                ItemKind::Function => ("Function", "()"),
+                ItemKind::Method => ("Method", "()"),
+                ItemKind::Constant | ItemKind::ClassConstant => ("Constant", ""),
+            };
+            let mut message = format!("{kind} {}{suffix} is deprecated", self.name);
+            if !self.since.is_empty() {
+                message.push_str(" since ");
+                message.push_str(self.since);
+            }
             append_message(&mut message, self.message);
             message
         })
@@ -110,7 +119,7 @@ fn inventory() -> &'static Deprecations {
                         message,
                         policy,
                         kind,
-                        constant_notice: OnceLock::new(),
+                        notice: OnceLock::new(),
                     },
                 ))
             })
@@ -131,7 +140,11 @@ pub fn omitted(kind: ItemKind, name: &str) -> Option<&'static Deprecation> {
 }
 
 pub fn kept_constant_notice(kind: ItemKind, name: &str) -> Option<&'static str> {
+    kept_notice(kind, name)
+}
+
+pub fn kept_notice(kind: ItemKind, name: &str) -> Option<&'static str> {
     find(kind, name)
         .filter(|item| item.policy == Policy::Keep)
-        .map(Deprecation::constant_notice)
+        .map(Deprecation::php_notice)
 }

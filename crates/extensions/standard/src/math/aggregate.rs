@@ -1,7 +1,9 @@
 //! `array_sum` and `array_product`, which use PHP's `+` and `*`.
 
 use phera_extension_api::value::{add, mul};
-use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType, Value};
+use phera_extension_api::{
+    Context, FunctionEntry, NativeCastKind, NativeResult, Param, ParamType, Value,
+};
 
 use crate::arguments::required_array;
 
@@ -14,6 +16,14 @@ enum Operation {
 impl Operation {
     /// Reuse scalar operators so coercion warnings match ordinary PHP arithmetic.
     fn apply(self, context: &mut dyn Context, left: &Value, right: &Value) -> NativeResult {
+        // PHP casts an object entry to a number first, so the result of summing
+        // `GMP` objects is an int or a float. An object without that cast is
+        // rejected by the operator below and skipped with a warning.
+        let number = match &*right.deref() {
+            Value::Object(object) => object.class.cast(object, NativeCastKind::Number),
+            _ => None,
+        };
+        let right = number.as_ref().unwrap_or(right);
         Ok(match self {
             Self::Sum => add(left, right, context.diagnostics())?,
             Self::Product => mul(left, right, context.diagnostics())?,

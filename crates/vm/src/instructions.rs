@@ -27,6 +27,11 @@ impl Vm {
         work: &mut usize,
     ) -> Result<Option<BatchExit>, NativeError> {
         use Instruction as I;
+        // A simple instruction that only fell back because it overwrites
+        // an array or object (see `crate::fast`).
+        if self.object_ids.has_due() && self.release_and_store(instruction) {
+            return Ok(None);
+        }
         match instruction {
             I::AssignPathFromLocal { .. }
             | I::MakeReference { .. }
@@ -253,8 +258,8 @@ impl Vm {
             I::JumpIfNot { condition, target } => self.jump_if_not(condition, target, work)?,
             I::JumpIfNull { value, target } => self.jump_if_null(value, target)?,
             I::JumpIfNotNull { value, target } => self.jump_if_not_null(value, target)?,
-            I::BeginSilence => self.diagnostic_reporter.begin_silence(),
-            I::EndSilence => self.diagnostic_reporter.end_silence(),
+            I::BeginSilence => self.begin_silence(),
+            I::EndSilence => self.end_silence(),
             I::Raise { detail, .. } => self.raise_match_error(detail)?,
 
             I::Capture { src, kind } => self.capture(src, kind)?,

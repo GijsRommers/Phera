@@ -33,8 +33,10 @@ impl Traversal for Cursor {
         operation: IteratorStep,
     ) -> Option<NativeResult> {
         match self {
-            Self::Native(iterator) => Some(native_step(iterator.as_mut(), context, operation)),
-            Self::Php(_) => None,
+            Self::Native(iterator) if !iterator.needs_input(operation) => {
+                Some(native_step(iterator.as_mut(), context, operation))
+            }
+            _ => None,
         }
     }
 
@@ -55,14 +57,27 @@ impl Traversal for Cursor {
                 },
                 Vec::new(),
             )),
-            Self::Native(iterator) => {
-                StepFuture::ready(native_step(iterator.as_mut(), context, operation))
-            }
+            Self::Native(iterator) => step_native_cursor(iterator.as_mut(), context, operation),
         }
     }
 }
 
-pub(crate) fn native_step(
+pub(crate) fn step_native_cursor<'a>(
+    iterator: &'a mut dyn NativeIterator,
+    context: &'a mut dyn Context,
+    operation: IteratorStep,
+) -> StepFuture<'a> {
+    if iterator.needs_input(operation) {
+        StepFuture::Pending(Box::pin(async move {
+            iterator.read_input(context).await?;
+            native_step(iterator, context, operation)
+        }))
+    } else {
+        StepFuture::ready(native_step(iterator, context, operation))
+    }
+}
+
+fn native_step(
     iterator: &mut dyn NativeIterator,
     context: &mut dyn Context,
     operation: IteratorStep,

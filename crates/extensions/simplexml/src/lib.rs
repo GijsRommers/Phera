@@ -53,7 +53,7 @@ impl Extension for SimpleXml {
 
 static HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Copy(projection::clone)),
-    scalar_cast: Some(projection::cast),
+    cast: Some(projection::cast),
     properties: Some(projection::properties),
     property_access: Some(&properties::ACCESS),
     iterator: Some(iteration::iterator),

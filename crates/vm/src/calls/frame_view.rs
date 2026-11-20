@@ -55,6 +55,36 @@ impl<'a> FrameView<'a> {
         self.code.cache(self.frame.function)
     }
 
+    /// File and function scopes both expose their compiled and dynamic names.
+    pub(crate) fn named_registers(&self) -> impl Iterator<Item = (&'a String, Reg)> {
+        let names = &self.unit().names;
+        self.function()
+            .locals
+            .iter()
+            .enumerate()
+            .filter_map(move |(index, name)| Some((names.get(name.index())?, Reg(index as u16))))
+            .chain(
+                self.extras
+                    .dynamic
+                    .iter()
+                    .map(|(name, register)| (name, *register)),
+            )
+    }
+
+    pub(crate) fn named_register(&self, name: &str) -> Option<Reg> {
+        self.function()
+            .locals
+            .iter()
+            .position(|candidate| {
+                self.unit()
+                    .names
+                    .get(candidate.index())
+                    .is_some_and(|value| value == name)
+            })
+            .map(|index| Reg(index as u16))
+            .or_else(|| self.extras.dynamic.get(name).copied())
+    }
+
     /// The function's number within its file; `None` for top-level code.
     pub(crate) fn function_id(&self) -> Option<usize> {
         self.code.local(self.frame.function)

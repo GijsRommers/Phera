@@ -16,6 +16,8 @@
 
 use std::path::{Path, PathBuf};
 
+use tempfile::TempPath;
+
 use phera_extension_api::{
     Context, FunctionEntry, NativeResult, Param, ParamType, Registry, Value, WorkingDirectory, args,
 };
@@ -24,21 +26,20 @@ use phera_extension_api::{
 /// moved yet.
 #[derive(Default)]
 pub struct UploadedFiles {
-    waiting: Vec<PathBuf>,
+    waiting: Vec<TempPath>,
     first_active: usize,
 }
 
 impl UploadedFiles {
-    pub fn new(waiting: Vec<PathBuf>) -> UploadedFiles {
+    pub fn new(waiting: Vec<TempPath>) -> UploadedFiles {
         UploadedFiles {
             waiting,
             first_active: 0,
         }
     }
 
-    /// PHP replaces the active upload table when a new multipart parse starts.
-    /// Keep the earlier files on the cleanup list.
-    pub fn replace_active(&mut self, files: Vec<PathBuf>) {
+    /// Only the latest parse is active. All unclaimed files live until request teardown.
+    pub fn replace_active(&mut self, files: Vec<TempPath>) {
         self.first_active = self.waiting.len();
         self.waiting.extend(files);
     }
@@ -46,43 +47,17 @@ impl UploadedFiles {
     fn holds(&self, path: &Path) -> bool {
         self.waiting[self.first_active..]
             .iter()
-            .any(|waiting| waiting == path)
+            .any(|waiting| &**waiting == path)
     }
 
     fn forget(&mut self, path: &Path) {
         if let Some(index) = self.waiting[self.first_active..]
             .iter()
-            .position(|file| file == path)
+            .position(|file| &**file == path)
         {
-            self.waiting.remove(self.first_active + index);
+            let mut file = self.waiting.remove(self.first_active + index);
+            file.disable_cleanup(true);
         }
-    }
-
-    /// The files nobody moved. The runtime deletes them after the request.
-    pub async fn cleanup(mut self) {
-        let files = std::mem::take(&mut self.waiting);
-        if !files.is_empty() {
-            let _ = tokio::task::spawn_blocking(move || remove_files(files)).await;
-        }
-    }
-}
-
-impl Drop for UploadedFiles {
-    fn drop(&mut self) {
-        let files = std::mem::take(&mut self.waiting);
-        if !files.is_empty() {
-            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-                runtime.spawn_blocking(move || remove_files(files));
-            } else {
-                remove_files(files);
-            }
-        }
-    }
-}
-
-fn remove_files(files: Vec<PathBuf>) {
-    for file in files {
-        let _ = std::fs::remove_file(file);
     }
 }
 

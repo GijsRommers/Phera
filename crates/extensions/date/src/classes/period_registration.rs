@@ -36,10 +36,10 @@ const METHODS: &[MethodEntry] = &[
     MethodEntry::public(
         "__construct",
         &[
-            Param::new("start", ParamType::Mixed).optional(),
+            Param::new("start", ParamType::Mixed).arity_checked_by_handler(),
             Param::new("interval", ParamType::Mixed).optional(),
             Param::new("end", ParamType::Mixed).optional(),
-            Param::new("options", ParamType::Mixed).variadic(),
+            Param::new("options", ParamType::Mixed).optional(),
         ],
         period::construct,
     ),

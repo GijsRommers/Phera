@@ -27,6 +27,14 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn extension_value(&self, key: &'static str) -> Option<Value> {
+        self.extension_values.get(key).cloned()
+    }
+
+    fn set_extension_value(&mut self, key: &'static str, value: Value) {
+        self.extension_values.insert(key, value);
+    }
+
     fn reflection(
         &mut self,
     ) -> Option<&mut dyn phera_extension_api::reflection::ReflectionContext> {
@@ -94,6 +102,10 @@ impl Context for Vm {
         Vm::serialization_precision(self)
     }
 
+    fn ini_value(&self, name: &[u8]) -> Option<phera_value::PhpString> {
+        Vm::ini_value(self, name)
+    }
+
     fn ini_set(
         &mut self,
         function: &str,
@@ -134,7 +146,7 @@ impl Context for Vm {
     }
 
     fn request_global(&self, name: &str) -> Option<Value> {
-        self.globals.get(name).cloned()
+        self.request_global_value(name).cloned()
     }
 
     fn replace_request_global(&mut self, name: &str, value: Value) {
@@ -245,6 +257,15 @@ impl Context for Vm {
 
     fn chain_exception(&mut self, error: NativeError, previous: NativeError) -> NativeError {
         self.exception_with_previous(error, previous)
+    }
+
+    fn native_binary(
+        &mut self,
+        operator: phera_extension_api::NativeBinaryOp,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Option<Value>, NativeError> {
+        Vm::native_binary(self, operator, left, right)
     }
 
     fn compare<'a>(
@@ -817,10 +838,31 @@ impl Context for Vm {
             return Err(internal_error!("InternalIterator allocation"));
         };
         *object.native.borrow_mut() = Some(Box::new(crate::internal_iterator::InternalIterator {
-            cursor,
+            cursor: Some(cursor),
             initialized: false,
         }));
         Ok(value)
+    }
+
+    fn call_hydration_constructor(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        arguments: &phera_value::PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        let callee = self
+            .classes
+            .for_object(&object)
+            .and_then(|class| class.constructor.clone().map(|method| (class, method)));
+        let Some((class, method)) = callee else {
+            return Box::pin(std::future::ready(Ok(Value::Null)));
+        };
+        let Some(scope) = self.classes.get(&method.declaring) else {
+            return Box::pin(std::future::ready(Err(internal_error!(
+                "hydration constructor scope"
+            ))));
+        };
+        let callee = self.reflection_callee(class, scope, method, Some(object));
+        self.invoke_array_callback(callee, arguments)
     }
 
     fn ensure_instantiable(&self, name: &str) -> Result<(), phera_extension_api::NativeError> {

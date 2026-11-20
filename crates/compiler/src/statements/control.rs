@@ -23,6 +23,16 @@ impl Compiler<'_> {
                 return compiler.compile_expression(operand).map(drop);
             }
             let result = compiler.compile_expression(expression)?;
+            // The call is the last instruction but for the clears of its
+            // operands (`expressions::operand_release`).
+            let call = compiler
+                .function
+                .instructions
+                .iter_mut()
+                .rev()
+                .find(|instruction| {
+                    !matches!(instruction, Instruction::Clear { register } if *register != result)
+                });
             if let Some(
                 Instruction::FinishCall {
                     destination,
@@ -33,7 +43,7 @@ impl Compiler<'_> {
                     result: use_of_result,
                     ..
                 },
-            ) = compiler.function.instructions.last_mut()
+            ) = call
                 && *destination == result
             {
                 *use_of_result = phera_bytecode::CallResult::Discarded;
@@ -93,7 +103,9 @@ impl Compiler<'_> {
         let mut ends = Vec::new();
         for (condition, body, line) in branches {
             let mark = self.mark_temporaries();
+            let start = self.temporaries_start();
             let register = self.compile_expression(condition)?;
+            let temporaries = self.temporaries_since(start);
             let skip = self.emit(
                 Instruction::Branch {
                     value: register,
@@ -102,10 +114,13 @@ impl Compiler<'_> {
                 },
                 line,
             );
+            // The condition's values are freed on both ways out, as in PHP.
+            self.clear_condition_temporaries(&temporaries, line);
             self.release_temporaries(mark);
             self.block(body, DeclarationTiming::AtExecution)?;
             ends.push(self.emit(Instruction::Jump(Target(0)), line));
             self.patch(skip, self.position());
+            self.clear_condition_temporaries(&temporaries, line);
         }
         if let Some(body) = otherwise {
             self.block(body, DeclarationTiming::AtExecution)?
@@ -126,7 +141,9 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         let start = self.position();
+        let mark = self.temporaries_start();
         let register = self.compile_expression(condition)?;
+        let condition = self.temporaries_since(mark);
         let end = self.emit(
             Instruction::Branch {
                 value: register,
@@ -135,6 +152,7 @@ impl Compiler<'_> {
             },
             line,
         );
+        self.clear_condition_temporaries(&condition, line);
         self.loops.push(Loop {
             start: self.position(),
             cleanup: None,
@@ -144,6 +162,7 @@ impl Compiler<'_> {
         self.block(body, DeclarationTiming::AtExecution)?;
         self.emit(Instruction::Jump(Target(start)), line);
         self.patch(end, self.position());
+        self.clear_condition_temporaries(&condition, line);
         self.loop_end(start);
 
         Ok(())

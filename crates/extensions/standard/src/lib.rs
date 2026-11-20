@@ -22,6 +22,7 @@ mod strings;
 mod time;
 mod version_compare;
 
+pub use arrays::zend_sort::order as zend_sort_order;
 pub use url::query;
 mod url;
 
@@ -60,6 +61,7 @@ pub use arrays::associative_sort;
 /// Exposes PHP comparison traversal for adversarial comparator regression tests.
 #[doc(hidden)]
 pub use arrays::zend_sort::order as php_sort_order;
+pub use process_info::shell::escape_shell_command;
 
 pub use strings::format::{Values as FormatValues, render as render_format};
 

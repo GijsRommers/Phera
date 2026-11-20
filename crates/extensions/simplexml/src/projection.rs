@@ -12,22 +12,23 @@ use phera_ext_dom::shared::SharedNode;
 use phera_ext_dom::tree::{Arena, Kind, NodeId};
 use phera_extension_api::{
     ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, PropertyPurpose, Value,
-    value::{NoDiagnostics, ScalarCast, to_float, to_int},
+    value::{NoDiagnostics, ObjectCast, to_float, to_int},
 };
 
 use crate::methods::{This, receiver};
 use crate::selection::{Selected, Selection, attributes, data, install, value, wrap};
 
-pub fn cast(object: &Object, kind: ScalarCast) -> Option<Value> {
+pub fn cast(object: &Object, kind: ObjectCast) -> Option<Value> {
     let state = data(object).ok()?;
     let selection = &state.selection;
     match kind {
-        ScalarCast::Bool => Some(Value::Bool(selection.is_truthy())),
-        ScalarCast::Int => {
+        ObjectCast::String => Some(Value::from(selection.value())),
+        ObjectCast::Bool => Some(Value::Bool(selection.is_truthy())),
+        ObjectCast::Int => {
             let text = Value::from(selection.value());
             to_int(&text, &mut NoDiagnostics).ok().map(Value::Int)
         }
-        ScalarCast::Float => {
+        ObjectCast::Number | ObjectCast::Float => {
             let text = Value::from(selection.value());
             to_float(&text, &mut NoDiagnostics).ok().map(Value::Float)
         }

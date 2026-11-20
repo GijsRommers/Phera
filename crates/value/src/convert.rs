@@ -1,9 +1,10 @@
 //! Conversions between PHP value types, matching PHP 8.5.
 
+use crate::ObjectCast;
+
 use crate::array::{ArrayKey, PhpArray};
 use crate::error::{Diagnostics, ErrorKind, OpError};
 use crate::float_format::{float_repr, float_repr_with_precision};
-use crate::object::ScalarCast;
 use crate::string::PhpString;
 use crate::value::Value;
 
@@ -320,7 +321,7 @@ pub fn to_bool(v: &Value) -> bool {
         Value::String(s) => !(s.is_empty() || (s.len() == 1 && s[0] == b'0')),
         Value::Array(a) => !a.is_empty(),
         Value::Object(object) => !matches!(
-            object.class.native_scalar_cast(object, ScalarCast::Bool),
+            object.class.cast(object, ObjectCast::Bool),
             Some(Value::Bool(false))
         ),
         Value::Resource(_) => true,
@@ -354,10 +355,10 @@ pub fn to_int(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, OpError> {
             None => 0,
         }),
         Value::Array(a) => Ok(i64::from(!a.is_empty())),
-        // Casting an object warns and gives 1; only arithmetic on one throws.
+        // Casting an ordinary object warns and gives 1; only arithmetic on one throws.
         Value::Object(o) => {
-            if let Some(Value::Int(result)) = o.class.native_scalar_cast(o, ScalarCast::Int) {
-                return Ok(result);
+            if let Some(Value::Int(value)) = o.class.cast(o, ObjectCast::Int) {
+                return Ok(value);
             }
             diag.warning(format!(
                 "Object of class {} could not be converted to int",
@@ -380,8 +381,8 @@ pub fn to_float(v: &Value, diag: &mut dyn Diagnostics) -> Result<f64, OpError> {
         Value::String(s) => Ok(strtod_prefix(s.as_bytes())),
         Value::Array(a) => Ok(if a.is_empty() { 0.0 } else { 1.0 }),
         Value::Object(o) => {
-            if let Some(Value::Float(result)) = o.class.native_scalar_cast(o, ScalarCast::Float) {
-                return Ok(result);
+            if let Some(Value::Float(value)) = o.class.cast(o, ObjectCast::Float) {
+                return Ok(value);
             }
             diag.warning(format!(
                 "Object of class {} could not be converted to float",
@@ -416,13 +417,16 @@ pub fn to_php_string(v: &Value, diag: &mut dyn Diagnostics) -> Result<PhpString,
             diag.warning("Array to string conversion".to_string());
             Ok(PhpString::from("Array"))
         }
-        Value::Object(o) => Err(OpError::new(
-            ErrorKind::Error,
-            format!(
-                "Object of class {} could not be converted to string",
-                o.class.name()
-            ),
-        )),
+        Value::Object(o) => match o.class.cast(o, ObjectCast::String) {
+            Some(Value::String(text)) => Ok(text),
+            _ => Err(OpError::new(
+                ErrorKind::Error,
+                format!(
+                    "Object of class {} could not be converted to string",
+                    o.class.name()
+                ),
+            )),
+        },
         Value::Resource(r) => Ok(PhpString::from(format!("Resource id #{}", r.id))),
         Value::Reference(_) => unreachable!("deref returns non-reference values"),
     }

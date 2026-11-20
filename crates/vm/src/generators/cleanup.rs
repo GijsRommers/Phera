@@ -51,6 +51,9 @@ impl Drop for Generator {
                 item: self.item.take(),
                 closure: self.closure.take(),
             });
+            if let Some(pool) = self.pool.upgrade() {
+                pool.wake_interpreter();
+            }
         }
     }
 }
@@ -65,6 +68,38 @@ impl Vm {
         self.generator_releases
             .as_ref()
             .is_some_and(|queue| !self.draining_generators && !queue.0.borrow().is_empty())
+    }
+
+    /// A generator still alive in the last destructor phase of the request:
+    /// PHP destroys it there, which runs its pending `finally` blocks, as a
+    /// release would. Afterwards it counts as finished.
+    ///
+    /// ```php
+    /// function gen() { try { yield; } finally { echo "closed\n"; } }
+    /// $keep = new Holder(gen());   // still alive when the script ends
+    /// ```
+    pub(crate) async fn close_live_generator(
+        &mut self,
+        object: &Object,
+    ) -> Result<(), NativeError> {
+        // A generator that is running, itself or at the end of its
+        // `yield from` chain (on the stack of a suspended fiber), is left
+        // alone: destroying the fiber unwinds it, inner frames first.
+        if chain_is_running(object) {
+            return Ok(());
+        }
+        let Ok(released) = super::state(object, |generator| Released::Owners {
+            state: std::mem::replace(&mut generator.state, State::Returned(Value::Null)),
+            item: generator.item.take(),
+            closure: generator.closure.take(),
+        }) else {
+            return Ok(());
+        };
+        let Some(queue) = self.generator_releases.clone() else {
+            return Ok(());
+        };
+        queue.0.borrow_mut().push(released);
+        self.drain_generator_releases().await
     }
 
     pub(crate) fn force_closing_generator(&self) -> bool {
@@ -171,6 +206,9 @@ impl Vm {
         activation: Activation,
         caller: Option<&SourceLocation>,
     ) -> Result<(), NativeError> {
+        if self.fiber_bailout {
+            return Ok(());
+        }
         let position = activation.frame.ip().saturating_sub(1);
         let handlers: Vec<_> = self
             .code
@@ -201,7 +239,7 @@ impl Vm {
             self.native_callback_sites.pop();
         }
         self.closing_generator = previous;
-        self.diagnostic_reporter.restore_silence(caller_silence);
+        self.restore_silence(caller_silence);
         if self.call_stack.depth() > stop {
             self.finish_return_value(Value::Null, stop)?;
         }
@@ -222,5 +260,28 @@ impl Vm {
             }
         }
         Ok(())
+    }
+}
+
+/// Whether the generator, or the generator its `yield from` chain ends in,
+/// is running. The chain is followed in a loop, one delegate at a time.
+fn chain_is_running(object: &Object) -> bool {
+    let mut current: Option<Rc<Object>> = None;
+    loop {
+        let link = super::state(
+            current.as_deref().unwrap_or(object),
+            |generator| match &generator.state {
+                State::Running => Err(true),
+                State::Delegating(_, _, super::delegation::Delegate::Generator(delegate)) => {
+                    Ok(delegate.clone())
+                }
+                _ => Err(false),
+            },
+        );
+        match link {
+            Ok(Ok(delegate)) => current = Some(delegate),
+            Ok(Err(running)) => return running,
+            Err(_) => return false,
+        }
     }
 }

@@ -50,7 +50,14 @@ impl Vm {
                 let result =
                     to_php_string(&diagnostics.vm.operand(register), &mut diagnostics.buffer);
                 drop(diagnostics);
-                return self.global_register(result?.to_string_lossy(), scratch, creation, missing);
+                let leaf = place.steps()?.next().is_none();
+                return self.global_register(
+                    result?.to_string_lossy(),
+                    scratch,
+                    creation,
+                    missing,
+                    leaf,
+                );
             }
             PathBase::Globals => return Err(internal_error!("global table has no register")),
         };
@@ -61,22 +68,15 @@ impl Vm {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("place without frame"))?;
-        if let Some(index) = frame.function().locals.iter().position(|candidate| {
-            frame
-                .unit()
-                .names
-                .get(candidate.index())
-                .is_some_and(|value| value == &name)
-        }) {
-            return Ok(Some(Reg(index as u16)));
+        if let Some(register) = frame.named_register(&name) {
+            return Ok(Some(register));
         }
-        if let Some(register) = frame.extras.dynamic.get(&name) {
-            return Ok(Some(*register));
-        }
-        if creation == Creation::Create {
+        if creation == Creation::Create
+            || (self.in_global_scope() && self.globals.get(&name).is_some())
+        {
             self.named_slot(&name).map(Some)
         } else {
-            if missing == Missing::Warn && self.diagnostic_reporter.is_visible() {
+            if missing == Missing::Warn {
                 self.warn(format!("Undefined variable ${name}"))
             }
             Ok(None)

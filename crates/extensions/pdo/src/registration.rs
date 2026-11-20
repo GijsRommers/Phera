@@ -5,7 +5,7 @@ use phera_extension_api::{
     ParamType, PropertyEntry, Registry, Visibility,
 };
 
-use crate::{attributes, connection, constants, fetch, statement, transactions};
+use crate::{attributes, connection, constants, statement, transactions};
 
 static UNCOPYABLE_CONNECTION: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
@@ -38,7 +38,6 @@ pub fn register(registry: &mut Registry) {
         registry.class(ClassEntry {
             parent: Some("PDO"),
             constants,
-            methods: PDO_METHODS,
             ..ClassEntry::class(name)
         });
     }
@@ -73,7 +72,8 @@ const PDO_METHODS: &[MethodEntry] = &[
                 .with_default(ConstantValue::Null),
             Param::new("password", ParamType::String)
                 .nullable()
-                .with_default(ConstantValue::Null),
+                .with_default(ConstantValue::Null)
+                .sensitive(),
             Param::new("options", ParamType::Array)
                 .nullable()
                 .with_default(ConstantValue::Null),
@@ -89,7 +89,8 @@ const PDO_METHODS: &[MethodEntry] = &[
                 .with_default(ConstantValue::Null),
             Param::new("password", ParamType::String)
                 .nullable()
-                .with_default(ConstantValue::Null),
+                .with_default(ConstantValue::Null)
+                .sensitive(),
             Param::new("options", ParamType::Array)
                 .nullable()
                 .with_default(ConstantValue::Null),
@@ -170,22 +171,53 @@ const PDO_METHODS: &[MethodEntry] = &[
     .tentative_return("bool"),
     MethodEntry::public(
         "pgsqlCopyFromArray",
-        &[Param::new("args", ParamType::Mixed).variadic()],
+        &[
+            Param::new("tableName", ParamType::String),
+            Param::new("rows", ParamType::Iterable),
+            Param::new("separator", ParamType::String).optional(),
+            Param::new("nullAs", ParamType::String).optional(),
+            Param::new("fields", ParamType::String)
+                .nullable()
+                .optional(),
+        ],
         statement::unsupported_method,
     ),
     MethodEntry::public(
         "pgsqlCopyFromFile",
-        &[Param::new("args", ParamType::Mixed).variadic()],
+        &[
+            Param::new("tableName", ParamType::String),
+            Param::new("filename", ParamType::String),
+            Param::new("separator", ParamType::String).optional(),
+            Param::new("nullAs", ParamType::String).optional(),
+            Param::new("fields", ParamType::String)
+                .nullable()
+                .optional(),
+        ],
         statement::unsupported_method,
     ),
     MethodEntry::public(
         "pgsqlCopyToArray",
-        &[Param::new("args", ParamType::Mixed).variadic()],
+        &[
+            Param::new("tableName", ParamType::String),
+            Param::new("separator", ParamType::String).optional(),
+            Param::new("nullAs", ParamType::String).optional(),
+            Param::new("fields", ParamType::String)
+                .nullable()
+                .optional(),
+        ],
         statement::unsupported_method,
     ),
     MethodEntry::public(
         "pgsqlCopyToFile",
-        &[Param::new("args", ParamType::Mixed).variadic()],
+        &[
+            Param::new("tableName", ParamType::String),
+            Param::new("filename", ParamType::String),
+            Param::new("separator", ParamType::String).optional(),
+            Param::new("nullAs", ParamType::String).optional(),
+            Param::new("fields", ParamType::String)
+                .nullable()
+                .optional(),
+        ],
         statement::unsupported_method,
     ),
 ];
@@ -240,13 +272,13 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         &[Param::new("column", ParamType::Int).optional()],
         crate::drivers::sqlite::fetch::column,
     ),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "setFetchMode",
         &[
             Param::new("mode", ParamType::Int),
             Param::new("args", ParamType::Mixed).variadic(),
         ],
-        fetch::set_mode,
+        crate::drivers::sqlite::fetch::set_mode,
     ),
     MethodEntry::public_async("closeCursor", &[], crate::drivers::sqlite::fetch::close),
     MethodEntry::public("columnCount", &[], statement::column_count),
@@ -263,7 +295,13 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
     ),
     MethodEntry::public(
         "bindColumn",
-        &[Param::new("args", ParamType::Mixed).variadic()],
+        &[
+            Param::new("column", ParamType::IntOrString),
+            Param::new("var", ParamType::Mixed).by_ref(),
+            Param::new("type", ParamType::Int).optional(),
+            Param::new("maxLength", ParamType::Int).optional(),
+            Param::new("driverOptions", ParamType::Mixed).optional(),
+        ],
         statement::unsupported_method,
     ),
     MethodEntry::public_async(
@@ -271,21 +309,9 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         &[Param::new("column", ParamType::Int)],
         crate::metadata::get,
     ),
-    MethodEntry::public(
-        "nextRowset",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
-    ),
-    MethodEntry::public(
-        "getIterator",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
-    ),
-    MethodEntry::public(
-        "debugDumpParams",
-        &[Param::new("args", ParamType::Mixed).variadic()],
-        statement::unsupported_method,
-    ),
+    MethodEntry::public("nextRowset", &[], statement::unsupported_method),
+    MethodEntry::public("getIterator", &[], statement::unsupported_method),
+    MethodEntry::public("debugDumpParams", &[], statement::unsupported_method),
     MethodEntry::public(
         "getAttribute",
         &[Param::new("name", ParamType::Int)],
@@ -293,7 +319,10 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
     ),
     MethodEntry::public(
         "setAttribute",
-        &[Param::new("args", ParamType::Mixed).variadic()],
+        &[
+            Param::new("attribute", ParamType::Int),
+            Param::new("value", ParamType::Mixed),
+        ],
         statement::unsupported_method,
     ),
 ];

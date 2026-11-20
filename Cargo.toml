@@ -19,6 +19,7 @@ members = [
     "crates/extension-api",
     "crates/sqlite",
     "crates/io-pool",
+    "crates/db-drivers",
     "crates/extensions/*",
 ]
 
@@ -39,6 +40,7 @@ rustls-native-certs = "0.8"
 tokio-rustls = { version = "0.26", default-features = false, features = ["tls12"] }
 webpki-roots = "1"
 futures-core = "0.3"
+fallible-iterator = "0.2"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 rsa = { version = "0.10", features = ["pkcs1v15"] }
@@ -46,6 +48,7 @@ sha1_011 = { package = "sha1", version = "0.11" }
 redis = { version = "=1.0.5", default-features = false, features = ["tokio-comp"] }
 phera-ext-reflection = { path = "crates/extensions/reflection" }
 phera-ext-redis = { path = "crates/extensions/redis" }
+phera-db-drivers = { path = "crates/db-drivers" }
 phera-io-pool = { path = "crates/io-pool" }
 phera-dotenv = { path = "crates/dotenv" }
 indexmap = "2"
@@ -65,6 +68,9 @@ phera-server = { path = "crates/server" }
 phera-phpt = { path = "crates/phpt" }
 phera-extension-api = { path = "crates/extension-api" }
 phera-ext-core = { path = "crates/extensions/core" }
+phera-ext-zlib = { path = "crates/extensions/zlib" }
+phera-ext-gmp = { path = "crates/extensions/gmp" }
+phera-ext-bcmath = { path = "crates/extensions/bcmath" }
 phera-ext-ctype = { path = "crates/extensions/ctype" }
 phera-ext-dom = { path = "crates/extensions/dom" }
 phera-ext-simplexml = { path = "crates/extensions/simplexml" }
@@ -73,23 +79,45 @@ phera-ext-xmlreader = { path = "crates/extensions/xmlreader" }
 phera-ext-xmlwriter = { path = "crates/extensions/xmlwriter" }
 quick-xml = "0.42"
 html5ever = "0.40"
+phera-ext-curl = { path = "crates/extensions/curl" }
 phera-ext-date = { path = "crates/extensions/date" }
 phera-ext-filter = { path = "crates/extensions/filter" }
 phera-ext-hash = { path = "crates/extensions/hash" }
+icu_collator = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_experimental = { version = "=0.7.0", default-features = false, features = ["compiled_data"] }
+icu_calendar = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_casemap = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_datetime = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_time = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+writeable = "=0.6.4"
+icu_decimal = { version = "=2.4.0", default-features = false, features = ["alloc", "compiled_data", "unstable"] }
+fixed_decimal = { version = "=0.7.3", features = ["ryu"] }
+icu_list = { version = "=2.4.0", default-features = false, features = ["alloc", "compiled_data"] }
+icu_locale = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_normalizer = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_properties = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+icu_plurals = { version = "=2.4.0", default-features = false, features = ["compiled_data"] }
+idna = "=1.1.0"
+icu_segmenter = { version = "=2.4.0", default-features = false, features = ["compiled_data", "unstable"] }
+phera-ext-intl = { path = "crates/extensions/intl" }
 phera-ext-http = { path = "crates/extensions/http" }
 phera-ext-mbstring = { path = "crates/extensions/mbstring" }
 iconv-native = "0.1"
 encoding_rs = "0.8.35"
+base16ct = { version = "1", features = ["alloc"] }
 cssparser = "0.38"
 precomputed-hash = "0.1"
 selectors = "0.41"
 base64 = "0.22"
 phera-ext-json = { path = "crates/extensions/json" }
+phera-ext-sodium = { path = "crates/extensions/sodium" }
 phera-ext-openssl = { path = "crates/extensions/openssl" }
 phera-ext-pcre = { path = "crates/extensions/pcre" }
 phera-sqlite = { path = "crates/sqlite" }
 phera-ext-sqlite3 = { path = "crates/extensions/sqlite3" }
 rusqlite = { version = "=0.43.0", default-features = false, features = ["bundled", "column_metadata", "column_decltype", "backup"] }
+phera-ext-mysqli = { path = "crates/extensions/mysqli" }
+phera-ext-pgsql = { path = "crates/extensions/pgsql" }
 phera-ext-pdo = { path = "crates/extensions/pdo" }
 phera-ext-random = { path = "crates/extensions/random" }
 phera-ext-serialize = { path = "crates/extensions/serialize" }
@@ -100,6 +128,18 @@ command-fds = "0.3.3"
 phera-ext-process = { path = "crates/extensions/process" }
 phera-ext-streams = { path = "crates/extensions/streams" }
 phera-ext-tokenizer = { path = "crates/extensions/tokenizer" }
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+blake2b_simd = "1"
+curve25519-dalek = "5"
+hmac = "0.12"
+siphasher = "1"
+poly1305 = { version = "0.9", features = ["zeroize"] }
+crypto-bigint = { version = "0.7", features = ["alloc", "zeroize"] }
+zeroize = "1.9"
+salsa20 = "0.11"
+chacha20 = { version = "0.10", features = ["legacy", "xchacha", "zeroize"] }
+scrypt = "0.12"
+block-padding = "0.4"
 aes = "0.9"
 aes-gcm = { version = "0.11", features = ["hazmat"] }
 cbc = "0.2"
@@ -147,6 +187,12 @@ rustix = { version = "1", features = ["fs", "param", "process", "system", "termi
 rustix-libc-wrappers = { version = "0.1.1", features = ["process"] }
 sysinfo = { version = "0.39.3", default-features = false, features = ["system"] }
 tempfile = "3"
+async-compression = { version = "0.4", features = ["tokio", "gzip", "zlib", "deflate", "brotli"] }
+cookie_store = { version = "0.22", default-features = false, features = ["preserve_order"] }
+psl = "2"
+tokio-util = { version = "0.7", features = ["io"] }
+tower-service = "0.3"
+memchr = "2"
 http-body-util = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio", "http1", "server-graceful"] }
@@ -159,6 +205,10 @@ httpdate = "1"
 # Compressing responses in `phera serve`. Both are Rust all the way down:
 # flate2 with its default miniz_oxide backend, and Dropbox's brotli.
 flate2 = "1"
+adler2 = "2"
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
 brotli = "9"
 fluent-uri = "0.4.1"
 url = "2.5"
@@ -171,6 +221,7 @@ pcre2 = "=0.2.11"
 pcre2-sys = "=0.2.10"
 
 tokio-postgres = "0.7.18"
+postgres-protocol = "0.6"
 mysql_async = { version = "0.37.1", default-features = false, features = [
     "minimal-rust",
     "rustls-tls",

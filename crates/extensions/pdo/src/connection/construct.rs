@@ -1,5 +1,10 @@
 //! `new PDO($dsn, $user, $password, $options)` borrows a configured connection.
 
+use crate::connect_options::FromPhp;
+use crate::dsn::ParseDsn;
+use crate::pool::FromOptions;
+use phera_db_drivers::connect_options::ConnectOptions;
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -73,8 +78,7 @@ pub(super) fn construct_with_call<'a>(
                     }
                 }
             } else {
-                dsn.options =
-                    crate::connect_options::ConnectOptions::from_php(context, dsn.driver, options)?;
+                dsn.options = ConnectOptions::from_php(context, dsn.driver, options)?;
                 attributes.autocommit = dsn.options.mysql.autocommit;
             }
         }

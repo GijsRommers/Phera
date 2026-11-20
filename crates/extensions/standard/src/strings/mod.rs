@@ -34,13 +34,20 @@ pub(crate) mod url;
 pub(crate) const MAX_STRING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 pub(crate) fn register(registry: &mut Registry) {
-    let modules = [
+    for entry in [
         base64::FUNCTIONS,
         case::FUNCTIONS,
         compare::FUNCTIONS,
         encode::FUNCTIONS,
         escaping::FUNCTIONS,
-        format::FUNCTIONS,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        registry.function(*entry);
+    }
+    format::register(registry);
+    let modules = [
         html::FUNCTIONS,
         metaphone::FUNCTIONS,
         number_format::FUNCTIONS,
@@ -60,6 +67,7 @@ pub(crate) fn register(registry: &mut Registry) {
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
+    registry.describe_function("utf8_encode", "string", None);
     replace::register_sync_selectors(registry);
 }
 

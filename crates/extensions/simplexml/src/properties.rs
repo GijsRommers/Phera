@@ -16,10 +16,7 @@ use phera_extension_api::{
 
 use crate::selection::{Filter, Selected, Selection, attributes, data, wrap};
 
-pub const ACCESS: NativePropertyAccess = NativePropertyAccess {
-    read: read_property,
-    mutate: mutate_property,
-};
+pub const ACCESS: NativePropertyAccess = NativePropertyAccess::new(read_property, mutate_property);
 
 pub const DIMENSIONS: NativeDimensions = NativeDimensions {
     fallback_if_overridden: &[],

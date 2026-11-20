@@ -2,6 +2,7 @@
 //! the comparison that a `SORT_*` flag selects.
 
 use std::cmp::Ordering;
+use std::rc::Rc;
 
 use phera_extension_api::value::{compare, to_float, to_php_string};
 use phera_extension_api::{Context, NativeError, Value};
@@ -11,12 +12,12 @@ use crate::constants::{
 };
 use crate::natural::natural_compare;
 
-pub(super) fn can_invoke_string_comparison(left: &Value, right: &Value) -> bool {
+/// Native comparisons can also involve a scalar and an object. Two arrays
+/// may reach an object comparison at any depth.
+pub(super) fn needs_context_comparison(left: &Value, right: &Value) -> bool {
     matches!(
         (&*left.deref(), &*right.deref()),
-        (Value::Object(_), Value::Object(_) | Value::String(_))
-            | (Value::String(_), Value::Object(_))
-            | (Value::Array(_), Value::Array(_))
+        (Value::Object(_), _) | (_, Value::Object(_)) | (Value::Array(_), Value::Array(_))
     )
 }
 
@@ -34,6 +35,30 @@ pub(super) enum SortFlags {
 }
 
 impl SortFlags {
+    /// The regular comparator used by PHP's multisort and unique passes
+    /// groups enum cases by identity.
+    pub(super) async fn compare_unstable(
+        self,
+        context: &mut dyn Context,
+        left: &Value,
+        right: &Value,
+    ) -> Result<Ordering, NativeError> {
+        let order = self.compare_with_objects(context, left, right).await?;
+        if matches!(self, Self::Regular)
+            && order == Ordering::Greater
+            && let Value::Object(right) = &*right.deref()
+            && right.class.is_enum()
+        {
+            return Ok(match &*left.deref() {
+                Value::Object(left) if left.class.is_enum() => {
+                    Rc::as_ptr(left).cmp(&Rc::as_ptr(right))
+                }
+                _ => Ordering::Less,
+            });
+        }
+        Ok(order)
+    }
+
     /// `SORT_STRING`, the comparison of `array_diff`, `array_intersect` and
     /// `array_unique` by default.
     pub(super) const STRING: Self = Self::String { ignore_case: false };
@@ -58,7 +83,7 @@ impl SortFlags {
         right: &Value,
     ) -> Result<Ordering, NativeError> {
         match self {
-            Self::Regular if can_invoke_string_comparison(left, right) => {
+            Self::Regular if needs_context_comparison(left, right) => {
                 Ok(context.compare(left, right).await?.cmp(&0))
             }
             Self::String { .. } | Self::Natural { .. } if left.is_object() || right.is_object() => {

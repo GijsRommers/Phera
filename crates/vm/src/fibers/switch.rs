@@ -100,7 +100,7 @@ impl Vm {
                 let exchange = Exchange::new(self);
                 let mut child = Box::new(self.new_fiber_stack());
                 child.active_fiber = Some(Box::new(Active {
-                    object: Rc::downgrade(&object),
+                    object: phera_value::WeakObject::new(&object),
                     exchange: exchange.clone(),
                     closing: false,
                 }));
@@ -109,7 +109,11 @@ impl Vm {
                 let future = Box::pin(async move {
                     channel.restore_child(&mut child)?;
                     channel.input.take();
-                    let result = child.invoke_array_callback(callee, &arguments).await;
+                    let call = child.invoke_array_callback(callee, &arguments);
+                    // The frame holds the arguments now: they go with its
+                    // variables, as in PHP, not when the fiber ends.
+                    drop(arguments);
+                    let result = call.await;
                     channel.park_child(&mut child)?;
                     result
                 });
@@ -160,7 +164,10 @@ impl Vm {
         exchange.caller_depth.set(depth);
         self.export_main_globals();
         exchange.input.set(Some(input));
-        exchange.transfer(self)?;
+        if let Err(error) = exchange.transfer(self) {
+            self.import_main_globals();
+            return Err(error);
+        }
         if exchange
             .site
             .borrow()
@@ -203,26 +210,27 @@ impl Vm {
             }
             Progress::Yielded(value) => {
                 with_state(&object, |fiber| fiber.state = State::Suspended(suspended))?;
-                self.suspended_fibers.entry(object.id).or_insert(object);
+                self.park_suspended(object);
                 Ok(value)
             }
             Progress::Inspected(result) => {
                 with_state(&object, |fiber| fiber.state = State::Suspended(suspended))?;
-                self.suspended_fibers.entry(object.id).or_insert(object);
+                self.park_suspended(object);
                 result
             }
             Progress::Finished(result) => {
                 self.suspended_fibers.remove(&object.id);
+                // A finished fiber has nothing left to unwind.
+                object.mark_destructed();
                 let state = match &result {
                     Ok(value) => State::Returned(value.clone()),
                     Err(NativeError::Unwind(payload))
-                        if payload.0.is::<()>()
+                        if payload.0.is::<crate::request_end::Exit>()
+                            || payload.0.is::<crate::request_end::FatalStop>()
                             || payload.0.is::<crate::last_error::FatalDiagnostic>()
                             || payload.0.is::<crate::error_traces::DeclarationFailure>() =>
                     {
-                        self.fiber_bailout = self.status == 255
-                            || payload.0.is::<crate::last_error::FatalDiagnostic>()
-                            || payload.0.is::<crate::error_traces::DeclarationFailure>();
+                        self.fiber_bailout = !payload.0.is::<crate::request_end::Exit>();
                         State::Exited
                     }
                     Err(_) => State::Failed,

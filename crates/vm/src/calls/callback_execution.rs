@@ -51,6 +51,14 @@ impl Vm {
         let result = result.map_err(|error| self.materialize_error(error));
         self.call_stack.truncate_calls(depth);
         self.registers.truncate(base);
+        // The callback's variables went as it returned: their destructors
+        // run now, before the native code that called it goes on, as in
+        // PHP (`register_shutdown_function`, `array_map`, `usort`, ...).
+        if result.is_ok() && self.destructors_due() {
+            Box::pin(self.run_destructors())
+                .await
+                .map_err(|error| self.materialize_error(error))?;
+        }
         result
     }
 

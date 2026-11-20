@@ -19,6 +19,8 @@ mod compile;
 mod errors;
 mod flags;
 mod grep;
+mod mark;
+mod mark_pattern;
 mod matches;
 mod matching;
 mod pattern;

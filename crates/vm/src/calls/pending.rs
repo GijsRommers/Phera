@@ -189,8 +189,15 @@ impl Vm {
                         ty: None,
                         by_reference: matches!(intrinsic, crate::intrinsics::Intrinsic::IsCallable)
                             && *name == "callable_name",
-                        variadic: matches!(intrinsic, crate::intrinsics::Intrinsic::CallUserFunc)
-                            && *name == "args",
+                        requires_reference: matches!(
+                            intrinsic,
+                            crate::intrinsics::Intrinsic::IsCallable
+                        ) && *name == "callable_name",
+                        variadic: matches!(
+                            (intrinsic, *name),
+                            (crate::intrinsics::Intrinsic::CallUserFunc, "args")
+                                | (crate::intrinsics::Intrinsic::Compact, "var_names")
+                        ),
                     })
                     .collect()
             };
@@ -302,9 +309,9 @@ impl Vm {
             let text = self.stringify_value(&value).await?;
             self.out(text.as_bytes());
         }
-        self.call_stack.clear();
+        self.release_frames_for_exit();
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
-            (),
+            crate::request_end::Exit,
         ))))
     }
 }
