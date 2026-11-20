@@ -164,7 +164,19 @@ impl Vm {
                     *work += 1;
                     self.call_lean_native(dst)
                 }
-                _ => self.execute::<TRACK_GENERATORS>(instruction, stop, work),
+                _ => {
+                    // The VM's handlers need the description of a lean
+                    // native record (see `calls::native_calls`).
+                    if self.call_stack.last_call().is_some_and(|call| {
+                        matches!(
+                            call.callee,
+                            crate::calls::prepared_call::PreparedCallee::Native(_)
+                        )
+                    }) {
+                        self.describe_native_call(&instruction);
+                    }
+                    self.execute::<TRACK_GENERATORS>(instruction, stop, work)
+                }
             };
             if let Some(exit) = exit? {
                 return Ok(exit);

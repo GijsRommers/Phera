@@ -56,6 +56,8 @@ impl Vm {
 
     /// Gives a lean native call its full description, before the general
     /// path handles an instruction that works on it.
+    #[cold]
+    #[inline(never)]
     pub(crate) fn describe_native_call(&mut self, instruction: &Instruction) {
         if !matches!(
             instruction,

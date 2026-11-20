@@ -292,8 +292,11 @@ impl Machine<'_> {
                 !call.flags.contains(CallFlags::DETAILS)
                     && self.accepts_argument(function, index, &value)
             }
-            PreparedCallee::General => self.general_accepts(index),
-            PreparedCallee::Native(id) => self.native_accepts(id, index),
+            // One out-of-line arm for both, so that the match keeps the
+            // shape the loop was laid out with.
+            PreparedCallee::General | PreparedCallee::Native(_) => {
+                self.other_accepts(call.callee, index)
+            }
             PreparedCallee::Constructed => false,
         };
         if !accepted {
@@ -344,14 +347,19 @@ impl Machine<'_> {
         })
     }
 
-    /// The same for a lean native call: a by-value parameter that is not
-    /// variadic. Its type is the function's to check, at the call.
+    /// [`Machine::general_accepts`] for a described callee; for a lean
+    /// native call, a by-value parameter that is not variadic (its type is
+    /// the function's to check, at the call).
     #[inline(never)]
-    fn native_accepts(&self, id: phera_extension_api::NativeId, index: usize) -> bool {
-        self.registry
-            .function_at(id)
-            .and_then(|entry| entry.params.get(index))
-            .is_some_and(|parameter| !parameter.by_ref && !parameter.variadic)
+    fn other_accepts(&self, callee: PreparedCallee, index: usize) -> bool {
+        match callee {
+            PreparedCallee::Native(id) => self
+                .registry
+                .function_at(id)
+                .and_then(|entry| entry.params.get(index))
+                .is_some_and(|parameter| !parameter.by_ref && !parameter.variadic),
+            _ => self.general_accepts(index),
+        }
     }
 
     /// `Call` of a prepared function, method or closure written in PHP whose
@@ -365,11 +373,12 @@ impl Machine<'_> {
         let function = match call.callee {
             PreparedCallee::Php(function) => function,
             PreparedCallee::Constructed => return self.finish_construction(position, destination),
-            PreparedCallee::General => {
+            // A lean native record is not a direct method, so it answers
+            // `Step::Slow` there, and the batch loop runs it
+            // (`Vm::call_lean_native`).
+            PreparedCallee::General | PreparedCallee::Native(_) => {
                 return self.finish_direct_method(position, destination, call);
             }
-            // The batch loop runs it (`Vm::call_lean_native`).
-            PreparedCallee::Native(_) => return Step::Slow,
         };
         let facts = self.code.facts(function);
         let sent = call.sent as usize;
