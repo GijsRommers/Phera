@@ -58,7 +58,7 @@ pub fn file_put_contents(
         if flags & crate::whole_file::NO_DEFAULT_CONTEXT == 0 {
             files(context).use_default_context(args::value(&arguments, 3));
         }
-        if !lock && let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+        if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
             let explicit = args::value(&arguments, 3);
             let supplied =
                 if explicit.is_null() && flags & crate::whole_file::NO_DEFAULT_CONTEXT == 0 {
@@ -78,18 +78,37 @@ pub fn file_put_contents(
                 return Ok(Value::Bool(false));
             };
             files(context).claim_id();
-            let written = write_user(
-                context,
-                &file,
-                function,
-                data,
-                source.map(|resource| resource.as_ref()),
-            )
+            let written = async {
+                if lock
+                    && (!file.lock(context, function, 0).await?
+                        || !file.lock(context, function, LOCK_EX).await?)
+                {
+                    return Ok(None);
+                }
+                if mode == b"cb" && context.has_method(&file.object, "stream_truncate") {
+                    file.truncate(context, function, 0).await?;
+                }
+                write_user(
+                    context,
+                    &file,
+                    function,
+                    data,
+                    source.map(|stream| stream.as_ref()),
+                )
+                .await
+                .map(Some)
+            }
             .await;
             let closed = file.close(context).await;
             let written = written?;
             closed?;
-            return Ok(written);
+            return match written {
+                Some(value) => Ok(value),
+                None => warn_false(
+                    context,
+                    "file_put_contents(): Exclusive locks are not supported for this stream".into(),
+                ),
+            };
         }
         let Some(mut stream) = open(context, function, name, mode, flags & USE_PATH != 0).await?
         else {

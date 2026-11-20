@@ -76,6 +76,7 @@ foreach (['file_exists', 'filesize'] as $function) {
 }
 var_dump(file_get_contents($path), file_get_contents($path, false, null, 0, 4));
 var_dump(file_put_contents($path, 'hello'));
+var_dump(file_put_contents($path, 'append', FILE_APPEND | LOCK_EX));
 
 $d = opendir($path);
 var_dump(readdir($d), rewinddir($d), readdir($d), closedir($d), scandir($path));
