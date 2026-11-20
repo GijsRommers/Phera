@@ -9,7 +9,8 @@
 //!
 //! The method is found in the class's [`MethodTable`] by the interned name
 //! the compiler wrote. Only the plain cases are taken here: a public method
-//! (or a private one called from its own class), written in PHP, where
+//! (or a private one called from its own class, or a protected one from a
+//! related class), written in PHP, where
 //! nothing else could shadow it. The call is one record and a window whose
 //! first register holds `$this`. Everything else answers [`Step::Slow`]
 //! without having changed anything, and `Vm::execute` applies every rule.
@@ -219,9 +220,11 @@ impl Machine<'_> {
 }
 
 /// Whether a frame with this class scope may call the method without the
-/// general visibility check: it is public, or private and called from
-/// inside the class that declares it. Protected methods take the general
-/// path.
+/// general visibility check: it is public; or private and called from
+/// inside the class that declares it; or protected and called from the
+/// declaring class, one of its parents or one of its descendants. PHP
+/// allows a protected call in a few more cases (through the method's
+/// prototype); those take the general path, which applies every rule.
 fn may_call(found: &FoundMethod<'_>, scope: Option<&Rc<Class>>) -> bool {
     match found.method.visibility {
         Visibility::Public => true,
@@ -232,6 +235,22 @@ fn may_call(found: &FoundMethod<'_>, scope: Option<&Rc<Class>>) -> bool {
                 .upgrade()
                 .is_some_and(|declaring| Some(declaring.index) == scope)
         }
-        Visibility::Protected => false,
+        Visibility::Protected => scope.is_some_and(|scope| {
+            found.scope.upgrade().is_some_and(|declaring| {
+                descends_from(scope, &declaring) || descends_from(&declaring, scope)
+            })
+        }),
     }
+}
+
+/// Whether `class` is `ancestor` or extends it, following parent classes.
+fn descends_from(class: &Rc<Class>, ancestor: &Class) -> bool {
+    let mut current = Some(class);
+    while let Some(candidate) = current {
+        if candidate.index == ancestor.index {
+            return true;
+        }
+        current = candidate.parent.as_ref();
+    }
+    false
 }
