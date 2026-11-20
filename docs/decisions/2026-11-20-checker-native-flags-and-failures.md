@@ -15,6 +15,8 @@ both operands are known integers.
 PHP stubs do not encode all constant values or distinguish `false`
 from `bool` in every fallible function. The distinction matters for
 flag-dependent returns and for guards such as `!== false`.
+This also applies to color allocation, stream reads, and OpenSSL
+decryption.
 
 ## Turned down
 

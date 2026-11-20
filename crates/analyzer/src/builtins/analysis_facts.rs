@@ -49,6 +49,10 @@ pub fn refine(index: &mut Index) {
         "mb_detect_encoding",
         "base64_decode",
         "json_encode",
+        "imagecolorallocate",
+        "imagecolorallocatealpha",
+        "stream_get_contents",
+        "openssl_decrypt",
     ] {
         super::runtime_signatures::literal_false(index, name);
     }

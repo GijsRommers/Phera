@@ -43,6 +43,7 @@
   "nullsafe_chain.php": [
     [8, 30, "method.nonObject", "Cannot call method id() on ChainRow|null."]
   ],
+  "scalar_guards.php": [],
   "strict_context.php": [],
   "typed_overrides.php": [],
   "union.php": [

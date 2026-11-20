@@ -14,12 +14,27 @@ impl Analyzer<'_> {
         truth: bool,
         span: Span,
     ) {
+        let non_null_test =
+            against == ValueType::Null && !truth || truth && against.excludes_null();
         let place = match &place.kind {
             ExpressionKind::Assign { target, .. } => target.as_ref(),
+            ExpressionKind::Binary {
+                operator: BinaryOperator::NullCoalesce,
+                left,
+                right,
+            } if self.level >= 7
+                && non_null_test
+                && matches!(right.kind, ExpressionKind::Literal(Literal::Null)) =>
+            {
+                left.as_ref()
+            }
             _ => place,
         };
-        if against == ValueType::Null && !truth || truth && against.excludes_null() {
+        if non_null_test {
             self.refine_nullsafe_receivers(place, scope);
+            if self.level >= 8 {
+                self.refine_other_non_null(place, scope, false);
+            }
         }
         let Some(place) = Place::of(place) else {
             return;
@@ -148,14 +163,20 @@ impl Analyzer<'_> {
     ) {
         if let Some(literal) = literal_type(right) {
             if self.level >= 8 && truth && literal == ValueType::Null {
-                self.refine_other_non_null(left, scope);
+                self.refine_other_non_null(left, scope, true);
             }
             self.refine_type(left, literal, scope, truth, span);
         } else if let Some(literal) = literal_type(left) {
             if self.level >= 8 && truth && literal == ValueType::Null {
-                self.refine_other_non_null(right, scope);
+                self.refine_other_non_null(right, scope, true);
             }
             self.refine_type(right, literal, scope, truth, span);
+        } else if self.level >= 8 && truth {
+            if let Some(class) = self.enum_case_class(right) {
+                self.refine_type(left, ValueType::Class(class), scope, true, span);
+            } else if let Some(class) = self.enum_case_class(left) {
+                self.refine_type(right, ValueType::Class(class), scope, true, span);
+            }
         }
     }
 

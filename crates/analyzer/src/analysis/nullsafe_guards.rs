@@ -5,6 +5,39 @@ use super::*;
 use crate::scope::Place;
 
 impl Analyzer<'_> {
+    pub(super) fn remember_nullsafe_result(
+        &self,
+        variable: &str,
+        expression: &Expression,
+        scope: &mut Scope,
+    ) {
+        if self.level < 8 || scope.dynamic || self.context.scope_kind == ScopeKind::Global {
+            return;
+        }
+        let target = match &expression.kind {
+            ExpressionKind::MethodCall {
+                target,
+                nullsafe: true,
+                ..
+            }
+            | ExpressionKind::Property {
+                target,
+                nullsafe: true,
+                ..
+            } => target,
+            _ => return,
+        };
+        if let ExpressionKind::Variable(Variable::Named(receiver)) = &target.kind
+            && variable != receiver
+            && !scope.aliases.contains_key(receiver)
+            && !scope.external_references.contains(receiver)
+            && !scope.aliases.contains_key(variable)
+            && !scope.external_references.contains(variable)
+        {
+            scope.facts.remember_nullsafe_result(variable, receiver);
+        }
+    }
+
     pub(super) fn refine_nullsafe_receivers(&self, mut expression: &Expression, scope: &mut Scope) {
         if self.level < 8 || scope.dynamic {
             return;

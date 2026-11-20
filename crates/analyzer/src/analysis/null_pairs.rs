@@ -29,11 +29,16 @@ impl Analyzer<'_> {
         }
     }
 
-    pub(super) fn refine_other_non_null(&self, expression: &Expression, scope: &mut Scope) {
+    pub(super) fn refine_other_non_null(
+        &self,
+        expression: &Expression,
+        scope: &mut Scope,
+        is_null: bool,
+    ) {
         let ExpressionKind::Variable(Variable::Named(name)) = &expression.kind else {
             return;
         };
-        for other in scope.facts.known_non_null_when(name) {
+        for other in scope.facts.known_non_null_when(name, is_null) {
             let ty = scope.get(&other).ty.without_null();
             if ty != ValueType::Never {
                 scope.facts.record(Place::variable(&other), ty, None);

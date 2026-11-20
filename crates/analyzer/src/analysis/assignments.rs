@@ -55,10 +55,11 @@ impl Analyzer<'_> {
                 if self.write(target, ty.clone(), scope) == Evaluation::Never {
                     return ValueType::Never;
                 }
-                if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind
-                    && let Some(value) = constant
-                {
-                    scope.values.insert(name.clone(), value);
+                if let ExpressionKind::Variable(Variable::Named(name)) = &target.kind {
+                    self.remember_nullsafe_result(name, value, scope);
+                    if let Some(value) = constant {
+                        scope.values.insert(name.clone(), value);
+                    }
                 }
                 self.assignment_result(target, scope, ty)
             }

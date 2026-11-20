@@ -11,6 +11,9 @@ impl Analyzer<'_> {
                 ExpressionKind::Variable(Variable::Named(name)) => {
                     scope.refine_variable_guard(name, truth);
                     if truth {
+                        if self.level >= 8 {
+                            self.refine_other_non_null(expression, scope, false);
+                        }
                         let ty = scope.get(name).ty.without_null();
                         let ty = if self.level >= 7 {
                             super::truthy_values::truthy_type(&ty)
@@ -93,6 +96,17 @@ impl Analyzer<'_> {
                         );
                     }
                 }
+                ExpressionKind::Binary {
+                    operator:
+                        operator @ (BinaryOperator::Less
+                        | BinaryOperator::LessEqual
+                        | BinaryOperator::Greater
+                        | BinaryOperator::GreaterEqual),
+                    left,
+                    right,
+                } if self.level >= 8 => {
+                    self.refine_coalesced_comparison(*operator, left, right, scope, truth);
+                }
                 ExpressionKind::InstanceOf { value, class } if truth => {
                     if let ExpressionKind::Variable(Variable::Named(name)) = &value.kind
                         && let ExpressionKind::Name(class) = &class.kind
@@ -162,6 +176,12 @@ impl Analyzer<'_> {
                 self.refine_type(&argument.value, against, scope, truth, span);
             } else if function == "in_array" {
                 self.refine_in_array(arguments, scope, truth, span);
+            } else if self.level >= 7 && truth && function == "is_scalar" {
+                let scalar = ValueType::Int
+                    .join(&ValueType::Float)
+                    .join(&ValueType::String)
+                    .join(&ValueType::Bool);
+                self.refine_type(&argument.value, scalar, scope, true, span);
             } else if self.level >= 5 && truth && function == "is_numeric" {
                 let numeric =
                     ValueType::Int

@@ -31,6 +31,7 @@ mod chain_value;
 mod closure_binding;
 mod closure_effects;
 mod coalesce_assignment;
+mod coalesce_guards;
 mod composite;
 mod condition;
 mod control;

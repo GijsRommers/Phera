@@ -116,12 +116,27 @@ pub struct Fact {
 #[derive(Clone, Debug, Default)]
 pub struct Facts {
     types: BTreeMap<Place, Fact>,
-    non_null_pairs: BTreeSet<(String, String)>,
+    null_relations: BTreeSet<NullRelation>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum NullRelation {
+    AtLeastOneNonNull(String, String),
+    NonNullResult { result: String, receiver: String },
+}
+
+impl NullRelation {
+    fn depends_on(&self, name: &str) -> bool {
+        match self {
+            Self::AtLeastOneNonNull(left, right) => left == name || right == name,
+            Self::NonNullResult { result, receiver } => result == name || receiver == name,
+        }
+    }
 }
 
 impl Facts {
     pub fn is_empty(&self) -> bool {
-        self.types.is_empty() && self.non_null_pairs.is_empty()
+        self.types.is_empty() && self.null_relations.is_empty()
     }
 
     pub fn get(&self, place: &Place) -> Option<&Fact> {
@@ -140,8 +155,8 @@ impl Facts {
 
     pub fn forget_variable(&mut self, name: &str) {
         self.types.retain(|place, _| !place.refers_to(name));
-        self.non_null_pairs
-            .retain(|(left, right)| left != name && right != name);
+        self.null_relations
+            .retain(|relation| !relation.depends_on(name));
     }
 
     pub fn forget_static(&mut self) {
@@ -162,7 +177,7 @@ impl Facts {
     }
 
     pub fn remember_non_null_pair(&mut self, left: &str, right: &str) {
-        if self.non_null_pairs.len() >= 32 {
+        if self.null_relations.len() >= 32 {
             return;
         }
         let (first, last) = if left < right {
@@ -170,20 +185,35 @@ impl Facts {
         } else {
             (right, left)
         };
-        self.non_null_pairs.insert((first.into(), last.into()));
+        self.null_relations
+            .insert(NullRelation::AtLeastOneNonNull(first.into(), last.into()));
     }
 
-    pub fn known_non_null_when(&self, variable_is_null: &str) -> Vec<String> {
-        self.non_null_pairs
+    pub fn remember_nullsafe_result(&mut self, result: &str, receiver: &str) {
+        if self.null_relations.len() < 32 {
+            self.null_relations.insert(NullRelation::NonNullResult {
+                result: result.into(),
+                receiver: receiver.into(),
+            });
+        }
+    }
+
+    pub fn known_non_null_when(&self, tested: &str, is_null: bool) -> Vec<String> {
+        self.null_relations
             .iter()
-            .filter_map(|(left, right)| {
-                if left == variable_is_null {
+            .filter_map(|relation| match relation {
+                NullRelation::AtLeastOneNonNull(left, right) if is_null && left == tested => {
                     Some(right.clone())
-                } else if right == variable_is_null {
-                    Some(left.clone())
-                } else {
-                    None
                 }
+                NullRelation::AtLeastOneNonNull(left, right) if is_null && right == tested => {
+                    Some(left.clone())
+                }
+                NullRelation::NonNullResult { result, receiver }
+                    if !is_null && result == tested =>
+                {
+                    Some(receiver.clone())
+                }
+                _ => None,
             })
             .collect()
     }
@@ -195,7 +225,12 @@ impl Facts {
                     return false;
                 };
                 if other.ty != fact.ty {
-                    return false;
+                    let joined = fact.ty.join(&other.ty);
+                    if joined.is_mixed() {
+                        return false;
+                    }
+                    fact.ty = joined.limit_complexity();
+                    fact.narrowed_at = None;
                 }
                 if other.narrowed_at != fact.narrowed_at {
                     fact.narrowed_at = None;
@@ -203,10 +238,10 @@ impl Facts {
             }
             true
         });
-        self.non_null_pairs.retain(|pair| {
+        self.null_relations.retain(|relation| {
             paths
                 .iter()
-                .all(|scope| scope.facts.non_null_pairs.contains(pair))
+                .all(|scope| scope.facts.null_relations.contains(relation))
         });
     }
 }

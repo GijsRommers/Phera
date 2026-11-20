@@ -33,3 +33,12 @@ function guardedOffset(array $values, string $key): int
     $values[$key] ??= new GuardedValue();
     return $values[$key]->number();
 }
+
+function numberFromResult(?GuardedValue $received): int
+{
+    $result = $received?->number();
+    if ($result === null) {
+        return 0;
+    }
+    return $received->number();
+}

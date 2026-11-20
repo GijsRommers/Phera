@@ -5,6 +5,23 @@ use super::*;
 use crate::scope::{GuardKey, Place};
 
 impl Analyzer<'_> {
+    pub(super) fn enum_case_class(&self, expression: &Expression) -> Option<String> {
+        let ExpressionKind::ClassConstant {
+            class,
+            name: MemberName::Identifier(case),
+        } = &expression.kind
+        else {
+            return None;
+        };
+        let ExpressionKind::Name(class) = &class.kind else {
+            return None;
+        };
+        let candidates = self.context.names.resolve(class, UseKind::Class);
+        let enumeration = self.index.class(candidates.first()?)?;
+        (enumeration.kind == ClassKind::Enum && enumeration.enum_cases.contains(&case.name))
+            .then(|| enumeration.name.clone())
+    }
+
     pub fn enum_guard(&self, condition: &Expression, scope: &Scope) -> Option<(GuardKey, bool)> {
         let ExpressionKind::Binary {
             operator: operator @ (BinaryOperator::Identical | BinaryOperator::NotIdentical),

@@ -53,7 +53,7 @@ results. It recognizes Doctrine lifecycle callbacks and Symfony service injectio
 command, route, listener, and scheduled-task attributes.
 Doctrine query projections that need metadata remain unresolved.
 The Symfony PHPStan include also leaves interface-declared denormalizer
-results open, as the extension does.
+results open and narrows InputBag results with non-null defaults.
 
 The checker reads `phpstan.neon`, `phpstan.neon.dist`, or `phpstan.dist.neon`
 in that order. It uses analysis paths, exclusions, levels, included baselines,
