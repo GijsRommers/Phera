@@ -164,9 +164,8 @@ async fn boot_and_answer(
 
 #[tokio::test(flavor = "current_thread")]
 async fn xml_snapshots_copy_memory_and_keep_simplexml_views_together() {
-    let plain = r#"["boot","boot","item","pending","<r><item>boot<\/item><\/r>",["R","ITEM"]]"#;
-    let changed =
-        r#"["changed","changed","item","pending","<r><item>changed<\/item><\/r>",["R","ITEM"]]"#;
+    let plain = r#"["boot","boot","item","pending","<r><item>boot<\/item><\/r>",["R","ITEM"],"boot resolver",false,false,false]"#;
+    let changed = r#"["changed","changed","item","pending","<r><item>changed<\/item><\/r>",["R","ITEM"],"boot resolver",false,false,true]"#;
     let responses = boot_and_answer(
         "xml-family",
         include_str!("snapshots/xml_family.php"),
