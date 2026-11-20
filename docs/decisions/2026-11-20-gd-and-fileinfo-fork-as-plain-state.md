@@ -9,6 +9,7 @@
 Register the plain-data fork policy for both `GdImage` and `finfo`.
 A fork copies the image's raster, palette, and rendering options. It
 copies the fileinfo handle's flag value. Both copies belong to the request.
+Neither extension stores separate state in the request registry.
 
 ## Why
 

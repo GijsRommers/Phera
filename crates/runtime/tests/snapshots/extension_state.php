@@ -7,7 +7,10 @@ $indexed = imagecreate(1, 1);
 imagecolorallocate($indexed, 1, 2, 3);
 $finfo = new finfo(FILEINFO_MIME_TYPE);
 
-Phera\snapshot();
+if (!Phera\snapshot()) {
+    echo "classic\n";
+    return;
+}
 
 if (isset($_GET['mutate'])) {
     imagesetpixel($truecolor, 0, 0, 0x20224466);
