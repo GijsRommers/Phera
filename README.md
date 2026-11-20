@@ -102,8 +102,8 @@ gzip file functions, and the `compress.zlib://` wrapper. The
 `zlib.output_compression` directive stores its value. Use `ob_gzhandler` for
 PHP output-buffer compression or `phera serve --compress` for server compression.
 
-In progress: intl, mysqli, pgsql.
-Not started: gd, fileinfo, SimpleXML, XMLReader, XMLWriter, zip, sockets.
+In progress: intl, mysqli, pgsql, SimpleXML, XMLReader, XMLWriter.
+Not started: gd, fileinfo, zip, sockets.
 
 ### Sodium
 
