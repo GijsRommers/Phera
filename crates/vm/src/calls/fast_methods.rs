@@ -47,11 +47,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let key = self.code.unit_name_key(position.frame.function, name);
-        let Some(found) = self
-            .classes
-            .method_table(class, self.code)
-            .and_then(|table| table.get(key))
-        else {
+        let Some(found) = self.classes.method_table(class, self.code).get(key) else {
             return Step::Slow;
         };
         let method = found.method;
@@ -124,11 +120,7 @@ impl Machine<'_> {
             },
         };
         let key = self.code.unit_symbol_key(function, method_symbol);
-        let Some(found) = self
-            .classes
-            .method_table(&class, self.code)
-            .and_then(|table| table.get(key))
-        else {
+        let Some(found) = self.classes.method_table(&class, self.code).get(key) else {
             return Step::Slow;
         };
         let receiver = match (found.method.is_static, relative) {
@@ -228,7 +220,7 @@ impl Machine<'_> {
         };
         self.classes
             .method_table(scope, self.code)
-            .and_then(|table| table.get(key))
+            .get(key)
             .is_some_and(|found| {
                 found.method.visibility == Visibility::Private && !Rc::ptr_eq(found.method, method)
             })

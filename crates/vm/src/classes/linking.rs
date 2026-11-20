@@ -485,6 +485,7 @@ impl Vm {
             constructor: methods.get("__construct").cloned(),
             magic: super::magic::MagicMethods::link(&methods),
             methods,
+            method_table: std::cell::OnceCell::new(),
             serialized_fields: std::cell::OnceCell::new(),
             property_template: super::class::property_template(&defaults),
             defaults,

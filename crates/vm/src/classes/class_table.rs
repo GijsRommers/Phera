@@ -13,6 +13,8 @@ use super::method_table::MethodTable;
 use super::operations::ClassOperations;
 use crate::code_table::CodeTable;
 
+type NativeMethodTables = Box<[OnceCell<MethodTable>]>;
+
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -65,11 +67,7 @@ pub(crate) struct ClassTable {
     pub(crate) has_property_views: bool,
     pub(crate) has_lazy_objects: bool,
     native_count: u32,
-    /// The method table of every class, by class number, built on first
-    /// use. Kept here, not in the class: a table uses this request's name
-    /// numbers, and a class is shared with other copies of the request's
-    /// state, which may number names differently.
-    method_tables: Vec<OnceCell<MethodTable>>,
+    native_methods: OnceCell<NativeMethodTables>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
     /// Allocations left before the cycle collector should run (see
@@ -89,9 +87,7 @@ impl ClassTable {
             has_property_views: native.has_property_views,
             has_lazy_objects: false,
             native_count: native.numbered.len() as u32,
-            method_tables: (0..native.numbered.len())
-                .map(|_| OnceCell::new())
-                .collect(),
+            native_methods: OnceCell::new(),
             native,
             local: ClassDefinitions::default(),
             objects: Vec::new(),
@@ -105,41 +101,57 @@ impl ClassTable {
         ClassIndex((self.native_count as usize + self.local.numbered.len()) as u32)
     }
 
-    /// The class's methods by this request's name numbers, built on first
-    /// use. `None` only for a class missing from this table, which a linked
-    /// class never is.
+    /// `$reflection->getName()` uses this request's name numbers, even when
+    /// the class definition is shared with another request on this worker.
     #[inline]
     pub(crate) fn method_table<'c>(
         &'c self,
         class: &'c Class,
         code: &CodeTable,
-    ) -> Option<&'c MethodTable> {
-        let cell = self.method_tables.get(class.index.0 as usize)?;
-        Some(match cell.get() {
-            Some(table) => table,
-            None => self.build_method_table(cell, class, code),
-        })
-    }
-
-    #[cold]
-    fn build_method_table<'c>(
-        &'c self,
-        cell: &'c OnceCell<MethodTable>,
-        class: &'c Class,
-        code: &CodeTable,
     ) -> &'c MethodTable {
+        let index = class.index.0 as usize;
+        let cell = if index < self.native_count as usize {
+            &self
+                .native_methods
+                .get()
+                .unwrap_or_else(|| self.allocate_native_method_tables())[index]
+        } else {
+            &class.method_table
+        };
         cell.get_or_init(|| MethodTable::build(class, code, |method| self.get(&method.declaring)))
     }
 
+    #[cold]
+    fn allocate_native_method_tables(&self) -> &NativeMethodTables {
+        self.native_methods
+            .get_or_init(|| (0..self.native_count).map(|_| OnceCell::new()).collect())
+    }
+
     pub(crate) fn cached_method_table<'c>(&'c self, class: &'c Class) -> Option<&'c MethodTable> {
-        self.method_tables.get(class.index.0 as usize)?.get()
+        let index = class.index.0 as usize;
+        if index < self.native_count as usize {
+            self.native_methods.get()?[index].get()
+        } else {
+            class.method_table.get()
+        }
+    }
+
+    /// Builds the method table of every class of this request that has
+    /// none yet. Taking a snapshot calls this: the classes are then shared
+    /// by every fork, and a table built later in one fork could use name
+    /// numbers that mean other names in another fork.
+    pub(crate) fn build_method_tables(&self, code: &CodeTable) {
+        for class in &self.local.numbered {
+            class.method_table.get_or_init(|| {
+                MethodTable::build(class, code, |method| self.get(&method.declaring))
+            });
+        }
     }
 
     pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
         debug_assert_eq!(class.index, self.next_index());
         self.local.order.push(class.name.clone());
         self.local.insert(lowercase_name, class);
-        self.method_tables.push(OnceCell::new());
         self.has_property_views |= self.local.has_property_views;
     }
 
@@ -326,7 +338,7 @@ impl ClassTable {
             has_property_views: self.has_property_views,
             has_lazy_objects: self.has_lazy_objects,
             native_count: self.native_count,
-            method_tables: self.method_tables.clone(),
+            native_methods: self.native_methods.clone(),
             objects,
             ids,
             allocations_before_collection: self.allocations_before_collection.clone(),

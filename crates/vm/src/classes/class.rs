@@ -42,6 +42,12 @@ pub(crate) struct Class {
     pub(crate) allows_dynamic_properties: bool,
     pub(crate) magic: Option<Box<super::magic::MagicMethods>>,
     pub(crate) methods: HashMap<String, Rc<Method>>,
+    /// The same methods by name key, built on first use by a fast call.
+    /// Name keys are numbers of the request's code table; a class shared by
+    /// the forks of a snapshot has its table built when the snapshot is
+    /// taken, from the numbers every fork shares, and never again (see
+    /// `ClassTable::build_method_tables`).
+    pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
     pub(crate) serialized_fields:
         std::cell::OnceCell<Option<Rc<[phera_extension_api::serialization::SerializedProperty]>>>,
     /// Constructor presence is immutable after linking, including inheritance.
