@@ -45,7 +45,6 @@ impl Vm {
                 self.snapshot.resume = destination;
                 // From here the classes are shared by every fork.
                 self.classes.build_method_tables();
-                self.code.freeze();
                 let mut frozen = self.fork_vm().map_err(|refusal| {
                     let error = self.snapshot_exception(&refusal);
                     if let NativeError::Throw { message, .. } = &error {

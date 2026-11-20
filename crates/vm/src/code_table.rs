@@ -60,11 +60,6 @@ pub(crate) struct LoadedUnit {
 #[derive(Default)]
 pub(crate) struct CodeTable {
     units: Vec<LoadedUnit>,
-    /// The facts of the functions a snapshot's boot loaded: frozen when the
-    /// snapshot is taken (see [`CodeTable::freeze`]) and shared by every
-    /// fork. Function `i` is here when `i < frozen.len()`.
-    frozen: std::rc::Rc<[FunctionFacts]>,
-    /// The facts of the functions loaded since, numbered after `frozen`.
     functions: Vec<FunctionFacts>,
     /// Where each loaded file is, by its process number
     /// (`UnitMetadata::id`): its position in `units` plus one, 0 if this
@@ -92,7 +87,7 @@ impl CodeTable {
             }
             self.slots[id] = index.0 + 1;
         }
-        let first = FunctionIndex(self.function_count() as u32);
+        let first = FunctionIndex(self.functions.len() as u32);
         let (name_keys, symbol_keys) = if let Some(metadata) = &unit.metadata {
             self.functions
                 .extend(metadata.functions.iter().cloned().enumerate().map(
@@ -202,7 +197,7 @@ impl CodeTable {
         local: usize,
     ) -> Option<(FunctionIndex, &FunctionFacts)> {
         let function = self.declared(first, local);
-        let facts = self.facts_of(function)?;
+        let facts = self.functions.get(function.index())?;
         (facts.unit_first == first).then_some((function, facts))
     }
 
@@ -212,13 +207,7 @@ impl CodeTable {
         function: FunctionIndex,
         class: crate::classes::ClassIndex,
     ) {
-        let index = function.index();
-        match index.checked_sub(self.frozen.len()) {
-            Some(own) => self.functions[own].class = Some(class),
-            // A fork links a class of a file the boot loaded: it copies the
-            // frozen facts once, and changes its own copy.
-            None => std::rc::Rc::make_mut(&mut self.frozen)[index].class = Some(class),
-        }
+        self.functions[function.index()].class = Some(class);
     }
 
     /// Flattened methods share immutable instructions and own their scope and static cells.
@@ -229,7 +218,7 @@ impl CodeTable {
     ) -> FunctionIndex {
         let mut facts = self.facts(source).clone();
         facts.class = Some(scope);
-        let function = FunctionIndex(self.function_count() as u32);
+        let function = FunctionIndex(self.functions.len() as u32);
         self.functions.push(facts);
         function
     }
@@ -261,35 +250,7 @@ impl CodeTable {
 
     #[inline]
     pub(crate) fn facts(&self, function: FunctionIndex) -> &FunctionFacts {
-        let index = function.index();
-        match self.frozen.get(index) {
-            Some(facts) => facts,
-            None => &self.functions[index - self.frozen.len()],
-        }
-    }
-
-    /// The facts of `function`, if it is a function of this table.
-    fn facts_of(&self, function: FunctionIndex) -> Option<&FunctionFacts> {
-        let index = function.index();
-        match index.checked_sub(self.frozen.len()) {
-            Some(own) => self.functions.get(own),
-            None => self.frozen.get(index),
-        }
-    }
-
-    fn function_count(&self) -> usize {
-        self.frozen.len() + self.functions.len()
-    }
-
-    /// Freezes the facts of every function loaded so far, so that the forks
-    /// of a snapshot share them instead of copying them. Taking a snapshot
-    /// calls this.
-    pub(crate) fn freeze(&mut self) {
-        if self.functions.is_empty() {
-            return;
-        }
-        let frozen = self.frozen.iter().cloned().chain(self.functions.drain(..));
-        self.frozen = frozen.collect();
+        &self.functions[function.index()]
     }
 
     fn loaded(&self, function: FunctionIndex) -> &LoadedUnit {
@@ -302,7 +263,7 @@ impl CodeTable {
     }
 
     pub(crate) fn known_unit(&self, function: FunctionIndex) -> Option<&Arc<CompiledUnit>> {
-        let facts = self.facts_of(function)?;
+        let facts = self.functions.get(function.index())?;
         self.units.get(facts.unit.0 as usize).map(|unit| &unit.unit)
     }
 
@@ -354,7 +315,6 @@ impl crate::snapshot::ForkCopy for CodeTable {
                     symbol_keys: loaded.symbol_keys.clone(),
                 })
                 .collect(),
-            frozen: self.frozen.clone(),
             functions: self.functions.clone(),
             slots: self.slots.clone(),
             trait_method_names: self.trait_method_names.clone(),
