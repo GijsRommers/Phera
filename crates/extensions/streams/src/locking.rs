@@ -66,7 +66,9 @@ fn flock(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeRe
         } else {
             operate(resource, policy, move |stream: &mut Stream| {
                 let file = stream.lock_descriptor().ok_or(Errno::NOTSUP)?;
-                rustix::fs::flock(file, operation)
+                rustix::fs::flock(file, operation)?;
+                stream.locked = operation != FlockOperation::Unlock;
+                Ok(())
             })
             .await?
         };

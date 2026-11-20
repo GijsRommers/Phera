@@ -55,6 +55,11 @@ pub struct Stream {
     pub spill_limit: Option<u64>,
     pub temporary_path: Option<TempPath>,
     pub data_header: Option<Vec<u8>>,
+    /// The file a `file://` stream opened, resolved, so that a fork of a
+    /// snapshot can open it again.
+    pub path: Option<std::path::PathBuf>,
+    /// `flock()` holds a lock through this stream's descriptor.
+    pub locked: bool,
     appending: bool,
     writable: bool,
 }
@@ -82,6 +87,8 @@ impl Stream {
             spill_limit: None,
             temporary_path: None,
             data_header: None,
+            path: None,
+            locked: false,
             appending: mode.first() == Some(&b'a'),
             writable: mode.first() != Some(&b'r') || mode.contains(&b'+'),
         }

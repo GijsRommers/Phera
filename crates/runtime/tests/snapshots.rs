@@ -162,23 +162,41 @@ async fn boot_and_answer(
         .await
 }
 
+/// A file the boot opened is opened again in each fork, at the boot's
+/// position: one fork's reads and writes do not move another's.
 #[tokio::test(flavor = "current_thread")]
-async fn an_open_file_refuses_the_snapshot_and_names_where_it_is() {
+async fn an_open_file_of_the_boot_is_each_forks_own() {
+    let answers = boot_and_answer(
+        "file",
+        "<?php file_put_contents(__DIR__ . '/data.txt', 'abcdef');
+         $in = fopen(__DIR__ . '/data.txt', 'r'); fread($in, 2);
+         $log = fopen(__DIR__ . '/log.txt', 'a');
+         Phera\\snapshot();
+         echo fread($in, 2), ' ', ftell($in);
+         fwrite($log, 'x');
+         clearstatcache(); echo ' ', filesize(__DIR__ . '/log.txt');",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["cd 4 1", "cd 4 2"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_locked_file_refuses_the_snapshot_and_names_where_it_is() {
     let error = boot_and_answer(
         "refusal",
-        "<?php class Log { public static $file; } Log::$file = fopen(__FILE__, 'r'); Phera\\snapshot();",
+        "<?php class Log { public static $file; } Log::$file = fopen(__FILE__, 'r');
+         flock(Log::$file, LOCK_SH); Phera\\snapshot();",
         &[],
     )
     .await
-    .expect_err("an open file cannot be kept");
+    .expect_err("a locked file cannot be kept");
     assert!(
         error.contains("Phera\\snapshot(): cannot keep stream (Log::$file)"),
         "{error}"
     );
-    assert!(
-        error.contains("an open file belongs to one request"),
-        "{error}"
-    );
+    assert!(error.contains("flock()"), "{error}");
 }
 
 #[tokio::test(flavor = "current_thread")]
