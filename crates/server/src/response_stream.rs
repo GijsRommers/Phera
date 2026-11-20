@@ -29,6 +29,7 @@ enum Phase {
 
 pub(crate) struct ResponseSlot {
     phase: Cell<Phase>,
+    /// Buffered requests carry only the empty pointer.
     response: Cell<Option<Box<Response>>>,
 }
 

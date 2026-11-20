@@ -9,7 +9,7 @@
 Use Hyper's end-of-stream signal to skip the body reader when the request
 head already completes the message. Build static-file conditions only
 after resolving a static file. Move the existing response headers into
-the wire response and allocate an early response slot only at handoff.
+the wire response. Allocate storage for the early response at handoff.
 
 ## Why
 
