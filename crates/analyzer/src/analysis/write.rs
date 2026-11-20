@@ -101,7 +101,9 @@ impl Analyzer<'_> {
                     }
                     if self.level >= 2 {
                         scope.forget_member_write(target);
-                        if matches!(target.kind, ExpressionKind::Property { .. })
+                        if (matches!(target.kind, ExpressionKind::Property { .. })
+                            || self.level >= 7
+                                && matches!(target.kind, ExpressionKind::StaticProperty { .. }))
                             && let Some(place) = crate::scope::Place::of(target)
                         {
                             scope.facts.record(place, ty, None);

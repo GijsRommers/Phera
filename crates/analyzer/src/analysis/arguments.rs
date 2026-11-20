@@ -57,11 +57,14 @@ impl Analyzer<'_> {
                                 })
                         }));
         let types = collect.then_some(&mut facts.types);
-        if self.evaluate_arguments(arguments, signature, scope, types) == Evaluation::Never {
+        if self.evaluate_arguments(arguments, signature, label, scope, types) == Evaluation::Never {
             facts.evaluation = Evaluation::Never;
             return facts;
         }
         scope.forget_reference_types();
+        if self.level >= 7 && !scope.facts.is_empty() {
+            scope.facts.forget_static();
+        }
         self.record_exception(scope);
         let Some(signature) = signature else {
             return facts;
@@ -81,6 +84,7 @@ impl Analyzer<'_> {
         &mut self,
         arguments: &[Argument],
         signature: Option<&Signature>,
+        label: &str,
         scope: &mut Scope,
         mut types: Option<&mut Vec<ValueType>>,
     ) -> Evaluation {
@@ -94,7 +98,24 @@ impl Analyzer<'_> {
             if let Some(class) = parameter.and_then(|p| p.closure_receiver.as_deref()) {
                 self.prepare_documented_binding(&argument.value, class);
             }
+            let previous_callback = std::mem::take(&mut self.pending_callback_types);
+            if self.level >= 7
+                && closure_binding::is_closure(&argument.value)
+                && !argument.spread
+                && arguments
+                    .iter()
+                    .all(|arg| arg.name.is_none() && !arg.spread)
+            {
+                self.pending_callback_types = super::callback_parameters::types(
+                    label,
+                    signature,
+                    parameter,
+                    types.as_deref().map_or(&[], Vec::as_slice),
+                    arguments,
+                );
+            }
             let ty = self.expression(&argument.value, scope, signature.is_none());
+            self.pending_callback_types = previous_callback;
             let explicitly_bound = self
                 .pending_binding
                 .as_ref()

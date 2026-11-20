@@ -150,6 +150,7 @@ pub struct ClassInfo {
     pub enum_cases: BTreeSet<String>,
     pub location: Location,
     pub open_properties: bool,
+    pub mapped_repository: Option<String>,
     pub documented: crate::phpdoc::Members,
 }
 

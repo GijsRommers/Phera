@@ -80,6 +80,7 @@ fn class(f: &[&str]) -> ClassInfo {
         enum_cases: Default::default(),
         location: location(f[9]),
         open_properties: f[8] == "true",
+        mapped_repository: None,
         documented: Default::default(),
     }
 }

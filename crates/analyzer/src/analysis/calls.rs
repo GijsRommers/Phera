@@ -124,7 +124,20 @@ impl Analyzer<'_> {
             if let Some(signature) = &signature {
                 self.discarded_method_result(span, class, &method.name, signature, access);
             }
-            let returns = if let Some(signature) = signature {
+            let returns = if self.level >= 7
+                && !access.static_call()
+                && let Arguments::List(args) = arguments
+                && args
+                    .first()
+                    .is_some_and(|arg| arg.name.is_none() && !arg.spread)
+                && let Some(returns) = crate::framework_knowledge::doctrine::return_type(
+                    self.index,
+                    class,
+                    &method.name,
+                    &facts.types,
+                ) {
+                returns
+            } else if let Some(signature) = signature {
                 signature.infer_return(arguments, &facts.types, self.index)
             } else if self.level >= 2 && !matches!(access, Access::Guarded | Access::GuardedStatic)
             {

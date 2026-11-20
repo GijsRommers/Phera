@@ -13,6 +13,7 @@ mod constants;
 mod dependencies;
 pub mod diagnostic;
 mod enums;
+mod framework_knowledge;
 pub mod global_effects;
 pub mod index;
 #[cfg(test)]
@@ -80,6 +81,9 @@ pub(crate) fn analyze_files(
     let mut diagnostics = Vec::new();
     let mut index = builtins::load_supported();
     index.read_type_docs = options.level >= 2;
+    if options.level >= 7 {
+        builtins::analysis_facts::refine(&mut index);
+    }
     for file in files {
         collect::collect(&mut index, &file.path, &file.source, &file.program);
     }

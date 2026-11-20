@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod definition_guards;
 pub(crate) use definition_guards::GuardKey;
 mod facts;
+pub(crate) use facts::SELF_PROPERTIES;
 pub use facts::{AccessStep, Place};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

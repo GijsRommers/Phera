@@ -141,7 +141,12 @@ impl Analyzer<'_> {
             condition,
             &branches,
         );
-        let (yes, yes_ty) = self.expression_branch(branches.yes, then, branches.ty);
+        let positive = if self.level >= 7 && then.is_none() {
+            super::truthy_values::truthy_type(&branches.ty)
+        } else {
+            branches.ty
+        };
+        let (yes, yes_ty) = self.expression_branch(branches.yes, then, positive);
         let (no, no_ty) = self.expression_branch(branches.no, Some(otherwise), ValueType::Mixed);
         if let Some(after) = super::condition::Condition::merge(yes, no) {
             *scope = after;

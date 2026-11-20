@@ -2,6 +2,7 @@
 //! Dynamic member names and trait bodies can hide uses of private members.
 
 use super::*;
+use crate::framework_knowledge::{AttributeUse, attributes_use};
 use std::collections::BTreeSet;
 
 #[derive(Default)]
@@ -49,6 +50,8 @@ impl Analyzer<'_> {
             return;
         }
         let uses = Uses::collect(declaration);
+        let names = &self.context.names;
+        let command = attributes_use(&declaration.attributes, names, AttributeUse::InvokeCommand);
         for member in &declaration.members {
             match &member.kind {
                 ClassMemberKind::Method(method) => {
@@ -57,6 +60,12 @@ impl Analyzer<'_> {
                         && !name.starts_with("__")
                         && !uses.dynamic_method
                         && !uses.methods.contains(&name.to_ascii_lowercase())
+                        && !(command && name.eq_ignore_ascii_case("execute"))
+                        && !attributes_use(
+                            &method.attributes,
+                            &self.context.names,
+                            AttributeUse::InvokeMethod,
+                        )
                     {
                         let label = if method.modifiers.is_static {
                             "Static method"
@@ -72,7 +81,11 @@ impl Analyzer<'_> {
                     for param in &method.parameters {
                         if is_private(param.modifiers)
                             && !uses.forwarded_parameters.contains(&param.name)
-                            && !self.externally_mapped(&param.attributes)
+                            && !attributes_use(
+                                &param.attributes,
+                                &self.context.names,
+                                AttributeUse::ReadWriteProperty,
+                            )
                         {
                             self.check_private_property(
                                 &uses,
@@ -90,7 +103,19 @@ impl Analyzer<'_> {
                     items,
                     attributes,
                     ..
-                } if is_private(*modifiers) && !self.externally_mapped(attributes) => {
+                } if is_private(*modifiers) => {
+                    if attributes_use(
+                        attributes,
+                        &self.context.names,
+                        AttributeUse::ReadWriteProperty,
+                    ) {
+                        continue;
+                    }
+                    let framework_write = attributes_use(
+                        attributes,
+                        &self.context.names,
+                        AttributeUse::WriteProperty,
+                    );
                     for item in items.iter().filter(|item| !item.has_hook_list) {
                         self.check_private_property(
                             &uses,
@@ -98,7 +123,7 @@ impl Analyzer<'_> {
                             &item.name,
                             member.span,
                             modifiers.is_static,
-                            item.default.is_some(),
+                            framework_write || item.default.is_some(),
                         );
                     }
                 }
@@ -119,13 +144,6 @@ impl Analyzer<'_> {
                 _ => {}
             }
         }
-    }
-
-    fn externally_mapped(&self, attributes: &[Attribute]) -> bool {
-        attributes.iter().any(|attribute| {
-            self.context.names.resolve(&attribute.name, UseKind::Class)[0]
-                .starts_with("Doctrine\\ORM\\Mapping\\")
-        })
     }
 
     fn check_private_property(

@@ -1,3 +1,7 @@
+The acceptance reference is now defined in
+[Measure projects with their PHPStan configuration](2026-11-20-checker-framework-reference.md).
+This core measurement is still reported for comparison.
+
 # Measure the large Symfony reference against core PHPStan rules
 
 - Date: 2026-11-20

@@ -80,20 +80,24 @@ fn preserve_false_return(index: &mut Index) {
         "parse_ini_file",
         "parse_ini_string",
     ] {
-        if let Some(signature) = index.functions.get_mut(name)
-            && let ValueType::Union(arms) = &signature.returns
-        {
-            signature.returns = ValueType::Union(
-                arms.iter()
-                    .map(|arm| {
-                        if *arm == ValueType::Bool {
-                            ValueType::BoolLiteral(false)
-                        } else {
-                            arm.clone()
-                        }
-                    })
-                    .collect(),
-            );
-        }
+        literal_false(index, name);
+    }
+}
+
+pub(super) fn literal_false(index: &mut Index, name: &str) {
+    if let Some(signature) = index.functions.get_mut(name)
+        && let ValueType::Union(arms) = &signature.returns
+    {
+        signature.returns = ValueType::Union(
+            arms.iter()
+                .map(|arm| {
+                    if *arm == ValueType::Bool {
+                        ValueType::BoolLiteral(false)
+                    } else {
+                        arm.clone()
+                    }
+                })
+                .collect(),
+        );
     }
 }

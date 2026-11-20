@@ -45,6 +45,12 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | `phera lint src` | Finds unused code and suspicious constructs; `--fix` applies the safe fixes |
 | `phera --dump file.php` | Prints the compiled bytecode |
 
+The checker recognizes Doctrine ORM mapping attributes as property reads
+and writes, including generated identifiers and associations. It also
+uses entity class strings to infer Doctrine repository, find, and reference
+results. It recognizes Doctrine lifecycle callbacks and Symfony service injection,
+command, route, listener, and scheduled-task attributes.
+
 `phera <command> --help` lists the options. There is no formatter and no test
 runner yet.
 

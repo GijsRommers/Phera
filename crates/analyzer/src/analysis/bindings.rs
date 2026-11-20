@@ -34,7 +34,8 @@ impl Analyzer<'_> {
     }
 
     pub fn parameter_scope(&mut self, parameters: &[Parameter], scope: &mut Scope) {
-        for parameter in parameters {
+        let contextual = std::mem::take(&mut self.pending_callback_types);
+        for (position, parameter) in parameters.iter().enumerate() {
             self.check_attributes(&parameter.attributes, scope);
             self.check_type(parameter.ty.as_ref());
             if let Some(default) = &parameter.default {
@@ -42,8 +43,14 @@ impl Analyzer<'_> {
             }
             let ty = if parameter.variadic {
                 ValueType::Array
-            } else if self.level >= 10 && parameter.ty.is_none() {
-                ValueType::ImplicitMixed
+            } else if parameter.ty.is_none() {
+                contextual.get(position).cloned().unwrap_or({
+                    if self.level >= 10 {
+                        ValueType::ImplicitMixed
+                    } else {
+                        ValueType::Mixed
+                    }
+                })
             } else {
                 ValueType::parameter(parameter, &self.context.names)
             };

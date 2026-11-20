@@ -25,6 +25,7 @@ mod bindings;
 mod builtin_facts;
 mod call_assertions;
 mod callable_signatures;
+mod callback_parameters;
 mod calls;
 mod closure_binding;
 mod closure_effects;
@@ -64,6 +65,7 @@ mod statements;
 mod strict_mixed;
 mod string_replacements;
 mod switch;
+mod truthy_values;
 mod type_docs;
 mod value_contracts;
 mod write;
@@ -105,6 +107,7 @@ pub struct Analyzer<'a> {
     pub return_scopes: Vec<Vec<Scope>>,
     pub controls: Vec<control::ControlFrame>,
     pub statement_docs: std::collections::BTreeMap<usize, Span>,
+    pub pending_callback_types: Vec<ValueType>,
     pub pending_binding: Option<(usize, closure_binding::ClosureBinding)>,
     pub last_condition: Option<Span>,
     pub discarded_expression: Option<Span>,
@@ -137,6 +140,7 @@ impl<'a> Analyzer<'a> {
             return_scopes: Vec::new(),
             controls: Vec::new(),
             pending_binding: None,
+            pending_callback_types: Vec::new(),
             last_condition: None,
             discarded_expression: None,
             trait_diagnostics: None,

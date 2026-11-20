@@ -1,6 +1,7 @@
 //! Builtin signatures generated from PHP stubs, e.g. `strlen(string $string): int`.
 //! The table is committed; compiling and checking never require PHP or php-src.
 
+pub(crate) mod analysis_facts;
 mod decode;
 mod encode;
 mod fields;

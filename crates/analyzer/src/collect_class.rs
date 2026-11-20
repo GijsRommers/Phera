@@ -28,6 +28,10 @@ pub fn class_info(
         enum_cases: Default::default(),
         location: location(class.span.start),
         open_properties: false,
+        mapped_repository: crate::framework_knowledge::doctrine::mapped_repository(
+            &class.attributes,
+            names,
+        ),
         documented: crate::phpdoc::text(source, class.doc_comment)
             .map_or_else(Default::default, |doc| crate::phpdoc::members(doc, names)),
     };

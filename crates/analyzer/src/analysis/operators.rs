@@ -22,7 +22,13 @@ pub fn binary_type(operator: BinaryOperator, left: &ValueType, right: &ValueType
         Op::Spaceship => T::IntRange(-1, 1),
         Op::ShiftLeft | Op::ShiftRight | Op::Modulo => T::Int,
         Op::BitwiseAnd | Op::BitwiseOr | Op::BitwiseXor => {
-            if is_string(left) && is_string(right) {
+            if let (T::IntLiteral(left), T::IntLiteral(right)) = (left, right) {
+                T::IntLiteral(match operator {
+                    Op::BitwiseAnd => left & right,
+                    Op::BitwiseOr => left | right,
+                    _ => left ^ right,
+                })
+            } else if is_string(left) && is_string(right) {
                 T::String
             } else if is_numeric(left) || is_numeric(right) {
                 T::Int

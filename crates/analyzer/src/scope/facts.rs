@@ -6,6 +6,9 @@ use phera_ast::{Arguments, Expression, ExpressionKind, MemberName, Variable};
 use phera_source::Span;
 use std::collections::BTreeMap;
 
+// A PHP variable name cannot contain a colon.
+pub(crate) const SELF_PROPERTIES: &str = ":self";
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Place {
     pub root: String,
@@ -57,6 +60,21 @@ impl Place {
                     };
                     members.push(step);
                     expression = target;
+                }
+                ExpressionKind::StaticProperty {
+                    class,
+                    name: Variable::Named(name),
+                    ..
+                } if matches!(&class.kind, ExpressionKind::Name(class)
+                        if class.kind == phera_ast::NameKind::Unqualified
+                        && class.text.eq_ignore_ascii_case("self")) =>
+                {
+                    members.push(AccessStep::Property(name.clone()));
+                    members.reverse();
+                    return Some(Self {
+                        root: SELF_PROPERTIES.into(),
+                        members,
+                    });
                 }
                 ExpressionKind::Variable(Variable::Named(root)) => {
                     members.reverse();
@@ -110,6 +128,10 @@ impl Facts {
         self.0.retain(|place, _| place.root != name);
     }
 
+    pub fn forget_static(&mut self) {
+        self.0.retain(|place, _| place.root != SELF_PROPERTIES);
+    }
+
     pub fn forget_receiver(&mut self, receiver: &Place) {
         self.0.retain(|place, _| {
             place.root != receiver.root
@@ -123,8 +145,20 @@ impl Facts {
     }
 
     pub fn retain_common(&mut self, paths: &[Scope]) {
-        self.0
-            .retain(|place, fact| paths.iter().all(|path| path.facts.get(place) == Some(fact)));
+        self.0.retain(|place, fact| {
+            for path in paths {
+                let Some(other) = path.facts.get(place) else {
+                    return false;
+                };
+                if other.ty != fact.ty {
+                    return false;
+                }
+                if other.narrowed_at != fact.narrowed_at {
+                    fact.narrowed_at = None;
+                }
+            }
+            true
+        });
     }
 }
 

@@ -21,6 +21,9 @@ impl Analyzer<'_> {
         let Some(place) = Place::of(place) else {
             return;
         };
+        if self.level < 7 && place.root == crate::scope::SELF_PROPERTIES {
+            return;
+        }
         let original = self.place_type(&place, scope);
         let current = match &original {
             ValueType::Union(variants) => variants.as_ref(),
@@ -80,11 +83,16 @@ impl Analyzer<'_> {
         }
     }
 
-    fn place_type(&self, place: &Place, scope: &Scope) -> ValueType {
+    pub(super) fn place_type(&self, place: &Place, scope: &Scope) -> ValueType {
         if let Some(fact) = scope.facts.get(place) {
             return fact.ty.clone();
         }
-        let mut ty = if place.root == "this" && self.context.object {
+        let mut ty = if place.root == crate::scope::SELF_PROPERTIES {
+            self.context
+                .class
+                .clone()
+                .map_or(ValueType::Mixed, ValueType::Class)
+        } else if place.root == "this" && self.context.object {
             self.context
                 .this_class
                 .as_ref()
