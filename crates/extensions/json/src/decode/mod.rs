@@ -67,13 +67,15 @@ pub(crate) fn json_validate(context: &mut dyn Context, arguments: &[Value]) -> N
     }
     *context.state().get_or_default::<Error>() = Error::None;
     let depth = depth(args::int(arguments, 1).unwrap_or(512), "json_validate", 2)?;
-    let mut flags = DecodeFlags::from_bits(bits);
-    flags.associative = true;
-    // Validation never builds objects: it parses in associative mode.
-    let mut never_called = |properties: PhpArray| Value::from(properties);
-    let result = parser::parse(bytes, depth, flags, &mut never_called);
+    let result = validate(bytes, depth, bits);
     let error = result.as_ref().err().copied().unwrap_or_default();
     error::finish(context, error, false, Value::Bool(result.is_ok()))
+}
+
+pub(crate) fn validate(bytes: &[u8], depth: usize, bits: i64) -> Result<Value, Error> {
+    let mut flags = DecodeFlags::from_bits(bits);
+    flags.associative = true;
+    parser::parse(bytes, depth, flags, &mut Value::from)
 }
 
 /// `$depth` must be from 1 to `i32::MAX`, PHP's C int.
