@@ -58,6 +58,39 @@ pub fn file_put_contents(
         if flags & crate::whole_file::NO_DEFAULT_CONTEXT == 0 {
             files(context).use_default_context(args::value(&arguments, 3));
         }
+        if !lock && let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+            let explicit = args::value(&arguments, 3);
+            let supplied =
+                if explicit.is_null() && flags & crate::whole_file::NO_DEFAULT_CONTEXT == 0 {
+                    crate::context_options::default_for_wrapper(context)
+                } else {
+                    explicit.clone()
+                };
+            let options = if flags & USE_PATH != 0 {
+                crate::user_wrappers::USE_PATH
+            } else {
+                0
+            };
+            let Some(file) =
+                crate::user_file::open(context, wrapper, function, name, mode, options, supplied)
+                    .await?
+            else {
+                return Ok(Value::Bool(false));
+            };
+            files(context).claim_id();
+            let written = write_user(
+                context,
+                &file,
+                function,
+                data,
+                source.map(|resource| resource.as_ref()),
+            )
+            .await;
+            let closed = file.close(context).await;
+            let written = written?;
+            closed?;
+            return Ok(written);
+        }
         let Some(mut stream) = open(context, function, name, mode, flags & USE_PATH != 0).await?
         else {
             return Ok(Value::Bool(false));
@@ -168,4 +201,43 @@ fn join_data(context: &mut dyn Context, data: &Value) -> Result<Option<Vec<u8>>,
         value => bytes.extend_from_slice(to_php_string(value, context.diagnostics())?.as_bytes()),
     }
     Ok(Some(bytes))
+}
+
+async fn write_user(
+    context: &mut dyn Context,
+    file: &crate::user_file::UserFile,
+    function: &str,
+    value: &Value,
+    source: Option<&phera_extension_api::value::Resource>,
+) -> NativeResult {
+    let bytes = if let Some(source) = source {
+        if let Some(user) = crate::user_file::resource_file(source) {
+            user.collect(context, function, None).await?
+        } else {
+            match read(source, None).await? {
+                Ok(data) => data,
+                Err(error) => {
+                    read_notice(context, function, &error, CHUNK as u64);
+                    return Ok(Value::Bool(false));
+                }
+            }
+        }
+    } else {
+        let Some(bytes) = join_data(context, value)? else {
+            return Ok(Value::Bool(false));
+        };
+        bytes
+    };
+    let count = file.write(context, function, &bytes).await?;
+    if count == bytes.len() {
+        Ok(Value::Int(count as i64))
+    } else {
+        warn_false(
+            context,
+            format!(
+                "{function}(): Only {count} of {} bytes written, possibly out of free disk space",
+                bytes.len()
+            ),
+        )
+    }
 }

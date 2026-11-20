@@ -25,7 +25,6 @@ pub fn register(registry: &mut Registry) {
         FunctionEntry::sync("stream_set_chunk_size", BUFFER, set_chunk_size),
         FunctionEntry::sync("stream_supports_lock", &[STREAM], supports_lock),
         FunctionEntry::sync("stream_get_meta_data", &[STREAM], get_meta_data),
-        FunctionEntry::sync("stream_get_wrappers", &[], get_wrappers),
         FunctionEntry::sync("stream_is_local", &[STREAM], is_local),
         FunctionEntry::sync("stream_isatty", &[STREAM], isatty),
         FunctionEntry::asynchronous("stream_set_blocking", BLOCK, set_blocking),
@@ -37,17 +36,12 @@ pub fn register(registry: &mut Registry) {
     }
 }
 
-fn get_wrappers(_: &mut dyn Context, _: &[Value]) -> NativeResult {
-    let mut wrappers = PhpArray::new();
-    for name in ["php", "file", "data", "compress.zlib"] {
-        wrappers.push(Value::from(name))?;
-    }
-    Ok(Value::from(wrappers))
-}
-
 fn is_local(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let value = args::value(arguments, 0);
-    if value.is_resource() {
+    if let Value::Resource(resource) = value {
+        if let Some(file) = crate::user_file::resource_file(resource) {
+            return Ok(Value::Bool(!file.remote));
+        }
         return with_stream(
             stream_arg(arguments, "stream_is_local").map_err(|_| {
                 NativeError::type_error(
@@ -68,6 +62,9 @@ fn is_local(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         .split(|byte| *byte == 0)
         .next()
         .unwrap_or_default();
+    if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+        return Ok(Value::Bool(!wrapper.remote));
+    }
     let target = Target::parse(name);
     if let Target::Unavailable(scheme) = target {
         if [
@@ -124,6 +121,9 @@ fn get_meta_data(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         return Ok(Value::from(data));
     }
     let stream = stream_arg(arguments, name)?;
+    if let Some(file) = crate::user_file::resource_file(stream) {
+        return Ok(file.metadata());
+    }
     with_stream(stream, |stream| Value::from(metadata(stream)))
 }
 
@@ -235,6 +235,9 @@ fn set_chunk_size(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let size = i32::try_from(size).map_err(|_| {
         NativeError::value_error("stream_set_chunk_size(): Argument #2 ($size) is too large")
     })?;
+    if let Some(file) = crate::user_file::resource_file(resource) {
+        return Ok(Value::Int(file.chunk.replace(size as usize) as i64));
+    }
     with_stream(resource, |stream| {
         let previous = std::mem::replace(&mut stream.chunk_size, size as usize);
         Value::Int(previous as i64)

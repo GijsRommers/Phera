@@ -45,6 +45,8 @@ mod stream_options;
 mod temporary;
 mod terminal;
 mod transfer;
+mod user_file;
+mod user_wrappers;
 mod whole_file;
 mod whole_write;
 mod wrapper;
@@ -100,6 +102,7 @@ impl Extension for Streams {
         select::register(registry);
         temporary::register(registry);
         transfer::register(registry);
+        user_wrappers::register(registry);
         whole_file::register(registry);
     }
 }

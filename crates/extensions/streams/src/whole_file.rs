@@ -88,6 +88,19 @@ fn file_get_contents(
         let offset = args::int(&arguments, 3).unwrap_or(0);
         let use_include = args::bool(&arguments, 1).unwrap_or(false);
         files(context).use_default_context(args::value(&arguments, 2));
+        if let Some(result) = user_contents(
+            context,
+            name,
+            function,
+            use_include,
+            args::value(&arguments, 2),
+            (offset, length),
+            true,
+        )
+        .await?
+        {
+            return Ok(result);
+        }
         let Some(mut stream) = open(context, function, name, b"rb", use_include).await? else {
             return Ok(Value::Bool(false));
         };
@@ -120,6 +133,25 @@ fn readfile(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
         let name = name(&arguments, function, 2)?;
         let use_include = args::bool(&arguments, 1).unwrap_or(false);
         files(context).use_default_context(args::value(&arguments, 2));
+        if let Some(result) = user_contents(
+            context,
+            name,
+            function,
+            use_include,
+            args::value(&arguments, 2),
+            (0, None),
+            true,
+        )
+        .await?
+        {
+            return match result {
+                Value::String(bytes) => {
+                    context.write(bytes.as_bytes());
+                    Ok(Value::Int(bytes.as_bytes().len() as i64))
+                }
+                other => Ok(other),
+            };
+        }
         let Some(stream) = open(context, function, name, b"rb", use_include).await? else {
             return Ok(Value::Bool(false));
         };
@@ -156,13 +188,32 @@ fn file(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
         if flags & NO_DEFAULT_CONTEXT == 0 {
             files(context).use_default_context(args::value(&arguments, 2));
         }
-        let Some(stream) = open(context, "file", name, b"rb", flags & USE_PATH != 0).await? else {
-            return Ok(Value::Bool(false));
+        let use_path = flags & USE_PATH != 0;
+        let use_default = flags & NO_DEFAULT_CONTEXT == 0;
+        let bytes = if let Some(result) = user_contents(
+            context,
+            name,
+            "file",
+            use_path,
+            args::value(&arguments, 2),
+            (0, None),
+            use_default,
+        )
+        .await?
+        {
+            match result {
+                Value::String(bytes) => bytes,
+                other => return Ok(other),
+            }
+        } else {
+            let Some(stream) = open(context, "file", name, b"rb", use_path).await? else {
+                return Ok(Value::Bool(false));
+            };
+            files(context).claim_id();
+            collect(context, stream, "file", None).await?.into()
         };
-        files(context).claim_id();
-        let bytes = collect(context, stream, "file", None).await?;
         let mut lines = PhpArray::new();
-        for mut line in bytes.split_inclusive(|&byte| byte == b'\n') {
+        for mut line in bytes.as_bytes().split_inclusive(|&byte| byte == b'\n') {
             if flags & IGNORE_ENDINGS != 0
                 && let Some(text) = line.strip_suffix(b"\n")
             {
@@ -215,4 +266,60 @@ async fn collect(
             Ok(Vec::new())
         }
     }
+}
+
+async fn user_contents(
+    context: &mut dyn Context,
+    name: &[u8],
+    function: &str,
+    use_include: bool,
+    supplied_context: &Value,
+    (offset, length): (i64, Option<u64>),
+    use_default: bool,
+) -> Result<Option<Value>, NativeError> {
+    let Some(wrapper) = crate::user_wrappers::locate(context, name) else {
+        return Ok(None);
+    };
+    let flags = if use_include {
+        crate::user_wrappers::USE_PATH
+    } else {
+        0
+    };
+    let supplied_context = if supplied_context.is_null() && use_default {
+        crate::context_options::default_for_wrapper(context)
+    } else {
+        supplied_context.clone()
+    };
+    let Some(file) = crate::user_file::open(
+        context,
+        wrapper,
+        function,
+        name,
+        b"rb",
+        flags,
+        supplied_context,
+    )
+    .await?
+    else {
+        return Ok(Some(Value::Bool(false)));
+    };
+    files(context).claim_id();
+    let result = if offset != 0
+        && !file
+            .seek(context, function, offset, if offset < 0 { 2 } else { 0 })
+            .await?
+    {
+        warn_false(
+            context,
+            format!("{function}(): Failed to seek to position {offset} in the stream"),
+        )
+    } else {
+        file.collect(context, function, length)
+            .await
+            .map(Value::from)
+    };
+    let closed = file.close(context).await;
+    let result = result?;
+    closed?;
+    Ok(Some(result))
 }

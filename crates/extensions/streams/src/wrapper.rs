@@ -141,7 +141,17 @@ pub(crate) async fn open_with_errors(
             .await;
         }
         Target::File(filename) => (
-            open_file(context, filename, name, mode, include_path).await?,
+            if crate::user_wrappers::file_disabled(context) {
+                errors.report(
+                    context,
+                    format!(
+                        "{function}(): file:// wrapper is disabled in the server configuration"
+                    ),
+                )?;
+                Err(OpenFailure::new("no suitable wrapper could be found"))
+            } else {
+                open_file(context, filename, name, mode, include_path).await?
+            },
             None,
         ),
         Target::RemoteFile => (

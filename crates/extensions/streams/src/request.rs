@@ -17,9 +17,11 @@ pub struct Files {
     pub directory: Option<Rc<Resource>>,
     pub input: RequestInput,
     pub stream_contexts: HashMap<i64, Rc<Resource>>,
+    pub(crate) wrappers: Option<crate::user_wrappers::Wrappers>,
     resources: Vec<Weak<Resource>>,
     next_id: i64,
-    default_context_claimed: bool,
+    pub(crate) default_context_id: Option<i64>,
+    pub(crate) default_context: Option<Value>,
 }
 
 impl Default for Files {
@@ -29,9 +31,11 @@ impl Default for Files {
             directory: None,
             input: RequestInput::default(),
             stream_contexts: HashMap::new(),
+            wrappers: None,
             resources: Vec::new(),
             next_id: 4,
-            default_context_claimed: false,
+            default_context_id: None,
+            default_context: None,
         }
     }
 }
@@ -92,9 +96,8 @@ impl Files {
 
     /// The default stream context occupies a resource ID on its first use.
     pub(crate) fn use_default_context(&mut self, explicit: &Value) {
-        if explicit.is_null() && !self.default_context_claimed {
-            self.claim_id();
-            self.default_context_claimed = true;
+        if explicit.is_null() && self.default_context_id.is_none() {
+            self.default_context_id = Some(self.claim_id());
         }
     }
 

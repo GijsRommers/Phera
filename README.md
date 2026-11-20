@@ -86,6 +86,11 @@ PDO (SQLite, MySQL, PostgreSQL, with TLS), random, redis, reflection, serialize,
 session, sodium, SPL, sqlite3, streams, tokenizer, zlib, bcmath, gmp, Unix process
 functions, and POSIX queries.
 
+Register an application stream wrapper with
+`stream_wrapper_register('virtual', VirtualFile::class)`. The registration
+belongs to the current request. `fopen()`, `file_get_contents()`, and
+`file_put_contents()` can use paths such as `virtual://report`.
+
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 
 - Documents and elements include `Dom\Document`, `Dom\HTMLDocument`,

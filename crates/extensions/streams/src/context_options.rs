@@ -76,6 +76,21 @@ fn create_options(context: &mut dyn Context, options: PhpArray) -> Value {
     new_resource(context.state(), "stream-context", Options(options))
 }
 
+pub(crate) fn default_for_wrapper(context: &mut dyn Context) -> Value {
+    let files = files(context);
+    files.use_default_context(&Value::Null);
+    if files.default_context.is_none()
+        && let Some(id) = files.default_context_id
+    {
+        files.default_context = Some(crate::request::resource(
+            id,
+            "stream-context",
+            Options(PhpArray::new()),
+        ));
+    }
+    files.default_context.clone().unwrap_or(Value::Null)
+}
+
 fn invalid(function: &str) -> NativeError {
     NativeError::type_error(format!(
         "{function}(): supplied resource is not a valid Stream-Context resource"
@@ -89,6 +104,12 @@ fn attached(
 ) -> Result<Option<Rc<Resource>>, NativeError> {
     if resource.kind == "stream-context" && !resource.is_closed() {
         return Ok(Some(resource.clone()));
+    }
+    if let Some(file) = crate::user_file::resource_file(resource) {
+        return Ok(match &file.context {
+            Value::Resource(resource) => Some(resource.clone()),
+            _ => None,
+        });
     }
     with_stream(resource, |_| ()).map_err(|_| invalid(function))?;
     Ok(files(context).stream_contexts.get(&resource.id).cloned())
