@@ -45,12 +45,15 @@ Character names use Unicode 18.0's
 and correction aliases from
 [NameAliases.txt](https://www.unicode.org/Public/18.0.0/ucd/NameAliases.txt).
 The property alias table uses ICU 79.1's public IntlChar property identifiers.
+Character-name lookup follows ICU 78.2's case-insensitive spelling rules.
 
 CLDR 49's number patterns, locale display patterns, Gregorian date styles, relative day terms,
 Gregorian available formats for skeletons,
 currency-region map and reverse Windows zone map are compiled into the
 extension. Their source is the
 [CLDR JSON release](https://github.com/unicode-org/cldr-json/tree/49.0.0).
+The Gregorian skeleton table retains ICU 78.2's standalone hour patterns for
+French, Italian and Ukrainian, including the French hour-plus-time-zone forms.
 The English number rules follow the
 [CLDR English RBNF data](https://github.com/unicode-org/cldr/blob/release-49/common/rbnf/en.xml).
 UConverter's single-byte mappings, aliases and substitution defaults were
@@ -75,6 +78,7 @@ reads files asynchronously. The implementation follows the
 | Explicit date patterns using `ss.SSS` in `fr_FR`, `nl_BE` and `ar_EG` | 49 | 49 | Fixed. PHP keeps the literal dot between seconds and milliseconds. |
 | `INTL_ICU_VERSION` and `INTL_ICU_DATA_VERSION` | 49 (`79.1` for both PHP constants) | 49 (`2.4.0` and `49`) | Accepted. Phera reports the ICU4X backend and compiled CLDR release. The PHP eligibility sweep covers ICU-version-gated fixtures on this host. |
 | Long date and time style for `fr_BE`, `fr_FR` and `ar_EG` at UTC and `pt_BR` in `Europe/Brussels` | 48 (ICU4C 78) | 49 | Accepted for eight exact results. The time-zone text differs (`UTC` versus `TU` or `التوقيت العالمي`, and `GMT+1`/`GMT+2` versus `+1 GMT`/`+2 GMT`). |
+| Standalone hour skeletons in French, Italian and Ukrainian | 48 (ICU4C 78.2) | 49 with ICU 78.2 hour patterns | Fixed. French preserves the quoted hour literal, including hour-plus-time-zone forms. Italian and Ukrainian preserve single-digit hour width. The differing comparisons run from PHP 8.5.13. |
 | Four `grapheme_extract` cases for `क्ष` starting inside the first UTF-8 scalar | 48 (ICU4C 78, Unicode 17) | 49 (Unicode 18) | Accepted. The virama boundary differs. The test compares the complete string, error state and resulting byte offset for each implementation. |
 | `IntlTimeZone::getIDForWindowsID` with India or an absent Pacific region override | 49 | 49 | Fixed. Resolve through the world region and return ICU's legacy `Asia/Calcutta` alias. |
 | `DECIMAL_COMPACT_SHORT` for legacy `en_UK` | 49 | 49 | Open. PHP renders `1.2M` and Phera resolves the legacy region alias and renders `1.2m`. |

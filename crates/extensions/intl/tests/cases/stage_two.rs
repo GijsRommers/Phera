@@ -1,6 +1,6 @@
 //! Verify the additional intl APIs directly against native PHP 8.5.
 
-use phera_extension_api::{ArrayKey, PhpArray, Value};
+use phera_extension_api::{ArrayKey, PhpArray, Value, testing::oracle};
 
 use crate::Matrix;
 
@@ -117,11 +117,15 @@ fn unicode_character_and_property_names() {
     }
     for (name, kind) in [
         ("SNOWMAN", 0),
-        ("snow-man", 0),
-        ("latin_capital-letter A", 0),
-        ("CJK unified ideograph-04E00", 0),
+        ("snow\tman", 0),
+        ("latin capital letter a", 0),
+        ("cjk unified ideograph-4e00", 0),
+        ("cjk unified ideograph-20000", 0),
+        ("CJK unified ideograph-+4E00", 0),
         ("HANGUL SYLLABLE GA", 0),
         ("LATIN CAPITAL LETTER GHA", 3),
+        ("latin capital letter gha", 3),
+        ("snowman", 2),
         ("<control-0>", 2),
         ("<unassigned-0378>", 2),
         ("<unassigned-2603>", 2),
@@ -134,6 +138,29 @@ fn unicode_character_and_property_names() {
             "IntlChar::charFromName",
             &[Value::from(name), Value::Int(kind)],
         );
+    }
+    if oracle::supports_php_since("IntlChar::charFromName exact ICU 78 spelling", 80_513) {
+        for (name, kind) in [
+            ("snow-man", 0),
+            ("snow man", 0),
+            (" Snowman ", 0),
+            ("latin_capital-letter A", 0),
+            ("LATINCAPITALLETTERA", 0),
+            ("LATIN  CAPITAL LETTER A", 0),
+            ("CJK unified ideograph-04E00", 0),
+            ("CJK unified ideograph-020000", 0),
+            ("CJK unified ideograph 4E00", 0),
+            ("CJK unified ideograph-4E00 ", 0),
+            ("hangul_syllable GA", 0),
+            ("HANGULSYLLABLEGA", 0),
+            ("latin_capital-letter GHA", 3),
+            ("snow-man", 2),
+        ] {
+            matrix.case(
+                "IntlChar::charFromName",
+                &[Value::from(name), Value::Int(kind)],
+            );
+        }
     }
     for (property, value) in [(0, 1), (3, 0), (4098, 230), (4101, 1), (4106, 25), (-1, 0)] {
         for kind in [0, 1, 2, 99] {

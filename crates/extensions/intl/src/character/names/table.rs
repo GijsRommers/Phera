@@ -85,42 +85,35 @@ pub(super) fn unicode(code: u32) -> Option<String> {
     })
 }
 
-fn loose(name: &str) -> impl Iterator<Item = u8> {
-    let bytes = name.as_bytes();
-    bytes
-        .iter()
-        .copied()
-        .enumerate()
-        .filter_map(|(index, byte)| {
-            let medial_hyphen = byte == b'-'
-                && index > 0
-                && bytes[index - 1].is_ascii_alphanumeric()
-                && bytes.get(index + 1).is_some_and(u8::is_ascii_alphanumeric);
-            (!byte.is_ascii_whitespace() && byte != b'_' && !medial_hyphen)
-                .then_some(byte.to_ascii_uppercase())
-        })
-}
-
 pub(super) fn reverse(name: &str, alias: bool) -> Option<u32> {
-    let key: Vec<_> = loose(name).collect();
     let data = names();
     if !alias {
-        if let Some(syllable) = key.strip_prefix(b"HANGULSYLLABLE") {
-            return hangul(syllable);
+        let upper = name.to_ascii_uppercase();
+        if let Some(syllable) = upper.strip_prefix("HANGUL SYLLABLE ") {
+            return hangul(syllable.as_bytes());
         }
         for &(start, end, prefix) in &data.ranges {
-            let prefix: Vec<_> = loose(prefix.trim_end_matches('-')).collect();
-            if let Some(hex) = key.strip_prefix(prefix.as_slice()) {
-                let code = u32::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()?;
-                if (start..=end).contains(&code) {
-                    return Some(code);
-                }
+            if let Some(hex) = upper.strip_prefix(prefix)
+                && hex.bytes().all(|byte| byte.is_ascii_hexdigit())
+                && let Ok(code) = u32::from_str_radix(hex, 16)
+                && (start..=end).contains(&code)
+                && hex.len() == hex_width(code)
+            {
+                return Some(code);
             }
         }
     }
     let rows = if alias { &data.aliases } else { &data.names };
     rows.iter()
-        .find_map(|&(code, candidate)| loose(candidate).eq(key.iter().copied()).then_some(code))
+        .find_map(|&(code, candidate)| candidate.eq_ignore_ascii_case(name).then_some(code))
+}
+
+fn hex_width(code: u32) -> usize {
+    match code {
+        0..=0xffff => 4,
+        0x10000..=0xfffff => 5,
+        _ => 6,
+    }
 }
 
 fn hangul(name: &[u8]) -> Option<u32> {

@@ -213,6 +213,8 @@ fn relative_date_styles() {
 #[test]
 fn date_pattern_generator_skeletons() {
     let mut matrix = Matrix::new();
+    let icu78_hour_patterns =
+        oracle::supports_php_since("IntlDatePatternGenerator ICU 78 hour patterns", 80_513);
     for locale in ["en_US", "de_DE", "fr_FR", "ja_JP"] {
         let constructor = [Value::from(locale)];
         for skeleton in [
@@ -238,6 +240,9 @@ fn date_pattern_generator_skeletons() {
             "YYYYMMMdd",
             "YYYYMMMddjjmm",
         ] {
+            if locale == "fr_FR" && skeleton == "j" && !icu78_hour_patterns {
+                continue;
+            }
             matrix.instance(
                 "IntlDatePatternGenerator",
                 &constructor,
@@ -253,6 +258,40 @@ fn date_pattern_generator_skeletons() {
             &[Value::from(vec![b'j', b'm', 128])],
             None,
         );
+    }
+    for locale in ["fr_FR", "fr_BE", "fr_CA", "fr_CH", "it_IT", "uk_UA"] {
+        let constructor = [Value::from(locale)];
+        for skeleton in ["jm", "Jm", "Cm"] {
+            matrix.instance(
+                "IntlDatePatternGenerator",
+                &constructor,
+                "getBestPattern",
+                &[Value::from(skeleton)],
+                None,
+            );
+        }
+        if icu78_hour_patterns {
+            for skeleton in ["H", "HH", "jj", "J", "JJ", "C", "CC", "CCCCCC"] {
+                matrix.instance(
+                    "IntlDatePatternGenerator",
+                    &constructor,
+                    "getBestPattern",
+                    &[Value::from(skeleton)],
+                    None,
+                );
+            }
+            if locale.starts_with("fr_") {
+                for skeleton in ["jz", "jv", "Jz", "Jv", "Cz", "Cv"] {
+                    matrix.instance(
+                        "IntlDatePatternGenerator",
+                        &constructor,
+                        "getBestPattern",
+                        &[Value::from(skeleton)],
+                        None,
+                    );
+                }
+            }
+        }
     }
     let long_locale = [Value::from("a".repeat(157))];
     matrix.instance(
