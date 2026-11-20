@@ -22,13 +22,15 @@ use phera_value::{ArrayKey, Value};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::fast_properties::Shape;
-use crate::element_writes::{MOST_KEYS, writable, write};
+use crate::element_writes::{MOST_KEYS, Target, writable, write};
 use crate::fast::store;
 
-/// The keys of a write, read from their registers.
+/// The keys of a write, read from their registers, and whether it appends
+/// after them (`[]`).
 pub(super) struct Keys {
     keys: [ArrayKey; MOST_KEYS],
     count: usize,
+    pub(super) target: Target,
 }
 
 impl Keys {
@@ -68,13 +70,15 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let (written, old) = match (path_body.base, path_body.steps.as_slice()) {
-            (PathBase::Register(root), [PathStep::Index(_), ..]) => {
+            (PathBase::Register(root), [PathStep::Index(_) | PathStep::Append, ..]) => {
                 let Some(keys) = self.write_keys(position, &path_body.steps) else {
                     return Step::Slow;
                 };
                 match self.registers.window_mut(base + root.index(), 1) {
-                    [Some(Value::Array(array))] if writable(array, keys.as_slice()) => {
-                        match write(array, keys.as_slice(), value.clone()) {
+                    [Some(Value::Array(array))]
+                        if writable(array, keys.as_slice(), keys.target) =>
+                    {
+                        match write(array, keys.as_slice(), keys.target, value.clone()) {
                             Some(old) => (true, old),
                             None => (false, None),
                         }
@@ -82,12 +86,24 @@ impl Machine<'_> {
                     _ => (false, None),
                 }
             }
-            (_, [PathStep::Property(_), PathStep::Index(_), ..]) => {
+            (
+                _,
+                [
+                    PathStep::Property(_),
+                    PathStep::Index(_) | PathStep::Append,
+                    ..,
+                ],
+            ) => {
                 let Some(keys) = self.write_keys(position, &path_body.steps[1..]) else {
                     return Step::Slow;
                 };
                 match self.with_site(position, (path, Shape::Element), |entry, object, scope| {
-                    entry.write_element_matching(object, scope, keys.as_slice(), value.clone())
+                    entry.write_element_matching(
+                        object,
+                        scope,
+                        (keys.as_slice(), keys.target),
+                        value.clone(),
+                    )
                 }) {
                     Some(old) => (true, old),
                     None => (false, None),
@@ -108,14 +124,19 @@ impl Machine<'_> {
     }
 
     /// The keys of `steps`, when they are one to three `[$key]` steps with
-    /// integer or string keys.
+    /// integer or string keys, the last of which may be `[]` instead.
     pub(super) fn write_keys(&self, position: Position, steps: &[PathStep]) -> Option<Keys> {
-        if steps.is_empty() || steps.len() > MOST_KEYS {
+        let (steps, target) = match steps.split_last() {
+            Some((PathStep::Append, levels)) => (levels, Target::Append),
+            _ => (steps, Target::Last),
+        };
+        if (steps.is_empty() && matches!(target, Target::Last)) || steps.len() > MOST_KEYS {
             return None;
         }
         let mut keys = Keys {
             keys: [const { ArrayKey::Int(0) }; MOST_KEYS],
             count: steps.len(),
+            target,
         };
         for (slot, step) in keys.keys.iter_mut().zip(steps) {
             let PathStep::Index(register) = step else {

@@ -148,7 +148,7 @@ pub(crate) fn write_element_at(
     object: &Object,
     key: &ArrayKey,
     slot: Option<usize>,
-    keys: &[ArrayKey],
+    (keys, place): (&[ArrayKey], crate::element_writes::Target),
     value: Value,
 ) -> Option<Option<Value>> {
     object
@@ -166,10 +166,10 @@ pub(crate) fn write_element_at(
             let Some(Value::Array(array)) = target else {
                 return None;
             };
-            if !crate::element_writes::writable(array, keys) {
+            if !crate::element_writes::writable(array, keys, place) {
                 return None;
             }
-            crate::element_writes::write(array, keys, value)
+            crate::element_writes::write(array, keys, place, value)
         })
         .flatten()
 }

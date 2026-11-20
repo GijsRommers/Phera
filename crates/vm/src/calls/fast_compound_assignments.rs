@@ -27,7 +27,7 @@ use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::fast_properties::Shape;
-use crate::element_writes::{writable, write};
+use crate::element_writes::{Target, writable, write};
 use crate::fast::store;
 use crate::fast_values::quiet_binary;
 
@@ -175,11 +175,14 @@ impl Machine<'_> {
         let [Some(Value::Array(array))] = self.registers.window_mut(slot, 1) else {
             return None;
         };
-        let Update { stored, result } = update(element(array, keys.as_slice())?)?;
-        if !writable(array, keys.as_slice()) {
+        if matches!(keys.target, Target::Append) {
             return None;
         }
-        let old = write(array, keys.as_slice(), stored)?;
+        let Update { stored, result } = update(element(array, keys.as_slice())?)?;
+        if !writable(array, keys.as_slice(), Target::Last) {
+            return None;
+        }
+        let old = write(array, keys.as_slice(), Target::Last, stored)?;
         drop(old);
         Some(result)
     }
@@ -192,7 +195,9 @@ impl Machine<'_> {
         steps: &[PathStep],
         update: impl FnOnce(&Value) -> Option<Update>,
     ) -> Option<Value> {
-        let keys = self.write_keys(position, steps)?;
+        let keys = self
+            .write_keys(position, steps)
+            .filter(|keys| matches!(keys.target, Target::Last))?;
         self.with_site(position, (path, Shape::Element), |entry, object, scope| {
             if entry.hooks.is_some() {
                 return None;
@@ -205,7 +210,12 @@ impl Machine<'_> {
                 };
                 update(element(&array, keys.as_slice())?)?
             };
-            let old = entry.write_element_matching(object, scope, keys.as_slice(), stored)?;
+            let old = entry.write_element_matching(
+                object,
+                scope,
+                (keys.as_slice(), Target::Last),
+                stored,
+            )?;
             drop(old);
             Some(result)
         })

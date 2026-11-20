@@ -86,7 +86,7 @@ impl PropertyEntry {
         &self,
         object: &Object,
         scope: Option<&Rc<crate::classes::Class>>,
-        keys: &[ArrayKey],
+        keys: (&[ArrayKey], crate::element_writes::Target),
         value: Value,
     ) -> Option<Option<Value>> {
         if !self.matches(object, scope)
