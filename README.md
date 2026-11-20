@@ -50,6 +50,7 @@ and writes, including generated identifiers and associations. It also
 uses entity class strings to infer Doctrine repository, find, and reference
 results. It recognizes Doctrine lifecycle callbacks and Symfony service injection,
 command, route, listener, and scheduled-task attributes.
+Doctrine query projections that need metadata remain unresolved.
 
 The checker reads `phpstan.neon`, `phpstan.neon.dist`, or `phpstan.dist.neon`
 in that order. It uses analysis paths, exclusions, levels, included baselines,

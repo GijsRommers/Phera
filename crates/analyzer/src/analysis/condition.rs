@@ -154,6 +154,12 @@ impl Analyzer<'_> {
                         Gate::Or => &mut outcome.yes,
                     };
                     *shortcut = Condition::merge(skipped, shortcut.take());
+                    if self.level >= 8
+                        && matches!(gate, Gate::And)
+                        && let Some(scope) = &mut outcome.no
+                    {
+                        self.remember_non_null_pair(operator, scope);
+                    }
                     outcome.boolean();
                     if !reported && !right_reported {
                         self.constant_logical_result(operator, outcome.truth());

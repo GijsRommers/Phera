@@ -49,7 +49,7 @@ pub fn from_name(
         "class-string" | "interface-string" | "trait-string" | "enum-string" => {
             T::ClassString(Arc::new(arguments.first().cloned().unwrap_or(T::Object)))
         }
-        "array-key" => T::Int.join(&T::String),
+        "array-key" => T::Int.join(&T::String).benevolent(),
         "number" => T::Int.join(&T::Float),
         "numeric" => T::Int
             .join(&T::Float)
@@ -115,7 +115,7 @@ pub fn collection(kind: CollectionKind, non_empty: bool, arguments: Vec<ValueTyp
     let key = match kind {
         CollectionKind::List => ValueType::Int,
         CollectionKind::Iterable => ValueType::Mixed,
-        CollectionKind::Array => ValueType::Int.join(&ValueType::String),
+        CollectionKind::Array => ValueType::Int.join(&ValueType::String).benevolent(),
     };
     let (key, value) = match arguments.as_slice() {
         [value] => (key, value.clone()),

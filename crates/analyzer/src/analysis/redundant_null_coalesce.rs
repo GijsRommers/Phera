@@ -51,7 +51,7 @@ impl Analyzer<'_> {
                 AccessStep::StringOffset(key) => ValueType::StringLiteral(key.as_slice().into()),
                 AccessStep::Property(name) => {
                     let property = self.index.property(ty.class_name()?, name)?;
-                    if !property.null_default {
+                    if property.default == crate::index::PropertyDefault::Other {
                         return None;
                     }
                     ty = property.effective_type(self.index);

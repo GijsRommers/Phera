@@ -102,11 +102,18 @@ impl Signature {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PropertyDefault {
+    Other,
+    ExplicitNull,
+    ImplicitNull,
+}
+
 #[derive(Clone, Debug)]
 pub struct PropertyInfo {
     pub ty: ValueType,
     pub documented_type: Option<ValueType>,
-    pub null_default: bool,
+    pub default: PropertyDefault,
     pub modifiers: Modifiers,
     pub location: Location,
 }

@@ -12,6 +12,38 @@ use std::sync::Arc;
 const MANAGER: &str = "Doctrine\\ORM\\EntityManagerInterface";
 const REPOSITORY: &str = "Doctrine\\ORM\\EntityRepository";
 
+const QUERY_RESULTS: &[(&str, &[&str])] = &[
+    (
+        "Doctrine\\ORM\\AbstractQuery",
+        &[
+            "getSingleScalarResult",
+            "getSingleResult",
+            "getOneOrNullResult",
+        ],
+    ),
+    ("Doctrine\\DBAL\\Connection", &["fetchOne"]),
+    ("Doctrine\\DBAL\\Result", &["fetchOne"]),
+];
+
+/// `(int) $query->getSingleScalarResult()` depends on the DQL and mapped fields.
+/// Leave this unresolved if the method signature alone provides only mixed.
+pub fn unresolved_result(index: &Index, class: &str, method: &str, result: ValueType) -> ValueType {
+    if !matches!(result, ValueType::ExplicitMixed | ValueType::ImplicitMixed) {
+        return result;
+    }
+    let Some((owner, _)) = index.method_owner(class, method) else {
+        return result;
+    };
+    if QUERY_RESULTS.iter().any(|(class, methods)| {
+        class.eq_ignore_ascii_case(&owner.name)
+            && methods.iter().any(|name| name.eq_ignore_ascii_case(method))
+    }) {
+        ValueType::Mixed
+    } else {
+        result
+    }
+}
+
 pub fn mapped_repository(attributes: &[Attribute], names: &Names) -> Option<String> {
     for attribute in attributes {
         let attribute_name = names.resolve(&attribute.name, UseKind::Class);

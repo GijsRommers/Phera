@@ -21,7 +21,7 @@ pub fn result(name: &str, arguments: &[T]) -> Option<T> {
     let subject = arguments.get(subject_position(name)?)?;
     let preg = name.starts_with("preg_");
     let arms = match subject {
-        T::Union(arms) => arms.as_ref(),
+        T::Union(arms) | T::BenevolentUnion(arms) => arms.as_ref(),
         subject => std::slice::from_ref(subject),
     };
     let mut result = T::Never;
@@ -56,6 +56,9 @@ pub fn result(name: &str, arguments: &[T]) -> Option<T> {
                 }
                 T::Shape(Arc::new(shape))
             }
+            unknown if preg && unknown.is_mixed() => {
+                return Some(T::Array.join(&T::String).join(&T::Null).benevolent());
+            }
             _ => return None,
         };
         result = result.join(&item);
@@ -66,7 +69,11 @@ pub fn result(name: &str, arguments: &[T]) -> Option<T> {
     if name == "mb_convert_encoding" && !arguments.get(2).is_none_or(single_encoding) {
         result = result.join(&T::BoolLiteral(false));
     }
-    Some(result)
+    Some(if matches!(subject, T::BenevolentUnion(_)) {
+        result.benevolent()
+    } else {
+        result
+    })
 }
 
 fn single_encoding(ty: &T) -> bool {

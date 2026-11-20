@@ -6,7 +6,7 @@ use crate::scope::Place;
 
 pub(super) fn truthy_type(ty: &ValueType) -> ValueType {
     let variants = match ty {
-        ValueType::Union(arms) => arms.as_ref(),
+        ValueType::Union(arms) | ValueType::BenevolentUnion(arms) => arms.as_ref(),
         ty => std::slice::from_ref(ty),
     };
     variants

@@ -26,7 +26,7 @@ impl Analyzer<'_> {
         }
         let original = self.place_type(&place, scope);
         let current = match &original {
-            ValueType::Union(variants) => variants.as_ref(),
+            ValueType::Union(variants) | ValueType::BenevolentUnion(variants) => variants.as_ref(),
             other => std::slice::from_ref(other),
         };
         let narrowed = current.iter().fold(ValueType::Never, |out, arm| {
@@ -140,8 +140,14 @@ impl Analyzer<'_> {
         span: Span,
     ) {
         if let Some(literal) = literal_type(right) {
+            if self.level >= 8 && truth && literal == ValueType::Null {
+                self.refine_other_non_null(left, scope);
+            }
             self.refine_type(left, literal, scope, truth, span);
         } else if let Some(literal) = literal_type(left) {
+            if self.level >= 8 && truth && literal == ValueType::Null {
+                self.refine_other_non_null(right, scope);
+            }
             self.refine_type(right, literal, scope, truth, span);
         }
     }

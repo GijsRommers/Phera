@@ -93,12 +93,19 @@ pub fn filter(file: &ParsedFile, diagnostics: &mut Vec<Diagnostic>, report_unmat
             break;
         }
     }
+    let traits = if phpstan_ignores.is_empty() {
+        Vec::new()
+    } else {
+        trait_lines(file)
+    };
     let unmatched: Vec<_> = phpstan_ignores
         .into_iter()
         .filter(|(line, identifier)| {
-            !diagnostics.iter().any(|diagnostic| {
-                diagnostic.line == *line && identifier.is_none_or(|id| id == diagnostic.identifier)
-            })
+            !traits.iter().any(|range| range.contains(line))
+                && !diagnostics.iter().any(|diagnostic| {
+                    diagnostic.line == *line
+                        && identifier.is_none_or(|id| id == diagnostic.identifier)
+                })
         })
         .collect();
     diagnostics.retain(|diagnostic| {
@@ -133,6 +140,30 @@ pub fn filter(file: &ParsedFile, diagnostics: &mut Vec<Diagnostic>, report_unmat
             severity: Default::default(),
         }
     }));
+}
+
+fn trait_lines(file: &ParsedFile) -> Vec<std::ops::RangeInclusive<usize>> {
+    use phera_ast::{ClassKind, StatementKind};
+
+    let mut ranges = Vec::new();
+    let mut pending = vec![file.program.statements.as_slice()];
+    while let Some(statements) = pending.pop() {
+        for statement in statements {
+            if matches!(&statement.kind, StatementKind::Class(class) if class.kind == ClassKind::Trait)
+            {
+                ranges.push(
+                    file.lines.line(statement.span.start)..=file.lines.line(statement.span.end),
+                );
+            } else {
+                match &statement.kind {
+                    StatementKind::Namespace { statements, .. } => pending.push(statements),
+                    StatementKind::Function(function) => pending.push(&function.body),
+                    _ => pending.extend(crate::collect::child_blocks(statement)),
+                }
+            }
+        }
+    }
+    ranges
 }
 
 fn has_identifier(text: &str, identifier: &str) -> bool {

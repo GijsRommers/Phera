@@ -65,7 +65,9 @@ fn non_nullable(ty: &ValueType) -> bool {
     let mut pending = vec![ty];
     while let Some(ty) = pending.pop() {
         match ty {
-            ValueType::Union(types) => pending.extend(types.iter()),
+            ValueType::Union(types) | ValueType::BenevolentUnion(types) => {
+                pending.extend(types.iter())
+            }
             ValueType::Conditional(conditional) => {
                 pending.extend([&conditional.yes, &conditional.no])
             }

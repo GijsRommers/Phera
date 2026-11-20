@@ -60,7 +60,7 @@ impl Analyzer<'_> {
                 {
                     scope.values.insert(name.clone(), value);
                 }
-                ty
+                self.assignment_result(target, scope, ty)
             }
             ExpressionKind::AssignReference { target, value } => {
                 self.reference_assignment(target, value, scope)
@@ -89,7 +89,7 @@ impl Analyzer<'_> {
                 if self.write(target, ty.clone(), scope) == Evaluation::Never {
                     return ValueType::Never;
                 }
-                ty
+                self.assignment_result(target, scope, ty)
             }
             ExpressionKind::IncDec { target, .. } => {
                 if self.expression(target, scope, quiet) == ValueType::Never {

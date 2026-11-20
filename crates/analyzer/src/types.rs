@@ -48,6 +48,7 @@ pub enum ValueType {
     This,
     UnknownCallable,
     Union(Arc<[ValueType]>),
+    BenevolentUnion(Arc<[ValueType]>),
     Intersection(Arc<[ValueType]>),
 }
 
@@ -144,6 +145,14 @@ pub enum ConditionTest {
 }
 
 impl ValueType {
+    pub fn benevolent(self) -> Self {
+        if let Self::Union(types) = self {
+            Self::BenevolentUnion(types)
+        } else {
+            self
+        }
+    }
+
     pub fn value_choices(&self) -> Self {
         if !matches!(self, Self::Conditional(_)) {
             return self.clone();
@@ -218,12 +227,19 @@ impl ValueType {
 
     pub fn without_null(&self) -> Self {
         match self {
-            Self::Union(types) => types
-                .iter()
-                .filter(|ty| **ty != Self::Null)
-                .cloned()
-                .reduce(|left, right| left.join(&right))
-                .unwrap_or(Self::Never),
+            Self::Union(types) | Self::BenevolentUnion(types) => {
+                let narrowed = types
+                    .iter()
+                    .filter(|ty| **ty != Self::Null)
+                    .cloned()
+                    .reduce(|left, right| left.join(&right))
+                    .unwrap_or(Self::Never);
+                if matches!(self, Self::BenevolentUnion(_)) {
+                    narrowed.benevolent()
+                } else {
+                    narrowed
+                }
+            }
             Self::Null => Self::Never,
             _ => self.clone(),
         }
@@ -241,7 +257,9 @@ impl ValueType {
             Self::Null | Self::Mixed | Self::ExplicitMixed | Self::ImplicitMixed | Self::Void => {
                 false
             }
-            Self::Union(types) => types.iter().all(Self::excludes_null),
+            Self::Union(types) | Self::BenevolentUnion(types) => {
+                types.iter().all(Self::excludes_null)
+            }
             Self::Intersection(types) => types.iter().any(Self::excludes_null),
             _ => true,
         }
@@ -262,7 +280,7 @@ impl ValueType {
     pub fn may_be_callable(&self) -> bool {
         match self {
             Self::Callable(_) | Self::UnknownCallable => true,
-            Self::Union(types) | Self::Intersection(types) => {
+            Self::Union(types) | Self::BenevolentUnion(types) | Self::Intersection(types) => {
                 types.iter().any(Self::may_be_callable)
             }
             _ => false,

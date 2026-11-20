@@ -99,12 +99,21 @@ impl Analyzer<'_> {
                     if given_property {
                         self.check_property_assignment(target, &expected, &ty);
                     }
+                    let place = if self.level >= 2 && given_property {
+                        crate::scope::Place::of(target)
+                    } else {
+                        None
+                    };
+                    let ty = place
+                        .as_ref()
+                        .and_then(|place| self.coerced_property_value(place, &ty, scope))
+                        .unwrap_or(ty);
                     if self.level >= 2 {
                         scope.forget_member_write(target);
                         if (matches!(target.kind, ExpressionKind::Property { .. })
                             || self.level >= 7
                                 && matches!(target.kind, ExpressionKind::StaticProperty { .. }))
-                            && let Some(place) = crate::scope::Place::of(target)
+                            && let Some(place) = place
                         {
                             scope.facts.record(place, ty, None);
                         }

@@ -110,7 +110,7 @@ pub fn offset_type(target: &ValueType, key: &ValueType) -> ValueType {
             ValueType::String | ValueType::StringLiteral(_) | ValueType::StringRefinement(_) => {
                 ValueType::String
             }
-            ValueType::Union(types) => {
+            ValueType::Union(types) | ValueType::BenevolentUnion(types) => {
                 pending.extend(types.iter());
                 continue;
             }
@@ -171,7 +171,9 @@ pub fn iteration_types(ty: &ValueType) -> (ValueType, ValueType) {
                     values = values.join(&rest.value);
                 }
             }
-            ValueType::Union(arms) => pending.extend(arms.iter()),
+            ValueType::Union(arms) | ValueType::BenevolentUnion(arms) => {
+                pending.extend(arms.iter())
+            }
             ValueType::Template(template) => pending.push(&template.bound),
             _ => return (ValueType::Mixed, ValueType::Mixed),
         }

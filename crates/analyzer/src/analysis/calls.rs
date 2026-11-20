@@ -164,6 +164,16 @@ impl Analyzer<'_> {
             } else {
                 ValueType::Mixed
             };
+            let returns = if self.level >= 9 {
+                crate::framework_knowledge::doctrine::unresolved_result(
+                    self.index,
+                    class,
+                    &method.name,
+                    returns,
+                )
+            } else {
+                returns
+            };
             self.relative_type(returns, class)
         }
     }

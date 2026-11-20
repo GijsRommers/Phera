@@ -4,7 +4,7 @@
 use super::{Scope, ValueType};
 use phera_ast::{Arguments, Expression, ExpressionKind, MemberName, Variable};
 use phera_source::Span;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 // A PHP variable name cannot contain a colon.
 pub(crate) const SELF_PROPERTIES: &str = ":self";
@@ -103,19 +103,22 @@ pub struct Fact {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Facts(BTreeMap<Place, Fact>);
+pub struct Facts {
+    types: BTreeMap<Place, Fact>,
+    non_null_pairs: BTreeSet<(String, String)>,
+}
 
 impl Facts {
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.types.is_empty() && self.non_null_pairs.is_empty()
     }
 
     pub fn get(&self, place: &Place) -> Option<&Fact> {
-        self.0.get(place)
+        self.types.get(place)
     }
 
     pub fn record(&mut self, place: Place, ty: ValueType, narrowed_at: Option<Span>) {
-        self.0.insert(
+        self.types.insert(
             place,
             Fact {
                 ty: ty.limit_complexity(),
@@ -125,15 +128,17 @@ impl Facts {
     }
 
     pub fn forget_variable(&mut self, name: &str) {
-        self.0.retain(|place, _| place.root != name);
+        self.types.retain(|place, _| place.root != name);
+        self.non_null_pairs
+            .retain(|(left, right)| left != name && right != name);
     }
 
     pub fn forget_static(&mut self) {
-        self.0.retain(|place, _| place.root != SELF_PROPERTIES);
+        self.types.retain(|place, _| place.root != SELF_PROPERTIES);
     }
 
     pub fn forget_receiver(&mut self, receiver: &Place) {
-        self.0.retain(|place, _| {
+        self.types.retain(|place, _| {
             place.root != receiver.root
                 || place.members.len() <= receiver.members.len()
                 || !place.members.starts_with(&receiver.members)
@@ -141,11 +146,39 @@ impl Facts {
     }
 
     pub fn forget_write(&mut self, target: Option<&Place>) {
-        self.0.retain(|place, _| !affected_by_write(place, target));
+        self.types
+            .retain(|place, _| !affected_by_write(place, target));
+    }
+
+    pub fn remember_non_null_pair(&mut self, left: &str, right: &str) {
+        if self.non_null_pairs.len() >= 32 {
+            return;
+        }
+        let (first, last) = if left < right {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        self.non_null_pairs.insert((first.into(), last.into()));
+    }
+
+    pub fn known_non_null_when(&self, variable_is_null: &str) -> Vec<String> {
+        self.non_null_pairs
+            .iter()
+            .filter_map(|(left, right)| {
+                if left == variable_is_null {
+                    Some(right.clone())
+                } else if right == variable_is_null {
+                    Some(left.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     pub fn retain_common(&mut self, paths: &[Scope]) {
-        self.0.retain(|place, fact| {
+        self.types.retain(|place, fact| {
             for path in paths {
                 let Some(other) = path.facts.get(place) else {
                     return false;
@@ -158,6 +191,11 @@ impl Facts {
                 }
             }
             true
+        });
+        self.non_null_pairs.retain(|pair| {
+            paths
+                .iter()
+                .all(|scope| scope.facts.non_null_pairs.contains(pair))
         });
     }
 }

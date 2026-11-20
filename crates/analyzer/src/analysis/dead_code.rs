@@ -182,7 +182,7 @@ pub fn truth(ty: &ValueType) -> Option<bool> {
     let mut result = None;
     while let Some(ty) = pending.pop() {
         let value = match ty {
-            T::Union(arms) => {
+            T::Union(arms) | T::BenevolentUnion(arms) => {
                 pending.extend(arms.iter());
                 continue;
             }

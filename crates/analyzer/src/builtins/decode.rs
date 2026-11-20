@@ -37,7 +37,7 @@ pub fn decode(data: &str) -> Index {
                         PropertyInfo {
                             ty: decode_type(f[2]),
                             documented_type: None,
-                            null_default: false,
+                            default: crate::index::PropertyDefault::Other,
                             modifiers: modifiers(f[3]),
                             location: location(f[4]),
                         },

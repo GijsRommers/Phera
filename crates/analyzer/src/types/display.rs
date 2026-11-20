@@ -105,8 +105,8 @@ impl Display for ValueType {
                     sequence(&mut parts, &generic.arguments, ", ", false);
                     continue;
                 }
-                Self::Union(types) | Self::Intersection(types) => {
-                    let union = matches!(ty, Self::Union(_));
+                Self::Union(types) | Self::BenevolentUnion(types) | Self::Intersection(types) => {
+                    let union = !matches!(ty, Self::Intersection(_));
                     if union
                         && let Some(names) =
                             types.iter().map(native_member).collect::<Option<Vec<_>>>()

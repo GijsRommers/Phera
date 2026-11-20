@@ -86,7 +86,7 @@ impl ValueType {
                         {
                             pending.push(Step::Compare(expected, constant));
                         }
-                        (_, Self::Union(types)) => {
+                        (_, Self::Union(types) | Self::BenevolentUnion(types)) => {
                             let requirement = if policy == TypePolicy::Documentation {
                                 Requirement::All
                             } else {
@@ -108,7 +108,7 @@ impl ValueType {
                             pending.push(Step::Compare(expected, &conditional.yes));
                             pending.push(Step::Compare(expected, &conditional.no));
                         }
-                        (Self::Union(types), _) => {
+                        (Self::Union(types) | Self::BenevolentUnion(types), _) => {
                             pending.push(Step::Reduce(types.len(), Requirement::Any));
                             pending.extend(types.iter().map(|ty| Step::Compare(ty, given)));
                         }

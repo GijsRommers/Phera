@@ -25,6 +25,12 @@ impl Analyzer<'_> {
             Op::GreaterEqual => ("greaterOrEqual", ">=", "Comparison operation"),
             _ => return None,
         };
+        if matches!(operator, Op::Identical | Op::NotIdentical)
+            && (left.1 == &T::Null && self.may_read_implicit_null(right.0, scope)
+                || right.1 == &T::Null && self.may_read_implicit_null(left.0, scope))
+        {
+            return None;
+        }
         let result = uniform_pairs(left.1, right.1, |a, b| compare(operator, a, b))?;
         let provenance_left = self.narrowed_at(left.0, scope);
         let provenance_right = self.narrowed_at(right.0, scope);

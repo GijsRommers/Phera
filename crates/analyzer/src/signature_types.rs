@@ -316,7 +316,7 @@ impl PropertyInfo {
             || self.ty.clone(),
             |annotation| refine(&self.ty, annotation, index),
         );
-        if self.null_default && !self.ty.excludes_null() {
+        if self.default == crate::index::PropertyDefault::ExplicitNull && !self.ty.excludes_null() {
             ty.join(&ValueType::Null)
         } else {
             ty

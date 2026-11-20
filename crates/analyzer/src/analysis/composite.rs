@@ -39,14 +39,14 @@ impl Analyzer<'_> {
                 }
                 if self.strict_mixed(&ty) {
                     let target = match kind {
-                        CastKind::Int => Some("int"),
-                        CastKind::Float => Some("float"),
-                        CastKind::String => Some("string"),
+                        CastKind::Int => Some(("cast.int", "int")),
+                        CastKind::Float => Some(("cast.double", "float")),
+                        CastKind::String => Some(("cast.string", "string")),
                         _ => None,
                     };
-                    if let Some(target) = target {
+                    if let Some((identifier, target)) = target {
                         self.diagnose(
-                            &format!("cast.{target}"),
+                            identifier,
                             expression.span,
                             format!("Cannot cast mixed to {target}."),
                         );

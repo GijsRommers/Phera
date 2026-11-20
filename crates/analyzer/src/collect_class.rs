@@ -146,12 +146,15 @@ fn add_member(
                                 .or_else(|| doc.variables.get(&None))
                                 .map(|annotation| annotation.ty.clone())
                         }),
-                        null_default: p
-                            .default
-                            .as_ref()
-                            .map_or(ty.is_none() && !p.has_hook_list, |value| {
-                                matches!(value.kind, ExpressionKind::Literal(Literal::Null))
-                            }),
+                        default: match p.default.as_ref().map(|value| &value.kind) {
+                            Some(ExpressionKind::Literal(Literal::Null)) => {
+                                PropertyDefault::ExplicitNull
+                            }
+                            None if ty.is_none() && !p.has_hook_list => {
+                                PropertyDefault::ImplicitNull
+                            }
+                            _ => PropertyDefault::Other,
+                        },
                         modifiers: *modifiers,
                         location: location(p.span.start),
                     },
@@ -219,7 +222,7 @@ fn add_method(
                 PropertyInfo {
                     ty: ValueType::declared(p.ty.as_ref(), names),
                     documented_type: None,
-                    null_default: false,
+                    default: crate::index::PropertyDefault::Other,
                     modifiers: p.modifiers,
                     location: location(p.span.start),
                 },
