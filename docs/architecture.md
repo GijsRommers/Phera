@@ -1732,6 +1732,16 @@ crate against the extension API.
 
 ### 11.5 `phera install`: packages, as fast as the JavaScript and Python tools made it
 
+The initial implementation lives in `crates/packages`. The CLI passes platform
+versions from Phera's runtime registry. The package crate handles resolution,
+archive downloads, the global store and Composer-compatible autoloader files.
+Downloads use the runtime's rustls and ring configuration. Locked installs
+prepare every archive before materializing packages into `vendor/`.
+The installer then applies approved native recipe and scaffold hooks, writes
+the Composer loader maps, and runs the project's supported scripts.
+See [package compatibility](../crates/packages/README.md) for implementation
+status. The list below describes the intended scope.
+
 Composer is written in PHP, resolves dependencies on one core, downloads
 with limited parallelism and unpacks every package into every project. pnpm,
 Bun and uv showed what the same job looks like when it is done natively:
@@ -1755,17 +1765,17 @@ that a project can use either tool.
   plain sentences.
 - **A global store.** Every package version is downloaded and unpacked once
   per machine into a content-addressed store and placed into `vendor/` with
-  copy-on-write clones or hard links, so a second project with the same
-  dependency costs no download and almost no disk.
+  copy-on-write clones where supported. Other filesystems use private
+  copies to keep project writes out of the shared store.
 - **Parallel everywhere.** Metadata is fetched concurrently while the resolver
-  runs, archives are downloaded and unpacked concurrently, the autoloader's
-  class map is built by scanning files on all cores with Phera's own parser.
-- **Installing from a lock file needs no resolution** and, when the store is
-  warm, no network: it is linking files.
-- **Commands**: `phera install`, `phera update`, `phera add`, `phera remove`,
-  `phera why`, `phera outdated`, `phera audit` (security advisories from
-  Packagist), `phera dump-autoload`, and `phera x vendor/bin-tool` to run a
-  package's binary.
+  runs, archives are downloaded and unpacked concurrently, and the autoloader's
+  class map is built by scanning files on all cores with Phera's tokenizer.
+- **Installing from a lock file needs no resolution.** A warm store supports
+  `--offline`. Online installs also show a Packagist advisory summary.
+- **Commands.** Use `install`, `update`, `add` and `remove` to manage dependencies.
+  `why`, `why-not`, `outdated`, `show`, `licenses`, `audit` and `validate` inspect
+  them. `dump-autoload` rebuilds the loader, `run-script` runs project scripts,
+  and `exec` runs an installed package binary.
 - **What does not carry over**: Composer plugins (they are PHP code that
   hooks into Composer's internals). The few that matter are handled natively
   (the installers for framework-specific paths); `scripts` in `composer.json`
@@ -1777,13 +1787,13 @@ that a project can use either tool.
   reason for each difference. Timings are measured cold and warm against
   Composer.
 
-Legacy layouts are not installed (6.2): a package that declares PSR-0
-autoloading, `target-dir` or `include-path` stops the install with an error
-naming the package and the field.
-
-The runtime side: when a script runs under Phera, autoloading reads the same
-metadata natively instead of executing the generated PHP autoloader, which
-needs namespaces and autoloading in the engine (11.3, item 3).
+The current autoloader supports PSR-4, PSR-0, class maps, eager files and
+package include paths.
+Native package hooks can generate framework files from the selected packages.
+They use the project's `allow-plugins` configuration and run after resolution.
+The runtime executes the generated PHP autoloader. The server's `--preload`
+option reads the generated metadata to compile PHP files before serving
+requests.
 
 ### 11.6 Phera views: a native template renderer
 
@@ -1894,19 +1904,17 @@ phera new shop --template symfony           asks nothing
 | `symfony-webapp` | The skeleton plus the `webapp` pack: Twig, Doctrine, forms, security. |
 | `laravel` | The official Laravel application. |
 
-- **Frameworks come from their own starting projects**, fetched with
-  Composer, not from copies kept in Phera: a copy would be out of date with
-  the next release of the framework. `phera install` (11.5) takes over from
-  Composer when it exists; until then a framework template needs Composer on
-  the machine, and the plain template only uses it to write the class loader.
+- **Frameworks come from their official starting projects.** Phera fetches
+  and installs them through its package manager (11.5). Composer can take
+  over when Phera refuses the template or its dependency requirements.
 - **It never overwrites.** The directory must be missing or empty.
 - **The name** is the last part of the directory. It is put into PHP, JSON
   and Markdown, so only letters, digits, `-`, `_` and `.` are accepted.
 - **Without a terminal** (a script, a pipeline) an unanswered question is an
   error that names the options, not a wait.
-- **While Phera cannot run a framework**, the command says so after creating
-  the project and names the PHP command that serves it meanwhile. One
-  function, `Template::runs_on_phera`, holds that fact.
+- **Serve the project** with `phera serve public` for the plain, Symfony
+  skeleton and Laravel templates. The webapp template reports its pending
+  Phera runtime support.
 
 ### 11.9 `phera lint`: source checks and local edits
 
