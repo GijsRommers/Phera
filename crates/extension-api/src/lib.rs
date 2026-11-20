@@ -43,7 +43,8 @@ pub use function::{
 pub use object_handlers::{
     ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeBinary,
     NativeClone, NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeForkHook,
-    NativeIterator, PropertyProjection, PropertyPurpose, fork_clone, fork_refused_handle,
+    NativeIterator, NativeRelease, PropertyProjection, PropertyPurpose, fork_clone,
+    fork_refused_handle,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
 pub use registry::{BundledSource, ConstantValue, Registry, ResourceFork};

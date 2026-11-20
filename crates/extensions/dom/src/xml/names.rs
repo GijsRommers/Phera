@@ -9,7 +9,7 @@ use crate::tree::Name;
 pub(crate) const XML: &str = "http://www.w3.org/XML/1998/namespace";
 pub(crate) const XMLNS: &str = "http://www.w3.org/2000/xmlns/";
 
-pub(crate) fn valid(name: &str) -> bool {
+pub fn valid(name: &str) -> bool {
     let mut characters = name.chars();
     characters.next().is_some_and(start) && characters.all(rest)
 }

@@ -11,6 +11,8 @@ use crate::{Vm, classes::Class, code_table::FunctionIndex};
 
 use super::{flags, source_info, visibility_bits};
 
+pub(super) const VIRTUAL_PROPERTY: i64 = 512;
+
 impl Vm {
     pub(super) fn reflection_trait_aliases(
         &self,
@@ -168,11 +170,17 @@ impl Vm {
                         .position(|candidate| candidate.name == property.name)
                 });
             }
+            let native_virtual = owner.declaration.is_none()
+                && owner
+                    .hooks
+                    .as_ref()
+                    .is_some_and(|hooks| hooks.virtual_properties);
             for (slot, property) in properties {
                 let is_virtual = property
                     .hooks
                     .as_ref()
-                    .is_some_and(|hooks| hooks.hooks.is_virtual);
+                    .is_some_and(|hooks| hooks.hooks.is_virtual)
+                    || (native_virtual && property.static_storage.is_none());
                 let is_abstract = property
                     .hooks
                     .as_ref()
@@ -185,7 +193,7 @@ impl Vm {
                         | flags(property.static_storage.is_some(), 16)
                         | flags(property.is_readonly, 128)
                         | flags(property.is_final, 32)
-                        | flags(is_virtual, 512)
+                        | flags(is_virtual, VIRTUAL_PROPERTY)
                         | flags(is_abstract, 64)
                         | flags(
                             property.set_visibility == Some(Visibility::Protected)
