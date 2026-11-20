@@ -277,7 +277,10 @@ impl Machine<'_> {
         let mut ip = position.ip;
         match instruction {
             Instruction::IterNext { iter, value, end } if position.frame.has_extras() => {
-                let iterators = &mut self.stack.current_extras_mut().iterators;
+                let Some(extras) = self.stack.current_extras_present() else {
+                    return Step::Slow;
+                };
+                let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
                 match crate::iteration::snapshot_step(iter, value, end, iterators, slots, &mut ip) {
                     true => Step::Done(ip),
@@ -287,7 +290,10 @@ impl Machine<'_> {
             Instruction::IterNextKeyed {
                 iter, key, value, ..
             } if position.frame.has_extras() => {
-                let iterators = &mut self.stack.current_extras_mut().iterators;
+                let Some(extras) = self.stack.current_extras_present() else {
+                    return Step::Slow;
+                };
+                let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
                 if iterators.get_mut(iter.0).is_some_and(|state| {
                     state.traversal_mode == TraversalMode::Value
