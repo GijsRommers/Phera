@@ -97,7 +97,10 @@ impl Vm {
         // A class whose linking raised a diagnostic is linked by each request
         // that declares it, so that each sees the diagnostic (and runs its
         // handler); an enum's cases and an anonymous class are the request's.
+        // Only a file revision from the code cache has a number to key the
+        // entry by: a class of `eval`'d or command-line code is the request's.
         let shared = raised == self.diagnostic_reporter.raised
+            && unit.metadata.is_some()
             && !matches!(declaration.kind, ClassKind::Enum | ClassKind::Anonymous);
         if shared
             && let Some(position) = position
@@ -119,6 +122,7 @@ impl Vm {
             );
         } else if let Some(position) = position {
             self.classes.lease_position(position);
+            self.classes.own_name(&key, position);
         }
         Ok(())
     }

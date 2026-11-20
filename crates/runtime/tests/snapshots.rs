@@ -744,3 +744,56 @@ async fn a_class_with_another_parent_in_another_request_is_linked_again() {
         ["hi a+child", "hi b+child", "hi a+child", "hi b+child"]
     );
 }
+
+/// `class_alias` names are each request's own: an alias made in one request
+/// of a worker is no class in the next, and may name another class there.
+#[tokio::test(flavor = "current_thread")]
+async fn class_aliases_are_each_requests_own() {
+    let site = Site::new("aliases");
+    std::fs::write(
+        site.root.join("classes.php"),
+        "<?php class Alpha { const N = 'alpha'; } class Beta { const N = 'beta'; }",
+    )
+    .expect("classes");
+    std::fs::write(site.root.join("alias.php"), "<?php require __DIR__ . '/classes.php'; if (isset($_GET['to'])) { class_alias($_GET['to'], 'Named'); } echo class_exists('Named', false) ? Named::N : 'none', ' ', class_exists('stdAlias', false) ? 'std' : 'nostd'; if (isset($_GET['std'])) { class_alias('stdClass', 'stdAlias'); echo ' ', get_class(new stdAlias); }").expect("alias");
+    let answers = worker_answers(
+        Runtime::new(),
+        &site,
+        &[
+            "alias.php?to=Alpha",
+            "alias.php",
+            "alias.php?to=Beta&std=1",
+            "alias.php",
+        ],
+    )
+    .await;
+    assert_eq!(
+        answers,
+        [
+            "alpha nostd",
+            "none nostd",
+            "beta nostd stdClass",
+            "none nostd"
+        ]
+    );
+}
+
+/// Class names ignore case in static references (`new POST`), in strings a
+/// script builds, and across requests that share the class.
+#[tokio::test(flavor = "current_thread")]
+async fn class_lookups_ignore_case_in_every_request() {
+    let site = Site::new("case-insensitive");
+    std::fs::write(
+        site.root.join("post.php"),
+        "<?php class Post { public static function query() { return 'query'; } }",
+    )
+    .expect("post");
+    std::fs::write(site.root.join("index.php"), "<?php require __DIR__ . '/post.php'; $name = 'pOsT'; echo get_class(new POST), ' ', post::query(), ' ', get_class(new $name), ' ', class_exists('POST', false) ? 'yes' : 'no', ' ', (new Post) instanceof pOST ? 'is' : 'not';").expect("index");
+    let answers = worker_answers(
+        Runtime::new(),
+        &site,
+        &["index.php", "index.php", "index.php"],
+    )
+    .await;
+    assert_eq!(answers, ["Post query Post yes is"; 3]);
+}
