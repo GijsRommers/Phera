@@ -477,3 +477,29 @@ async fn a_dom_document_of_the_boot_is_each_forks_own() {
     let expected = "<a><b>x</b></a> same <a fork=\"1\"><b>changed</b></a> 4509beb0 boot";
     assert_eq!(answers, [expected, expected]);
 }
+
+/// Generators and fibers of the boot: each fork resumes its own copy from
+/// where the boot left it, and a suspended generator's `finally` runs at
+/// the end of every request, as it would in a run from the top.
+#[tokio::test(flavor = "current_thread")]
+async fn generators_and_fibers_of_the_boot_are_each_forks_own() {
+    let answers = boot_and_answer(
+        "generators",
+        "<?php function count_up() { try { $i = 0; while (true) { $got = yield $i++; if ($got) echo \"[$got]\"; } } finally { echo '(closed)'; } }
+         $counter = count_up(); $counter->current(); $counter->next();
+         function done() { yield 1; } $done = done(); foreach ($done as $_) {}
+         $fiber = new Fiber(fn (int $n) => $n * 2);
+         $finished = new Fiber(fn () => 'ok'); $finished->start();
+         Phera\\snapshot();
+         echo $counter->current(), $counter->send('x'), ' ';
+         echo $done->valid() ? 'valid' : 'done', ' ';
+         $fiber->start(21); echo $fiber->getReturn(), ' ', $finished->getReturn(), ' ';",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(
+        answers,
+        ["1[x]2 done 42 ok (closed)", "1[x]2 done 42 ok (closed)"]
+    );
+}

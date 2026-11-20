@@ -63,7 +63,72 @@ struct Item {
     value: Value,
 }
 
+/// The fork of a generator the boot made, for [`crate::snapshot`]: `None`
+/// when `state` is not a generator's. Each fork resumes its own copy from
+/// where the boot left it.
+///
+/// ```php
+/// function lines() { yield 'a'; yield 'b'; }
+/// $lines = lines(); $lines->current();
+/// Phera\snapshot();
+/// $lines->next(); echo $lines->current();   // every request: b
+/// ```
+pub(crate) fn fork_generator(
+    state: &dyn std::any::Any,
+    fork: &mut phera_value::Fork<'_>,
+    releases: &cleanup::ReleaseQueue,
+) -> Option<Result<Box<dyn std::any::Any>, String>> {
+    let generator = state.downcast_ref::<Generator>()?;
+    Some(
+        generator
+            .forked(fork, releases.clone())
+            .map(|copy| Box::new(copy) as Box<dyn std::any::Any>),
+    )
+}
+
 impl Generator {
+    fn forked(
+        &self,
+        fork: &mut phera_value::Fork<'_>,
+        releases: cleanup::ReleaseQueue,
+    ) -> Result<Self, String> {
+        let state = match &self.state {
+            State::Created(activation) => State::Created(activation.forked(fork)?),
+            State::Ready(activation) => State::Ready(activation.forked(fork)?),
+            State::Yielded(activation, destination) => {
+                State::Yielded(activation.forked(fork)?, *destination)
+            }
+            State::Delegating(activation, destination, delegate) => State::Delegating(
+                activation.forked(fork)?,
+                *destination,
+                delegate.forked(fork)?,
+            ),
+            State::Returned(value) => State::Returned(fork.value(value)),
+            State::Failed => State::Failed,
+            State::Running => return Err("it is running".into()),
+        };
+        Ok(Generator {
+            releases,
+            pool: Rc::downgrade(fork.ids()),
+            name: fork.value(&self.name),
+            function: self.function,
+            closure: self.closure.as_ref().map(|closure| fork.object(closure)),
+            reference: self.reference,
+            state,
+            leaf: self
+                .leaf
+                .as_ref()
+                .and_then(Weak::upgrade)
+                .map(|leaf| Rc::downgrade(&fork.object(&leaf))),
+            item: self.item.as_ref().map(|item| Item {
+                key: fork.value(&item.key),
+                value: fork.value(&item.value),
+            }),
+            first_yield: self.first_yield,
+            largest_key: self.largest_key,
+        })
+    }
+
     fn delegation_leaf(&self) -> Option<Rc<Object>> {
         if matches!(self.state, State::Delegating(_, _, Delegate::Generator(_))) {
             self.leaf.as_ref()?.upgrade()
