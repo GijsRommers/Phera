@@ -37,7 +37,7 @@ fn selected_update_unlocks_only_the_requested_package_and_optional_dependencies(
     let root = directory.path();
     let mut options = options(root);
     let mut packages = vec![
-        package("test/a", "1.0.0", json!({})),
+        package("test/a", "1.0.0", json!({"test/b": "self.version"})),
         package("test/b", "1.0.0", json!({})),
         package("test/c", "1.0.0", json!({})),
     ];

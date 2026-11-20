@@ -64,6 +64,11 @@ impl Locked {
                 }
                 for (name, wanted) in package.field("require").as_object().into_iter().flatten() {
                     if let Some(wanted) = wanted.as_str() {
+                        let wanted = if wanted == "self.version" {
+                            &package.version
+                        } else {
+                            wanted
+                        };
                         pending.push((name.clone(), wanted.to_owned()));
                     }
                 }

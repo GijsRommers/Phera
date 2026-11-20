@@ -104,6 +104,11 @@ impl<'a> Provider<'a> {
                     let text = text
                         .as_str()
                         .context("Dependency constraint must be a string.")?;
+                    let text = if text == "self.version" {
+                        &package.version
+                    } else {
+                        text
+                    };
                     let range = self.matching(name, text, negative)?;
                     dependencies
                         .entry(name.clone())
