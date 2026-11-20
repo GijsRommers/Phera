@@ -40,27 +40,7 @@ impl FunctionIndex {
     pub(crate) fn index(self) -> usize {
         self.0 as usize
     }
-
-    /// The slot of the code table this function's facts are in.
-    #[inline]
-    fn slot(self) -> usize {
-        (self.0 >> SLOT_BITS) as usize
-    }
-
-    /// The function's position in its slot.
-    #[inline]
-    fn position(self) -> usize {
-        (self.0 & SLOT_MASK) as usize
-    }
 }
-
-/// A function number is a slot of the code table and a position in it:
-/// `slot << SLOT_BITS | position`. A file's functions take one slot (or
-/// several consecutive ones when it has more than a slot holds), so that a
-/// function keeps its number whatever else is loaded around it.
-const SLOT_BITS: u32 = 12;
-const SLOT_SIZE: usize = 1 << SLOT_BITS;
-const SLOT_MASK: u32 = (1 << SLOT_BITS) - 1;
 
 /// One loaded file: its bytecode and the request-local values made from it.
 pub(crate) struct LoadedUnit {
@@ -80,12 +60,7 @@ pub(crate) struct LoadedUnit {
 #[derive(Default)]
 pub(crate) struct CodeTable {
     units: Vec<LoadedUnit>,
-    /// The facts of every function, by slot (see [`SLOT_BITS`]): finding
-    /// a function's facts is two loads and no branch.
-    functions: Vec<Vec<FunctionFacts>>,
-    /// The slot that trait methods composed into classes are numbered in,
-    /// while it has room.
-    trait_slot: Option<usize>,
+    functions: Vec<FunctionFacts>,
     /// Where each loaded file is, by its process number
     /// (`UnitMetadata::id`): its position in `units` plus one, 0 if this
     /// request has not loaded it.
@@ -112,29 +87,30 @@ impl CodeTable {
             }
             self.slots[id] = index.0 + 1;
         }
-        let first = FunctionIndex((self.functions.len() << SLOT_BITS) as u32);
-        let mut facts = Vec::new();
+        let first = FunctionIndex(self.functions.len() as u32);
         let (name_keys, symbol_keys) = if let Some(metadata) = &unit.metadata {
-            facts.extend(metadata.functions.iter().cloned().enumerate().map(
-                |(offset, signature)| {
-                    let local = offset.checked_sub(1).map(|local| local as u32);
-                    let instructions = body(unit, local.map(|local| local as usize))
-                        .instructions
-                        .clone();
-                    FunctionFacts::bind((index, first, local), signature, instructions)
-                },
-            ));
+            self.functions
+                .extend(metadata.functions.iter().cloned().enumerate().map(
+                    |(offset, signature)| {
+                        let local = offset.checked_sub(1).map(|local| local as u32);
+                        let instructions = body(unit, local.map(|local| local as usize))
+                            .instructions
+                            .clone();
+                        FunctionFacts::bind((index, first, local), signature, instructions)
+                    },
+                ));
             (metadata.name_keys.clone(), metadata.symbol_keys.clone())
         } else {
             let bodies = std::iter::once(&unit.main).chain(&unit.functions);
-            facts.extend(bodies.enumerate().map(|(offset, body)| {
-                let local = offset.checked_sub(1).map(|local| local as u32);
-                FunctionFacts::bind(
-                    (index, first, local),
-                    FunctionSignature::new(body, &unit.types),
-                    body.instructions.clone(),
-                )
-            }));
+            self.functions
+                .extend(bodies.enumerate().map(|(offset, body)| {
+                    let local = offset.checked_sub(1).map(|local| local as u32);
+                    FunctionFacts::bind(
+                        (index, first, local),
+                        FunctionSignature::new(body, &unit.types),
+                        body.instructions.clone(),
+                    )
+                }));
             let names: Vec<String> = unit
                 .names
                 .iter()
@@ -150,17 +126,6 @@ impl CodeTable {
                 phera_bytecode::name_keys::keys(symbols.iter().map(String::as_str)),
             )
         };
-        // A file with more functions than a slot holds goes on in the next
-        // slots: `declared` counts past the end of one into the next.
-        let mut facts = facts.into_iter();
-        loop {
-            let chunk: Vec<FunctionFacts> = facts.by_ref().take(SLOT_SIZE).collect();
-            let last = chunk.len() < SLOT_SIZE;
-            self.functions.push(chunk);
-            if last {
-                break;
-            }
-        }
         self.units.push(LoadedUnit {
             unit: unit.clone(),
             cache: UnitCache::new(unit),
@@ -232,7 +197,7 @@ impl CodeTable {
         local: usize,
     ) -> Option<(FunctionIndex, &FunctionFacts)> {
         let function = self.declared(first, local);
-        let facts = self.facts_of(function)?;
+        let facts = self.functions.get(function.index())?;
         (facts.unit_first == first).then_some((function, facts))
     }
 
@@ -242,7 +207,7 @@ impl CodeTable {
         function: FunctionIndex,
         class: crate::classes::ClassIndex,
     ) {
-        self.functions[function.slot()][function.position()].class = Some(class);
+        self.functions[function.index()].class = Some(class);
     }
 
     /// Flattened methods share immutable instructions and own their scope and static cells.
@@ -253,17 +218,9 @@ impl CodeTable {
     ) -> FunctionIndex {
         let mut facts = self.facts(source).clone();
         facts.class = Some(scope);
-        let slot = match self.trait_slot {
-            Some(slot) if self.functions[slot].len() < SLOT_SIZE => slot,
-            _ => {
-                self.functions.push(Vec::new());
-                self.functions.len() - 1
-            }
-        };
-        self.trait_slot = Some(slot);
-        let position = self.functions[slot].len();
-        self.functions[slot].push(facts);
-        FunctionIndex(((slot << SLOT_BITS) | position) as u32)
+        let function = FunctionIndex(self.functions.len() as u32);
+        self.functions.push(facts);
+        function
     }
 
     pub(crate) fn import_trait_method(
@@ -293,14 +250,7 @@ impl CodeTable {
 
     #[inline]
     pub(crate) fn facts(&self, function: FunctionIndex) -> &FunctionFacts {
-        &self.functions[function.slot()][function.position()]
-    }
-
-    /// The facts of `function`, if it is a function of this table.
-    fn facts_of(&self, function: FunctionIndex) -> Option<&FunctionFacts> {
-        self.functions
-            .get(function.slot())?
-            .get(function.position())
+        &self.functions[function.index()]
     }
 
     fn loaded(&self, function: FunctionIndex) -> &LoadedUnit {
@@ -313,7 +263,7 @@ impl CodeTable {
     }
 
     pub(crate) fn known_unit(&self, function: FunctionIndex) -> Option<&Arc<CompiledUnit>> {
-        let facts = self.facts_of(function)?;
+        let facts = self.functions.get(function.index())?;
         self.units.get(facts.unit.0 as usize).map(|unit| &unit.unit)
     }
 
@@ -395,7 +345,6 @@ impl crate::snapshot::ForkCopy for CodeTable {
                 })
                 .collect(),
             functions: self.functions.clone(),
-            trait_slot: self.trait_slot,
             slots: self.slots.clone(),
             trait_method_names: self.trait_method_names.clone(),
         }
