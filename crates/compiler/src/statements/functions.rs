@@ -272,6 +272,7 @@ impl<'ast> Compiler<'ast> {
         builder.function.strict_types = self.function.strict_types;
         for parameter in declaration.parameters {
             builder.local(&parameter.name)?;
+            let declaration_type = builder.parameter_type(parameter);
             builder.function.parameters.push(Parameter {
                 default_display: parameter
                     .default
@@ -279,10 +280,7 @@ impl<'ast> Compiler<'ast> {
                     .map(crate::helpers::default_display),
                 name: parameter.name.clone(),
                 has_default: parameter.default.is_some(),
-                declaration_type: parameter
-                    .ty
-                    .as_ref()
-                    .map(|declared_type| self.declaration_type(declared_type)),
+                declaration_type,
                 by_reference: parameter.by_reference,
                 variadic: parameter.variadic,
             });
