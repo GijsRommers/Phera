@@ -17,6 +17,7 @@ pub mod serialization;
 mod state;
 pub mod testing;
 pub mod traversal;
+pub mod web_log;
 mod working_directory;
 
 pub use phera_bytecode::{BinaryOp as NativeBinaryOp, UnaryOp as NativeUnaryOp};

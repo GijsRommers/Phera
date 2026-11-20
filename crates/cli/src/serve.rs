@@ -127,7 +127,9 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         site.describe(),
         server.local_addr()
     );
-    match server.run() {
+    let result = server.run();
+    phera_extension_api::web_log::flush();
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("The server stopped: {error}");

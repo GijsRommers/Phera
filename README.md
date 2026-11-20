@@ -56,6 +56,10 @@ fatal backtraces, go to the server log by default. Use `phera serve --dev public
 to display diagnostics in responses and check PHP files on each request during
 local development.
 
+The web SAPI queues stderr diagnostics and `error_log()` messages. When the
+queue fills or a record exceeds 64 KiB, it drops the record so the request can
+finish. Explicit file destinations keep their file write behavior.
+
 `--request-read-timeout SECONDS` sets the initial time budget for receiving
 headers and the body. It defaults to 60 seconds and gains one second for every
 16 KiB of body data received. If the budget runs out, the server returns HTTP 408
