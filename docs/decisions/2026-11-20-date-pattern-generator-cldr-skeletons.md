@@ -8,8 +8,8 @@
 
 Use Gregorian CLDR available formats and the existing date style tables to
 select a localized pattern for a requested set of fields. Resolve the
-preferred hour cycle from the locale and combine date and time when a single
-candidate covers neither combination.
+preferred hour cycle from the locale. Combine date and time when no candidate
+covers both.
 
 ## Why
 

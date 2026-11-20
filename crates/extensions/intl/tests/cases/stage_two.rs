@@ -40,6 +40,10 @@ fn collation_and_transforms() {
         ("Upper", "Straße"),
         ("NFD", "é"),
         ("NFD; [:Nonspacing Mark:] Remove; NFC", "crème brûlée"),
+        (
+            "NFKC; [:Nonspacing Mark:] Remove; NFKC; Any-Latin; Latin-ASCII;",
+            "crème brûlée",
+        ),
         ("[:Mn:] Any-Remove", "e\u{301} का \u{1d185}"),
         ("[:^Letter:] Remove", "Café 42"),
         ("Remove", "😀𝟫"),
@@ -57,6 +61,11 @@ fn collation_and_transforms() {
         "اللغة العربية",
         "नमस्ते दुनिया",
         "中文测试",
+        "こんにちは世界",
+        "東京と大阪",
+        "hello中文测试ok",
+        "A。中、B",
+        "五5六",
     ] {
         for id in ["Any-Latin", "Any-Latin;Latin-ASCII;Lower()"] {
             matrix.case(
@@ -66,6 +75,9 @@ fn collation_and_transforms() {
         }
     }
     matrix.case("Transliterator::create", &[Value::from("Any-Latin/BGN")]);
+    for id in ["NFD; ", "NFD;;NFC", "NFD;;;"] {
+        matrix.case("Transliterator::create", &[Value::from(id)]);
+    }
     let invalid = Value::from(vec![255]);
     let locale = [Value::from("en_US")];
     for (left, right) in [
@@ -237,6 +249,44 @@ fn unicode_and_single_byte_conversion() {
         matrix.case("UConverter::reasonText", &[Value::Int(reason)]);
     }
     matrix.compare("intl-unicode-and-single-byte-conversion");
+}
+
+#[test]
+fn calendar_component_errors() {
+    let mut matrix = Matrix::new();
+    let constructor = [Value::from("UTC"), Value::from("en_US")];
+    for (setter, factory, count) in [
+        ("setDate", "IntlGregorianCalendar::createFromDate", 3),
+        (
+            "setDateTime",
+            "IntlGregorianCalendar::createFromDateTime",
+            6,
+        ),
+    ] {
+        for index in 0..count {
+            for invalid in [i64::from(i32::MAX) + 1, i64::from(i32::MIN) - 1] {
+                let mut args = vec![Value::Int(1); count];
+                args[index] = Value::Int(invalid);
+                matrix.instance("IntlGregorianCalendar", &constructor, setter, &args, None);
+                matrix.case(factory, &args);
+            }
+        }
+    }
+    for (method, value) in [
+        ("clear", -1),
+        ("setMinimalDaysInFirstWeek", 0),
+        ("setSkippedWallTimeOption", 3),
+        ("setRepeatedWallTimeOption", 2),
+    ] {
+        matrix.instance(
+            "IntlGregorianCalendar",
+            &constructor,
+            method,
+            &[Value::Int(value)],
+            None,
+        );
+    }
+    matrix.compare("intl-calendar-component-errors");
 }
 
 #[test]

@@ -104,6 +104,50 @@ fn english_spellout_and_ordinals() {
 }
 
 #[test]
+fn significant_digit_patterns_and_symbol_errors() {
+    let mut matrix = Matrix::new();
+    let long = "@".repeat(200);
+    for pattern in ["@@", "@@##", "@#", long.as_str()] {
+        let constructor = [Value::from("en_US"), Value::Int(0), Value::from(pattern)];
+        matrix.instance(
+            "NumberFormatter",
+            &constructor,
+            "format",
+            &[Value::Float(12_345.123456)],
+            None,
+        );
+        matrix.instance("NumberFormatter", &constructor, "getPattern", &[], None);
+        for attribute in [16, 17, 18] {
+            matrix.instance(
+                "NumberFormatter",
+                &constructor,
+                "getAttribute",
+                &[Value::Int(attribute)],
+                None,
+            );
+        }
+    }
+    let constructor = [Value::from("en_US"), Value::Int(0)];
+    for symbol in [-1, 18, 20, 25, 27, 28, 29, 4_294_901_761] {
+        matrix.instance(
+            "NumberFormatter",
+            &constructor,
+            "getSymbol",
+            &[Value::Int(symbol)],
+            None,
+        );
+        matrix.instance(
+            "NumberFormatter",
+            &constructor,
+            "setSymbol",
+            &[Value::Int(symbol), Value::from(".")],
+            None,
+        );
+    }
+    matrix.compare("intl-number-significant-patterns-and-symbol-errors");
+}
+
+#[test]
 fn core_date_formats() {
     let mut matrix = Matrix::new();
     for &(locale, _) in LOCALES {
@@ -272,6 +316,9 @@ fn locale_length_and_time_zone_errors() {
         matrix.case("intlcal_create_instance", &setter);
         matrix.instance("IntlGregorianCalendar", &setter, "getErrorCode", &[], None);
     }
+    let styles = [Value::from("en"), Value::Int(-2), Value::Int(0)];
+    matrix.instance("IntlDateFormatter", &styles, "getErrorCode", &[], None);
+    matrix.case("datefmt_create", &styles);
     matrix.compare("intl-locale-length-and-time-zone-errors");
 }
 

@@ -184,8 +184,18 @@ fn script_runs(input: &str, rules: &ScriptTransforms) -> String {
     let mut output = String::with_capacity(input.len());
     let mut active = Script::Unknown;
     let mut start = 0;
+    let mut common_start = None;
     let flush = |output: &mut String, script, text: &str| {
         if let Some((_, rule)) = rules.iter().find(|(key, _)| *key == script) {
+            if script == Script::Han
+                && text
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| scripts.get(ch) == Script::Han)
+                && output.chars().next_back().is_some_and(char::is_alphabetic)
+            {
+                output.push(' ');
+            }
             output.push_str(&rule.transliterate(text.to_owned()));
         } else {
             output.push_str(text);
@@ -193,11 +203,21 @@ fn script_runs(input: &str, rules: &ScriptTransforms) -> String {
     };
     for (offset, ch) in input.char_indices() {
         let script = scripts.get(ch);
-        if script != active && !matches!(script, Script::Inherited | Script::Common) {
-            flush(&mut output, active, &input[start..offset]);
-            active = script;
-            start = offset;
+        if script == Script::Common {
+            common_start.get_or_insert(offset);
+            continue;
         }
+        if script != active && !matches!(script, Script::Inherited | Script::Common) {
+            let boundary = if script == Script::Han {
+                common_start.unwrap_or(offset)
+            } else {
+                offset
+            };
+            flush(&mut output, active, &input[start..boundary]);
+            active = script;
+            start = boundary;
+        }
+        common_start = None;
     }
     flush(&mut output, active, &input[start..]);
     output

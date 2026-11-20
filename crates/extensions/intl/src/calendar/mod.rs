@@ -171,10 +171,35 @@ fn create(
     op: Factory,
 ) -> NativeResult {
     error::clear(context);
+    if site == "intlgregcal_create_instance" {
+        context.deprecated(
+            concat!(
+                "Function intlgregcal_create_instance() is deprecated since 8.4, use ",
+                "IntlGregorianCalendar::__construct(), IntlGregorianCalendar::createFromDate(), ",
+                "or IntlGregorianCalendar::createFromDateTime() instead"
+            )
+            .to_owned(),
+        );
+    } else if matches!(op, Factory::Gregorian) && !matches!(args::value(values, 2), Value::Null) {
+        context.deprecated(
+            concat!(
+                "Calling IntlGregorianCalendar::__construct() with more than 2 arguments is ",
+                "deprecated, use either IntlGregorianCalendar::createFromDate() or ",
+                "IntlGregorianCalendar::createFromDateTime() instead"
+            )
+            .to_owned(),
+        );
+    }
     let instant = timezone::clock_millis() as f64;
     let numbered = matches!(op, Factory::Date | Factory::DateTime)
         || (matches!(op, Factory::Gregorian) && matches!(args::value(values, 0), Value::Int(_)));
     if numbered {
+        let names = if matches!(op, Factory::Gregorian) {
+            fields::LEGACY_GREGORIAN_FIELDS
+        } else {
+            fields::CIVIL_FIELDS
+        };
+        fields::check_components(values, names, site, 1)?;
         let zone = ZoneKind::Identifier(zone::current(context));
         let locale = locale::effective(context, b"");
         let mut state = State::new(locale, zone, true, instant);

@@ -126,13 +126,9 @@ fn apply(
             };
             Value::Bool(result)
         }
-        Op::Set => {
-            if args::int(values, 2).is_none() && !(0..23).contains(&field) {
-                return field_error(site);
-            }
-            Value::Bool(fields::set(state, values))
-        }
+        Op::Set => return set_fields(context, state, values, site, field),
         Op::SetDate | Op::SetDateTime => {
+            fields::check_components(values, fields::CIVIL_FIELDS, site, 1)?;
             if !fields::date(state, values, matches!(op, Op::SetDate)) {
                 return Err(NativeError::value_error(format!(
                     "{site}(): Invalid calendar fields"
@@ -158,10 +154,16 @@ fn apply(
         Op::ToDate => return create_datetime(context, state.as_datetime()),
         Op::First => Value::Int(state.first),
         Op::SetFirst | Op::SetMinimal => {
-            check_weekday(field, site)?;
             if matches!(op, Op::SetFirst) {
+                check_weekday(field, site)?;
                 state.first = field;
             } else {
+                if !(1..=7).contains(&field) {
+                    let argument = first_argument(site);
+                    return Err(NativeError::value_error(format!(
+                        "{site}(): Argument #{argument} ($days) must be between 1 and 7"
+                    )));
+                }
                 state.minimal_days = field;
             }
             Value::Bool(true)
@@ -280,19 +282,78 @@ fn apply(
         Op::Repeated => Value::Int(state.repeated_wall),
         Op::Skipped => Value::Int(state.skipped_wall),
         Op::SetRepeated | Op::SetSkipped => {
-            if !(0..=2).contains(&field) {
-                return failure(context, state, site, "Invalid wall time option");
-            }
-            if matches!(op, Op::SetRepeated) {
-                state.repeated_wall = field;
-            } else {
-                state.skipped_wall = field;
-            }
-            Value::Bool(true)
+            return set_wall_option(state, site, field, matches!(op, Op::SetRepeated));
         }
         Op::ErrorCode | Op::ErrorMessage => return Err(unsupported::item(site)),
     };
     Ok(value)
+}
+
+fn set_fields(
+    context: &mut dyn Context,
+    state: &mut State,
+    values: &[Value],
+    site: &str,
+    field: i64,
+) -> NativeResult {
+    let first = first_argument(site);
+    let multiple = args::int(values, 2).is_some();
+    if first == 2 {
+        context.deprecated(
+            concat!(
+                "Function intlcal_set() is deprecated since 8.4, use IntlCalendar::set(), ",
+                "IntlCalendar::setDate(), or IntlCalendar::setDateTime() instead"
+            )
+            .to_owned(),
+        );
+    } else if multiple {
+        context.deprecated(
+            concat!(
+                "Calling IntlCalendar::set() with more than 2 arguments is deprecated, ",
+                "use either IntlCalendar::setDate() or IntlCalendar::setDateTime() instead"
+            )
+            .to_owned(),
+        );
+    }
+    if multiple {
+        if args::int(values, 3).is_some() && args::int(values, 4).is_none() {
+            return Err(NativeError::argument_count_error(format!(
+                "{site}() has no variant with exactly {} parameters",
+                first + 3
+            )));
+        }
+        fields::check_components(values, fields::CIVIL_FIELDS, site, first)?;
+    } else {
+        if !(0..23).contains(&field) {
+            return invalid_field(site, "year");
+        }
+        fields::check_components(values, &["year", "month"], site, first)?;
+    }
+    Ok(Value::Bool(fields::set(state, values)))
+}
+
+fn set_wall_option(state: &mut State, site: &str, option: i64, repeated: bool) -> NativeResult {
+    let max = if repeated { 1 } else { 2 };
+    if !(0..=max).contains(&option) {
+        let allowed = if repeated {
+            "either IntlCalendar::WALLTIME_FIRST or IntlCalendar::WALLTIME_LAST"
+        } else {
+            concat!(
+                "one of IntlCalendar::WALLTIME_FIRST, IntlCalendar::WALLTIME_LAST, ",
+                "or IntlCalendar::WALLTIME_NEXT_VALID"
+            )
+        };
+        let argument = first_argument(site);
+        return Err(NativeError::value_error(format!(
+            "{site}(): Argument #{argument} ($option) must be {allowed}"
+        )));
+    }
+    if repeated {
+        state.repeated_wall = option;
+    } else {
+        state.skipped_wall = option;
+    }
+    Ok(Value::Bool(true))
 }
 
 pub fn kind(kind: AnyCalendarKind) -> &'static str {
@@ -319,8 +380,17 @@ pub fn kind(kind: AnyCalendarKind) -> &'static str {
 }
 
 fn field_error(site: &str) -> NativeResult {
+    invalid_field(site, "field")
+}
+
+fn first_argument(site: &str) -> usize {
+    1 + usize::from(site.starts_with("intlcal_") || site.starts_with("intlgregcal_"))
+}
+
+fn invalid_field(site: &str, name: &str) -> NativeResult {
+    let argument = first_argument(site);
     Err(NativeError::value_error(format!(
-        "{site}(): Argument #1 ($field) must be a valid field"
+        "{site}(): Argument #{argument} (${name}) must be a valid field"
     )))
 }
 
@@ -328,8 +398,9 @@ fn check_weekday(day: i64, site: &str) -> Result<(), NativeError> {
     if (1..=7).contains(&day) {
         return Ok(());
     }
+    let argument = first_argument(site);
     Err(NativeError::value_error(format!(
-        "{site}(): Argument #1 ($dayOfWeek) must be a valid day of the week"
+        "{site}(): Argument #{argument} ($dayOfWeek) must be a valid day of the week"
     )))
 }
 

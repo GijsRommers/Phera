@@ -132,6 +132,18 @@ fn init(
     let requested = locale::effective(context, args::bytes(values, 0));
     let date_type = args::int(values, 1).unwrap_or(0);
     let time_type = args::int(values, 2).unwrap_or(0);
+    if date_type == -2 && time_type != -2 {
+        return fail_creation(
+            context,
+            object,
+            site,
+            1,
+            concat!(
+                "datefmt_create: time format must be IntlDateFormatter::PATTERN ",
+                "if date format is IntlDateFormatter::PATTERN"
+            ),
+        );
+    }
     let modern = locale_id::cldr(&requested);
     if modern.id.language.is_unknown() || !number::known_language(modern.id.language.as_str()) {
         return Err(NativeError::value_error(format!(
