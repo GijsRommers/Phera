@@ -76,13 +76,23 @@ pub fn effective(context: &dyn Context, value: &[u8]) -> String {
 }
 
 pub fn too_long(context: &mut dyn Context, site: &str) -> NativeResult {
-    error::fail(
+    too_long_for(context, site, false)
+}
+
+pub fn too_long_for(context: &mut dyn Context, site: &str, constructor: bool) -> NativeResult {
+    const DETAIL: &str = "Locale string too long, should be no longer than 156 characters";
+    let result = error::fail(
         context,
         site,
         error::ILLEGAL_ARGUMENT,
-        "Locale string too long, should be no longer than 156 characters",
+        DETAIL,
         Value::Null,
-    )
+    );
+    if constructor {
+        Err(NativeError::throw("IntlException", format!("{site}(): {DETAIL}")))
+    } else {
+        result
+    }
 }
 
 fn get_default(context: &mut dyn Context, _: &[Value], _: &str) -> NativeResult {

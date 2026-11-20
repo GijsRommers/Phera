@@ -21,22 +21,31 @@ pub fn timezone(
     value: &Value,
     site: &str,
     index: usize,
-) -> Result<Option<ZoneKind>, NativeError> {
+) -> Result<ZoneKind, NativeError> {
     match &*value.deref() {
-        Value::Null => Ok(Some(current_zone(context))),
-        Value::String(value) if value.as_bytes().is_empty() => Ok(Some(current_zone(context))),
+        Value::Null => Ok(current_zone(context)),
+        Value::String(value) if value.as_bytes().is_empty() => Ok(current_zone(context)),
         Value::String(value) => {
             let bytes = value.as_bytes();
+            let name = std::str::from_utf8(bytes).map_err(|_| {
+                NativeError::throw(
+                    "IntlException",
+                    format!("{site}(): Time zone identifier given is not a valid UTF-8 string"),
+                )
+            })?;
             let wrapped = [b"GMT+".as_slice(), b"GMT-"]
                 .iter()
                 .any(|prefix| bytes.starts_with(prefix));
-            Ok(parse_timezone(if wrapped { &bytes[3..] } else { bytes }))
+            parse_timezone(if wrapped { &bytes[3..] } else { bytes }).ok_or_else(|| {
+                let name = name.split('\0').next().unwrap_or_default();
+                NativeError::throw("IntlException", format!("{site}(): No such time zone: \"{name}\""))
+            })
         }
         Value::Object(object) if object.class.is_instance_of("DateTimeZone") => {
-            read_timezone(object).map(Some)
+            read_timezone(object)
         }
         Value::Object(object) if object.class.is_instance_of("IntlTimeZone") => {
-            crate::timezone::read_zone(object).map(Some)
+            crate::timezone::read_zone(object)
         }
         other => Err(type_error(
             site,

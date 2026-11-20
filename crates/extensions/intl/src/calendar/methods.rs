@@ -152,11 +152,7 @@ fn apply(
         }
         Op::TimeZone => return timezone::wrap_zone(context, state.zone.clone()),
         Op::SetTimeZone => {
-            let Some(zone) = date::input::timezone(context, args::value(values, 0), site, 1)?
-            else {
-                return failure(context, state, site, "No such time zone");
-            };
-            state.zone = zone;
+            state.zone = date::input::timezone(context, args::value(values, 0), site, 1)?;
             Value::Bool(true)
         }
         Op::ToDate => return create_datetime(context, state.as_datetime()),

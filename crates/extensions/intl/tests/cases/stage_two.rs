@@ -39,6 +39,10 @@ fn collation_and_transforms() {
         ("Any-Latin; Latin-ASCII; Lower()", "À New York"),
         ("Upper", "Straße"),
         ("NFD", "é"),
+        ("NFD; [:Nonspacing Mark:] Remove; NFC", "crème brûlée"),
+        ("[:Mn:] Any-Remove", "e\u{301} का \u{1d185}"),
+        ("[:^Letter:] Remove", "Café 42"),
+        ("Remove", "😀𝟫"),
         ("Null", "😀𝟫"),
     ] {
         matrix.case(

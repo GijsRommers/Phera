@@ -146,7 +146,8 @@ rejects secret keys whose embedded public half cannot be decoded as a point.
 
 The intl extension includes ICU4X normalization, grapheme operations, IDNA,
 locale queries, number and date formatting, collation, list and message
-formatting, transliteration, break iteration, resource bundles, and calendar
+formatting, transliteration including category-filtered accent removal,
+break iteration, resource bundles, and calendar
 and timezone objects. See the [intl coverage notes](crates/extensions/intl/README.md) for
 the APIs that still differ from PHP.
 

@@ -200,15 +200,7 @@ fn create(
         let instant = date.timestamp as f64 * 1000.0 + date.micros as f64 / 1000.0;
         return make(context, None, State::new(locale, date.zone, false, instant));
     }
-    let Some(zone) = date::input::timezone(context, args::value(values, 0), site, 1)? else {
-        if object.is_some() {
-            return Err(NativeError::throw(
-                "IntlException",
-                format!("{site}(): No such time zone"),
-            ));
-        }
-        return error::fail(context, site, 1, "No such time zone", Value::Null);
-    };
+    let zone = date::input::timezone(context, args::value(values, 0), site, 1)?;
     make(
         context,
         object,

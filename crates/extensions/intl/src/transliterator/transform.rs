@@ -6,7 +6,10 @@ use icu_casemap::CaseMapper;
 use icu_experimental::transliterate::Transliterator;
 use icu_locale::LanguageIdentifier;
 use icu_normalizer::{ComposingNormalizer, DecomposingNormalizer};
-use icu_properties::{CodePointMapData, props::Script};
+use icu_properties::{
+    CodePointMapData, PropertyValueNameToEnumMapper,
+    props::{GeneralCategory, GeneralCategoryGroup, Script},
+};
 
 const SCRIPTS: &[(Script, &str, &str)] = &[
     (Script::Arabic, "Arabic", "arab"),
@@ -64,12 +67,26 @@ pub enum Step {
     Nfd,
     Nfkc,
     Nfkd,
+    Remove,
+    RemoveCategory(GeneralCategoryGroup, bool),
     Null,
 }
 
 impl Step {
     pub fn load(id: &str) -> Option<Self> {
         let id = id.to_ascii_lowercase();
+        if let Some(filter) = id.strip_prefix("[:") {
+            let (property, transform) = filter.split_once(":]")?;
+            if !matches!(transform.trim(), "remove" | "any-remove") {
+                return None;
+            }
+            let property = property.trim();
+            let inverted = property.starts_with('^');
+            let category = property.trim_start_matches('^');
+            let category = PropertyValueNameToEnumMapper::<GeneralCategoryGroup>::new()
+                .get_loose(category)?;
+            return Some(Self::RemoveCategory(category, inverted));
+        }
         let id = id.strip_prefix("any-").unwrap_or(&id);
         Some(match id {
             "lower" | "lower()" => Self::Lower,
@@ -78,6 +95,7 @@ impl Step {
             "nfd" => Self::Nfd,
             "nfkc" => Self::Nfkc,
             "nfkd" => Self::Nfkd,
+            "remove" => Self::Remove,
             "null" => Self::Null,
             "latin" => Self::Scripts(Rc::new(
                 SCRIPTS
@@ -116,7 +134,7 @@ impl Step {
         })
     }
 
-    pub fn apply(&self, input: String) -> String {
+    pub fn apply(&self, mut input: String) -> String {
         match self {
             Self::Rule(rule) => rule.transliterate(input),
             Self::Scripts(rules) => script_runs(&input, rules),
@@ -138,6 +156,12 @@ impl Step {
             Self::Nfkd => DecomposingNormalizer::new_nfkd()
                 .normalize(&input)
                 .into_owned(),
+            Self::Remove => String::new(),
+            Self::RemoveCategory(category, inverted) => {
+                let categories = CodePointMapData::<GeneralCategory>::new();
+                input.retain(|ch| category.contains(categories.get(ch)) == *inverted);
+                input
+            }
             Self::Null => input,
         }
     }

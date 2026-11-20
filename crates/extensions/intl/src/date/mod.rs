@@ -119,6 +119,9 @@ fn init(
     site: &str,
 ) -> NativeResult {
     error::clear(context);
+    if args::bytes(values, 0).len() > locale::MAX_LEN {
+        return locale::too_long_for(context, site, object.is_some());
+    }
     let requested = locale::effective(context, args::bytes(values, 0));
     let date_type = args::int(values, 1).unwrap_or(0);
     let time_type = args::int(values, 2).unwrap_or(0);
@@ -134,19 +137,11 @@ fn init(
     };
     let calendar_input = args::value(values, 4);
     let timezone_input = args::value(values, 3);
-    let implicit_zone = match (&*timezone_input.deref(), &*calendar_input.deref()) {
+    let zone = match (&*timezone_input.deref(), &*calendar_input.deref()) {
         (Value::Null, Value::Object(calendar)) if calendar.class.is_instance_of("IntlCalendar") => {
-            Some(crate::calendar::calendar_zone(calendar)?)
+            crate::calendar::calendar_zone(calendar)?
         }
-        _ => None,
-    };
-    let zone = if let Some(zone) = implicit_zone {
-        Some(zone)
-    } else {
-        input::timezone(context, timezone_input, site, 4)?
-    };
-    let Some(zone) = zone else {
-        return fail_creation(context, object, site, 1, "No such time zone");
+        _ => input::timezone(context, timezone_input, site, 4)?,
     };
     let Some(calendar) = input::calendar(calendar_input, site, 5)? else {
         return fail_creation(context, object, site, 1, input::CALENDAR_ERROR);
@@ -295,11 +290,7 @@ fn dispatch(
             Value::Null
         }
         Operation::SetTimeZone => {
-            let Some(zone) = input::timezone(context, args::value(arguments, 0), site, argument)?
-            else {
-                return fail(context, state, site, 1, "No such time zone");
-            };
-            state.zone = zone;
+            state.zone = input::timezone(context, args::value(arguments, 0), site, argument)?;
             Value::Bool(true)
         }
         Operation::SetCalendar => {

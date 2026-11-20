@@ -124,7 +124,7 @@ fn init(
     error::clear(context);
     let supplied = args::bytes(arguments, 0);
     if supplied.len() > locale::MAX_LEN {
-        return locale::too_long(context, site);
+        return locale::too_long_for(context, site, this.is_some());
     }
     let locale = locale::effective(context, supplied);
     let locale = locale.split('\0').next().unwrap_or_default();
