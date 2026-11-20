@@ -114,7 +114,10 @@ impl UserFile {
         for (key, value) in [
             ("timed_out", Value::Bool(false)),
             ("blocked", Value::Bool(true)),
-            ("eof", Value::Bool(self.eof.get())),
+            (
+                "eof",
+                Value::Bool(self.eof.get() && self.buffer.borrow().is_empty()),
+            ),
             ("wrapper_data", Value::Object(self.object.clone())),
             ("wrapper_type", Value::from("user-space")),
             ("stream_type", Value::from("user-space")),

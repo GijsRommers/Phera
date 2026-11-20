@@ -5,45 +5,69 @@
 //! ```
 
 use phera_ext_streams::native::FileStatus;
-use phera_extension_api::{Context, NativeResult, Value};
+use phera_extension_api::{Context, LocalFuture, NativeResult, Object, Value};
+use std::rc::Rc;
 
 use super::location;
-use crate::{This, receiver};
+use crate::receiver;
 
-fn status(
-    context: &mut dyn Context,
-    this: This<'_>,
+fn status<'a>(
+    context: &'a mut dyn Context,
+    this: Option<Rc<Object>>,
     which: FileStatus,
-    name: &str,
-) -> NativeResult {
-    which.get(
-        context,
-        location(receiver(this)?)?.pathname.as_bytes(),
-        name,
-    )
+    name: &'static str,
+) -> LocalFuture<'a, NativeResult> {
+    Box::pin(async move {
+        let path = location(receiver(this.as_ref())?)?.pathname;
+        which.get_async(context, path.as_bytes(), name).await
+    })
 }
 
-pub(super) fn perms(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn perms(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(context, this, FileStatus::Perms, "SplFileInfo::getPerms")
 }
 
-pub(super) fn inode(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn inode(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(context, this, FileStatus::Inode, "SplFileInfo::getInode")
 }
 
-pub(super) fn size(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn size(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(context, this, FileStatus::Size, "SplFileInfo::getSize")
 }
 
-pub(super) fn owner(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn owner(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(context, this, FileStatus::Owner, "SplFileInfo::getOwner")
 }
 
-pub(super) fn group(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn group(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(context, this, FileStatus::Group, "SplFileInfo::getGroup")
 }
 
-pub(super) fn atime(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn atime(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(
         context,
         this,
@@ -52,7 +76,11 @@ pub(super) fn atime(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> N
     )
 }
 
-pub(super) fn mtime(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn mtime(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(
         context,
         this,
@@ -61,7 +89,11 @@ pub(super) fn mtime(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> N
     )
 }
 
-pub(super) fn ctime(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn ctime(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(
         context,
         this,
@@ -70,11 +102,19 @@ pub(super) fn ctime(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> N
     )
 }
 
-pub(super) fn file_type(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn file_type(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(context, this, FileStatus::Type, "SplFileInfo::getType")
 }
 
-pub(super) fn writable(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn writable(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(
         context,
         this,
@@ -83,7 +123,11 @@ pub(super) fn writable(context: &mut dyn Context, this: This<'_>, _: &[Value]) -
     )
 }
 
-pub(super) fn readable(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn readable(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(
         context,
         this,
@@ -92,7 +136,11 @@ pub(super) fn readable(context: &mut dyn Context, this: This<'_>, _: &[Value]) -
     )
 }
 
-pub(super) fn executable(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn executable(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(
         context,
         this,
@@ -101,14 +149,26 @@ pub(super) fn executable(context: &mut dyn Context, this: This<'_>, _: &[Value])
     )
 }
 
-pub(super) fn is_file(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn is_file(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(context, this, FileStatus::IsFile, "SplFileInfo::isFile")
 }
 
-pub(super) fn is_dir(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn is_dir(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(context, this, FileStatus::IsDirectory, "SplFileInfo::isDir")
 }
 
-pub(super) fn is_link(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
+pub(super) fn is_link(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     status(context, this, FileStatus::IsLink, "SplFileInfo::isLink")
 }

@@ -78,6 +78,52 @@ pub fn read_link(context: &mut dyn Context, path: &[u8]) -> std::io::Result<Vec<
     crate::mutations::read_link(context, path)
 }
 
+/// SPL's live wrapper directory cursor, separate from the default `opendir()` handle.
+#[derive(Clone)]
+pub struct DirectoryStream(std::rc::Rc<phera_extension_api::value::Resource>);
+
+impl DirectoryStream {
+    pub async fn open_wrapper(
+        context: &mut dyn Context,
+        name: &[u8],
+        method: &str,
+    ) -> Result<Option<Self>, phera_extension_api::NativeError> {
+        use phera_extension_api::NativeError;
+
+        let Some(wrapper) = crate::user_wrappers::locate(context, name) else {
+            return Ok(None);
+        };
+        let supplied = crate::request::files(context)
+            .default_context
+            .clone()
+            .unwrap_or(Value::Null);
+        let Some(directory) =
+            crate::user_directory::open(context, wrapper, method, name, supplied).await?
+        else {
+            return Err(NativeError::throw(
+                "UnexpectedValueException",
+                format!(
+                    "Failed to open directory \"{}\"",
+                    String::from_utf8_lossy(name)
+                ),
+            ));
+        };
+        let Value::Resource(resource) = crate::user_resource::make_directory(context, directory)
+        else {
+            return Err(NativeError::error("Directory factory returned no resource"));
+        };
+        Ok(Some(Self(resource)))
+    }
+
+    pub async fn read(&self, context: &mut dyn Context, method: &str) -> NativeResult {
+        crate::directory::read(context, &self.0, method).await
+    }
+
+    pub async fn rewind(&self, context: &mut dyn Context) -> NativeResult {
+        crate::directory::rewind(context, &self.0).await
+    }
+}
+
 /// An open handle owned by a native file object for its entire lifetime.
 #[derive(Clone)]
 pub struct FileStream(std::rc::Rc<phera_extension_api::value::Resource>);

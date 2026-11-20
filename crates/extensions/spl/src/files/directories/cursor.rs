@@ -5,38 +5,110 @@
 //! ```
 
 use phera_extension_api::{
-    Context, LocalFuture, NativeError, NativeIterator, NativeResult, Object, Value, args,
-    value::to_bool,
+    Context, LocalFuture, NativeError, NativeIterator, NativeResult, Object, PhpString, Value,
+    args, traversal::IteratorStep, value::to_bool,
 };
 use std::rc::Rc;
 
-use super::{Current, FILESYSTEM, KEY_FILENAME, KEY_MASK, change, get, information, read};
+use super::{
+    Current, Entries, FILESYSTEM, KEY_FILENAME, KEY_MASK, SKIP_DOTS, change, dot, get, information,
+    read,
+};
 use crate::{This, receiver};
 
-pub(in crate::files) fn rewind(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
-    rewind_at(receiver(this)?)?;
-    Ok(Value::Null)
+pub(in crate::files) fn rewind(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        move_cursor(context, receiver(this.as_ref())?, Move::Rewind).await?;
+        Ok(Value::Null)
+    })
 }
 
 fn rewind_at(object: &Object) -> Result<(), NativeError> {
     change(object, |dir| {
         dir.position = 0;
-        dir.offset = 0;
+        if let Entries::List { offset, .. } = &mut dir.entries {
+            *offset = 0;
+        }
         dir.skip_dots();
     })
 }
 
-pub(in crate::files) fn next(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
-    advance(receiver(this)?)?;
-    Ok(Value::Null)
+pub(in crate::files) fn next(
+    context: &mut dyn Context,
+    this: Option<Rc<Object>>,
+    _: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        move_cursor(context, receiver(this.as_ref())?, Move::Next).await?;
+        Ok(Value::Null)
+    })
 }
 
 fn advance(object: &Object) -> Result<(), NativeError> {
     change(object, |dir| {
         dir.position = dir.position.saturating_add(1);
-        dir.offset = dir.offset.saturating_add(1);
+        if let Entries::List { offset, .. } = &mut dir.entries {
+            *offset = offset.saturating_add(1);
+        }
         dir.skip_dots();
     })
+}
+
+enum Move {
+    Rewind,
+    Next,
+}
+
+async fn move_cursor(
+    context: &mut dyn Context,
+    object: &Object,
+    operation: Move,
+) -> Result<(), NativeError> {
+    let source = get(object, |dir| match &dir.entries {
+        Entries::Wrapped { handle, .. } => Some((handle.clone(), dir.flags)),
+        Entries::List { .. } => None,
+    })?;
+    let Some((handle, flags)) = source else {
+        return match operation {
+            Move::Rewind => rewind_at(object),
+            Move::Next => advance(object),
+        };
+    };
+    let method = match operation {
+        Move::Rewind => {
+            handle.rewind(context).await?;
+            "DirectoryIterator::rewind"
+        }
+        Move::Next => "DirectoryIterator::next",
+    };
+    let entry = read_wrapper_entry(context, &handle, flags, method).await?;
+    change(object, |dir| {
+        if let Entries::Wrapped { entry: current, .. } = &mut dir.entries {
+            *current = entry;
+        }
+        dir.position = match operation {
+            Move::Rewind => 0,
+            Move::Next => dir.position.saturating_add(1),
+        };
+    })
+}
+
+pub(super) async fn read_wrapper_entry(
+    context: &mut dyn Context,
+    handle: &phera_ext_streams::native::DirectoryStream,
+    flags: i64,
+    method: &str,
+) -> Result<Option<PhpString>, NativeError> {
+    while let Value::String(entry) = handle.read(context, method).await? {
+        if flags & SKIP_DOTS == 0 || !dot(entry.as_bytes()) {
+            return Ok(Some(entry));
+        }
+    }
+    Ok(None)
 }
 
 pub(in crate::files) fn valid(_: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {
@@ -102,7 +174,7 @@ pub(in crate::files) fn seek(
                     .call_method(object.clone(), "rewind", Vec::new())
                     .await?;
             } else {
-                rewind_at(object)?;
+                move_cursor(context, object, Move::Rewind).await?;
             }
         }
         let custom_valid = context.is_user_method(object, "valid");
@@ -129,7 +201,7 @@ pub(in crate::files) fn seek(
                     .call_method(object.clone(), "next", Vec::new())
                     .await?;
             } else {
-                advance(object)?;
+                move_cursor(context, object, Move::Next).await?;
             }
             if get(object, |dir| dir.position)? <= before {
                 return Err(NativeError::throw(
@@ -145,24 +217,56 @@ pub(in crate::files) fn seek(
 struct Cursor {
     object: Rc<Object>,
     filesystem: bool,
+    wrapped: bool,
 }
 
 pub(in crate::files) fn create(
     _: &mut dyn Context,
     object: Rc<Object>,
 ) -> Result<Box<dyn NativeIterator>, NativeError> {
-    get(&object, |_| ())?;
+    let wrapped = get(&object, |dir| {
+        matches!(dir.entries, Entries::Wrapped { .. })
+    })?;
     let filesystem = object.class.is_instance_of(FILESYSTEM);
-    Ok(Box::new(Cursor { object, filesystem }))
+    Ok(Box::new(Cursor {
+        object,
+        filesystem,
+        wrapped,
+    }))
 }
 
 impl NativeIterator for Cursor {
+    fn needs_input(&self, operation: IteratorStep) -> bool {
+        self.wrapped && matches!(operation, IteratorStep::Rewind | IteratorStep::Advance)
+    }
+
+    fn read_input<'a>(
+        &'a mut self,
+        context: &'a mut dyn Context,
+        operation: IteratorStep,
+    ) -> LocalFuture<'a, Result<(), NativeError>> {
+        let operation = if matches!(operation, IteratorStep::Rewind) {
+            Move::Rewind
+        } else {
+            Move::Next
+        };
+        Box::pin(move_cursor(context, &self.object, operation))
+    }
+
     fn rewind(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
-        rewind_at(&self.object)
+        if self.wrapped {
+            Ok(())
+        } else {
+            rewind_at(&self.object)
+        }
     }
 
     fn advance(&mut self, _: &mut dyn Context) -> Result<(), NativeError> {
-        advance(&self.object)
+        if self.wrapped {
+            Ok(())
+        } else {
+            advance(&self.object)
+        }
     }
 
     fn valid(&mut self, _: &mut dyn Context) -> Result<bool, NativeError> {
