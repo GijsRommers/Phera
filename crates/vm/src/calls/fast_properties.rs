@@ -154,7 +154,8 @@ impl Machine<'_> {
         access: impl FnOnce(&PropertyEntry, &Object, Option<&Rc<Class>>) -> Option<R>,
     ) -> Option<R> {
         let function = position.frame.function;
-        let path = self.code.function(function).paths.get(path.index())?;
+        let body = self.code.function(function);
+        let path = body.paths.get(path.index())?;
         let object = match (path.steps.as_slice(), path.base, shape) {
             ([PathStep::Property(_)], base, _) => self.property_object(position, base)?,
             (
@@ -172,11 +173,7 @@ impl Machine<'_> {
         let site = self
             .code
             .cache(function)
-            .site(
-                self.code.function(function),
-                self.code.local(function),
-                position.ip,
-            )?
+            .site(body, self.code.local(function), position.ip)?
             .try_borrow()
             .ok()?;
         let CachedSite::Property(entry) = &*site else {

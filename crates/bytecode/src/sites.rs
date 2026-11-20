@@ -45,7 +45,18 @@ impl SiteTable {
             .count()
     }
 
+    #[inline]
     fn table(&self, instructions: &[Instruction]) -> &[u32] {
+        match self.0.get() {
+            Some(table) => table,
+            None => self.fill(instructions),
+        }
+    }
+
+    /// Works the table out, the first time a request asks.
+    #[cold]
+    #[inline(never)]
+    fn fill(&self, instructions: &[Instruction]) -> &[u32] {
         self.0.get_or_init(|| {
             let mut next = 0;
             // One more position than instructions: a site is keyed by the
