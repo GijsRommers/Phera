@@ -10,7 +10,7 @@
 
 ## Why
 
-The VM hashed the object's class name to find its class, and the tested name (lowercased, with an allocation when it had capitals) in the ancestor set: about 1,600 machine instructions per test against PHP's 410, 1,100 to 1,700 tests per framework request. In the loop: about 900 fewer (`micro/io.php`, three levels of interfaces).
+The VM hashed the object's class name to find its class, and the tested name (lowercased, with an allocation when it had capitals) in the ancestor set: about 1,600 machine instructions per test against PHP's 410, 1,100 to 1,700 tests per framework request. In the loop: about 900 fewer (a test against an interface three levels up, in a loop).
 
 ## Turned down
 
