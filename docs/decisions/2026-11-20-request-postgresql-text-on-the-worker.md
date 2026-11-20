@@ -44,6 +44,12 @@ and the php-src PDO PostgreSQL and pgsql suites. Check round trips against PHP
 before CPU cost, including the first prepared execution, parameterized pgsql,
 the 500-row fetch, an insert in a transaction, and an unbuffered cursor.
 
+The performance gate for this change is the query exchange count. Small reused
+queries still cost more CPU than PHP. The profile is dominated by socket
+work, and the same `by_id` measurement attributes about one extra BSD system
+call per query to Phera on both PostgreSQL and MySQL. Changes to how workers
+wait on sockets will be examined separately after the Doctrine benchmark.
+
 ## Alternatives considered
 
 SQLx and xitca-postgres request binary results on prepared statements.
