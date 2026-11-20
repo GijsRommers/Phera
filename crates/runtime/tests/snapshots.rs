@@ -266,7 +266,11 @@ async fn a_fork_keeps_independent_images_and_fileinfo_flags() {
     let answers = boot_and_answer(
         "gd-fileinfo",
         include_str!("snapshots/extension_state.php"),
-        &["/index.php", "/index.php?mutate=1", "/index.php"],
+        &[
+            "/index.php?fork_probe=1",
+            "/index.php?fork_probe=1&mutate=1",
+            "/index.php?fork_probe=1",
+        ],
     )
     .await
     .expect("GD and fileinfo boot state supports a snapshot");

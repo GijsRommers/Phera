@@ -7,7 +7,11 @@ $indexed = imagecreate(1, 1);
 imagecolorallocate($indexed, 1, 2, 3);
 $finfo = new finfo(FILEINFO_MIME_TYPE);
 
-if (!Phera\snapshot()) {
+// The boot starts without query data. Forks receive it before resuming.
+$startedWithRequest = isset($_GET['fork_probe']);
+Phera\snapshot();
+
+if ($startedWithRequest || !isset($_GET['fork_probe'])) {
     echo "classic\n";
     return;
 }
