@@ -65,17 +65,31 @@ impl PropertyEntry {
         scope: Option<&Rc<crate::classes::Class>>,
         value: &Value,
     ) -> bool {
+        self.write_matching_as(object, scope, value).is_some()
+    }
+
+    /// [`PropertyEntry::write_matching`], saying whether the value stored
+    /// is `value` converted to a float (`1` written to a `float` property
+    /// stores `1.0`): `Some(true)` then, `Some(false)` for `value` as it is,
+    /// `None` when nothing was written.
+    pub(crate) fn write_matching_as(
+        &self,
+        object: &Object,
+        scope: Option<&Rc<crate::classes::Class>>,
+        value: &Value,
+    ) -> Option<bool> {
         if !self.matches(object, scope) {
-            return false;
+            return None;
         }
         let widened = self.write_rule.widened(value);
-        let value = widened.as_ref().unwrap_or(value);
-        if matches!(value, Value::Reference(_)) || !self.write_rule.accepts(value) {
-            return false;
+        let stored = widened.as_ref().unwrap_or(value);
+        if matches!(stored, Value::Reference(_)) || !self.write_rule.accepts(stored) {
+            return None;
         }
-        crate::property_storage::write_direct_known(object, self.known(), value, || {
+        crate::property_storage::write_direct_known(object, self.known(), stored, || {
             self.write_rule.may_create() && !has_magic_properties(object) && object.lazy().is_none()
         })
+        .then_some(widened.is_some())
     }
 
     /// Stores `value` at `keys` of the array the property holds, for a
@@ -113,12 +127,6 @@ impl PropertyEntry {
             return None;
         }
         self.increment(object, mode)
-    }
-
-    /// What a write of `value` stores instead, when the declared type
-    /// converts it as it is (an int into a `float` property).
-    pub(crate) fn widened(&self, value: &Value) -> Option<Value> {
-        self.write_rule.widened(value)
     }
 
     /// Whether this entry was made for the object's class and a read or

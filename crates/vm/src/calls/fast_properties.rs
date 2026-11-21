@@ -101,35 +101,23 @@ impl Machine<'_> {
             _ => return Step::Slow,
         };
         let written = self.with_site(position, (path, Shape::Write), |entry, object, scope| {
-            entry.write_matching(object, scope, &value).then_some(())
+            entry.write_matching_as(object, scope, &value)
         });
-        if written.is_none() {
+        let Some(converted) = written else {
             return Step::Slow;
-        }
+        };
         if let Some(result) = result {
             // The assignment's result is the value stored: `1.0` for a
-            // `float` property assigned `1`. Only an integer can differ.
-            let stored = match value {
-                Value::Int(_) => self.stored_integer(position, path, value),
-                value => value,
+            // `float` property assigned `1`. Outside the guarded loop, into
+            // a register checked above, a store completes.
+            let stored = if converted {
+                converted_to_float(value)
+            } else {
+                value
             };
-            // Outside the guarded loop, into a register checked above, a
-            // store completes.
             let _ = store::<false>(self.registers.tail_mut(base), result, stored);
         }
         Step::Done(position.ip)
-    }
-
-    /// What the property `path` names stored for the integer `value` the
-    /// loop just wrote to it: the float a `float` property converts it to,
-    /// or the integer. Out of line, so the write's arm stays as small.
-    #[cold]
-    #[inline(never)]
-    fn stored_integer(&self, position: Position, path: PathId, value: Value) -> Value {
-        self.with_site(position, (path, Shape::Write), |entry, _, _| {
-            entry.widened(&value)
-        })
-        .unwrap_or(value)
     }
 
     /// `IncDecPath` of one declared integer property.
@@ -253,4 +241,14 @@ pub(super) enum Shape {
     Read,
     Write,
     Element,
+}
+
+/// The float an integer written to a `float` property is stored as.
+#[cold]
+#[inline(never)]
+fn converted_to_float(value: Value) -> Value {
+    match value {
+        Value::Int(integer) => Value::Float(integer as f64),
+        value => value,
+    }
 }
