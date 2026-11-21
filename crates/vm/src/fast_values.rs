@@ -53,7 +53,7 @@ pub(crate) fn value_step<const GUARDED: bool>(
             };
             let result = quiet_binary(op, &left.deref(), &right.deref());
             match result {
-                Some(value) => store::<GUARDED>(slots, dst, value),
+                Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -63,7 +63,7 @@ pub(crate) fn value_step<const GUARDED: bool>(
             };
             let result = quiet_unary(op, &value.deref());
             match result {
-                Some(value) => store::<GUARDED>(slots, dst, value),
+                Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -72,7 +72,7 @@ pub(crate) fn value_step<const GUARDED: bool>(
             jump_on_null(slots, value, target, false, ip)
         }
         Instruction::NewArray { dst, .. } => {
-            store::<GUARDED>(slots, dst, Value::Array(Rc::new(PhpArray::new())))
+            store::<GUARDED, _>(slots, dst, Value::Array(Rc::new(PhpArray::new())))
         }
         Instruction::FetchIndex {
             dst,
@@ -83,7 +83,7 @@ pub(crate) fn value_step<const GUARDED: bool>(
         } => {
             let element = array_element(slots, base, index, mode);
             match element {
-                Some(value) => store::<GUARDED>(slots, dst, value),
+                Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }

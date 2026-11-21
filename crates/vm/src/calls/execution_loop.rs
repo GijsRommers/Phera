@@ -21,7 +21,7 @@ use phera_value::Value;
 use crate::Vm;
 use crate::calls::call_stack::CallStack;
 use crate::calls::frame::Frame;
-use crate::calls::registers::Registers;
+use crate::calls::registers::{Registers, WINDOW};
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
 use crate::fast::{ScalarStep, array_index_step, scalar_step};
@@ -315,7 +315,22 @@ impl Machine<'_> {
         instructions: &[Instruction],
         position: &mut Position,
     ) -> Result<Instruction, LoopExit> {
-        let slots = self.registers.tail_mut(position.frame.base());
+        // Code with more registers than a window runs on the checked tail
+        // of the register file, one instruction at a time, through `step`
+        // and the VM (see `registers::WINDOW`).
+        if self.code.facts(position.frame.function).registers as usize > WINDOW {
+            return match instructions.get(position.ip) {
+                Some(instruction) => {
+                    position.ip += 1;
+                    self.executed += 1;
+                    Ok(*instruction)
+                }
+                None => Err(LoopExit::Invalid),
+            };
+        }
+        let Some(slots) = self.registers.window_at(position.frame.base()) else {
+            return Err(LoopExit::Invalid);
+        };
         let mut ip = position.ip;
         let mut executed = 0;
         let mut work = self.work;
@@ -326,11 +341,11 @@ impl Machine<'_> {
             let previous = ip;
             ip += 1;
             executed += 1;
-            let step = match scalar_step::<GUARDED>(instruction, slots, &mut ip) {
+            let step = match scalar_step::<GUARDED, _>(instruction, slots, &mut ip) {
                 ScalarStep::Fallback => match *instruction {
                     Instruction::FetchIndex {
                         dst, base, index, ..
-                    } => array_index_step::<GUARDED>(dst, base, index, slots),
+                    } => array_index_step::<GUARDED, _>(dst, base, index, slots),
                     _ => ScalarStep::Fallback,
                 },
                 complete => complete,

@@ -68,7 +68,7 @@ impl Machine<'_> {
             _ => return Step::Slow,
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, Value::Bool(answer)) {
+        match store::<GUARDED, _>(slots, destination, Value::Bool(answer)) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
