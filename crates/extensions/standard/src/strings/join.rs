@@ -94,6 +94,11 @@ fn operands<'a>(
 
 fn join_sync(context: &mut dyn Context, arguments: &[Value], function: &str) -> NativeResult {
     let (separator, array) = operands(arguments, function)?;
+    if array.len() == 1
+        && let Some(value) = array.values().next()
+    {
+        return Ok(Value::String(to_php_string(value, context.diagnostics())?));
+    }
     let mut result = joined_buffer(separator, array)?;
     for (index, value) in array.values().enumerate() {
         append_scalar(context, &mut result, separator_at(separator, index), value)?;
