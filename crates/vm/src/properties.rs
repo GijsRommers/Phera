@@ -193,7 +193,7 @@ impl Vm {
         {
             return Err(NativeError::error(format!(
                 "Typed property {}::${name} must not be accessed before initialization",
-                property.declaring
+                phera_value::class_display_name(&property.declaring)
             )));
         }
         if missing == Missing::Warn {
