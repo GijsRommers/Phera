@@ -368,6 +368,11 @@ impl Vm {
         };
         drop(diagnostics);
         let value = value?;
+        if let Some(limit) = crate::typed_increment::IntegerLimit::reached(&old, &value, mode)
+            && let Value::Reference(cell) = self.raw_local(local)
+        {
+            self.check_increment_reference(&cell, limit)?;
+        }
         self.assign_local(local, value.clone())?;
         self.set(
             destination,

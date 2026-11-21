@@ -132,7 +132,7 @@ impl<'n> Fork<'n> {
                 .objects
                 .values()
                 .map(|copy| {
-                    copy.with_properties(crate::PhpArray::heap_bytes)
+                    copy.with_properties(crate::Properties::heap_bytes)
                         .unwrap_or(0)
                 })
                 .sum::<usize>();

@@ -6,6 +6,30 @@ use phera_extension_api::{NativeError, NativePropertyMutation};
 use phera_value::Value;
 
 impl Vm {
+    /// An indexed write that promotes an empty static slot initializes it on success.
+    pub(crate) fn prepare_static_array_promotion(
+        &mut self,
+        class: crate::static_places::StaticClass,
+        name: crate::static_places::StaticName,
+    ) -> Result<std::rc::Rc<crate::reference_holders::StaticProperty>, NativeError> {
+        let (class_name, name) = self.static_property_names(class, name)?;
+        let class = self
+            .classes
+            .get(&class_name)
+            .ok_or_else(|| internal_error!("static class"))?;
+        let property = class
+            .static_properties
+            .iter()
+            .rev()
+            .find(|property| property.name == name)
+            .ok_or_else(|| internal_error!("static property"))?;
+        self.check_set_visibility(property, PropertyChange::Indirect)?;
+        crate::path_dimensions::check_property_array_promotion(property)?;
+        self.class_states
+            .static_property(property)
+            .ok_or_else(|| internal_error!("static storage"))
+    }
+
     /// Class types use inheritance membership; scalar types reuse PHP's existing coercion policy.
     pub(crate) fn coerce_property(
         &mut self,
@@ -30,16 +54,20 @@ impl Vm {
         if let Some(float) = crate::types::widen_int_to_float(&value, declaration_type.mask) {
             return Ok(float);
         }
+        let parent = self
+            .classes
+            .get(&property.declaring)
+            .and_then(|declaring| declaring.parent.as_ref().map(|parent| parent.name.clone()));
         if let Value::Object(object) = &*value.deref() {
             let matches = declaration_type
                 .display
                 .trim_start_matches('?')
                 .split('|')
                 .any(|name| {
-                    let name = if name == "self" {
-                        property.declaring.as_str()
-                    } else {
-                        name
+                    let name = match name {
+                        "self" => property.declaring.as_str(),
+                        "parent" => parent.as_deref().unwrap_or(name),
+                        name => name,
                     };
                     self.classes
                         .get(object.class.name())
@@ -53,13 +81,17 @@ impl Vm {
             self.current()
                 .is_some_and(|frame| frame.function().strict_types)
         });
-        let actual = value.type_name();
         crate::types::coerce(value.clone(), declaration_type, strict.into(), self).map_err(|_| {
+            let actual = crate::types::property_value_type(&value);
             NativeError::type_error(format!(
                 "Cannot assign {actual} to property {}::${} of type {}",
-                property.declaring,
+                phera_value::class_display_name(&property.declaring),
                 property.name,
-                crate::types::php_type_display(declaration_type)
+                resolved_type_display(
+                    &crate::types::php_type_display(declaration_type),
+                    &property.declaring,
+                    parent.as_deref(),
+                )
             ))
         })
     }
@@ -88,9 +120,17 @@ impl Vm {
             return Ok(());
         }
         if let Some(declaration_type) = &property.ty {
-            let converted = self.coerce_property(value.clone(), property, declaration_type)?;
-            if !matches!(value, Value::Reference(_)) {
-                *value = converted;
+            match value {
+                Value::Reference(reference) => {
+                    if matches!(change, PropertyChange::Bind) {
+                        self.coerce_property_binding(reference, property, declaration_type)?;
+                    } else {
+                        self.coerce_property(value.clone(), property, declaration_type)?;
+                    }
+                }
+                _ => {
+                    *value = self.coerce_property(value.clone(), property, declaration_type)?;
+                }
             }
         }
         if let Some(storage) = self.class_states.static_property(property) {
@@ -204,10 +244,32 @@ impl Vm {
                             && mutation != Mutation::Unset
                             && let Some(declaration_type) = &property.ty
                         {
-                            let converted =
-                                self.coerce_property(value.clone(), property, declaration_type)?;
-                            if !matches!(value, Value::Reference(_)) {
-                                *value = converted;
+                            match value {
+                                Value::Reference(reference) => {
+                                    if mutation == Mutation::Bind {
+                                        crate::reference_holders::ReferenceHolders::check_object_storage(
+                                            object, key,
+                                        )?;
+                                        self.coerce_property_binding(
+                                            reference,
+                                            property,
+                                            declaration_type,
+                                        )?;
+                                    } else {
+                                        self.coerce_property(
+                                            value.clone(),
+                                            property,
+                                            declaration_type,
+                                        )?;
+                                    }
+                                }
+                                _ => {
+                                    *value = self.coerce_property(
+                                        value.clone(),
+                                        property,
+                                        declaration_type,
+                                    )?;
+                                }
                             }
                         }
                         if steps.peek().is_none() {
@@ -303,4 +365,29 @@ impl Vm {
             );
         }
     }
+}
+
+/// A property type as PHP prints it in a TypeError: `self` and `parent`
+/// are the classes they stand for, from the declaring class.
+fn resolved_type_display(display: &str, declaring: &str, parent: Option<&str>) -> String {
+    let mut resolved = String::with_capacity(display.len());
+    let mut atom = String::new();
+    let flush = |atom: &mut String, resolved: &mut String| {
+        match atom.as_str() {
+            "self" => resolved.push_str(declaring),
+            "parent" => resolved.push_str(parent.unwrap_or("parent")),
+            other => resolved.push_str(other),
+        }
+        atom.clear();
+    };
+    for character in display.chars() {
+        if matches!(character, '?' | '|' | '&' | '(' | ')') {
+            flush(&mut atom, &mut resolved);
+            resolved.push(character);
+        } else {
+            atom.push(character);
+        }
+    }
+    flush(&mut atom, &mut resolved);
+    resolved
 }

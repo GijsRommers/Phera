@@ -12,6 +12,7 @@ mod fork;
 mod lazy_object;
 mod object;
 mod ops;
+mod properties;
 mod string;
 mod value;
 mod weak_object;
@@ -44,6 +45,7 @@ pub use ops::{
     modulo, mul, negate, pow, shift_left, shift_right, strict_equals, sub, try_get_long,
     unary_plus,
 };
+pub use properties::{Properties, PropertyLayout};
 pub use string::PhpString;
 pub use value::{Value, ValueRef};
 pub use weak_object::WeakObject;

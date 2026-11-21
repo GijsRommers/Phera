@@ -497,10 +497,16 @@ impl Vm {
         let constant = linked
             .constants
             .get(&self.code.unit(function).names[name.index()])?;
-        if constant.deprecated.is_some()
-            || self.needs_enum_backing(linked)
-            || !self.can_read_class_constant(constant)
-        {
+        if constant.deprecated.is_some() || !self.can_read_class_constant(constant) {
+            return None;
+        }
+        // A stored enum case was checked when it was stored; any other
+        // constant of a backed enum waits for that check.
+        let is_case = matches!(
+            constant.initializer,
+            crate::classes::class::ConstantInitializer::EnumCase { .. }
+        );
+        if !is_case && self.needs_enum_backing(linked) {
             return None;
         }
         self.ready_constant_value(&constant.initializer)

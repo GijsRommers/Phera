@@ -189,6 +189,12 @@ fn strtr(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
 }
 
 async fn translate(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    if let [Value::String(string), Value::Array(pairs)] = arguments {
+        if string.is_empty() {
+            return Ok(Value::String(string.clone()));
+        }
+        return translate_pairs(context, string.as_bytes(), pairs).await;
+    }
     let mut prepared = arguments.to_vec();
     let params = if prepared.len() == 2 {
         STRTR_PAIRS
@@ -242,11 +248,11 @@ async fn translate_pairs(
         Some(value) if pairs.len() == 1 => Some(Value::String(stringify(context, value).await?)),
         _ => None,
     };
-    let mut patterns = Vec::new();
+    let mut patterns = Vec::with_capacity(pairs.len());
     for (key, value) in pairs.iter() {
         let key = match key {
-            ArrayKey::Int(number) => number.to_string().into_bytes(),
-            ArrayKey::String(string) => string.as_bytes().to_vec(),
+            ArrayKey::Int(number) => number.to_string().into_bytes().into(),
+            ArrayKey::String(string) => string,
         };
         if key.is_empty() {
             context.warning("strtr(): Ignoring replacement of empty string".to_string());
@@ -259,7 +265,10 @@ async fn translate_pairs(
     let mut result = buffer(string.len())?;
     let mut rest = string;
     while let Some(&byte) = rest.first() {
-        if let Some((key, replacement)) = patterns.iter().find(|(key, _)| rest.starts_with(key)) {
+        if let Some((key, replacement)) = patterns
+            .iter()
+            .find(|(key, _)| rest.starts_with(key.as_bytes()))
+        {
             let replacement = stringify(context, replacement).await?;
             reserve(&mut result, replacement.len())?;
             result.extend_from_slice(replacement.as_bytes());
