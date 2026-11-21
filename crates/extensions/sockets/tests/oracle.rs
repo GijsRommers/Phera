@@ -48,6 +48,7 @@ fn socket_select_matches_php_for_close_reset_and_urgent_data() {
                         Err(error) => panic!("accept for {action}: {error}"),
                     }
                 };
+                peer.set_nonblocking(false).unwrap();
                 thread::sleep(Duration::from_millis(30));
                 let socket = SockRef::from(&peer);
                 if action == "reset" {
