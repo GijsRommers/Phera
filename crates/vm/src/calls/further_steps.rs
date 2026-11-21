@@ -183,7 +183,7 @@ impl Machine<'_> {
     ) -> Step {
         let slots = self.registers.tail_mut(position.frame.base());
         match store::<GUARDED>(slots, destination, value) {
-            ScalarStep::Complete => Step::Done(position.ip),
+            ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
     }
@@ -204,7 +204,7 @@ impl Machine<'_> {
                 self.publish(ip);
                 Step::Yield
             }
-            ScalarStep::Complete => Step::Done(ip),
+            ScalarStep::Complete | ScalarStep::Released => Step::Done(ip),
         }
     }
 }

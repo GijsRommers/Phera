@@ -19,6 +19,11 @@ use crate::operators::fast_binary;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScalarStep {
     Complete,
+    /// Complete, in the guarded loop, and the write dropped the last
+    /// handle on an array, object, resource or PHP reference: a destructor
+    /// may now be waiting, which the loop asks about before the next
+    /// instruction.
+    Released,
     Fallback,
 }
 
@@ -134,25 +139,18 @@ fn clear(slot: &mut Option<Value>) -> ScalarStep {
     write_releasing(slot, None)
 }
 
-/// Writes a register that holds a value. An object that this was the last
-/// handle on is freed here; if that made a destructor due, the answer is
-/// `Fallback`, and the general handler runs the instruction once more (the
-/// stores that come here write the same value again) and then the
-/// destructor. A last handle on an array or PHP reference falls back
-/// before the write: what it frees cannot be told from here.
+/// Writes a register that holds a value, in the guarded loop. When that
+/// was the last handle on what it held, the answer is `Released`: freeing
+/// it may have queued a destructor, which the loop runs before the next
+/// instruction.
 #[inline(always)]
 fn write_releasing(slot: &mut Option<Value>, value: Option<Value>) -> ScalarStep {
-    let pool = match slot {
-        Some(Value::Object(object)) if std::rc::Rc::strong_count(object) == 1 => object.pool(),
-        Some(Value::Array(_) | Value::Resource(_) | Value::Reference(_)) if frees_on_drop(slot) => {
-            return ScalarStep::Fallback;
-        }
-        _ => None,
-    };
+    let last = frees_on_drop(slot);
     *slot = value;
-    match pool {
-        Some(pool) if pool.has_doomed() => ScalarStep::Fallback,
-        _ => ScalarStep::Complete,
+    if last {
+        ScalarStep::Released
+    } else {
+        ScalarStep::Complete
     }
 }
 
@@ -534,11 +532,13 @@ pub(crate) fn array_index_step<const GUARDED: bool>(
     let Some(target) = slots.get_mut(destination.index()) else {
         return ScalarStep::Fallback;
     };
-    if GUARDED && frees_on_drop(target) {
-        return ScalarStep::Fallback;
-    }
+    let released = GUARDED && frees_on_drop(target);
     *target = Some(value);
-    ScalarStep::Complete
+    if released {
+        ScalarStep::Released
+    } else {
+        ScalarStep::Complete
+    }
 }
 
 /// Runs a simple store that fell back only because the register it writes

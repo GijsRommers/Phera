@@ -48,9 +48,6 @@ impl Machine<'_> {
         path: PathId,
         (source, result): (Reg, Option<Reg>),
     ) -> Step {
-        if GUARDED {
-            return Step::Slow;
-        }
         let base = position.frame.base();
         // The result register is checked first: once the element is
         // written, the value must be stored.

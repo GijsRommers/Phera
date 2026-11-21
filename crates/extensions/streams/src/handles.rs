@@ -122,6 +122,9 @@ pub(crate) async fn open_resource(
             None => Value::Bool(false),
         });
     }
+    if crate::socket::http::is_url(name) {
+        return crate::socket::http::fopen(context, function, name, mode, stream_context).await;
+    }
     let stream = if let Target::Gzip(filename) = Target::parse(name)
         && !crate::user_wrappers::protocol_disabled(context, b"compress.zlib")
         && let Some(level) = crate::context_options::option(stream_context, "zlib", "level")
@@ -188,6 +191,9 @@ pub(crate) async fn close_arguments(
         return Ok(Value::Bool(true));
     }
     let (gzip, filtered) = with_stream(resource, |stream| {
+        if let crate::stream::Backing::Socket(socket) = &stream.backing {
+            socket.retire();
+        }
         (
             stream.wrapper.is_gzip(),
             stream
@@ -234,7 +240,13 @@ fn feof(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
         if let Some(file) = crate::user_file::resource_file(resource) {
             return Ok(Value::Bool(file.at_end(context, "feof").await?));
         }
-        with_stream(resource, |stream| Value::Bool(stream.eof))
+        with_stream(resource, |stream| {
+            let eof = match &stream.backing {
+                crate::stream::Backing::Socket(socket) => socket.eof(),
+                _ => stream.eof,
+            };
+            Value::Bool(eof)
+        })
     })
 }
 
@@ -449,6 +461,9 @@ fn fdatasync(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
 }
 
 pub fn read_notice(context: &mut dyn Context, function: &str, error: &io::Error, amount: u64) {
+    if error.kind() == io::ErrorKind::TimedOut {
+        return;
+    }
     if error.kind() == io::ErrorKind::Other && error.get_ref().is_some() {
         context.warning(format!("{function}(): {error}"));
     } else if let Some(errno) = error.raw_os_error() {

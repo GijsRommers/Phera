@@ -277,7 +277,16 @@ impl Machine<'_> {
                 Err(exit) => return exit,
             };
             match self.step::<GUARDED>(instruction, position) {
-                Step::Done(ip) => position.ip = ip,
+                Step::Done(ip) => {
+                    // In the guarded loop a step may have let go of the
+                    // last handle on an object with a destructor: it runs
+                    // before the next instruction, as the VM runs it.
+                    if GUARDED && self.ids.has_doomed() {
+                        self.publish(ip);
+                        return destructors_due();
+                    }
+                    position.ip = ip;
+                }
                 Step::Switched(next) => {
                     // A return releases the frame's variables. Simple
                     // instructions release nothing (see `crate::fast`), and
@@ -329,6 +338,11 @@ impl Machine<'_> {
             if step == ScalarStep::Fallback {
                 break Ok(*instruction);
             }
+            // Only the guarded loop's writes answer `Released`: freeing what
+            // a register held may have queued a destructor.
+            if GUARDED && step == ScalarStep::Released && self.ids.has_doomed() {
+                break Err(destructors_due());
+            }
             // Only backward jumps count as work; comparing positions also
             // covers fused compare-and-branch instructions.
             if ip <= previous {
@@ -377,17 +391,6 @@ impl Machine<'_> {
                 };
                 let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
-                // In the guarded loop, overwriting the variables could let go
-                // of an object whose destructor must run at once.
-                if GUARDED
-                    && [key, value].iter().any(|register| {
-                        slots
-                            .get(register.index())
-                            .is_none_or(crate::fast::owns_heap_values)
-                    })
-                {
-                    return Step::Slow;
-                }
                 match crate::iteration::keyed_step(
                     iter,
                     (key, value),

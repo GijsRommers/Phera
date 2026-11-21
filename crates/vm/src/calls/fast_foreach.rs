@@ -32,9 +32,6 @@ impl Machine<'_> {
         iterator: IterId,
         source: Reg,
     ) -> Step {
-        if GUARDED {
-            return Step::Slow;
-        }
         let slot = position.frame.base() + source.index();
         let [Some(Value::Array(array))] = self.registers.window(slot, 1) else {
             return Step::Slow;
@@ -71,7 +68,7 @@ impl Machine<'_> {
         position: Position,
         iterator: IterId,
     ) -> Step {
-        if GUARDED || !position.frame.has_extras() {
+        if !position.frame.has_extras() {
             return Step::Slow;
         }
         let Some(extras) = self.stack.current_extras_present() else {
