@@ -2,7 +2,7 @@
 
 - Date: 2026-11-21
 - Area: Calls
-- Decided by: Design
+- Decided by: Mistral Large 4 (implementation), reviewed by Fable
 
 ## Decision
 
@@ -10,7 +10,7 @@
 
 - the name is looked up in the request's class table with `ClassTable::get`, which strips a leading backslash and lowercases into a stack buffer without allocating; the answer is the entry's kind;
 - a miss with the autoload flag off answers `false`;
-- a miss with the flag on answers `false` only when no autoloader is registered (the same `autoload.callbacks` state the general lookup reads) and the name cannot be a bundled `Phera\...` class; otherwise the call falls back.
+- a miss with the flag on answers `false` only when no autoloader is registered (the same `autoload.callbacks` state the general lookup reads) and the name is not one a bundled source can have (`bundled_classes::is_bundled_class_name`, the predicate `load_bundled_class` itself uses); otherwise the call falls back.
 
 Every other shape — a named or coerced argument, a name that is not valid UTF-8, a wrong argument count — returns `BatchExit::NativeCall` with the window intact, and `Vm::class_intrinsic` remains the single definition of the full behaviour, including running the autoloader and raising PHP's errors.
 

@@ -274,12 +274,30 @@ impl Vm {
                         crate::class_intrinsics::ClassFunction::ObjectId => {
                             self.object_id_call(call, destination)
                         }
-                        function @ (crate::class_intrinsics::ClassFunction::ClassExists
-                        | crate::class_intrinsics::ClassFunction::InterfaceExists
-                        | crate::class_intrinsics::ClassFunction::TraitExists
-                        | crate::class_intrinsics::ClassFunction::EnumExists) => {
-                            self.class_query_call(function, call, destination)
-                        }
+                        crate::class_intrinsics::ClassFunction::ClassExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Class,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::InterfaceExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Interface,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::TraitExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Trait,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::EnumExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Enum,
+                                call,
+                                destination,
+                            ),
                         _ => Some(BatchExit::NativeCall(destination)),
                     })
                 }

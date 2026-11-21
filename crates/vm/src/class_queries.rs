@@ -23,18 +23,39 @@ use phera_bytecode::{ClassKind, Reg};
 use phera_value::{PhpString, Value};
 
 use crate::Vm;
+use crate::bundled_classes::is_bundled_class_name;
 use crate::calls::execution_loop::BatchExit;
 use crate::calls::prepared_call::PreparedCall;
-use crate::class_intrinsics::ClassFunction;
+
+/// Which entry kind a `*_exists` call asks for, made by the routing arm in
+/// `calls::sync_native`.
+#[derive(Clone, Copy)]
+pub(crate) enum ExistsKind {
+    Class,
+    Interface,
+    Trait,
+    Enum,
+}
+
+impl ExistsKind {
+    /// Whether a class table entry of `kind` answers the call.
+    fn answers(self, kind: ClassKind) -> bool {
+        match self {
+            Self::Class => kind.is_class(),
+            Self::Interface => kind == ClassKind::Interface,
+            Self::Trait => kind == ClassKind::Trait,
+            Self::Enum => kind == ClassKind::Enum,
+        }
+    }
+}
 
 impl Vm {
-    /// `class_exists`, `interface_exists`, `trait_exists` and `enum_exists`
-    /// for a plain call: the answer from the class table, or `None` when the
-    /// call has a shape the general handler must see.
+    /// The four `*_exists` functions for a plain call: the answer from the
+    /// class table, or the exit for the general handler.
     #[inline(never)]
     pub(crate) fn class_query_call(
         &mut self,
-        function: ClassFunction,
+        kind: ExistsKind,
         call: PreparedCall,
         destination: Reg,
     ) -> Option<BatchExit> {
@@ -47,9 +68,9 @@ impl Vm {
                 .is_some_and(|details| details.named.is_none() && details.extra_named.is_empty());
         let answer = if plain {
             match self.registers.window(call.base(), count) {
-                [Some(Value::String(name))] => self.exists_answer(function, name, true),
+                [Some(Value::String(name))] => self.exists_answer(kind, name, true),
                 [Some(Value::String(name)), Some(Value::Bool(autoload))] => {
-                    self.exists_answer(function, name, *autoload)
+                    self.exists_answer(kind, name, *autoload)
                 }
                 _ => None,
             }
@@ -70,42 +91,24 @@ impl Vm {
     /// The answer for a `*_exists` call whose first argument is `name`:
     /// `Some(answer)` when no PHP code can change it, `None` to fall back to
     /// the general handler.
-    fn exists_answer(
-        &self,
-        function: ClassFunction,
-        name: &PhpString,
-        autoload: bool,
-    ) -> Option<bool> {
+    fn exists_answer(&self, kind: ExistsKind, name: &PhpString, autoload: bool) -> Option<bool> {
         // The general handler lossy-converts bytes that are not UTF-8 before
         // looking the name up; only a valid name takes this path.
         let name = std::str::from_utf8(name.as_bytes()).ok()?;
         if let Some(class) = self.classes.get(name) {
-            return Some(match function {
-                ClassFunction::ClassExists => class.kind.is_class(),
-                ClassFunction::InterfaceExists => class.kind == ClassKind::Interface,
-                ClassFunction::TraitExists => class.kind == ClassKind::Trait,
-                ClassFunction::EnumExists => class.kind == ClassKind::Enum,
-                _ => return None,
-            });
+            return Some(kind.answers(class.kind));
         }
         if !autoload {
             return Some(false);
         }
         // A miss with autoloading allowed goes to the general handler, which
-        // runs the registered loaders or loads a bundled `Phera\...` class.
-        // With no loader registered and a name no bundled source can have,
-        // the general lookup also answers "no class" without running PHP.
-        if self.has_autoloaders() || may_load_bundled(name) {
+        // runs the registered loaders or loads a bundled class. With no
+        // loader registered and a name no bundled source can have, the
+        // general lookup also answers "no class" without running PHP.
+        let callback_name = name.strip_prefix('\\').unwrap_or(name);
+        if self.has_autoloaders() || is_bundled_class_name(callback_name) {
             return None;
         }
         Some(false)
     }
-}
-
-/// Whether `name` could name a bundled class: the general lookup loads those
-/// from their source even when no autoloader is registered.
-fn may_load_bundled(name: &str) -> bool {
-    let name = name.strip_prefix('\\').unwrap_or(name);
-    let bytes = name.as_bytes();
-    bytes.len() >= 6 && bytes[..6].eq_ignore_ascii_case(b"phera") && bytes[6] == b'\\'
 }
