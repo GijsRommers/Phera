@@ -64,7 +64,7 @@ for ($i = 0; $i < 2; $i++) {
     attempt('promoted wrong 2', fn () => new Promoted($o, $u, 1));
 }
 
---EXPECT--
+--EXPECTF--
 p plain: ok
 p sub: ok
 p unrelated: Cannot assign Unrelated to property Holder::$p of type Plain
@@ -151,8 +151,8 @@ parent: ok
 parent wrong: Cannot assign Plain to property Child::$up of type Base
 maybe: ok
 promoted: ok
-promoted wrong: Promoted::__construct(): Argument #1 ($a) must be of type Plain, Unrelated given, called in /Users/gijsr/.phera-review/typed/writes.php on line 60
-promoted wrong 2: Promoted::__construct(): Argument #2 ($b) must be of type ?Marker, Unrelated given, called in /Users/gijsr/.phera-review/typed/writes.php on line 61
+promoted wrong: Promoted::__construct(): Argument #1 ($a) must be of type Plain, Unrelated given, called in %s on line 60
+promoted wrong 2: Promoted::__construct(): Argument #2 ($b) must be of type ?Marker, Unrelated given, called in %s on line 61
 promoted: ok
-promoted wrong: Promoted::__construct(): Argument #1 ($a) must be of type Plain, Unrelated given, called in /Users/gijsr/.phera-review/typed/writes.php on line 60
-promoted wrong 2: Promoted::__construct(): Argument #2 ($b) must be of type ?Marker, Unrelated given, called in /Users/gijsr/.phera-review/typed/writes.php on line 61
+promoted wrong: Promoted::__construct(): Argument #1 ($a) must be of type Plain, Unrelated given, called in %s on line 60
+promoted wrong 2: Promoted::__construct(): Argument #2 ($b) must be of type ?Marker, Unrelated given, called in %s on line 61
