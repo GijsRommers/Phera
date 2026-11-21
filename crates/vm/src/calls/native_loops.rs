@@ -251,10 +251,16 @@ impl Vm {
             Kind::Reduce => [Some(std::mem::take(&mut state.carry)), Some(element)],
         };
         state.key = key;
-        let (target, origin) = (state.callee.target.clone(), state.origin);
-        let arguments: Vec<Value> = arguments.into_iter().flatten().collect();
-        if let CallTarget::Closure(closure) = &target
-            && self.enter_closure_callback(closure, &arguments)
+        let origin = state.origin;
+        let closure = match &state.callee.target {
+            CallTarget::Closure(closure) => Some(closure.clone()),
+            _ => None,
+        };
+        let count = arguments.iter().flatten().count();
+        let mut arguments = arguments.map(Option::unwrap_or_default);
+        let arguments = arguments.get_mut(..count).unwrap_or_default();
+        if let Some(closure) = closure
+            && self.enter_closure_callback(&closure, arguments)
         {
             return Ok(());
         }
@@ -262,8 +268,8 @@ impl Vm {
             return Err(internal_error!("native loop"));
         };
         self.prepare_call(state.callee.clone())?;
-        for (index, argument) in arguments.into_iter().enumerate() {
-            self.store_sent_value(index, argument)?;
+        for (index, argument) in arguments.iter_mut().enumerate() {
+            self.store_sent_value(index, std::mem::take(argument))?;
         }
         match self.with_argument_origin(origin, |vm| vm.enter_prepared_call(None))? {
             crate::calls::call_execution::CallEntry::Php => {}
@@ -281,7 +287,7 @@ impl Vm {
     /// and its frame. `false`, with nothing changed, for any shape that
     /// needs the general path (a type an argument does not have as it is, a
     /// default to fill, a bound or unbound closure, the frame limit).
-    fn enter_closure_callback(&mut self, closure: &Rc<Object>, arguments: &[Value]) -> bool {
+    fn enter_closure_callback(&mut self, closure: &Rc<Object>, arguments: &mut [Value]) -> bool {
         use crate::calls::frame::Frame;
         use crate::function_facts::FunctionShape;
         let function = {
@@ -324,8 +330,9 @@ impl Vm {
         let Some(call) = self.call_stack.pop_plain() else {
             return false;
         };
-        for (offset, argument) in arguments.iter().enumerate() {
-            self.registers.put(call.base() + offset, argument.clone());
+        for (offset, argument) in arguments.iter_mut().enumerate() {
+            self.registers
+                .put(call.base() + offset, std::mem::take(argument));
         }
         let mut frame = Frame::of_kind(function, call.kind, call.base(), None);
         if usize::from(facts.parameters) > count {
