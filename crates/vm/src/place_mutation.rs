@@ -79,29 +79,34 @@ impl Vm {
         mut value: Value,
         binding: Binding,
     ) -> Result<(), NativeError> {
-        let static_promotion = if let Some((class, name)) =
-            crate::static_places::static_base(place.base()?)
-            && let Some(first) = keys.iter().next()
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?)
+            && !keys.is_empty()
         {
             let current = self.get(register);
-            match (first, &*current.deref()) {
-                (PathKey::Index(_), Value::Null | Value::Bool(false)) => {
-                    Some(self.prepare_static_array_promotion(class, name)?)
-                }
-                (_, Value::Object(_)) => None,
-                _ => {
-                    self.validate_static_mutation(
-                        class,
-                        name,
-                        &mut value,
-                        PropertyChange::Indirect,
-                    )?;
-                    None
-                }
+            let promote_array = matches!(&*current.deref(), Value::Null | Value::Bool(false))
+                && matches!(keys.iter().next(), Some(PathKey::Index(_)));
+            if promote_array {
+                drop(current);
+                let storage = self.prepare_static_array_promotion(class, name)?;
+                self.write_validated_place(place, register, keys, value, binding)?;
+                storage.value_initialized.set(true);
+                return Ok(());
             }
-        } else {
-            None
-        };
+            if !current.is_object() {
+                self.validate_static_mutation(class, name, &mut value, PropertyChange::Indirect)?;
+            }
+        }
+        self.write_validated_place(place, register, keys, value, binding)
+    }
+
+    fn write_validated_place(
+        &mut self,
+        place: &AccessPath,
+        register: phera_bytecode::Reg,
+        keys: crate::inline_stack::InlineStack<PathKey>,
+        mut value: Value,
+        binding: Binding,
+    ) -> Result<(), NativeError> {
         if binding == Binding::ByReference
             && matches!(keys.iter().last(), Some(PathKey::Index(_)))
             && let Value::Reference(reference) = &value
@@ -143,9 +148,6 @@ impl Vm {
         if let Err(error) = result {
             self.set(register, root);
             return Err(error);
-        }
-        if let Some(storage) = static_promotion {
-            storage.value_initialized.set(true);
         }
         let updated = root;
         if let PathBase::GlobalNamed { name, .. } = place.base()? {

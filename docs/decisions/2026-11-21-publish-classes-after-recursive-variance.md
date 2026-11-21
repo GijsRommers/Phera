@@ -33,8 +33,6 @@ rechecked if that type has a pending declaration in the current request.
 The worker validates the ordinary class numbers first, then checks the
 missing names against the pending declarations. Nominal comparisons use
 borrowed names and consult linked ancestry before walking declarations.
-Ancestry checks fold short names in the same stack buffer as class
-lookups so mixed-case types can be checked without an allocation.
 
 ## Turned down
 

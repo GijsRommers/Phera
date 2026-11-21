@@ -190,9 +190,11 @@ impl Class {
         if self.name.eq_ignore_ascii_case(name) {
             return true;
         }
-        super::class_table::with_lowercase_name(name, |lowercase| {
-            self.ancestors.contains(lowercase)
-        })
+        if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            self.ancestors.contains(&name.to_ascii_lowercase())
+        } else {
+            self.ancestors.contains(name)
+        }
     }
 }
 

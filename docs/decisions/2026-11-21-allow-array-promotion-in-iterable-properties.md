@@ -12,8 +12,9 @@ property to an array. The existing iterable mask permits the promotion.
 When indexing an empty static property, validate its declared type
 before promotion, and mark the slot initialized after the write.
 Promotion through an alias checks every typed holder before creating
-the array. The checks run only on a null or false value that is about
-to become an array.
+the array. The reference arm owns that check, and the static promotion
+arm owns the initialization state. Ordinary writes use the same path
+through the array mutation code as writes on main.
 
 ## Why
 

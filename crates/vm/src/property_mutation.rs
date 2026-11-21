@@ -113,15 +113,15 @@ impl Vm {
         }
         if let Some(declaration_type) = &property.ty {
             match value {
-                Value::Reference(reference) if matches!(change, PropertyChange::Bind) => {
-                    self.coerce_property_binding(reference, property, declaration_type)?;
+                Value::Reference(reference) => {
+                    if matches!(change, PropertyChange::Bind) {
+                        self.coerce_property_binding(reference, property, declaration_type)?;
+                    } else {
+                        self.coerce_property(value.clone(), property, declaration_type)?;
+                    }
                 }
                 _ => {
-                    let converted =
-                        self.coerce_property(value.clone(), property, declaration_type)?;
-                    if !matches!(value, Value::Reference(_)) {
-                        *value = converted;
-                    }
+                    *value = self.coerce_property(value.clone(), property, declaration_type)?;
                 }
             }
         }
@@ -237,25 +237,30 @@ impl Vm {
                             && let Some(declaration_type) = &property.ty
                         {
                             match value {
-                                Value::Reference(reference) if mutation == Mutation::Bind => {
-                                    crate::reference_holders::ReferenceHolders::check_object_storage(
-                                        object, key,
-                                    )?;
-                                    self.coerce_property_binding(
-                                        reference,
-                                        property,
-                                        declaration_type,
-                                    )?;
+                                Value::Reference(reference) => {
+                                    if mutation == Mutation::Bind {
+                                        crate::reference_holders::ReferenceHolders::check_object_storage(
+                                            object, key,
+                                        )?;
+                                        self.coerce_property_binding(
+                                            reference,
+                                            property,
+                                            declaration_type,
+                                        )?;
+                                    } else {
+                                        self.coerce_property(
+                                            value.clone(),
+                                            property,
+                                            declaration_type,
+                                        )?;
+                                    }
                                 }
                                 _ => {
-                                    let converted = self.coerce_property(
+                                    *value = self.coerce_property(
                                         value.clone(),
                                         property,
                                         declaration_type,
                                     )?;
-                                    if !matches!(value, Value::Reference(_)) {
-                                        *value = converted;
-                                    }
                                 }
                             }
                         }
