@@ -218,9 +218,13 @@ fn candidate(
             return None;
         }
         let instruction = function.instructions[index];
-        if operand_regs(function, instruction).writes(local)
-            || (runs_php_code(instruction) && function.dynamic_scope)
-        {
+        if operand_regs(function, instruction).writes(local) {
+            return None;
+        }
+        // The warning for an undefined local moves from the copy into the
+        // consumer, so nothing that can run PHP code or raise may sit between
+        // them: main warns at the copy, before any such effect.
+        if index != consumer && runs_php_code(instruction) {
             return None;
         }
     }

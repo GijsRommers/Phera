@@ -276,6 +276,7 @@ pub(crate) fn runs_php_code(instruction: Instruction) -> bool {
         | I::NewDynamic { .. }
         | I::Include { .. }
         | I::Eval { .. }
+        | I::Raise { .. }
         | I::Clone { .. }
         | I::Echo { .. }
         | I::YieldFrom { .. }
