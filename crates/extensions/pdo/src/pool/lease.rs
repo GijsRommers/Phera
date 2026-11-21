@@ -10,10 +10,11 @@ use phera_extension_api::PhpArray;
 
 use crate::constants::ATTR_SERVER_INFO;
 use crate::drivers::{Column, Driver, Execution, Prepared, Rows, connection_error};
+use crate::dsn::DriverName;
 use crate::errors::DbError;
 use crate::metadata::Metadata;
 use crate::parameters::BoundValue;
-use crate::placeholders::Sql;
+use crate::placeholders::{Sql, Syntax};
 
 pub struct Lease {
     connection: OnceCell<DriverLease>,
@@ -156,6 +157,27 @@ impl Lease {
                 result
             })
             .await
+    }
+
+    pub async fn parse_sql(&self, source: String, driver: DriverName) -> Result<Sql, DbError> {
+        let default = match driver {
+            DriverName::Sqlite => return Ok(Sql::sqlite(source)),
+            DriverName::Postgres => Syntax::POSTGRES,
+            DriverName::Mysql => Syntax::MYSQL,
+        };
+        let syntax = if Sql::needs_string_mode(&source) {
+            self.run(async |driver| match driver {
+                Driver::Postgres(postgres) => Ok(Syntax::Postgres {
+                    backslash_strings: postgres.backslash_strings().await?,
+                }),
+                Driver::Mysql(mysql) => mysql.placeholder_syntax().await,
+                Driver::Sqlite(_) => Err(connection_error("Mismatched database driver")),
+            })
+            .await?
+        } else {
+            default
+        };
+        Sql::parse(source, syntax)
     }
 
     pub async fn prepare(&self, sql: &Sql, number: u64) -> Result<Prepared, DbError> {
