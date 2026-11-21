@@ -166,6 +166,70 @@ pub(crate) fn display_key(key: &ArrayKey) -> String {
 }
 
 impl Vm {
+    /// Warn for each path key of `instruction` that is a named local with no
+    /// value yet.
+    ///
+    /// A key used to be a temporary the compiler filled with a `Move` from
+    /// the local, and that `Move` raised PHP's "Undefined variable" warning
+    /// before the path was walked. The compiler can now name the local in the
+    /// path itself; reading it in place moves the warning here, once, in key
+    /// order and before the base is read. Temporaries are always assigned
+    /// before use, so they never warn.
+    ///
+    /// ```php
+    /// $row[$key];   // Undefined variable $key when $key was never assigned
+    /// $o->$prop;
+    /// ```
+    pub(crate) fn warn_undefined_path_keys(
+        &mut self,
+        instruction: phera_bytecode::Instruction,
+    ) -> Result<(), NativeError> {
+        let path = match instruction {
+            phera_bytecode::Instruction::Fetch { path, .. }
+            | phera_bytecode::Instruction::FetchIndex { path, .. }
+            | phera_bytecode::Instruction::AssignPath { path, .. }
+            | phera_bytecode::Instruction::AssignPathFromLocal { path, .. }
+            | phera_bytecode::Instruction::AssignOpPath { path, .. }
+            | phera_bytecode::Instruction::IncDecPath { path, .. }
+            | phera_bytecode::Instruction::UnsetPath { path }
+            | phera_bytecode::Instruction::IssetPath { path, .. }
+            | phera_bytecode::Instruction::MakeReference { path, .. }
+            | phera_bytecode::Instruction::BindReference { path, .. }
+            | phera_bytecode::Instruction::SendPath { path }
+            | phera_bytecode::Instruction::IterStartReference { path, .. } => path,
+            _ => return Ok(()),
+        };
+        let place = self.path(path)?;
+        for step in place.steps()? {
+            let register = match step {
+                Step::Index(register) | Step::DynamicProperty(register) => register,
+                Step::Property(_) | Step::Append => continue,
+            };
+            let missing = self.current().and_then(|frame| {
+                if register.index() >= frame.function().locals.len() {
+                    return None;
+                }
+                let defined = frame
+                    .slots(&self.registers)
+                    .get(register.index())
+                    .is_some_and(Option::is_some);
+                if defined {
+                    return None;
+                }
+                frame
+                    .function()
+                    .locals
+                    .get(register.index())
+                    .and_then(|name| frame.unit().names.get(name.index()))
+                    .cloned()
+            });
+            if let Some(name) = missing {
+                self.warn(format!("Undefined variable ${name}"));
+            }
+        }
+        Ok(())
+    }
+
     /// Read a root slot without evaluating array keys, retaining undefined-variable warnings.
     pub(crate) fn read_root(&mut self, register: Reg, missing: Missing) -> Value {
         let slot = self

@@ -32,6 +32,9 @@ impl Vm {
         if self.object_ids.has_due() && self.release_and_store(instruction) {
             return Ok(None);
         }
+        // A path key that names an undefined local used to be copied by a
+        // `Move`, which warned before the path was walked.
+        self.warn_undefined_path_keys(instruction)?;
         match instruction {
             I::AssignPathFromLocal { .. }
             | I::MakeReference { .. }
