@@ -104,7 +104,10 @@ impl<'a> Address<'a> {
             .strip_prefix('[')
             .and_then(|host| host.strip_suffix(']'))
             .unwrap_or(host);
-        let port = port.parse().map_err(|_| malformed())?;
+        let port = port
+            .trim_end_matches('/')
+            .parse()
+            .map_err(|_| malformed())?;
         Ok(Self {
             transport,
             host,
@@ -137,6 +140,11 @@ pub(super) fn name(address: &SockAddr) -> Option<Vec<u8>> {
         return Some(address.to_string().into_bytes());
     }
     if address.domain() == Domain::UNIX {
+        if let Some(name) = address.as_abstract_namespace() {
+            let mut bytes = vec![0];
+            bytes.extend_from_slice(name);
+            return Some(bytes);
+        }
         return address
             .as_pathname()
             .map(|path| path.as_os_str().as_bytes().to_vec());
@@ -144,17 +152,46 @@ pub(super) fn name(address: &SockAddr) -> Option<Vec<u8>> {
     None
 }
 
-pub(super) fn source(address: &[u8]) -> io::Result<SocketAddr> {
+pub(super) fn received_from(address: rustix::net::SocketAddrAny) -> Option<Vec<u8>> {
+    use rustix::net::SocketAddrUnix;
+
+    if let Ok(internet) = SocketAddr::try_from(address.clone()) {
+        return Some(internet.to_string().into_bytes());
+    }
+    let unix = SocketAddrUnix::try_from(address).ok()?;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if let Some(name) = unix.abstract_name() {
+        let mut bytes = vec![0];
+        bytes.extend_from_slice(name);
+        return Some(bytes);
+    }
+    unix.path_bytes().map(<[u8]>::to_vec)
+}
+
+#[derive(PartialEq, Eq)]
+pub(super) struct Source {
+    pub address: SocketAddr,
+    pub label: String,
+}
+
+pub(super) fn source(address: &[u8]) -> Result<Option<Source>, String> {
     use std::net::IpAddr;
 
-    let address = std::str::from_utf8(address).unwrap_or_default();
-    if let Ok(ip) = address.parse::<IpAddr>() {
-        return Ok(SocketAddr::new(ip, 0));
-    }
-    address.parse().map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("Invalid IP Address: {address}"),
-        )
-    })
+    let label = String::from_utf8_lossy(address);
+    let parts = if let Some(bracketed) = label.strip_prefix('[') {
+        bracketed.split_once("]:")
+    } else {
+        label.split_once(':')
+    };
+    let Some((host, port)) = parts else {
+        return Ok(None);
+    };
+    let ip = host
+        .parse::<IpAddr>()
+        .map_err(|_| format!("Invalid IP Address: {host}"))?;
+    let port = port.trim().parse::<i64>().unwrap_or(0) as u16;
+    Ok(Some(Source {
+        address: SocketAddr::new(ip, port),
+        label: label.into_owned(),
+    }))
 }

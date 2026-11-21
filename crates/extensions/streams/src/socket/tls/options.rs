@@ -2,7 +2,7 @@
 
 use std::{io, path::PathBuf};
 
-use phera_extension_api::{ArrayKey, PhpArray, Value, value::to_bool};
+use phera_extension_api::{ArrayKey, Context, PhpArray, Value, WorkingDirectory, value::to_bool};
 
 #[derive(Clone, PartialEq, Eq)]
 pub(in crate::socket) struct Options {
@@ -22,6 +22,31 @@ pub(in crate::socket) struct Options {
 }
 
 impl Options {
+    pub fn in_context(
+        context: &mut dyn Context,
+        options: &PhpArray,
+        client: bool,
+    ) -> io::Result<Self> {
+        let mut options = Self::parse(options, client)?;
+        for path in [
+            &mut options.cafile,
+            &mut options.capath,
+            &mut options.local_cert,
+            &mut options.local_pk,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if path.is_relative() {
+                *path = context
+                    .state()
+                    .get_or_default::<WorkingDirectory>()
+                    .resolve(path)?;
+            }
+        }
+        Ok(options)
+    }
+
     pub fn parse(options: &PhpArray, client: bool) -> io::Result<Self> {
         let get = |key: &str| {
             options

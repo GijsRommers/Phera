@@ -119,7 +119,7 @@ async fn fetch(path: &str, options: &PhpArray, ssl: &PhpArray) -> io::Result<(Ve
         return Err(invalid("HTTP proxy context options are not supported"));
     }
     let request = build_request(uri.clone(), authority.as_str(), options)?;
-    let socket = transport::connect(&address, None, false).await?;
+    let socket = transport::connect(&address, None, false, |_| {}).await?;
     let _ = socket.peer.set(address.host.to_owned());
     let channel: Box<dyn HttpChannel> = if encrypted {
         let connection = Io {
@@ -130,10 +130,9 @@ async fn fetch(path: &str, options: &PhpArray, ssl: &PhpArray) -> io::Result<(Ve
         };
         let options = tls::Options::parse(ssl, true)?;
         tls::enable(&connection, &options, options.method.unwrap_or(121) | 1).await?;
-        let secure = tls::take_channel(&socket)
+        tls::take_channel(&socket)
             .await
-            .ok_or_else(|| invalid("TLS setup failed"))?;
-        secure
+            .ok_or_else(|| invalid("TLS setup failed"))?
     } else {
         Box::new(socket.wire.clone())
     };

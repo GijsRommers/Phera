@@ -18,7 +18,7 @@ use tokio::{
 
 use super::{
     Connection, Io,
-    address::{Address, Transport},
+    address::{Address, Source, Transport},
     client::transport_error,
     tls, transport,
 };
@@ -37,7 +37,7 @@ pub(super) struct Key {
     pub application: Option<PathBuf>,
     pub id: IdKind,
     pub uri: Vec<u8>,
-    pub source: Option<Vec<u8>>,
+    pub source: Option<Source>,
     pub tls: Option<tls::Options>,
 }
 
@@ -49,8 +49,8 @@ pub(super) struct Dial {
 }
 
 impl Dial {
-    pub async fn open(&self) -> io::Result<Arc<Connection>> {
-        self.establish(self.material().await?).await
+    pub async fn open(&self, warning: impl FnMut(String)) -> io::Result<Arc<Connection>> {
+        self.establish(self.material().await?, warning).await
     }
 
     async fn material(&self) -> io::Result<Option<tls::Material>> {
@@ -60,7 +60,11 @@ impl Dial {
         }
     }
 
-    async fn establish(&self, material: Option<tls::Material>) -> io::Result<Arc<Connection>> {
+    async fn establish(
+        &self,
+        material: Option<tls::Material>,
+        warning: impl FnMut(String),
+    ) -> io::Result<Arc<Connection>> {
         let (_, authority) = Transport::parse(&self.key.uri).map_err(transport_error)?;
         let address = Address::parse(self.kind, authority).map_err(transport_error)?;
         if self.deadline.is_some_and(|wait| wait.is_zero())
@@ -69,7 +73,12 @@ impl Dial {
         {
             return Err(io::Error::from_raw_os_error(nix::libc::ETIMEDOUT));
         }
-        let open = transport::connect(&address, self.key.source.as_deref(), self.asynchronous);
+        let open = transport::connect(
+            &address,
+            self.key.source.as_ref(),
+            self.asynchronous,
+            warning,
+        );
         let socket = match self.deadline {
             Some(duration) => tokio::time::timeout(duration, open)
                 .await
@@ -89,7 +98,7 @@ impl Dial {
         Ok(socket)
     }
 
-    pub async fn lease(self: &Arc<Self>) -> io::Result<Lease> {
+    pub async fn lease(self: &Arc<Self>, warning: impl FnMut(String)) -> io::Result<Lease> {
         let pool = Pool::current();
         let material = self.material().await?;
         let stamp = material.as_ref().map(|material| material.stamp);
@@ -102,7 +111,7 @@ impl Dial {
         }
         let connection = match reused {
             Some(connection) => connection,
-            None => self.establish(material).await?,
+            None => self.establish(material, warning).await?,
         };
         connection.timed_out.store(false, Ordering::Relaxed);
         Ok(Lease {

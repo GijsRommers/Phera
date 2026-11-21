@@ -67,7 +67,7 @@ impl Socket {
             .lease
             .get_or_try_init(|| async {
                 let dial = self.dial.as_ref().ok_or(io::ErrorKind::NotConnected)?;
-                dial.lease().await
+                dial.lease(|_| {}).await
             })
             .await?;
         Ok(lease.connection.clone())
@@ -112,6 +112,10 @@ impl Socket {
             },
             Connection::stream_type,
         )
+    }
+
+    pub(crate) fn crypto(&self) -> Option<phera_extension_api::Value> {
+        super::tls::metadata(self.ready()?)
     }
 }
 

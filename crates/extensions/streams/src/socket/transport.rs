@@ -7,25 +7,22 @@ use socket2::{SockAddr, Socket as Descriptor};
 use tokio::io::Interest;
 
 use super::Connection;
-use super::address::{Address, Transport};
+use super::address::{Address, Source, Transport};
 
 pub(super) async fn connect(
     address: &Address<'_>,
-    source: Option<&[u8]>,
+    source: Option<&Source>,
     asynchronous: bool,
+    mut warning: impl FnMut(String),
 ) -> io::Result<Arc<Connection>> {
-    let source = source
-        .filter(|source| !source.is_empty() && !address.transport.unix())
-        .map(|source| super::address::source(source))
-        .transpose()?
-        .map(SockAddr::from);
     let mut last = io::ErrorKind::AddrNotAvailable.into();
     for destination in address.resolve().await? {
         match connect_addr(
             address.transport,
             &destination,
-            source.as_ref(),
+            source,
             asynchronous,
+            &mut warning,
         )
         .await
         {
@@ -39,15 +36,25 @@ pub(super) async fn connect(
 async fn connect_addr(
     transport: Transport,
     destination: &SockAddr,
-    source: Option<&SockAddr>,
+    source: Option<&Source>,
     asynchronous: bool,
+    warning: &mut impl FnMut(String),
 ) -> io::Result<Arc<Connection>> {
     let descriptor = Descriptor::new(destination.domain(), transport.socket_type(), None)?;
     descriptor.set_nonblocking(true)?;
-    if let Some(source) = source
-        && source.family() == destination.family()
-    {
-        descriptor.bind(source)?;
+    let mut bound = true;
+    if let Some(source) = source {
+        let local = SockAddr::from(source.address);
+        if local.family() != destination.family() {
+            bound = false;
+        } else if let Err(error) = descriptor.bind(&local) {
+            warning(format!(
+                "Failed to bind to '{}', system said: {}",
+                source.label,
+                crate::errors::reason(&error),
+            ));
+            bound = false;
+        }
     }
     let pending = match descriptor.connect(destination) {
         Ok(()) => false,
@@ -60,6 +67,11 @@ async fn connect_addr(
         Err(error) => return Err(error),
     };
     let socket = Connection::new(descriptor, transport, false, false)?;
+    if !bound {
+        socket
+            .retired
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     if pending && !asynchronous {
         socket
             .wire

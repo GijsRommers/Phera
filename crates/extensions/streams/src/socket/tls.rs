@@ -1,6 +1,7 @@
 //! `stream_socket_enable_crypto($socket, true, $method)` negotiates or resumes TLS.
 
 mod material;
+mod metadata;
 mod options;
 mod verify;
 
@@ -19,6 +20,7 @@ use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
 use super::{Connection, Io, wire::Wire};
 
 pub(super) use material::Material;
+pub(super) use metadata::crypto as metadata;
 pub(super) use options::Options;
 
 type Handshake = Pin<Box<dyn Future<Output = io::Result<TlsStream<Wire>>> + Send>>;
@@ -139,17 +141,30 @@ fn handshake(
         let builder = ServerConfig::builder_with_provider(provider.clone())
             .with_protocol_versions(&versions)
             .map_err(invalid)?;
-        let builder = if options.verify_peer {
-            let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
-                Arc::new(material.roots),
-                provider,
-            )
-            .build()
-            .map_err(invalid)?;
-            builder.with_client_cert_verifier(verifier)
-        } else {
-            builder.with_no_client_auth()
-        };
+        let builder =
+            if options.verify_peer || options.verify_name || !options.fingerprints.is_empty() {
+                let name = options.peer_name.clone().or_else(|| {
+                    socket
+                        .sockref()
+                        .peer_addr()
+                        .ok()?
+                        .as_socket()
+                        .map(|address| address.ip().to_string())
+                });
+                let name = name
+                    .map(ServerName::try_from)
+                    .transpose()
+                    .map_err(invalid)?;
+                let verifier = verify::ClientVerifier::new(
+                    options,
+                    material.roots,
+                    provider.signature_verification_algorithms,
+                    name,
+                )?;
+                builder.with_client_cert_verifier(Arc::new(verifier))
+            } else {
+                builder.with_no_client_auth()
+            };
         let config = builder.with_single_cert(cert, key).map_err(invalid)?;
         let acceptor = TlsAcceptor::from(Arc::new(config));
         Ok(Box::pin(async move {

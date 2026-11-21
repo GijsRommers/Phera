@@ -1,10 +1,11 @@
 //! `verify_peer`, `verify_depth`, and `peer_fingerprint` constrain which peers connect.
 
 use rustls::{
-    DigitallySignedStruct, Error, RootCertStore, SignatureScheme,
+    DigitallySignedStruct, DistinguishedName, Error, RootCertStore, SignatureScheme,
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
     crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature},
     pki_types::{CertificateDer, ServerName, UnixTime},
+    server::danger::{ClientCertVerified, ClientCertVerifier},
 };
 use sha2::Digest;
 use webpki::{EndEntityCert, KeyUsage, VerifiedPath};
@@ -40,24 +41,24 @@ impl Verifier {
             algorithms,
         })
     }
-}
-
-impl ServerCertVerifier for Verifier {
-    fn verify_server_cert(
+    fn verify(
         &self,
         certificate: &CertificateDer<'_>,
         intermediates: &[CertificateDer<'_>],
-        name: &ServerName<'_>,
-        _: &[u8],
+        name: Option<&ServerName<'_>>,
         now: UnixTime,
-    ) -> Result<ServerCertVerified, Error> {
+        usage: KeyUsage,
+    ) -> Result<(), Error> {
         let leaf = EndEntityCert::try_from(certificate).map_err(certificate_error)?;
         let depth = |path: &VerifiedPath<'_>| {
-            if self
-                .depth
-                .is_some_and(|max| path.intermediate_certificates().count() > max)
-            {
-                return Err(webpki::Error::MaximumPathDepthExceeded);
+            if let Some(max) = self.depth {
+                let intermediates = path.intermediate_certificates().count();
+                let self_anchored = intermediates == 0
+                    && leaf.subject() == path.anchor().subject.as_ref()
+                    && leaf.subject_public_key_info() == webpki::spki_for_anchor(path.anchor());
+                if intermediates + usize::from(!self_anchored) > max {
+                    return Err(webpki::Error::MaximumPathDepthExceeded);
+                }
             }
             Ok(())
         };
@@ -68,7 +69,7 @@ impl ServerCertVerifier for Verifier {
                     &roots.roots,
                     chain,
                     now,
-                    KeyUsage::server_auth(),
+                    usage,
                     None,
                     Some(&depth),
                 )
@@ -83,12 +84,34 @@ impl ServerCertVerifier for Verifier {
             result.map_err(certificate_error)?;
         }
         if self.verify_name {
+            let name =
+                name.ok_or_else(|| Error::General("Missing certificate peer name".into()))?;
             leaf.verify_is_valid_for_subject_name(name)
                 .map_err(certificate_error)?;
         }
         if self.pins.iter().any(|pin| !pin.matches(certificate)) {
             return Err(Error::General("peer_fingerprint match failure".into()));
         }
+        Ok(())
+    }
+}
+
+impl ServerCertVerifier for Verifier {
+    fn verify_server_cert(
+        &self,
+        certificate: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        name: &ServerName<'_>,
+        _: &[u8],
+        now: UnixTime,
+    ) -> Result<ServerCertVerified, Error> {
+        self.verify(
+            certificate,
+            intermediates,
+            Some(name),
+            now,
+            KeyUsage::server_auth(),
+        )?;
         Ok(ServerCertVerified::assertion())
     }
 
@@ -112,6 +135,75 @@ impl ServerCertVerifier for Verifier {
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
         self.algorithms.supported_schemes()
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct ClientVerifier {
+    verifier: Verifier,
+    hints: Vec<DistinguishedName>,
+    name: Option<ServerName<'static>>,
+}
+
+impl ClientVerifier {
+    pub fn new(
+        options: &Options,
+        roots: RootCertStore,
+        algorithms: WebPkiSupportedAlgorithms,
+        name: Option<ServerName<'static>>,
+    ) -> std::io::Result<Self> {
+        let hints = roots.subjects();
+        Ok(Self {
+            verifier: Verifier::new(options, roots, algorithms)?,
+            hints,
+            name,
+        })
+    }
+}
+
+impl ClientCertVerifier for ClientVerifier {
+    fn root_hint_subjects(&self) -> &[DistinguishedName] {
+        &self.hints
+    }
+
+    fn verify_client_cert(
+        &self,
+        certificate: &CertificateDer<'_>,
+        intermediates: &[CertificateDer<'_>],
+        now: UnixTime,
+    ) -> Result<ClientCertVerified, Error> {
+        self.verifier.verify(
+            certificate,
+            intermediates,
+            self.name.as_ref(),
+            now,
+            KeyUsage::client_auth(),
+        )?;
+        Ok(ClientCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        certificate: &CertificateDer<'_>,
+        signature: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        self.verifier
+            .verify_tls12_signature(message, certificate, signature)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        certificate: &CertificateDer<'_>,
+        signature: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
+        self.verifier
+            .verify_tls13_signature(message, certificate, signature)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.verifier.supported_verify_schemes()
     }
 }
 
@@ -150,7 +242,9 @@ impl Pin {
             _ => return Err(super::invalid("Invalid SSL peer fingerprint")),
         };
         let bytes = hex
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| {
                 let high = char::from(pair[0]).to_digit(16)?;
                 let low = char::from(pair[1]).to_digit(16)?;

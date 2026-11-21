@@ -4,7 +4,7 @@ use std::{io, sync::Arc, time::Duration};
 
 use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Value, args};
 
-use super::address::{Address, Transport};
+use super::address::{self, Address, Source, Transport};
 use super::{
     Socket, default_timeout,
     persistent::{self, Dial, IdKind, Key},
@@ -69,15 +69,14 @@ async fn open(
     let connect = async {
         let (kind, authority) = Transport::parse(&uri).map_err(transport_error)?;
         Address::parse(kind, authority).map_err(transport_error)?;
-        let source =
-            context_options::option(&attached, "socket", "bindto").and_then(|value| match &*value
-                .deref()
-            {
-                Value::String(source) => Some(source.as_bytes().to_vec()),
-                _ => None,
-            });
+        let source = if kind.unix() {
+            None
+        } else {
+            binding(context, function, &attached)?
+        };
         let tls = if matches!(kind, Transport::Tls(_)) {
-            Some(tls::Options::parse(
+            Some(tls::Options::in_context(
+                context,
                 &context_options::for_wrapper(&attached, "ssl"),
                 true,
             )?)
@@ -101,12 +100,10 @@ async fn open(
             asynchronous: flags & 2 != 0,
         };
         if !is_persistent {
-            return Ok(wrap(
-                context,
-                Socket::live(dial.open().await?),
-                &uri,
-                &attached,
-            ));
+            let socket = dial
+                .open(|message| context.warning(format!("{function}(): {message}")))
+                .await?;
+            return Ok(wrap(context, Socket::live(socket), &uri, &attached));
         }
         if let Some(value) = persistent::existing(context, &dial.key) {
             return Ok(value);
@@ -115,7 +112,10 @@ async fn open(
         let socket = if context.is_snapshot_boot() {
             Socket::deferred(dial.clone())
         } else {
-            Socket::with_lease(dial.lease().await?)
+            let lease = dial
+                .lease(|message| context.warning(format!("{function}(): {message}")))
+                .await?;
+            Socket::with_lease(lease)
         };
         let value = wrap(context, socket, &uri, &attached);
         persistent::remember(context, dial, &value);
@@ -127,6 +127,28 @@ async fn open(
         Err(error) => Ok(open_failure(
             context, &arguments, function, &uri, error_at, error,
         )),
+    }
+}
+
+fn binding(
+    context: &mut dyn Context,
+    function: &str,
+    attached: &Value,
+) -> io::Result<Option<Source>> {
+    let Some(value) = context_options::option(attached, "socket", "bindto") else {
+        return Ok(None);
+    };
+    let Value::String(value) = &*value.deref() else {
+        return Err(transport_error(
+            "local_addr context option is not a string.".into(),
+        ));
+    };
+    match address::source(value.as_bytes()) {
+        Ok(source) => Ok(source),
+        Err(message) => {
+            context.warning(format!("{function}(): {message}"));
+            Ok(None)
+        }
     }
 }
 

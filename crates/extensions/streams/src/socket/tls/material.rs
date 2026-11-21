@@ -44,9 +44,9 @@ impl Material {
             let leaf = certificates(&pem)?;
             let key = if let Some(path) = &options.local_pk {
                 let bytes = read(path, &mut stamp).await?;
-                private_key(&bytes, options.passphrase.as_deref())?
+                private_key(bytes, options.passphrase.as_deref()).await?
             } else {
-                private_key(&pem, options.passphrase.as_deref())?
+                private_key(pem, options.passphrase.as_deref()).await?
             };
             Some((leaf, key))
         } else {
@@ -115,10 +115,17 @@ fn certificates(bytes: &[u8]) -> io::Result<Vec<CertificateDer<'static>>> {
     }
 }
 
-fn private_key(bytes: &[u8], password: Option<&str>) -> io::Result<PrivateKeyDer<'static>> {
-    if let Ok(key) = PrivateKeyDer::from_pem_slice(bytes) {
+async fn private_key(bytes: Vec<u8>, password: Option<&str>) -> io::Result<PrivateKeyDer<'static>> {
+    if let Ok(key) = PrivateKeyDer::from_pem_slice(&bytes) {
         return Ok(key);
     }
+    let password = password.unwrap_or_default().to_owned();
+    tokio::task::spawn_blocking(move || encrypted_key(&bytes, &password))
+        .await
+        .map_err(invalid)?
+}
+
+fn encrypted_key(bytes: &[u8], password: &str) -> io::Result<PrivateKeyDer<'static>> {
     let marker = b"-----BEGIN ENCRYPTED PRIVATE KEY-----";
     let start = bytes
         .windows(marker.len())
@@ -127,8 +134,6 @@ fn private_key(bytes: &[u8], password: Option<&str>) -> io::Result<PrivateKeyDer
     let pem = std::str::from_utf8(&bytes[start..]).map_err(invalid)?;
     let (_, document) = SecretDocument::from_pem(pem).map_err(invalid)?;
     let info = EncryptedPrivateKeyInfoRef::from_der(document.as_bytes()).map_err(invalid)?;
-    let key = info
-        .decrypt(password.unwrap_or_default().as_bytes())
-        .map_err(invalid)?;
+    let key = info.decrypt(password.as_bytes()).map_err(invalid)?;
     Ok(PrivatePkcs8KeyDer::from(key.as_bytes().to_vec()).into())
 }

@@ -171,6 +171,9 @@ fn metadata(stream: &Stream) -> PhpArray {
         result.insert(ArrayKey::str(key), value);
     };
     if let Backing::Socket(socket) = &stream.backing {
+        if let Some(crypto) = socket.crypto() {
+            insert("crypto", crypto);
+        }
         insert("timed_out", Value::Bool(socket.timed_out()));
         insert("blocked", Value::Bool(stream.blocked));
         insert("eof", Value::Bool(socket.eof()));

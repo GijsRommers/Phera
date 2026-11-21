@@ -282,7 +282,7 @@ fn crypto(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
             return Ok(Value::Bool(true));
         }
         let method = method.unwrap_or(121);
-        let progress = match tls::Options::parse(&options, method & 1 != 0) {
+        let progress = match tls::Options::in_context(context, &options, method & 1 != 0) {
             Ok(options) => {
                 if matches!(io.socket.transport, address::Transport::Tcp) {
                     io.socket

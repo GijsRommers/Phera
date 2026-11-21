@@ -66,7 +66,7 @@ pub(super) fn accept(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture
                 ..io
             };
             let options = context_options::for_wrapper(&attached, "ssl");
-            let result = match tls::Options::parse(&options, false) {
+            let result = match tls::Options::in_context(context, &options, false) {
                 Ok(options) => {
                     tls::enable(&connection, &options, options.method.unwrap_or(method) & !1).await
                 }
