@@ -23,6 +23,7 @@ pub type AsyncFn = for<'a> fn(&'a mut dyn Context, Vec<Value>) -> LocalFuture<'a
 pub enum NativeFn {
     Sync(SyncFn),
     DeprecatedSync(SyncFn),
+    DeprecatedAsync(AsyncFn),
     Async(AsyncFn),
 }
 
@@ -332,6 +333,20 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::DeprecatedSync(handler),
+            id: NativeId::NONE,
+        }
+    }
+
+    /// Emit PHP's notice before validating arguments, then run an async handler.
+    pub const fn deprecated_async(
+        name: &'static str,
+        params: &'static [Param],
+        handler: AsyncFn,
+    ) -> Self {
+        Self {
+            name,
+            params,
+            handler: NativeFn::DeprecatedAsync(handler),
             id: NativeId::NONE,
         }
     }

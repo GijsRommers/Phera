@@ -6,7 +6,15 @@ use crate::calls::frame::Frame;
 use crate::calls::frame_extras::FrameExtras;
 use crate::calls::prepared_call::{CallDetails, CallFlags, PreparedCall, PreparedCallee};
 
-pub(crate) const MAX_CALLBACK_DEPTH: usize = 32;
+/// How deeply native code may nest on the Rust stack: callbacks a built-in
+/// awaits, and fiber switches (each counts `fibers::switch::SWITCH_DEPTH`
+/// plus its entry call). Measured in a release build on 21 November 2026,
+/// one level of an awaited callback takes about 12 KB of Rust stack and one
+/// nested fiber about 16 KB (three counts), so 64 counts stay under about
+/// 1 MB of a worker thread's 2 MB. Callbacks that run on the frame stack
+/// (`calls::native_loops`) and plain PHP calls take no Rust stack and do
+/// not count.
+pub(crate) const MAX_CALLBACK_DEPTH: usize = 64;
 
 /// The running PHP functions of a request, innermost last, and the calls
 /// whose arguments are being evaluated.
