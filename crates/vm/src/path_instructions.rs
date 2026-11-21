@@ -118,6 +118,18 @@ impl Vm {
             self.set(destination, value);
             return Ok(None);
         }
+        // An object that converts through PHP code (`__toString`) needs
+        // the async handler, as a `Binary` of it does.
+        if crate::object_operators::has_binary(&left, &right)
+            || (operator == BinaryOp::Concat && (left.is_object() || right.is_object()))
+        {
+            return Ok(Some(BatchExit::Instruction(Instruction::AssignOpPath {
+                op: operator,
+                dst: destination,
+                path,
+                src: source,
+            })));
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = ops::binary(
             operator,
