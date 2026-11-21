@@ -89,13 +89,13 @@ impl Parser<'_> {
             TokenKind::Declare => return self.parse_declare(),
             TokenKind::Break => {
                 self.bump()?;
-                let level = self.parse_jump_level("break", start)?;
+                let level = self.parse_jump_level("break")?;
                 self.expect_end()?;
                 StatementKind::Break(level)
             }
             TokenKind::Continue => {
                 self.bump()?;
-                let level = self.parse_jump_level("continue", start)?;
+                let level = self.parse_jump_level("continue")?;
                 self.expect_end()?;
                 StatementKind::Continue(level)
             }
@@ -797,11 +797,7 @@ impl Parser<'_> {
     }
 
     /// `break;` is `Break(1)`; `break 2;` is `Break(2)`.
-    fn parse_jump_level(
-        &mut self,
-        keyword: &str,
-        start: phera_source::Span,
-    ) -> Result<u32, ParseError> {
+    fn parse_jump_level(&mut self, keyword: &str) -> Result<u32, ParseError> {
         if self.at(TokenKind::Semicolon) || self.at(TokenKind::CloseTag) {
             return Ok(1);
         }
@@ -812,15 +808,15 @@ impl Parser<'_> {
             ExpressionKind::Literal(Literal::Int(value)) if value > 0 => {
                 Ok(value.min(u32::MAX as i64) as u32)
             }
-            ExpressionKind::Literal(Literal::Int(_) | Literal::Float(_)) => {
+            ExpressionKind::Literal(Literal::Int(_) | Literal::Float(_) | Literal::String(_)) => {
                 Err(ParseError::compile(
                     format!("'{keyword}' operator accepts only positive integers"),
-                    start,
+                    expression.span,
                 ))
             }
             _ => Err(ParseError::compile(
                 format!("'{keyword}' operator with non-integer operand is no longer supported"),
-                start,
+                expression.span,
             )),
         }
     }
