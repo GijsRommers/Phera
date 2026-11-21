@@ -82,7 +82,9 @@ impl Fork<'_> {
                 *slot = self.value(slot);
             }
         }
-        self.array_contents(properties.others_mut());
+        if let Some(others) = properties.others_mut() {
+            self.array_contents(others);
+        }
         *copy.properties.borrow_mut() = properties;
         let native = match original.native.try_borrow() {
             Ok(native) => native.as_deref().map(|state| {

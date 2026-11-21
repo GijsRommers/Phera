@@ -69,8 +69,9 @@ pub struct Properties {
     layout: Option<Rc<PropertyLayout>>,
     /// One per key of the layout.
     slots: Box<[Option<Value>]>,
-    /// Properties the class does not declare, in insertion order.
-    others: PhpArray,
+    /// Properties the class does not declare, in insertion order; made on
+    /// the first one, since most objects have none.
+    others: Option<Box<PhpArray>>,
 }
 
 impl Properties {
@@ -81,7 +82,7 @@ impl Properties {
         Self {
             layout: Some(layout),
             slots,
-            others: PhpArray::new(),
+            others: None,
         }
     }
 
@@ -102,7 +103,7 @@ impl Properties {
         Self {
             layout: None,
             slots: Box::default(),
-            others,
+            others: Some(Box::new(others)),
         }
     }
 
@@ -113,6 +114,10 @@ impl Properties {
     #[inline]
     fn slot_of(&self, key: &ArrayKey) -> Option<usize> {
         self.layout.as_ref()?.slot(key)
+    }
+
+    fn others_or_new(&mut self) -> &mut PhpArray {
+        self.others.get_or_insert_with(Box::default)
     }
 
     // ----- By slot number -------------------------------------------------
@@ -147,6 +152,11 @@ impl Properties {
         &self.slots
     }
 
+    /// The slots, writable, in layout order.
+    pub(crate) fn slots_mut(&mut self) -> &mut [Option<Value>] {
+        &mut self.slots
+    }
+
     /// The slot of `key`, using `hint` (a slot a site or a
     /// `ReflectionProperty` remembered) when the layout has `key` there.
     #[inline]
@@ -163,7 +173,7 @@ impl Properties {
     pub fn get_at(&self, key: &ArrayKey, hint: Option<usize>) -> Option<&Value> {
         match self.slot_for(key, hint) {
             Some(slot) => self.slot(slot),
-            None => self.others.get(key),
+            None => self.others.as_deref()?.get(key),
         }
     }
 
@@ -172,7 +182,7 @@ impl Properties {
     pub fn get_mut_at(&mut self, key: &ArrayKey, hint: Option<usize>) -> Option<&mut Value> {
         match self.slot_for(key, hint) {
             Some(slot) => self.slot_mut(slot),
-            None => self.others.get_mut(key),
+            None => self.others.as_deref_mut()?.get_mut(key),
         }
     }
 
@@ -181,24 +191,18 @@ impl Properties {
     pub fn insert_at(&mut self, key: ArrayKey, hint: Option<usize>, value: Value) -> Option<Value> {
         match self.slot_for(&key, hint) {
             Some(slot) => self.set_slot(slot, value).flatten(),
-            None => self.others.insert(key, value),
+            None => self.others_or_new().insert(key, value),
         }
     }
 
     // ----- By key, as `PhpArray` ------------------------------------------
 
     pub fn get(&self, key: &ArrayKey) -> Option<&Value> {
-        match self.slot_of(key) {
-            Some(slot) => self.slot(slot),
-            None => self.others.get(key),
-        }
+        self.get_at(key, None)
     }
 
     pub fn get_mut(&mut self, key: &ArrayKey) -> Option<&mut Value> {
-        match self.slot_of(key) {
-            Some(slot) => self.slot_mut(slot),
-            None => self.others.get_mut(key),
-        }
+        self.get_mut_at(key, None)
     }
 
     pub fn contains_key(&self, key: &ArrayKey) -> bool {
@@ -207,10 +211,7 @@ impl Properties {
 
     /// Sets a property, creating it if needed, and returns what it held.
     pub fn insert(&mut self, key: ArrayKey, value: Value) -> Option<Value> {
-        match self.slot_of(&key) {
-            Some(slot) => self.set_slot(slot, value).flatten(),
-            None => self.others.insert(key, value),
-        }
+        self.insert_at(key, None, value)
     }
 
     /// Removes a property and returns what it held. A declared property's
@@ -218,12 +219,12 @@ impl Properties {
     pub fn remove(&mut self, key: &ArrayKey) -> Option<Value> {
         match self.slot_of(key) {
             Some(slot) => self.clear_slot(slot),
-            None => self.others.remove(key),
+            None => self.others.as_deref_mut()?.remove(key),
         }
     }
 
     pub fn len(&self) -> usize {
-        self.slots.iter().flatten().count() + self.others.len()
+        self.slots.iter().flatten().count() + self.others.as_deref().map_or(0, PhpArray::len)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -237,25 +238,28 @@ impl Properties {
         keys.iter()
             .zip(self.slots.iter())
             .filter_map(|(key, value)| Some((key.clone(), value.as_ref()?)))
-            .chain(self.others.iter())
+            .chain(self.others.as_deref().into_iter().flat_map(PhpArray::iter))
     }
 
     /// The values in PHP's order.
     pub fn values(&self) -> impl Iterator<Item = &Value> {
-        self.slots.iter().flatten().chain(self.others.values())
-    }
-
-    /// The slots, writable, in layout order.
-    pub(crate) fn slots_mut(&mut self) -> &mut [Option<Value>] {
-        &mut self.slots
+        self.slots.iter().flatten().chain(
+            self.others
+                .as_deref()
+                .into_iter()
+                .flat_map(PhpArray::values),
+        )
     }
 
     /// The memory the properties hold beyond the object itself.
     pub fn heap_bytes(&self) -> usize {
-        self.slots.len() * std::mem::size_of::<Option<Value>>() + self.others.heap_bytes()
+        self.slots.len() * std::mem::size_of::<Option<Value>>()
+            + self.others.as_deref().map_or(0, |others| {
+                std::mem::size_of::<PhpArray>() + others.heap_bytes()
+            })
     }
 
-    /// The same, with each value writable.
+    /// Every value, writable, in PHP's order.
     pub fn for_each_mut(&mut self, mut visit: impl FnMut(&ArrayKey, &mut Value)) {
         if let Some(layout) = &self.layout {
             for (key, value) in layout.keys().iter().zip(self.slots.iter_mut()) {
@@ -264,9 +268,8 @@ impl Properties {
                 }
             }
         }
-        let keys: Vec<ArrayKey> = self.others.iter().map(|(key, _)| key).collect();
-        for key in keys {
-            if let Some(value) = self.others.get_mut(&key) {
+        if let Some(others) = self.others.as_deref_mut() {
+            for (key, value) in others.iter_mut() {
                 visit(&key, value);
             }
         }
@@ -276,38 +279,39 @@ impl Properties {
     /// `get_object_vars`, `var_dump`.
     pub fn to_array(&self) -> PhpArray {
         if self.layout.is_none() {
-            return self.others.clone();
+            return self.others.as_deref().cloned().unwrap_or_default();
         }
-        let mut array = PhpArray::new();
+        let mut array = PhpArray::with_capacity(self.len());
         for (key, value) in self.iter() {
             array.insert(key, value.clone());
         }
         array
     }
 
-    /// The properties that are not declared, in insertion order.
-    pub fn others(&self) -> &PhpArray {
-        &self.others
+    /// The properties that are not declared, in insertion order, if any.
+    pub fn others(&self) -> Option<&PhpArray> {
+        self.others.as_deref()
     }
 
-    pub fn others_mut(&mut self) -> &mut PhpArray {
-        &mut self.others
+    /// The same, writable.
+    pub fn others_mut(&mut self) -> Option<&mut PhpArray> {
+        self.others.as_deref_mut()
     }
 
     /// Replaces every property with those of `array`, by key: declared
     /// keys go to their slots, the rest to the other properties.
     pub fn replace_all(&mut self, array: PhpArray) {
         let Some(layout) = self.layout.clone() else {
-            self.others = array;
+            self.others = (!array.is_empty()).then(|| Box::new(array));
             return;
         };
         self.slots.iter_mut().for_each(|slot| *slot = None);
-        self.others = PhpArray::new();
+        self.others = None;
         for (key, value) in array.iter() {
             match layout.slot(&key).and_then(|slot| self.slots.get_mut(slot)) {
                 Some(slot) => *slot = Some(value.clone()),
                 None => {
-                    self.others.insert(key, value.clone());
+                    self.others_or_new().insert(key, value.clone());
                 }
             }
         }
@@ -316,8 +320,10 @@ impl Properties {
     /// Moves every value out, for a release that must not recurse. They go
     /// in last first, so that `pop` frees them in PHP's order: the
     /// declared properties first to last, then the others.
-    pub(crate) fn take_values(mut self, work: &mut Vec<Value>) {
-        self.others.take_values(work);
+    pub(crate) fn take_values(self, work: &mut Vec<Value>) {
+        if let Some(mut others) = self.others {
+            others.take_values(work);
+        }
         work.extend(self.slots.into_vec().into_iter().rev().flatten());
     }
 }
