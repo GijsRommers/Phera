@@ -27,7 +27,7 @@ use postgres_protocol::message::backend::Message;
 use super::{Execution, Prepared, RowBuffer, Rows, connection_error};
 use crate::errors::DbError;
 use crate::parameters::{BoundValue, literal, quote};
-use crate::placeholders::Sql;
+use crate::placeholders::{Sql, Syntax};
 
 pub struct Postgres {
     client: wire::Client,
@@ -125,12 +125,15 @@ impl Postgres {
         let owner = options.postgres_stream.as_ref();
         if matches!(prepared, Prepared::Emulated) {
             let query = if parameters.is_empty() {
-                sql.source.clone()
+                sql.unbound_sql().into_owned()
             } else {
+                sql.check_emulation()?;
+                let backslash_strings = self.backslash_strings();
+                sql.check_string_mode(Syntax::Postgres { backslash_strings })?;
                 let literals: Vec<_> = parameters
                     .iter()
                     .map(|value| match value {
-                        BoundValue::String(bytes) => self.quote(bytes),
+                        BoundValue::String(bytes) => quote_string(bytes, backslash_strings),
                         value => literal(value, false),
                     })
                     .collect();
@@ -285,12 +288,11 @@ impl Postgres {
     }
 
     pub fn quote(&self, bytes: &[u8]) -> String {
-        let quoted = quote(bytes, false);
-        if self.client.parameter("standard_conforming_strings") == Some("off") {
-            quoted.replace('\\', "\\\\")
-        } else {
-            quoted
-        }
+        quote_string(bytes, self.backslash_strings())
+    }
+
+    pub fn backslash_strings(&self) -> bool {
+        self.client.parameter("standard_conforming_strings") == Some("off")
     }
 
     pub async fn last_id(&mut self, name: Option<&str>) -> Result<String, DbError> {
@@ -317,4 +319,13 @@ fn affected(tag: &str) -> u64 {
         .next()
         .and_then(|count| count.parse().ok())
         .unwrap_or_default()
+}
+
+fn quote_string(bytes: &[u8], backslash_strings: bool) -> String {
+    let quoted = quote(bytes, false);
+    if backslash_strings {
+        quoted.replace('\\', "\\\\")
+    } else {
+        quoted
+    }
 }

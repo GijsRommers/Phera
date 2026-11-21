@@ -57,7 +57,13 @@ pub fn execute_named<'a>(
                 }
                 Bindings::Keyed(bindings) => {
                     let ordered = match statement.prepared {
-                        Prepared::Emulated if bindings.is_empty() => Ok(Vec::new()),
+                        Prepared::Emulated
+                            if bindings.is_empty()
+                                || (statement.connection.name == DriverName::Mysql
+                                    && statement.sql.has_only_unterminated_markers()) =>
+                        {
+                            Ok(Vec::new())
+                        }
                         Prepared::Emulated => parameters::ordered(&statement.sql, bindings),
                         _ => crate::native_parameters::ordered(
                             &statement.sql,

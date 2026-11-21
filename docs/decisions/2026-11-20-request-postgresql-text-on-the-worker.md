@@ -27,6 +27,11 @@ observable prepare and execution behavior permits it. Preserve cursors and
 existing refusal cases. A request interrupted with messages in flight
 closes the socket, as it did with the pool's interrupted-connection policy.
 
+The PDO scanner reads `standard_conforming_strings` from this connection.
+Emulation checks
+the mode again before interpolation. The server's ParameterStatus messages
+already carry the mode, so neither check issues a statement.
+
 Reuse Phera's TLS policy. A DSN that requires TLS fails when encryption is
 unavailable. Use the protocol crate to verify the SCRAM server-final
 signature. Prefer SCRAM-SHA-256-PLUS when TLS and the server offer it. Hash

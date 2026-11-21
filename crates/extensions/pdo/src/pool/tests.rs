@@ -18,7 +18,7 @@ use super::{Lease, Policy, Pool, acquire, acquire_from};
 use crate::drivers::{Prepared, Rows};
 use crate::dsn::Dsn;
 use crate::errors::DbError;
-use crate::placeholders::Sql;
+use crate::placeholders::{Sql, Syntax};
 
 const USER: &str = "phera_pool";
 
@@ -72,13 +72,9 @@ async fn direct(name: &str) -> Lease {
 }
 
 async fn rows(driver: &mut Lease, sql: &str) -> Rows {
+    let sql = Sql::parse(sql.into(), Syntax::POSTGRES).unwrap();
     driver
-        .execute(
-            &Sql::parse(sql.into()).unwrap(),
-            &Prepared::Emulated,
-            &[],
-            Default::default(),
-        )
+        .execute(&sql, &Prepared::Emulated, &[], Default::default())
         .await
         .unwrap()
 }
