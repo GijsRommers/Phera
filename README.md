@@ -170,7 +170,7 @@ PHP programs can open a client or listener, wait for readiness with
 `stream_select()`, and use the regular read, write, and timeout functions.
 TCP clients can start TLS when connecting or upgrade an existing connection.
 Listeners can accept TLS directly or upgrade an accepted connection.
-Client certificate and host-name verification are enabled by default.
+By default clients verify the server's certificate and host name.
 A live socket held by the boot prevents `Phera\snapshot()` from creating
 a snapshot. Persistent sockets created during boot connect on first use
 in each fork. `pfsockopen()` and `STREAM_CLIENT_PERSISTENT` can reuse a

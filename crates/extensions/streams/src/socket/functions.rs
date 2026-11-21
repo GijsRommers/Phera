@@ -185,14 +185,20 @@ pub(super) async fn socket_arg(
 ) -> Result<Option<Io>, NativeError> {
     let resource =
         crate::resource::stream_argument(args::value(args, 0), function, &format!("#1 (${name})"))?;
-    let Some(socket) = StreamIo::for_resource(resource) else {
-        return Ok(None);
-    };
+    Ok(socket_from_resource(resource, function, context).await)
+}
+
+pub(super) async fn socket_from_resource(
+    resource: &phera_extension_api::value::Resource,
+    function: &str,
+    context: &mut dyn Context,
+) -> Option<Io> {
+    let socket = StreamIo::for_resource(resource)?;
     match socket.resolve().await {
-        Ok(io) => Ok(Some(io)),
+        Ok(io) => Some(io),
         Err(error) => {
             context.warning(format!("{function}(): {error}"));
-            Ok(None)
+            None
         }
     }
 }

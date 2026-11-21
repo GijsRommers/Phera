@@ -1,14 +1,12 @@
 //! `stream_socket_recvfrom($socket, 512, 0, $peer)` returns a datagram and its source.
 
-use std::io;
-
 use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Value, args};
 use rustix::net::{RecvFlags, recvfrom};
 use tokio::io::Interest;
 
 use super::{
-    address::{Address, received_from},
-    functions::socket_arg,
+    address::{Address, Transport, received_from},
+    functions::{socket_arg, socket_from_resource},
 };
 
 pub(super) fn receive(
@@ -17,13 +15,19 @@ pub(super) fn receive(
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let function = "stream_socket_recvfrom";
+        let resource = crate::resource::stream_argument(
+            args::value(&args, 0), function, "#1 ($socket)",
+        )?;
+        if let Some(target) = args::reference(&args, 3) {
+            *target.borrow_mut() = Value::Null;
+        }
         let length = args::int(&args, 1).unwrap_or_default();
         if length <= 0 {
             return Err(NativeError::value_error(
                 "stream_socket_recvfrom(): Argument #2 ($length) must be greater than 0",
             ));
         }
-        let Some(socket) = socket_arg(&args, function, "socket", context).await? else {
+        let Some(socket) = socket_from_resource(resource, function, context).await else {
             return Ok(Value::Bool(false));
         };
         let flags = args::int(&args, 2).unwrap_or_default();
@@ -55,7 +59,7 @@ pub(super) fn receive(
                 }
                 Ok(Value::from(buffer))
             }
-            Err(error) => Ok(warn(context, function, "recvfrom", &error)),
+            Err(_) => Ok(Value::Bool(false)),
         }
     })
 }
@@ -68,21 +72,23 @@ pub(super) fn send(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'
         };
         let flags = args::int(&args, 2).unwrap_or_default() as i32;
         let bytes = args::bytes(&args, 1);
-        let address = args::bytes(&args, 3);
-        let destination = if address.is_empty() {
+        let target = args::bytes(&args, 3);
+        let destination = if target.is_empty() {
             None
         } else {
-            let address = match Address::parse(socket.socket.transport, address) {
-                Ok(address) => address,
-                Err(message) => {
-                    context.warning(format!("{function}(): {message}"));
-                    return Ok(Value::Bool(false));
-                }
+            let resolved = match Address::parse(Transport::Tcp, target) {
+                Ok(address) => address.resolve().await.ok()
+                    .and_then(|addresses| addresses.into_iter().next()),
+                Err(_) => None,
             };
-            match address.resolve().await {
-                Ok(addresses) => addresses.into_iter().next(),
-                Err(error) => return Ok(warn(context, function, "sendto", &error)),
+            let Some(address) = resolved else {
+                context.warning(format!(
+                    "{function}(): Failed to parse `{}' into a valid network address",
+                    String::from_utf8_lossy(target),
+                ));
+                return Ok(Value::Bool(false));
             }
+            Some(address)
         };
         let send = || {
             let descriptor = socket.socket.sockref();
@@ -106,7 +112,11 @@ pub(super) fn send(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'
         };
         Ok(match result {
             Ok(length) => Value::Int(length as i64),
-            Err(error) => warn(context, function, "sendto", &error),
+            Err(error) => {
+                let message = crate::errors::reason(&error);
+                context.warning(format!("{function}(): {message}\n"));
+                Value::Int(-1)
+            }
         })
     })
 }
@@ -120,10 +130,3 @@ fn read_interest(flags: RecvFlags) -> Interest {
     Interest::READABLE
 }
 
-fn warn(context: &mut dyn Context, function: &str, call: &str, error: &io::Error) -> Value {
-    context.warning(format!(
-        "{function}(): {call} failed: {}",
-        crate::errors::reason(error)
-    ));
-    Value::Bool(false)
-}
