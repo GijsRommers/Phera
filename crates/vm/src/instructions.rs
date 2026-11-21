@@ -45,11 +45,15 @@ impl Vm {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
             I::Call { dst, .. } => return self.call::<TRACK_GENERATORS>(dst, work),
-            // The loop enters a method site itself; here, as wherever its
-            // quick entry declines, the call runs written out in full.
+            // The loop enters or prepares a method site itself; it comes
+            // here when the VM must prepare the call (`__call`, an error,
+            // a closure or a generator). That is the first instruction of
+            // the call written out in full, which runs here, the rest
+            // following it.
             I::CallMethod { site, .. } => {
-                let fallback = self.method_site_fallback(site)?;
-                self.execute_jump(fallback, work)?;
+                let (after, init) = self.method_site_fallback(site)?;
+                self.jump(after)?;
+                return self.execute::<TRACK_GENERATORS>(init, stop, work);
             }
             I::CallDirect {
                 function,

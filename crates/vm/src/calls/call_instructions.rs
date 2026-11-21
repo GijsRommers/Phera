@@ -8,19 +8,26 @@ use phera_value::Value;
 use crate::Vm;
 
 impl Vm {
-    /// Where the running function writes method site `site` out in full
-    /// (see [`phera_bytecode::MethodSite`]).
+    /// The first instruction of method site `site` written out in full
+    /// (its `InitMethodCall`, see [`phera_bytecode::MethodSite`]), and the
+    /// position after it.
     pub(crate) fn method_site_fallback(
         &self,
         site: phera_bytecode::MethodSiteId,
-    ) -> Result<Target, NativeError> {
+    ) -> Result<(Target, phera_bytecode::Instruction), NativeError> {
         let frame = self.current().ok_or_else(|| internal_error!("no frame"))?;
-        frame
-            .function()
+        let function = frame.function();
+        let fallback = function
             .method_sites
             .get(site.index())
             .map(|site| site.fallback)
-            .ok_or_else(|| internal_error!("method site number"))
+            .ok_or_else(|| internal_error!("method site number"))?;
+        let init = function
+            .instructions
+            .get(fallback.index())
+            .copied()
+            .ok_or_else(|| internal_error!("method site fallback"))?;
+        Ok((Target(fallback.0 + 1), init))
     }
 
     /// Implements PHP MakeCallable semantics outside the dispatch loop.

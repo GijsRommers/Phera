@@ -101,8 +101,9 @@ impl Machine<'_> {
     /// `CallMethod`: enter the PHP method that method site `site` calls,
     /// with its arguments in a new window. Where that cannot be done here,
     /// the call is prepared as `InitMethodCall` would prepare it and the
-    /// sends written out at the site's fallback run next; where even that
-    /// is not plain, the whole fallback runs.
+    /// sends written out at the site's fallback run next; where the VM must
+    /// prepare it (`__call`, an error, a closure or a generator), the
+    /// instruction goes to the VM, which starts the written-out call.
     #[inline(always)]
     pub(super) fn call_method(
         &mut self,
@@ -118,7 +119,7 @@ impl Machine<'_> {
     }
 
     /// See [`Machine::call_method`]: the receiver's method found once, then
-    /// entered, prepared, or left to the fallback.
+    /// entered, prepared, or left to the VM.
     #[inline(always)]
     fn enter_method_site(
         &mut self,
@@ -131,16 +132,16 @@ impl Machine<'_> {
         let base = position.frame.base();
         let object = match self.registers.window(base + site.receiver.index(), 1) {
             [Some(Value::Object(object))] => object.clone(),
-            _ => return Step::Done(fallback),
+            _ => return Step::Slow,
         };
         let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
-            return Step::Done(fallback);
+            return Step::Slow;
         };
         let key = self
             .code
             .unit_name_key(position.frame.function, site.method);
         let Some(found) = self.classes.method_table(class).get(key) else {
-            return Step::Done(fallback);
+            return Step::Slow;
         };
         let method = found.method;
         // The sends written out at the fallback, which follow its
@@ -152,9 +153,11 @@ impl Machine<'_> {
         let function = match method.body {
             MethodBody::User(function) => function,
             MethodBody::Native(_) => {
-                return self.prepare_native_site(sends, &object, class, key, fallback);
+                // Owned, so that the preparation may change the machine.
+                let found = (found.method.clone(), found.scope.clone());
+                return self.prepare_native_site(sends, &object, (class, key, found));
             }
-            _ => return Step::Done(fallback),
+            _ => return Step::Slow,
         };
         let scope = self.caller_scope(position);
         if method.is_abstract
@@ -162,10 +165,10 @@ impl Machine<'_> {
             || !may_call(&found, scope)
             || self.shadowed_by_private(scope, key, method)
         {
-            return Step::Done(fallback);
+            return Step::Slow;
         }
         let Some(arguments) = body.site_arguments.get(site.argument_range()) else {
-            return Step::Done(fallback);
+            return Step::Slow;
         };
         let count = arguments.len();
         let facts = self.code.facts(function);
@@ -229,22 +232,21 @@ impl Machine<'_> {
 
     /// A method site whose method is native: prepared as `InitMethodCall`
     /// prepares it, with `sends` as the position after it (a getter with no
-    /// arguments runs at once there, its `Call` being next). The fallback
-    /// runs for whatever that preparation leaves to the VM.
+    /// arguments runs at once there, its `Call` being next). `Step::Slow`
+    /// for whatever that preparation leaves to the VM.
     #[cold]
     #[inline(never)]
     fn prepare_native_site(
         &mut self,
         sends: Position,
         object: &Rc<Object>,
-        class: &Class,
-        key: NameKey,
-        fallback: usize,
+        (class, key, (method, scope)): (&Class, NameKey, FoundParts),
     ) -> Step {
-        match self.prepare_found_native(sends, object, class, key) {
-            Step::Slow => Step::Done(fallback),
-            step => step,
-        }
+        let found = FoundMethod {
+            method: &method,
+            scope: &scope,
+        };
+        self.prepare_found_native(sends, object, (class, key), &found)
     }
 
     /// `InitMethodCall` of a native method, as [`Machine::prepare_method`]
@@ -255,12 +257,9 @@ impl Machine<'_> {
         &mut self,
         position: Position,
         object: &Rc<Object>,
-        class: &Class,
-        key: NameKey,
+        (class, key): (&Class, NameKey),
+        found: &FoundMethod<'_>,
     ) -> Step {
-        let Some(found) = self.classes.method_table(class).get(key) else {
-            return Step::Slow;
-        };
         let method = found.method;
         let MethodBody::Native(entry) = method.body else {
             return Step::Slow;
@@ -275,13 +274,13 @@ impl Machine<'_> {
         if entry.direct.is_some()
             && entry.params.is_empty()
             && let Some((destination, value)) =
-                self.run_direct_getter(position, object, (&found, key))
+                self.run_direct_getter(position, object, (found, key))
         {
             self.registers
                 .put(position.frame.base() + destination.index(), value);
             return Step::Done(position.ip + 1);
         }
-        let Some((context, method)) = self.native_class_method((object, class), &found, key) else {
+        let Some((context, method)) = self.native_class_method((object, class), found, key) else {
             return Step::Slow;
         };
         match entry.direct {
@@ -540,3 +539,6 @@ fn descends_from(class: &Rc<Class>, ancestor: &Class) -> bool {
     }
     false
 }
+
+/// A found method held by value: the method and the class that declares it.
+type FoundParts = (Rc<crate::classes::Method>, std::rc::Weak<Class>);
