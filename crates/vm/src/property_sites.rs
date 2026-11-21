@@ -58,38 +58,25 @@ impl PropertyEntry {
     /// the object's class and that scope and the value fits the declared
     /// type as it is, as [`Vm::write_property_site`] does; `false`, with
     /// nothing changed, otherwise (a setter, a coercion, a reference, a
-    /// readonly property: the general path).
+    /// readonly property: the general path). An integer written to a
+    /// `float` property is stored as a float, which is also the
+    /// assignment's result: the VM's site write gives that, so the loop
+    /// leaves it to the VM.
     pub(crate) fn write_matching(
         &self,
         object: &Object,
         scope: Option<&Rc<crate::classes::Class>>,
         value: &Value,
     ) -> bool {
-        self.write_matching_as(object, scope, value).is_some()
-    }
-
-    /// [`PropertyEntry::write_matching`], saying whether the value stored
-    /// is `value` converted to a float (`1` written to a `float` property
-    /// stores `1.0`): `Some(true)` then, `Some(false)` for `value` as it is,
-    /// `None` when nothing was written.
-    pub(crate) fn write_matching_as(
-        &self,
-        object: &Object,
-        scope: Option<&Rc<crate::classes::Class>>,
-        value: &Value,
-    ) -> Option<bool> {
-        if !self.matches(object, scope) {
-            return None;
+        if !self.matches(object, scope)
+            || matches!(value, Value::Reference(_))
+            || !self.write_rule.accepts(value)
+        {
+            return false;
         }
-        let widened = self.write_rule.widened(value);
-        let stored = widened.as_ref().unwrap_or(value);
-        if matches!(stored, Value::Reference(_)) || !self.write_rule.accepts(stored) {
-            return None;
-        }
-        crate::property_storage::write_direct_known(object, self.known(), stored, || {
+        crate::property_storage::write_direct_known(object, self.known(), value, || {
             self.write_rule.may_create() && !has_magic_properties(object) && object.lazy().is_none()
         })
-        .then_some(widened.is_some())
     }
 
     /// Stores `value` at `keys` of the array the property holds, for a
