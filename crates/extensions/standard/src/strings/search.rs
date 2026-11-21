@@ -144,9 +144,10 @@ fn find_last(arguments: &[Value], function: &str, case: CaseSensitivity) -> Nati
     } else {
         first = position;
     }
-    let found = (first..=last)
-        .rev()
-        .find(|&start| case.equal(&haystack[start..start + needle.len()], needle));
+    let found = haystack
+        .get(first..last + needle.len())
+        .and_then(|range| case.rfind(range, needle))
+        .map(|start| first + start);
     Ok(position_or_false(found))
 }
 

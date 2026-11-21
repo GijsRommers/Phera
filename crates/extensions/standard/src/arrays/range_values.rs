@@ -134,7 +134,7 @@ impl RangeValues {
                     Direction::Decreasing => i128::from(self.start.integer) - delta,
                 };
                 match self.kind {
-                    RangeKind::Character => Value::from(vec![integer as u8]),
+                    RangeKind::Character => Value::from([integer as u8].as_slice()),
                     _ => Value::Int(integer as i64),
                 }
             }
@@ -143,20 +143,16 @@ impl RangeValues {
 
     /// Rounded float counts can overrun the endpoint; PHP stops before that value.
     pub(super) fn collect(self) -> NativeResult {
-        let mut result = PhpArray::new();
-        for index in 0..self.count()? {
-            let value = self.value_at(index);
-            if let Value::Float(number) = &value {
-                let beyond_end = match self.direction {
+        let count = self.count()?;
+        let values = (0..count)
+            .map(|index| self.value_at(index))
+            .take_while(|value| match value {
+                Value::Float(number) => !match self.direction {
                     Direction::Increasing => *number > self.end.number,
                     Direction::Decreasing => *number < self.end.number,
-                };
-                if beyond_end {
-                    break;
-                }
-            }
-            result.push(value)?;
-        }
-        Ok(Value::from(result))
+                },
+                _ => true,
+            });
+        Ok(Value::from(PhpArray::from_values(values, count as usize)))
     }
 }

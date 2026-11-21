@@ -5,8 +5,9 @@
 //! has its own cache, without locks, shared by the requests it serves. As
 //! in PHP, it holds 4096 patterns and drops the oldest eighth when full.
 
-use crate::compile::{self, Compiled, Settings};
+use crate::compile::{self, Compiled};
 use crate::errors::{self, Error};
+use crate::settings::{self, Settings};
 use phera_extension_api::Context;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -30,7 +31,7 @@ pub(crate) fn get(
     function: &str,
     pattern: &[u8],
 ) -> Option<Rc<Compiled>> {
-    match lookup(pattern, Settings::read(context)) {
+    match lookup(pattern, settings::read(context)) {
         Ok(compiled) => Some(compiled),
         Err(message) => {
             context.warning(format!("{function}(): {message}"));

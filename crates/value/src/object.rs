@@ -2,8 +2,7 @@
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use crate::array::{ArrayKey, PhpArray};
 use crate::destruction::{Destruction, DoomedObjects};
@@ -224,7 +223,7 @@ pub struct ObjectIds {
     /// The object that now carries each id whose object was handed over
     /// for its destructor, with the identity (address) of the object it
     /// took over from; see `crate::weak_object`.
-    pub(crate) incarnations: RefCell<HashMap<u32, (usize, Weak<Object>)>>,
+    pub(crate) incarnations: RefCell<Vec<Option<crate::weak_object::Incarnation>>>,
 }
 
 #[derive(Debug, Default)]
@@ -266,8 +265,11 @@ impl ObjectIds {
         if let Ok(mut state) = self.state.try_borrow_mut() {
             state.free.push(id);
         }
-        if incarnated && let Ok(mut incarnations) = self.incarnations.try_borrow_mut() {
-            incarnations.remove(&id);
+        if incarnated
+            && let Ok(mut incarnations) = self.incarnations.try_borrow_mut()
+            && let Some(slot) = incarnations.get_mut(id as usize)
+        {
+            *slot = None;
         }
     }
 
@@ -283,7 +285,7 @@ impl ObjectIds {
                 no_reuse: false,
             }),
             doomed: DoomedObjects::default(),
-            incarnations: RefCell::new(HashMap::new()),
+            incarnations: RefCell::default(),
         })
     }
 

@@ -87,14 +87,13 @@ impl Storage {
     /// every position is unchanged.
     pub fn as_map(&mut self) -> &mut OrderedMap {
         if let Self::List(values) = self {
-            let entries = std::mem::take(values)
-                .into_iter()
-                .enumerate()
-                .map(|(position, value)| Entry {
+            let mut entries = Vec::with_capacity(values.capacity());
+            entries.extend(std::mem::take(values).into_iter().enumerate().map(
+                |(position, value)| Entry {
                     key: ArrayKey::Int(position as i64),
                     value,
-                })
-                .collect();
+                },
+            ));
             *self = Self::Map(OrderedMap::new(entries));
         }
         match self {
