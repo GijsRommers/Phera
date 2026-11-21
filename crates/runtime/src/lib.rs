@@ -108,6 +108,12 @@ impl WebWorker {
         self.snapshots.warmup_classes(script)
     }
 
+    /// How many warm-up boots this worker ran for `script` (a boot a
+    /// changed file started does not count).
+    pub fn warmup_boots(&self, script: &Path) -> u32 {
+        self.snapshots.warmup_boots(script)
+    }
+
     pub async fn handle_request(
         &self,
         script: &Path,
@@ -492,12 +498,7 @@ impl Runtime {
         // list; once the list settles, the worker boots again in the
         // background and the new snapshot declares the classes.
         if let Some(before) = warmup_before {
-            let grew = worker
-                .snapshots
-                .warmup_sink(script)
-                .borrow()
-                .len()
-                > before;
+            let grew = worker.snapshots.warmup_sink(script).borrow().len() > before;
             if worker.snapshots.note_forked_request(script, grew) {
                 worker.boot_in_background(script, document_root);
             }

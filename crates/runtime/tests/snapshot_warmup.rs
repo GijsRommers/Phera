@@ -19,8 +19,7 @@ struct Site {
 
 impl Site {
     fn new(name: &str) -> Site {
-        let root =
-            std::env::temp_dir().join(format!("phera-warmup-{name}-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("phera-warmup-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("src/Warm")).expect("create site directory");
         Site {
@@ -37,7 +36,10 @@ impl Site {
     }
 
     fn log_lines(&self) -> usize {
-        self.read("autoload.log").lines().filter(|line| !line.is_empty()).count()
+        self.read("autoload.log")
+            .lines()
+            .filter(|line| !line.is_empty())
+            .count()
     }
 }
 
@@ -121,7 +123,10 @@ async fn second_snapshot_declares_request_classes_and_requests_stop_autoloading(
                 "bool(true)\nbool(true)\n"
             );
             assert_eq!(site.log_lines(), 1);
-            assert_eq!(worker.warmup_classes(&script), vec!["Warm\\Thing".to_string()]);
+            assert_eq!(
+                worker.warmup_classes(&script),
+                vec!["Warm\\Thing".to_string()]
+            );
             // Requests until the list settles (64 without growth) and the
             // background re-boot has replaced the snapshot: from then on a
             // request finds the class declared and runs no autoloader.
@@ -146,7 +151,11 @@ async fn second_snapshot_declares_request_classes_and_requests_stop_autoloading(
                 answer(&worker, &site, &script, "/index.php").await,
                 "bool(true)\nbool(true)\n"
             );
-            assert_eq!(site.log_lines(), before, "the autoloader ran in a request after the re-boot");
+            assert_eq!(
+                site.log_lines(),
+                before,
+                "the autoloader ran in a request after the re-boot"
+            );
         })
         .await;
 }
@@ -188,7 +197,10 @@ async fn a_class_that_throws_in_the_boot_does_not_break_it() {
     let site = Site::new("flaky");
     let script = site.root.join("index.php");
     site.write("index.php", INDEX);
-    site.write("src/Warm/Flaky.php", "<?php\nnamespace Warm;\nclass Flaky {}\n");
+    site.write(
+        "src/Warm/Flaky.php",
+        "<?php\nnamespace Warm;\nclass Flaky {}\n",
+    );
     let local = tokio::task::LocalSet::new();
     local
         .run_until(async {
@@ -216,6 +228,12 @@ async fn a_class_that_throws_in_the_boot_does_not_break_it() {
                 ),
                 "the warm-up load of a throwing class failed the boot"
             );
+            // The class the boot could not load is dropped from the list.
+            assert!(
+                worker.warmup_classes(&script).is_empty(),
+                "a class whose boot load failed stayed in the list: {:?}",
+                worker.warmup_classes(&script)
+            );
             // The request loads the class as before: the autoloader throws,
             // the script catches, the class does not exist.
             assert_eq!(
@@ -223,6 +241,108 @@ async fn a_class_that_throws_in_the_boot_does_not_break_it() {
                 "caught\n"
             );
             assert_eq!(phera_runtime::requests_from_the_top(), 0);
+        })
+        .await;
+}
+
+/// Serves `target` `n` times, letting the LocalSet poll background boots.
+async fn serve_n(worker: &WebWorker, site: &Site, script: &Path, target: &str, n: usize) {
+    for _ in 0..n {
+        let _ = answer(worker, site, script, target).await;
+        for _ in 0..5 {
+            tokio::task::yield_now().await;
+        }
+    }
+}
+
+/// A worker whose 300 requests all load the same classes boots exactly once
+/// more after the list settles, and never again.
+#[tokio::test(flavor = "current_thread")]
+async fn a_settled_worker_boots_exactly_once_for_the_same_classes() {
+    let site = Site::new("once");
+    let script = site.root.join("index.php");
+    site.write("index.php", INDEX);
+    site.write("src/Warm/Thing.php", thing_class());
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let worker = Runtime::new().web_worker(0).with_background_boots();
+            assert!(matches!(
+                worker.boot(&script, &site.root).await,
+                BootReport::Snapshot { .. }
+            ));
+            serve_n(&worker, &site, &script, "/index.php", 300).await;
+            assert_eq!(
+                worker.warmup_boots(&script),
+                1,
+                "300 requests loading the same classes must boot exactly once more"
+            );
+            // After the warm-up boot a request runs no autoloader.
+            let before = site.log_lines();
+            assert_eq!(
+                answer(&worker, &site, &script, "/index.php").await,
+                "bool(true)\nbool(true)\n"
+            );
+            assert_eq!(
+                site.log_lines(),
+                before,
+                "the autoloader ran after the warm-up boot"
+            );
+        })
+        .await;
+}
+
+/// A class first loaded after the first warm-up boot is declared by one more
+/// boot; the boot count never passes the maximum.
+#[tokio::test(flavor = "current_thread")]
+async fn a_new_class_after_the_first_boot_boots_once_more_never_past_the_maximum() {
+    let site = Site::new("grow");
+    let script = site.root.join("index.php");
+    site.write("index.php", INDEX);
+    site.write("src/Warm/Thing.php", thing_class());
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let worker = Runtime::new().web_worker(0).with_background_boots();
+            assert!(matches!(
+                worker.boot(&script, &site.root).await,
+                BootReport::Snapshot { .. }
+            ));
+            // First request loads Warm\Thing; 64 requests without growth
+            // settle the list: exactly one warm-up boot.
+            serve_n(&worker, &site, &script, "/index.php", 80).await;
+            assert_eq!(worker.warmup_boots(&script), 1);
+            // Each new class the requests then load is declared by one more
+            // boot, until the maximum of 3 warm-up boots is reached.
+            for (i, class) in ["Other", "Third", "Fourth"].iter().enumerate() {
+                site.write(
+                    &format!("src/Warm/{class}.php"),
+                    &format!("<?php\nnamespace Warm;\nclass {class} {{}}\n"),
+                );
+                let target = format!("/index.php?class=Warm\\{class}");
+                assert_eq!(
+                    answer(&worker, &site, &script, &target).await,
+                    "bool(true)\nbool(true)\n"
+                );
+                serve_n(&worker, &site, &script, "/index.php", 80).await;
+                assert_eq!(
+                    worker.warmup_boots(&script),
+                    (i as u32 + 2).min(3),
+                    "after loading {class}, the warm-up boot count"
+                );
+            }
+            assert_eq!(
+                worker.warmup_boots(&script),
+                3,
+                "more than the maximum warm-up boots"
+            );
+            assert!(
+                worker
+                    .warmup_classes(&script)
+                    .contains(&"Warm\\Fourth".to_string()),
+                "the list keeps the class the capped worker never declared: {:?}",
+                worker.warmup_classes(&script)
+            );
         })
         .await;
 }

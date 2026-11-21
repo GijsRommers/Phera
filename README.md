@@ -156,8 +156,10 @@ for them (64 requests without a new class, at most 3 warm-up boots per
 worker; see
 [the decision](docs/decisions/2026-11-21-request-autoloads-are-declared-in-the-snapshot.md)).
 Like `opcache.preload`, a warmed class exists before the request starts:
-`class_exists($name, false)` is true for it. `phera serve --no-class-warmup`
-turns this off.
+`class_exists($name, false)` is true for it. An autoloader with a side
+effect (logging, counting) is called once per warmed class in the warm-up
+boot and then no longer in requests. `phera serve --no-class-warmup` turns
+this off.
 
 ## 🧩 Extensions
 

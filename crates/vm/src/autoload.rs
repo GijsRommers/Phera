@@ -215,7 +215,10 @@ impl Vm {
             && let Some(sink) = &self.snapshot.warmup_sink
         {
             let mut list = sink.borrow_mut();
-            if !list.iter().any(|class| class.eq_ignore_ascii_case(callback_name)) {
+            if !list
+                .iter()
+                .any(|class| class.eq_ignore_ascii_case(callback_name))
+            {
                 list.push(callback_name.to_owned());
             }
         }

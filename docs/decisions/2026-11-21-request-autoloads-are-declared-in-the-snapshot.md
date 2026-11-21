@@ -29,10 +29,23 @@ no request waits for the boot. Only classes an autoloader call produced are
 listed, so anonymous classes, classes declared conditionally inside a
 function the request then calls, and `eval` classes are never in it.
 
+A warm-up boot starts only when the list has grown since the last boot that
+used it (the worker remembers the length that boot declared) and has then
+been stable for 64 requests; a settled worker whose requests load nothing
+new therefore never boots again, and at most 3 warm-up boots run per script
+per worker (`note_forked_request` in `crates/runtime/src/snapshots.rs`). A
+class the boot cannot load any more (its file was deleted or renamed, or
+the load throws) is removed from the list, so a later boot does not try it
+again; it loads in the request as before.
+
 The one way a program can tell the difference from PHP — the same stated
 difference `opcache.preload` has: a warmed class exists before the request
 starts, so `class_exists($name, false)` is true and the autoloader is not
-called for it in the request.
+called for it in the request. An autoloader with a side effect (logging,
+counting) therefore sees one call per warmed class in the warm-up boot and
+no calls in requests after it settles, where PHP calls it once in the first
+request that needs the class; with `--no-class-warmup` Phera calls it in
+every request, as before.
 
 ## Why
 
@@ -86,9 +99,10 @@ stats nothing per request (its whole file-system row is 0.64M/req on hello,
 against Phera's 0.99M). Loading itself is the next cost to attack; this change
 only removes the repetition.
 
-The settle rule: 64 requests without growth is 1–6 s at the gate's 40–200
-requests per second, and a route hit once an hour still lands in the list at
-the next settle; the cap of 3 warm-up boots per script per worker bounds a
-site whose routes keep growing forever. The list is data of the worker, not
-a cache: the only invalidation is the existing "a file changed, boot again",
-which reloads the classes from the new files.
+The settle rule: a warm-up boot starts when the list has grown since the
+last boot that used it and then saw 64 requests without growth — 1–6 s at
+the gate's 40–200 requests per second, and a route hit once an hour still
+lands in the list at the next settle; the cap of 3 warm-up boots per script
+per worker bounds a site whose routes keep growing forever. The list is
+data of the worker, not a cache: the only invalidation is the existing "a
+file changed, boot again", which reloads the classes from the new files.

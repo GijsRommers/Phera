@@ -104,7 +104,10 @@ const WARMUP_MAX_BOOTS: u32 = 3;
 pub(crate) struct Warmup {
     pub(crate) classes: Rc<RefCell<Vec<String>>>,
     requests_since_growth: Cell<u64>,
+    /// How many warm-up boots ran, and the length of the list the last
+    /// boot that used it declared.
     boots: Cell<u32>,
+    declared_len: Cell<usize>,
 }
 
 /// What requests do while a snapshot whose files changed boots again.
@@ -216,9 +219,37 @@ impl WorkerSnapshots {
             .unwrap_or_default()
     }
 
+    /// How many warm-up boots ran for `script` (a boot a changed file
+    /// started does not count).
+    pub(crate) fn warmup_boots(&self, script: &Path) -> u32 {
+        self.warmup
+            .borrow()
+            .get(script)
+            .map(|warmup| warmup.boots.get())
+            .unwrap_or(0)
+    }
+
+    /// Records that a boot of `script` declared `len` classes from the
+    /// warm-up list: the length the last boot declared.
+    pub(crate) fn note_declared(&self, script: &Path, len: usize) {
+        let mut warmup = self.warmup.borrow_mut();
+        let Some(entry) = warmup.get_mut(script) else {
+            return;
+        };
+        if len > entry.declared_len.get() {
+            entry.declared_len.set(len);
+        }
+        entry.requests_since_growth.set(0);
+    }
+
     /// Records that a forked request of `script` ran; `grew` says it
-    /// autoloaded a class not in the list yet. Returns true when the list
-    /// has settled and the worker should boot again to declare it.
+    /// autoloaded a class not in the list yet. Returns true when the
+    /// worker should boot again to declare the list.
+    ///
+    /// A warm-up boot starts only when the list has grown since the last
+    /// boot that used it (its length is `declared_len`) and has then been
+    /// stable for WARMUP_SETTLE_REQUESTS requests. A settled worker whose
+    /// requests load nothing new therefore never boots again.
     pub(crate) fn note_forked_request(&self, script: &Path, grew: bool) -> bool {
         let booting = self.booting.borrow().iter().any(|path| path == script);
         let mut warmup = self.warmup.borrow_mut();
@@ -228,13 +259,19 @@ impl WorkerSnapshots {
         if grew {
             entry.requests_since_growth.set(0);
         } else {
-            entry.requests_since_growth.set(entry.requests_since_growth.get() + 1);
-        }        if entry.requests_since_growth.get() >= WARMUP_SETTLE_REQUESTS
+            entry
+                .requests_since_growth
+                .set(entry.requests_since_growth.get() + 1);
+        }
+        let len = entry.classes.borrow().len();
+        if len > entry.declared_len.get()
+            && entry.requests_since_growth.get() >= WARMUP_SETTLE_REQUESTS
             && entry.boots.get() < WARMUP_MAX_BOOTS
-            && !entry.classes.borrow().is_empty()
             && !booting
         {
             entry.boots.set(entry.boots.get() + 1);
+            entry.declared_len.set(len);
+            entry.requests_since_growth.set(0);
             return true;
         }
         false

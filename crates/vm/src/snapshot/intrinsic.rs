@@ -45,14 +45,23 @@ impl Vm {
                 self.snapshot.resume = destination;
                 // Warm-up: declare the classes this worker's requests
                 // autoloaded, through the application's own autoloaders, so
-                // that requests find them declared. A class whose load
-                // fails or throws is dropped here and loads in the request
-                // as before; the boot never fails because of the warm-up.
-                if let Some(warmup) = self.snapshot.boot_warmup.take() {
-                    for name in warmup {
+                // that requests find them declared. A class the boot cannot
+                // load (its file is gone, the load throws) is removed from
+                // the list and loads in the request as before; the boot
+                // never fails because of the warm-up.
+                if let Some(sink) = self.snapshot.boot_warmup.take() {
+                    let names = sink.borrow().clone();
+                    let mut failed = Vec::new();
+                    for name in names {
                         if self.classes.get(&name).is_none() {
-                            let _ = self.lookup_class_from(&name, None).await;
+                            match self.lookup_class_from(&name, None).await {
+                                Ok(Some(_)) => {}
+                                _ => failed.push(name),
+                            }
                         }
+                    }
+                    if !failed.is_empty() {
+                        sink.borrow_mut().retain(|name| !failed.contains(name));
                     }
                 }
                 // From here the classes are shared by every fork.

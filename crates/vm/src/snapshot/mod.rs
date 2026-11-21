@@ -73,9 +73,10 @@ pub(crate) struct SnapshotState {
     pub(crate) refused: Option<String>,
     /// A fork adds here every class a request's autoloader call produced.
     pub(crate) warmup_sink: Option<WarmupSink>,
-    /// A boot run declares these through the autoloaders before the call
-    /// keeps the state.
-    pub(crate) boot_warmup: Option<Vec<String>>,
+    /// A boot run declares the classes in this list through the autoloaders
+    /// before the call keeps the state; a class whose load fails is
+    /// removed from the list.
+    pub(crate) boot_warmup: Option<WarmupSink>,
 }
 
 impl Vm {
@@ -85,10 +86,11 @@ impl Vm {
         self.snapshot.warmup_sink = Some(sink);
     }
 
-    /// A boot run declares `classes` through the registered autoloaders
-    /// just before `Phera\snapshot()` keeps the state.
-    pub fn set_boot_warmup(&mut self, classes: Vec<String>) {
-        self.snapshot.boot_warmup = Some(classes);
+    /// A boot run declares the classes in `sink` through the registered
+    /// autoloaders just before `Phera\snapshot()` keeps the state; a class
+    /// whose load fails or throws is removed from `sink`.
+    pub fn set_boot_warmup(&mut self, sink: WarmupSink) {
+        self.snapshot.boot_warmup = Some(sink);
     }
 }
 
