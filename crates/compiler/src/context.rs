@@ -252,6 +252,9 @@ impl<'ast> Compiler<'ast> {
             | Instruction::Jump(t)
             | Instruction::Branch { target: t, .. }
             | Instruction::BranchNull { target: t, .. }
+            | Instruction::BranchNotNull { target: t, .. }
+            | Instruction::BranchCompare { target: t, .. }
+            | Instruction::BranchCompareInt { target: t, .. }
             | Instruction::IterNext { end: t, .. },
         ) = self.function.instructions.get_mut(i)
         {

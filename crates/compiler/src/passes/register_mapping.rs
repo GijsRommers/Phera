@@ -274,8 +274,18 @@ impl Instruction {
             }
             Instruction::Branch { value, .. }
             | Instruction::BranchNull { value, .. }
+            | Instruction::BranchNotNull { value, .. }
             | Instruction::Define { source: value, .. }
             | Instruction::Global { local: value, .. } => *value = map(*value),
+            Instruction::BranchCompare {
+                left,
+                right,
+                ..
+            } => {
+                *left = map(*left);
+                *right = map(*right)
+            }
+            Instruction::BranchCompareInt { left, .. } => *left = map(*left),
             Instruction::Call {
                 destination: dst,
                 name,

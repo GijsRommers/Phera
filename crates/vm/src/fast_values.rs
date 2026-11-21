@@ -57,6 +57,48 @@ pub(crate) fn value_step<const GUARDED: bool>(
                 None => ScalarStep::Fallback,
             }
         }
+        Instruction::BinaryBranch {
+            op,
+            lhs,
+            rhs,
+            target,
+            when,
+        } => {
+            let (Some(Some(left)), Some(Some(right))) =
+                (slots.get(lhs.index()), slots.get(rhs.index()))
+            else {
+                return ScalarStep::Fallback;
+            };
+            match quiet_binary(op, &left.deref(), &right.deref()) {
+                Some(value) => {
+                    if to_bool(&value) == when {
+                        *ip = target.index();
+                    }
+                    ScalarStep::Complete
+                }
+                None => ScalarStep::Fallback,
+            }
+        }
+        Instruction::BinaryIntBranch {
+            op,
+            lhs,
+            rhs,
+            target,
+            when,
+        } => {
+            let Some(Some(left)) = slots.get(lhs.index()) else {
+                return ScalarStep::Fallback;
+            };
+            match quiet_binary(op, &left.deref(), &Value::Int(i64::from(rhs))) {
+                Some(value) => {
+                    if to_bool(&value) == when {
+                        *ip = target.index();
+                    }
+                    ScalarStep::Complete
+                }
+                None => ScalarStep::Fallback,
+            }
+        }
         Instruction::Unary { op, dst, src } => {
             let Some(Some(value)) = slots.get(src.index()) else {
                 return ScalarStep::Fallback;
@@ -91,9 +133,10 @@ pub(crate) fn value_step<const GUARDED: bool>(
     }
 }
 
-/// `JumpIfNull` (`when_null`) or `JumpIfNotNull`. An unset register reads
-/// as null without a warning, as in the general handler: these follow a
-/// quiet read (`??`, `?->`).
+/// `JumpIfNull` (`when_null`) or `JumpIfNotNull`. An unset register falls
+/// back: the general handler reads it as null, warning when it is a named
+/// local, as in PHP for `$undef === null` (a `??` always tests a register a
+/// quiet read filled).
 #[inline(always)]
 fn jump_on_null(
     slots: &[Option<Value>],
@@ -102,10 +145,10 @@ fn jump_on_null(
     when_null: bool,
     ip: &mut usize,
 ) -> ScalarStep {
-    let Some(slot) = slots.get(register.index()) else {
+    let Some(Some(value)) = slots.get(register.index()) else {
         return ScalarStep::Fallback;
     };
-    let is_null = slot.as_ref().is_none_or(|value| value.deref().is_null());
+    let is_null = value.deref().is_null();
     if is_null == when_null {
         *ip = target.index();
     }

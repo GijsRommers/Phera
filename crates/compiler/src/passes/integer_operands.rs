@@ -269,6 +269,7 @@ pub(crate) fn fuse_integer_branches(function: &mut Function) {
             lhs,
             rhs,
             target,
+            when: false,
         };
         function.instructions[index] = Instruction::Nop;
     }

@@ -258,13 +258,18 @@ pub enum Instruction {
     },
 
     // ----- Operators ------------------------------------------------------
-    /// Compare a register to an integer and branch when the result is false.
-    /// The literal and target fit inline; no temporary boolean register is needed.
+    /// Compare a register to an integer literal and branch on the result,
+    /// jumping to `target` when it equals `when`. The literal and target fit
+    /// inline; no temporary boolean register is needed. Only comparison
+    /// operators appear here, so `when` can never be decided by inverting
+    /// `op`: PHP's orderings are not exact negations of each other (NAN
+    /// compares false to everything, including itself).
     BinaryIntBranch {
         op: BinaryOp,
         lhs: Reg,
         rhs: i32,
         target: Target,
+        when: bool,
     },
     /// A binary operation with a signed small integer. This avoids loading a
     /// literal register on every loop iteration; coercion matches `Binary`.
@@ -279,6 +284,18 @@ pub enum Instruction {
         dst: Reg,
         lhs: Reg,
         rhs: Reg,
+    },
+    /// Compare two registers and branch on the result, jumping to `target`
+    /// when it equals `when`: the condition of an `if`, `while`, `for`,
+    /// `do-while`, ternary, `&&`, `||` or `!` written as one instruction,
+    /// without a temporary boolean. Only comparison operators appear here.
+    /// The comparison itself is `Binary`'s, so the two stay in step.
+    BinaryBranch {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: Reg,
+        target: Target,
+        when: bool,
     },
     Unary {
         op: UnaryOp,

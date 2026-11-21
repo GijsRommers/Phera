@@ -354,12 +354,13 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             lhs,
             rhs,
             target,
+            when,
         } => {
             let right = i64::from(rhs);
             if let Some(left) = integer_at(slots, lhs)
                 && let Some(condition) = integer_condition(op, left, right)
             {
-                if !condition {
+                if condition == when {
                     *ip = target.index();
                 }
                 return ScalarStep::Complete;
@@ -370,7 +371,7 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             let Some(value) = fast_binary(op, left, &Value::Int(right)) else {
                 return ScalarStep::Fallback;
             };
-            if !to_bool(&value) {
+            if to_bool(&value) == when {
                 *ip = target.index();
             }
             ScalarStep::Complete
@@ -403,6 +404,47 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
                 Some(value) => store::<GUARDED>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
+        }
+        Instruction::BinaryBranch {
+            op,
+            lhs,
+            rhs,
+            target,
+            when,
+        } => {
+            // Two integers: the comparison needs no coercion at all.
+            if let (Some(left), Some(right)) = (integer_at(slots, lhs), integer_at(slots, rhs))
+                && let Some(condition) = integer_condition(op, left, right)
+            {
+                if condition == when {
+                    *ip = target.index();
+                }
+                return ScalarStep::Complete;
+            }
+            // An identity test where at least one side owns no heap value
+            // runs no PHP code, so the answer is decided here. An unset
+            // register falls back: the general handler warns for it.
+            if matches!(op, BinaryOp::Identical | BinaryOp::NotIdentical) {
+                let (Some(Some(left)), Some(Some(right))) =
+                    (slots.get(lhs.index()), slots.get(rhs.index()))
+                else {
+                    return ScalarStep::Fallback;
+                };
+                let left = left.deref();
+                let right = right.deref();
+                if let Some(same) = identity_condition(&left, &right) {
+                    let condition = if op == BinaryOp::Identical {
+                        same
+                    } else {
+                        !same
+                    };
+                    if condition == when {
+                        *ip = target.index();
+                    }
+                    return ScalarStep::Complete;
+                }
+            }
+            ScalarStep::Fallback
         }
         Instruction::AssignOp { op, local, src } => {
             if let Some(left) = integer_at(slots, local)
@@ -506,6 +548,32 @@ fn integer_condition(operator: BinaryOp, left: i64, right: i64) -> Option<bool> 
         BinaryOp::Equal | BinaryOp::Identical => left == right,
         BinaryOp::NotEqual | BinaryOp::NotIdentical => left != right,
         _ => return None,
+    })
+}
+
+/// `===` between two values where at least one owns no heap value (a number,
+/// a boolean or null): no PHP code can run, so identity is decided here. Two
+/// such values are identical when they are the same kind and equal — float
+/// equality says `NAN === NAN` is false and `-0.0 === 0.0` is true, as in PHP —
+/// and a value that owns nothing is never identical to a string, array,
+/// object, resource or reference.
+#[inline(always)]
+fn identity_condition(left: &Value, right: &Value) -> Option<bool> {
+    let owns_nothing = |value: &Value| {
+        matches!(
+            value,
+            Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_)
+        )
+    };
+    if !owns_nothing(left) && !owns_nothing(right) {
+        return None;
+    }
+    Some(match (left, right) {
+        (Value::Null, Value::Null) => true,
+        (Value::Bool(a), Value::Bool(b)) => a == b,
+        (Value::Int(a), Value::Int(b)) => a == b,
+        (Value::Float(a), Value::Float(b)) => a == b,
+        _ => false,
     })
 }
 

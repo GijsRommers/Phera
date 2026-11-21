@@ -49,6 +49,8 @@ impl Machine<'_> {
                 done => done,
             },
             Instruction::Binary { .. }
+            | Instruction::BinaryBranch { .. }
+            | Instruction::BinaryIntBranch { .. }
             | Instruction::Unary { .. }
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }

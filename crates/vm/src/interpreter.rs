@@ -2,6 +2,7 @@
 
 use phera_bytecode::Target;
 use phera_extension_api::{LocalFuture, NativeError, NativeResult};
+use phera_value::to_bool;
 
 use crate::Vm;
 use crate::calls::execution_loop::BatchExit;
@@ -108,6 +109,34 @@ impl Vm {
                 }
                 BatchExit::UndefinedBinary { op, dst, lhs, rhs } => {
                     Box::pin(self.binary_with_undefined_operand(op, dst, lhs, rhs)).await?;
+                }
+                BatchExit::UndefinedBinaryBranch {
+                    op,
+                    lhs,
+                    rhs,
+                    target,
+                    when,
+                } => {
+                    Box::pin(self.binary_branch_with_undefined_operand(
+                        op, lhs, rhs, target, when, work,
+                    ))
+                    .await?;
+                }
+                BatchExit::CompareBranch {
+                    pending,
+                    target,
+                    when,
+                } => {
+                    let result = pending.destination;
+                    Box::pin(self.continue_comparison(pending)).await?;
+                    let value = self.get(result);
+                    self.clear_local(result)?;
+                    if to_bool(&value) == when {
+                        if self.backward(target) {
+                            *work += 1;
+                        }
+                        self.jump(target)?;
+                    }
                 }
                 BatchExit::BindCall(destination) => {
                     self.coerce_call_strings(self.argument_origin).await?;
