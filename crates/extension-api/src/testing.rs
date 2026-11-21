@@ -101,12 +101,13 @@ pub fn call(
     let entry: &FunctionEntry = registry
         .get_function(name)
         .ok_or_else(|| NativeError::error(format!("Call to undefined function {name}()")))?;
-    if matches!(entry.handler, NativeFn::DeprecatedSync(_))
-        && let Some(message) = phera_source::deprecations::kept_notice(
-            phera_source::deprecations::ItemKind::Function,
-            entry.name,
-        )
-    {
+    if matches!(
+        entry.handler,
+        NativeFn::DeprecatedSync(_) | NativeFn::DeprecatedAsync(_)
+    ) && let Some(message) = phera_source::deprecations::kept_notice(
+        phera_source::deprecations::ItemKind::Function,
+        entry.name,
+    ) {
         crate::Context::deprecated(context, message.into());
     }
     crate::prepare_arguments(entry, &mut arguments, context)?;
@@ -121,7 +122,7 @@ pub fn call(
         NativeFn::Sync(function) | NativeFn::DeprecatedSync(function) => {
             function(context, &arguments)
         }
-        NativeFn::Async(function) => {
+        NativeFn::Async(function) | NativeFn::DeprecatedAsync(function) => {
             match function(context, arguments)
                 .as_mut()
                 .poll(&mut TaskContext::from_waker(Waker::noop()))
