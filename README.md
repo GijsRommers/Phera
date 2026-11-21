@@ -40,9 +40,9 @@ parameters with a literal `null` default accept `null` and emit PHP's
 implicit-nullability deprecation.
 During cycle collection, a WeakMap entry keeps its value reachable only
 while the map and key are reachable.
-Typed property references require the same conversion for every property
-holding the reference. The compiler diagnoses ambiguous ternary chains,
-invalid loop operands and misplaced namespace declarations.
+The compiler diagnoses ambiguous ternary chains, invalid loop operands
+and misplaced namespace declarations. Syntax-only tokenization accepts
+those constructs.
 
 ## 🧰 The `phera` command
 

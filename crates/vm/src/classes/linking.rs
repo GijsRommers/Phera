@@ -357,12 +357,7 @@ impl Vm {
             if let Some(inherited) = methods.get(&key) {
                 super::inheritance_checks::check_override(name, inherited, &linked)
                     .map_err(|error| self.magic_override_error(&linked, error))?;
-                let prototype = if key == "__construct" && !inherited.is_abstract {
-                    abstract_constructor(parent.as_deref()).unwrap_or(inherited)
-                } else {
-                    inherited
-                };
-                if let Some(miss) = self.check_method_contract(prototype, &linked, unit)?
+                if let Some(miss) = self.check_method_contract(inherited, &linked, unit)?
                     && let Some(parent) = &parent
                 {
                     pending.push((
@@ -601,19 +596,4 @@ impl Vm {
         self.classes.insert(class);
         Ok(())
     }
-}
-
-/// A concrete constructor does not erase an ancestor's abstract signature.
-fn abstract_constructor(mut parent: Option<&Class>) -> Option<&Rc<Method>> {
-    while let Some(class) = parent {
-        if let Some(method) = class
-            .methods
-            .get("__construct")
-            .filter(|method| method.is_abstract)
-        {
-            return Some(method);
-        }
-        parent = class.parent.as_deref();
-    }
-    None
 }

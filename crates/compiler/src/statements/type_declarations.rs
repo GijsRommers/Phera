@@ -53,10 +53,6 @@ pub(super) fn builtin_type(lower: &str) -> bool {
     )
 }
 
-pub(super) fn reserved_class_word(lower: &str) -> bool {
-    builtin_type(lower) || matches!(lower, "self" | "parent" | "static")
-}
-
 impl Compiler<'_> {
     pub(super) fn validate_declared_type(
         &self,

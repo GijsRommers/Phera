@@ -53,11 +53,11 @@ impl Vm {
             self.current()
                 .is_some_and(|frame| frame.function().strict_types)
         });
+        let actual = value.type_name();
         crate::types::coerce(value.clone(), declaration_type, strict.into(), self).map_err(|_| {
-            let actual = crate::types::property_value_type(&value);
             NativeError::type_error(format!(
                 "Cannot assign {actual} to property {}::${} of type {}",
-                phera_value::class_display_name(&property.declaring),
+                property.declaring,
                 property.name,
                 crate::types::php_type_display(declaration_type)
             ))
@@ -88,17 +88,9 @@ impl Vm {
             return Ok(());
         }
         if let Some(declaration_type) = &property.ty {
-            match value {
-                Value::Reference(reference) if matches!(change, PropertyChange::Bind) => {
-                    self.coerce_property_binding(reference, property, declaration_type)?;
-                }
-                _ => {
-                    let converted =
-                        self.coerce_property(value.clone(), property, declaration_type)?;
-                    if !matches!(value, Value::Reference(_)) {
-                        *value = converted;
-                    }
-                }
+            let converted = self.coerce_property(value.clone(), property, declaration_type)?;
+            if !matches!(value, Value::Reference(_)) {
+                *value = converted;
             }
         }
         if let Some(storage) = self.class_states.static_property(property) {
@@ -212,27 +204,10 @@ impl Vm {
                             && mutation != Mutation::Unset
                             && let Some(declaration_type) = &property.ty
                         {
-                            match value {
-                                Value::Reference(reference) if mutation == Mutation::Bind => {
-                                    crate::reference_holders::ReferenceHolders::check_object_storage(
-                                        object, key,
-                                    )?;
-                                    self.coerce_property_binding(
-                                        reference,
-                                        property,
-                                        declaration_type,
-                                    )?;
-                                }
-                                _ => {
-                                    let converted = self.coerce_property(
-                                        value.clone(),
-                                        property,
-                                        declaration_type,
-                                    )?;
-                                    if !matches!(value, Value::Reference(_)) {
-                                        *value = converted;
-                                    }
-                                }
+                            let converted =
+                                self.coerce_property(value.clone(), property, declaration_type)?;
+                            if !matches!(value, Value::Reference(_)) {
+                                *value = converted;
                             }
                         }
                         if steps.peek().is_none() {
