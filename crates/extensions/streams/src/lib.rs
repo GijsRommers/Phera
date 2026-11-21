@@ -69,6 +69,11 @@ pub use input::RequestInput;
 pub use path_text::parent as dirname_parent;
 pub use request::{creation_mask, new_resource};
 pub use request::{request_input, set_request, track_standard};
+pub use socket::descriptor::{
+    close_socket_stream, export_socket_stream, import_socket_stream, received_file_stream,
+    set_socket_stream_blocking, socket_stream_blocking,
+};
+pub use socket::{Connection as SocketConnection, Socket as StreamSocket};
 pub use terminal::{stream_kind, with_descriptor};
 pub use whole_write::append_log;
 pub use wrapper::standard_constants;
