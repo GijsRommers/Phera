@@ -111,7 +111,7 @@ impl Machine<'_> {
 /// Whether `class` is `target`, extends it or implements it: the same
 /// ancestry as `Class::ancestors`, its parent and interfaces and theirs.
 /// `None` when the walk outgrows its stack or its visits.
-fn derives_from(class: &Class, target: &Class) -> Option<bool> {
+pub(super) fn derives_from(class: &Class, target: &Class) -> Option<bool> {
     let mut waiting: [Option<&Class>; WALK_DEPTH] = [None; WALK_DEPTH];
     waiting[0] = Some(class);
     let mut count: usize = 1;

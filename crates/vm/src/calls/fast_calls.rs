@@ -129,13 +129,7 @@ impl Machine<'_> {
                 .code
                 .function(frame.function)
                 .return_type
-                .is_some_and(|declared| {
-                    crate::class_types::known_class_match(
-                        self.code.cache(frame.function),
-                        declared,
-                        value,
-                    )
-                })
+                .is_some_and(|declared| self.class_type_matches(frame.function, declared, value))
         {
             return Step::Slow;
         }
@@ -447,8 +441,64 @@ impl Machine<'_> {
             return true;
         }
         let declared = self.code.function(function).parameters[index].ty;
-        declared.is_some_and(|declared| {
-            crate::class_types::known_class_match(self.code.cache(function), declared, value)
+        declared.is_some_and(|declared| self.class_type_matches(function, declared, value))
+    }
+
+    /// Whether `value` is an object of a class that the class type
+    /// `declared` of `function` allows: the class the unit's cache last
+    /// matched, or else the declared class found by its name key, with
+    /// the object's linked ancestry walked by pointer.
+    #[inline(always)]
+    fn class_type_matches(
+        &self,
+        function: FunctionIndex,
+        declared: phera_bytecode::TypeId,
+        value: &Value,
+    ) -> bool {
+        crate::class_types::known_class_match(self.code.cache(function), declared, value)
+            || self.declared_class_match(function, declared, value)
+    }
+
+    /// The second half of [`Machine::class_type_matches`]: a union of
+    /// absolute class names (`Type`, `A|B`, `?Model`). `self`, `static`,
+    /// `parent`, intersections and undeclared classes are left to the VM.
+    #[cold]
+    #[inline(never)]
+    fn declared_class_match(
+        &self,
+        function: FunctionIndex,
+        declared: phera_bytecode::TypeId,
+        value: &Value,
+    ) -> bool {
+        let Value::Object(object) = value else {
+            return false;
+        };
+        let Some(class) = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+        else {
+            return false;
+        };
+        let unit = self.code.unit(function);
+        let Some(ty) = unit.types.get(declared.index()) else {
+            return false;
+        };
+        if ty.intersection {
+            return false;
+        }
+        ty.classes.iter().any(|name| {
+            let relative = unit
+                .names
+                .get(name.index())
+                .is_none_or(|written| matches!(written.as_str(), "self" | "static" | "parent"));
+            !relative
+                && self
+                    .classes
+                    .by_key(self.code.unit_name_key(function, *name))
+                    .is_some_and(|target| {
+                        super::fast_instance_of::derives_from(class, target) == Some(true)
+                    })
         })
     }
 
