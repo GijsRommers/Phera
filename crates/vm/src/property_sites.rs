@@ -566,7 +566,6 @@ impl Vm {
             return Ok(false);
         };
         // `public float $x` assigned an int stores the float, as PHP does.
-        let original = value;
         let widened = entry.write_rule.widened(value);
         let value = widened.as_ref().unwrap_or(value);
         let accepted = !matches!(value, Value::Reference(_)) && entry.write_rule.accepts(value);
@@ -586,8 +585,10 @@ impl Vm {
         ) {
             return Ok(false);
         }
+        // The assignment's result is the value stored (`1.0` for a `float`
+        // property assigned `1`).
         if let Some((_, result)) = assignment {
-            self.set(result, original.clone());
+            self.set(result, value.clone());
         }
         Ok(true)
     }

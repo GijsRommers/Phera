@@ -74,4 +74,14 @@ impl PropertyFacts {
     pub(crate) fn has(self, flag: Self) -> bool {
         self.0 & flag.0 != 0
     }
+
+    /// Whether any of `flags` is set.
+    pub(crate) fn has_any(self, flags: Self) -> bool {
+        self.0 & flags.0 != 0
+    }
+
+    /// These flags and `other`.
+    pub(crate) const fn with(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
 }
