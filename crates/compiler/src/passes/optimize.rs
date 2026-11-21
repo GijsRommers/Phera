@@ -90,13 +90,14 @@ pub(crate) fn target_mut(instruction: &mut Instruction) -> Option<&mut Target> {
         | Instruction::JumpIfNotNull { target, .. } => Some(target),
         Instruction::ReceiveDefault { passed, .. } => Some(passed),
         Instruction::BindStatic { initialized, .. } => Some(initialized),
+        Instruction::FinallyCall { target, .. } => Some(target),
         Instruction::IterNext { end, .. } | Instruction::IterNextKeyed { end, .. } => Some(end),
         _ => None,
     }
 }
 
 /// Preserve source locations and targets after integer fusion removes loads.
-fn compact_nops(function: &mut Function) {
+pub(crate) fn compact_nops(function: &mut Function) {
     let mut offsets = Vec::with_capacity(function.instructions.len() + 1);
     let mut count = 0;
     for instruction in &function.instructions {

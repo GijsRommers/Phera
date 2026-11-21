@@ -6,7 +6,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use phera_value::{Object, ObjectIds, PhpArray};
+use phera_value::{Object, ObjectIds};
 
 use super::Class;
 use super::method_table::MethodTable;
@@ -177,9 +177,16 @@ impl ClassTable {
         *self.recording.borrow_mut() = Some(Vec::new());
     }
 
-    /// Ends a link: the names it looked up, and the position it used.
-    pub(crate) fn end_link(&mut self) -> (Vec<super::worker_classes::Dependency>, Option<u32>) {
-        let recorded = self.recording.borrow_mut().take().unwrap_or_default();
+    /// Linking against a class that is still being declared is request-local.
+    pub(crate) fn discard_link_dependencies(&self) {
+        *self.recording.borrow_mut() = None;
+    }
+
+    /// Ends a link: the reusable dependencies, and the position it used.
+    pub(crate) fn end_link(
+        &mut self,
+    ) -> (Option<Vec<super::worker_classes::Dependency>>, Option<u32>) {
+        let recorded = self.recording.borrow_mut().take();
         (recorded, self.linking.take())
     }
 
@@ -326,6 +333,13 @@ impl ClassTable {
         self.register(position, class);
     }
 
+    /// A declaration completed across an autoload is request-local.
+    pub(crate) fn publish_delayed(&mut self, class: Rc<Class>) {
+        let position = class.index.0 - self.native_count;
+        self.own_name(&class.name.to_ascii_lowercase(), position);
+        self.insert(class);
+    }
+
     pub(crate) fn alias(&mut self, name: String, class: Rc<Class>) -> bool {
         if self.get_lowercase(&name).is_some() {
             return false;
@@ -419,20 +433,21 @@ impl ClassTable {
 
     /// Value-owned leases implement PHP's LIFO reuse without inspecting weak handles.
     pub(crate) fn allocate(&mut self, class: Rc<Class>) -> Rc<Object> {
-        self.allocate_with_properties(class, PhpArray::new())
+        let properties = phera_value::Properties::for_class(&*class);
+        self.allocate_with_properties(class, properties)
     }
 
     pub(crate) fn allocate_with_properties(
         &mut self,
         class: Rc<Class>,
-        properties: PhpArray,
+        properties: phera_value::Properties,
     ) -> Rc<Object> {
         self.has_dimensions |= class.operations.has(ClassOperations::DIMENSIONS);
         let has_destructor = class
             .magic
             .as_ref()
             .is_some_and(|magic| magic.destruct.is_some());
-        let object = Object::allocate_with_properties(&self.ids, class, properties);
+        let object = Object::allocate_with(&self.ids, class, properties);
         if has_destructor {
             object.expect_destructor();
         }
@@ -506,7 +521,7 @@ impl Drop for ClassTable {
         // the pool, which holds the queue, so an unclosed queue would leak.
         drop(self.ids.close());
         for object in self.objects.iter().filter_map(Weak::upgrade) {
-            object.update(|properties| *properties = phera_value::PhpArray::new());
+            object.update(|properties| *properties = phera_value::Properties::default());
             drop(object.take_attachments());
             if let Ok(mut native) = object.native.try_borrow_mut() {
                 *native = None;

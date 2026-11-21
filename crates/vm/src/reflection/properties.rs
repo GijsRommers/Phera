@@ -131,7 +131,8 @@ impl Vm {
                 if property.ty.is_some() {
                     Err(NativeError::error(format!(
                         "Typed property {}::${} must not be accessed before initialization",
-                        property.declaring, property.name
+                        phera_value::class_display_name(&property.declaring),
+                        property.name
                     )))
                 } else {
                     Ok(Value::Null)

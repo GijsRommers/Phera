@@ -116,7 +116,7 @@ impl Vm {
         let properties = if let Some(template) = &class.property_template {
             template.clone()
         } else {
-            let mut properties = phera_value::PhpArray::new();
+            let mut properties = phera_value::Properties::for_class(&*class);
             for property in &class.defaults {
                 if property.initialized {
                     let value = if let Some(initializer) = &property.initializer {
