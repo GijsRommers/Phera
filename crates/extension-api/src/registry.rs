@@ -61,8 +61,12 @@ impl From<&'static str> for ConstantValue {
 #[derive(Clone, Default)]
 pub struct Registry {
     iconv_converter: Option<crate::IconvConverter>,
-    /// Keyed by lowercase name: PHP function names are case-insensitive.
-    functions: HashMap<String, FunctionEntry>,
+    /// Every native function, in registration order; a function's
+    /// [`NativeId`](crate::NativeId) is its index here.
+    functions: Vec<FunctionEntry>,
+    /// The index of each function by lowercase name: PHP function names are
+    /// case-insensitive. Used when a name is linked, not when a call runs.
+    function_ids: HashMap<String, crate::NativeId>,
     /// Only calls already holding a first-argument object need to check this table.
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
     sync_selectors: HashMap<&'static str, crate::SyncSelector>,
@@ -246,7 +250,7 @@ impl Registry {
     pub fn function(&mut self, entry: FunctionEntry) {
         let key = entry.name.to_ascii_lowercase();
         assert!(
-            !self.functions.contains_key(&key),
+            !self.function_ids.contains_key(&key),
             "function {}() is already registered",
             entry.name
         );
@@ -254,7 +258,9 @@ impl Registry {
             self.function_modules.insert(entry.name, module);
         }
         self.function_order.push(entry.name);
-        self.functions.insert(key, entry);
+        let id = crate::NativeId(self.functions.len() as u32);
+        self.function_ids.insert(key, id);
+        self.functions.push(FunctionEntry { id, ..entry });
     }
 
     /// Panics on a duplicate name, like [`Registry::function`].
@@ -369,7 +375,19 @@ impl Registry {
     }
 
     pub fn get_function(&self, name: &str) -> Option<&FunctionEntry> {
-        self.functions.get(&name.to_ascii_lowercase())
+        self.get_folded_function(&folded_name(name))
+    }
+
+    /// [`Registry::get_function`] for a name already in lowercase.
+    pub fn get_folded_function(&self, lowercase_name: &str) -> Option<&FunctionEntry> {
+        let id = self.function_ids.get(lowercase_name)?;
+        self.function_at(*id)
+    }
+
+    /// The function with this number.
+    #[inline]
+    pub fn function_at(&self, id: crate::NativeId) -> Option<&FunctionEntry> {
+        self.functions.get(id.0 as usize)
     }
 
     pub fn get_constant(&self, name: &str) -> Option<&ConstantValue> {
@@ -468,6 +486,17 @@ impl Registry {
         self.constants
             .iter()
             .map(|(name, constant)| (name.as_str(), &constant.value, constant.deprecated))
+    }
+}
+
+/// A PHP function or class name in lowercase, the form name lookups use
+/// (PHP's names are case-insensitive). Most names are written in
+/// lowercase already, and are given back as they are, without a copy.
+pub fn folded_name(name: &str) -> std::borrow::Cow<'_, str> {
+    if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        std::borrow::Cow::Owned(name.to_ascii_lowercase())
+    } else {
+        std::borrow::Cow::Borrowed(name)
     }
 }
 

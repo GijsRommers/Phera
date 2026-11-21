@@ -233,13 +233,27 @@ impl Vm {
             return Ok(Some(BatchExit::NativeCall(destination)));
         };
         let CallTarget::Native(entry) = callee.target else {
-            return if matches!(callee.target, CallTarget::Method { .. }) {
-                self.call_sync_native_method(call, destination)
-            } else {
-                Ok(Some(BatchExit::NativeCall(destination)))
+            return match callee.target {
+                CallTarget::Method { .. } => self.call_sync_native_method(call, destination),
+                // Its callbacks run on the frame stack (`calls::native_loops`).
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::ArrayMap) => {
+                    match self.start_array_map(destination)? {
+                        Some(exit) => Ok(exit),
+                        None => Ok(Some(BatchExit::NativeCall(destination))),
+                    }
+                }
+                _ => Ok(Some(BatchExit::NativeCall(destination))),
             };
         };
         let NativeFn::Sync(handler) = entry.handler else {
+            // Their callbacks run on the frame stack (`calls::native_loops`).
+            if matches!(
+                entry.name,
+                "array_filter" | "array_reduce" | "usort" | "uasort" | "uksort"
+            ) && let Some(exit) = self.start_native_function_loop(destination, entry)?
+            {
+                return Ok(exit);
+            }
             return Ok(Some(BatchExit::NativeCall(destination)));
         };
         let binding = callee.argument_binding;
@@ -277,7 +291,12 @@ impl Vm {
         result
     }
 
-    fn accepts_sync_call(&self, entry: FunctionEntry, base: usize, count: usize) -> bool {
+    pub(crate) fn accepts_sync_call(
+        &self,
+        entry: FunctionEntry,
+        base: usize,
+        count: usize,
+    ) -> bool {
         let slots = self.registers.window(base, count);
         slots.len() == count
             && accepts(entry.params, slots)
@@ -285,7 +304,7 @@ impl Vm {
                 || self.registry.object_handler(entry.name).is_none())
     }
 
-    fn invoke_sync_function(
+    pub(crate) fn invoke_sync_function(
         &mut self,
         name: &'static str,
         handler: SyncFn,

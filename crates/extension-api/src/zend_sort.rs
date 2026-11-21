@@ -45,7 +45,7 @@ use std::future::Future;
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
 
-use phera_extension_api::NativeError;
+use crate::NativeError;
 
 /// Runs of at most this many entries are insertion sorted (`nmemb <= 16`).
 const INSERTION_SORT_MAX: usize = 16;

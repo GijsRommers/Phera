@@ -62,6 +62,31 @@ impl Iterators {
         self.slots[index] = Some(state);
     }
 
+    /// Whether the slot holds no loop's state.
+    pub(crate) fn is_free(&self, index: u16) -> bool {
+        self.slots.get(index as usize).is_none_or(Option::is_none)
+    }
+
+    /// Ends a by-value loop over an array (or an empty slot): `Some` with
+    /// what the slot held. `None`, leaving it in place, for the state of a
+    /// by-reference loop or of an object's own iteration, which need more
+    /// to end.
+    pub(crate) fn take_by_value(&mut self, index: u16) -> Option<Option<IteratorState>> {
+        let Some(slot) = self.slots.get_mut(index as usize) else {
+            return Some(None);
+        };
+        match slot {
+            Some(state)
+                if state.source.is_some()
+                    || state.traversal.is_some()
+                    || state.property_hooks.is_some() =>
+            {
+                None
+            }
+            _ => Some(slot.take()),
+        }
+    }
+
     /// Ending foreach transfers its remaining owners out of the activation.
     pub(crate) fn remove(&mut self, index: &u16) -> Option<IteratorState> {
         self.slots.get_mut(*index as usize)?.take()

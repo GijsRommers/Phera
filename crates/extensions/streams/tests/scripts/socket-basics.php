@@ -1,6 +1,10 @@
 <?php
 var_dump(stream_socket_client('missing://example:1', $errno, $error, 0.01), $errno, $error);
-var_dump(stream_get_transports());
+// PHP's list depends on its OpenSSL build; these are in every build and in Phera.
+var_dump(array_values(array_intersect(
+    ['tcp', 'udp', 'unix', 'udg', 'ssl', 'tls', 'tlsv1.2', 'tlsv1.3'],
+    stream_get_transports(),
+)));
 [$left, $right] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
 var_dump(stream_get_meta_data($left), stream_is_local($left));
 var_dump(stream_socket_get_name($left, false), stream_socket_get_name($left, true));

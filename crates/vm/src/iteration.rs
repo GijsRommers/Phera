@@ -311,6 +311,59 @@ pub(crate) fn snapshot_step(
     true
 }
 
+/// `IterNextKeyed` of a by-value loop, as `Vm::iter_next` makes it: the
+/// next entry of the array the loop iterates over (its key, then its
+/// value), or the next of an object's own cursor; `false` with nothing
+/// changed for a by-reference loop or any other state.
+#[inline(never)]
+pub(crate) fn keyed_step(
+    iterator: IterId,
+    (key, destination): (Reg, Reg),
+    end: Target,
+    iterators: &mut crate::iterators::Iterators,
+    slots: &mut [Option<Value>],
+    ip: &mut usize,
+) -> bool {
+    let Some(state) = iterators.get_mut(iterator.0) else {
+        return false;
+    };
+    if state.source.is_some() {
+        return false;
+    }
+    let Some(array) = &state.snapshot else {
+        return state.traversal_mode == frame::TraversalMode::Value
+            && native_step(state, Some(key), destination, slots);
+    };
+    let position = match (state.started, state.position) {
+        (true, Some(position)) => array.next_position(position),
+        (true, None) => None,
+        (false, _) => array.first_position(),
+    };
+    state.position = position;
+    state.started = true;
+    let entry = match position {
+        Some(position) => array.entry_at(position),
+        None => None,
+    };
+    match entry {
+        Some((element_key, value)) => {
+            let element_key = match element_key {
+                ArrayKey::Int(integer) => Value::Int(integer),
+                ArrayKey::String(string) => Value::String(string.clone()),
+            };
+            let value = crate::fast::duplicate(&value.deref());
+            if let Some(slot) = slots.get_mut(key.index()) {
+                *slot = Some(element_key);
+            }
+            if let Some(slot) = slots.get_mut(destination.index()) {
+                *slot = Some(value);
+            }
+        }
+        None => *ip = end.index(),
+    }
+    true
+}
+
 /// Consume a combined entry from a by-value cursor on the ordinary path.
 pub(crate) fn native_step(
     state: &mut frame::IteratorState,

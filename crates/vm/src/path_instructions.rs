@@ -99,6 +99,9 @@ impl Vm {
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?
         {
+            // The loop updates the next such property itself (see
+            // `calls::fast_compound_assignments`).
+            self.prepare_update_site(&place)?;
             return Ok(Some(BatchExit::Instruction(Instruction::AssignOpPath {
                 op: operator,
                 dst: destination,
@@ -114,6 +117,18 @@ impl Vm {
             self.finish_indexed_update(&place, register, keys, value.clone())?;
             self.set(destination, value);
             return Ok(None);
+        }
+        // An object that converts through PHP code (`__toString`) needs
+        // the async handler, as a `Binary` of it does.
+        if crate::object_operators::has_binary(&left, &right)
+            || (operator == BinaryOp::Concat && (left.is_object() || right.is_object()))
+        {
+            return Ok(Some(BatchExit::Instruction(Instruction::AssignOpPath {
+                op: operator,
+                dst: destination,
+                path,
+                src: source,
+            })));
         }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = ops::binary(
@@ -144,6 +159,7 @@ impl Vm {
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?
         {
+            self.prepare_update_site(&place)?;
             return Ok(Some(BatchExit::Instruction(Instruction::IncDecPath {
                 mode,
                 dst: destination,
@@ -245,6 +261,9 @@ impl Vm {
                 && place.steps()?.next().is_none()
                 && Self::has_string_conversion(&value))
         {
+            // The loop writes the next such element itself (see
+            // `calls::fast_element_writes`).
+            self.prepare_element_site(&place)?;
             return Ok(Some(BatchExit::Instruction(Instruction::AssignPath {
                 path,
                 src: source,

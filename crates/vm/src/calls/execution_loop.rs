@@ -20,7 +20,7 @@ use phera_value::Value;
 
 use crate::Vm;
 use crate::calls::call_stack::CallStack;
-use crate::calls::frame::{Frame, TraversalMode};
+use crate::calls::frame::Frame;
 use crate::calls::registers::Registers;
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
@@ -83,6 +83,15 @@ enum LoopExit {
 }
 
 /// The parts of the VM the loop borrows, and its counters.
+/// A value the loop hands to the batch loop when it leaves as if yielding
+/// (see `CallStack::handed_back`).
+pub(crate) enum HandedBack {
+    /// The function native code called returned it (`Machine::leave_to_native`).
+    Native(Value),
+    /// A callback of a native loop returned it (`Machine::leave_to_native_loop`).
+    NativeLoop(Value),
+}
+
 pub(super) struct Machine<'a> {
     pub(super) code: &'a CodeTable,
     pub(super) classes: &'a mut ClassTable,
@@ -97,6 +106,8 @@ pub(super) struct Machine<'a> {
     pub(super) frame_limit: usize,
     /// The request's object ids, which say whether a destructor is due.
     pub(super) ids: &'a phera_value::ObjectIds,
+    /// The native functions, for the parameters of a lean native call.
+    pub(super) registry: &'a phera_extension_api::Registry,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -143,6 +154,7 @@ impl Vm {
                 stop,
                 frame_limit: self.frame_limit,
                 ids: &self.object_ids,
+                registry: &self.registry,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
@@ -157,11 +169,50 @@ impl Vm {
             self.executed_instructions += machine.executed;
             let instruction = match exit {
                 LoopExit::Slow(instruction) => instruction,
-                LoopExit::Yield => return Ok(BatchExit::Yield),
+                LoopExit::Yield => {
+                    match self.call_stack.handed_back.take() {
+                        Some(HandedBack::NativeLoop(value)) => {
+                            // The built-in's next step (`calls::native_loops`).
+                            self.resume_native_loop(value)?;
+                            if self.destructors_due() {
+                                return Ok(BatchExit::Destructors);
+                            }
+                            if self.pending_callbacks
+                                || (TRACK_GENERATORS && self.generator_releases_pending())
+                            {
+                                return Ok(BatchExit::Handlers);
+                            }
+                            continue;
+                        }
+                        Some(HandedBack::Native(value)) => return Ok(BatchExit::Returned(value)),
+                        None => return Ok(BatchExit::Yield),
+                    }
+                }
                 LoopExit::Destructors => return Ok(BatchExit::Destructors),
                 LoopExit::Invalid => return Err(internal_error!("invalid IP")),
             };
-            if let Some(exit) = self.execute::<TRACK_GENERATORS>(instruction, stop, work)? {
+            let exit = match instruction {
+                // A call of a native function goes straight to it: the
+                // general handler would only find that out and come here.
+                Instruction::Call { dst, .. } if !TRACK_GENERATORS && self.calls_plain_native() => {
+                    *work += 1;
+                    self.call_lean_native(dst)
+                }
+                _ => {
+                    // The VM's handlers need the description of a lean
+                    // native record (see `calls::native_calls`).
+                    if self.call_stack.last_call().is_some_and(|call| {
+                        matches!(
+                            call.callee,
+                            crate::calls::prepared_call::PreparedCallee::Native(_)
+                        )
+                    }) {
+                        self.describe_native_call(&instruction);
+                    }
+                    self.execute::<TRACK_GENERATORS>(instruction, stop, work)
+                }
+            };
+            if let Some(exit) = exit? {
                 return Ok(exit);
             }
             if self.destructors_due() {
@@ -175,6 +226,23 @@ impl Vm {
                 return Ok(BatchExit::Yield);
             }
         }
+    }
+}
+
+impl Vm {
+    /// Whether the innermost prepared call is to native code that needs no
+    /// argument expansion first (a magic `__call` does).
+    #[inline]
+    fn calls_plain_native(&self) -> bool {
+        use crate::calls::prepared_call::PreparedCallee;
+        self.call_stack.last_call().is_some_and(|call| {
+            matches!(
+                call.callee,
+                PreparedCallee::General | PreparedCallee::Native(_)
+            ) && !call
+                .flags
+                .contains(crate::calls::prepared_call::CallFlags::MAGIC)
+        })
     }
 }
 
@@ -205,7 +273,16 @@ impl Machine<'_> {
                 Err(exit) => return exit,
             };
             match self.step::<GUARDED>(instruction, position) {
-                Step::Done(ip) => position.ip = ip,
+                Step::Done(ip) => {
+                    // In the guarded loop a step may have let go of the
+                    // last handle on an object with a destructor: it runs
+                    // before the next instruction, as the VM runs it.
+                    if GUARDED && self.ids.has_doomed() {
+                        self.publish(ip);
+                        return destructors_due();
+                    }
+                    position.ip = ip;
+                }
                 Step::Switched(next) => {
                     // A return releases the frame's variables. Simple
                     // instructions release nothing (see `crate::fast`), and
@@ -257,6 +334,11 @@ impl Machine<'_> {
             if step == ScalarStep::Fallback {
                 break Ok(*instruction);
             }
+            // Only the guarded loop's writes answer `Released`: freeing what
+            // a register held may have queued a destructor.
+            if GUARDED && step == ScalarStep::Released && self.ids.has_doomed() {
+                break Err(destructors_due());
+            }
             // Only backward jumps count as work; comparing positions also
             // covers fused compare-and-branch instructions.
             if ip <= previous {
@@ -295,20 +377,26 @@ impl Machine<'_> {
                 }
             }
             Instruction::IterNextKeyed {
-                iter, key, value, ..
+                iter,
+                key,
+                value,
+                end,
             } if position.frame.has_extras() => {
                 let Some(extras) = self.stack.current_extras_present() else {
                     return Step::Slow;
                 };
                 let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
-                if iterators.get_mut(iter.0).is_some_and(|state| {
-                    state.traversal_mode == TraversalMode::Value
-                        && crate::iteration::native_step(state, Some(key), value, slots)
-                }) {
-                    Step::Done(ip)
-                } else {
-                    Step::Slow
+                match crate::iteration::keyed_step(
+                    iter,
+                    (key, value),
+                    end,
+                    iterators,
+                    slots,
+                    &mut ip,
+                ) {
+                    true => Step::Done(ip),
+                    false => Step::Slow,
                 }
             }
             Instruction::AppendLocal { local, src } => {
@@ -357,11 +445,15 @@ impl Machine<'_> {
             | Instruction::FetchIndex { .. }
             | Instruction::Fetch { .. }
             | Instruction::AssignPath { .. }
+            | Instruction::AssignPathFromLocal { .. }
+            | Instruction::AssignOpPath { .. }
             | Instruction::IncDecPath { .. }
             | Instruction::InitCall { .. }
-            | Instruction::FetchClassName { .. } => {
-                self.further_step::<GUARDED>(instruction, position)
-            }
+            | Instruction::FetchClassName { .. }
+            | Instruction::InstanceOf { .. }
+            | Instruction::SendPath { .. }
+            | Instruction::IterStart { .. }
+            | Instruction::IterEnd { .. } => self.further_step::<GUARDED>(instruction, position),
             _ => Step::Slow,
         }
     }

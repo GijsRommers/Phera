@@ -65,6 +65,16 @@ impl Storage {
         }
     }
 
+    /// Drops every slot from `position` on. The caller has taken their
+    /// values out of the index already (only holes and the removed entry
+    /// are past `position`).
+    pub fn truncate(&mut self, position: usize) {
+        match self {
+            Self::List(values) => values.truncate(position),
+            Self::Map(map) => map.entries.truncate(position),
+        }
+    }
+
     /// The value at `position`, or `None` for a hole or past the end.
     #[inline]
     pub fn value(&self, position: usize) -> Option<&Value> {

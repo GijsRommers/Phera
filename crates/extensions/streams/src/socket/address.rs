@@ -16,8 +16,12 @@ pub(super) enum Transport {
     Tls(i64),
 }
 
+/// The transports this build can open. PHP's own list depends on how its
+/// OpenSSL was built (Homebrew's lists `sslv3`, a Linux build does not);
+/// Phera speaks TLS 1.2 and 1.3 only, so the older protocol names are not
+/// transports here and get PHP's message for one that is not built in.
 pub(super) const NAMES: &[&str] = &[
-    "tcp", "udp", "unix", "udg", "ssl", "sslv3", "tls", "tlsv1.0", "tlsv1.1", "tlsv1.2", "tlsv1.3",
+    "tcp", "udp", "unix", "udg", "ssl", "tls", "tlsv1.2", "tlsv1.3",
 ];
 
 impl Transport {
@@ -32,9 +36,6 @@ impl Transport {
             b"unix" => Self::Unix,
             b"udg" => Self::UnixDatagram,
             b"ssl" | b"tls" => Self::Tls(121),
-            b"sslv3" => Self::Tls(5),
-            b"tlsv1.0" => Self::Tls(9),
-            b"tlsv1.1" => Self::Tls(17),
             b"tlsv1.2" => Self::Tls(33),
             b"tlsv1.3" => Self::Tls(65),
             _ => {
