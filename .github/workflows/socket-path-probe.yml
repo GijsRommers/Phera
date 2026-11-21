@@ -1,0 +1,159 @@
+name: Socket path probe
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  named-syscalls:
+    if: github.event.pull_request.head.ref == 'speed/socket-path'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: phera_bench
+          POSTGRES_USER: phera
+          POSTGRES_PASSWORD: phera
+        ports: ['54329:5432']
+        options: >-
+          --health-cmd "pg_isready -U phera -d phera_bench"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: phera_bench
+          MYSQL_USER: phera
+          MYSQL_PASSWORD: phera
+          MYSQL_ROOT_PASSWORD: phera-root
+        ports: ['33069:3306']
+        options: >-
+          --health-cmd "mysqladmin ping --silent"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca
+        with:
+          toolchain: '1.99.1'
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          shared-key: linux
+          save-if: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
+        with:
+          php-version: '8.5'
+          extensions: pdo, mysqlnd, pdo_mysql, pdo_pgsql
+          coverage: none
+      - name: Build release runtime
+        run: cargo build --locked --release -p phera-cli
+      - name: Count named syscalls for PDO by_id
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v strace >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y strace
+          fi
+          clean=(env -i PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}")
+          php_args=(-n)
+          for module in pdo mysqlnd pdo_mysql pdo_pgsql; do
+            if ! "${clean[@]}" php -n -r 'exit(extension_loaded($argv[1]) ? 0 : 1);' -- "$module"; then
+              php_args+=(-d "extension=$module")
+            fi
+          done
+          work="$RUNNER_TEMP/socket-path"
+          mkdir -p "$work"
+          cat > "$work/by-id.php" <<'PHP'
+          <?php
+          $dsn = match ($argv[1]) {
+              'mysql' => 'mysql:host=127.0.0.1;port=33069;dbname=phera_bench',
+              'pgsql' => 'pgsql:host=127.0.0.1;port=54329;dbname=phera_bench;sslmode=disable',
+          };
+          try {
+              $options = [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION];
+              if (defined('PDO::PHERA_ATTR_POOL')) {
+                  $options[PDO::PHERA_ATTR_POOL] = false;
+              }
+              $pdo = new PDO($dsn, 'phera', 'phera', $options);
+              if ($argv[2] === 'seed') {
+                  $pdo->exec('CREATE TABLE posts (
+                      id int PRIMARY KEY, user_id int NOT NULL, title varchar(100) NOT NULL,
+                      slug varchar(100) NOT NULL, body text NOT NULL, created_at timestamp NOT NULL,
+                      updated_at timestamp NOT NULL, published boolean NOT NULL
+                  )');
+                  $insert = $pdo->prepare('INSERT INTO posts VALUES (?, 1, ?, ?, ?, ?, ?, TRUE)');
+                  for ($id = 1; $id <= 20; ++$id) {
+                      $insert->execute([$id, "Post $id", "post-$id", "Body $id",
+                                        '2020-01-01 00:00:00', '2020-01-02 00:00:00']);
+                  }
+                  return;
+              }
+              $statement = $pdo->prepare('SELECT * FROM posts WHERE id = ?');
+              $sum = 0;
+              for ($i = 0; $i < (int) $argv[2]; ++$i) {
+                  $statement->execute([($i % 20) + 1]);
+                  $row = $statement->fetch(PDO::FETCH_ASSOC);
+                  $sum += $row ? count($row) : 0;
+              }
+              echo "by_id $sum\n";
+          } catch (Throwable $error) {
+              fwrite(STDERR, get_class($error) . ' ' . $error->getCode() . "\n");
+              exit(1);
+          }
+          PHP
+          git rev-parse HEAD
+          "${clean[@]}" php "${php_args[@]}" -r 'echo PHP_VERSION, "\n";'
+          for db in mysql pgsql; do
+            "${clean[@]}" php "${php_args[@]}" "$work/by-id.php" "$db" seed
+            for runtime in php phera; do
+              if [[ "$runtime" == php ]]; then
+                command=(php "${php_args[@]}")
+              else
+                command=(target/release/phera)
+              fi
+              for repeat in 1 2; do
+                for count in 100 1100; do
+                  output=$(strace -f -qq -c -e 'trace=%desc,%network,futex' \
+                    -o "$work/$db-$runtime-$repeat-$count.txt" \
+                    "${clean[@]}" "${command[@]}" "$work/by-id.php" "$db" "$count")
+                  test "$output" = "by_id $((count * 8))"
+                done
+              done
+            done
+          done
+          python3 - "$work" <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          folder = Path(sys.argv[1])
+
+          def counters(path):
+              counts = {}
+              for line in path.read_text().splitlines():
+                  m = re.fullmatch(r'\s*[\d.]+\s+[\d.]+\s+\d+\s+(\d+)(?:\s+(\d+))?\s+(\w+)\s*', line)
+                  if m and m[3] != 'total':
+                      counts[m[3]] = int(m[1]), int(m[2] or 0)
+              if not counts:
+                  raise ValueError(f'No syscall counts in {path.name}')
+              return counts
+
+          for db in ('mysql', 'pgsql'):
+              for runtime in ('php', 'phera'):
+                  for repeat in (1, 2):
+                      stem = f'{db}-{runtime}-{repeat}'
+                      short = counters(folder / f'{stem}-100.txt')
+                      long = counters(folder / f'{stem}-1100.txt')
+                      print(stem, 'calls/query and errors/query')
+                      for call in sorted(short.keys() | long.keys()):
+                          delta = [(b - a) / 1000 for a, b in zip(short.get(call, (0, 0)), long.get(call, (0, 0)))]
+                          if max(map(abs, delta)) >= .001:
+                              print(f'  {call:22} {delta[0]:7.3f} {delta[1]:7.3f}')
+          PY
