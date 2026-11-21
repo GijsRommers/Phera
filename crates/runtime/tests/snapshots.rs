@@ -797,3 +797,42 @@ async fn class_lookups_ignore_case_in_every_request() {
     .await;
     assert_eq!(answers, ["Post query Post yes is"; 3]);
 }
+
+/// A script with forty enums: shared by the worker's requests, each enum's
+/// cases are still each request's own objects, and lookups of built-in and
+/// application classes answer as PHP does.
+fn forty_enums_script() -> String {
+    let mut source = String::from("<?php\n");
+    for index in 0..40 {
+        source.push_str(&format!(
+            "enum Status{index}: string {{ case On = 'on{index}'; case Off = 'off{index}'; const DEFAULT = self::On; }}\n"
+        ));
+    }
+    source.push_str(
+        "class Order { const LIMIT = 3; public Status7 $status = Status7::Off; }
+         $a = Status3::On; $b = Status3::On;
+         echo $a === $b ? 'same' : 'other', ' ', spl_object_id($a) === spl_object_id(Status3::On) ? 'id' : 'noid', ' ';
+         echo unserialize(serialize(Status39::Off)) === Status39::Off ? 'serial' : 'noserial', ' ';
+         echo Status12::DEFAULT === Status12::On ? 'const' : 'noconst', ' ', Status20::tryFrom('off20')?->name, ' ';
+         $order = new Order; echo Order::LIMIT, ' ', $order->status->value, ' ', $order instanceof Order ? 'order' : 'no', ' ';
+         echo (new ArrayObject([1])) instanceof Countable ? 'countable' : 'no', ' ', count(get_declared_classes()) > 40 ? 'declared' : 'missing';",
+    );
+    source
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn forty_shared_enums_keep_their_cases_per_request() {
+    let site = Site::new("forty-enums");
+    let source = forty_enums_script();
+    std::fs::write(site.root.join("index.php"), &source).expect("script");
+    let expected = phera_extension_api::testing::oracle::run_php("forty-enums", &source)
+        .map(|lines| lines.concat());
+    let answers = worker_answers(Runtime::new(), &site, &["index.php"; 3]).await;
+    if let Some(expected) = expected {
+        assert_eq!(answers, [expected.clone(), expected.clone(), expected]);
+    }
+    assert_eq!(
+        answers[0],
+        "same id serial const Off 3 off7 order countable declared"
+    );
+}

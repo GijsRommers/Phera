@@ -102,7 +102,10 @@ impl PositionLeases {
 impl Drop for PositionLeases {
     fn drop(&mut self) {
         let mut inner = self.worker.inner.borrow_mut();
-        inner.free.append(self.positions.get_mut());
+        for position in self.positions.get_mut().drain(..) {
+            inner.unchain(position);
+            inner.free.push(position);
+        }
     }
 }
 
@@ -192,6 +195,14 @@ impl WorkerClasses {
     pub(crate) fn after(&self, position: u32) -> Option<u32> {
         let inner = self.inner.borrow();
         inner.next.get(position as usize)?.checked_sub(1)
+    }
+
+    /// Names a class one request linked for itself alone (its position is
+    /// that request's lease): the class is found through the same chain as
+    /// shared ones, and only the request that declared it has it in its
+    /// table. The chain entry goes when the lease does.
+    pub(crate) fn chain_leased(&self, lowercase: &str, position: u32) {
+        self.inner.borrow_mut().chain(lowercase, position);
     }
 
     /// The process key of a lowercased class name some entry has.

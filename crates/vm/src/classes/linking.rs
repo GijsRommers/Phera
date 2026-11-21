@@ -84,7 +84,7 @@ impl Vm {
         self.classes.begin_link();
         self.code.begin_imports();
         let raised = self.diagnostic_reporter.raised;
-        let linked = self.link_class_body(unit, unit_first, index, key.clone());
+        let linked = self.link_class_body(unit, unit_first, index);
         let (dependencies, position) = self.classes.end_link();
         let imports = self.code.end_imports();
         if let Err(error) = linked {
@@ -96,12 +96,13 @@ impl Vm {
         let declaration = &unit.classes[index.index()];
         // A class whose linking raised a diagnostic is linked by each request
         // that declares it, so that each sees the diagnostic (and runs its
-        // handler); an enum's cases and an anonymous class are the request's.
-        // Only a file revision from the code cache has a number to key the
-        // entry by: a class of `eval`'d or command-line code is the request's.
+        // handler); an anonymous class is the request's. An enum is shared
+        // like any class: its case objects are the request's, made on first
+        // use (`EnumCases`). Only a file revision from the code cache has a
+        // number to key the entry by: `eval`'d code's classes are the request's.
         let shared = raised == self.diagnostic_reporter.raised
             && unit.metadata.is_some()
-            && !matches!(declaration.kind, ClassKind::Enum | ClassKind::Anonymous);
+            && declaration.kind != ClassKind::Anonymous;
         if shared
             && let Some(position) = position
             && let Some(class) = self.classes.at_position(position)
@@ -172,7 +173,7 @@ impl Vm {
         for import in &entry.imports {
             self.code.write_import(import, class.index);
         }
-        self.classes.declare_entry(&entry.lowercase_name, class);
+        self.classes.declare_entry(class);
     }
 
     /// Structural declaration failures are fatal; missing dependencies remain catchable Errors.
@@ -181,7 +182,6 @@ impl Vm {
         unit: &Arc<CompiledUnit>,
         unit_first: FunctionIndex,
         declaration_index: ClassId,
-        key: String,
     ) -> Result<(), NativeError> {
         let declaration = &unit.classes[declaration_index.index()];
         let name = &declaration.name;
@@ -593,7 +593,7 @@ impl Vm {
                 "Enum {name} cannot implement the Serializable interface"
             )));
         }
-        self.classes.insert(key, class);
+        self.classes.insert(class);
         Ok(())
     }
 }

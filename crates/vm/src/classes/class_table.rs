@@ -104,12 +104,11 @@ pub(crate) struct ClassTable {
     declared: Vec<u32>,
     /// Names in declaration order, aliases included (`get_declared_classes`).
     order: Vec<Rc<str>>,
-    /// Names only this request resolves, with their process key and class
-    /// number: classes it linked for itself alone (see
-    /// `super::worker_classes`) and `class_alias` names, which may name a
-    /// built-in. Usually empty; shared classes are found through the
-    /// worker's names and this request's `local`.
-    own: Vec<(Rc<str>, phera_bytecode::NameKey, u32)>,
+    /// This request's `class_alias` names, with their process key and the
+    /// number of the class they name (which may be a built-in). Checked
+    /// after the worker's names and the built-ins, so that a lookup of a
+    /// declared class never walks it.
+    aliases: Vec<(Rc<str>, phera_bytecode::NameKey, u32)>,
     /// The position reserved for the class being linked.
     linking: Option<u32>,
     /// While a class links: every class name it looked up, and what it was.
@@ -144,7 +143,7 @@ impl ClassTable {
             worker,
             declared: Vec::new(),
             order: Vec::new(),
-            own: Vec::new(),
+            aliases: Vec::new(),
             linking: None,
             recording: Default::default(),
             has_dimensions: false,
@@ -202,9 +201,7 @@ impl ClassTable {
     /// Names a class linked for this request alone: found through its own
     /// names, not the worker's.
     pub(crate) fn own_name(&mut self, lowercase: &str, position: u32) {
-        let key = phera_bytecode::name_keys::key(lowercase);
-        self.own
-            .push((lowercase.into(), key, self.native_count + position));
+        self.worker.chain_leased(lowercase, position);
     }
 
     /// The class a name of the running code means in this request, by the
@@ -214,10 +211,11 @@ impl ClassTable {
         if let Some(found) = self.declared_by_key(key) {
             return Some(found);
         }
-        if let Some((_, _, number)) = self.own.iter().find(|(_, own, _)| *own == key) {
-            return self.by_number(*number);
+        if let Some(found) = self.native.by_key(key) {
+            return Some(found);
         }
-        self.native.by_key(key)
+        let (_, _, number) = self.aliases.iter().find(|(_, alias, _)| *alias == key)?;
+        self.by_number(*number)
     }
 
     /// The class this request declared among the worker's entries named by
@@ -237,9 +235,6 @@ impl ClassTable {
     /// The class a lowercased name means in this request, from a string a
     /// script built or a declaration names.
     fn find(&self, lowercase: &str) -> Option<&Rc<Class>> {
-        if let Some((_, _, number)) = self.own.iter().find(|(name, _, _)| &**name == lowercase) {
-            return self.by_number(*number);
-        }
         if let Some(found) = self
             .worker
             .key_of(lowercase)
@@ -247,7 +242,14 @@ impl ClassTable {
         {
             return Some(found);
         }
-        self.native.entries.get(lowercase)
+        if let Some(found) = self.native.entries.get(lowercase) {
+            return Some(found);
+        }
+        let (_, _, number) = self
+            .aliases
+            .iter()
+            .find(|(alias, _, _)| &**alias == lowercase)?;
+        self.by_number(*number)
     }
 
     /// The class this request linked at worker `position`.
@@ -256,12 +258,12 @@ impl ClassTable {
     }
 
     /// Declares a class another request of the worker linked.
-    pub(crate) fn declare_entry(&mut self, lowercase_name: &str, class: Rc<Class>) {
+    pub(crate) fn declare_entry(&mut self, class: Rc<Class>) {
         let position = class.index.0 - self.native_count;
-        self.register(position, lowercase_name.into(), class);
+        self.register(position, class);
     }
 
-    fn register(&mut self, position: u32, lowercase_name: Rc<str>, class: Rc<Class>) {
+    fn register(&mut self, position: u32, class: Rc<Class>) {
         self.has_property_views |= class
             .hooks
             .as_ref()
@@ -273,7 +275,6 @@ impl ClassTable {
         self.order.push(class.name.as_str().into());
         self.local[index] = Some(class);
         self.declared.push(position);
-        let _ = lowercase_name;
     }
 
     /// The class's methods by name key, built on first use. The keys are
@@ -320,9 +321,9 @@ impl ClassTable {
     }
 
     /// Declares the class this request just linked, at its reserved position.
-    pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
+    pub(crate) fn insert(&mut self, class: Rc<Class>) {
         let position = class.index.0 - self.native_count;
-        self.register(position, lowercase_name.into(), class);
+        self.register(position, class);
     }
 
     pub(crate) fn alias(&mut self, name: String, class: Rc<Class>) -> bool {
@@ -331,7 +332,7 @@ impl ClassTable {
         }
         self.order.push(name.as_str().into());
         let key = phera_bytecode::name_keys::key(&name);
-        self.own.push((name.into(), key, class.index.0));
+        self.aliases.push((name.into(), key, class.index.0));
         true
     }
 
@@ -525,7 +526,7 @@ impl ClassTable {
             local: self.local.clone(),
             declared: self.declared.clone(),
             order: self.order.clone(),
-            own: self.own.clone(),
+            aliases: self.aliases.clone(),
             linking: None,
             recording: Default::default(),
             leases: self
