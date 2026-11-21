@@ -50,12 +50,17 @@ impl Machine<'_> {
         };
         let slots = self.registers.tail_mut(position.frame.base());
         match store::<GUARDED>(slots, destination, value) {
-            ScalarStep::Complete => Step::Done(position.ip),
+            ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
     }
 
-    fn property_element(&self, position: Position, path: PathId, quiet: bool) -> Option<Value> {
+    pub(super) fn property_element(
+        &self,
+        position: Position,
+        path: PathId,
+        quiet: bool,
+    ) -> Option<Value> {
         let property =
             self.with_site(position, (path, Shape::Element), |entry, object, scope| {
                 if entry.hooks.is_some() {
@@ -93,7 +98,7 @@ impl Machine<'_> {
     }
 
     /// An integer or string key in a register, as PHP converts it.
-    fn array_key(&self, position: Position, register: Reg) -> Option<ArrayKey> {
+    pub(super) fn array_key(&self, position: Position, register: Reg) -> Option<ArrayKey> {
         match self
             .registers
             .window(position.frame.base() + register.index(), 1)

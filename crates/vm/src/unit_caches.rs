@@ -26,7 +26,6 @@ pub(crate) struct UnitCache {
     pub(crate) direct_natives: OnceCell<Box<[Cell<Option<crate::calls::sync_native::NativeLink>>]>>,
     pub(crate) constants: Rc<[phera_value::Value]>,
     pub(crate) class_names: Rc<[phera_value::Value]>,
-    pub(crate) classes: Vec<RefCell<Option<Rc<crate::classes::Class>>>>,
     /// Keyed by immutable unit TypeId and made at first unit use; spelling cannot
     /// change, so scope classification needs no invalidation. Relative types resolve per call.
     pub(crate) type_scopes: Arc<[crate::types::DeclarationScope]>,
@@ -63,19 +62,18 @@ impl UnitCache {
     /// site cells made so far, the per-function cell boxes, and the
     /// per-symbol and per-type resolution slots. The shared literal tables
     /// cost a fork nothing. See `crate::snapshot::footprint`.
-    pub(crate) fn fork_bytes(&self) -> (usize, usize, usize) {
+    pub(crate) fn fork_bytes(&self) -> [usize; 5] {
         use std::mem::size_of;
         let made = |sites: &Sites| sites.get().map_or(0, |cells| cells.len());
         let cells = (made(&self.main_sites) + self.function_sites.iter().map(made).sum::<usize>())
             * size_of::<RefCell<CachedSite>>();
         let boxes = (self.function_sites.len() + 1) * size_of::<Sites>();
-        let slots = self.classes.len() * size_of::<RefCell<Option<Rc<crate::classes::Class>>>>()
-            + self.class_types.len() * size_of::<RefCell<Option<ClassTypeEntry>>>()
-            + self.symbols.borrow().len()
-                * size_of::<Option<crate::calls::pending::LinkedFunction>>()
-            + self.closure_signatures.borrow().len()
-                * size_of::<Option<crate::calls::call_state::Callee>>();
-        (cells, boxes, slots)
+        let types = self.class_types.len() * size_of::<RefCell<Option<ClassTypeEntry>>>();
+        let functions = self.symbols.borrow().len()
+            * size_of::<Option<crate::calls::pending::LinkedFunction>>();
+        let closures = self.closure_signatures.borrow().len()
+            * size_of::<Option<crate::calls::call_state::Callee>>();
+        [cells, boxes, types, functions, closures]
     }
 
     pub(crate) fn trace_file(&self, unit: &CompiledUnit) -> Value {
@@ -133,7 +131,6 @@ impl UnitCache {
                 .iter()
                 .map(crate::unit_caches::value)
                 .collect(),
-            classes: unit.symbols.iter().map(|_| RefCell::new(None)).collect(),
             type_scopes: match &unit.metadata {
                 Some(metadata) => metadata.type_scopes.clone(),
                 None => unit
@@ -208,7 +205,6 @@ impl crate::snapshot::ForkCopy for UnitCache {
             direct_natives: self.direct_natives.clone(),
             constants: self.constants.clone(),
             class_names: self.class_names.clone(),
-            classes: self.classes.clone(),
             type_scopes: self.type_scopes.clone(),
             class_types: self.class_types.clone(),
             main_sites: sites(&self.main_sites, fork),

@@ -57,11 +57,24 @@ struct Inner {
     entries: Vec<Option<Rc<EntryFacts>>>,
     /// The entries made from each declaration: file revision (its process
     /// number) and class number in the file.
-    declarations: HashMap<(u32, u32), Vec<u32>>,
+    /// Indexed by the file revision's process number, then by class number
+    /// in the file: the positions of the entries made from that declaration
+    /// (usually one).
+    declarations: Vec<Vec<Vec<u32>>>,
     /// Entries by file revision, to drop them when the revision is gone.
     revisions: Vec<RevisionEntries>,
     /// Positions given back by requests, handed out again first.
     free: Vec<u32>,
+    /// The first entry with each class name, by the name's process key,
+    /// plus one (0: none), and the next entry with the same name, by
+    /// position, plus one: every entry of a name in two flat arrays.
+    heads: Vec<u32>,
+    next: Vec<u32>,
+    /// The key of each entry's lowercased name, by position, to unlink it.
+    entry_keys: Vec<u32>,
+    /// Lowercased class names to their process keys, for names a script
+    /// builds at run time (`new $class`, `class_exists($name)`).
+    keys: HashMap<Box<str>, phera_bytecode::NameKey>,
 }
 
 /// Positions one request (or boot) took for classes it linked for itself
@@ -89,7 +102,10 @@ impl PositionLeases {
 impl Drop for PositionLeases {
     fn drop(&mut self) {
         let mut inner = self.worker.inner.borrow_mut();
-        inner.free.append(self.positions.get_mut());
+        for position in self.positions.get_mut().drain(..) {
+            inner.unchain(position);
+            inner.free.push(position);
+        }
     }
 }
 
@@ -105,23 +121,24 @@ impl WorkerClasses {
     }
 
     /// The entries made from declaration `class` of `unit`, newest first.
-    pub(crate) fn candidates(
+    /// The newest entry made from declaration `class` of `unit` that
+    /// `usable` accepts.
+    pub(crate) fn find_entry(
         &self,
         unit: &Arc<phera_bytecode::CompiledUnit>,
         class: u32,
-    ) -> Vec<Rc<EntryFacts>> {
-        let Some(metadata) = &unit.metadata else {
-            return Vec::new();
-        };
+        usable: impl Fn(&EntryFacts) -> bool,
+    ) -> Option<Rc<EntryFacts>> {
+        let metadata = unit.metadata.as_ref()?;
         let inner = self.inner.borrow();
-        inner
+        let positions = inner
             .declarations
-            .get(&(metadata.id, class))
-            .into_iter()
-            .flatten()
-            .rev()
-            .filter_map(|position| inner.entries.get(*position as usize)?.clone())
-            .collect()
+            .get(metadata.id as usize)?
+            .get(class as usize)?;
+        positions.iter().rev().find_map(|position| {
+            let entry = inner.entries.get(*position as usize)?.as_ref()?;
+            usable(entry).then(|| entry.clone())
+        })
     }
 
     /// Keeps a class a request linked at `position`, for every request of
@@ -139,7 +156,16 @@ impl WorkerClasses {
         let mut inner = self.inner.borrow_mut();
         inner.drop_dead_revisions();
         let key = (metadata.id, declaration);
-        inner.declarations.entry(key).or_default().push(position);
+        let (revision, class) = (key.0 as usize, key.1 as usize);
+        if inner.declarations.len() <= revision {
+            inner.declarations.resize_with(revision + 1, Vec::new);
+        }
+        let classes = &mut inner.declarations[revision];
+        if classes.len() <= class {
+            classes.resize_with(class + 1, Vec::new);
+        }
+        classes[class].push(position);
+        inner.chain(&facts.lowercase_name, position);
         if let Some(slot) = inner.entries.get_mut(position as usize) {
             *slot = Some(Rc::new(facts));
         }
@@ -156,7 +182,88 @@ impl WorkerClasses {
     }
 }
 
+impl WorkerClasses {
+    /// The first entry named by `key`, if any.
+    #[inline]
+    pub(crate) fn first(&self, key: phera_bytecode::NameKey) -> Option<u32> {
+        let inner = self.inner.borrow();
+        inner.heads.get(key.0 as usize)?.checked_sub(1)
+    }
+
+    /// The entry after `position` with the same name, if any.
+    #[inline]
+    pub(crate) fn after(&self, position: u32) -> Option<u32> {
+        let inner = self.inner.borrow();
+        inner.next.get(position as usize)?.checked_sub(1)
+    }
+
+    /// Names a class one request linked for itself alone (its position is
+    /// that request's lease): the class is found through the same chain as
+    /// shared ones, and only the request that declared it has it in its
+    /// table. The chain entry goes when the lease does.
+    pub(crate) fn chain_leased(&self, lowercase: &str, position: u32) {
+        self.inner.borrow_mut().chain(lowercase, position);
+    }
+
+    /// The process key of a lowercased class name some entry has.
+    pub(crate) fn key_of(&self, lowercase: &str) -> Option<phera_bytecode::NameKey> {
+        self.inner.borrow().keys.get(lowercase).copied()
+    }
+}
+
 impl Inner {
+    /// Puts `position` first among the entries named `lowercase`.
+    fn chain(&mut self, lowercase: &str, position: u32) {
+        let key = match self.keys.get(lowercase) {
+            Some(key) => *key,
+            None => {
+                let key = phera_bytecode::name_keys::key(lowercase);
+                self.keys.insert(lowercase.into(), key);
+                key
+            }
+        };
+        let (slot, at) = (key.0 as usize, position as usize);
+        if self.heads.len() <= slot {
+            self.heads.resize(slot + 1, 0);
+        }
+        if self.next.len() <= at {
+            self.next.resize(at + 1, 0);
+            self.entry_keys.resize(at + 1, u32::MAX);
+        }
+        self.next[at] = self.heads[slot];
+        self.heads[slot] = position + 1;
+        self.entry_keys[at] = key.0;
+    }
+
+    /// Takes `position` out of its name's chain.
+    fn unchain(&mut self, position: u32) {
+        let at = position as usize;
+        let Some(key) = self
+            .entry_keys
+            .get(at)
+            .copied()
+            .filter(|key| *key != u32::MAX)
+        else {
+            return;
+        };
+        let after = self.next[at];
+        if self.heads[key as usize] == position + 1 {
+            self.heads[key as usize] = after;
+        } else {
+            let mut previous = self.heads[key as usize];
+            while previous != 0 {
+                let link = (previous - 1) as usize;
+                if self.next[link] == position + 1 {
+                    self.next[link] = after;
+                    break;
+                }
+                previous = self.next[link];
+            }
+        }
+        self.next[at] = 0;
+        self.entry_keys[at] = u32::MAX;
+    }
+
     /// Forgets the entries of file revisions nothing holds any more.
     fn drop_dead_revisions(&mut self) {
         let mut position = 0;
@@ -167,10 +274,18 @@ impl Inner {
             }
             let (_, entries) = self.revisions.swap_remove(position);
             for (unit, class, entry) in entries {
-                self.declarations.remove(&(unit, class));
+                if let Some(classes) = self.declarations.get_mut(unit as usize) {
+                    if let Some(positions) = classes.get_mut(class as usize) {
+                        positions.clear();
+                    }
+                    if classes.iter().all(Vec::is_empty) {
+                        *classes = Vec::new();
+                    }
+                }
                 if let Some(slot) = self.entries.get_mut(entry as usize) {
                     *slot = None;
                 }
+                self.unchain(entry);
                 self.free.push(entry);
             }
         }

@@ -4,7 +4,9 @@ use std::collections::HashSet;
 
 use phera_bytecode::reflection::DeclarationMetadata;
 use phera_bytecode::{ClassDeclaration, CompiledUnit, TraitAdaptation, Visibility};
-use phera_extension_api::reflection::{AttributeTarget, MemberInfo, PropertyHandle, PropertySlot};
+use phera_extension_api::reflection::{
+    AttributeTarget, MemberInfo, MethodHandle, PropertyHandle, PropertySlot,
+};
 
 use crate::classes::class::ConstantInitializer;
 use crate::{Vm, classes::Class, code_table::FunctionIndex};
@@ -107,7 +109,12 @@ impl Vm {
         methods.sort_by_key(|method| self.method_listing_order(class, method));
         methods
             .into_iter()
-            .map(|method| MemberInfo {
+            .enumerate()
+            .map(|(index, method)| MemberInfo {
+                method: u32::try_from(index).ok().map(|index| MethodHandle {
+                    class: class.index.number(),
+                    index,
+                }),
                 name: method.name.clone(),
                 class: method.declaring.clone(),
                 lookup_class: class.name.clone(),

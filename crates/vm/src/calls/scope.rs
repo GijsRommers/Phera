@@ -37,8 +37,9 @@ impl Vm {
 
     /// Namespace fallbacks test user declarations, natives and VM intrinsics.
     pub(crate) fn exists(&self, name: &str) -> bool {
-        self.function_table.contains(&name.to_ascii_lowercase())
-            || self.registry.get_function(name).is_some()
-            || Intrinsic::resolve(name).is_some()
+        let name = phera_extension_api::folded_name(name);
+        self.function_table.contains(&name)
+            || self.registry.get_folded_function(&name).is_some()
+            || Intrinsic::resolve_folded(&name).is_some()
     }
 }

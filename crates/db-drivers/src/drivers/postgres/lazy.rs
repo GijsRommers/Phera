@@ -1,202 +1,156 @@
-//! `PDO::ATTR_PREFETCH => false` returns PostgreSQL rows one result at a time.
+//! `PDO::ATTR_PREFETCH => false` keeps reading the same socket at fetch time.
 
 use std::collections::VecDeque;
-use std::future::poll_fn;
-use std::pin::Pin;
 use std::sync::{Arc, Weak};
 
-use futures_core::Stream;
-use tokio_postgres::RowStream;
-use tokio_postgres::types::Type;
+use postgres_protocol::message::backend::{DataRowBody, Message};
 
-use super::{Postgres, Row, error, text};
-use crate::drivers::{Column, RawRows};
+use super::{Postgres, values};
+use crate::drivers::{Column, RowBuffer, Rows};
 use crate::errors::DbError;
-
-enum Pending {
-    Stream {
-        first: Option<tokio_postgres::Row>,
-        source: Pin<Box<RowStream>>,
-        query: String,
-    },
-    Buffered(VecDeque<Result<Row, DbError>>),
-}
 
 pub(super) struct Active {
     owner: Weak<()>,
+    columns: Vec<Column>,
+    query: String,
     rows: Pending,
 }
 
-impl Postgres {
-    pub fn discard_lazy(&mut self) {
-        self.lazy = None;
-    }
+enum Pending {
+    Socket(Option<DataRowBody>),
+    Buffered(VecDeque<Result<DataRowBody, DbError>>),
+}
 
-    pub fn close_lazy(&mut self, owner: &Arc<()>) {
-        if self.lazy.as_ref().is_some_and(|lazy| lazy.owns(owner)) {
-            self.discard_lazy();
+impl Active {
+    pub(super) fn new(
+        owner: &Arc<()>,
+        columns: Vec<Column>,
+        query: String,
+        first: DataRowBody,
+    ) -> Self {
+        Self {
+            owner: Arc::downgrade(owner),
+            columns,
+            query,
+            rows: Pending::Socket(Some(first)),
         }
     }
 
-    /// Make room for a side query without losing rows from the active statement.
-    pub async fn buffer_lazy(&mut self) {
-        let Some(Active {
-            rows: pending @ Pending::Stream { .. },
+    fn owns(&self, owner: &Arc<()>) -> bool {
+        self.owner.ptr_eq(&Arc::downgrade(owner))
+    }
+}
+
+impl Postgres {
+    pub async fn discard_lazy(&mut self) -> Result<(), DbError> {
+        if let Some(Active {
+            rows: Pending::Socket(_),
+            query,
             ..
-        }) = &mut self.lazy
-        else {
+        }) = self.lazy.take()
+        {
+            self.finish(&query).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn close_lazy(&mut self, owner: &Arc<()>) -> Result<(), DbError> {
+        if self.lazy.as_ref().is_some_and(|lazy| lazy.owns(owner)) {
+            self.discard_lazy().await?;
+        }
+        Ok(())
+    }
+
+    /// A side query uses the same socket, so save the unread cells first.
+    pub async fn buffer_lazy(&mut self) {
+        let Some(mut active) = self.lazy.take() else {
             return;
         };
-        let mut buffered = VecDeque::new();
-        loop {
-            match pending.next().await {
-                Ok(Some(row)) => buffered.push_back(Ok(row)),
-                Ok(None) => break,
-                Err(error) => {
-                    buffered.push_back(Err(error));
-                    break;
+        if let Pending::Socket(first) = &mut active.rows {
+            let mut rows = VecDeque::new();
+            if let Some(first) = first.take() {
+                rows.push_back(Ok(first));
+            }
+            loop {
+                match self.lazy_row(&active.query).await {
+                    Ok(Some(row)) => rows.push_back(Ok(row)),
+                    Ok(None) => break,
+                    Err(error) => {
+                        rows.push_back(Err(error));
+                        break;
+                    }
                 }
             }
+            active.rows = Pending::Buffered(rows);
         }
-        *pending = Pending::Buffered(buffered);
-    }
-
-    pub(super) async fn start_lazy(
-        &mut self,
-        stream: RowStream,
-        mut columns: Vec<Column>,
-        query: String,
-        owner: &Arc<()>,
-    ) -> Result<RawRows, DbError> {
-        let mut source = Box::pin(stream);
-        let Some(first) = next(&mut source, &query).await? else {
-            let affected = if columns.is_empty() {
-                source.rows_affected().unwrap_or_default()
-            } else {
-                0
-            };
-            return Ok(RawRows::Postgres {
-                columns,
-                rows: Vec::new(),
-                affected,
-            });
-        };
-        if columns.is_empty() {
-            self.retire |= first
-                .columns()
-                .iter()
-                .any(|c| Type::from_oid(c.type_().oid()).is_none());
-            columns = first
-                .columns()
-                .iter()
-                .map(crate::metadata::postgres)
-                .collect();
-        }
-        let rows = if first
-            .columns()
-            .iter()
-            .any(|column| text::server_text(column.type_()))
-        {
-            // Session-sensitive values need a second query to format them. Until the
-            // first query is consumed, its bounded response channel can block that query.
-            let mut buffered = vec![first];
-            while let Some(row) = next(&mut source, &query).await? {
-                buffered.push(row);
-            }
-            let formatted = text::convert(&self.client, buffered, &query)
-                .await?
-                .into_iter()
-                .map(Ok)
-                .collect();
-            Pending::Buffered(formatted)
-        } else {
-            Pending::Stream {
-                first: Some(first),
-                source,
-                query,
-            }
-        };
-        self.lazy = Some(Active {
-            owner: Arc::downgrade(owner),
-            rows,
-        });
-        Ok(RawRows::Postgres {
-            columns,
-            rows: Vec::new(),
-            affected: 1,
-        })
+        self.lazy = Some(active);
     }
 
     pub async fn read_lazy(
         &mut self,
         owner: &Arc<()>,
         all: bool,
-    ) -> Result<Option<(RawRows, bool)>, DbError> {
-        let Some(active) = self.lazy.as_mut().filter(|lazy| lazy.owns(owner)) else {
+    ) -> Result<Option<(Rows, bool)>, DbError> {
+        let Some(mut active) = self.lazy.take() else {
             return Ok(None);
         };
-        let mut rows = Vec::new();
+        if !active.owns(owner) {
+            self.lazy = Some(active);
+            return Ok(None);
+        }
+        let mut values = RowBuffer::with_capacity(active.columns.len(), usize::from(!all));
         let done = loop {
-            match active.rows.next().await {
-                Ok(Some(row)) => rows.push(row),
-                Ok(None) => break true,
-                Err(error) => {
-                    self.discard_lazy();
-                    return Err(error);
+            let streaming = matches!(active.rows, Pending::Socket(_));
+            let row = match &mut active.rows {
+                Pending::Socket(first) => match first.take() {
+                    Some(row) => Some(row),
+                    None => self.lazy_row(&active.query).await?,
+                },
+                Pending::Buffered(rows) => rows.pop_front().transpose()?,
+            };
+            let Some(row) = row else {
+                break true;
+            };
+            if let Err(error) = values::append(&active.columns, &mut values, &row) {
+                if error.state == "08006" {
+                    return Err(self.client.invalid(error.detail));
                 }
+                if streaming {
+                    let _ = self.finish(&active.query).await;
+                }
+                return Err(error);
             }
             if !all {
                 break false;
             }
         };
-        if done {
-            self.discard_lazy();
+        if !done {
+            self.lazy = Some(active);
         }
         Ok(Some((
-            RawRows::Postgres {
-                columns: Vec::new(),
-                rows,
-                affected: 0,
+            Rows {
+                values,
+                ..Rows::default()
             },
             done,
         )))
     }
-}
 
-impl Active {
-    fn owns(&self, owner: &Arc<()>) -> bool {
-        Weak::ptr_eq(&self.owner, &Arc::downgrade(owner))
-    }
-}
-
-impl Pending {
-    async fn next(&mut self) -> Result<Option<Row>, DbError> {
-        match self {
-            Self::Buffered(rows) => rows.pop_front().transpose(),
-            Self::Stream {
-                first,
-                source,
-                query,
-            } => {
-                let row = match first.take() {
-                    Some(row) => Some(row),
-                    None => next(source, query).await?,
-                };
-                Ok(row.map(|binary| Row {
-                    binary,
-                    text: Vec::new(),
-                }))
+    async fn lazy_row(&mut self, query: &str) -> Result<Option<DataRowBody>, DbError> {
+        loop {
+            match self.client.next().await? {
+                Message::DataRow(row) => return Ok(Some(row)),
+                Message::CommandComplete(_) => {
+                    self.finish_after_result(query).await?;
+                    return Ok(None);
+                }
+                Message::CloseComplete => {}
+                Message::ReadyForQuery(_) => return Ok(None),
+                Message::ErrorResponse(error) => {
+                    return Err(self.client.failure(error, query, false).await);
+                }
+                _ => return Err(self.client.invalid("unexpected PostgreSQL cursor response")),
             }
         }
     }
-}
-
-async fn next(
-    source: &mut Pin<Box<RowStream>>,
-    query: &str,
-) -> Result<Option<tokio_postgres::Row>, DbError> {
-    poll_fn(|context| source.as_mut().poll_next(context))
-        .await
-        .transpose()
-        .map_err(|failure| error(failure, query))
 }

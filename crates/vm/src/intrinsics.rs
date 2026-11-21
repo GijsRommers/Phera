@@ -54,7 +54,12 @@ pub(crate) enum Intrinsic {
 impl Intrinsic {
     /// Resolve the case-insensitive PHP function name at the call boundary.
     pub(crate) fn resolve(name: &str) -> Option<Self> {
-        Some(match name.to_ascii_lowercase().as_str() {
+        Self::resolve_folded(&phera_extension_api::folded_name(name))
+    }
+
+    /// [`Intrinsic::resolve`] for a name already in lowercase.
+    pub(crate) fn resolve_folded(lowercase_name: &str) -> Option<Self> {
+        Some(match lowercase_name {
             "set_exception_handler" => {
                 Self::Handler(crate::error_handlers::HandlerFunction::SetException)
             }

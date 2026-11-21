@@ -67,6 +67,13 @@ impl FunctionFacts {
         index < self.parameters as usize && index < 64 && self.by_reference & (1 << index) != 0
     }
 
+    /// Whether every declared parameter takes a copy of its argument (none
+    /// is by reference or variadic), so that no argument can be one a
+    /// reference was expected for.
+    pub(crate) fn takes_values_only(&self) -> bool {
+        self.special == 0 && self.parameters <= 64
+    }
+
     /// Whether parameter `index` is declared and takes a copy of its
     /// argument: it is neither by reference nor variadic.
     pub(crate) fn takes_value(&self, index: usize) -> bool {

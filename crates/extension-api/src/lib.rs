@@ -40,7 +40,7 @@ pub use context::{
 mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{
-    AsyncFn, FunctionEntry, NativeFn, NativeNumericParameter, Param, ParamType, SyncFn,
+    AsyncFn, FunctionEntry, NativeFn, NativeId, NativeNumericParameter, Param, ParamType, SyncFn,
     SyncSelector, deprecated_method,
 };
 pub use object_handlers::{
@@ -50,7 +50,7 @@ pub use object_handlers::{
     fork_refused_handle,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
-pub use registry::{BundledSource, ConstantValue, Registry, ResourceFork};
+pub use registry::{BundledSource, ConstantValue, Registry, ResourceFork, folded_name};
 pub use state::{ProcessCancellation, RequestState, StateFork, copy_state, fresh_state};
 pub use working_directory::WorkingDirectory;
 
@@ -90,3 +90,4 @@ pub trait Extension {
 pub mod fiber;
 pub mod ini;
 pub mod reflection;
+pub mod zend_sort;

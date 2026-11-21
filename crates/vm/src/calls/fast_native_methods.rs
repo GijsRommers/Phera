@@ -1,4 +1,5 @@
-//! A synchronous native method can finish directly from its argument window.
+//! Native methods prepared by the interpreter loop; a synchronous one can
+//! finish directly from its argument window.
 //!
 //! ```php
 //! $stack->push($value); // one by-value argument
@@ -48,6 +49,26 @@ impl Machine<'_> {
         if let Some(call) = self.stack.last_call_mut() {
             call.flags.insert(CallFlags::DIRECT_NATIVE);
         }
+        Step::Done(position.ip)
+    }
+
+    /// `InitMethodCall` of any other public native method: the call's
+    /// description, as the VM's method preparation makes it. The call
+    /// itself runs the method from the batch loop.
+    pub(super) fn prepare_native_method(
+        &mut self,
+        position: Position,
+        context: MethodContext,
+        method: Rc<Method>,
+    ) -> Step {
+        let signature = method.signature(self.code);
+        let callee = Callee {
+            name: signature.name.clone(),
+            parameters: signature.parameters.clone(),
+            argument_binding: ArgumentBinding::Caller,
+            target: CallTarget::Method { method, context },
+        };
+        super::pending::prepare_general(self.stack, self.registers, callee);
         Step::Done(position.ip)
     }
 

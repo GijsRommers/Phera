@@ -263,14 +263,11 @@ pub fn consume(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture<'_, NativeResu
             return Ok(Value::Bool(true));
         };
         poll_input(&state).await;
-        Ok(Value::Bool(
-            lease
-                .try_inspect(|driver| match driver {
-                    phera_db_drivers::drivers::Driver::Postgres(pg) => !pg.is_broken(),
-                    _ => false,
-                })
-                .unwrap_or(true),
-        ))
+        if has_pending_query(&state) {
+            return Ok(Value::Bool(true));
+        }
+        let result = connection::run(&lease, |pg| Box::pin(pg.consume_input())).await;
+        Ok(Value::Bool(result.is_ok()))
     })
 }
 

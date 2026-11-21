@@ -22,13 +22,10 @@ function Counter::tick (5 registers)
   0000  line 1    LoadInt { dst: r1, value: 1 }
   0001  line 1    AssignPath { path: path#0, src: r1 }
   0002  line 1    Clear { reg: r0 }
-  0003  line 1    Clear { reg: r1 }
-  0004  line 1    FetchClassName { dst: r0, class: symbol#0 }
-  0005  line 1    LoadConst { dst: r1, constant: const#0 }
-  0006  line 1    IncDecPath { mode: PostIncrement, dst: r3, path: path#1 }
-  0007  line 1    Clear { reg: r0 }
-  0008  line 1    Clear { reg: r1 }
-  0009  line 1    Clear { reg: r2 }
-  0010  line 1    Clear { reg: r3 }
-  0011  line 1    LoadConst { dst: r0, constant: const#1 }
-  0012  line 1    Return { src: r0 }
+  0003  line 1    FetchClassName { dst: r0, class: symbol#0 }
+  0004  line 1    LoadConst { dst: r1, constant: const#0 }
+  0005  line 1    IncDecPath { mode: PostIncrement, dst: r3, path: path#1 }
+  0006  line 1    Clear { reg: r0 }
+  0007  line 1    Clear { reg: r2 }
+  0008  line 1    LoadConst { dst: r0, constant: const#1 }
+  0009  line 1    Return { src: r0 }

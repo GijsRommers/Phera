@@ -96,6 +96,19 @@ pub struct MemberInfo {
     pub has_default: bool,
     pub dynamic: bool,
     pub property: Option<PropertyHandle>,
+    /// For a method in a class's member list, where the VM keeps its
+    /// reflected function (see [`FunctionTarget::Member`]).
+    pub method: Option<MethodHandle>,
+}
+
+/// A method by its place in the member list of a linked class: the class's
+/// number and the method's position. The VM keeps the reflected function
+/// of each in a column of that class, so that `getMethods()` finds them
+/// without a name. Valid only for the current PHP request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MethodHandle {
+    pub class: u32,
+    pub index: u32,
 }
 
 /// A property slot in a linked class, valid only for the current PHP request.
@@ -346,6 +359,8 @@ pub enum FunctionTarget {
         class: String,
         name: String,
     },
+    /// A method of a class's member list, by its place (`getMethods()`).
+    Member(MethodHandle),
     PropertyHook {
         property: PropertyHandle,
         kind: PropertyHookKind,

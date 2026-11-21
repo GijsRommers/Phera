@@ -265,13 +265,16 @@ pub(crate) fn member_object(
     kind: MemberKind,
 ) -> NativeResult {
     if matches!(kind, MemberKind::Method) {
-        return crate::function::make(
-            context,
-            phera_extension_api::reflection::FunctionTarget::Method {
+        // By its place in the class's member list, which the VM answers
+        // without looking the method up by name.
+        let target = match member.method {
+            Some(handle) => phera_extension_api::reflection::FunctionTarget::Member(handle),
+            None => phera_extension_api::reflection::FunctionTarget::Method {
                 class: member.lookup_class.clone(),
                 name: member.name.clone(),
             },
-        );
+        };
+        return crate::function::make(context, target);
     }
     let class = match kind {
         MemberKind::Method => "ReflectionMethod",

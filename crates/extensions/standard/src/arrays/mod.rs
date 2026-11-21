@@ -37,7 +37,7 @@ pub fn associative_sort(name: &str) -> Option<phera_extension_api::FunctionEntry
 mod stack;
 mod tables;
 mod walk;
-pub(crate) mod zend_sort;
+pub(crate) use phera_extension_api::zend_sort;
 
 pub(crate) fn register(registry: &mut Registry) {
     multisort::register(registry);

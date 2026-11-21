@@ -33,12 +33,8 @@ impl Machine<'_> {
         position: Position,
         symbol: SymbolId,
     ) -> Step {
-        let cache = self.code.cache(position.frame.function);
-        let Some(class) = cache
-            .classes
-            .get(symbol.index())
-            .and_then(|slot| slot.borrow().clone())
-        else {
+        let key = self.code.unit_symbol_key(position.frame.function, symbol);
+        let Some(class) = self.classes.by_key(key).cloned() else {
             return Step::Slow;
         };
         let Some(template) = class.property_template.as_ref() else {

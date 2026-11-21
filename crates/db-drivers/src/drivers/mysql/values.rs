@@ -89,6 +89,7 @@ pub(super) fn finish(columns: Vec<mysql_async::Column>, values: RowBuffer, affec
             .collect(),
         values,
         affected,
+        has_pending_rows: false,
     }
 }
 

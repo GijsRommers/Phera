@@ -4,7 +4,8 @@ use std::{collections::HashMap, rc::Rc};
 
 use phera_extension_api::NativeError;
 use phera_extension_api::reflection::{
-    ClassInfo, FunctionInfo, FunctionTarget, MemberKind, Members, PropertyHandle, PropertyHookKind,
+    ClassInfo, FunctionInfo, FunctionTarget, MemberKind, Members, MethodHandle, PropertyHandle,
+    PropertyHookKind,
 };
 
 use crate::{
@@ -22,6 +23,10 @@ pub(crate) struct ReflectionCache {
 struct ReflectedClass {
     info: Option<Rc<ClassInfo>>,
     methods: Option<Members>,
+    /// The reflected function of each method in `methods`, by position,
+    /// made when a `ReflectionMethod` of it is first made
+    /// (`FunctionTarget::Member`).
+    method_functions: Vec<Option<Rc<FunctionInfo>>>,
     properties: Option<Members>,
     constants: Option<Members>,
 }
@@ -87,6 +92,7 @@ impl Vm {
             FunctionTarget::PropertyHook { property, kind } => {
                 FunctionKey::PropertyHook(*property, *kind)
             }
+            FunctionTarget::Member(handle) => return self.member_function(*handle),
             FunctionTarget::Closure(_) | FunctionTarget::ClosureInvoke(_) => {
                 return self.reflection_function(target).map(Rc::new);
             }
@@ -98,5 +104,51 @@ impl Vm {
         let info = Rc::new(self.reflection_function(target)?);
         self.reflection_cache().functions.insert(key, info.clone());
         Ok(info)
+    }
+
+    /// The reflected function of a method of a class's member list, from
+    /// the class's column of them (made the first time).
+    fn member_function(&mut self, handle: MethodHandle) -> Result<Rc<FunctionInfo>, NativeError> {
+        let class = self
+            .classes
+            .numbered(handle.class)
+            .ok_or_else(|| internal_error!("reflected method class"))?;
+        let index = handle.index as usize;
+        if let Some(Some(info)) = self
+            .reflected_class_cache(class.index)
+            .method_functions
+            .get(index)
+        {
+            return Ok(info.clone());
+        }
+        let target = self.member_target(handle)?;
+        let info = Rc::new(self.reflection_function(&target)?);
+        let functions = &mut self.reflected_class_cache(class.index).method_functions;
+        if functions.len() <= index {
+            functions.resize(index + 1, None);
+        }
+        if let Some(slot) = functions.get_mut(index) {
+            *slot = Some(info.clone());
+        }
+        Ok(info)
+    }
+
+    /// The same method by its class and name, for the paths that look it up.
+    pub(super) fn member_target(
+        &mut self,
+        handle: MethodHandle,
+    ) -> Result<FunctionTarget, NativeError> {
+        let class = self
+            .classes
+            .numbered(handle.class)
+            .ok_or_else(|| internal_error!("reflected method class"))?;
+        let members = self.cached_members(&class, MemberKind::Method);
+        let member = members
+            .get(handle.index as usize)
+            .ok_or_else(|| internal_error!("reflected method"))?;
+        Ok(FunctionTarget::Method {
+            class: member.lookup_class.clone(),
+            name: member.name.clone(),
+        })
     }
 }

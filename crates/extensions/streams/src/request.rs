@@ -161,7 +161,7 @@ pub fn canonical(path: &Path) -> io::Result<PathBuf> {
 }
 
 /// A fork keeps the wrapper table, default context, umask and resource numbering.
-/// An open directory or an attached context belongs to its original stream.
+/// Attached options follow their stream's resource id into the fork.
 pub(crate) fn fork_files(
     state: &dyn std::any::Any,
     fork: &mut phera_extension_api::value::Fork<'_>,
@@ -171,11 +171,10 @@ pub(crate) fn fork_files(
         .directory
         .as_ref()
         .is_some_and(|directory| !directory.is_closed())
-        || !files.stream_contexts.is_empty()
     {
         fork.refuse_state(
             "streams",
-            "a directory handle or stream context opened before the call belongs to one request",
+            "a directory handle opened before the call belongs to one request",
         );
     }
     let mut copy = Files::default();
@@ -187,5 +186,10 @@ pub(crate) fn fork_files(
         .default_context
         .as_ref()
         .map(|context| fork.value(context));
+    for (&id, context) in &files.stream_contexts {
+        if let Value::Resource(context) = fork.value(&Value::Resource(context.clone())) {
+            copy.stream_contexts.insert(id, context);
+        }
+    }
     Some(Box::new(copy))
 }
