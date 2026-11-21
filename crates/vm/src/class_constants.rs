@@ -236,7 +236,7 @@ impl Vm {
         if access == ConstantAccess::Read
             && let Some(message) = &constant.deprecated
         {
-            self.diagnostic("Deprecated", message.clone());
+            self.attribute_deprecated(message.clone());
         }
         Ok(())
     }
