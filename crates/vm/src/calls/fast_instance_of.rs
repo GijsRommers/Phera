@@ -28,12 +28,6 @@ use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::classes::Class;
 use crate::fast::{ScalarStep, store};
 
-/// How many classes the walk keeps waiting at once, and how many it
-/// visits in all (an interface reached along two paths is visited twice).
-/// Real hierarchies stay far below both; a larger one goes to the VM.
-const WALK_DEPTH: usize = 32;
-const WALK_VISITS: usize = 256;
-
 impl Machine<'_> {
     /// `InstanceOf`, as `Vm::instance_of` answers it.
     pub(super) fn instance_of<const GUARDED: bool>(
@@ -56,7 +50,7 @@ impl Machine<'_> {
                     return Step::Slow;
                 };
                 match self.instance_target(position, symbol) {
-                    Some(target) => match derives_from(class, &target) {
+                    Some(target) => match class.derives_from(&target) {
                         Some(answer) => answer,
                         None => return Step::Slow,
                     },
@@ -106,28 +100,4 @@ impl Machine<'_> {
             .get(symbol.index())
             .is_none_or(|symbol| matches!(symbol.written.as_str(), "self" | "static" | "parent"))
     }
-}
-
-/// Whether `class` is `target`, extends it or implements it: the same
-/// ancestry as `Class::ancestors`, its parent and interfaces and theirs.
-/// `None` when the walk outgrows its stack or its visits.
-pub(super) fn derives_from(class: &Class, target: &Class) -> Option<bool> {
-    let mut waiting: [Option<&Class>; WALK_DEPTH] = [None; WALK_DEPTH];
-    waiting[0] = Some(class);
-    let mut count: usize = 1;
-    for _ in 0..WALK_VISITS {
-        let Some(last) = count.checked_sub(1) else {
-            return Some(false);
-        };
-        count = last;
-        let class = waiting.get(last).copied().flatten()?;
-        if std::ptr::eq(class, target) {
-            return Some(true);
-        }
-        for ancestor in class.parent.iter().chain(&class.interfaces) {
-            *waiting.get_mut(count)? = Some(&**ancestor);
-            count += 1;
-        }
-    }
-    None
 }

@@ -43,7 +43,8 @@ impl ClassDefinitions {
                 serialized_fields: std::cell::OnceCell::new(),
                 constructor: None,
                 magic: None,
-                property_template: Some(phera_value::PhpArray::new()),
+                property_template: Some(phera_value::Properties::default()),
+                layout: None,
                 defaults: Vec::new(),
                 static_properties: Vec::new(),
                 constants: HashMap::new(),
@@ -235,6 +236,8 @@ impl ClassDefinitions {
             )
             .with_native_dimensions(hooks.as_deref(), &methods);
             let index = table.next_index();
+            let layout = super::class::property_layout(&defaults);
+            let property_template = super::class::property_template(&defaults, layout.as_ref());
             table.insert(
                 entry.name.to_ascii_lowercase(),
                 Rc::new_cyclic(|identity| Class {
@@ -277,7 +280,8 @@ impl ClassDefinitions {
                     methods,
                     method_table: std::cell::OnceCell::new(),
                     serialized_fields: std::cell::OnceCell::new(),
-                    property_template: super::class::property_template(&defaults),
+                    property_template,
+                    layout,
                     defaults,
                     static_properties: Vec::new(),
                     constants,

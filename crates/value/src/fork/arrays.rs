@@ -105,7 +105,7 @@ impl Fork<'_> {
 }
 
 /// Whether a value may differ in the fork: anything but a scalar or string.
-fn needs_copy(value: &Value) -> bool {
+pub(super) fn needs_copy(value: &Value) -> bool {
     matches!(
         value,
         Value::Array(_) | Value::Object(_) | Value::Reference(_) | Value::Resource(_)
