@@ -120,10 +120,7 @@ impl Chains {
             let eof = if let Some(file) = crate::user_file::resource_file(stream) {
                 file.eof.get()
             } else {
-                with_stream(stream, |stream| match &stream.backing {
-                    crate::stream::Backing::Socket(socket) => socket.eof(),
-                    _ => stream.eof,
-                })?
+                with_stream(stream, |stream| stream.eof)?
             };
             let closing = eof || block.is_empty();
             let Some(output) = self

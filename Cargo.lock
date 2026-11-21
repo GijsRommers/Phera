@@ -3271,28 +3271,15 @@ name = "phera-ext-streams"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "bytes",
  "flate2",
- "http-body-util",
- "hyper",
- "hyper-util",
- "md-5 0.10.6",
  "nix",
  "percent-encoding",
  "phera-ext-standard",
  "phera-extension-api",
- "phera-io-pool",
  "phera-lexer",
- "pkcs8",
  "rustix",
- "rustls",
- "rustls-webpki",
- "sha1 0.10.7",
- "sha2 0.10.9",
- "socket2",
  "tempfile",
  "tokio",
- "tokio-rustls",
  "zlib-rs",
 ]
 
