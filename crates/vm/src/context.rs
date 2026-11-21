@@ -81,6 +81,16 @@ impl Context for Vm {
         self.out(bytes)
     }
 
+    fn pending_output_diagnostics(
+        &mut self,
+    ) -> Option<LocalFuture<'_, phera_extension_api::OutputDiagnostics>> {
+        if self.error_handlers.pending.is_empty() {
+            None
+        } else {
+            Some(self.drain_output_diagnostics())
+        }
+    }
+
     fn backtrace(&mut self, objects: bool, arguments: bool, limit: i32) -> Value {
         Value::from(self.capture_trace(phera_value::PhpArray::new(), objects, arguments, limit))
     }

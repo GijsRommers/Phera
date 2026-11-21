@@ -52,6 +52,11 @@ pub trait Context {
     /// Appends to the request's output, as `echo` does.
     fn write(&mut self, bytes: &[u8]);
 
+    /// Delivers diagnostics from conversions before a native emits output.
+    fn pending_output_diagnostics(&mut self) -> Option<LocalFuture<'_, OutputDiagnostics>> {
+        None
+    }
+
     /// Snapshot PHP callers without retaining references to live parameter slots.
     fn backtrace(&mut self, _objects: bool, _arguments: bool, _limit: i32) -> Value {
         Value::from(PhpArray::new())
@@ -713,4 +718,33 @@ pub trait Context {
     fn deprecated(&mut self, message: String) {
         self.diagnostics().deprecated(message);
     }
+}
+
+/// What an output native must do after running its diagnostic handler.
+pub enum OutputDiagnostics {
+    Ready,
+    WriteThenUnwind(NativeError),
+    Stop(NativeError),
+}
+
+/// Runs pending diagnostics before a native's first write. An exception or
+/// exit travels separately so the caller can write before propagating it.
+pub async fn before_output(context: &mut dyn Context) -> Result<Option<NativeError>, NativeError> {
+    let Some(pending) = context.pending_output_diagnostics() else {
+        return Ok(None);
+    };
+    match pending.await {
+        OutputDiagnostics::Ready => Ok(None),
+        OutputDiagnostics::WriteThenUnwind(error) => Ok(Some(error)),
+        OutputDiagnostics::Stop(error) => Err(error),
+    }
+}
+
+pub async fn write_after_diagnostics(
+    context: &mut dyn Context,
+    bytes: &[u8],
+) -> Result<(), NativeError> {
+    let unwind = before_output(context).await?;
+    context.write(bytes);
+    unwind.map_or(Ok(()), Err)
 }
