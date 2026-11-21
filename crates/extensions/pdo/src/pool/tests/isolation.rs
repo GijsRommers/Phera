@@ -4,7 +4,7 @@ use phera_extension_api::Value;
 
 use super::{rows, scalar};
 use crate::drivers::Prepared;
-use crate::placeholders::Sql;
+use crate::placeholders::{Sql, Syntax};
 use crate::pool::Lease;
 
 pub async fn dirty(driver: &mut Lease, name: &str) {
@@ -52,7 +52,7 @@ pub async fn dirty(driver: &mut Lease, name: &str) {
 pub async fn clean(driver: &mut Lease, name: &str) {
     let missing = driver
         .execute(
-            &Sql::parse("SELECT * FROM phera_pool_dirty".into()).unwrap(),
+            &Sql::parse("SELECT * FROM phera_pool_dirty".into(), Syntax::MYSQL).unwrap(),
             &Prepared::Emulated,
             &[],
             Default::default(),

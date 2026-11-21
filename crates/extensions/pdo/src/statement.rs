@@ -142,11 +142,10 @@ async fn create(
             flags: attributes.fetch_flags,
         }
     };
-    // SQLite numbers its own `?`, `?2`, `:name` and `@name` placeholders.
-    let parsed = match connection.name {
-        crate::dsn::DriverName::Sqlite => Ok(Sql::sqlite(source.clone())),
-        _ => Sql::parse(source.clone()),
-    };
+    let parsed = connection
+        .driver
+        .parse_sql(source.clone(), connection.name)
+        .await;
     let sql = match parsed {
         Ok(sql) => sql,
         Err(error) => return connection.fail(context, error, method),
