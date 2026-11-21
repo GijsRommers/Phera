@@ -207,7 +207,10 @@ fn input_array(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<
     Box::pin(async move {
         let call = Call::InputArray;
         let input = source(context, &arguments, call.name(), "type")?.array();
-        let definition = call.union(context, args::value(&arguments, 1))?;
+        let definition = match arguments.get(1) {
+            Some(options) => call.union(context, options)?,
+            None => Value::Int(DEFAULT),
+        };
         let Some(input) = input else {
             return Ok(Value::Null);
         };

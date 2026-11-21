@@ -19,12 +19,22 @@ if (function_exists('Phera\snapshot')) {
 }
 $_GET['count'] = 99;
 unset($_GET['name']);
+$serverKeys = array_keys(filter_input_array(INPUT_SERVER) ?? []);
+sort($serverKeys);
+$syntheticKeys = [];
+foreach (['REQUEST_URI', 'REQUEST_METHOD', 'PATH_INFO', 'PHP_SELF', 'SERVER_NAME', 'REMOTE_ADDR'] as $key) {
+    $syntheticKeys[$key] = [
+        filter_has_var(INPUT_SERVER, $key),
+        filter_input(INPUT_SERVER, $key),
+    ];
+}
 echo json_encode([
     filter_has_var(INPUT_GET, 'name'),
     filter_input(INPUT_GET, 'count', FILTER_VALIDATE_INT),
     filter_input(INPUT_GET, 'missing', FILTER_DEFAULT, FILTER_NULL_ON_FAILURE),
     filter_input_array(INPUT_GET, ['count' => FILTER_VALIDATE_INT, 'name' => FILTER_DEFAULT]),
-    filter_input(INPUT_SERVER, 'REQUEST_METHOD'),
+    $serverKeys,
+    $syntheticKeys,
     filter_input(INPUT_SERVER, 'HTTP_HOST'),
     filter_input(INPUT_SERVER, 'QUERY_STRING'),
     $_REQUEST['count'],
@@ -34,12 +44,25 @@ echo json_encode([
     .unwrap();
     let oracle = Server::start_php(&php, &root, 1);
     let candidate = Server::start(Path::new(&phera), &root, 1, &[]);
-    for path in [
-        "/index.php?count=3&name=first",
-        "/index.php?count=8&name=second",
+    for (method, path, headers, body) in [
+        (
+            "GET",
+            "/index.php?count=3&name=first",
+            &[("X-Filter-Test", "request")][..],
+            &b""[..],
+        ),
+        (
+            "POST",
+            "/index.php?count=8&name=second",
+            &[
+                ("X-Filter-Test", "request"),
+                ("Content-Type", "application/x-www-form-urlencoded"),
+            ][..],
+            &b"key=value"[..],
+        ),
     ] {
-        let php = oracle.get_one(path);
-        let phera = candidate.get_one(path);
+        let php = oracle.request(method, path, headers, body);
+        let phera = candidate.request(method, path, headers, body);
         assert!(php.starts_with("HTTP/1.1 200"), "{php}");
         assert!(phera.starts_with("HTTP/1.1 200"), "{phera}");
         assert_eq!(
