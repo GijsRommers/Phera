@@ -221,6 +221,32 @@ impl Vm {
 
     /// Unhandled shapes keep their window intact for the ordinary native binder.
     #[inline(never)]
+    /// `spl_object_id($object)`: the object's id, with nothing else to do
+    /// (a lazy object stays uninitialized). Any other shape goes to the
+    /// general intrinsic.
+    fn object_id_call(
+        &mut self,
+        call: crate::calls::prepared_call::PreparedCall,
+        destination: Reg,
+    ) -> Option<BatchExit> {
+        let plain = call.is_plain()
+            && call.sent == 1
+            && self
+                .call_stack
+                .top_details()
+                .is_some_and(|details| details.named.is_none() && details.extra_named.is_empty());
+        let id = match self.registers.window(call.base(), 1) {
+            [Some(Value::Object(object))] if plain => object.id,
+            _ => return Some(BatchExit::NativeCall(destination)),
+        };
+        if self.call_stack.pop_call().is_err() {
+            return Some(BatchExit::NativeCall(destination));
+        }
+        self.registers.truncate(call.start());
+        self.set(destination, Value::Int(id.into()));
+        None
+    }
+
     pub(crate) fn call_native(
         &mut self,
         destination: Reg,
@@ -242,6 +268,9 @@ impl Vm {
                         None => Ok(Some(BatchExit::NativeCall(destination))),
                     }
                 }
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
+                    crate::class_intrinsics::ClassFunction::ObjectId,
+                )) => Ok(self.object_id_call(call, destination)),
                 _ => Ok(Some(BatchExit::NativeCall(destination))),
             };
         };

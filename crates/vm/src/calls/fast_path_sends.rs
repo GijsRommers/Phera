@@ -36,9 +36,7 @@ impl Machine<'_> {
                 !call.flags.contains(CallFlags::DETAILS)
                     && self.code.facts(function).takes_value(index)
             }
-            PreparedCallee::General | PreparedCallee::Native(_) => {
-                self.other_accepts(call.callee, index)
-            }
+            PreparedCallee::General | PreparedCallee::Native(_) => true,
             PreparedCallee::Constructed => false,
         };
         if !takes_value {
@@ -52,7 +50,7 @@ impl Machine<'_> {
                 self.accepts_argument(function, index, &value)
                     || self.widen_argument(function, index, &mut value)
             }
-            _ => true,
+            _ => self.other_accepts(call.callee, index, &value),
         };
         if !accepted {
             return Step::Slow;

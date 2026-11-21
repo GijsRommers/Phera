@@ -124,7 +124,7 @@ impl Machine<'_> {
             None => &Value::Null,
         };
         if let Some(mask) = facts.return_mask
-            && !mask.intersects(crate::types::own_type(value))
+            && !return_fits(mask, value)
             && !self
                 .code
                 .function(frame.function)
@@ -232,7 +232,7 @@ impl Machine<'_> {
         if kind != CallKind::Constructor
             && facts
                 .return_mask
-                .is_some_and(|mask| !mask.intersects(crate::types::own_type(value)))
+                .is_some_and(|mask| !return_fits(mask, value))
         {
             return Step::Slow;
         }
@@ -271,7 +271,7 @@ impl Machine<'_> {
         };
         if facts
             .return_mask
-            .is_some_and(|mask| !mask.intersects(crate::types::own_type(value)))
+            .is_some_and(|mask| !return_fits(mask, value))
         {
             return Step::Slow;
         }
@@ -302,10 +302,7 @@ impl Machine<'_> {
             .code
             .facts(frame.function)
             .return_mask
-            .is_some_and(|mask| {
-                !mask.intersects(crate::types::own_type(value))
-                    && !(mask.intersects(phera_bytecode::TypeMask::VOID) && value.is_null())
-            })
+            .is_some_and(|mask| !return_fits(mask, value))
         {
             return Step::Slow;
         }
@@ -388,7 +385,7 @@ impl Machine<'_> {
             // One out-of-line arm for both, so that the match keeps the
             // shape the loop was laid out with.
             PreparedCallee::General | PreparedCallee::Native(_) => {
-                self.other_accepts(call.callee, index)
+                self.other_accepts(call.callee, index, &value)
             }
             PreparedCallee::Constructed => false,
         };
@@ -459,13 +456,21 @@ impl Machine<'_> {
     /// an untyped by-value parameter. A pending named argument takes the
     /// general path.
     #[inline(always)]
-    fn general_accepts(&self, index: usize) -> bool {
+    fn general_accepts(&self, index: usize, value: &Value) -> bool {
         let Some(details) = self.stack.top_details() else {
             return false;
         };
         let Some(callee) = details.callee.as_ref().filter(|_| details.named.is_none()) else {
             return false;
         };
+        // `spl_object_id($object)`: an object needs no coercion, and the
+        // batch loop answers the call (`Vm::object_id_call`).
+        if let CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
+            crate::class_intrinsics::ClassFunction::ObjectId,
+        )) = callee.target
+        {
+            return index == 0 && matches!(value, Value::Object(_));
+        }
         let intrinsic = matches!(callee.target, CallTarget::Intrinsic(_));
         callee.parameters.get(index).is_some_and(|parameter| {
             !intrinsic && !parameter.by_reference && !parameter.variadic && parameter.ty.is_none()
@@ -476,10 +481,15 @@ impl Machine<'_> {
     /// native call, [`Machine::native_accepts`]. Inline, so that a
     /// described callee costs what it did before lean records existed.
     #[inline(always)]
-    pub(super) fn other_accepts(&self, callee: PreparedCallee, index: usize) -> bool {
+    pub(super) fn other_accepts(
+        &self,
+        callee: PreparedCallee,
+        index: usize,
+        value: &Value,
+    ) -> bool {
         match callee {
             PreparedCallee::Native(id) => self.native_accepts(id, index),
-            _ => self.general_accepts(index),
+            _ => self.general_accepts(index, value),
         }
     }
 
@@ -554,4 +564,11 @@ impl Machine<'_> {
             .put(position.frame.base() + destination.index(), object);
         Step::Done(position.ip)
     }
+}
+
+/// Whether a returned value passes the bit test of the declared return
+/// type: `return;` of a `void` function returns null.
+fn return_fits(mask: phera_bytecode::TypeMask, value: &Value) -> bool {
+    mask.intersects(crate::types::own_type(value))
+        || (mask.intersects(phera_bytecode::TypeMask::VOID) && value.is_null())
 }
