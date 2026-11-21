@@ -581,6 +581,7 @@ impl Vm {
             is_final: declaration.is_final,
             is_readonly: declaration.is_readonly,
             allows_dynamic_properties,
+            property_facts: std::cell::OnceCell::new(),
             constructor: methods.get("__construct").cloned(),
             magic: super::magic::MagicMethods::link(&methods),
             methods,
