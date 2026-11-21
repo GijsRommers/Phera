@@ -168,17 +168,19 @@ impl Compiler<'_> {
             && let Ok(rhs) = i32::try_from(value)
         {
             let lhs = self.condition_operand(left, left_local)?;
-            return Ok(vec![self.emit(
-                Instruction::BranchCompareInt {
-                    operator: binary(operator)
-                        .ok_or_else(|| self.error("Operator not supported yet", line))?,
-                    left: lhs,
-                    rhs,
-                    target: Target(0),
-                    when,
-                },
-                operation_line,
-            )]);
+            return Ok(vec![
+                self.emit(
+                    Instruction::BranchCompareInt {
+                        operator: binary(operator)
+                            .ok_or_else(|| self.error("Operator not supported yet", line))?,
+                        left: lhs,
+                        rhs,
+                        target: Target(0),
+                        when,
+                    },
+                    operation_line,
+                ),
+            ]);
         }
         // The same literal on the left: compare with the operands swapped.
         if right_literal.is_none()
@@ -186,27 +188,29 @@ impl Compiler<'_> {
             && let Ok(rhs) = i32::try_from(value)
         {
             let operand = self.condition_operand(right, right_local)?;
-            return Ok(vec![self.emit(
-                Instruction::BranchCompareInt {
-                    operator: binary(swapped(operator))
-                        .ok_or_else(|| self.error("Operator not supported yet", line))?,
-                    left: operand,
-                    rhs,
-                    target: Target(0),
-                    when,
-                },
-                operation_line,
-            )]);
+            return Ok(vec![
+                self.emit(
+                    Instruction::BranchCompareInt {
+                        operator: binary(swapped(operator))
+                            .ok_or_else(|| self.error("Operator not supported yet", line))?,
+                        left: operand,
+                        rhs,
+                        target: Target(0),
+                        when,
+                    },
+                    operation_line,
+                ),
+            ]);
         }
         // `=== null` and `!== null` reuse the null test itself.
         if matches!(
             operator,
             ast::BinaryOperator::Identical | ast::BinaryOperator::NotIdentical
         ) {
-            let null_on_right = left_literal.is_none()
-                && matches!(right_literal, Some(Constant::Null));
-            let null_on_left = right_literal.is_none()
-                && matches!(left_literal, Some(Constant::Null));
+            let null_on_right =
+                left_literal.is_none() && matches!(right_literal, Some(Constant::Null));
+            let null_on_left =
+                right_literal.is_none() && matches!(left_literal, Some(Constant::Null));
             if null_on_right || null_on_left {
                 let (operand_expression, operand_local) = if null_on_right {
                     (left, left_local)
@@ -234,17 +238,19 @@ impl Compiler<'_> {
         // Any other comparison reads both operands in source order.
         let lhs = self.condition_operand(left, left_local)?;
         let rhs = self.condition_operand(right, right_local)?;
-        Ok(vec![self.emit(
-            Instruction::BranchCompare {
-                operator: binary(operator)
-                    .ok_or_else(|| self.error("Operator not supported yet", line))?,
-                left: lhs,
-                right: rhs,
-                target: Target(0),
-                when,
-            },
-            operation_line,
-        )])
+        Ok(vec![
+            self.emit(
+                Instruction::BranchCompare {
+                    operator: binary(operator)
+                        .ok_or_else(|| self.error("Operator not supported yet", line))?,
+                    left: lhs,
+                    right: rhs,
+                    target: Target(0),
+                    when,
+                },
+                operation_line,
+            ),
+        ])
     }
 
     /// One comparison operand: a plain local's register, a literal's load, or

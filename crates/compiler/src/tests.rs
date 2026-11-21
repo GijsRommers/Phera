@@ -173,7 +173,10 @@ fn identical_condition_is_one_binary_branch() {
     assert_eq!(
         count(&code, |i| matches!(
             i,
-            Instruction::BinaryBranch { op: BinaryOp::Identical, .. }
+            Instruction::BinaryBranch {
+                op: BinaryOp::Identical,
+                ..
+            }
         )),
         1
     );
@@ -199,7 +202,10 @@ fn null_conditions_reuse_the_null_jumps() {
         count(&code, |i| matches!(i, Instruction::JumpIfNotNull { .. })),
         1
     );
-    assert_eq!(count(&code, |i| matches!(i, Instruction::LoadNull { .. })), 0);
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::LoadNull { .. })),
+        0
+    );
     assert_eq!(count(&code, |i| matches!(i, Instruction::Binary { .. })), 0);
 }
 
@@ -212,9 +218,7 @@ fn integer_literal_conditions_carry_the_literal() {
     let branches: Vec<_> = code
         .iter()
         .filter_map(|i| match i {
-            Instruction::BinaryIntBranch {
-                op, lhs, rhs, ..
-            } => Some((*op, *lhs, *rhs)),
+            Instruction::BinaryIntBranch { op, lhs, rhs, .. } => Some((*op, *lhs, *rhs)),
             _ => None,
         })
         .collect();
@@ -251,13 +255,16 @@ fn plain_local_conditions_jump_on_the_local() {
 /// Loops compile their condition as one branch per round.
 #[test]
 fn loop_conditions_are_one_branch_per_round() {
-    let while_code = function_instructions(
-        "<?php function f($k, $n) { while ($k < $n) { $k++; } return $k; }",
-    );
+    let while_code =
+        function_instructions("<?php function f($k, $n) { while ($k < $n) { $k++; } return $k; }");
     assert_eq!(
         count(&while_code, |i| matches!(
             i,
-            Instruction::BinaryBranch { op: BinaryOp::Less, when: false, .. }
+            Instruction::BinaryBranch {
+                op: BinaryOp::Less,
+                when: false,
+                ..
+            }
         )),
         1
     );
@@ -271,7 +278,11 @@ fn loop_conditions_are_one_branch_per_round() {
     assert_eq!(
         count(&do_code, |i| matches!(
             i,
-            Instruction::BinaryBranch { op: BinaryOp::Less, when: true, .. }
+            Instruction::BinaryBranch {
+                op: BinaryOp::Less,
+                when: true,
+                ..
+            }
         )),
         1
     );
@@ -281,7 +292,11 @@ fn loop_conditions_are_one_branch_per_round() {
     assert_eq!(
         count(&for_code, |i| matches!(
             i,
-            Instruction::BinaryBranch { op: BinaryOp::Less, when: false, .. }
+            Instruction::BinaryBranch {
+                op: BinaryOp::Less,
+                when: false,
+                ..
+            }
         )),
         1
     );
@@ -291,7 +306,12 @@ fn loop_conditions_are_one_branch_per_round() {
     assert_eq!(
         count(&literal_for, |i| matches!(
             i,
-            Instruction::BinaryIntBranch { op: BinaryOp::Less, rhs: 10, when: false, .. }
+            Instruction::BinaryIntBranch {
+                op: BinaryOp::Less,
+                rhs: 10,
+                when: false,
+                ..
+            }
         )),
         1
     );
@@ -300,13 +320,15 @@ fn loop_conditions_are_one_branch_per_round() {
 /// A ternary's condition branches directly into its two arms.
 #[test]
 fn ternary_condition_branches_directly() {
-    let code = function_instructions(
-        "<?php function f($a, $b) { return $a === $b ? 1 : 2; }",
-    );
+    let code = function_instructions("<?php function f($a, $b) { return $a === $b ? 1 : 2; }");
     assert_eq!(
         count(&code, |i| matches!(
             i,
-            Instruction::BinaryBranch { op: BinaryOp::Identical, when: false, .. }
+            Instruction::BinaryBranch {
+                op: BinaryOp::Identical,
+                when: false,
+                ..
+            }
         )),
         1
     );
@@ -340,7 +362,10 @@ fn comparison_as_a_value_keeps_binary() {
     assert_eq!(
         count(&code, |i| matches!(
             i,
-            Instruction::Binary { op: BinaryOp::Identical, .. }
+            Instruction::Binary {
+                op: BinaryOp::Identical,
+                ..
+            }
         )),
         1
     );
@@ -349,4 +374,3 @@ fn comparison_as_a_value_keeps_binary() {
         0
     );
 }
-

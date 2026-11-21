@@ -117,9 +117,9 @@ impl Vm {
                     target,
                     when,
                 } => {
-                    Box::pin(self.binary_branch_with_undefined_operand(
-                        op, lhs, rhs, target, when, work,
-                    ))
+                    Box::pin(
+                        self.binary_branch_with_undefined_operand(op, lhs, rhs, target, when, work),
+                    )
                     .await?;
                 }
                 BatchExit::CompareBranch {

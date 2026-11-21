@@ -277,11 +277,7 @@ impl Instruction {
             | Instruction::BranchNotNull { value, .. }
             | Instruction::Define { source: value, .. }
             | Instruction::Global { local: value, .. } => *value = map(*value),
-            Instruction::BranchCompare {
-                left,
-                right,
-                ..
-            } => {
+            Instruction::BranchCompare { left, right, .. } => {
                 *left = map(*left);
                 *right = map(*right)
             }

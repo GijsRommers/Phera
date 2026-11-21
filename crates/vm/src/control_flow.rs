@@ -132,15 +132,13 @@ impl Vm {
             None => return self.take_branch(scratch, target, when, work),
         };
         Ok(Some(match exit {
-            BatchExit::UndefinedBinary { op, lhs, rhs, .. } => {
-                BatchExit::UndefinedBinaryBranch {
-                    op,
-                    lhs,
-                    rhs,
-                    target,
-                    when,
-                }
-            }
+            BatchExit::UndefinedBinary { op, lhs, rhs, .. } => BatchExit::UndefinedBinaryBranch {
+                op,
+                lhs,
+                rhs,
+                target,
+                when,
+            },
             BatchExit::Instruction(phera_bytecode::Instruction::Binary {
                 op, lhs, rhs, ..
             }) => BatchExit::Instruction(phera_bytecode::Instruction::BinaryBranch {
