@@ -255,7 +255,12 @@ thumbnail operations, filters, and the five built-in fonts. The same build
 includes `getimagesize()` and `exif_imagetype()`. Compatibility limits are
 listed in the [GD coverage notes](crates/extensions/gd/README.md).
 
-Not started: zip, sockets.
+The sockets extension supports TCP, UDP and Unix sockets, including
+descriptor passing with Unix socket messages. A `Socket` and an exported
+stream share the same connection. Some platform-specific options, resolver
+hints and out-of-band operations remain incomplete.
+
+Not started: zip.
 
 ### Database connection pool
 
