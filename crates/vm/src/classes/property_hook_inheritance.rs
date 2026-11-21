@@ -58,12 +58,7 @@ impl Vm {
             line,
         };
         let missing = self
-            .unresolved_contract_types(
-                property_type(property),
-                Some(&parameter_type.display),
-                scope,
-                unit,
-            )
+            .unresolved_contract_types(property_type(property), Some(&parameter_type.display), unit)
             .map(str::to_owned);
         Err(crate::autoload::ClassMiss::property_signature(
             missing, failure,
@@ -173,7 +168,7 @@ impl Vm {
                 "Type of {class}::${name} must be omitted to match the parent definition in class {parent}"
             ),
         };
-        let missing = self.unresolved_contract_types(actual, expected, class, unit);
+        let missing = self.unresolved_contract_types(actual, expected, unit);
         if let Some(declaration) = unit.classes.iter().find(|entry| entry.name == *class) {
             return Err(crate::autoload::ClassMiss::property_signature(
                 missing.map(str::to_owned),
