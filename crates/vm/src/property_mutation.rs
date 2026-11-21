@@ -6,6 +6,30 @@ use phera_extension_api::{NativeError, NativePropertyMutation};
 use phera_value::Value;
 
 impl Vm {
+    /// An indexed write that promotes an empty static slot initializes it on success.
+    pub(crate) fn prepare_static_array_promotion(
+        &mut self,
+        class: crate::static_places::StaticClass,
+        name: crate::static_places::StaticName,
+    ) -> Result<std::rc::Rc<crate::reference_holders::StaticProperty>, NativeError> {
+        let (class_name, name) = self.static_property_names(class, name)?;
+        let class = self
+            .classes
+            .get(&class_name)
+            .ok_or_else(|| internal_error!("static class"))?;
+        let property = class
+            .static_properties
+            .iter()
+            .rev()
+            .find(|property| property.name == name)
+            .ok_or_else(|| internal_error!("static property"))?;
+        self.check_set_visibility(property, PropertyChange::Indirect)?;
+        crate::path_dimensions::check_property_array_promotion(property)?;
+        self.class_states
+            .static_property(property)
+            .ok_or_else(|| internal_error!("static storage"))
+    }
+
     /// Class types use inheritance membership; scalar types reuse PHP's existing coercion policy.
     pub(crate) fn coerce_property(
         &mut self,
@@ -53,11 +77,11 @@ impl Vm {
             self.current()
                 .is_some_and(|frame| frame.function().strict_types)
         });
-        let actual = value.type_name();
         crate::types::coerce(value.clone(), declaration_type, strict.into(), self).map_err(|_| {
+            let actual = crate::types::property_value_type(&value);
             NativeError::type_error(format!(
                 "Cannot assign {actual} to property {}::${} of type {}",
-                property.declaring,
+                phera_value::class_display_name(&property.declaring),
                 property.name,
                 crate::types::php_type_display(declaration_type)
             ))
@@ -88,9 +112,17 @@ impl Vm {
             return Ok(());
         }
         if let Some(declaration_type) = &property.ty {
-            let converted = self.coerce_property(value.clone(), property, declaration_type)?;
-            if !matches!(value, Value::Reference(_)) {
-                *value = converted;
+            match value {
+                Value::Reference(reference) if matches!(change, PropertyChange::Bind) => {
+                    self.coerce_property_binding(reference, property, declaration_type)?;
+                }
+                _ => {
+                    let converted =
+                        self.coerce_property(value.clone(), property, declaration_type)?;
+                    if !matches!(value, Value::Reference(_)) {
+                        *value = converted;
+                    }
+                }
             }
         }
         if let Some(storage) = self.class_states.static_property(property) {
@@ -204,10 +236,27 @@ impl Vm {
                             && mutation != Mutation::Unset
                             && let Some(declaration_type) = &property.ty
                         {
-                            let converted =
-                                self.coerce_property(value.clone(), property, declaration_type)?;
-                            if !matches!(value, Value::Reference(_)) {
-                                *value = converted;
+                            match value {
+                                Value::Reference(reference) if mutation == Mutation::Bind => {
+                                    crate::reference_holders::ReferenceHolders::check_object_storage(
+                                        object, key,
+                                    )?;
+                                    self.coerce_property_binding(
+                                        reference,
+                                        property,
+                                        declaration_type,
+                                    )?;
+                                }
+                                _ => {
+                                    let converted = self.coerce_property(
+                                        value.clone(),
+                                        property,
+                                        declaration_type,
+                                    )?;
+                                    if !matches!(value, Value::Reference(_)) {
+                                        *value = converted;
+                                    }
+                                }
                             }
                         }
                         if steps.peek().is_none() {

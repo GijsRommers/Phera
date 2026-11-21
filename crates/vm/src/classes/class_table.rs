@@ -177,9 +177,16 @@ impl ClassTable {
         *self.recording.borrow_mut() = Some(Vec::new());
     }
 
-    /// Ends a link: the names it looked up, and the position it used.
-    pub(crate) fn end_link(&mut self) -> (Vec<super::worker_classes::Dependency>, Option<u32>) {
-        let recorded = self.recording.borrow_mut().take().unwrap_or_default();
+    /// Linking against a class that is still being declared is request-local.
+    pub(crate) fn discard_link_dependencies(&self) {
+        *self.recording.borrow_mut() = None;
+    }
+
+    /// Ends a link: the reusable dependencies, and the position it used.
+    pub(crate) fn end_link(
+        &mut self,
+    ) -> (Option<Vec<super::worker_classes::Dependency>>, Option<u32>) {
+        let recorded = self.recording.borrow_mut().take();
         (recorded, self.linking.take())
     }
 
@@ -324,6 +331,13 @@ impl ClassTable {
     pub(crate) fn insert(&mut self, class: Rc<Class>) {
         let position = class.index.0 - self.native_count;
         self.register(position, class);
+    }
+
+    /// A declaration completed across an autoload is request-local.
+    pub(crate) fn publish_delayed(&mut self, class: Rc<Class>) {
+        let position = class.index.0 - self.native_count;
+        self.own_name(&class.name.to_ascii_lowercase(), position);
+        self.insert(class);
     }
 
     pub(crate) fn alias(&mut self, name: String, class: Rc<Class>) -> bool {

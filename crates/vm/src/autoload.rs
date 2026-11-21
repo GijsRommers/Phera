@@ -12,6 +12,8 @@ pub(crate) struct Autoloaders {
     pub(crate) callbacks: Vec<Option<RegisteredLoader>>,
     pub(crate) extensions: Option<String>,
     pub(crate) active: HashSet<String>,
+    pub(crate) declaring: Vec<DeclaringClass>,
+    pub(super) pending: Vec<PendingClass>,
 }
 
 #[derive(Clone)]
@@ -30,27 +32,30 @@ pub(crate) struct RegisteredLoader {
 pub(crate) struct ClassMiss {
     pub(crate) name: String,
     failure: MissFailure,
+    declaring: Option<DeclaringClass>,
 }
 
 mod method_variance;
-pub(crate) use method_variance::MethodVariance;
+pub(crate) use method_variance::{DeclaringClass, MethodVariance, PendingClass};
 
 enum MissFailure {
     Lookup(&'static str),
     Member(phera_source::deprecations::ItemKind, String),
-    MethodSignatures(Vec<MethodVariance>),
-    PropertySignature {
-        remaining: Vec<String>,
-        failure: crate::error_traces::DeclarationFailure,
-    },
+    MethodSignatures(Box<PendingClass>),
+    PropertySignature(Box<PropertyVariance>),
+}
+
+struct PropertyVariance {
+    remaining: Vec<String>,
+    failure: crate::error_traces::DeclarationFailure,
 }
 
 impl ClassMiss {
-    pub(crate) fn take(error: NativeError) -> Result<Self, NativeError> {
+    /// The unwind already owns the miss. Keep it in place across the loader's await.
+    pub(crate) fn take(error: NativeError) -> Result<Box<Self>, NativeError> {
         match error {
             NativeError::Unwind(Unwind(payload)) => payload
                 .downcast::<Self>()
-                .map(|miss| *miss)
                 .map_err(|payload| NativeError::Unwind(Unwind(payload))),
             error => Err(error),
         }
@@ -60,14 +65,31 @@ impl ClassMiss {
         matches!(error, NativeError::Unwind(Unwind(payload)) if payload.is::<Self>())
     }
 
-    pub(crate) fn method_signatures(methods: Vec<MethodVariance>) -> NativeError {
-        let Some(name) = methods.first().and_then(|method| method.names.first()) else {
-            return internal_error!("empty method variance obligation");
-        };
+    pub(crate) fn method_signatures(pending: PendingClass) -> NativeError {
+        let name = pending.class.name.clone();
         NativeError::Unwind(Unwind(Box::new(Self {
-            name: name.clone(),
-            failure: MissFailure::MethodSignatures(methods),
+            name,
+            failure: MissFailure::MethodSignatures(Box::new(pending)),
+            declaring: None,
         })))
+    }
+
+    pub(crate) fn during_declaration(
+        mut error: NativeError,
+        unit: &std::sync::Arc<phera_bytecode::CompiledUnit>,
+        index: phera_bytecode::ClassId,
+    ) -> NativeError {
+        if let NativeError::Unwind(Unwind(payload)) = &mut error
+            && let Some(miss) = payload.downcast_mut::<Self>()
+            && !matches!(miss.failure, MissFailure::MethodSignatures(_))
+        {
+            miss.declaring = Some(DeclaringClass {
+                unit: unit.clone(),
+                index,
+                required: Default::default(),
+            });
+        }
+        error
     }
 
     pub(crate) fn property_signature(
@@ -80,14 +102,15 @@ impl ClassMiss {
         };
         NativeError::Unwind(Unwind(Box::new(Self {
             name,
-            failure: MissFailure::PropertySignature {
+            failure: MissFailure::PropertySignature(Box::new(PropertyVariance {
                 remaining: names.collect(),
                 failure,
-            },
+            })),
+            declaring: None,
         })))
     }
 
-    pub(crate) fn error(self) -> NativeError {
+    pub(crate) fn error(self: Box<Self>) -> NativeError {
         match self.failure {
             MissFailure::Lookup(kind) => {
                 NativeError::error(format!("{kind} \"{}\" not found", self.name))
@@ -96,12 +119,12 @@ impl ClassMiss {
                 kind, &self.name, &member,
             )
             .unwrap_or_else(|| NativeError::error(format!("Class \"{}\" not found", self.name))),
-            MissFailure::MethodSignatures(methods) => methods.first().map_or_else(
+            MissFailure::MethodSignatures(pending) => pending.methods.first().map_or_else(
                 || internal_error!("empty method variance obligation"),
-                |method| method.error(&self.name),
+                |method| method.error(method.names.first().unwrap_or(&self.name)),
             ),
-            MissFailure::PropertySignature { failure, .. } => {
-                NativeError::Unwind(Unwind(Box::new(failure)))
+            MissFailure::PropertySignature(variance) => {
+                NativeError::Unwind(Unwind(Box::new(variance.failure)))
             }
         }
     }
@@ -118,6 +141,7 @@ impl Vm {
         let miss = ClassMiss {
             name: name.into(),
             failure: MissFailure::Lookup(kind),
+            declaring: None,
         };
         NativeError::Unwind(Unwind(Box::new(miss)))
     }
@@ -132,6 +156,7 @@ impl Vm {
         NativeError::Unwind(Unwind(Box::new(ClassMiss {
             name: name.into(),
             failure: MissFailure::Member(kind, member.into()),
+            declaring: None,
         })))
     }
 
@@ -170,10 +195,12 @@ impl Vm {
         if !self.autoload.active.insert(key.clone()) {
             return Ok(None);
         }
-        let result = self.call_autoloaders(callback_name, origin).await;
+        let result = self
+            .call_autoloaders_for_key(callback_name, &key, origin)
+            .await;
         self.autoload.active.remove(&key);
         result?;
-        Ok(self.classes.get(name))
+        Ok(self.classes.get_lowercase(&key).cloned())
     }
 
     /// Read the live list after each call so removing or appending loaders takes effect.
@@ -181,6 +208,16 @@ impl Vm {
     pub(crate) async fn call_autoloaders(
         &mut self,
         name: &str,
+        origin: Option<(&str, &[Value])>,
+    ) -> Result<(), NativeError> {
+        self.call_autoloaders_for_key(name, &name.to_ascii_lowercase(), origin)
+            .await
+    }
+
+    async fn call_autoloaders_for_key(
+        &mut self,
+        name: &str,
+        key: &str,
         origin: Option<(&str, &[Value])>,
     ) -> Result<(), NativeError> {
         if let Some((function, arguments)) = origin {
@@ -207,11 +244,7 @@ impl Vm {
             let Some(loader) = loader else { continue };
             self.invoke_resolved_callable(loader.callee, [Value::from(name)])
                 .await?;
-            if self
-                .classes
-                .get_lowercase(&name.to_ascii_lowercase())
-                .is_some()
-            {
+            if self.classes.get_lowercase(key).is_some() {
                 break;
             }
         }
@@ -221,8 +254,15 @@ impl Vm {
     /// Resume the interrupted operation only after the class is linked. Operands were
     /// already evaluated into registers before the fetch instruction was entered.
     #[cold]
-    pub(crate) async fn resume_class_fetch(&mut self, miss: ClassMiss) -> Result<(), NativeError> {
+    pub(crate) async fn resume_class_fetch(
+        &mut self,
+        miss: Box<ClassMiss>,
+    ) -> Result<(), NativeError> {
+        let completed_declaration = matches!(miss.failure, MissFailure::MethodSignatures(_));
         self.resolve_class_miss(miss).await?;
+        if completed_declaration {
+            return Ok(());
+        }
         let frame = self
             .call_stack
             .current_mut()
@@ -238,15 +278,48 @@ impl Vm {
     /// Loads what a synchronous step that unwound with `miss` was missing:
     /// the class, through the autoloaders, or the classes of a signature.
     /// The error PHP raises when one stays missing.
-    pub(crate) async fn resolve_class_miss(&mut self, miss: ClassMiss) -> Result<(), NativeError> {
+    pub(crate) async fn resolve_class_miss(
+        &mut self,
+        mut miss: Box<ClassMiss>,
+    ) -> Result<(), NativeError> {
         if !self.error_handlers.pending.is_empty() {
             self.drain_error_handlers().await?;
         }
-        if let MissFailure::MethodSignatures(methods) = &miss.failure {
-            self.load_method_signature_classes(methods).await?;
-        } else if let MissFailure::PropertySignature { remaining, .. } = &miss.failure {
+        if let MissFailure::MethodSignatures(pending) = miss.failure {
+            return self.finish_pending_class(*pending).await;
+        }
+        let Some(declaring) = miss.declaring.take() else {
+            return self.load_class_miss(miss).await;
+        };
+        let depth = self.autoload.declaring.len();
+        self.autoload.declaring.push(declaring);
+        let result = self.load_class_miss(miss).await;
+        let required = self
+            .autoload
+            .declaring
+            .get(depth)
+            .filter(|entry| entry.required.get())
+            .and_then(|entry| {
+                let declaration = entry.unit.classes.get(entry.index.index())?;
+                Some((
+                    declaration.name.clone(),
+                    entry.unit.file.clone(),
+                    declaration.line as usize,
+                ))
+            });
+        self.autoload.declaring.truncate(depth);
+        match (result, required) {
+            (Err(error), Some((class, file, line))) => {
+                Err(self.variance_autoload_failure(error, &class, None, file, line))
+            }
+            (result, _) => result,
+        }
+    }
+
+    async fn load_class_miss(&mut self, miss: Box<ClassMiss>) -> Result<(), NativeError> {
+        if let MissFailure::PropertySignature(variance) = &miss.failure {
             let mut attempted = HashSet::new();
-            let names = std::iter::once(&miss.name).chain(remaining);
+            let names = std::iter::once(&miss.name).chain(&variance.remaining);
             for name in names.clone() {
                 if attempted.insert(name.to_ascii_lowercase()) {
                     self.lookup_class(name).await?;
@@ -333,6 +406,8 @@ impl crate::snapshot::ForkCopy for Autoloaders {
             callbacks: self.callbacks.fork_copy(fork),
             extensions: self.extensions.clone(),
             active: Default::default(),
+            declaring: Default::default(),
+            pending: Default::default(),
         }
     }
 }
