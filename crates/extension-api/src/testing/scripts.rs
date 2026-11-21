@@ -111,13 +111,19 @@ impl Comparison {
             }
         }
         let problem = if !php.status.success() {
-            Some("PHP failed")
+            Some("PHP failed".to_owned())
         } else if !phera.status.success() {
-            Some("Phera failed")
+            Some("Phera failed".to_owned())
         } else if php.stdout != phera.stdout {
-            Some("stdout differs")
+            Some(format!(
+                "stdout differs\n{}",
+                first_difference(&php.stdout, &phera.stdout)
+            ))
         } else if php.stderr != phera.stderr {
-            Some("stderr differs")
+            Some(format!(
+                "stderr differs\n{}",
+                first_difference(&php.stderr, &phera.stderr)
+            ))
         } else {
             None
         };
@@ -252,6 +258,40 @@ impl Comparison {
     }
 }
 
+/// Where two outputs first differ, with a few lines of each from there, so
+/// that a failure on another machine (the Linux runner) can be read in its
+/// log without the saved files.
+///
+/// ```text
+///   line 12
+///   PHP:   string(21) "Name or service not known"
+///   Phera: string(18) "nodename not known"
+/// ```
+fn first_difference(php: &[u8], phera: &[u8]) -> String {
+    const LINES_SHOWN: usize = 4;
+    let php = String::from_utf8_lossy(php);
+    let phera = String::from_utf8_lossy(phera);
+    let same = php
+        .lines()
+        .zip(phera.lines())
+        .take_while(|(left, right)| left == right)
+        .count();
+    let shown = |text: &str| -> String {
+        let lines: Vec<&str> = text.lines().skip(same).take(LINES_SHOWN).collect();
+        if lines.is_empty() {
+            "(the output ends here)".to_owned()
+        } else {
+            lines.join("\n         ")
+        }
+    };
+    format!(
+        "  line {}\n  PHP:   {}\n  Phera: {}",
+        same + 1,
+        shown(&php),
+        shown(&phera)
+    )
+}
+
 fn minimum_php(script: &Path) -> Option<u32> {
     let source = std::fs::read(script).expect("read oracle script");
     String::from_utf8_lossy(&source).lines().find_map(|line| {
@@ -283,4 +323,27 @@ fn stem(path: &Path) -> String {
     path.file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::first_difference;
+
+    #[test]
+    fn the_first_differing_line_is_shown_with_what_follows() {
+        let report = first_difference(b"a\nb\nc\nd\n", b"a\nB\nc\n");
+        assert_eq!(
+            report,
+            "  line 2\n  PHP:   b\n         c\n         d\n  Phera: B\n         c"
+        );
+    }
+
+    #[test]
+    fn an_output_that_ends_early_says_so() {
+        let report = first_difference(b"a\nb\n", b"a\n");
+        assert_eq!(
+            report,
+            "  line 2\n  PHP:   b\n  Phera: (the output ends here)"
+        );
+    }
 }

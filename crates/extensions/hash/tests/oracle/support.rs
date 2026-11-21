@@ -26,7 +26,9 @@ pub async fn invoke(
         NativeFn::Sync(function) | NativeFn::DeprecatedSync(function) => {
             function(context, &arguments)
         }
-        NativeFn::Async(function) => function(context, arguments).await,
+        NativeFn::Async(function) | NativeFn::DeprecatedAsync(function) => {
+            function(context, arguments).await
+        }
     }
 }
 
