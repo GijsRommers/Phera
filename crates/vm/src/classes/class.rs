@@ -226,6 +226,10 @@ pub(crate) enum ConstantInitializer {
     EnumCase {
         name: String,
         backing: Option<crate::code_table::FunctionIndex>,
+        /// Where the request keeps the case object once it may be read
+        /// directly (see `EnumCases`). A native enum's cases have none and
+        /// are always fetched through the case lookup.
+        slot: Option<super::class_state::ConstantSlot>,
     },
 }
 
