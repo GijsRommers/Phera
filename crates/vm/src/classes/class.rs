@@ -184,6 +184,12 @@ impl ClassHandle for Class {
     fn property_layout(&self) -> Option<Rc<phera_value::PropertyLayout>> {
         self.layout.clone()
     }
+
+    fn has_property_magic(&self) -> bool {
+        self.magic
+            .as_ref()
+            .is_some_and(|magic| magic.has_properties())
+    }
 }
 
 impl Class {

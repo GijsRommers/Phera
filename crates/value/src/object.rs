@@ -60,6 +60,12 @@ pub trait ClassHandle: Any {
         false
     }
 
+    /// Whether the class has `__get`, `__set`, `__isset` or `__unset`, which
+    /// an access of an unset property calls.
+    fn has_property_magic(&self) -> bool {
+        false
+    }
+
     /// The declared instance properties' keys, in PHP's order, for classes
     /// that keep them in slots (see `crate::properties`).
     fn property_layout(&self) -> Option<Rc<crate::properties::PropertyLayout>> {
