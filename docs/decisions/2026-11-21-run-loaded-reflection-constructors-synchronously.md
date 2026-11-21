@@ -17,10 +17,13 @@ The metadata of a linked class is already available when the constructor runs. T
 | Native method entry | Sync or async handler and optional argument preparation | An optional ready handler alongside the existing handler and preparation |
 | Prepared positional constructor arguments | A vector passed to the async method | Two stack slots on the ready path, restored to the call on a miss |
 | Reflection class input | Owned class name, including for objects | Linked class for objects and a borrowed name for valid UTF-8 strings |
+| Class name during autoload and enum case lookup | Owned string for each name lookup | Borrowed object name or valid UTF-8 string, with owned bytes for lossy conversion |
 | Method constructor target | Class and method names | Linked class number and method name, with the existing function metadata map keyed by class number and folded method name |
 | Class reflector name | A new PHP string written during binding | The linked class's PHP string shared with the reflector |
 
 Each reflector carries boxed state. When a worker forks from a snapshot, the class number identifies the same class table position used by class and member reflectors.
+
+The borrowed name on the general lookup path incorporates the approach proposed in PR #163.
 
 ## Turned down
 
