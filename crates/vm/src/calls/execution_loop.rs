@@ -103,6 +103,10 @@ pub(super) struct Machine<'a> {
     /// made that return itself (see `Machine::leave_to_native`); the loop
     /// then leaves as if yielding.
     pub(super) returned: Option<Value>,
+    /// What a callback of a native loop returned, when the loop made that
+    /// return itself (see `Machine::leave_to_native_loop`): the batch loop
+    /// hands it to the built-in's next step.
+    pub(super) loop_returned: Option<Value>,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -151,6 +155,7 @@ impl Vm {
                 ids: &self.object_ids,
                 registry: &self.registry,
                 returned: None,
+                loop_returned: None,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
@@ -166,7 +171,22 @@ impl Vm {
             let instruction = match exit {
                 LoopExit::Slow(instruction) => instruction,
                 LoopExit::Yield => {
-                    return Ok(match machine.returned.take() {
+                    let (returned, loop_returned) =
+                        (machine.returned.take(), machine.loop_returned.take());
+                    if let Some(value) = loop_returned {
+                        // The built-in's next step (`calls::native_loops`).
+                        self.resume_native_loop(value)?;
+                        if self.destructors_due() {
+                            return Ok(BatchExit::Destructors);
+                        }
+                        if self.pending_callbacks
+                            || (TRACK_GENERATORS && self.generator_releases_pending())
+                        {
+                            return Ok(BatchExit::Handlers);
+                        }
+                        continue;
+                    }
+                    return Ok(match returned {
                         Some(value) => BatchExit::Returned(value),
                         None => BatchExit::Yield,
                     });

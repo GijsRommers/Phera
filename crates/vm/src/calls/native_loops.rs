@@ -156,6 +156,15 @@ impl Vm {
         };
         let element = element.deref().clone();
         step.key = key;
+        if let crate::calls::call_state::CallTarget::Closure(closure) = &step.callee.target {
+            let closure = closure.clone();
+            if self.enter_closure_callback(&closure, &element) {
+                return Ok(());
+            }
+        }
+        let Some(NativeLoop { step, .. }) = self.call_stack.native_loops.last_mut() else {
+            return Err(internal_error!("native loop"));
+        };
         let (callee, origin) = (step.callee.clone(), step.origin);
         self.prepare_call(callee)?;
         self.store_sent_value(0, element)?;
@@ -167,6 +176,69 @@ impl Vm {
             frame.mark_native_loop();
         }
         Ok(())
+    }
+
+    /// Enters a closure written in PHP with one argument the way the
+    /// interpreter loop enters `$f($value)`: its window with the closure
+    /// and its captured variables, the argument where its first parameter
+    /// is, and its frame. `false`, with nothing changed, for any shape that
+    /// needs the general path (a type the value does not have as it is, a
+    /// default to fill, a bound or unbound closure, the frame limit).
+    fn enter_closure_callback(
+        &mut self,
+        closure: &Rc<phera_value::Object>,
+        element: &Value,
+    ) -> bool {
+        use crate::calls::frame::Frame;
+        use crate::function_facts::FunctionShape;
+        let function = {
+            let native = closure.native.borrow();
+            let Some(state) = native
+                .as_ref()
+                .and_then(|state| state.downcast_ref::<crate::closures::ClosureState>())
+            else {
+                return false;
+            };
+            if state.origin != crate::closures::ClosureOrigin::Lexical {
+                return false;
+            }
+            let Some(function) = state.callee.user_function() else {
+                return false;
+            };
+            function
+        };
+        let facts = self.code.facts(function);
+        let fits = facts.shape == FunctionShape::Plain
+            && facts.required <= 1
+            && facts.parameters >= 1
+            && facts.takes_value(0)
+            && (!facts.is_typed(0)
+                || facts
+                    .parameter_masks
+                    .first()
+                    .is_some_and(|mask| mask.intersects(crate::types::own_type(element))))
+            && self.call_stack.depth() < self.frame_limit;
+        if !fits {
+            return false;
+        }
+        let parts = (&mut self.call_stack, &mut self.registers);
+        if !crate::calls::php_windows::push_closure_call(&self.code, parts, closure) {
+            return false;
+        }
+        let Some(call) = self.call_stack.pop_plain() else {
+            return false;
+        };
+        self.registers.put(call.base(), element.clone());
+        let mut frame = Frame::of_kind(function, call.kind, call.base(), None);
+        if facts.parameters > 1 {
+            frame = frame.with_passed(1);
+        }
+        frame.mark_native_loop();
+        self.call_stack.push(frame);
+        if call.called.is_some() {
+            self.call_stack.current_extras_mut().called = call.called;
+        }
+        true
     }
 
     /// A callback of a native loop returned `value`: its next step.

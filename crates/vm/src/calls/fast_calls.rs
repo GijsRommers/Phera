@@ -94,6 +94,8 @@ impl Machine<'_> {
         let Some(destination) = frame.destination() else {
             return if frame.discards_result() {
                 self.leave_discarded(frame, source)
+            } else if !GUARDED && frame.returns_to_native_loop() {
+                self.leave_to_native_loop(frame, source)
             } else if !GUARDED && self.stack.depth() == self.stop + 1 {
                 self.leave_to_native(frame, source)
             } else {
@@ -238,6 +240,45 @@ impl Machine<'_> {
         self.stack.pop();
         self.registers.release_frame(frame.start(), frame.base());
         self.returned = Some(value);
+        Step::Yield
+    }
+
+    /// A plain return of a callback of a native loop (`array_map`'s
+    /// closure), as the VM makes it: the frame goes, and the value goes to
+    /// the batch loop, which hands it to the built-in's next step
+    /// (`calls::native_loops`). The cases `leave_to_native` leaves to the
+    /// VM stay with it here too.
+    #[cold]
+    #[inline(never)]
+    fn leave_to_native_loop(&mut self, frame: Frame, source: Option<Reg>) -> Step {
+        let facts = self.code.facts(frame.function);
+        let depth = self.stack.depth();
+        let function = self.code.function(frame.function);
+        if facts.local.is_none()
+            || function.is_generator
+            || function.returns_reference
+            || (frame.has_extras() && !self.stack.extras(depth - 1).plain_return_can_release())
+            || self.stack.has_calls_from(frame.start())
+        {
+            return Step::Slow;
+        }
+        let value = match source {
+            Some(source) => match self.registers.window(frame.base() + source.index(), 1) {
+                [Some(value)] if !value.is_reference() => value,
+                _ => return Step::Slow,
+            },
+            None => &Value::Null,
+        };
+        if facts
+            .return_mask
+            .is_some_and(|mask| !mask.intersects(crate::types::own_type(value)))
+        {
+            return Step::Slow;
+        }
+        let value = value.clone();
+        self.stack.pop();
+        self.registers.release_frame(frame.start(), frame.base());
+        self.loop_returned = Some(value);
         Step::Yield
     }
 
