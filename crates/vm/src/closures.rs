@@ -167,6 +167,12 @@ pub(crate) fn captured_values(object: &phera_value::Object) -> Vec<Value> {
 impl ClosureState {
     /// PHP clone and bind copy the current static values into independent reference cells.
     pub(crate) fn duplicate(&self) -> Self {
+        let mut callee = self.callee.clone();
+        if let CallTarget::Magic(target) = &mut callee.target {
+            // Each closure owns its magic receiver once, including when
+            // several copies are examined by the cycle collector.
+            *target = Rc::new((**target).clone());
+        }
         let statics = self.statics.as_ref().map(|statics| {
             let copied = statics
                 .borrow()
@@ -185,7 +191,7 @@ impl ClosureState {
         });
         Self {
             origin: self.origin,
-            callee: self.callee.clone(),
+            callee,
             captures: self.captures.clone(),
             context: self.context.clone(),
             binding: self.binding,

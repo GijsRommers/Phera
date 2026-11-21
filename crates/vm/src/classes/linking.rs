@@ -67,10 +67,11 @@ impl Vm {
             ));
         }
         self.link_new_class(&unit, unit_first, index, key)
+            .map_err(|error| crate::autoload::ClassMiss::during_declaration(error, &unit, index))
     }
 
-    /// Both callers have checked the declaration's case-insensitive name.
-    fn link_new_class(
+    /// The caller has checked that the declaration's name is available.
+    pub(crate) fn link_new_class(
         &mut self,
         unit: &Arc<CompiledUnit>,
         unit_first: FunctionIndex,
@@ -87,7 +88,10 @@ impl Vm {
         let linked = self.link_class_body(unit, unit_first, index);
         let (dependencies, position) = self.classes.end_link();
         let imports = self.code.end_imports();
-        if let Err(error) = linked {
+        if let Err(mut error) = linked {
+            if dependencies.is_none() || self.diagnostic_reporter.raised != raised {
+                crate::autoload::ClassMiss::keep_pending_shape(&mut error);
+            }
             if let Some(position) = position {
                 self.classes.lease_position(position);
             }
@@ -104,6 +108,7 @@ impl Vm {
             && unit.metadata.is_some()
             && declaration.kind != ClassKind::Anonymous;
         if shared
+            && let Some(dependencies) = dependencies
             && let Some(position) = position
             && let Some(class) = self.classes.at_position(position)
         {
@@ -143,6 +148,7 @@ impl Vm {
                     .dependencies
                     .iter()
                     .all(|(name, number)| self.classes.resolve_number(name) == *number)
+                    && !self.inherits_from_pending_type(&entry.dependencies)
             })
     }
 
@@ -189,8 +195,7 @@ impl Vm {
             .parent
             .map(|symbol| {
                 let parent_name = &unit.symbols[symbol.index()].written;
-                self.classes
-                    .get(parent_name)
+                self.class_for_inheritance(parent_name)
                     .ok_or_else(|| Self::class_miss(parent_name, "Class"))
             })
             .transpose()?;
@@ -238,8 +243,7 @@ impl Vm {
             .map(|symbol| {
                 let interface_name = &unit.symbols[symbol.index()].written;
                 let interface = self
-                    .classes
-                    .get(interface_name)
+                    .class_for_inheritance(interface_name)
                     .ok_or_else(|| Self::class_miss(interface_name, "Interface"))?;
                 if interface.kind != ClassKind::Interface {
                     return Err(NativeError::error(format!(
@@ -357,7 +361,12 @@ impl Vm {
             if let Some(inherited) = methods.get(&key) {
                 super::inheritance_checks::check_override(name, inherited, &linked)
                     .map_err(|error| self.magic_override_error(&linked, error))?;
-                if let Some(miss) = self.check_method_contract(inherited, &linked, unit)?
+                let prototype = if key == "__construct" && !inherited.is_abstract {
+                    abstract_constructor(parent.as_deref()).unwrap_or(inherited)
+                } else {
+                    inherited
+                };
+                if let Some(miss) = self.check_method_contract(prototype, &linked, unit)?
                     && let Some(parent) = &parent
                 {
                     pending.push((
@@ -470,12 +479,6 @@ impl Vm {
                     .or_insert_with(|| method.clone());
             }
         }
-        if !pending.is_empty() {
-            pending.sort_by(|(left, _), (right, _)| left.cmp(right));
-            return Err(crate::autoload::ClassMiss::method_signatures(
-                pending.into_iter().map(|(_, miss)| miss).collect(),
-            ));
-        }
         super::inheritance_checks::check_abstract(
             name,
             declaration.kind,
@@ -578,6 +581,7 @@ impl Vm {
             is_final: declaration.is_final,
             is_readonly: declaration.is_readonly,
             allows_dynamic_properties,
+            property_facts: std::cell::OnceCell::new(),
             constructor: methods.get("__construct").cloned(),
             magic: super::magic::MagicMethods::link(&methods),
             methods,
@@ -596,7 +600,46 @@ impl Vm {
                 "Enum {name} cannot implement the Serializable interface"
             )));
         }
+        if !pending.is_empty()
+            || class
+                .parent
+                .iter()
+                .chain(&class.interfaces)
+                .any(|dependency| self.is_pending_class(dependency.index))
+        {
+            pending.sort_by(|(left, _), (right, _)| left.cmp(right));
+            return Err(crate::autoload::ClassMiss::method_signatures(
+                crate::autoload::PendingClass {
+                    class,
+                    unit: unit.clone(),
+                    methods: pending.into_iter().map(|(_, miss)| miss).collect(),
+                    requested: Default::default(),
+                    publication: std::cell::Cell::new(
+                        if unit.metadata.is_some() && declaration.kind != ClassKind::Anonymous {
+                            crate::autoload::PendingPublication::RetryLink
+                        } else {
+                            crate::autoload::PendingPublication::KeepShape
+                        },
+                    ),
+                },
+            ));
+        }
         self.classes.insert(class);
         Ok(())
     }
+}
+
+/// A concrete constructor does not erase an ancestor's abstract signature.
+fn abstract_constructor(mut parent: Option<&Class>) -> Option<&Rc<Method>> {
+    while let Some(class) = parent {
+        if let Some(method) = class
+            .methods
+            .get("__construct")
+            .filter(|method| method.is_abstract)
+        {
+            return Some(method);
+        }
+        parent = class.parent.as_deref();
+    }
+    None
 }

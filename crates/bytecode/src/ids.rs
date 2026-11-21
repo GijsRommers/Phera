@@ -69,6 +69,11 @@ index!(
 );
 
 index!(
+    /// An entry in [`crate::Function::method_sites`].
+    MethodSiteId(u32), "site#"
+);
+
+index!(
     /// An entry in [`crate::CompiledUnit::classes`].
     ClassId(u32), "class#"
 );

@@ -38,6 +38,7 @@ impl ClassDefinitions {
                 is_final: false,
                 is_readonly: false,
                 allows_dynamic_properties: true,
+                property_facts: std::cell::OnceCell::new(),
                 methods: HashMap::new(),
                 method_table: std::cell::OnceCell::new(),
                 serialized_fields: std::cell::OnceCell::new(),
@@ -53,6 +54,10 @@ impl ClassDefinitions {
         );
         let closure = phera_extension_api::ClassEntry {
             kind: NativeKind::FinalClass,
+            hooks: Some(&phera_extension_api::ClassHooks {
+                trace_native: Some(crate::closure_cycles::trace),
+                ..phera_extension_api::ClassHooks::EMPTY
+            }),
             ..phera_extension_api::ClassEntry::class("Closure")
         };
         let internal_iterator = registry
@@ -275,6 +280,7 @@ impl ClassDefinitions {
                     ),
                     is_readonly: entry.kind == NativeKind::FinalReadonlyClass,
                     allows_dynamic_properties: false,
+                    property_facts: std::cell::OnceCell::new(),
                     constructor: methods.get("__construct").cloned(),
                     magic: super::magic::MagicMethods::link(&methods),
                     methods,

@@ -40,6 +40,9 @@ pub(crate) struct Class {
     pub(crate) is_final: bool,
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,
+    /// What its property accesses may involve (see `property_facts`), made
+    /// once the rest of the class is linked.
+    pub(crate) property_facts: std::cell::OnceCell<super::property_facts::PropertyFacts>,
     pub(crate) magic: Option<Box<super::magic::MagicMethods>>,
     pub(crate) methods: HashMap<String, Rc<Method>>,
     /// The same methods by name key, built on first use by a fast call.
@@ -127,10 +130,15 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
-    fn native_state_is_weak(&self) -> bool {
+    fn trace_native_values(
+        &self,
+        payload: &dyn std::any::Any,
+        visit: &mut dyn FnMut(&Value),
+    ) -> bool {
         self.hooks
             .as_ref()
-            .is_some_and(|hooks| hooks.native_state_is_weak)
+            .and_then(|hooks| hooks.trace_native)
+            .is_some_and(|trace| trace(payload, visit))
     }
 
     fn is_traversable(&self) -> bool {
@@ -436,6 +444,14 @@ const WALK_DEPTH: usize = 32;
 const WALK_VISITS: usize = 256;
 
 impl Class {
+    /// What this class's property accesses may involve.
+    #[inline]
+    pub(crate) fn property_facts(&self) -> super::property_facts::PropertyFacts {
+        *self
+            .property_facts
+            .get_or_init(|| super::property_facts::PropertyFacts::of(self))
+    }
+
     /// Whether this class is `target`, extends it or implements it: the same
     /// ancestry as `Class::ancestors`, its parent and interfaces and theirs.
     /// `None` when the walk outgrows its stack or its visits.

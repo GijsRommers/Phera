@@ -35,8 +35,16 @@ pub(super) fn update(
     references: &Rc<RefCell<ReferenceHolders>>,
 ) -> Result<(), NativeError> {
     let mut parents = InlineStack::new();
-    let result = walk(current, &mut parents, keys, value, mutation, diagnostics)
-        .and_then(|()| rebuild(current, &mut parents, mutation, diagnostics, references));
+    let result = walk(
+        current,
+        &mut parents,
+        keys,
+        value,
+        mutation,
+        diagnostics,
+        references,
+    )
+    .and_then(|()| rebuild(current, &mut parents, mutation, diagnostics, references));
     if result.is_err() {
         restore(current, &mut parents);
     }
@@ -51,14 +59,21 @@ fn walk(
     value: Value,
     mutation: crate::access_mode::Mutation,
     diagnostics: &mut dyn Diagnostics,
+    references: &RefCell<ReferenceHolders>,
 ) -> Result<(), NativeError> {
     for key in keys.iter() {
         if let Value::Reference(reference) = current {
-            let child = std::mem::take(
-                &mut *reference
-                    .try_borrow_mut()
-                    .map_err(|_| internal_error!("borrowed reference"))?,
-            );
+            let mut slot = reference
+                .try_borrow_mut()
+                .map_err(|_| internal_error!("borrowed reference"))?;
+            if matches!(key, PathKey::Index(_))
+                && (slot.is_null() || matches!(*slot, Value::Bool(false)))
+                && mutation != crate::access_mode::Mutation::Unset
+            {
+                crate::typed_references::check_reference_array_promotion(reference, references)?;
+            }
+            let child = std::mem::take(&mut *slot);
+            drop(slot);
             let Value::Reference(reference) = std::mem::replace(current, child) else {
                 return Err(internal_error!("detached reference"));
             };

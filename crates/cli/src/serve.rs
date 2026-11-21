@@ -90,7 +90,8 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     let mut runtime = Runtime::with_environment(loaded.environment)
         .with_startup_ini(options.ini)
         .with_web_development(options.dev)
-        .without_web_processes(options.no_process);
+        .without_web_processes(options.no_process)
+        .without_class_warmup(!options.class_warmup);
     if let (Adapter::Laravel, Some(front_controller)) = (adapter, site.front_controller()) {
         runtime = runtime.with_entry_script(
             front_controller.to_path_buf(),
