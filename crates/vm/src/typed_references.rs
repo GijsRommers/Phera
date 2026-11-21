@@ -412,6 +412,30 @@ pub(crate) fn uninitialized_reference_error(property: &PropertyDefault) -> Nativ
     ))
 }
 
+/// A write through an alias must respect every holder before creating an array.
+pub(crate) fn check_reference_array_promotion(
+    reference: &Rc<RefCell<Value>>,
+    references: &RefCell<crate::reference_holders::ReferenceHolders>,
+) -> Result<(), NativeError> {
+    let references = references.borrow();
+    if let Some(properties) = references
+        .constraints
+        .get(&(Rc::as_ptr(reference) as usize))
+        && let Some(property) = properties.values().find(|property| {
+            property
+                .ty
+                .as_ref()
+                .is_some_and(|ty| !crate::path_dimensions::accepts_promoted_array(ty))
+        })
+    {
+        return Err(NativeError::type_error(format!(
+            "Cannot auto-initialize an array inside a reference held by property {}",
+            reference_property_name(property)
+        )));
+    }
+    Ok(())
+}
+
 fn conflicting_reference_types(
     value: &Value,
     first: &PropertyDefault,

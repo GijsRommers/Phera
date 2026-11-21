@@ -35,8 +35,16 @@ pub(super) fn update(
     references: &Rc<RefCell<ReferenceHolders>>,
 ) -> Result<(), NativeError> {
     let mut parents = InlineStack::new();
-    let result = walk(current, &mut parents, keys, value, mutation, diagnostics)
-        .and_then(|()| rebuild(current, &mut parents, mutation, diagnostics, references));
+    let result = walk(
+        current,
+        &mut parents,
+        keys,
+        value,
+        mutation,
+        diagnostics,
+        references,
+    )
+    .and_then(|()| rebuild(current, &mut parents, mutation, diagnostics, references));
     if result.is_err() {
         restore(current, &mut parents);
     }
@@ -51,6 +59,7 @@ fn walk(
     value: Value,
     mutation: crate::access_mode::Mutation,
     diagnostics: &mut dyn Diagnostics,
+    references: &RefCell<ReferenceHolders>,
 ) -> Result<(), NativeError> {
     for key in keys.iter() {
         if let Value::Reference(reference) = current {
@@ -84,6 +93,13 @@ fn walk(
             }
             PathKey::Index(key) => {
                 if current.is_null() || matches!(current, Value::Bool(false)) {
+                    if mutation != crate::access_mode::Mutation::Unset
+                        && let Some(Parent::Reference(reference)) = parents.iter().next_back()
+                    {
+                        crate::typed_references::check_reference_array_promotion(
+                            reference, references,
+                        )?;
+                    }
                     *current = Value::Array(Rc::new(PhpArray::new()));
                 }
                 if let Value::String(string) = current {

@@ -6,6 +6,30 @@ use phera_extension_api::{NativeError, NativePropertyMutation};
 use phera_value::Value;
 
 impl Vm {
+    /// An indexed write that promotes an empty static slot initializes it on success.
+    pub(crate) fn prepare_static_array_promotion(
+        &mut self,
+        class: phera_bytecode::Reg,
+        name: phera_bytecode::Reg,
+    ) -> Result<std::rc::Rc<crate::reference_holders::StaticProperty>, NativeError> {
+        let (class_name, name) = self.static_property_names(class, name)?;
+        let class = self
+            .classes
+            .get(&class_name)
+            .ok_or_else(|| internal_error!("static class"))?;
+        let property = class
+            .static_properties
+            .iter()
+            .rev()
+            .find(|property| property.name == name)
+            .ok_or_else(|| internal_error!("static property"))?;
+        self.check_set_visibility(property, PropertyChange::Indirect)?;
+        crate::path_dimensions::check_property_array_promotion(property)?;
+        self.class_states
+            .static_property(property)
+            .ok_or_else(|| internal_error!("static storage"))
+    }
+
     /// Class types use inheritance membership; scalar types reuse PHP's existing coercion policy.
     pub(crate) fn coerce_property(
         &mut self,

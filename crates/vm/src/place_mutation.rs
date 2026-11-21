@@ -79,12 +79,28 @@ impl Vm {
         mut value: Value,
         binding: Binding,
     ) -> Result<(), NativeError> {
-        if let PathBase::StaticProperty { class, name, .. } = place.base()?
-            && keys.iter().next().is_some()
-            && !self.get(register).is_object()
+        let static_promotion = if let PathBase::StaticProperty { class, name, .. } = place.base()?
+            && let Some(first) = keys.iter().next()
         {
-            self.validate_static_mutation(class, name, &mut value, PropertyChange::Indirect)?;
-        }
+            let current = self.get(register);
+            match (first, &*current.deref()) {
+                (PathKey::Index(_), Value::Null | Value::Bool(false)) => {
+                    Some(self.prepare_static_array_promotion(class, name)?)
+                }
+                (_, Value::Object(_)) => None,
+                _ => {
+                    self.validate_static_mutation(
+                        class,
+                        name,
+                        &mut value,
+                        PropertyChange::Indirect,
+                    )?;
+                    None
+                }
+            }
+        } else {
+            None
+        };
         if binding == Binding::ByReference
             && matches!(keys.iter().last(), Some(PathKey::Index(_)))
             && let Value::Reference(reference) = &value
@@ -126,6 +142,9 @@ impl Vm {
         if let Err(error) = result {
             self.set(register, root);
             return Err(error);
+        }
+        if let Some(storage) = static_promotion {
+            storage.value_initialized.set(true);
         }
         let updated = root;
         if let PathBase::GlobalNamed { name, .. } = place.base()? {
