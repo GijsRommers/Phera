@@ -256,6 +256,10 @@ the pool limit. Each fork reconnects a boot connection on first use and
 replays the boot's session changes. The fork can borrow a pooled socket for
 a nonpersistent mysqli or pgsql connection opened during boot.
 
+PDO placeholder parsing follows each database's quoting and comment rules.
+The [PDO coverage notes](crates/extensions/pdo/README.md#differences-from-php-85)
+describe two PostgreSQL emulation differences from PHP 8.5.
+
 ### Sodium
 
 Phera implements PHP's `sodium` module in Rust. It supports NaCl secret boxes

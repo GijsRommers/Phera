@@ -20,7 +20,7 @@ use super::{Execution, Prepared, RowBuffer, Rows};
 use crate::connect_options::MysqlOptions;
 use crate::errors::DbError;
 use crate::parameters::{BoundValue, literal, quote};
-use crate::placeholders::Sql;
+use crate::placeholders::{Sql, Syntax};
 use values::parameter;
 
 pub struct Mysql {
@@ -131,11 +131,18 @@ impl Mysql {
                 self.last_insert_id = insert_id;
                 Ok(rows)
             }
-            Prepared::Emulated if values.is_empty() => {
-                self.text(&sql.source, options.mysql_stream.as_ref()).await
-            }
             Prepared::Emulated => {
-                let mode = self.backslash_escapes().await?;
+                if values.is_empty() {
+                    return self.text(&sql.source, options.mysql_stream.as_ref()).await;
+                }
+                sql.check_emulation()?;
+                let mode = if sql.has_sensitive_quotes() {
+                    let syntax = self.placeholder_syntax().await?;
+                    sql.check_string_mode(syntax)?;
+                    syntax.backslash_strings()
+                } else {
+                    self.backslash_escapes().await?
+                };
                 let query = sql.render(|i| match &values[i] {
                     BoundValue::String(bytes) => {
                         let quoted = quote(bytes, mode);
@@ -211,15 +218,29 @@ impl Mysql {
         }
         // An error packet has no status flags, and the client discards the
         // previous OK packet. Ask for the mode before quoting again.
+        Ok(!self
+            .sql_mode()
+            .await?
+            .split(',')
+            .any(|value| value == "NO_BACKSLASH_ESCAPES"))
+    }
+
+    async fn sql_mode(&mut self) -> Result<String, DbError> {
         let mode: Option<String> = self
             .connection()?
             .query_first("SELECT @@SESSION.sql_mode")
             .await
             .map_err(error)?;
-        Ok(!mode
-            .unwrap_or_default()
-            .split(',')
-            .any(|value| value == "NO_BACKSLASH_ESCAPES"))
+        Ok(mode.unwrap_or_default())
+    }
+
+    pub async fn placeholder_syntax(&mut self) -> Result<Syntax, DbError> {
+        self.check_pending().await?;
+        let mode = self.sql_mode().await?;
+        Ok(Syntax::Mysql {
+            backslash_strings: !mode.split(',').any(|value| value == "NO_BACKSLASH_ESCAPES"),
+            ansi_quotes: mode.split(',').any(|value| value == "ANSI_QUOTES"),
+        })
     }
 
     pub async fn quote(&mut self, bytes: &[u8]) -> Result<String, DbError> {
