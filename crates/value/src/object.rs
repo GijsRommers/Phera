@@ -21,8 +21,9 @@ pub enum ObjectCast {
 
 /// The VM's per-class data. Implemented by other crates; tests use a dummy.
 pub trait ClassHandle: Any {
-    /// Whether the collector can traverse properties without inspecting native state.
-    fn native_state_is_weak(&self) -> bool {
+    /// Visit native strong handles, or return false without visiting anything
+    /// when the collector must keep an opaque payload alive.
+    fn trace_native_values(&self, _: &dyn Any, _: &mut dyn FnMut(&Value)) -> bool {
         false
     }
 

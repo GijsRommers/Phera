@@ -52,6 +52,10 @@ impl ClassDefinitions {
         );
         let closure = phera_extension_api::ClassEntry {
             kind: NativeKind::FinalClass,
+            hooks: Some(&phera_extension_api::ClassHooks {
+                trace_native: Some(crate::closure_cycles::trace),
+                ..phera_extension_api::ClassHooks::EMPTY
+            }),
             ..phera_extension_api::ClassEntry::class("Closure")
         };
         let internal_iterator = registry

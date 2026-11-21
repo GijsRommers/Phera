@@ -123,10 +123,15 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
-    fn native_state_is_weak(&self) -> bool {
+    fn trace_native_values(
+        &self,
+        payload: &dyn std::any::Any,
+        visit: &mut dyn FnMut(&Value),
+    ) -> bool {
         self.hooks
             .as_ref()
-            .is_some_and(|hooks| hooks.native_state_is_weak)
+            .and_then(|hooks| hooks.trace_native)
+            .is_some_and(|trace| trace(payload, visit))
     }
 
     fn is_traversable(&self) -> bool {
