@@ -2,8 +2,7 @@
 
 use std::io;
 
-use flate2::{Compress, Compression, FlushCompress};
-use zlib_rs::{Inflate, InflateFlush, Status};
+use zlib_rs::{Deflate, DeflateConfig, DeflateFlush, Inflate, InflateFlush, Status};
 
 use super::{Flush, bounded};
 
@@ -11,7 +10,7 @@ const BUFFER: usize = 32 * 1024;
 
 pub(super) enum Zlib {
     Inflate { codec: Box<Inflate>, ended: bool },
-    Deflate { codec: Box<Compress>, pending: bool },
+    Deflate { codec: Box<Deflate>, pending: bool },
 }
 
 impl Zlib {
@@ -27,13 +26,29 @@ impl Zlib {
         })
     }
 
-    pub fn deflate(level: i64, window: i64) -> Option<Self> {
-        let level = u32::try_from(level)
-            .ok()
-            .filter(|&level| level <= 9)
-            .unwrap_or(6);
+    pub fn deflate(level: i64, window: i64, memory: i64) -> Option<Self> {
+        let window_bits = match window {
+            -15..=-9 | 8..=15 | 25..=31 => window as i32,
+            _ => return None,
+        };
+        let level = if (-1..=9).contains(&level) {
+            level as i32
+        } else {
+            -1
+        };
+        let mem_level = if (1..=9).contains(&memory) {
+            memory as i32
+        } else {
+            9
+        };
+        let config = DeflateConfig {
+            level,
+            window_bits,
+            mem_level,
+            ..DeflateConfig::default()
+        };
         Some(Self::Deflate {
-            codec: Box::new(Compress::new(Compression::new(level), window > 0)),
+            codec: Box::new(Deflate::new_with_config(config)),
             pending: false,
         })
     }
@@ -71,20 +86,15 @@ impl Zlib {
                 }
             }
             Self::Deflate { codec, pending } => {
-                let mode = match flush {
-                    Flush::No => FlushCompress::None,
-                    Flush::Incremental => FlushCompress::Sync,
-                    Flush::Closing => FlushCompress::Full,
-                };
                 for chunk in bytes.chunks(BUFFER) {
-                    deflate(codec, chunk, mode, &mut result)?;
-                    *pending = flush == Flush::No;
+                    deflate(codec, chunk, DeflateFlush::NoFlush, &mut result)?;
+                    *pending = true;
                 }
                 if flush == Flush::Closing || (flush == Flush::Incremental && *pending) {
                     let mode = if flush == Flush::Closing {
-                        FlushCompress::Finish
+                        DeflateFlush::Finish
                     } else {
-                        FlushCompress::Sync
+                        DeflateFlush::SyncFlush
                     };
                     deflate(codec, &[], mode, &mut result)?;
                     *pending = false;
@@ -96,19 +106,15 @@ impl Zlib {
 }
 
 fn deflate(
-    codec: &mut Compress,
+    codec: &mut Deflate,
     input: &[u8],
-    flush: FlushCompress,
+    flush: DeflateFlush,
     result: &mut Vec<u8>,
 ) -> io::Result<()> {
     pump(input, result, |input, output| {
         let read = codec.total_in();
         let written = codec.total_out();
-        let status = match codec.compress(input, output, flush).map_err(invalid)? {
-            flate2::Status::Ok => Status::Ok,
-            flate2::Status::BufError => Status::BufError,
-            flate2::Status::StreamEnd => Status::StreamEnd,
-        };
+        let status = codec.compress(input, output, flush).map_err(invalid)?;
         Ok((
             status,
             (codec.total_in() - read) as usize,
