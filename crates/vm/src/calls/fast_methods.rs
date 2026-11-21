@@ -287,9 +287,15 @@ impl Machine<'_> {
                 return Step::Done(sends.ip);
             }
         }
-        for argument in arguments {
-            if !matches!(self.send(position, argument.register()), Step::Done(_)) {
-                return Step::Done(sends.ip);
+        // All passed: each goes where `send` would put it, by value.
+        for (index, argument) in arguments.iter().enumerate() {
+            let value = match self.registers.window(base + argument.register().index(), 1) {
+                [Some(value)] => value.deref().clone(),
+                _ => return Step::Done(sends.ip),
+            };
+            self.registers.put(call.base() + index, value);
+            if let Some(call) = self.stack.last_call_mut() {
+                call.mark_sent(index, true);
             }
         }
         // The call, as the loop makes it (a direct native), going on after
