@@ -108,6 +108,9 @@ pub(super) struct Machine<'a> {
     pub(super) ids: &'a phera_value::ObjectIds,
     /// The native functions, for the parameters of a lean native call.
     pub(super) registry: &'a phera_extension_api::Registry,
+    /// The request's evaluated class constants, read by the loop's
+    /// class constant reads.
+    pub(super) class_states: &'a crate::classes::class_state::ClassStates,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -155,6 +158,7 @@ impl Vm {
                 frame_limit: self.frame_limit,
                 ids: &self.object_ids,
                 registry: &self.registry,
+                class_states: &self.class_states,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
@@ -450,7 +454,10 @@ impl Machine<'_> {
             | Instruction::InstanceOf { .. }
             | Instruction::SendPath { .. }
             | Instruction::IterStart { .. }
-            | Instruction::IterEnd { .. } => self.further_step::<GUARDED>(instruction, position),
+            | Instruction::IterEnd { .. }
+            | Instruction::FetchNamedClassConstant { .. } => {
+                self.further_step::<GUARDED>(instruction, position)
+            }
             _ => Step::Slow,
         }
     }

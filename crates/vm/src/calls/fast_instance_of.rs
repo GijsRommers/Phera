@@ -11,8 +11,10 @@
 //! by pointer: its class, its parents and the interfaces each one
 //! implements. No name is hashed or lowercased.
 //!
-//! The loop leaves the instruction to the VM ([`Step::Slow`]) when the name
-//! means no declared class, when the operand is undefined or a
+//! A name that means no class of the request (`$entity instanceof Proxy`
+//! where no proxy class was ever loaded) answers `false`, as PHP does
+//! without autoloading. The loop leaves the instruction to the VM
+//! ([`Step::Slow`]) when the operand is undefined or a
 //! PHP reference, when the object's class is not a linked class, and when
 //! the interfaces to walk do not fit the walk's fixed stack, and in the
 //! guarded loop (some object has a destructor due).
@@ -53,11 +55,14 @@ impl Machine<'_> {
                 let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
                     return Step::Slow;
                 };
-                let Some(target) = self.instance_target(position, symbol) else {
-                    return Step::Slow;
-                };
-                match derives_from(class, &target) {
-                    Some(answer) => answer,
+                match self.instance_target(position, symbol) {
+                    Some(target) => match derives_from(class, &target) {
+                        Some(answer) => answer,
+                        None => return Step::Slow,
+                    },
+                    // A name no class of this request has: nothing is an
+                    // instance of it, and `instanceof` never autoloads.
+                    None if !self.relative_symbol(position, symbol) => false,
                     None => return Step::Slow,
                 }
             }
