@@ -487,7 +487,7 @@ impl Machine<'_> {
         if ty.intersection {
             return false;
         }
-        ty.classes.iter().any(|name| {
+        let matches = ty.classes.iter().any(|name| {
             let relative = unit
                 .names
                 .get(name.index())
@@ -499,7 +499,24 @@ impl Machine<'_> {
                     .is_some_and(|target| {
                         super::fast_instance_of::derives_from(class, target) == Some(true)
                     })
-        })
+        });
+        // Remember it, as the VM's check does, so that the next value of
+        // this class is the cache's first test.
+        let cache = self.code.cache(function);
+        if matches
+            && cache.type_scopes.get(declared.index())
+                == Some(&crate::types::DeclarationScope::Absolute)
+            && let Some(Ok(mut slot)) = cache
+                .class_types
+                .get(declared.index())
+                .map(|slot| slot.try_borrow_mut())
+        {
+            *slot = Some(crate::unit_caches::ClassTypeEntry {
+                class: object.class.clone(),
+                matches,
+            });
+        }
+        matches
     }
 
     /// The same for a general callee, which is native code: any value, for
