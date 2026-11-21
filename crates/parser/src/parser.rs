@@ -116,16 +116,23 @@ impl<'src> Parser<'src> {
         let mut body = statements
             .iter()
             .skip_while(|statement| matches!(statement.kind, StatementKind::Declare { .. }));
-        if body
-            .next()
-            .is_some_and(|statement| !matches!(statement.kind, StatementKind::Namespace { .. }))
-            && let Some(namespace) =
-                body.find(|statement| matches!(statement.kind, StatementKind::Namespace { .. }))
-        {
-            return Err(ParseError::compile(
-                "Namespace declaration statement has to be the very first statement or after any declare call in the script",
-                namespace.span,
-            ));
+        let first_style = body.next().and_then(|statement| match statement.kind {
+            StatementKind::Namespace { braced, .. } => Some(braced),
+            _ => None,
+        });
+        for statement in body {
+            if let StatementKind::Namespace { braced, .. } = statement.kind {
+                let message = match first_style {
+                    None => {
+                        "Namespace declaration statement has to be the very first statement or after any declare call in the script"
+                    }
+                    Some(first) if first != braced => {
+                        "Cannot mix bracketed namespace declarations with unbracketed namespace declarations"
+                    }
+                    Some(_) => continue,
+                };
+                return Err(ParseError::compile(message, statement.span));
+            }
         }
         Ok(Program { statements })
     }
