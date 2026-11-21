@@ -78,6 +78,27 @@ socket_close($client);
 socket_close($serverSide);
 socket_close($server);
 
+try {
+    socket_addrinfo_lookup('127.0.0.1', '80', ['ai_socktype' => new stdClass()]);
+} catch (TypeError $error) {
+    item('address info hint type', $error->getMessage());
+}
+try {
+    socket_addrinfo_lookup('127.0.0.1', '80', ['ai_family' => PHP_INT_MAX]);
+} catch (ValueError $error) {
+    item('address info family', get_class($error));
+}
+
+$opts = stream_context_create(['socket' => ['tcp_nodelay' => true]]);
+$listener = stream_socket_server('tcp://127.0.0.1:0', $error, $message, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN, $opts);
+$client = stream_socket_client('tcp://' . stream_socket_get_name($listener, false), $error, $message, 2, STREAM_CLIENT_CONNECT, $opts);
+$accepted = stream_socket_accept($listener, 2);
+foreach (['listener' => $listener, 'client' => $client, 'accepted' => $accepted] as $side => $tcp) {
+    $socket = socket_import_stream($tcp);
+    item('TCP_NODELAY ' . $side, socket_get_option($socket, SOL_TCP, TCP_NODELAY) > 0);
+    fclose($tcp);
+}
+
 $receiver = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
 $sender = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
 socket_bind($receiver, '127.0.0.1', 0);

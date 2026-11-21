@@ -7,7 +7,7 @@ use phera_ext_streams::StreamSocket;
 use phera_extension_api::{
     ArrayKey, ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult,
     Object, Param, ParamType, PhpArray, Registry, Value, args,
-    value::{Fork, to_int},
+    value::{Fork, is_numeric, to_int},
 };
 use socket2::{Domain, Protocol, Socket, Type};
 
@@ -125,7 +125,26 @@ impl Hints {
                         )));
                     }
                 };
+                match &*value.deref() {
+                    Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Null => {}
+                    Value::String(value) if is_numeric(value.as_bytes()) => {}
+                    _ => {
+                        return Err(NativeError::type_error(format!(
+                            "{ERROR} \"{}\" key must be of type int, {} given",
+                            String::from_utf8_lossy(name),
+                            value.type_name()
+                        )));
+                    }
+                }
                 let number = to_int(value, context.diagnostics())?;
+                if name == b"ai_family"
+                    && number != i64::from(libc::AF_INET)
+                    && number != i64::from(libc::AF_INET6)
+                {
+                    return Err(NativeError::value_error(format!(
+                        "{ERROR} \"ai_family\" key must be AF_INET or AF_INET6"
+                    )));
+                }
                 *target = i32::try_from(number)
                     .ok()
                     .filter(|value| *value >= 0)
@@ -135,13 +154,6 @@ impl Hints {
                             String::from_utf8_lossy(name)
                         ))
                     })?;
-                if name == b"ai_family"
-                    && !matches!(*target, libc::AF_INET | libc::AF_INET6 | libc::AF_UNSPEC)
-                {
-                    return Err(NativeError::value_error(format!(
-                        "{ERROR} \"ai_family\" key must be AF_INET or AF_INET6"
-                    )));
-                }
             }
         }
         Ok(parsed)
