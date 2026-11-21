@@ -219,11 +219,10 @@ impl Vm {
         }
     }
 
-    /// Unhandled shapes keep their window intact for the ordinary native binder.
-    #[inline(never)]
     /// `spl_object_id($object)`: the object's id, with nothing else to do
     /// (a lazy object stays uninitialized). Any other shape goes to the
     /// general intrinsic.
+    #[inline(never)]
     fn object_id_call(
         &mut self,
         call: crate::calls::prepared_call::PreparedCall,
@@ -247,6 +246,8 @@ impl Vm {
         None
     }
 
+    /// Unhandled shapes keep their window intact for the ordinary native binder.
+    #[inline(never)]
     pub(crate) fn call_native(
         &mut self,
         destination: Reg,
