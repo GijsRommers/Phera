@@ -192,8 +192,8 @@ fn candidate(
         .get(&temp)?
         .iter()
         .copied()
-        .filter(|index| *index < consumer)
-        .next_back()?;
+        .rev()
+        .find(|index| *index < consumer)?;
     // No clear of the temporary between the copy and the consumer either.
     if clears
         .iter()
