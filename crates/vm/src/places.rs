@@ -85,6 +85,13 @@ impl Vm {
 
     /// Convert path keys in source order while reusing the operator diagnostic buffer.
     pub(crate) fn keys(&mut self, place: &AccessPath) -> Result<InlineStack<PathKey>, NativeError> {
+        if let Ok(steps) = place.steps() {
+            for step in steps {
+                if let Step::Index(register) | Step::DynamicProperty(register) = step {
+                    self.warn_undefined_key(register);
+                }
+            }
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let mut keys = InlineStack::new();
         let result = (|| {
@@ -166,75 +173,38 @@ pub(crate) fn display_key(key: &ArrayKey) -> String {
 }
 
 impl Vm {
-    /// Warn for each path key of `instruction` that is a named local with no
-    /// value yet.
+    /// Warn when a path key register names an undefined local.
     ///
     /// A key used to be a temporary the compiler filled with a `Move` from
     /// the local, and that `Move` raised PHP's "Undefined variable" warning
     /// before the path was walked. The compiler can now name the local in the
-    /// path itself; reading it in place moves the warning here, once, in key
-    /// order and before the base is read. Temporaries are always assigned
-    /// before use, so they never warn.
+    /// path step itself; the warning moves to the conversion of the step's
+    /// register into a key. Only a `None` slot pays for the frame lookup, and
+    /// only a named local can warn: temporaries are always assigned first.
     ///
     /// ```php
     /// $row[$key];   // Undefined variable $key when $key was never assigned
     /// $o->$prop;
     /// ```
-    pub(crate) fn warn_undefined_path_keys(
-        &mut self,
-        instruction: phera_bytecode::Instruction,
-    ) -> Result<(), NativeError> {
-        let path = match instruction {
-            phera_bytecode::Instruction::Fetch { path, .. }
-            | phera_bytecode::Instruction::FetchIndex { path, .. }
-            | phera_bytecode::Instruction::AssignPath { path, .. }
-            | phera_bytecode::Instruction::AssignPathFromLocal { path, .. }
-            | phera_bytecode::Instruction::AssignOpPath { path, .. }
-            | phera_bytecode::Instruction::IncDecPath { path, .. }
-            | phera_bytecode::Instruction::UnsetPath { path }
-            | phera_bytecode::Instruction::IssetPath { path, .. }
-            | phera_bytecode::Instruction::MakeReference { path, .. }
-            | phera_bytecode::Instruction::BindReference { path, .. }
-            | phera_bytecode::Instruction::SendPath { path }
-            | phera_bytecode::Instruction::IterStartReference { path, .. } => path,
-            _ => return Ok(()),
-        };
-        // Read the compiled path table directly: resolving the path here would
-        // duplicate the work the instruction's own handler does right after.
-        let mut missing: Vec<String> = Vec::new();
-        if let Some(frame) = self.current()
-            && let Some(definition) = frame.function().paths.get(path.index())
-        {
-            let function = frame.function();
-            let locals = function.locals.len();
-            for step in &definition.steps {
-                let register = match step {
-                    Step::Index(register) | Step::DynamicProperty(register) => *register,
-                    Step::Property(_) | Step::Append => continue,
-                };
-                if register.index() >= locals {
-                    continue;
-                }
-                let defined = frame
-                    .slots(&self.registers)
-                    .get(register.index())
-                    .is_some_and(Option::is_some);
-                if defined {
-                    continue;
-                }
-                if let Some(name) = function
+    pub(crate) fn warn_undefined_key(&mut self, register: Reg) {
+        let mut name = None;
+        if let Some(frame) = self.current() {
+            let defined = frame
+                .slots(&self.registers)
+                .get(register.index())
+                .is_some_and(Option::is_some);
+            if !defined && register.index() < frame.function().locals.len() {
+                name = frame
+                    .function()
                     .locals
                     .get(register.index())
-                    .and_then(|name| frame.unit().names.get(name.index()))
-                {
-                    missing.push(name.clone());
-                }
+                    .and_then(|local| frame.unit().names.get(local.index()))
+                    .cloned();
             }
         }
-        for name in missing {
+        if let Some(name) = name {
             self.warn(format!("Undefined variable ${name}"));
         }
-        Ok(())
     }
 
     /// Read a root slot without evaluating array keys, retaining undefined-variable warnings.

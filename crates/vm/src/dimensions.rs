@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::{FetchMode, Step};
+use phera_bytecode::{FetchMode, Reg, Step};
 use phera_extension_api::{
     Context, DimensionReferenceMode, NativeDimensions, NativeError, NativeResult,
 };
@@ -32,18 +32,28 @@ impl Vm {
     /// Look through already-evaluated registers and stored slots without invoking callbacks.
     /// A normal array path never crosses an overloaded object boundary.
     pub(crate) fn find_dimension(
-        &self,
+        &mut self,
         root: Value,
         steps: impl Iterator<Item = Step>,
     ) -> Result<Option<DimensionPath>, NativeError> {
         let mut value = root;
         let mut steps = steps;
+        // Key registers read along the walk. They warn only when the walk
+        // diverts to an overloaded dimension; otherwise the general path
+        // walks the same steps and warns there.
+        let mut key_registers: Vec<Reg> = Vec::new();
         while let Some(step) = steps.next() {
             let current = value.deref().clone();
             value = match (current, step) {
                 (Value::Object(object), Step::Index(_) | Step::Append)
                     if has_dimension(&object) =>
                 {
+                    if let Step::Index(register) = step {
+                        key_registers.push(register);
+                    }
+                    for register in &key_registers {
+                        self.warn_undefined_key(*register);
+                    }
                     let offset = match step {
                         Step::Index(register) => self.get(register),
                         _ => Value::Null,
@@ -55,6 +65,7 @@ impl Vm {
                     }));
                 }
                 (Value::Array(array), Step::Index(register)) => {
+                    key_registers.push(register);
                     let Ok(key) = ArrayKey::from_value(&self.operand(register)) else {
                         return Ok(None);
                     };
@@ -66,11 +77,14 @@ impl Vm {
                 (Value::Object(object), Step::Property(_) | Step::DynamicProperty(_)) => {
                     let name = match step {
                         Step::Property(name) => self.name(name)?.to_owned(),
-                        Step::DynamicProperty(register) => match self.get(register) {
-                            Value::String(name) => name.to_string_lossy(),
-                            Value::Int(number) => number.to_string(),
-                            _ => return Ok(None),
-                        },
+                        Step::DynamicProperty(register) => {
+                            key_registers.push(register);
+                            match self.get(register) {
+                                Value::String(name) => name.to_string_lossy(),
+                                Value::Int(number) => number.to_string(),
+                                _ => return Ok(None),
+                            }
+                        }
                         _ => return Err(internal_error!("dimension property step")),
                     };
                     let Ok(key) = self.property_key(&object, &name) else {
@@ -193,6 +207,7 @@ impl Vm {
             value = if let (Value::Object(object), Step::Index(register)) = (&current, step)
                 && has_dimension(object)
             {
+                self.warn_undefined_key(register);
                 self.read_dimension_mode(
                     object.clone(),
                     self.get(register),
@@ -240,6 +255,8 @@ impl Vm {
                     let key = self.read_index_key(register, missing)?;
                     self.read_path_index(value, &key, missing)
                 } else {
+                    // The offset is not converted, but PHP still evaluates it.
+                    self.warn_undefined_key(register);
                     self.read_nonarray_offset(value, missing)
                 }
             }
@@ -249,6 +266,7 @@ impl Vm {
                 self.read_property(value, key, missing)
             }
             Step::DynamicProperty(register) => {
+                self.warn_undefined_key(register);
                 let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
                 let name = phera_value::to_php_string(
                     &diagnostics.vm.operand(register),

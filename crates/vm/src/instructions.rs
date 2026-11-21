@@ -32,10 +32,6 @@ impl Vm {
         if self.object_ids.has_due() && self.release_and_store(instruction) {
             return Ok(None);
         }
-        // A path key that names an undefined local used to be copied by a
-        // `Move`, which warned before the path was walked. The warning runs in
-        // the path arms below, so instructions without a path operand pay
-        // nothing for it.
         match instruction {
             I::AssignPathFromLocal { .. }
             | I::MakeReference { .. }
@@ -46,7 +42,6 @@ impl Vm {
                 if self.classes.has_dimensions
                     && self.prepare_dimension_instruction(instruction)? =>
             {
-                self.warn_undefined_path_keys(instruction)?;
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
             I::Call { dst, .. } => return self.call::<TRACK_GENERATORS>(dst, work),
@@ -129,7 +124,6 @@ impl Vm {
             I::SendValue { src } => self.send(SentArgument::Value(src))?,
             I::SendLocal { local } => self.send(SentArgument::Local(local))?,
             I::SendPath { path } => {
-                self.warn_undefined_path_keys(instruction)?;
                 if !self.send_path(self.path(path)?)? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
@@ -189,24 +183,19 @@ impl Vm {
             | I::FetchIndex {
                 dst, path, mode, ..
             } => {
-                self.warn_undefined_path_keys(instruction)?;
                 return self.fetch_path(dst, path, mode);
             }
             I::AssignOpPath { op, dst, path, src } => {
-                self.warn_undefined_path_keys(instruction)?;
                 return self.assign_op_path(op, dst, path, src);
             }
             I::IncDecPath { mode, dst, path } => {
-                self.warn_undefined_path_keys(instruction)?;
                 return self.inc_dec_path(mode, dst, path);
             }
             I::AppendLocal { local, src } => self.append_local(local, src)?,
             I::AssignPath { path, src } => {
-                self.warn_undefined_path_keys(instruction)?;
                 return self.assign_path(path, src);
             }
             I::AssignPathFromLocal { path, src, dst } => {
-                self.warn_undefined_path_keys(instruction)?;
                 let handled = if let Some(value) = self.read_defined_local(src) {
                     self.assign_property_site(&self.path(path)?, &value, Some((src, dst)))?
                 } else {
@@ -218,21 +207,18 @@ impl Vm {
                 }
             }
             I::MakeReference { dst, path } => {
-                self.warn_undefined_path_keys(instruction)?;
                 if self.path(path)?.has_properties()? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
                 self.make_reference(dst, path)?;
             }
             I::BindReference { path, src } => {
-                self.warn_undefined_path_keys(instruction)?;
                 if self.path(path)?.has_properties()? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
                 self.bind_reference(path, src)?;
             }
             I::UnsetPath { path } => {
-                self.warn_undefined_path_keys(instruction)?;
                 let place = self.path(path)?;
                 if place.has_properties()? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
@@ -347,7 +333,6 @@ impl Vm {
                 path,
                 ..
             } => {
-                self.warn_undefined_path_keys(instruction)?;
                 if self.path(path)?.has_properties()?
                     || !self.start_reference_iterator(iter, path, subject)?
                 {

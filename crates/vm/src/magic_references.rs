@@ -108,6 +108,7 @@ impl Vm {
                 && let Value::Object(object) = &current
                 && crate::dimensions::has_dimension(object)
             {
+                self.warn_undefined_key(index);
                 return self
                     .reference_property_dimension(crate::dimensions::DimensionPath {
                         object: object.clone(),

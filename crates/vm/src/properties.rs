@@ -292,6 +292,11 @@ impl Vm {
         use crate::path_update::PathKey;
         let mut keys = crate::inline_stack::InlineStack::new();
         for step in steps {
+            if let phera_bytecode::Step::Index(register)
+            | phera_bytecode::Step::DynamicProperty(register) = step
+            {
+                self.warn_undefined_key(register);
+            }
             let key = match step {
                 phera_bytecode::Step::Index(register) => {
                     let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);

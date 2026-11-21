@@ -93,7 +93,10 @@ impl Vm {
                 && crate::dimensions::has_dimension(object)
             {
                 let offset = match step {
-                    Step::Index(index) => self.get(index),
+                    Step::Index(index) => {
+                        self.warn_undefined_key(index);
+                        self.get(index)
+                    }
                     _ => Value::Null,
                 };
                 return Ok(OverloadedMutation::Dimension(
