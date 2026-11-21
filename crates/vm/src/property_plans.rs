@@ -23,7 +23,9 @@
 //! - a deprecation (creating a dynamic property where PHP warns);
 //! - a PHP reference in the property (writes and unsets go through it);
 //! - a coercion that runs PHP code (`__toString`);
-//! - a name a static property of the class has (PHP's notice).
+//! - a name a static property of the class has (PHP's notice);
+//! - a write or unset of a property with asymmetric visibility
+//!   (`private(set)`), which checks the scope.
 
 use phera_bytecode::{FetchMode, PathBase, Reg, Step};
 use phera_extension_api::NativeError;
@@ -41,6 +43,16 @@ struct PlainProperty {
     object: Rc<Object>,
     class: Rc<Class>,
     key: ArrayKey,
+}
+
+impl PlainProperty {
+    /// The class's declaration of the property, if it declares it.
+    fn declared(&self) -> Option<&PropertyDefault> {
+        self.class
+            .defaults
+            .iter()
+            .find(|declared| declared.key == self.key)
+    }
 }
 
 impl Vm {
@@ -98,11 +110,7 @@ impl Vm {
         let Some(property) = self.plain_property(place, avoid)? else {
             return Ok(None);
         };
-        let declared = property
-            .class
-            .defaults
-            .iter()
-            .find(|declared| declared.key == property.key);
+        let declared = property.declared();
         let value = match declared {
             Some(declared) => match self.plain_declared_value(declared, value)? {
                 Some(value) => value,
@@ -146,6 +154,13 @@ impl Vm {
         let Some(property) = self.plain_property(place, avoid)? else {
             return Ok(false);
         };
+        // `private(set)` and `protected(set)`: the scope check and its error.
+        if property
+            .declared()
+            .is_some_and(|declared| declared.set_visibility.is_some())
+        {
+            return Ok(false);
+        }
         let removed = property
             .object
             .update(|properties| match properties.get(&property.key) {

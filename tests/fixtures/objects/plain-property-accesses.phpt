@@ -28,6 +28,9 @@ show('write int to float', function () use ($h) { $n = 'f'; $h->$n = 3; return $
 show('assigned int to float, its result', function () use ($h) { $v = 1; $all = []; for ($k = 0; $k < 3; $k++) { $x = $h->f = $v; $all[] = $x; } return $all; });
 class U { public $u = 1; public function __get($n) { return "__get($n)"; } }
 show('unset declared, then magic read', function () { $o = new U; unset($o->u); return $o->u; });
+class AV { public private(set) string $s = 'a'; public protected(set) string $t = 't'; }
+$av = new AV;
+for ($k = 0; $k < 2; $k++) { show('unset private(set)', function () use ($av) { unset($av->s); return 'done'; }); show('unset protected(set)', function () use ($av) { unset($av->t); return 'done'; }); }
 show('read own private', fn () => $h->readOwn('secret'));
 show('empty name', function () use ($h) { $n = ''; return $h->$n = 1; });
 show('nul name', function () use ($h) { $n = "\0x"; return $h->$n; });
@@ -129,16 +132,20 @@ assigned int to float, its result: array (
   2 => 1.0,
 )
 unset declared, then magic read: '__get(u)'
+unset private(set): Error: Cannot unset private(set) property AV::$s from global scope
+unset protected(set): Error: Cannot unset protected(set) property AV::$t from global scope
+unset private(set): Error: Cannot unset private(set) property AV::$s from global scope
+unset protected(set): Error: Cannot unset protected(set) property AV::$t from global scope
 read own private: 's'
 empty name: 1
 nul name: Error: Cannot access property starting with "\0"
 
-Notice: Accessing static property H::$st as non static in %s on line 31
+Notice: Accessing static property H::$st as non static in %s on line 34
 static as instance: 2
 f,1,,st
 read unset typed: Error: Typed property H::$id must not be accessed before initialization
 
-Warning: Undefined property: H::$u in %s on line 35
+Warning: Undefined property: H::$u in %s on line 38
 read unset untyped: NULL
 isset unset typed: false
 id,u,f,1,,st,dyn
