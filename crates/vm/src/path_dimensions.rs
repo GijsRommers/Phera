@@ -139,11 +139,13 @@ impl Vm {
                 .as_ref()
                 .is_none_or(|value| matches!(&*value.deref(), Value::Null | Value::Bool(false)))
             && let Some(ty) = &property.ty
-            && !ty.mask.intersects(phera_bytecode::TypeMask::ARRAY)
+            && !ty.mask.intersects(
+                phera_bytecode::TypeMask::ARRAY.union(phera_bytecode::TypeMask::ITERABLE),
+            )
         {
             return Err(NativeError::type_error(format!(
                 "Cannot auto-initialize an array inside property {}::${name} of type {}",
-                property.declaring,
+                phera_value::class_display_name(&property.declaring),
                 crate::types::php_type_display(ty)
             )));
         }

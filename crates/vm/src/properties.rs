@@ -93,7 +93,7 @@ impl Vm {
             };
             return Err(NativeError::error(format!(
                 "Cannot access {visibility} property {}::${name}",
-                property.declaring
+                phera_value::class_display_name(&property.declaring)
             )));
         }
         if class.kind == phera_bytecode::ClassKind::Trait {
