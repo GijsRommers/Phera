@@ -7,6 +7,7 @@ use phera_extension_api::{
     Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
 };
 
+mod dns;
 mod host;
 mod interfaces;
 mod services;
@@ -23,6 +24,7 @@ pub(crate) fn register(registry: &mut Registry) {
         registry.function(entry);
     }
     host::register(registry);
+    dns::register(registry);
     interfaces::register(registry);
     services::register(registry);
 }
