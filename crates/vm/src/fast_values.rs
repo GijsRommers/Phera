@@ -62,42 +62,48 @@ pub(crate) fn value_step<const GUARDED: bool>(
             lhs,
             rhs,
             target,
-            when,
         } => {
             let (Some(Some(left)), Some(Some(right))) =
                 (slots.get(lhs.index()), slots.get(rhs.index()))
             else {
                 return ScalarStep::Fallback;
             };
-            match quiet_binary(op, &left.deref(), &right.deref()) {
-                Some(value) => {
-                    if to_bool(&value) == when {
-                        *ip = target.index();
-                    }
-                    ScalarStep::Complete
-                }
-                None => ScalarStep::Fallback,
-            }
+            branch_on_binary::<false>(op, &left.deref(), &right.deref(), target, ip)
+        }
+        Instruction::BinaryBranchIf {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => {
+            let (Some(Some(left)), Some(Some(right))) =
+                (slots.get(lhs.index()), slots.get(rhs.index()))
+            else {
+                return ScalarStep::Fallback;
+            };
+            branch_on_binary::<true>(op, &left.deref(), &right.deref(), target, ip)
         }
         Instruction::BinaryIntBranch {
             op,
             lhs,
             rhs,
             target,
-            when,
         } => {
             let Some(Some(left)) = slots.get(lhs.index()) else {
                 return ScalarStep::Fallback;
             };
-            match quiet_binary(op, &left.deref(), &Value::Int(i64::from(rhs))) {
-                Some(value) => {
-                    if to_bool(&value) == when {
-                        *ip = target.index();
-                    }
-                    ScalarStep::Complete
-                }
-                None => ScalarStep::Fallback,
-            }
+            branch_on_binary::<false>(op, &left.deref(), &Value::Int(i64::from(rhs)), target, ip)
+        }
+        Instruction::BinaryIntBranchIf {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => {
+            let Some(Some(left)) = slots.get(lhs.index()) else {
+                return ScalarStep::Fallback;
+            };
+            branch_on_binary::<true>(op, &left.deref(), &Value::Int(i64::from(rhs)), target, ip)
         }
         Instruction::Unary { op, dst, src } => {
             let Some(Some(value)) = slots.get(src.index()) else {
@@ -249,5 +255,25 @@ impl Diagnostics for Silent {
 
     fn deprecated(&mut self, _message: String) {
         self.raised.set(true);
+    }
+}
+
+/// Run a comparison in the value tier and jump when its truthiness equals WHEN.
+#[inline(always)]
+fn branch_on_binary<const WHEN: bool>(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    target: Target,
+    ip: &mut usize,
+) -> ScalarStep {
+    match quiet_binary(op, left, right) {
+        Some(value) => {
+            if to_bool(&value) == WHEN {
+                *ip = target.index();
+            }
+            ScalarStep::Complete
+        }
+        None => ScalarStep::Fallback,
     }
 }

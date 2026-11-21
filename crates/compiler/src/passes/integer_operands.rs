@@ -156,6 +156,24 @@ pub(crate) fn dead_after(function: &Function, index: usize, register: phera_byte
                     }
                     pending.push(target.index());
                 }
+                Instruction::BinaryIntBranch { lhs, target, .. }
+                | Instruction::BinaryIntBranchIf { lhs, target, .. } => {
+                    if lhs == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::BinaryBranch {
+                    lhs, rhs, target, ..
+                }
+                | Instruction::BinaryBranchIf {
+                    lhs, rhs, target, ..
+                } => {
+                    if lhs == register || rhs == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
                 Instruction::ReturnNull => break,
                 Instruction::AssignOp { src, local, .. } => {
                     if src == register || local == register {
@@ -239,11 +257,19 @@ pub(crate) fn fuse_integer_branches(function: &mut Function) {
         if boundaries.contains(&index) {
             continue;
         }
-        let Instruction::BinaryInt { op, dst, lhs, rhs } = function.instructions[index - 1] else {
-            continue;
+        let (condition, target, when) = match function.instructions[index] {
+            Instruction::JumpIfNot { condition, target } => (condition, target, false),
+            Instruction::JumpIf { condition, target } => (condition, target, true),
+            _ => continue,
         };
-        let Instruction::JumpIfNot { condition, target } = function.instructions[index] else {
-            continue;
+        let (op, dst, branch) = match function.instructions[index - 1] {
+            Instruction::BinaryInt { op, dst, lhs, rhs } => {
+                (op, dst, BranchShape::Int { lhs, rhs })
+            }
+            Instruction::Binary { op, dst, lhs, rhs } => {
+                (op, dst, BranchShape::General { lhs, rhs })
+            }
+            _ => continue,
         };
         if condition != dst
             || dst.index() < function.locals.len()
@@ -264,13 +290,44 @@ pub(crate) fn fuse_integer_branches(function: &mut Function) {
         ) {
             continue;
         }
-        function.instructions[index - 1] = Instruction::BinaryIntBranch {
-            op,
-            lhs,
-            rhs,
-            target,
-            when: false,
+        function.instructions[index - 1] = match (branch, when) {
+            (BranchShape::Int { lhs, rhs }, false) => Instruction::BinaryIntBranch {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
+            (BranchShape::Int { lhs, rhs }, true) => Instruction::BinaryIntBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
+            (BranchShape::General { lhs, rhs }, false) => Instruction::BinaryBranch {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
+            (BranchShape::General { lhs, rhs }, true) => Instruction::BinaryBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
         };
         function.instructions[index] = Instruction::Nop;
     }
+}
+
+/// Which compare-and-jump instruction a fused comparison lowers to.
+enum BranchShape {
+    Int {
+        lhs: phera_bytecode::Reg,
+        rhs: i32,
+    },
+    General {
+        lhs: phera_bytecode::Reg,
+        rhs: phera_bytecode::Reg,
+    },
 }

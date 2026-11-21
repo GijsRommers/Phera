@@ -141,12 +141,20 @@ impl Vm {
             },
             BatchExit::Instruction(phera_bytecode::Instruction::Binary {
                 op, lhs, rhs, ..
-            }) => BatchExit::Instruction(phera_bytecode::Instruction::BinaryBranch {
-                op,
-                lhs,
-                rhs,
-                target,
-                when,
+            }) => BatchExit::Instruction(if when {
+                phera_bytecode::Instruction::BinaryBranchIf {
+                    op,
+                    lhs,
+                    rhs,
+                    target,
+                }
+            } else {
+                phera_bytecode::Instruction::BinaryBranch {
+                    op,
+                    lhs,
+                    rhs,
+                    target,
+                }
             }),
             BatchExit::Compare(pending) => BatchExit::CompareBranch {
                 pending,

@@ -15,22 +15,34 @@ branches:
 
 | PHP | structure: was | structure: is |
 |---|---|---|
-| `if ($a === $b)` | `Binary Identical` into a temporary, `JumpIfNot` | `BinaryBranch { Identical, $a, $b, else, when: false }` |
-| `if ($a < 10)` / `if (10 > $a)` | `LoadInt`, `Binary Less`, `JumpIfNot` | `BinaryIntBranch { Less, $a, 10, else, when: false }` (literal on the left swaps operands and operator) |
+| `if ($a === $b)` | `Binary Identical` into a temporary, `JumpIfNot` | `BinaryBranch { Identical, $a, $b, else }` |
+| `if ($a < 10)` / `if (10 > $a)` | `LoadInt`, `Binary Less`, `JumpIfNot` | `BinaryIntBranch { Less, $a, 10, else }` (literal on the left swaps operands and operator) |
 | `if ($a !== null)` / `if (null === $a)` | `LoadConst null`, `Binary NotIdentical`, `JumpIfNot` | `JumpIfNull { $a, else }` / `JumpIfNotNull { $a, else }` |
 | `if ($a)` / `if (!$a)` | `Move`, (`Unary Not`,) `JumpIfNot` | `JumpIfNot { $a }` / `JumpIf { $a }` on the local's own register |
 | `if ($a && $b)` | value-producing short circuit, `Move`, `Unary Bool`, `JumpIfNot` | one jump per operand, no boolean value |
 | `$c ? $a : $b` | condition value, `Move`, `JumpIfNot` | the condition's jumps land on the `otherwise` arm directly |
 
-- `BinaryIntBranch` gains a `when: bool` (jump when the comparison result
-  equals `when`) and a register sibling `BinaryBranch { op, lhs, rhs, target,
-  when }` is added; both stay within the 16-byte instruction budget. `when`
-  cannot be compiled away by inverting `op`: PHP's orderings are not exact
-  negations of each other (`NAN < x` and `NAN >= x` are both false).
+- The true case is a separate opcode, not a field: `BinaryIntBranch` /
+  `BinaryIntBranchIf` and `BinaryBranch` / `BinaryBranchIf`, all within the
+  16-byte instruction budget. A `when: bool` field was tried first and
+  measured: testing it in the hot arm cost ~1% on arithmetic loops and ~2.5%
+  on a bare `while ($i < $n) $i++` (min-of-9 "instructions retired" against
+  main), because every compare-and-jump paid an extra flag test. With two
+  opcodes the false case compiles byte-for-byte like main's `BinaryIntBranch`
+  arm, and those shapes measure within noise (±0.4%). `when` cannot be
+  compiled away by inverting `op`: PHP's orderings are not exact negations of
+  each other (`NAN < x` and `NAN >= x` are both false).
+- The liveness proof in `passes/integer_operands.rs` (`dead_after`) learned
+  the four new instructions read their operands and branch target; without
+  that, `LoadInt`+`Binary` stopped fusing into `BinaryInt` whenever the
+  consumer was a compare-and-branch, which cost ~7% on `bench-arithmetic`.
+  `fuse_integer_branches` now also fuses a leftover `Binary`+`JumpIfNot` into
+  `BinaryBranch` and either jump into the `If` forms, so compare-branches
+  reach every shape the front end does not special-case.
 - `=== null` / `!== null` reuse the existing `JumpIfNull` / `JumpIfNotNull`.
 - A boolean, float or string literal operand loads once and compares through
   `BinaryBranch`; only the integer literal rides inline, because the
-  16-byte budget does not allow a third inline literal next to `when`.
+  16-byte budget does not allow a third inline literal.
 - A comparison whose value is used (`$x = $a === $b`) still compiles to
   `Binary`, unchanged.
 
@@ -76,9 +88,12 @@ while another change works there.
 - Inverting the operator to encode `when`: wrong for NAN and any pair PHP does
   not define as exact negations.
 - A single literal-carrying branch covering null, bool and int through one
-  inline enum: the operand would not fit in the 16-byte instruction next to
-  `when`, so null reuses `JumpIfNull`/`JumpIfNotNull`, int keeps
-  `BinaryIntBranch`, and bool/float/string load once.
+  inline enum: the operand would not fit in the 16-byte instruction, so null
+  reuses `JumpIfNull`/`JumpIfNotNull`, int keeps `BinaryIntBranch`, and
+  bool/float/string load once.
+- A `when: bool` field on the branch instructions (instead of the `If`
+  opcode pair): correct, but the runtime flag test in the hot arm measurably
+  cost every compare-and-jump in a loop; see the design notes above.
 - Fusing `switch` case comparisons the same way: out of this step's scope; the
   subject is computed once and each case is a loose `==` against it.
 - Making the fast loop answer string `===` byte equality: `quiet_binary`

@@ -457,7 +457,9 @@ impl Machine<'_> {
             // not pay for a call to it on their way to the VM.
             Instruction::Binary { .. }
             | Instruction::BinaryBranch { .. }
+            | Instruction::BinaryBranchIf { .. }
             | Instruction::BinaryIntBranch { .. }
+            | Instruction::BinaryIntBranchIf { .. }
             | Instruction::Unary { .. }
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }

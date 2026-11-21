@@ -262,7 +262,6 @@ fn loop_conditions_are_one_branch_per_round() {
             i,
             Instruction::BinaryBranch {
                 op: BinaryOp::Less,
-                when: false,
                 ..
             }
         )),
@@ -278,9 +277,8 @@ fn loop_conditions_are_one_branch_per_round() {
     assert_eq!(
         count(&do_code, |i| matches!(
             i,
-            Instruction::BinaryBranch {
+            Instruction::BinaryBranchIf {
                 op: BinaryOp::Less,
-                when: true,
                 ..
             }
         )),
@@ -294,7 +292,6 @@ fn loop_conditions_are_one_branch_per_round() {
             i,
             Instruction::BinaryBranch {
                 op: BinaryOp::Less,
-                when: false,
                 ..
             }
         )),
@@ -309,7 +306,6 @@ fn loop_conditions_are_one_branch_per_round() {
             Instruction::BinaryIntBranch {
                 op: BinaryOp::Less,
                 rhs: 10,
-                when: false,
                 ..
             }
         )),
@@ -326,7 +322,6 @@ fn ternary_condition_branches_directly() {
             i,
             Instruction::BinaryBranch {
                 op: BinaryOp::Identical,
-                when: false,
                 ..
             }
         )),

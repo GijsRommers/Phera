@@ -259,17 +259,25 @@ pub enum Instruction {
 
     // ----- Operators ------------------------------------------------------
     /// Compare a register to an integer literal and branch on the result,
-    /// jumping to `target` when it equals `when`. The literal and target fit
-    /// inline; no temporary boolean register is needed. Only comparison
-    /// operators appear here, so `when` can never be decided by inverting
-    /// `op`: PHP's orderings are not exact negations of each other (NAN
-    /// compares false to everything, including itself).
+    /// jumping to `target` when the comparison is false. The literal and
+    /// target fit inline; no temporary boolean register is needed. Only
+    /// comparison operators appear here. The true case is `BinaryIntBranchIf`:
+    /// `when` cannot be decided by inverting `op`, because PHP's orderings are
+    /// not exact negations of each other (NAN compares false to everything,
+    /// including itself).
     BinaryIntBranch {
         op: BinaryOp,
         lhs: Reg,
         rhs: i32,
         target: Target,
-        when: bool,
+    },
+    /// Compare a register to an integer literal and branch on the result,
+    /// jumping to `target` when the comparison is true.
+    BinaryIntBranchIf {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: i32,
+        target: Target,
     },
     /// A binary operation with a signed small integer. This avoids loading a
     /// literal register on every loop iteration; coercion matches `Binary`.
@@ -286,16 +294,24 @@ pub enum Instruction {
         rhs: Reg,
     },
     /// Compare two registers and branch on the result, jumping to `target`
-    /// when it equals `when`: the condition of an `if`, `while`, `for`,
+    /// when the comparison is false: the condition of an `if`, `while`, `for`,
     /// `do-while`, ternary, `&&`, `||` or `!` written as one instruction,
     /// without a temporary boolean. Only comparison operators appear here.
-    /// The comparison itself is `Binary`'s, so the two stay in step.
+    /// The comparison itself is `Binary`'s, so the two stay in step. The true
+    /// case is `BinaryBranchIf`.
     BinaryBranch {
         op: BinaryOp,
         lhs: Reg,
         rhs: Reg,
         target: Target,
-        when: bool,
+    },
+    /// Compare two registers and branch on the result, jumping to `target`
+    /// when the comparison is true.
+    BinaryBranchIf {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: Reg,
+        target: Target,
     },
     Unary {
         op: UnaryOp,

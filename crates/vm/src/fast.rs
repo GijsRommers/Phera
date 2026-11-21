@@ -10,7 +10,7 @@
 //! a PHP reference goes on to the general handler, which writes through it.
 //! So the simple loop itself never tests for due destructors.
 
-use phera_bytecode::{BinaryOp, IncDec, Instruction, Reg};
+use phera_bytecode::{BinaryOp, IncDec, Instruction, Reg, Target};
 use phera_value::{Value, to_bool};
 
 use crate::operators::fast_binary;
@@ -354,28 +354,13 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             lhs,
             rhs,
             target,
-            when,
-        } => {
-            let right = i64::from(rhs);
-            if let Some(left) = integer_at(slots, lhs)
-                && let Some(condition) = integer_condition(op, left, right)
-            {
-                if condition == when {
-                    *ip = target.index();
-                }
-                return ScalarStep::Complete;
-            }
-            let Some(Some(left)) = slots.get(lhs.index()) else {
-                return ScalarStep::Fallback;
-            };
-            let Some(value) = fast_binary(op, left, &Value::Int(right)) else {
-                return ScalarStep::Fallback;
-            };
-            if to_bool(&value) == when {
-                *ip = target.index();
-            }
-            ScalarStep::Complete
-        }
+        } => binary_int_branch_step::<GUARDED, false>(slots, op, lhs, rhs, target, ip),
+        Instruction::BinaryIntBranchIf {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => binary_int_branch_step::<GUARDED, true>(slots, op, lhs, rhs, target, ip),
         Instruction::BinaryInt { op, dst, lhs, rhs } => {
             let right = i64::from(rhs);
             if let Some(left) = integer_at(slots, lhs) {
@@ -410,42 +395,13 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             lhs,
             rhs,
             target,
-            when,
-        } => {
-            // Two integers: the comparison needs no coercion at all.
-            if let (Some(left), Some(right)) = (integer_at(slots, lhs), integer_at(slots, rhs))
-                && let Some(condition) = integer_condition(op, left, right)
-            {
-                if condition == when {
-                    *ip = target.index();
-                }
-                return ScalarStep::Complete;
-            }
-            // An identity test where at least one side owns no heap value
-            // runs no PHP code, so the answer is decided here. An unset
-            // register falls back: the general handler warns for it.
-            if matches!(op, BinaryOp::Identical | BinaryOp::NotIdentical) {
-                let (Some(Some(left)), Some(Some(right))) =
-                    (slots.get(lhs.index()), slots.get(rhs.index()))
-                else {
-                    return ScalarStep::Fallback;
-                };
-                let left = left.deref();
-                let right = right.deref();
-                if let Some(same) = identity_condition(&left, &right) {
-                    let condition = if op == BinaryOp::Identical {
-                        same
-                    } else {
-                        !same
-                    };
-                    if condition == when {
-                        *ip = target.index();
-                    }
-                    return ScalarStep::Complete;
-                }
-            }
-            ScalarStep::Fallback
-        }
+        } => binary_branch_step::<GUARDED, false>(slots, op, lhs, rhs, target, ip),
+        Instruction::BinaryBranchIf {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => binary_branch_step::<GUARDED, true>(slots, op, lhs, rhs, target, ip),
         Instruction::AssignOp { op, local, src } => {
             if let Some(left) = integer_at(slots, local)
                 && let Some(right) = integer_at(slots, src)
@@ -549,6 +505,93 @@ fn integer_condition(operator: BinaryOp, left: i64, right: i64) -> Option<bool> 
         BinaryOp::NotEqual | BinaryOp::NotIdentical => left != right,
         _ => return None,
     })
+}
+
+/// Compare a register to an integer literal and branch. `WHEN` selects the
+/// `BinaryIntBranch`/`BinaryIntBranchIf` pair, so each arm compiles like the
+/// plain false case.
+#[inline(always)]
+fn binary_int_branch_step<const GUARDED: bool, const WHEN: bool>(
+    slots: &[Option<Value>],
+    op: BinaryOp,
+    lhs: Reg,
+    rhs: i32,
+    target: Target,
+    ip: &mut usize,
+) -> ScalarStep {
+    let right = i64::from(rhs);
+    if let Some(left) = integer_at(slots, lhs)
+        && let Some(condition) = integer_condition(op, left, right)
+    {
+        if condition == WHEN {
+            *ip = target.index();
+        }
+        return ScalarStep::Complete;
+    }
+    let Some(Some(left)) = slots.get(lhs.index()) else {
+        return ScalarStep::Fallback;
+    };
+    let Some(value) = fast_binary(op, left, &Value::Int(right)) else {
+        return ScalarStep::Fallback;
+    };
+    if to_bool(&value) == WHEN {
+        *ip = target.index();
+    }
+    ScalarStep::Complete
+}
+
+/// Compare two registers and branch on the result.
+#[inline(always)]
+fn binary_branch_step<const GUARDED: bool, const WHEN: bool>(
+    slots: &[Option<Value>],
+    op: BinaryOp,
+    lhs: Reg,
+    rhs: Reg,
+    target: Target,
+    ip: &mut usize,
+) -> ScalarStep {
+    // Two integers: the comparison needs no coercion at all.
+    if let (Some(left), Some(right)) = (integer_at(slots, lhs), integer_at(slots, rhs))
+        && let Some(condition) = integer_condition(op, left, right)
+    {
+        if condition == WHEN {
+            *ip = target.index();
+        }
+        return ScalarStep::Complete;
+    }
+    let (Some(Some(left)), Some(Some(right))) = (slots.get(lhs.index()), slots.get(rhs.index()))
+    else {
+        return ScalarStep::Fallback;
+    };
+    let left = left.deref();
+    let right = right.deref();
+    if let Some(value) = fast_binary(op, &left, &right) {
+        let truthy = match value {
+            Value::Bool(boolean) => boolean,
+            other => to_bool(&other),
+        };
+        if truthy == WHEN {
+            *ip = target.index();
+        }
+        return ScalarStep::Complete;
+    }
+    // An identity test where at least one side owns no heap value
+    // runs no PHP code, so the answer is decided here. An unset
+    // register fell back above: the general handler warns for it.
+    if matches!(op, BinaryOp::Identical | BinaryOp::NotIdentical)
+        && let Some(same) = identity_condition(&left, &right)
+    {
+        let condition = if op == BinaryOp::Identical {
+            same
+        } else {
+            !same
+        };
+        if condition == WHEN {
+            *ip = target.index();
+        }
+        return ScalarStep::Complete;
+    }
+    ScalarStep::Fallback
 }
 
 /// `===` between two values where at least one owns no heap value (a number,
