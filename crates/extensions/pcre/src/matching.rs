@@ -68,10 +68,12 @@ fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> Na
             i64::MIN
         )));
     }
-    matches::assign(arguments, 2, Value::from(PhpArray::new()));
+    let captures_requested = args::reference(arguments, 2).is_some();
+    if captures_requested {
+        matches::assign(arguments, 2, Value::from(PhpArray::new()));
+    }
     let flags = args::int(arguments, 3).unwrap_or(0);
     let order = function.order(flags)?;
-    let capture_flags = CaptureFlags::parse(flags);
     let subject = args::bytes(arguments, 1);
     // A negative offset counts from the end, and stops at the start.
     let position = if offset < 0 {
@@ -84,11 +86,27 @@ fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> Na
         return Ok(Value::Bool(false));
     }
     errors::set(context, Error::None);
-    let names = compiled.regex.capture_names();
     let mut scanner = Scanner::new(&compiled, subject, position);
+    if !captures_requested {
+        let count = scanner.count_up_to(function.limit()).and_then(|count| {
+            if function == Function::Match && arguments.len() < 3 {
+                scanner.check_empty_retry()?;
+            }
+            Ok(count)
+        });
+        return Ok(match count {
+            Ok(count) => Value::Int(count as i64),
+            Err(error) => {
+                errors::set(context, error);
+                Value::Bool(false)
+            }
+        });
+    }
+    let capture_flags = CaptureFlags::parse(flags);
+    let names = compiled.regex.capture_names();
     let mut rows = Vec::new();
     let mut marks = Vec::new();
-    let found = if let Some(probe) = compiled.marks.as_deref().filter(|_| arguments.len() >= 3) {
+    let found = if let Some(probe) = compiled.marks.as_deref() {
         std::iter::from_fn(|| scanner.next_marked(probe))
             .take(function.limit())
             .try_for_each(|found| {
@@ -110,13 +128,6 @@ fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> Na
         errors::set(context, error);
         let table = matches::table(subject, &rows, &marks, names, capture_flags, order);
         matches::assign(arguments, 2, table);
-        return Ok(Value::Bool(false));
-    }
-    if function == Function::Match
-        && arguments.len() < 3
-        && let Err(error) = scanner.check_empty_retry()
-    {
-        errors::set(context, error);
         return Ok(Value::Bool(false));
     }
     let table = matches::table(subject, &rows, &marks, names, capture_flags, order);

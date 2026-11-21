@@ -160,7 +160,11 @@ impl Object {
             pool: Some(hold),
         });
         if let Ok(mut incarnations) = pool.incarnations.try_borrow_mut() {
-            incarnations.insert(self.id, (origin, Rc::downgrade(&doomed)));
+            let index = self.id as usize;
+            if index >= incarnations.len() {
+                incarnations.resize_with(index + 1, || None);
+            }
+            incarnations[index] = Some((origin, Rc::downgrade(&doomed)));
         }
         pool.doomed.push(Doomed::Object(doomed));
     }

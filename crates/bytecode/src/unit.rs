@@ -111,11 +111,9 @@ const UNION_ORDER: &[&str] = &[
 /// null|int              ?int
 /// ```
 ///
-/// Intersection types (`A&B`, `(A&B)|null`) are printed as written.
+/// An intersection keeps its written bound order. Inside a union it is
+/// parenthesized so its members read as one alternative.
 pub fn union_in_php_order(written: &str) -> String {
-    if written.contains('&') {
-        return written.to_owned();
-    }
     let mut members: Vec<&str> = written.trim_start_matches('?').split('|').collect();
     if written.starts_with('?') {
         members.push("null");
@@ -129,7 +127,18 @@ pub fn union_in_php_order(written: &str) -> String {
     });
     members.dedup();
     match members.as_slice() {
-        [single, "null"] => format!("?{single}"),
+        [single, "null"] if !single.contains('&') => format!("?{single}"),
+        many if many.len() > 1 && written.contains('&') => many
+            .iter()
+            .map(|member| {
+                if member.contains('&') && !member.starts_with('(') {
+                    std::borrow::Cow::Owned(format!("({member})"))
+                } else {
+                    std::borrow::Cow::Borrowed(*member)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("|"),
         _ => members.join("|"),
     }
 }

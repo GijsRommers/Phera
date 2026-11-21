@@ -9,11 +9,15 @@ use phera_bytecode::Reg;
 use phera_extension_api::{NativeError, NativeMethod};
 use phera_value::Value;
 
-use super::{call_state::CallTarget, execution_loop::BatchExit, prepared_call::PreparedCall};
+use super::{
+    call_state::{CallTarget, Callee},
+    execution_loop::BatchExit,
+    prepared_call::{CallDetails, PreparedCall},
+};
 use crate::{
     Vm,
     calls::native_frames::NativeFrame,
-    classes::{Invocation, MethodBody},
+    classes::{Invocation, MethodBody, MethodContext},
 };
 
 impl Vm {
@@ -57,9 +61,17 @@ impl Vm {
             return fallback;
         }
         let (_, details) = self.call_stack.pop_call()?;
-        let Some(CallTarget::Method { method, context }) = details
-            .and_then(|details| details.callee)
-            .map(|callee| callee.target)
+        let Some(CallDetails {
+            callee:
+                Some(Callee {
+                    argument_binding,
+                    name,
+                    parameters,
+                    target: CallTarget::Method { method, context },
+                }),
+            named,
+            extra_named,
+        }) = details
         else {
             return Err(internal_error!("native method target"));
         };
@@ -68,13 +80,20 @@ impl Vm {
             *argument = self.registers.take(call.base() + offset);
         }
         self.registers.truncate(call.start());
+        let MethodContext {
+            receiver,
+            scope,
+            called,
+            invocation,
+        } = context;
+        let mut called = Some(called);
         let previous = self.native_called_class.take();
         if method.is_static {
-            self.native_called_class = Some(context.called);
+            self.native_called_class = called.take();
         }
         let pending = self.error_handlers.pending.len();
-        let result = handler(self, context.receiver.as_ref(), &arguments[..count]);
-        self.native_called_class = previous;
+        let result = handler(self, receiver.as_ref(), &arguments[..count]);
+        let lent = std::mem::replace(&mut self.native_called_class, previous);
         if pending != self.error_handlers.pending.len() {
             let operator = if method.is_static { "::" } else { "->" };
             let name = format!("{}{operator}{}", method.declaring, method.name);
@@ -94,6 +113,23 @@ impl Vm {
                     Box::new((error, method)),
                 )))
             }
+            // The interpreter runs the `Call` again once the class is loaded
+            // (see `calls::native_retries`).
+            Err(error) if crate::autoload::ClassMiss::is(&error) => {
+                let taken = TakenMethodCall {
+                    argument_binding,
+                    name,
+                    parameters,
+                    method,
+                    receiver,
+                    scope,
+                    called: called.or(lent),
+                    invocation,
+                    named,
+                    extra_named,
+                };
+                Err(self.restore_native_method_call(call, taken, &arguments[..count], error))
+            }
             Err(error) => {
                 self.record_native_failure(
                     &error,
@@ -104,4 +140,77 @@ impl Vm {
             }
         }
     }
+
+    /// Puts a fast native method call back as it was after its handler
+    /// missed a class, so that the interpreter's retry of the `Call` finds
+    /// it: the record rebuilt from the parts the call took apart, `$this`
+    /// below the window, the arguments in it. Gives the error to unwind
+    /// with.
+    #[cold]
+    #[inline(never)]
+    fn restore_native_method_call(
+        &mut self,
+        call: PreparedCall,
+        taken: TakenMethodCall,
+        arguments: &[Value],
+        error: NativeError,
+    ) -> NativeError {
+        let TakenMethodCall {
+            argument_binding,
+            name,
+            parameters,
+            method,
+            receiver,
+            scope,
+            called,
+            invocation,
+            named,
+            extra_named,
+        } = taken;
+        // A native method's receiver travels in its context; a window that
+        // also keeps `$this` below its first register gets it back there.
+        // Another shape cannot be rebuilt here, and reports the missing class.
+        let (Some(called), slots @ (0 | 1)) = (called, call.kind.prefix()) else {
+            return crate::autoload::ClassMiss::take(error)
+                .map_or_else(|error| error, crate::autoload::ClassMiss::error);
+        };
+        let this = receiver.clone().filter(|_| slots == 1).map(Value::Object);
+        let details = CallDetails {
+            callee: Some(Callee {
+                argument_binding,
+                name,
+                parameters,
+                target: CallTarget::Method {
+                    method,
+                    context: MethodContext {
+                        receiver,
+                        scope,
+                        called,
+                        invocation,
+                    },
+                },
+            }),
+            named,
+            extra_named,
+        };
+        self.restore_native_call((call, Some(details)), [this, None], arguments);
+        error
+    }
+}
+
+/// The parts a fast native method call takes its record apart into, kept
+/// for a class miss to put the record back (see
+/// [`Vm::restore_native_method_call`]).
+struct TakenMethodCall {
+    argument_binding: super::callback_binding::ArgumentBinding,
+    name: std::rc::Rc<str>,
+    parameters: std::rc::Rc<[super::call_state::ParameterSpec]>,
+    method: std::rc::Rc<crate::classes::Method>,
+    receiver: Option<std::rc::Rc<phera_value::Object>>,
+    scope: std::rc::Rc<crate::classes::Class>,
+    /// `None` while a static method's class is lent to the handler.
+    called: Option<std::rc::Rc<crate::classes::Class>>,
+    invocation: Invocation,
+    named: Option<phera_value::PhpString>,
+    extra_named: Vec<(usize, phera_value::PhpString)>,
 }

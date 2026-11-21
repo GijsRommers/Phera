@@ -107,6 +107,11 @@ pub(crate) struct Registers {
 }
 
 impl Registers {
+    /// The bytes of the register file, for a fork's footprint.
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.slots.capacity() * std::mem::size_of::<Option<Value>>()
+    }
+
     /// Each request owns a single contiguous value stack.
     pub(crate) fn new() -> Self {
         Self {
