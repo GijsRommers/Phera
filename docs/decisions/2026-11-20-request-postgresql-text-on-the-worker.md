@@ -29,10 +29,17 @@ closes the socket, as it did with the pool's interrupted-connection policy.
 
 Reuse Phera's TLS policy. A DSN that requires TLS fails when encryption is
 unavailable. Use the protocol crate to verify the SCRAM server-final
-signature. Advertise channel binding only for a connection that supplies the
-required TLS binding data. Check wire lengths and counts before allocating
-or slicing. Cap an individual message at 64 MiB, including its length field,
-and retire the connection if its framing is invalid.
+signature. Prefer SCRAM-SHA-256-PLUS when TLS and the server offer it. Hash
+the exact leaf certificate with its signature hash, substituting SHA-256
+for MD5 and SHA-1. Apply `channel_binding` and `require_auth` before replying
+to any authentication challenge. With no method restriction, the server
+chooses the authentication method.
+
+Check wire lengths and counts before allocating or slicing. Cap an
+individual message at 64 MiB, including its length field. Notices and
+notifications each keep up to 4 MiB and drop their oldest entries to make
+room. Limit the parameter map to 128 entries and 128 KiB. Retire a socket
+that exceeds the parameter limit or sends invalid framing.
 
 ## Verification
 

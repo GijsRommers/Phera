@@ -21,6 +21,10 @@ futures-util = { workspace = true, features = ["sink"] }
 postgres-protocol.workspace = true
 percent-encoding.workspace = true
 url.workspace = true
+pkcs1 = "0.8"
+sha2.workspace = true
+sha3.workspace = true
+x509-cert.workspace = true
 
 [dev-dependencies]
 base64.workspace = true

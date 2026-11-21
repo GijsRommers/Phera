@@ -3,12 +3,145 @@
 use std::collections::BTreeMap;
 use std::io;
 
+use fallible_iterator::FallibleIterator;
 use postgres_protocol::authentication::md5_hash;
-use postgres_protocol::authentication::sasl::{ChannelBinding, SCRAM_SHA_256, ScramSha256};
-use postgres_protocol::message::{backend::Message, frontend};
+use postgres_protocol::authentication::sasl::{
+    ChannelBinding, SCRAM_SHA_256, SCRAM_SHA_256_PLUS, ScramSha256,
+};
+use postgres_protocol::message::{
+    backend::{AuthenticationSaslBody, Message},
+    frontend,
+};
 
 use super::{MAX_MESSAGE, Transport, invalid};
+use crate::drivers::connection_error;
+use crate::dsn::Dsn;
 use crate::errors::DbError;
+
+mod binding;
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub(in super::super) enum BindingMode {
+    Disable,
+    #[default]
+    Prefer,
+    Require,
+}
+
+#[derive(Clone, Copy)]
+enum Method {
+    None,
+    Password,
+    Md5,
+    Scram,
+    Gss,
+    Sspi,
+    Oauth,
+}
+
+impl Method {
+    fn mask(self) -> u8 {
+        1 << self as u8
+    }
+}
+
+pub(in super::super) struct AuthPolicy<'a> {
+    pub binding: BindingMode,
+    required: Option<&'a str>,
+    allowed: u8,
+}
+
+impl Default for AuthPolicy<'_> {
+    fn default() -> Self {
+        Self {
+            binding: BindingMode::Prefer,
+            required: None,
+            allowed: u8::MAX,
+        }
+    }
+}
+
+impl<'a> AuthPolicy<'a> {
+    pub fn parse(dsn: &'a Dsn) -> Result<Self, DbError> {
+        let binding = match dsn.get("channel_binding", "prefer") {
+            "disable" => BindingMode::Disable,
+            "prefer" => BindingMode::Prefer,
+            "require" => BindingMode::Require,
+            _ => return Err(connection_error("invalid channel_binding value")),
+        };
+        let required = dsn.fields.get("require_auth").map(String::as_str);
+        let allowed = required.map(parse_methods).transpose()?.unwrap_or(u8::MAX);
+        Ok(Self {
+            binding,
+            required,
+            allowed,
+        })
+    }
+
+    fn check(&self, request: &Message) -> io::Result<()> {
+        let (method, challenge) = match request {
+            Message::AuthenticationOk => (Method::None, "server did not complete authentication"),
+            Message::AuthenticationCleartextPassword => {
+                (Method::Password, "server requested a cleartext password")
+            }
+            Message::AuthenticationMd5Password(_) => {
+                (Method::Md5, "server requested a hashed password")
+            }
+            Message::AuthenticationSasl(_) => {
+                (Method::Scram, "server requested SASL authentication")
+            }
+            _ => return Ok(()),
+        };
+        if self.allowed & method.mask() == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "authentication method requirement \"{}\" failed: {challenge}",
+                    self.required.unwrap_or_default()
+                ),
+            ));
+        }
+        if self.binding == BindingMode::Require && !matches!(method, Method::Scram) {
+            return Err(invalid(
+                "channel binding required, but server did not offer an authentication method that supports channel binding",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn parse_methods(value: &str) -> Result<u8, DbError> {
+    if value.is_empty() {
+        return Ok(Method::None.mask());
+    }
+    let negated = value.starts_with('!');
+    let mut methods = 0;
+    for item in value.split(',') {
+        if negated != item.starts_with('!') {
+            return Err(connection_error(
+                "negative and non-negative require_auth methods cannot be mixed",
+            ));
+        }
+        let method = match item.strip_prefix('!').unwrap_or(item) {
+            "none" => Method::None,
+            "password" => Method::Password,
+            "md5" => Method::Md5,
+            "scram-sha-256" => Method::Scram,
+            "gss" => Method::Gss,
+            "sspi" => Method::Sspi,
+            "oauth" => Method::Oauth,
+            _ => return Err(connection_error("invalid require_auth value")),
+        }
+        .mask();
+        if methods & method != 0 {
+            return Err(connection_error(
+                "require_auth method specified more than once",
+            ));
+        }
+        methods |= method;
+    }
+    Ok(if negated { !methods } else { methods })
+}
 
 #[derive(Debug)]
 pub(in super::super) enum StartError {
@@ -23,9 +156,44 @@ impl From<io::Error> for StartError {
 }
 
 pub(in super::super) struct Session {
-    pub parameters: BTreeMap<String, String>,
+    pub parameters: Parameters,
     pub pid: i32,
     pub status: u8,
+}
+
+#[derive(Default)]
+pub(in super::super) struct Parameters {
+    entries: BTreeMap<String, String>,
+    bytes: usize,
+}
+
+impl Parameters {
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.entries.get(name).map(String::as_str)
+    }
+
+    pub fn set(&mut self, name: &str, value: &str) -> io::Result<()> {
+        const MAX_COUNT: usize = 128;
+        const MAX_BYTES: usize = 128 * 1024;
+        let prior = self.get(name);
+        let byte_count = self.bytes
+            + value.len()
+            + match prior {
+                Some(_) => 0,
+                None => name.len(),
+            }
+            - prior.map_or(0, str::len);
+        if byte_count > MAX_BYTES || (prior.is_none() && self.entries.len() >= MAX_COUNT) {
+            return Err(invalid("PostgreSQL session parameters exceed the limit"));
+        }
+        if let Some(prior) = self.entries.get_mut(name) {
+            *prior = value.to_owned();
+        } else {
+            self.entries.insert(name.into(), value.into());
+        }
+        self.bytes = byte_count;
+        Ok(())
+    }
 }
 
 pub(in super::super) async fn start(
@@ -33,6 +201,8 @@ pub(in super::super) async fn start(
     parameters: &[(&str, &str)],
     user: &str,
     password: &[u8],
+    policy: &AuthPolicy<'_>,
+    certificate: Option<&[u8]>,
 ) -> Result<Session, StartError> {
     let size = parameters.iter().try_fold(9_usize, |size, (key, value)| {
         size.checked_add(key.len())?
@@ -45,7 +215,12 @@ pub(in super::super) async fn start(
     transport
         .send(|out| frontend::startup_message(parameters.iter().copied(), out))
         .await?;
-    match next(transport).await? {
+    let request = next(transport).await?;
+    if policy.binding == BindingMode::Require && certificate.is_none() {
+        return Err(invalid("channel binding required, but SSL not in use").into());
+    }
+    policy.check(&request)?;
+    match request {
         Message::AuthenticationOk => {}
         Message::AuthenticationCleartextPassword => {
             transport
@@ -61,16 +236,8 @@ pub(in super::super) async fn start(
             auth_ok(transport).await?;
         }
         Message::AuthenticationSasl(request) => {
-            use fallible_iterator::FallibleIterator;
-            if !request
-                .mechanisms()
-                .any(|mechanism| Ok(mechanism == SCRAM_SHA_256))?
-            {
-                return Err(invalid("unsupported PostgreSQL SASL authentication mechanism").into());
-            }
-            // The TLS adapter does not supply channel binding data. Offer
-            // ordinary SCRAM only, including on a TLS socket.
-            scram(transport, password).await?;
+            let (mechanism, binding) = scram_mechanism(&request, policy.binding, certificate)?;
+            scram(transport, password, mechanism, binding).await?;
             auth_ok(transport).await?;
         }
         Message::AuthenticationGss
@@ -84,7 +251,7 @@ pub(in super::super) async fn start(
     }
 
     let mut session = Session {
-        parameters: BTreeMap::new(),
+        parameters: Parameters::default(),
         pid: 0,
         status: b'I',
     };
@@ -93,7 +260,7 @@ pub(in super::super) async fn start(
             Message::ParameterStatus(parameter) => {
                 session
                     .parameters
-                    .insert(parameter.name()?.into(), parameter.value()?.into());
+                    .set(parameter.name()?, parameter.value()?)?;
             }
             Message::BackendKeyData(key) => {
                 session.pid = key.process_id();
@@ -115,10 +282,55 @@ async fn auth_ok(transport: &mut Transport) -> Result<(), StartError> {
     }
 }
 
-async fn scram(transport: &mut Transport, password: &[u8]) -> Result<(), StartError> {
-    let mut scram = ScramSha256::new(password, ChannelBinding::unsupported());
+fn scram_mechanism(
+    request: &AuthenticationSaslBody,
+    mode: BindingMode,
+    certificate: Option<&[u8]>,
+) -> io::Result<(&'static str, ChannelBinding)> {
+    let certificate = certificate.filter(|_| mode != BindingMode::Disable);
+    let mut plain = false;
+    let mut plus = false;
+    let mut mechanisms = request.mechanisms();
+    while let Some(mechanism) = mechanisms.next()? {
+        plain |= mechanism == SCRAM_SHA_256;
+        plus |= mechanism == SCRAM_SHA_256_PLUS;
+    }
+    if let Some(certificate) = certificate.filter(|_| plus) {
+        let digest = binding::certificate_hash(certificate).ok_or_else(|| {
+            invalid("could not determine the TLS certificate channel binding hash")
+        })?;
+        return Ok((
+            SCRAM_SHA_256_PLUS,
+            ChannelBinding::tls_server_end_point(digest),
+        ));
+    }
+    if mode == BindingMode::Require {
+        return Err(invalid(
+            "channel binding required, but server did not offer it",
+        ));
+    }
+    if !plain {
+        return Err(invalid(
+            "unsupported PostgreSQL SASL authentication mechanism",
+        ));
+    }
+    let binding = if certificate.is_some() {
+        ChannelBinding::unrequested()
+    } else {
+        ChannelBinding::unsupported()
+    };
+    Ok((SCRAM_SHA_256, binding))
+}
+
+async fn scram(
+    transport: &mut Transport,
+    password: &[u8],
+    mechanism: &str,
+    binding: ChannelBinding,
+) -> Result<(), StartError> {
+    let mut scram = ScramSha256::new(password, binding);
     transport
-        .send(|out| frontend::sasl_initial_response(SCRAM_SHA_256, scram.message(), out))
+        .send(|out| frontend::sasl_initial_response(mechanism, scram.message(), out))
         .await?;
     let Message::AuthenticationSaslContinue(first) = next(transport).await? else {
         return Err(invalid("expected PostgreSQL SCRAM server-first message").into());

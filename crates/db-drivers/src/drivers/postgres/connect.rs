@@ -6,8 +6,7 @@ use std::time::Duration;
 
 use tokio::net::{TcpStream, UnixStream};
 
-use super::stream::Socket;
-use super::tls::{Mode, negotiate};
+use super::tls::{Mode, Negotiated, negotiate};
 use super::wire::{Client, Transport, startup};
 use super::{Postgres, native};
 use crate::drivers::connection_error;
@@ -23,6 +22,7 @@ async fn open(dsn: &Dsn, user: &str, password: &str) -> Result<Client, DbError> 
     };
     let mode_text = dsn.get("sslmode", default_mode);
     let mode = Mode::parse(mode_text)?;
+    let auth = startup::AuthPolicy::parse(dsn)?;
     if system_roots && mode != Mode::VerifyFull {
         return Err(connection_error(format!(
             "weak sslmode \"{mode_text}\" may not be used with sslrootcert=system \
@@ -52,17 +52,25 @@ async fn open(dsn: &Dsn, user: &str, password: &str) -> Result<Client, DbError> 
             }
             let path = format!("{host}/.s.PGSQL.{port}");
             let socket = UnixStream::connect(&path).await.map_err(connection_error)?;
-            return start(Box::new(socket), &parameters, user, password, host, port)
-                .await
-                .map_err(|(error, _)| error);
+            return start(
+                Negotiated::plain(socket),
+                &parameters,
+                user,
+                password,
+                host,
+                port,
+                &auth,
+            )
+            .await
+            .map_err(|(error, _)| error);
         }
         let address = dsn.get("hostaddr", host);
         let socket = negotiate(tcp(address, port).await?, dsn, host, port, mode).await?;
-        match start(socket, &parameters, user, password, host, port).await {
+        match start(socket, &parameters, user, password, host, port, &auth).await {
             Err((_, true)) if mode == Mode::Allow => {
                 let socket =
                     negotiate(tcp(address, port).await?, dsn, host, port, Mode::Require).await?;
-                start(socket, &parameters, user, password, host, port)
+                start(socket, &parameters, user, password, host, port, &auth)
                     .await
                     .map_err(|(error, _)| error)
             }
@@ -89,15 +97,25 @@ async fn tcp(address: &str, port: u16) -> Result<TcpStream, DbError> {
 }
 
 async fn start(
-    socket: Box<dyn Socket>,
+    negotiated: Negotiated,
     parameters: &[(&str, &str)],
     user: &str,
     password: &str,
     host: &str,
     port: u16,
+    auth: &startup::AuthPolicy<'_>,
 ) -> Result<Client, (DbError, bool)> {
-    let mut transport = Transport::new(socket);
-    match startup::start(&mut transport, parameters, user, password.as_bytes()).await {
+    let mut transport = Transport::new(negotiated.socket);
+    match startup::start(
+        &mut transport,
+        parameters,
+        user,
+        password.as_bytes(),
+        auth,
+        negotiated.certificate.as_deref(),
+    )
+    .await
+    {
         Ok(session) => Ok(Client::new(transport, session)),
         Err(startup::StartError::Transport(error)) => Err((failed(host, port, error), false)),
         Err(startup::StartError::Server(error)) => Err((failed(host, port, error.detail), true)),

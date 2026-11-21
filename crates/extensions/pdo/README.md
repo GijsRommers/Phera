@@ -78,6 +78,13 @@ the platform store is unavailable or empty. A supplied CA takes precedence.
 Use `sslrootcert=/path/ca.pem` for a private PostgreSQL CA. The `sslcert` and
 `sslkey` parameters select a PEM client certificate and private key.
 
+The PostgreSQL DSN option `channel_binding=prefer` uses SCRAM channel binding
+when the server offers it over TLS. Use `disable` to opt out or `require` to
+require it. With `require_auth`, list permitted methods such as
+`scram-sha-256,md5` or excluded methods such as `!password,!md5`. The
+`none` method accepts a server that skips the authentication challenge.
+`require_auth` is optional and defaults to the server's choice.
+
 For MySQL, use `Pdo\Mysql::ATTR_SSL_CA` or `ATTR_SSL_CAPATH` for trust roots,
 and `ATTR_SSL_CERT` with `ATTR_SSL_KEY` for client authentication. Server
 verification is enabled by default. With TLS options present, setting

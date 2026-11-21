@@ -2797,6 +2797,7 @@ dependencies = [
  "phera-extension-api",
  "phera-io-pool",
  "phera-sqlite",
+ "pkcs1",
  "postgres-protocol",
  "postgres-types",
  "rcgen",
@@ -2804,10 +2805,13 @@ dependencies = [
  "rsa",
  "rustls",
  "sha1 0.11.0",
+ "sha2 0.10.9",
+ "sha3 0.10.9",
  "tempfile",
  "tokio",
  "tokio-rustls",
  "url",
+ "x509-cert",
 ]
 
 [[package]]

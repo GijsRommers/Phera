@@ -112,6 +112,10 @@ const CALLS: &[(&str, &str)] = &[
     ("escape-bytea", "pg_escape_bytea($db, \"a\\x00\\xff\")"),
     ("unescape-bytea", "pg_unescape_bytea('\\x5c00ff')"),
     (
+        "query-nul-terminates-sql",
+        "pg_fetch_row(pg_query($db, \"SELECT 7\\x00; SELECT 8\"))",
+    ),
+    (
         "unescape-bytea-octal",
         "bin2hex(pg_unescape_bytea('\\000\\200\\377'))",
     ),

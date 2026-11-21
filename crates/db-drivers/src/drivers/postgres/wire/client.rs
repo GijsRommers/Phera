@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 use std::io;
 
 use bytes::{BufMut, BytesMut};
+use fallible_iterator::FallibleIterator;
 use postgres_protocol::IsNull;
 use postgres_protocol::message::{
     backend::{ErrorResponseBody, Message},
@@ -16,12 +17,14 @@ use crate::errors::DbError;
 use crate::parameters::BoundValue;
 
 const ASYNC_MESSAGES: usize = 4096;
+// Each queue holds up to 4 MiB, for a total of 8 MiB per connection.
+const ASYNC_QUEUE_BYTES: usize = 4 * 1024 * 1024;
 
 pub(in super::super) struct Client {
     transport: Transport,
     session: Session,
-    notices: VecDeque<String>,
-    notifications: VecDeque<Notification>,
+    notices: AsyncQueue<String>,
+    notifications: AsyncQueue<Notification>,
 }
 
 pub struct Notification {
@@ -47,8 +50,8 @@ impl Client {
         Self {
             transport,
             session,
-            notices: VecDeque::new(),
-            notifications: VecDeque::new(),
+            notices: AsyncQueue::new(),
+            notifications: AsyncQueue::new(),
         }
     }
 
@@ -64,14 +67,18 @@ impl Client {
     }
 
     pub(in super::super) fn parameter(&self, name: &str) -> Option<&str> {
-        self.session.parameters.get(name).map(String::as_str)
+        self.session.parameters.get(name)
     }
 
     pub(in super::super) fn notices(&mut self, clear: bool) -> Vec<String> {
         if clear {
             self.notices.clear();
         }
-        self.notices.iter().cloned().collect()
+        self.notices
+            .items
+            .iter()
+            .map(|(_, notice)| notice.clone())
+            .collect()
     }
 
     pub(in super::super) fn notification(&mut self) -> Option<Notification> {
@@ -161,22 +168,29 @@ impl Client {
             Message::ParameterStatus(parameter) => {
                 self.session
                     .parameters
-                    .insert(parameter.name()?.into(), parameter.value()?.into());
+                    .set(parameter.name()?, parameter.value()?)?;
             }
             Message::NoticeResponse(notice) => {
-                bounded_push(
-                    &mut self.notices,
-                    server_error(notice.fields(), "", false)?.detail,
-                );
+                let mut fields = notice.fields();
+                let mut bytes = 0;
+                while let Some(field) = fields.next()? {
+                    bytes += field.value_bytes().len();
+                }
+                if bytes < ASYNC_QUEUE_BYTES {
+                    let text = server_error(notice.fields(), "", false)?.detail;
+                    self.notices.push(text.capacity(), || text);
+                }
             }
-            Message::NotificationResponse(notice) => bounded_push(
-                &mut self.notifications,
-                Notification {
-                    pid: notice.process_id(),
-                    channel: notice.channel()?.into(),
-                    payload: notice.message()?.into(),
-                },
-            ),
+            Message::NotificationResponse(notice) => {
+                let channel = notice.channel()?;
+                let payload = notice.message()?;
+                self.notifications
+                    .push(channel.len() + payload.len(), || Notification {
+                        pid: notice.process_id(),
+                        channel: channel.into(),
+                        payload: payload.into(),
+                    });
+            }
             Message::ReadyForQuery(ref ready) => {
                 self.session.status = ready_status(ready.status())?;
                 return Ok(Some(message));
@@ -224,11 +238,41 @@ impl Client {
     }
 }
 
-fn bounded_push<T>(queue: &mut VecDeque<T>, item: T) {
-    if queue.len() == ASYNC_MESSAGES {
-        queue.pop_front();
+struct AsyncQueue<T> {
+    items: VecDeque<(usize, T)>,
+    bytes: usize,
+}
+
+impl<T> AsyncQueue<T> {
+    fn new() -> Self {
+        Self {
+            items: VecDeque::new(),
+            bytes: 0,
+        }
     }
-    queue.push_back(item);
+
+    fn push(&mut self, size: usize, make_item: impl FnOnce() -> T) {
+        let size = size + size_of::<(usize, T)>();
+        if size > ASYNC_QUEUE_BYTES {
+            return;
+        }
+        while self.items.len() >= ASYNC_MESSAGES || self.bytes + size > ASYNC_QUEUE_BYTES {
+            self.pop_front();
+        }
+        self.bytes += size;
+        self.items.push_back((size, make_item()));
+    }
+
+    fn pop_front(&mut self) -> Option<T> {
+        let (size, item) = self.items.pop_front()?;
+        self.bytes -= size;
+        Some(item)
+    }
+
+    fn clear(&mut self) {
+        self.items.clear();
+        self.bytes = 0;
+    }
 }
 
 fn check_bind(name: &str, sql: Option<&str>, values: &[BoundValue]) -> Result<(), DbError> {
