@@ -22,6 +22,11 @@ pub enum ObjectCast {
 
 /// The VM's per-class data. Implemented by other crates; tests use a dummy.
 pub trait ClassHandle: Any {
+    /// Whether the collector can traverse properties without inspecting native state.
+    fn native_state_is_weak(&self) -> bool {
+        false
+    }
+
     fn name(&self) -> &str;
     fn is_instance_of(&self, name: &str) -> bool {
         self.name().eq_ignore_ascii_case(name)

@@ -127,6 +127,12 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
+    fn native_state_is_weak(&self) -> bool {
+        self.hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.native_state_is_weak)
+    }
+
     fn is_traversable(&self) -> bool {
         self.operations
             .has(super::operations::ClassOperations::TRAVERSABLE)
