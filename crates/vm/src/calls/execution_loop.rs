@@ -271,11 +271,16 @@ impl Machine<'_> {
             ip: frame.ip(),
         };
         let mut instructions = self.code.instructions(frame.function);
+        // Whether the frame's registers fit a window (see
+        // `registers::WINDOW`): decided when the frame is entered, not per
+        // instruction.
+        let mut windowed = self.windowed(frame);
         loop {
-            let instruction = match self.run_simple::<GUARDED>(instructions, &mut position) {
-                Ok(instruction) => instruction,
-                Err(exit) => return exit,
-            };
+            let instruction =
+                match self.run_simple::<GUARDED>(instructions, &mut position, windowed) {
+                    Ok(instruction) => instruction,
+                    Err(exit) => return exit,
+                };
             match self.step::<GUARDED>(instruction, position) {
                 Step::Done(ip) => {
                     // In the guarded loop a step may have let go of the
@@ -296,6 +301,7 @@ impl Machine<'_> {
                     }
                     position = next;
                     instructions = self.code.instructions(next.frame.function);
+                    windowed = self.windowed(next.frame);
                 }
                 Step::Slow => {
                     self.publish(position.ip);
@@ -314,11 +320,12 @@ impl Machine<'_> {
         &mut self,
         instructions: &[Instruction],
         position: &mut Position,
+        windowed: bool,
     ) -> Result<Instruction, LoopExit> {
         // Code with more registers than a window runs on the checked tail
         // of the register file, one instruction at a time, through `step`
         // and the VM (see `registers::WINDOW`).
-        if self.code.facts(position.frame.function).registers as usize > WINDOW {
+        if !windowed {
             return match instructions.get(position.ip) {
                 Some(instruction) => {
                     position.ip += 1;
@@ -375,6 +382,12 @@ impl Machine<'_> {
             self.publish(ip);
         }
         result
+    }
+
+    /// Whether `frame`'s code fits a register window.
+    #[inline(always)]
+    fn windowed(&self, frame: Frame) -> bool {
+        self.code.facts(frame.function).registers as usize <= WINDOW
     }
 
     /// The instructions that are not simple but need only the borrowed
