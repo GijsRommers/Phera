@@ -3,7 +3,7 @@
 use crate::{CompileError, Compiler};
 use phera_ast as ast;
 
-use super::type_declarations::{TypeScope, TypeSite, builtin_type};
+use super::type_declarations::{TypeScope, TypeSite, reserved_class_word};
 
 impl Compiler<'_> {
     /// Reject structurally invalid classes before any top-level instruction runs.
@@ -33,23 +33,35 @@ impl Compiler<'_> {
             ));
         }
         if let Some(identifier) = &declaration.name
-            && {
-                let lower = identifier.name.to_ascii_lowercase();
-                builtin_type(&lower) || matches!(lower.as_str(), "self" | "parent" | "static")
-            }
+            && reserved_class_word(&identifier.name.to_ascii_lowercase())
         {
-            let message = if is_interface {
-                format!(
-                    "Cannot use \"{}\" as interface name, as it is reserved",
-                    identifier.name
-                )
-            } else {
-                format!(
-                    "Cannot use \"{}\" as a class name as it is reserved",
-                    identifier.name
-                )
+            let kind = match declaration.kind {
+                ast::ClassKind::Interface => "an interface",
+                ast::ClassKind::Trait => "a trait",
+                ast::ClassKind::Enum => "an enum",
+                _ => "a class",
             };
+            let message = format!(
+                "Cannot use \"{}\" as {kind} name as it is reserved",
+                identifier.name
+            );
             return Err(self.error(message, self.lines.line(identifier.span.start)));
+        }
+        if let Some(identifier) = &declaration.name
+            && identifier.name == "_"
+        {
+            let kind = if is_interface {
+                "an interface"
+            } else {
+                "a class"
+            };
+            self.compile_diagnostics
+                .borrow_mut()
+                .push(phera_source::CompileDiagnostic {
+                    kind: phera_source::CompileDiagnosticKind::Deprecated,
+                    message: format!("Using \"_\" as {kind} name is deprecated since 8.4"),
+                    line: self.lines.line(identifier.span.start),
+                });
         }
         for parent in declaration.extends.iter().chain(&declaration.implements) {
             if matches!(

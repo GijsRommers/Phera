@@ -22,19 +22,30 @@ impl Compiler<'_> {
                 ast::UseKind::Function => NameKind::Function,
                 ast::UseKind::Constant => NameKind::Constant,
             };
-            if key == NameKind::Class
-                && super::type_declarations::builtin_type(&alias.to_ascii_lowercase())
-            {
-                return Err(self.error(
-                    format!(
-                        "Cannot use {} as {alias} because '{alias}' is a special class name",
-                        i.name.text
-                    ),
-                    self.lines.line(i.name.span.start),
-                ));
+            let lower = alias.to_ascii_lowercase();
+            if key == NameKind::Class {
+                let reason = if super::type_declarations::reserved_class_word(&lower) {
+                    Some(format!("'{alias}' is a special class name"))
+                } else if self.classes.iter().any(|class| {
+                    let (namespace, local) =
+                        class.name.rsplit_once('\\').unwrap_or(("", &class.name));
+                    namespace.eq_ignore_ascii_case(&self.namespace)
+                        && local.eq_ignore_ascii_case(&alias)
+                        && !class.name.eq_ignore_ascii_case(&i.name.text)
+                }) {
+                    Some("the name is already in use".to_owned())
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    return Err(self.error(
+                        format!("Cannot use {} as {alias} because {reason}", i.name.text),
+                        self.lines.line(i.name.span.start),
+                    ));
+                }
             }
             let imports = self.imports.get_or_insert_with(Default::default);
-            Arc::make_mut(imports).insert((key, alias.to_ascii_lowercase()), i.name.text.clone());
+            Arc::make_mut(imports).insert((key, lower), i.name.text.clone());
         }
 
         Ok(())

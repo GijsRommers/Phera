@@ -89,13 +89,13 @@ impl Parser<'_> {
             TokenKind::Declare => return self.parse_declare(),
             TokenKind::Break => {
                 self.bump()?;
-                let level = self.parse_jump_level()?;
+                let level = self.parse_jump_level("break", start)?;
                 self.expect_end()?;
                 StatementKind::Break(level)
             }
             TokenKind::Continue => {
                 self.bump()?;
-                let level = self.parse_jump_level()?;
+                let level = self.parse_jump_level("continue", start)?;
                 self.expect_end()?;
                 StatementKind::Continue(level)
             }
@@ -797,19 +797,32 @@ impl Parser<'_> {
     }
 
     /// `break;` is `Break(1)`; `break 2;` is `Break(2)`.
-    fn parse_jump_level(&mut self) -> Result<u32, ParseError> {
+    fn parse_jump_level(
+        &mut self,
+        keyword: &str,
+        start: phera_source::Span,
+    ) -> Result<u32, ParseError> {
         if self.at(TokenKind::Semicolon) || self.at(TokenKind::CloseTag) {
             return Ok(1);
         }
         // PHP accepts any expression here and rejects invalid levels at
         // compile time; the AST stores a plain level.
         let expression = self.parse_expr(0)?;
-        Ok(match &expression.kind {
-            ExpressionKind::Literal(Literal::Int(value)) => {
-                (*value).clamp(0, u32::MAX as i64) as u32
+        match expression.kind {
+            ExpressionKind::Literal(Literal::Int(value)) if value > 0 => {
+                Ok(value.min(u32::MAX as i64) as u32)
             }
-            _ => 1,
-        })
+            ExpressionKind::Literal(Literal::Int(_) | Literal::Float(_)) => {
+                Err(ParseError::compile(
+                    format!("'{keyword}' operator accepts only positive integers"),
+                    start,
+                ))
+            }
+            _ => Err(ParseError::compile(
+                format!("'{keyword}' operator with non-integer operand is no longer supported"),
+                start,
+            )),
+        }
     }
 
     /// A comma-separated expression list up to (not including) `stop`.

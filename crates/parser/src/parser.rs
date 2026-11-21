@@ -102,6 +102,20 @@ impl<'src> Parser<'src> {
         if self.at(TokenKind::RightBrace) {
             return Err(self.error("unexpected '}'"));
         }
+        let mut body = statements
+            .iter()
+            .skip_while(|statement| matches!(statement.kind, StatementKind::Declare { .. }));
+        if body
+            .next()
+            .is_some_and(|statement| !matches!(statement.kind, StatementKind::Namespace { .. }))
+            && let Some(namespace) =
+                body.find(|statement| matches!(statement.kind, StatementKind::Namespace { .. }))
+        {
+            return Err(ParseError::compile(
+                "Namespace declaration statement has to be the very first statement or after any declare call in the script",
+                namespace.span,
+            ));
+        }
         Ok(Program { statements })
     }
 
