@@ -25,6 +25,41 @@ use phera_value::Value;
 use std::{cell::RefCell, rc::Rc};
 
 impl Vm {
+    /// Binding an untyped cell may convert it. An already typed cell keeps its value.
+    pub(crate) fn coerce_property_binding(
+        &mut self,
+        reference: &Rc<RefCell<Value>>,
+        property: &PropertyDefault,
+        ty: &phera_bytecode::Type,
+    ) -> Result<(), NativeError> {
+        let value = reference
+            .try_borrow()
+            .map_err(|_| internal_error!("borrowed property alias"))?
+            .clone();
+        let converted = self.coerce_property(value.clone(), property, ty)?;
+        if std::mem::discriminant(&value) == std::mem::discriminant(&converted) {
+            return Ok(());
+        }
+        let holders = self.property_references.borrow();
+        if let Some(holder) = holders
+            .constraints
+            .get(&(Rc::as_ptr(reference) as usize))
+            .and_then(|properties| properties.values().next())
+        {
+            return Err(NativeError::type_error(format!(
+                "Reference with value of type {} held by property {} is not compatible with property {}",
+                crate::types::property_value_type(&value),
+                reference_property_name(holder),
+                reference_property_name(property),
+            )));
+        }
+        drop(holders);
+        *reference
+            .try_borrow_mut()
+            .map_err(|_| internal_error!("borrowed property alias"))? = converted;
+        Ok(())
+    }
+
     /// Only an object assigned through a typed reference can need a callback.
     pub(crate) fn local_reference_needs_string(
         &self,
@@ -60,7 +95,7 @@ impl Vm {
     pub(crate) fn check_reference_assignment(
         &mut self,
         reference: &Rc<RefCell<Value>>,
-        mut value: Value,
+        value: Value,
     ) -> NativeResult {
         let index = self.property_references.borrow();
         if index.constraints.is_empty() {
@@ -74,10 +109,23 @@ impl Vm {
             constraints.push(property.clone());
         }
         drop(index);
-        for property in constraints.iter() {
-            value = self.coerce_reference_property(value, property)?;
+        let mut holders = constraints.iter();
+        let Some(first) = holders.next() else {
+            return Ok(value);
+        };
+        if constraints.len() == 1 {
+            return self.coerce_reference_property(value, first);
         }
-        Ok(value)
+        // All holders must choose the same conversion from the original
+        // input. Scalar conversions here are deterministic for a result type.
+        let converted = self.coerce_reference_property(value.clone(), first)?;
+        for property in holders {
+            let candidate = self.coerce_reference_property(value.clone(), property)?;
+            if std::mem::discriminant(&converted) != std::mem::discriminant(&candidate) {
+                return Err(conflicting_reference_types(&value, first, property));
+            }
+        }
+        Ok(converted)
     }
 
     /// The alias diagnostic names the property holding the type constraint, not the variable.
@@ -89,7 +137,7 @@ impl Vm {
         let Some(declaration) = &property.ty else {
             return Ok(value);
         };
-        let actual = value.type_name();
+        let actual = crate::types::property_value_type(&value);
         self.coerce_property(value, property, declaration)
             .map_err(|_| reference_type_error(&actual, property))
     }
@@ -144,8 +192,8 @@ impl Vm {
         Ok(())
     }
 
-    /// Static reads use internal cells too; index them only when PHP acquires an alias.
-    pub(crate) fn track_static_property_reference(
+    /// Acquiring a PHP alias initializes a nullable static slot to null.
+    pub(crate) fn acquire_static_property_reference(
         &mut self,
         class: crate::static_places::StaticClass,
         name: crate::static_places::StaticName,
@@ -165,6 +213,16 @@ impl Vm {
             .class_states
             .static_property(property)
             .ok_or_else(|| internal_error!("static storage"))?;
+        if !storage.value_initialized.get() {
+            if property
+                .ty
+                .as_ref()
+                .is_some_and(|ty| !ty.mask.intersects(phera_bytecode::TypeMask::NULL))
+            {
+                return Err(uninitialized_reference_error(property));
+            }
+            storage.value_initialized.set(true);
+        }
         storage.track(&self.property_references, property);
         Ok(())
     }
@@ -331,7 +389,10 @@ impl Vm {
     }
 }
 
-fn path_reference(root: &Value, keys: &InlineStack<PathKey>) -> Option<Rc<RefCell<Value>>> {
+pub(crate) fn path_reference(
+    root: &Value,
+    keys: &InlineStack<PathKey>,
+) -> Option<Rc<RefCell<Value>>> {
     let mut target = root.clone();
     for key in keys.iter() {
         let next = match (&*target.deref(), key) {
@@ -357,6 +418,38 @@ fn reference_type_error(actual: &str, property: &PropertyDefault) -> NativeError
     ))
 }
 
+pub(crate) fn uninitialized_reference_error(property: &PropertyDefault) -> NativeError {
+    NativeError::error(format!(
+        "Cannot access uninitialized non-nullable property {}::${} by reference",
+        phera_value::class_display_name(&property.declaring),
+        property.name,
+    ))
+}
+
+/// A write through an alias must respect every holder before creating an array.
+pub(crate) fn check_reference_array_promotion(
+    reference: &Rc<RefCell<Value>>,
+    references: &RefCell<crate::reference_holders::ReferenceHolders>,
+) -> Result<(), NativeError> {
+    let references = references.borrow();
+    if let Some(properties) = references
+        .constraints
+        .get(&(Rc::as_ptr(reference) as usize))
+        && let Some(property) = properties.values().find(|property| {
+            property
+                .ty
+                .as_ref()
+                .is_some_and(|ty| !crate::path_dimensions::accepts_promoted_array(ty))
+        })
+    {
+        return Err(NativeError::type_error(format!(
+            "Cannot auto-initialize an array inside a reference held by property {}",
+            reference_property_name(property)
+        )));
+    }
+    Ok(())
+}
+
 fn conflicting_reference_types(
     value: &Value,
     first: &PropertyDefault,
@@ -364,20 +457,22 @@ fn conflicting_reference_types(
 ) -> NativeError {
     NativeError::type_error(format!(
         "Cannot assign {} to reference held by property {} and property {}, as this would result in an inconsistent type conversion",
-        value.type_name(),
+        crate::types::property_value_type(value),
         reference_property_name(first),
         reference_property_name(other)
     ))
 }
 
-fn reference_property_name(property: &PropertyDefault) -> String {
+pub(crate) fn reference_property_name(property: &PropertyDefault) -> String {
     let declaration = property
         .ty
         .as_ref()
         .map_or("mixed".into(), crate::types::php_type_display);
     format!(
         "{}::${} of type {}",
-        property.declaring, property.name, declaration
+        phera_value::class_display_name(&property.declaring),
+        property.name,
+        declaration
     )
 }
 

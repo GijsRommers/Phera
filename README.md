@@ -38,6 +38,8 @@ Phera validates union and intersection declarations during compilation and
 checks inherited property types when linking classes. Ordinary typed
 parameters with a literal `null` default accept `null` and emit PHP's
 implicit-nullability deprecation.
+Typed property references require the same conversion for every property
+holding the reference.
 During cycle collection, a WeakMap entry keeps its value reachable only
 while the map and key are reachable.
 Closure captures, static values and bound receivers participate in
