@@ -84,6 +84,13 @@ impl Vm {
             },
         )?;
         self.set(destination, value);
+        if matches!(
+            place.base()?,
+            phera_bytecode::PathBase::NamedStaticProperty { .. }
+        ) {
+            // The loop reads the next one itself (see `crate::static_sites`).
+            self.prepare_static_site(&place)?;
+        }
         Ok(None)
     }
 
@@ -198,7 +205,6 @@ impl Vm {
         place: &AccessPath,
     ) -> Result<(Option<Reg>, InlineStack<PathKey>, Value), NativeError> {
         let register = self.base_register(place, Creation::Existing, Missing::Warn)?;
-        self.check_static_read(place, Missing::Warn)?;
         if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
             self.validate_static_mutation(
                 class,

@@ -42,6 +42,7 @@ mod fast_objects;
 mod fast_path_sends;
 mod fast_properties;
 mod fast_property_elements;
+mod fast_static_properties;
 pub(crate) mod frame;
 pub(crate) mod frame_extras;
 pub(crate) mod frame_view;
