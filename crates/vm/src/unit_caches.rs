@@ -34,6 +34,11 @@ pub(crate) struct UnitCache {
     /// instruction, made when the function first looks a site up.
     main_sites: Sites,
     function_sites: Box<[Sites]>,
+    /// What each method site (`CallMethod`) of the top-level code and of each
+    /// function found the last time it ran: one fixed entry per site, made
+    /// when the function's first site runs.
+    main_records: Records,
+    function_records: Box<[Records]>,
     pub(crate) closure_signatures: RefCell<Vec<Option<crate::calls::call_state::Callee>>>,
 }
 
@@ -45,6 +50,38 @@ pub(crate) struct UnitCache {
 pub(crate) struct ClassTypeEntry {
     pub(crate) class: Rc<dyn phera_value::ClassHandle>,
     pub(crate) matches: bool,
+}
+
+/// The method site records of one function, one per site.
+pub(crate) type Records = OnceCell<Box<[Cell<SiteRecord>]>>;
+
+/// What a method site found for a receiver of class `class`: the method
+/// depends only on the class and on the scope the site is written in, so
+/// the next call with a receiver of the same class needs no lookup. A
+/// receiver of another class looks the method up and replaces the record.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SiteRecord {
+    pub(crate) class: Option<crate::classes::ClassIndex>,
+    pub(crate) outcome: SiteOutcome,
+}
+
+/// How a method site calls the method it found.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SiteOutcome {
+    /// A method written in PHP the site's scope may call: entered from the
+    /// site.
+    Enter(crate::code_table::FunctionIndex),
+    /// A native method: the written-out `InitMethodCall` prepares it.
+    Native,
+    /// The VM prepares it (`__call`, an error, a closure, a generator).
+    Vm,
+}
+
+impl SiteRecord {
+    const EMPTY: SiteRecord = SiteRecord {
+        class: None,
+        outcome: SiteOutcome::Vm,
+    };
 }
 
 /// One cache cell per unit/function/instruction, not a hash lookup per access.
@@ -101,6 +138,23 @@ impl UnitCache {
             .get_or_init(|| empty_sites(facts.instructions.len()))
             .get(ip)
     }
+
+    /// The record of method site `site` of the function `facts` describes,
+    /// which has `sites` method sites.
+    pub(crate) fn site_record(
+        &self,
+        facts: &crate::function_facts::FunctionFacts,
+        sites: usize,
+        site: phera_bytecode::MethodSiteId,
+    ) -> Option<&Cell<SiteRecord>> {
+        let records = match facts.local {
+            Some(function) => self.function_records.get(function as usize)?,
+            None => &self.main_records,
+        };
+        records
+            .get_or_init(|| (0..sites).map(|_| Cell::new(SiteRecord::EMPTY)).collect())
+            .get(site.index())
+    }
 }
 
 /// The site cells of one function, made when it first uses one: a request
@@ -142,6 +196,8 @@ impl UnitCache {
             class_types: unit.types.iter().map(|_| RefCell::new(None)).collect(),
             main_sites: Sites::new(),
             function_sites: unit.functions.iter().map(|_| Sites::new()).collect(),
+            main_records: Records::new(),
+            function_records: unit.functions.iter().map(|_| Records::new()).collect(),
             closure_signatures: RefCell::new(Vec::new()),
             class_names: unit
                 .symbols
@@ -198,6 +254,13 @@ impl crate::snapshot::ForkCopy for UnitCache {
             }
             copy
         };
+        let records = |records: &Records| {
+            let copy = Records::new();
+            if let Some(cells) = records.get() {
+                let _ = copy.set(cells.iter().map(|cell| Cell::new(cell.get())).collect());
+            }
+            copy
+        };
         UnitCache {
             trace_file: self.trace_file.clone(),
             names: self.names.clone(),
@@ -213,6 +276,8 @@ impl crate::snapshot::ForkCopy for UnitCache {
                 .iter()
                 .map(|function| sites(function, fork))
                 .collect(),
+            main_records: records(&self.main_records),
+            function_records: self.function_records.iter().map(records).collect(),
             closure_signatures: RefCell::new(self.closure_signatures.borrow().fork_copy(fork)),
         }
     }

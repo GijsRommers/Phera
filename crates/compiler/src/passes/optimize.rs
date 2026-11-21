@@ -90,6 +90,7 @@ pub(crate) fn target_mut(instruction: &mut Instruction) -> Option<&mut Target> {
         | Instruction::JumpIfNotNull { target, .. } => Some(target),
         Instruction::ReceiveDefault { passed, .. } => Some(passed),
         Instruction::BindStatic { initialized, .. } => Some(initialized),
+        Instruction::FinallyCall { target, .. } => Some(target),
         Instruction::IterNext { end, .. } | Instruction::IterNextKeyed { end, .. } => Some(end),
         _ => None,
     }

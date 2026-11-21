@@ -64,6 +64,13 @@ $numbers = numbers(); $word = 'hello'; echo $numbers->current(), "\n"; echo $num
 $stack = new SplStack(); $stack->push($three); $stack->push($word); echo $stack->pop(), ' ', $stack->count(), "\n";
 // Arguments the quick test refuses at first: widening, a class not cached yet.
 $seven = 7; echo $shape->half($seven), ' ', $square->same($shape), ' ', $shape->same($square), "\n";
+function aroundTry(Shape $shape, int $i): string {
+    $before = $shape->add($i, 1);
+    try { $inside = $shape->add($i, thrower()); } catch (RuntimeException $e) { $inside = $shape->add($i, 2); }
+    finally { $after = $shape->add($i, 3); }
+    return "$before $inside $after " . $shape->add($i);
+}
+echo aroundTry($shape, $i), "\n";
 function recursive(Shape $shape, int $depth): int { return $depth === 0 ? 0 : 1 + recursive($shape, $shape->add($depth, -1)); }
 echo recursive($shape, 3), "\n";
 "#;

@@ -96,10 +96,37 @@ pub(crate) fn rewrite(function: &mut Function) {
             function.instructions[call.call] = Instruction::CallMethod { site, dst, result };
         }
     }
-    if function.handlers.is_empty() {
-        crate::passes::optimize::compact_nops(function);
-    }
+    compact(function);
     append_fallbacks(function, &originals);
+}
+
+/// Removes the `Nop`s the rewrite left (and any other), renumbering the
+/// jump targets, the `finally` entries and the `try` ranges, so that a
+/// function with a `try` runs no empty instructions either.
+fn compact(function: &mut Function) {
+    let mut offsets = Vec::with_capacity(function.instructions.len() + 1);
+    let mut kept = 0u32;
+    for instruction in function.instructions.iter() {
+        offsets.push(kept);
+        if !matches!(instruction, Instruction::Nop) {
+            kept += 1;
+        }
+    }
+    offsets.push(kept);
+    let renumber = |target: &mut Target| {
+        target.0 = offsets.get(target.index()).copied().unwrap_or(target.0);
+    };
+    for handler in &mut function.handlers {
+        renumber(&mut handler.start);
+        renumber(&mut handler.end);
+        if let Some(catch) = &mut handler.catch {
+            renumber(catch);
+        }
+        if let Some(finally) = &mut handler.finally {
+            renumber(finally);
+        }
+    }
+    crate::passes::optimize::compact_nops(function);
 }
 
 /// `CallMethod` reads every argument at the call, so a literal loaded into
@@ -329,6 +356,39 @@ mod tests {
         }"#;
         // Only the inner `$o->n($a)` of the fifth call is one instruction.
         assert_eq!(calls(source, "f"), (1, 6));
+    }
+
+    #[test]
+    fn a_function_with_a_try_keeps_no_empty_instructions() {
+        let source = r#"<?php function f($o, $a) {
+            $o->m($a, 1);
+            try { $o->m(thrower()); } catch (Exception $e) { $o->m($a); } finally { $o->m(); }
+            return $o->m($a);
+        }"#;
+        let unit = crate::compile(source, "f.php").expect("compiles");
+        let function = unit.functions.iter().find(|f| f.name == "f").expect("f");
+        assert!(
+            !function
+                .instructions
+                .iter()
+                .any(|i| matches!(i, Instruction::Nop)),
+            "{:?}",
+            function.instructions
+        );
+        // `try`/`catch`/`finally` has two handlers; the innermost is first.
+        let handler = function.handlers.first().expect("a handler");
+        // The protected range still starts at the call inside the `try`.
+        let protected = &function.instructions[handler.start.index()..handler.end.index()];
+        assert!(
+            protected
+                .iter()
+                .any(|i| matches!(i, Instruction::InitMethodCall { .. }))
+        );
+        assert!(
+            !protected
+                .iter()
+                .any(|i| matches!(i, Instruction::CallMethod { .. }))
+        );
     }
 
     #[test]

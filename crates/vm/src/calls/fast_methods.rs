@@ -15,6 +15,7 @@
 //! first register holds `$this`. Everything else answers [`Step::Slow`]
 //! without having changed anything, and `Vm::execute` applies every rule.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use phera_bytecode::{
@@ -30,6 +31,7 @@ use crate::calls::window_context::WindowContext;
 use crate::classes::method_table::FoundMethod;
 use crate::classes::{Class, ClassIndex, MethodBody};
 use crate::code_table::{FunctionIndex, FunctionShape, NameKey};
+use crate::unit_caches::{SiteOutcome, SiteRecord};
 
 impl Machine<'_> {
     /// `InitMethodCall` of a public instance method written in PHP: reserve
@@ -98,85 +100,126 @@ impl Machine<'_> {
         }
     }
 
-    /// `CallMethod`: enter the PHP method that method site `site` calls,
-    /// with its arguments in a new window. Where that cannot be done here,
-    /// the call is prepared as `InitMethodCall` would prepare it and the
-    /// sends written out at the site's fallback run next; where the VM must
-    /// prepare it (`__call`, an error, a closure or a generator), the
-    /// instruction goes to the VM, which starts the written-out call.
+    /// `CallMethod`: what method site `site` found for the receiver's class
+    /// the last time (its record) or else finds now, then done. A PHP method
+    /// is entered from here, with its arguments in a new window; a native
+    /// method is prepared by the site's written-out `InitMethodCall`, which
+    /// runs next; whatever the VM must prepare (`__call`, an error, a
+    /// closure or a generator) goes to the VM, which starts the written-out
+    /// call.
     #[inline(never)]
     pub(super) fn call_method(
         &mut self,
         position: Position,
-        site: MethodSiteId,
+        site_id: MethodSiteId,
         destination: Reg,
     ) -> Step {
-        let body = self.code.function(position.frame.function);
-        let Some(site) = body.method_sites.get(site.index()) else {
+        let code = self.code;
+        let body = code.function(position.frame.function);
+        let Some(site) = body.method_sites.get(site_id.index()) else {
             return Step::Slow;
         };
-        self.enter_method_site(position, body, site, destination)
-    }
-
-    /// See [`Machine::call_method`]: the receiver's method found once, then
-    /// entered, prepared, or left to the VM.
-    #[inline(always)]
-    fn enter_method_site(
-        &mut self,
-        position: Position,
-        body: &phera_bytecode::Function,
-        site: &MethodSite,
-        destination: Reg,
-    ) -> Step {
-        let fallback = site.fallback.index();
-        let base = position.frame.base();
-        let object = match self.registers.window(base + site.receiver.index(), 1) {
+        let object = match self
+            .registers
+            .window(position.frame.base() + site.receiver.index(), 1)
+        {
             [Some(Value::Object(object))] => object.clone(),
             _ => return Step::Slow,
         };
         let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
             return Step::Slow;
         };
+        // A closure's scope can change from one call to the next, so its
+        // sites keep no record.
+        let record = match position.frame.kind() {
+            CallKind::Closure => None,
+            _ => code.cache(position.frame.function).site_record(
+                code.facts(position.frame.function),
+                body.method_sites.len(),
+                site_id,
+            ),
+        };
+        let outcome = match record.map(Cell::get) {
+            Some(SiteRecord {
+                class: Some(index),
+                outcome,
+            }) if index == class.index => outcome,
+            _ => {
+                let outcome = self.resolve_site(position, site, class);
+                if let Some(record) = record {
+                    record.set(SiteRecord {
+                        class: Some(class.index),
+                        outcome,
+                    });
+                }
+                outcome
+            }
+        };
+        match outcome {
+            SiteOutcome::Enter(function) => {
+                self.enter_site_method(position, (body, site), function, object, destination)
+            }
+            SiteOutcome::Native => Step::Done(site.fallback.index()),
+            SiteOutcome::Vm => Step::Slow,
+        }
+    }
+
+    /// What method site `site` does for a receiver of class `class`: the
+    /// method found by name, and whether the site's scope may call it. It
+    /// depends on nothing else, so the site records it.
+    #[cold]
+    #[inline(never)]
+    fn resolve_site(&self, position: Position, site: &MethodSite, class: &Class) -> SiteOutcome {
         let key = self
             .code
             .unit_name_key(position.frame.function, site.method);
         let Some(found) = self.classes.method_table(class).get(key) else {
-            return Step::Slow;
+            return SiteOutcome::Vm;
         };
         let method = found.method;
-        // The sends written out at the fallback, which follow its
-        // `InitMethodCall`.
-        let sends = Position {
-            frame: position.frame,
-            ip: fallback + 1,
-        };
-        let function = match method.body {
-            MethodBody::User(function) => function,
-            // `Closure::__invoke` and the methods of a generator have
-            // their own preparation in the VM.
-            MethodBody::Native(_) if class.name == "Closure" || class.name == "Generator" => {
-                return Step::Slow;
-            }
-            MethodBody::Native(_) => {
-                // Owned, so that the preparation may change the machine.
-                let found = (found.method.clone(), found.scope.clone());
-                return self.prepare_native_site(sends, &object, (class, key, found));
-            }
-            _ => return Step::Slow,
-        };
-        let scope = self.caller_scope(position);
-        if method.is_abstract
-            || method.is_static
-            || !may_call(&found, scope)
-            || self.shadowed_by_private(scope, key, method)
-        {
-            return Step::Slow;
+        if method.is_abstract || method.is_static {
+            return SiteOutcome::Vm;
         }
+        match method.body {
+            MethodBody::User(function) => {
+                let scope = self.caller_scope(position);
+                if may_call(&found, scope) && !self.shadowed_by_private(scope, key, method) {
+                    SiteOutcome::Enter(function)
+                } else {
+                    SiteOutcome::Vm
+                }
+            }
+            // `Closure::__invoke` and the methods of a generator have their
+            // own preparation in the VM.
+            MethodBody::Native(_) if class.name == "Closure" || class.name == "Generator" => {
+                SiteOutcome::Vm
+            }
+            MethodBody::Native(_) => SiteOutcome::Native,
+            _ => SiteOutcome::Vm,
+        }
+    }
+
+    /// Enter the PHP method `function` of method site `site` with `object`
+    /// as `$this`: plain in shape, with arguments that are defined, not
+    /// references, passed by value and accepted by their types. Otherwise
+    /// the call becomes the prepared call `InitMethodCall` makes and the
+    /// site's written-out sends run next.
+    #[inline(always)]
+    fn enter_site_method(
+        &mut self,
+        position: Position,
+        (body, site): (&phera_bytecode::Function, &MethodSite),
+        function: FunctionIndex,
+        object: Rc<Object>,
+        destination: Reg,
+    ) -> Step {
+        let sends = site.fallback.index() + 1;
         let Some(arguments) = body.site_arguments.get(site.argument_range()) else {
             return Step::Slow;
         };
         let count = arguments.len();
         let facts = self.code.facts(function);
+        let base = position.frame.base();
         // The window, as `InitMethodCall` reserves it, with `$this`.
         let start = self.registers.len();
         let first = start + CallKind::Method.prefix();
@@ -188,22 +231,26 @@ impl Machine<'_> {
             || count > facts.parameters as usize
             || self.stack.depth() >= self.frame_limit
         {
-            return self.record_site_call(function, start, sends.ip);
+            return self.record_site_call(function, start, sends);
         }
         for (index, argument) in arguments.iter().enumerate() {
+            // A by-reference parameter binds to the variable itself, which
+            // only the written-out `SendLocal` does.
+            if !facts.takes_value(index) {
+                return self.record_site_call(function, start, sends);
+            }
             let value = match self.registers.window(base + argument.register().index(), 1) {
                 [Some(value)] if !value.is_reference() => value,
-                _ => return self.record_site_call(function, start, sends.ip),
+                _ => return self.record_site_call(function, start, sends),
             };
-            let plain = facts.takes_value(index)
-                && (!facts.is_typed(index)
-                    || facts.parameter_masks[index].intersects(crate::types::own_type(value)));
+            let plain = !facts.is_typed(index)
+                || facts.parameter_masks[index].intersects(crate::types::own_type(value));
             let mut value = value.clone();
             if !plain
                 && !self.accepts_argument(function, index, &value)
                 && !self.accepts_on_second_look(function, index, &mut value)
             {
-                return self.record_site_call(function, start, sends.ip);
+                return self.record_site_call(function, start, sends);
             }
             self.registers.put(first + index, value);
         }
@@ -233,65 +280,6 @@ impl Machine<'_> {
         );
         self.stack.push_call(call, None);
         Step::Done(sends)
-    }
-
-    /// A method site whose method is native: prepared as `InitMethodCall`
-    /// prepares it, with `sends` as the position after it (a getter with no
-    /// arguments runs at once there, its `Call` being next). `Step::Slow`
-    /// for whatever that preparation leaves to the VM.
-    #[cold]
-    #[inline(never)]
-    fn prepare_native_site(
-        &mut self,
-        sends: Position,
-        object: &Rc<Object>,
-        (class, key, (method, scope)): (&Class, NameKey, FoundParts),
-    ) -> Step {
-        let found = FoundMethod {
-            method: &method,
-            scope: &scope,
-        };
-        self.prepare_found_native(sends, object, (class, key), &found)
-    }
-
-    /// `InitMethodCall` of a native method, as [`Machine::prepare_method`]
-    /// prepares it, for a method site that found the method by `key`: a
-    /// getter with no parameters whose `Call` comes next runs at once, any
-    /// other public native method is described for its `Call`.
-    fn prepare_found_native(
-        &mut self,
-        position: Position,
-        object: &Rc<Object>,
-        (class, key): (&Class, NameKey),
-        found: &FoundMethod<'_>,
-    ) -> Step {
-        let method = found.method;
-        let MethodBody::Native(entry) = method.body else {
-            return Step::Slow;
-        };
-        if method.is_abstract
-            || method.is_static
-            || class.name == "Closure"
-            || class.name == "Generator"
-        {
-            return Step::Slow;
-        }
-        if entry.direct.is_some()
-            && entry.params.is_empty()
-            && let Some((destination, value)) =
-                self.run_direct_getter(position, object, (found, key))
-        {
-            self.registers
-                .put(position.frame.base() + destination.index(), value);
-            return Step::Done(position.ip + 1);
-        }
-        let Some((context, method)) = self.native_class_method((object, class), found, key) else {
-            return Step::Slow;
-        };
-        match entry.direct {
-            Some(_) => self.prepare_direct_method(position, context, method, entry),
-            None => self.prepare_native_method(position, context, method),
-        }
     }
 
     /// The class scope of the code at `position`: for a method, the class
@@ -544,6 +532,3 @@ fn descends_from(class: &Rc<Class>, ancestor: &Class) -> bool {
     }
     false
 }
-
-/// A found method held by value: the method and the class that declares it.
-type FoundParts = (Rc<crate::classes::Method>, std::rc::Weak<Class>);
