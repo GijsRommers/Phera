@@ -277,23 +277,7 @@ impl Vm {
             .map(|(position, param)| {
                 let metadata = metadata.and_then(|metadata| metadata.parameters.get(position));
                 let optional = required.is_none_or(|required| position > required);
-                let declared_type = param.ty.map(|id| {
-                    let ty = &unit.types[id.index()].display;
-                    if param.default_display.as_deref() == Some("null")
-                        && !ty.starts_with('?')
-                        && !ty.split('|').any(|name| matches!(name, "null" | "mixed"))
-                    {
-                        if ty.contains('|') {
-                            format!("{ty}|null")
-                        } else if ty.contains('&') {
-                            format!("({ty})|null")
-                        } else {
-                            format!("?{ty}")
-                        }
-                    } else {
-                        ty.clone()
-                    }
-                });
+                let declared_type = param.ty.map(|id| unit.types[id.index()].display.clone());
                 ParameterInfo {
                     name: unit.names[param.name.index()].clone(),
                     position,

@@ -597,3 +597,150 @@ async fn temporary_files_and_unused_contexts_of_the_boot_are_each_forks_own() {
     let expected = "boot-data+fork tmp+fork 616263 CurlMultiHandle CurlShareHandle";
     assert_eq!(answers, [expected, expected]);
 }
+
+/// Two files that declare a function of the same name, run by different
+/// requests of one worker: each request calls its own, although the worker
+/// numbers both files' functions in one table.
+#[tokio::test(flavor = "current_thread")]
+async fn two_files_with_the_same_function_name_on_different_requests_of_a_worker() {
+    let site = Site::new("same-function");
+    std::fs::write(
+        site.root.join("a.php"),
+        "<?php function helper() { return 'a'; } echo helper();",
+    )
+    .expect("a.php");
+    std::fs::write(site.root.join("b.php"), "<?php function helper() { return 'b'; } echo helper(), ' ', function_exists('other') ? 'other' : 'none';").expect("b.php");
+    std::fs::write(
+        site.root.join("c.php"),
+        "<?php function other() {} echo function_exists('helper') ? 'helper' : 'none';",
+    )
+    .expect("c.php");
+    let local = tokio::task::LocalSet::new();
+    let answers = local
+        .run_until(async {
+            let worker = Runtime::new().web_worker(0);
+            let mut answers = Vec::new();
+            for script in ["a.php", "b.php", "c.php", "a.php", "b.php"] {
+                let path = site.root.join(script);
+                let response = worker
+                    .handle_request(&path, &site.root, request(&format!("/{script}")))
+                    .await;
+                answers.push(String::from_utf8_lossy(&response.body).into_owned());
+            }
+            answers
+        })
+        .await;
+    assert_eq!(answers, ["a", "b none", "none", "a", "b none"]);
+}
+
+/// Runs `targets` (script and query) as requests of one unbooted worker,
+/// whose requests share the worker's linked classes.
+async fn worker_answers(runtime: Runtime, site: &Site, targets: &[&str]) -> Vec<String> {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let worker = runtime.web_worker(0);
+            let mut answers = Vec::new();
+            for target in targets {
+                let script = site.root.join(target.split('?').next().unwrap_or(target));
+                let response = worker
+                    .handle_request(&script, &site.root, request(&format!("/{target}")))
+                    .await;
+                answers.push(String::from_utf8_lossy(&response.body).into_owned());
+            }
+            answers
+        })
+        .await
+}
+
+/// A class file edited between two requests of a worker: the second request
+/// links the new revision, as a fresh worker would; the old revision's
+/// linked class is not reused.
+#[tokio::test(flavor = "current_thread")]
+async fn a_class_file_edited_between_two_requests_links_its_new_revision() {
+    let site = Site::new("edited-class");
+    let model = site.root.join("model.php");
+    std::fs::write(
+        &model,
+        "<?php class Model { function value() { return 'old'; } }",
+    )
+    .expect("model");
+    std::fs::write(site.root.join("index.php"), "<?php require __DIR__ . '/model.php'; $m = new Model; echo $m->value(), ' ', method_exists($m, 'added') ? 'added' : 'none';").expect("index");
+    let runtime = Runtime::new().with_web_development(true);
+    let local = tokio::task::LocalSet::new();
+    let answers = local
+        .run_until(async {
+            let worker = runtime.web_worker(0);
+            let index = site.root.join("index.php");
+            let mut answers = Vec::new();
+            for step in 0..4 {
+                if step == 2 {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    std::fs::write(&model, "<?php class Model { function value() { return 'new'; } function added() {} }").expect("edit");
+                }
+                let response = worker.handle_request(&index, &site.root, request("/index.php")).await;
+                answers.push(String::from_utf8_lossy(&response.body).into_owned());
+            }
+            answers
+        })
+        .await;
+    assert_eq!(answers, ["old none", "old none", "new added", "new added"]);
+}
+
+/// Conditional declarations resolve per request: a class declared in either
+/// branch of an `if`, and one name declared by two files on alternating
+/// requests, are each request's own class.
+#[tokio::test(flavor = "current_thread")]
+async fn conditional_and_same_name_declarations_resolve_per_request() {
+    let site = Site::new("conditional-classes");
+    std::fs::write(site.root.join("branch.php"), "<?php if (isset($_GET['one'])) { class C { function n() { return 'one'; } } } else { class C { function n() { return 'two'; } } } echo (new C)->n();").expect("branch");
+    std::fs::write(site.root.join("first.php"), "<?php class D { const V = 'first'; } echo D::V, ' ', class_exists('E', false) ? 'E' : 'no E';").expect("first");
+    std::fs::write(site.root.join("second.php"), "<?php class D { const V = 'second'; } class E {} echo D::V, ' ', class_exists('E', false) ? 'E' : 'no E';").expect("second");
+    let answers = worker_answers(
+        Runtime::new(),
+        &site,
+        &[
+            "branch.php?one=1",
+            "branch.php",
+            "branch.php?one=1",
+            "first.php",
+            "second.php",
+            "first.php",
+            "second.php",
+        ],
+    )
+    .await;
+    assert_eq!(
+        answers,
+        [
+            "one",
+            "two",
+            "one",
+            "first no E",
+            "second E",
+            "first no E",
+            "second E"
+        ]
+    );
+}
+
+/// A class whose parent is a different class in two requests is linked by
+/// each: its linked class from the first request is not reused.
+#[tokio::test(flavor = "current_thread")]
+async fn a_class_with_another_parent_in_another_request_is_linked_again() {
+    let site = Site::new("other-parent");
+    std::fs::write(site.root.join("child.php"), "<?php class Child extends Base { use Greets; function name() { return parent::name() . '+child'; } }").expect("child");
+    std::fs::write(
+        site.root.join("greets.php"),
+        "<?php trait Greets { function greet() { return 'hi ' . $this->name(); } }",
+    )
+    .expect("trait");
+    std::fs::write(site.root.join("a.php"), "<?php class Base { function name() { return 'a'; } } require __DIR__ . '/greets.php'; require __DIR__ . '/child.php'; echo (new Child)->greet();").expect("a");
+    std::fs::write(site.root.join("b.php"), "<?php class Base { function name() { return 'b'; } } require __DIR__ . '/greets.php'; require __DIR__ . '/child.php'; echo (new Child)->greet();").expect("b");
+    let answers =
+        worker_answers(Runtime::new(), &site, &["a.php", "b.php", "a.php", "b.php"]).await;
+    assert_eq!(
+        answers,
+        ["hi a+child", "hi b+child", "hi a+child", "hi b+child"]
+    );
+}

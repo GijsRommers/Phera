@@ -11,6 +11,9 @@ $statement->execute(['id' => 42]);
 $user = $statement->fetch(PDO::FETCH_ASSOC);
 ```
 
+In PostgreSQL PDO statements, write `??` for a literal question mark
+operator, as in `SELECT data ?? 'title' FROM posts WHERE id = ?`.
+
 Every database wait is asynchronous: while one request waits for its query,
 its worker thread runs other requests. The drivers sit behind one interface,
 `src/drivers/mod.rs`, which also says what adding a driver takes.
@@ -110,6 +113,15 @@ These throw a PDOException that says "... is not supported yet":
 
 MySQL `LOCAL INFILE` and its directory option are refused because clients would
 otherwise allow the server to request files from the application host.
+
+## Differences from PHP 8.5
+
+- PDO PostgreSQL emulation treats the entire nested comment `/* a /* ? */ :v */`
+  as a comment. Binding `:v` for that text returns `HY093`. PHP 8.5 can treat
+  `:v` as a placeholder because its scanner stops at the inner `*/`.
+- PDO PostgreSQL emulation rejects a binding for a marker in an unterminated
+  literal such as `SELECT 'abc ? AS y` with `HY093` before sending SQL. PHP 8.5
+  substitutes the value and PostgreSQL reports a syntax error.
 
 ## Tests
 

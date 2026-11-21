@@ -183,6 +183,7 @@ mod types;
 mod unit_caches;
 mod unpacking;
 mod unsupported_items;
+mod worker_code;
 
 pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
@@ -261,6 +262,9 @@ pub struct Vm {
     /// Whether output or a diagnostic needs to invoke a PHP callback.
     pending_callbacks: bool,
     failed_native: Option<error_traces::NativeTrace>,
+    /// The arguments of a native call that missed a class, kept by the miss
+    /// for its second call (see `calls::native_retries`).
+    missed_native: Option<Vec<Value>>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
     reflection_cache: Option<Box<reflection::ReflectionCache>>,
@@ -290,7 +294,7 @@ impl Vm {
 
     /// Start a fresh request with the worker's already linked built-ins.
     pub fn with_native_tables(native: &NativeTables) -> Self {
-        let classes = classes::ClassTable::new(native.classes.clone());
+        let classes = classes::ClassTable::new(native.classes.clone(), native.linked.clone());
         let object_ids = classes.ids_handle();
         Self {
             enum_cases: classes::enums::EnumCases::default(),
@@ -321,8 +325,8 @@ impl Vm {
             native_view_depth: None,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
-            code: code_table::CodeTable::default(),
-            class_states: Default::default(),
+            code: code_table::CodeTable::for_worker(&native.code),
+            class_states: classes::class_state::ClassStates::for_worker(&native.slots),
             globals: globals::Globals::new(),
             extension_values: Default::default(),
             static_variables: static_variables::StaticVariables::new(),
@@ -348,6 +352,7 @@ impl Vm {
             error_handlers: error_handlers::ErrorHandlers::default(),
             pending_callbacks: false,
             failed_native: None,
+            missed_native: None,
             state: RequestState::default(),
             reflection_cache: None,
         }

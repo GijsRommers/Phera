@@ -36,8 +36,13 @@ enum State {
 struct Frame {
     container: Container,
     state: State,
+    values: Option<Members>,
+}
+
+#[derive(Default)]
+struct Members {
     key: Option<ArrayKey>,
-    values: PhpArray,
+    entries: PhpArray,
 }
 
 /// Parses a whole document. `factory` makes the objects, unless
@@ -46,9 +51,9 @@ pub(super) fn parse(
     bytes: &[u8],
     depth: usize,
     flags: DecodeFlags,
-    factory: ObjectFactory<'_>,
+    mut factory: Option<ObjectFactory<'_>>,
 ) -> Result<Value, Error> {
-    let mut scanner = Scanner::new(bytes, flags);
+    let mut scanner = Scanner::new(bytes, flags, factory.is_some());
     let mut frames: Vec<Frame> = Vec::new();
     let mut root = None;
     loop {
@@ -77,8 +82,7 @@ pub(super) fn parse(
                 frames.push(Frame {
                     container,
                     state: State::First,
-                    key: None,
-                    values: PhpArray::new(),
+                    values: factory.is_some().then(Members::default),
                 });
             }
             Token::Close(container) => {
@@ -86,12 +90,24 @@ pub(super) fn parse(
                 if container != frame.container {
                     return Err(Error::State);
                 }
-                let value = if container == Container::Object && !flags.associative {
-                    factory(frame.values)
-                } else {
-                    Value::from(frame.values)
+                let value = match (frame.values, &mut factory) {
+                    (Some(members), Some(factory))
+                        if container == Container::Object && !flags.associative =>
+                    {
+                        factory(members.entries)
+                    }
+                    (Some(members), _) => Value::from(members.entries),
+                    (None, _) => Value::Null,
                 };
                 accept(&mut frames, &mut root, value, flags)?;
+            }
+            Token::String(string) => {
+                accept(
+                    &mut frames,
+                    &mut root,
+                    string.map_or(Value::Null, Value::from),
+                    flags,
+                )?;
             }
             Token::Value(value) => accept(&mut frames, &mut root, value, flags)?,
             _ => return Err(Error::Syntax),
@@ -107,16 +123,18 @@ fn accept(
     flags: DecodeFlags,
 ) -> Result<(), Error> {
     if let Some(frame) = frames.last_mut() {
-        if frame.container == Container::Object {
-            let key = frame.key.take().ok_or(Error::Syntax)?;
-            if !flags.associative
-                && matches!(&key, ArrayKey::String(name) if name.as_bytes().first() == Some(&0))
-            {
-                return Err(Error::Property);
+        if let Some(members) = &mut frame.values {
+            if frame.container == Container::Object {
+                let key = members.key.take().ok_or(Error::Syntax)?;
+                if !flags.associative
+                    && matches!(&key, ArrayKey::String(name) if name.as_bytes().first() == Some(&0))
+                {
+                    return Err(Error::Property);
+                }
+                members.entries.insert(key, value);
+            } else {
+                members.entries.push(value).map_err(|_| Error::Syntax)?;
             }
-            frame.values.insert(key, value);
-        } else {
-            frame.values.push(value).map_err(|_| Error::Syntax)?;
         }
         frame.state = State::Comma;
     } else {
@@ -152,14 +170,17 @@ impl Frame {
                 return Ok(None);
             }
             State::Key | State::First if self.container == Container::Object => {
-                let Token::Value(Value::String(name)) = token else {
+                let Token::String(name) = token else {
                     return Err(Error::Syntax);
                 };
-                self.key = Some(if flags.associative {
-                    ArrayKey::from_value(&Value::String(name)).map_err(|_| Error::Syntax)?
-                } else {
-                    ArrayKey::String(name)
-                });
+                if let (Some(members), Some(name)) = (&mut self.values, name) {
+                    let name = name.into();
+                    members.key = Some(if flags.associative {
+                        ArrayKey::from_value(&Value::String(name)).map_err(|_| Error::Syntax)?
+                    } else {
+                        ArrayKey::String(name)
+                    });
+                }
                 self.state = State::Colon;
                 return Ok(None);
             }

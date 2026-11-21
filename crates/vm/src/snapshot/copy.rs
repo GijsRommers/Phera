@@ -101,6 +101,10 @@ impl Vm {
             }
         }
         let ids = fork.ids().clone();
+        #[cfg(debug_assertions)]
+        if std::env::var_os("PHERA_FORK_FOOTPRINT").is_some() {
+            super::footprint::report(&fork, &code, &registers, &class_states);
+        }
         let copies = fork.finish().map_err(|refusal| SnapshotRefusal {
             class: refusal.class,
             reason: refusal.reason,
@@ -154,6 +158,7 @@ impl Vm {
             error_handlers,
             pending_callbacks: false,
             failed_native: None,
+            missed_native: None,
             state,
             reflection_cache: None,
             property_references,

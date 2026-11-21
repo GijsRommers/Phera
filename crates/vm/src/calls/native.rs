@@ -85,9 +85,19 @@ impl Vm {
                     &mut self.native_view_depth,
                     destination.map(|_| self.call_stack.depth()),
                 );
-                let result = self
+                let mut result = self
                     .native_entry_origin(*entry, arguments, origin, callee.argument_binding)
                     .await;
+                // A class miss loads the class and calls the native again
+                // (see `calls::native_retries`).
+                if let Err(error) = &result
+                    && crate::autoload::ClassMiss::is(error)
+                    && let Err(error) = result
+                {
+                    result = self
+                        .retry_missed_function(*entry, (origin, callee.argument_binding), error)
+                        .await;
+                }
                 self.native_view_depth = previous_view;
                 self.native_called_class = previous;
                 if self.output_writer.buffers.pending.is_some() && result.is_ok() {
@@ -170,9 +180,19 @@ impl Vm {
                     .map(Some)
             }
             CallTarget::Method { method, context } => {
-                let result = self
+                let mut result = self
                     .native_method_window(method, context, arguments, named, origin)
                     .await;
+                // A class miss loads the class and calls the native again
+                // (see `calls::native_retries`).
+                if let Err(error) = &result
+                    && crate::autoload::ClassMiss::is(error)
+                    && let Err(error) = result
+                {
+                    result = self
+                        .retry_missed_method((method, context), (named, origin), error)
+                        .await;
+                }
                 match result {
                     Ok(value) => Ok(Some(value)),
                     Err(error) => {

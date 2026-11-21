@@ -44,7 +44,7 @@ pub(crate) fn json_decode(context: &mut dyn Context, arguments: &[Value]) -> Nat
             Value::from(properties)
         }
     };
-    let result = parser::parse(bytes, depth, flags, &mut make_object);
+    let result = parser::parse(bytes, depth, flags, Some(&mut make_object));
     match result {
         Ok(value) => error::finish(context, Error::None, flags.throw_on_error, value),
         Err(error) => error::finish(context, error, flags.throw_on_error, Value::Null),
@@ -73,9 +73,7 @@ pub(crate) fn json_validate(context: &mut dyn Context, arguments: &[Value]) -> N
 }
 
 pub(crate) fn validate(bytes: &[u8], depth: usize, bits: i64) -> Result<Value, Error> {
-    let mut flags = DecodeFlags::from_bits(bits);
-    flags.associative = true;
-    parser::parse(bytes, depth, flags, &mut Value::from)
+    parser::parse(bytes, depth, DecodeFlags::from_bits(bits), None)
 }
 
 /// `$depth` must be from 1 to `i32::MAX`, PHP's C int.

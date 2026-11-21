@@ -59,6 +59,25 @@ pub(crate) enum CachedSite {
 }
 
 impl UnitCache {
+    /// What a fork's copy of this cache holds on the heap, in bytes: the
+    /// site cells made so far, the per-function cell boxes, and the
+    /// per-symbol and per-type resolution slots. The shared literal tables
+    /// cost a fork nothing. See `crate::snapshot::footprint`.
+    pub(crate) fn fork_bytes(&self) -> (usize, usize, usize) {
+        use std::mem::size_of;
+        let made = |sites: &Sites| sites.get().map_or(0, |cells| cells.len());
+        let cells = (made(&self.main_sites) + self.function_sites.iter().map(made).sum::<usize>())
+            * size_of::<RefCell<CachedSite>>();
+        let boxes = (self.function_sites.len() + 1) * size_of::<Sites>();
+        let slots = self.classes.len() * size_of::<RefCell<Option<Rc<crate::classes::Class>>>>()
+            + self.class_types.len() * size_of::<RefCell<Option<ClassTypeEntry>>>()
+            + self.symbols.borrow().len()
+                * size_of::<Option<crate::calls::pending::LinkedFunction>>()
+            + self.closure_signatures.borrow().len()
+                * size_of::<Option<crate::calls::call_state::Callee>>();
+        (cells, boxes, slots)
+    }
+
     pub(crate) fn trace_file(&self, unit: &CompiledUnit) -> Value {
         Value::String(
             self.trace_file

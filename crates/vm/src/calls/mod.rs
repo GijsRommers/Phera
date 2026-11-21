@@ -53,6 +53,7 @@ mod native_function;
 mod native_loops;
 mod native_method;
 mod native_ready;
+mod native_retries;
 mod native_signature;
 pub(crate) mod parameter_binding;
 pub(crate) mod pending;

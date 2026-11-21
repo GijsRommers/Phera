@@ -6,6 +6,37 @@ use crate::ir::{Instruction, Place, Target};
 use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
+    /// Literal null defaults on ordinary parameters also accept an explicit null argument.
+    pub(super) fn parameter_type(&self, parameter: &ast::Parameter) -> Option<String> {
+        let mut declared = self.declaration_type(parameter.ty.as_ref()?);
+        if parameter.is_promoted()
+            || !matches!(
+                parameter.default.as_ref().map(|default| &default.kind),
+                Some(ast::ExpressionKind::Literal(ast::Literal::Null))
+            )
+            || declared.starts_with('?')
+            || declared
+                .split('|')
+                .any(|member| matches!(member, "null" | "mixed" | "void" | "never"))
+        {
+            return Some(declared);
+        }
+        self.compile_diagnostics.borrow_mut().push(phera_source::CompileDiagnostic {
+            kind: phera_source::CompileDiagnosticKind::Deprecated,
+            message: format!(
+                "{}(): Implicitly marking parameter ${} as nullable is deprecated, the explicit nullable type must be used instead",
+                self.function.name, parameter.name
+            ),
+            line: self.lines.line(parameter.span.start),
+        });
+        if declared.contains(['|', '&']) {
+            declared.push_str("|null");
+        } else {
+            declared.insert(0, '?');
+        }
+        Some(declared)
+    }
+
     /// Unsupported declaration metadata must fail before any body is emitted.
     pub(crate) fn validate_parameter_features(
         &self,
@@ -72,7 +103,7 @@ impl Compiler<'_> {
         parameters: &[ast::Parameter],
         line: usize,
     ) -> Result<(), CompileError> {
-        for parameter in parameters {
+        for (index, parameter) in parameters.iter().enumerate() {
             if let Some(default) = &parameter.default {
                 self.validate_parameter_default(parameter, default, line)?;
                 let param = self.local(&parameter.name)?;
@@ -95,11 +126,16 @@ impl Compiler<'_> {
                     },
                     line,
                 );
-                if let Some(ty) = &parameter.ty {
+                if let Some(declaration_type) = self
+                    .function
+                    .parameters
+                    .get(index)
+                    .and_then(|parameter| parameter.declaration_type.clone())
+                {
                     self.emit(
                         Instruction::Check {
                             local: param,
-                            declaration_type: self.declaration_type(ty),
+                            declaration_type,
                         },
                         line,
                     );

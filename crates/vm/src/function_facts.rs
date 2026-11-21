@@ -80,6 +80,26 @@ impl FunctionFacts {
         index < self.parameters as usize && index < 64 && self.special & (1 << index) == 0
     }
 
+    /// The facts at a number of a function the request has not loaded: no
+    /// unit, no code. They are never run (see `crate::code_table::CodeTable`).
+    pub(crate) fn placeholder() -> Self {
+        Self::bind(
+            (UnitIndex(u32::MAX), FunctionIndex(u32::MAX), None),
+            FunctionSignature {
+                registers: 0,
+                parameters: 0,
+                required: 0,
+                typed: 0,
+                special: 0,
+                by_reference: 0,
+                parameter_masks: std::sync::Arc::from([]),
+                return_mask: None,
+                shape: phera_bytecode::FunctionShape::Plain,
+            },
+            Default::default(),
+        )
+    }
+
     pub(crate) fn bind(
         (unit, unit_first, local): (UnitIndex, FunctionIndex, Option<u32>),
         signature: FunctionSignature,

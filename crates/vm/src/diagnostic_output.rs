@@ -86,6 +86,7 @@ impl Vm {
         message: PhpString,
         location: SourceLocation,
     ) {
+        self.diagnostic_reporter.raised += 1;
         const FATAL: i64 = 1 | 4 | 16 | 64 | 256 | 4096;
         let display = Display::from_ini(self.ini_get(b"display_errors").as_ref());
         if level & FATAL != 0 && matches!(display, Display::Off) {
