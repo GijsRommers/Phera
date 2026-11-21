@@ -32,6 +32,7 @@ mod input;
 mod io_policy;
 mod locking;
 mod metadata;
+mod file_details;
 mod mode;
 mod mutations;
 pub mod native;
@@ -112,6 +113,7 @@ impl Extension for Streams {
         ini::register(registry);
         locking::register(registry);
         metadata::register(registry);
+        file_details::register(registry);
         mutations::register(registry);
         path_text::register(registry);
         pattern::register(registry);
