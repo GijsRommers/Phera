@@ -15,9 +15,8 @@ pub(super) fn receive(
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let function = "stream_socket_recvfrom";
-        let resource = crate::resource::stream_argument(
-            args::value(&args, 0), function, "#1 ($socket)",
-        )?;
+        let resource =
+            crate::resource::stream_argument(args::value(&args, 0), function, "#1 ($socket)")?;
         if let Some(target) = args::reference(&args, 3) {
             *target.borrow_mut() = Value::Null;
         }
@@ -77,7 +76,10 @@ pub(super) fn send(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'
             None
         } else {
             let resolved = match Address::parse(Transport::Tcp, target) {
-                Ok(address) => address.resolve().await.ok()
+                Ok(address) => address
+                    .resolve()
+                    .await
+                    .ok()
                     .and_then(|addresses| addresses.into_iter().next()),
                 Err(_) => None,
             };
@@ -87,7 +89,7 @@ pub(super) fn send(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'
                     String::from_utf8_lossy(target),
                 ));
                 return Ok(Value::Bool(false));
-            }
+            };
             Some(address)
         };
         let send = || {
@@ -129,4 +131,3 @@ fn read_interest(flags: RecvFlags) -> Interest {
     let _ = flags;
     Interest::READABLE
 }
-
