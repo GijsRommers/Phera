@@ -33,6 +33,9 @@ rechecked if that type has a pending declaration in the current request.
 The worker validates the ordinary class numbers first, then checks the
 missing names against the pending declarations. Nominal comparisons use
 borrowed names and consult linked ancestry before walking declarations.
+Method contracts read the existing bytecode and native parameter slices.
+Default values are rendered only when a compatibility diagnostic uses
+them.
 
 Once the missing types are loaded, a diagnostic-free file declaration
 whose pending shape was never used returns to the ordinary linker.
