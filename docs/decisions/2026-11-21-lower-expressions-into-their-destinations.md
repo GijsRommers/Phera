@@ -24,3 +24,22 @@ Measure executed opcodes by kind on Symfony's database yardstick and
 Laravel's posts route before choosing which producers and consumers to
 change. Measure native instructions separately on all three gated routes
 and verify each change against PHP.
+
+## First lowering cases
+
+- For a literal on a `match` or ternary branch, load it into the result
+  register that both branches agree on. Nonliteral branches keep the value
+  copy for results that may carry a reference.
+- A scalar assignment statement to a plain local selects the unit constant
+  and uses the reference-aware assignment handler. Used assignment results
+  keep their own value. Replacing a local still restarts its foreach subject
+  and applies any property type bound through a reference.
+- A strict comparison with a string literal on the right reads the literal
+  by its unit index. PHP's strict comparison needs no scalar conversion,
+  object hook or recursive value comparison with a string. Missing variables
+  still use the existing warning and error-handler path before the store.
+  Other operators keep their original operand evaluation and coercion.
+
+The two new instructions are `AssignConst` and `StrictCompareConst`. They
+stay within the existing 16-byte instruction size. The general handlers
+live outside the interpreter loop and can run without a loop-specific arm.

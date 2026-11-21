@@ -230,6 +230,10 @@ pub enum Instruction {
         destination: Reg,
         constant: usize,
     },
+    AssignConst {
+        local: Reg,
+        constant: Constant,
+    },
     /// Copy a dereferenced register value; emits Move.
     Move {
         destination: Reg,
@@ -265,6 +269,12 @@ pub enum Instruction {
         operator: Binary,
         left: Reg,
         right: Reg,
+    },
+    StrictCompareConst {
+        destination: Reg,
+        left: Reg,
+        constant: Constant,
+        comparison: phera_bytecode::StrictComparison,
     },
     /// Apply a unary operation or explicit cast; emits Unary or Cast.
     Unary {

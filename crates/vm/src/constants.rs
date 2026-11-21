@@ -9,17 +9,19 @@ use phera_value::Value;
 use crate::Vm;
 
 impl Vm {
+    pub(crate) fn literal_constant(&self, constant: ConstId) -> Result<&Value, NativeError> {
+        self.current()
+            .and_then(|frame| frame.cache().constants.get(constant.index()))
+            .ok_or_else(|| internal_error!("constant"))
+    }
+
     /// Implements PHP LoadConst semantics outside the dispatch loop.
     pub(crate) fn load_constant(
         &mut self,
         destination: Reg,
         constant: ConstId,
     ) -> Result<(), NativeError> {
-        let value = self
-            .current()
-            .and_then(|frame| frame.cache().constants.get(constant.index()))
-            .cloned()
-            .ok_or_else(|| internal_error!("constant"))?;
+        let value = self.literal_constant(constant)?.clone();
         self.set(destination, value);
         Ok(())
     }

@@ -110,7 +110,8 @@ pub(crate) fn dead_after(function: &Function, index: usize, register: phera_byte
                         break;
                     }
                 }
-                Instruction::BinaryInt { dst, lhs, .. } => {
+                Instruction::BinaryInt { dst, lhs, .. }
+                | Instruction::StrictCompareConst { dst, lhs, .. } => {
                     if lhs == register {
                         return false;
                     }

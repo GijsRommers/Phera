@@ -170,6 +170,17 @@ fn retarget(instruction: Instruction, from: Reg, to: Reg) -> Option<Instruction>
             lhs,
             rhs,
         },
+        I::StrictCompareConst {
+            dst,
+            lhs,
+            rhs,
+            comparison,
+        } if dst == from => I::StrictCompareConst {
+            dst: to,
+            lhs,
+            rhs,
+            comparison,
+        },
         I::Call { dst, result } if dst == from => I::Call { dst: to, result },
         I::CallDirect {
             function,

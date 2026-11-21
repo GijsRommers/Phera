@@ -258,6 +258,12 @@ impl<'ast> Compiler<'ast> {
     /// Record a literal and load it into a fresh register.
     pub(super) fn literal(&mut self, value: Constant, line: usize) -> Result<Reg, CompileError> {
         let dst = self.allocate_register()?;
+        self.load_literal(dst, value, line);
+        Ok(dst)
+    }
+
+    /// Load a literal directly into a reserved temporary result register.
+    pub(crate) fn load_literal(&mut self, dst: Reg, value: Constant, line: usize) {
         let constant = self.function.constants.len();
         self.function.constants.push(value);
         self.emit(
@@ -267,7 +273,6 @@ impl<'ast> Compiler<'ast> {
             },
             line,
         );
-        Ok(dst)
     }
 
     /// Resolve imports before namespace fallback, preserving PHP qualification rules.

@@ -176,6 +176,23 @@ impl Vm {
                         diagnostics,
                     )?,
                 ),
+                Instruction::StrictCompareConst {
+                    dst,
+                    lhs,
+                    rhs,
+                    comparison,
+                } => (
+                    dst,
+                    crate::operators::strict_compare_const(
+                        &slot(slots, lhs),
+                        &crate::unit_caches::value(
+                            unit.constants
+                                .get(rhs.index())
+                                .ok_or_else(|| internal_error!("constant"))?,
+                        ),
+                        comparison,
+                    )?,
+                ),
                 // `'a' . self::B . 'c'` appends to its own left operand.
                 Instruction::AssignOp {
                     op: operator,

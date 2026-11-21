@@ -1,9 +1,9 @@
 //! Iterative expression-spine lowering avoids Rust recursion for long PHP chains.
 
 use phera_ast as ast;
-use phera_bytecode::Reg;
+use phera_bytecode::{Reg, StrictComparison};
 
-use crate::ir::{Argument, Constant, Instruction, Target, Unary};
+use crate::ir::{Argument, Binary, Constant, Instruction, Target, Unary};
 use crate::{CompileError, Compiler, binary};
 /// One deferred right operand, retaining its operator and source location.
 struct BinaryStep<'ast> {
@@ -163,22 +163,43 @@ impl Compiler<'_> {
                     }
                     _ => {
                         let right_local = self.compiled_variable(right)?;
-                        let rhs = match right_local {
-                            Some(local) => local,
-                            None => self.compile_expression(right)?,
-                        };
                         let operation_line = if first_local.is_some() || right_local.is_some() {
                             self.operand_line(right)
                         } else {
                             line
                         };
+                        let left = first_local.take().unwrap_or(lhs);
+                        let operator = binary(operator)
+                            .ok_or_else(|| self.error("Operator not supported yet", line))?;
+                        let comparison = match operator {
+                            Binary::Identical => Some(StrictComparison::Identical),
+                            Binary::NotIdentical => Some(StrictComparison::NotIdentical),
+                            _ => None,
+                        };
+                        if let Some(comparison) = comparison
+                            && let ast::ExpressionKind::Literal(ast::Literal::String(bytes)) =
+                                &right.kind
+                        {
+                            self.emit(
+                                Instruction::StrictCompareConst {
+                                    destination: lhs,
+                                    left,
+                                    constant: Constant::Bytes(bytes.clone()),
+                                    comparison,
+                                },
+                                operation_line,
+                            );
+                            continue;
+                        }
+                        let rhs = match right_local {
+                            Some(local) => local,
+                            None => self.compile_expression(right)?,
+                        };
                         self.emit(
                             Instruction::Binary {
                                 destination: lhs,
-                                operator: binary(operator).ok_or_else(|| {
-                                    self.error("Operator not supported yet", line)
-                                })?,
-                                left: first_local.take().unwrap_or(lhs),
+                                operator,
+                                left,
                                 right: rhs,
                             },
                             operation_line,

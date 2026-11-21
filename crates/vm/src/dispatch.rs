@@ -86,6 +86,15 @@ impl Vm {
                     .await?;
                 self.set(dst, value);
             }
+            Instruction::StrictCompareConst {
+                dst,
+                lhs,
+                rhs,
+                comparison,
+            } => {
+                self.strict_compare_const_with_undefined_operand(dst, lhs, rhs, comparison)
+                    .await?;
+            }
             Instruction::ArraySet { array, key, src }
             | Instruction::ArraySetReference { array, key, src } => {
                 let mode = if matches!(instruction, Instruction::ArraySetReference { .. }) {

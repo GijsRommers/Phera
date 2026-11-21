@@ -233,6 +233,10 @@ impl Tables<'_> {
                 destination: dst,
                 source: src,
             } => Instruction::Move { dst, src },
+            Old::AssignConst { local, constant } => Instruction::AssignConst {
+                local,
+                constant: self.constant(&constant),
+            },
             Old::Read {
                 destination: dst,
                 place,
@@ -287,6 +291,17 @@ impl Tables<'_> {
                 op: binary(op),
                 lhs,
                 rhs,
+            },
+            Old::StrictCompareConst {
+                destination: dst,
+                left: lhs,
+                constant,
+                comparison,
+            } => Instruction::StrictCompareConst {
+                dst,
+                lhs,
+                rhs: self.constant(&constant),
+                comparison,
             },
             Old::Unary {
                 destination: dst,

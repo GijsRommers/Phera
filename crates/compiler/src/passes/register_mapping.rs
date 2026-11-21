@@ -130,6 +130,7 @@ impl Instruction {
                 *src = map(*src);
             }
             Instruction::Check { local, .. } => *local = map(*local),
+            Instruction::AssignConst { local, .. } => *local = map(*local),
             Instruction::DynamicGlobal { name } => *name = map(*name),
             Instruction::Clear { register } => *register = map(*register),
             Instruction::StartCall { .. } => {}
@@ -268,6 +269,12 @@ impl Instruction {
                 *dst = map(*dst);
                 *lhs = map(*lhs);
                 *rhs = map(*rhs)
+            }
+            Instruction::StrictCompareConst {
+                destination, left, ..
+            } => {
+                *destination = map(*destination);
+                *left = map(*left);
             }
             Instruction::Branch { value, .. }
             | Instruction::BranchNull { value, .. }
