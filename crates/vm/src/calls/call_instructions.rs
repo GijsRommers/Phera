@@ -13,10 +13,13 @@ impl Vm {
     pub(crate) fn start_written_out_call<const TRACK_GENERATORS: bool>(
         &mut self,
     ) -> Result<(), NativeError> {
-        let frame = self.current().ok_or_else(|| internal_error!("no frame"))?;
+        let frame = *self
+            .call_stack
+            .current()
+            .ok_or_else(|| internal_error!("no frame"))?;
         let ip = frame.ip();
         let Some(&phera_bytecode::Instruction::InitMethodCall { receiver, method }) =
-            frame.function().instructions.get(ip)
+            self.code.instructions(frame.function).get(ip)
         else {
             return Err(internal_error!("a method site without its InitMethodCall"));
         };

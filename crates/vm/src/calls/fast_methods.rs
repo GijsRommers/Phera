@@ -122,7 +122,7 @@ impl Machine<'_> {
             .registers
             .window(position.frame.base() + site.receiver.index(), 1)
         {
-            [Some(Value::Object(object))] => object.clone(),
+            [Some(Value::Object(object))] => object,
             _ => return Step::Done(position.ip),
         };
         let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
@@ -155,19 +155,30 @@ impl Machine<'_> {
             }
         };
         match outcome {
-            SiteOutcome::Enter(function) => {
-                self.enter_site_method(position, (body, site), function, object, destination)
-            }
-            SiteOutcome::Getter(getter) => {
-                self.run_site_getter(position, site, &object, getter, destination)
-            }
-            // Prepared here as the following `InitMethodCall` would, and
-            // its sends run next.
-            SiteOutcome::Native => {
-                self.call_site_native(position, (body, site), (&object, class), destination)
-            }
             // The VM runs the following `InitMethodCall` itself.
             SiteOutcome::Vm => Step::Slow,
+            SiteOutcome::Enter(function) => {
+                let object = object.clone();
+                self.enter_site_method(position, (body, site), function, object, destination)
+            }
+            // A native getter's value goes where the call's result goes; a
+            // lazy object, or a getter that declines, takes the general
+            // sequence.
+            SiteOutcome::Getter(getter) => {
+                if self.classes.has_lazy_objects && object.lazy().is_some() {
+                    return Step::Done(position.ip);
+                }
+                let Some(value) = getter(object, &[]) else {
+                    return Step::Done(position.ip);
+                };
+                self.registers
+                    .put(position.frame.base() + destination.index(), value);
+                Step::Done(site.after.index())
+            }
+            SiteOutcome::Native => {
+                let object = object.clone();
+                self.call_site_native(position, (body, site), &object, destination)
+            }
         }
     }
 
@@ -227,9 +238,12 @@ impl Machine<'_> {
         &mut self,
         position: Position,
         (body, site): (&phera_bytecode::Function, &MethodSite),
-        (object, class): (&Rc<Object>, &Class),
+        object: &Rc<Object>,
         destination: Reg,
     ) -> Step {
+        let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
+            return Step::Done(position.ip);
+        };
         let key = self
             .code
             .unit_name_key(position.frame.function, site.method);
@@ -257,39 +271,24 @@ impl Machine<'_> {
                 return Step::Done(sends.ip);
             }
         }
-        // The call, as the loop makes it, going on after the written-out
-        // `Call`; one that needs the VM goes there through that `Call`.
+        // The call, as the loop makes it (a direct native), going on after
+        // the written-out `Call`; one that needs the VM goes there through
+        // that `Call`.
         let after = Position {
             frame: position.frame,
             ip: site.after.index(),
         };
+        let direct = self.stack.last_call().is_some_and(|call| {
+            call.flags
+                .contains(crate::calls::prepared_call::CallFlags::DIRECT_NATIVE)
+        });
+        if !direct {
+            return Step::Done(after.ip - 1);
+        }
         match self.enter_prepared(after, destination) {
             Step::Slow => Step::Done(after.ip - 1),
             step => step,
         }
-    }
-
-    /// A method site whose method is a native getter: its value goes where
-    /// the call's result goes, and the caller goes on after the call. A lazy
-    /// object, or a getter that declines, takes the general sequence.
-    #[inline(always)]
-    fn run_site_getter(
-        &mut self,
-        position: Position,
-        site: &MethodSite,
-        object: &Rc<Object>,
-        getter: crate::unit_caches::Getter,
-        destination: Reg,
-    ) -> Step {
-        if self.classes.has_lazy_objects && object.lazy().is_some() {
-            return Step::Done(position.ip);
-        }
-        let Some(value) = getter(object, &[]) else {
-            return Step::Done(position.ip);
-        };
-        self.registers
-            .put(position.frame.base() + destination.index(), value);
-        Step::Done(site.after.index())
     }
 
     /// Enter the PHP method `function` of method site `site` with `object`
