@@ -173,18 +173,20 @@ pub(crate) fn display_key(key: &ArrayKey) -> String {
 }
 
 impl Vm {
-    /// Warn when a path key register names an undefined local.
+    /// Warn when a path key or operator operand register names an undefined local.
     ///
-    /// A key used to be a temporary the compiler filled with a `Move` from
-    /// the local, and that `Move` raised PHP's "Undefined variable" warning
-    /// before the path was walked. The compiler can now name the local in the
-    /// path step itself; the warning moves to the conversion of the step's
-    /// register into a key. Only a `None` slot pays for the frame lookup, and
-    /// only a named local can warn: temporaries are always assigned first.
+    /// A key or operand used to be a temporary the compiler filled with a
+    /// `Move` from the local, and that `Move` raised PHP's "Undefined
+    /// variable" warning before the consumer ran. The compiler can now name
+    /// the local in the path step or as the operand itself; the warning moves
+    /// to where the register is read as a key or operand. Only a `None` slot
+    /// pays for the frame lookup, and only a named local can warn: temporaries
+    /// are always assigned first.
     ///
     /// ```php
     /// $row[$key];   // Undefined variable $key when $key was never assigned
     /// $o->$prop;
+    /// (int) $x;     // Undefined variable $x
     /// ```
     pub(crate) fn warn_undefined_key(&mut self, register: Reg) {
         let mut name = None;

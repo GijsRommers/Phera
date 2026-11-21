@@ -274,6 +274,9 @@ impl Vm {
         destination: Reg,
         source: Reg,
     ) -> Result<(), NativeError> {
+        // The compiler can name a local as the source operand; an undefined
+        // one warns here, where the operand is read.
+        self.warn_undefined_key(source);
         let value = self.get(source);
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let result = match to {
@@ -463,6 +466,9 @@ impl Vm {
         operator: UnaryOp,
         source: Reg,
     ) -> Result<(), NativeError> {
+        // The compiler can name a local as the source operand; an undefined
+        // one warns here, where the operand is read.
+        self.warn_undefined_key(source);
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let source_value = diagnostics.vm.get(source);
         if let Some(value) = diagnostics.vm.native_unary(operator, &source_value)? {
