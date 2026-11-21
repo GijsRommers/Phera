@@ -12,7 +12,7 @@ use crate::{
     UNCLONEABLE, allocate, bind,
     class::{ReflectedClass, reflected_class, target_class},
     class_members::{find, members},
-    engine, exception, member, receiver,
+    engine, exception, inspect, member, receiver,
 };
 
 const CASE_NAME: &[Param] = &[Param::new("name", ParamType::String)];
@@ -36,11 +36,14 @@ pub(crate) fn register(registry: &mut Registry) {
                     .returning("ReflectionEnumUnitCase"),
                 MethodEntry::public("getCases", &[], get_cases).returning("array"),
                 MethodEntry::public("isBacked", &[], |_, o, _| {
-                    Ok(Value::Bool(reflected_class(o)?.info.enum_backing.is_some()))
+                    inspect(o, |class: &ReflectedClass| {
+                        Value::Bool(class.info.enum_backing.is_some())
+                    })
                 })
                 .returning("bool"),
                 MethodEntry::public("getBackingType", &[], |c, o, _| {
-                    crate::types::make(c, reflected_class(o)?.info.enum_backing)
+                    let backing = inspect(o, |class: &ReflectedClass| class.info.enum_backing)?;
+                    crate::types::make(c, backing)
                 })
                 .returning("?ReflectionNamedType"),
             ]

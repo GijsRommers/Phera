@@ -6,7 +6,7 @@ use phera_extension_api::{
     ClassEntry, ClassKind, Context, MethodEntry, NativeResult, Object, Registry, Value,
 };
 
-use crate::{UNCLONEABLE, allocate, load, values};
+use crate::{UNCLONEABLE, allocate, inspect, load, values};
 
 #[derive(Clone)]
 pub(crate) struct ReflectedType {
@@ -28,11 +28,11 @@ pub(crate) fn register(registry: &mut Registry) {
         methods: const {
             &[
                 MethodEntry::public("allowsNull", &[], |_, o, _| {
-                    Ok(Value::Bool(allows_null(&reflected(o)?.text)))
+                    inspect(o, |ty: &ReflectedType| Value::Bool(allows_null(&ty.text)))
                 })
                 .tentative_return("bool"),
                 MethodEntry::public("__toString", &[], |_, o, _| {
-                    Ok(Value::from(reflected(o)?.text))
+                    inspect(o, |ty: &ReflectedType| Value::from(ty.text.as_str()))
                 })
                 .returning("string"),
             ]
@@ -45,12 +45,15 @@ pub(crate) fn register(registry: &mut Registry) {
         methods: const {
             &[
                 MethodEntry::public("getName", &[], |_, o, _| {
-                    Ok(Value::from(reflected(o)?.text.trim_start_matches('?')))
+                    inspect(o, |ty: &ReflectedType| {
+                        Value::from(ty.text.trim_start_matches('?'))
+                    })
                 })
                 .tentative_return("string"),
                 MethodEntry::public("isBuiltin", &[], |_, o, _| {
-                    let ty = reflected(o)?;
-                    Ok(Value::Bool(is_builtin(ty.text.trim_start_matches('?'))))
+                    inspect(o, |ty: &ReflectedType| {
+                        Value::Bool(is_builtin(ty.text.trim_start_matches('?')))
+                    })
                 })
                 .tentative_return("bool"),
             ]
@@ -96,12 +99,8 @@ pub(crate) fn make(context: &mut dyn Context, declared: Option<&str>) -> NativeR
     allocate(context, name, None, ReflectedType { text, kind })
 }
 
-fn reflected(this: Option<&Rc<Object>>) -> Result<ReflectedType, phera_extension_api::NativeError> {
-    load(this)
-}
-
 fn members(context: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
-    let ty = reflected(this)?;
+    let ty: ReflectedType = load(this)?;
     let separator = if ty.kind == Kind::Union { '|' } else { '&' };
     let mut members = Vec::new();
     for member in ty.text.split(separator) {
