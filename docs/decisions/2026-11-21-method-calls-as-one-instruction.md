@@ -29,11 +29,12 @@ PHP finds the method (`INIT_METHOD_CALL`) before it evaluates the arguments: an 
 - Replaying `InitMethodCall`, the sends and `Call` inside one VM handler: a handler that needs the async shell midway (autoload, `__call` running PHP code) could not resume the rest.
 - A hash table or a growing list of classes per site: the record is one fixed entry, replaced when the class changes.
 
-## Two benchmarks above the 1% rule, accepted for this change
+## Three benchmarks above the 1% rule, accepted for this change
 
 Against main `80694810`, with every other benchmark faster or within 1% and every route flat or lower (`/api/hello` +0.10% at twelve pairs, `/api/posts` -0.44%, the Symfony yardstick -1.54%):
 
 - `bench-reflection` +1.6%: native Reflection methods that are neither direct getters nor completed in the loop (they need the VM) pay the site's decision, about 90 instructions, on top of the general sequence.
 - `bench-generators` +1.1%: `Generator` methods are prepared by the VM, so their sites hand over to it after the decision.
+- `bench-natives` +1.4% (against main `c2f9b5c0`): native methods that need the VM pay the site's decision as well. Main `326e7438` made native methods cheaper (#169), so the decision is a larger share of a native call.
 
-Both come from a loop in which an instruction the loop cannot finish costs a trip out and back. The loop core rewrite decided on 2026-11-21 (one loop that holds the frame's window, with the call protocol inline) removes that trip, and with it these two costs. Decided by Fable, for the owner's request to reach PHP's cost.
+All three come from a loop in which an instruction the loop cannot finish costs a trip out and back. The loop core rewrite decided on 2026-11-21 (one loop that holds the frame's window, with the call protocol inline) removes that trip, and with it these costs. Decided by Fable, for the owner's request to reach PHP's cost.
