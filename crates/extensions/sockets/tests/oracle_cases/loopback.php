@@ -104,6 +104,10 @@ $receiver = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
 $sender = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
 item('set default multicast interface', socket_set_option($receiver, IPPROTO_IP, IP_MULTICAST_IF, 0));
 item('default multicast interface', socket_get_option($receiver, IPPROTO_IP, IP_MULTICAST_IF) === 0);
+$loopback = PHP_OS_FAMILY === 'Darwin' ? 'lo0' : 'lo';
+item('set multicast loopback by name', socket_set_option($receiver, IPPROTO_IP, IP_MULTICAST_IF, $loopback));
+item('resolve multicast loopback index', socket_get_option($receiver, IPPROTO_IP, IP_MULTICAST_IF) > 0);
+item('restore default multicast interface', socket_set_option($receiver, IPPROTO_IP, IP_MULTICAST_IF, 0));
 try {
     socket_bind($receiver, '127.0.0.1', -1);
 } catch (ValueError $error) {

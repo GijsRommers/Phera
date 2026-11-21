@@ -1,7 +1,7 @@
 //! `socket_select($read, $write, $except, 0)` keeps only sockets that are ready.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     os::fd::{AsFd, AsRawFd},
     sync::Arc,
     time::Duration,
@@ -13,12 +13,12 @@ use phera_extension_api::{
     ArrayKey, ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
     ParamType, PhpArray, Registry, Value, args,
 };
-use rustix::event::{PollFd, PollFlags, poll};
+#[path = "readiness.rs"]
+mod readiness;
 
 use crate::{classes, failure};
 
 const FIELDS: [&str; 3] = ["read", "write", "except"];
-const READINESS: [PollFlags; 3] = [PollFlags::IN, PollFlags::OUT, PollFlags::PRI];
 
 pub(super) fn register(registry: &mut Registry) {
     const ARRAYS: &[Param] = &[
@@ -89,67 +89,11 @@ fn select(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, Native
         let timeout = seconds.map(|seconds| {
             Duration::from_secs(seconds as u64).saturating_add(Duration::from_micros(micros as u64))
         });
-        match wait(&candidates, timeout).await {
+        match readiness::wait(&candidates, timeout).await {
             Ok(ready) => apply(&args, &candidates, ready),
-            Err(error) => failure(context, None, FUNCTION, "Unable to select", &error.into()),
+            Err(error) => failure(context, None, FUNCTION, "Unable to select", &error),
         }
     })
-}
-
-async fn wait(
-    candidates: &[Candidate],
-    timeout: Option<Duration>,
-) -> rustix::io::Result<Vec<usize>> {
-    let start = tokio::time::Instant::now();
-    let mut positions = HashMap::new();
-    let mut descriptors = Vec::new();
-    for candidate in candidates {
-        let fd = candidate.socket.as_fd();
-        let position = *positions.entry(fd.as_raw_fd()).or_insert_with(|| {
-            let position = descriptors.len();
-            descriptors.push((fd, PollFlags::empty()));
-            position
-        });
-        descriptors[position].1 |= READINESS[candidate.group];
-    }
-    let mut fds: Vec<_> = descriptors
-        .into_iter()
-        .map(|(fd, events)| PollFd::from_borrowed_fd(fd, events))
-        .collect();
-    loop {
-        let count = poll(
-            &mut fds,
-            Some(&rustix::event::Timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            }),
-        )?;
-        if count != 0 {
-            let ready = candidates
-                .iter()
-                .enumerate()
-                .filter_map(|(index, candidate)| {
-                    let fd = &fds[positions[&candidate.socket.as_fd().as_raw_fd()]];
-                    let mut want = READINESS[candidate.group];
-                    if candidate.group == 0 {
-                        want |= PollFlags::HUP | PollFlags::ERR;
-                    }
-                    fd.revents().intersects(want).then_some(index)
-                })
-                .collect::<Vec<_>>();
-            if !ready.is_empty() {
-                return Ok(ready);
-            }
-        }
-        let interval = Duration::from_millis(1);
-        let delay = timeout.map_or(interval, |limit| {
-            interval.min(limit.saturating_sub(start.elapsed()))
-        });
-        if delay.is_zero() {
-            return Ok(Vec::new());
-        }
-        tokio::time::sleep(delay).await;
-    }
 }
 
 fn apply(args: &[Value], candidates: &[Candidate], ready: Vec<usize>) -> NativeResult {

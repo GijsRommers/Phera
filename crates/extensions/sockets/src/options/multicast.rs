@@ -25,15 +25,53 @@ pub(crate) const MCAST_JOIN_GROUP: i32 = 80;
 #[cfg(target_vendor = "apple")]
 pub(crate) const MCAST_LEAVE_GROUP: i32 = 81;
 
-pub(super) fn interface_index(value: &Value) -> io::Result<u32> {
-    match &*value.deref() {
-        Value::Int(index) => u32::try_from(*index).map_err(|_| invalid_interface()),
-        Value::String(name) => if_nametoindex(name.as_bytes()).map_err(Into::into),
-        _ => Err(invalid_interface()),
+async fn lookup<T: Send + 'static>(
+    work: impl FnOnce() -> io::Result<T> + Send + 'static,
+) -> io::Result<T> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(io::Error::other)?
+}
+
+pub(super) enum Interface {
+    Index(u32),
+    Name(Vec<u8>),
+}
+
+impl Interface {
+    pub(super) fn from_value(value: &Value) -> io::Result<Self> {
+        match &*value.deref() {
+            Value::Int(index) => u32::try_from(*index)
+                .map(Self::Index)
+                .map_err(|_| invalid_interface()),
+            Value::String(name) => Ok(Self::Name(name.as_bytes().to_vec())),
+            _ => Err(invalid_interface()),
+        }
+    }
+
+    fn resolve(self) -> io::Result<u32> {
+        match self {
+            Self::Index(index) => Ok(index),
+            Self::Name(name) => if_nametoindex(name.as_slice()).map_err(Into::into),
+        }
+    }
+
+    pub(super) async fn index(self) -> io::Result<u32> {
+        match self {
+            Self::Index(index) => Ok(index),
+            Self::Name(_) => lookup(move || self.resolve()).await,
+        }
+    }
+
+    pub(super) async fn ipv4(self) -> io::Result<Ipv4Addr> {
+        match self {
+            Self::Index(0) => Ok(Ipv4Addr::UNSPECIFIED),
+            _ => lookup(move || ipv4_address(self.resolve()?)).await,
+        }
     }
 }
 
-pub(super) fn ipv4_address(index: u32) -> io::Result<Ipv4Addr> {
+fn ipv4_address(index: u32) -> io::Result<Ipv4Addr> {
     if index == 0 {
         return Ok(Ipv4Addr::UNSPECIFIED);
     }
@@ -50,25 +88,28 @@ pub(super) fn ipv4_address(index: u32) -> io::Result<Ipv4Addr> {
     Err(invalid_interface())
 }
 
-pub(super) fn ipv4_index(socket: &SockRef<'_>) -> io::Result<u32> {
+pub(super) async fn ipv4_index(socket: &SockRef<'_>) -> io::Result<u32> {
     let address = socket.multicast_if_v4()?;
     if address.is_unspecified() {
         return Ok(0);
     }
-    for interface in getifaddrs()? {
-        if interface
-            .address
-            .as_ref()
-            .and_then(|address| address.as_sockaddr_in())
-            .is_some_and(|candidate| candidate.ip() == address)
-        {
-            return if_nametoindex(interface.interface_name.as_str()).map_err(Into::into);
+    lookup(move || {
+        for interface in getifaddrs()? {
+            if interface
+                .address
+                .as_ref()
+                .and_then(|address| address.as_sockaddr_in())
+                .is_some_and(|candidate| candidate.ip() == address)
+            {
+                return if_nametoindex(interface.interface_name.as_str()).map_err(Into::into);
+            }
         }
-    }
-    Err(invalid_interface())
+        Err(invalid_interface())
+    })
+    .await
 }
 
-pub(super) fn membership(
+pub(super) async fn membership(
     socket: &SockRef<'_>,
     option: i32,
     value: &Value,
@@ -105,15 +146,29 @@ pub(super) fn membership(
             "IP address used in the context of an unexpected type of socket",
         ));
     }
-    let index = fields
+    let interface = match fields
         .get(&ArrayKey::str("interface"))
-        .map_or(Ok(0), interface_index);
-    Ok(index.and_then(|index| match (address, join) {
-        (IpAddr::V4(address), true) => socket.join_multicast_v4(&address, &ipv4_address(index)?),
-        (IpAddr::V4(address), false) => socket.leave_multicast_v4(&address, &ipv4_address(index)?),
-        (IpAddr::V6(address), true) => socket.join_multicast_v6(&address, index),
-        (IpAddr::V6(address), false) => socket.leave_multicast_v6(&address, index),
-    }))
+        .map_or(Ok(Interface::Index(0)), Interface::from_value)
+    {
+        Ok(interface) => interface,
+        Err(error) => return Ok(Err(error)),
+    };
+    Ok(match address {
+        IpAddr::V4(address) => interface.ipv4().await.and_then(|local| {
+            if join {
+                socket.join_multicast_v4(&address, &local)
+            } else {
+                socket.leave_multicast_v4(&address, &local)
+            }
+        }),
+        IpAddr::V6(address) => interface.index().await.and_then(|index| {
+            if join {
+                socket.join_multicast_v6(&address, index)
+            } else {
+                socket.leave_multicast_v6(&address, index)
+            }
+        }),
+    })
 }
 
 fn invalid_interface() -> io::Error {

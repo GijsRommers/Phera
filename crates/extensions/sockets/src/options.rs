@@ -18,6 +18,8 @@ use phera_extension_api::{
 };
 use socket2::SockRef;
 
+use multicast::Interface;
+
 use crate::{SOCKET, classes, data, failure, status};
 
 pub(crate) use multicast::{MCAST_JOIN_GROUP, MCAST_LEAVE_GROUP};
@@ -62,13 +64,13 @@ async fn get(context: &mut dyn Context, args: Vec<Value>, function: &str) -> Nat
     };
     let level = args::int(&args, 1).unwrap_or_default() as i32;
     let option = args::int(&args, 2).unwrap_or_default() as i32;
-    match get_value(&connection, level, option) {
+    match get_value(&connection, level, option).await {
         Ok(value) => Ok(value),
         Err(error) => failure(context, Some(&handle), function, DETAIL, &error),
     }
 }
 
-fn get_value(connection: &SocketConnection, level: i32, option: i32) -> io::Result<Value> {
+async fn get_value(connection: &SocketConnection, level: i32, option: i32) -> io::Result<Value> {
     let socket = SockRef::from(connection);
     let number = match (level, option) {
         (libc::SOL_SOCKET, libc::SO_LINGER) => {
@@ -105,7 +107,9 @@ fn get_value(connection: &SocketConnection, level: i32, option: i32) -> io::Resu
         ),
         (libc::IPPROTO_TCP, libc::TCP_NODELAY) => i64::from(socket.tcp_nodelay()?),
         (libc::IPPROTO_IP, libc::IP_TTL) => i64::from(socket.ttl_v4()?),
-        (libc::IPPROTO_IP, libc::IP_MULTICAST_IF) => i64::from(multicast::ipv4_index(&socket)?),
+        (libc::IPPROTO_IP, libc::IP_MULTICAST_IF) => {
+            i64::from(multicast::ipv4_index(&socket).await?)
+        }
         (libc::IPPROTO_IP, libc::IP_MULTICAST_LOOP) => i64::from(socket.multicast_loop_v4()?),
         (libc::IPPROTO_IP, libc::IP_MULTICAST_TTL) => i64::from(socket.multicast_ttl_v4()?),
         (libc::IPPROTO_IPV6, libc::IPV6_V6ONLY) => i64::from(socket.only_v6()?),
@@ -134,13 +138,15 @@ async fn set(context: &mut dyn Context, args: Vec<Value>, function: &str) -> Nat
         option,
         args::value(&args, 3),
         function,
-    )? {
+    )
+    .await?
+    {
         Ok(()) => Ok(Value::Bool(true)),
         Err(error) => failure(context, Some(&handle), function, DETAIL, &error),
     }
 }
 
-fn set_value(
+async fn set_value(
     context: &mut dyn Context,
     connection: &SocketConnection,
     level: i32,
@@ -151,16 +157,27 @@ fn set_value(
     let socket = SockRef::from(connection);
     match (level, option) {
         (libc::IPPROTO_IP, libc::IP_MULTICAST_IF) => {
-            return Ok(multicast::interface_index(value)
-                .and_then(multicast::ipv4_address)
+            let interface = match Interface::from_value(value) {
+                Ok(interface) => interface,
+                Err(error) => return Ok(Err(error)),
+            };
+            return Ok(interface
+                .ipv4()
+                .await
                 .and_then(|address| socket.set_multicast_if_v4(&address)));
         }
         (libc::IPPROTO_IPV6, libc::IPV6_MULTICAST_IF) => {
-            return Ok(multicast::interface_index(value)
+            let interface = match Interface::from_value(value) {
+                Ok(interface) => interface,
+                Err(error) => return Ok(Err(error)),
+            };
+            return Ok(interface
+                .index()
+                .await
                 .and_then(|index| socket.set_multicast_if_v6(index)));
         }
         (libc::IPPROTO_IP | libc::IPPROTO_IPV6, MCAST_JOIN_GROUP | MCAST_LEAVE_GROUP) => {
-            return multicast::membership(&socket, option, value, function);
+            return multicast::membership(&socket, option, value, function).await;
         }
         _ => {}
     }
