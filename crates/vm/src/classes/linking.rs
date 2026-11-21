@@ -78,8 +78,7 @@ impl Vm {
         index: ClassId,
         key: String,
     ) -> Result<(), NativeError> {
-        let deferred_context = self.links_against_pending_classes();
-        if !deferred_context && let Some(entry) = self.reusable_entry(unit, index) {
+        if let Some(entry) = self.reusable_entry(unit, index) {
             self.declare_linked(&entry, unit, unit_first, index);
             return Ok(());
         }
@@ -103,10 +102,10 @@ impl Vm {
         // use (`EnumCases`). Only a file revision from the code cache has a
         // number to key the entry by: `eval`'d code's classes are the request's.
         let shared = raised == self.diagnostic_reporter.raised
-            && !deferred_context
             && unit.metadata.is_some()
             && declaration.kind != ClassKind::Anonymous;
         if shared
+            && let Some(dependencies) = dependencies
             && let Some(position) = position
             && let Some(class) = self.classes.at_position(position)
         {
@@ -142,10 +141,10 @@ impl Vm {
         self.classes
             .worker()
             .find_entry(unit, index.index() as u32, |entry| {
-                entry
-                    .dependencies
-                    .iter()
-                    .all(|(name, number)| self.classes.resolve_number(name) == *number)
+                entry.dependencies.iter().all(|(name, number)| {
+                    self.classes.resolve_number(name) == *number
+                        && (number.is_some() || !self.inheritance_type_pending(name))
+                })
             })
     }
 

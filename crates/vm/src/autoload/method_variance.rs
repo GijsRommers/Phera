@@ -57,18 +57,26 @@ impl MethodVariance {
 impl Vm {
     pub(crate) fn class_for_inheritance(&self, name: &str) -> Option<Rc<Class>> {
         self.classes.get(name).or_else(|| {
-            self.autoload.pending.iter().find_map(|entry| {
-                entry
-                    .class
-                    .name
-                    .eq_ignore_ascii_case(name)
-                    .then(|| entry.class.clone())
-            })
+            let entry = self
+                .autoload
+                .pending
+                .iter()
+                .find(|entry| entry.class.name.eq_ignore_ascii_case(name))?;
+            self.classes.discard_link_dependencies();
+            Some(entry.class.clone())
         })
     }
 
-    pub(crate) fn links_against_pending_classes(&self) -> bool {
-        !self.autoload.pending.is_empty() || !self.autoload.declaring.is_empty()
+    pub(crate) fn inheritance_type_pending(&self, name: &str) -> bool {
+        self.autoload
+            .pending
+            .iter()
+            .any(|entry| entry.class.name.eq_ignore_ascii_case(name))
+            || self.autoload.declaring.iter().any(|entry| {
+                entry.unit.classes[entry.index.index()]
+                    .name
+                    .eq_ignore_ascii_case(name)
+            })
     }
 
     pub(crate) fn is_pending_class(&self, index: ClassIndex) -> bool {

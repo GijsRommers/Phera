@@ -398,6 +398,7 @@ impl Vm {
                 let class = declaring.unit.classes.get(declaring.index.index())?;
                 if class.name.eq_ignore_ascii_case(name) {
                     declaring.required.set(true);
+                    self.classes.discard_link_dependencies();
                     Some((&*declaring.unit, class))
                 } else {
                     None

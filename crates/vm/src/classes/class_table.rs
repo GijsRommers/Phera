@@ -177,9 +177,16 @@ impl ClassTable {
         *self.recording.borrow_mut() = Some(Vec::new());
     }
 
-    /// Ends a link: the names it looked up, and the position it used.
-    pub(crate) fn end_link(&mut self) -> (Vec<super::worker_classes::Dependency>, Option<u32>) {
-        let recorded = self.recording.borrow_mut().take().unwrap_or_default();
+    /// Linking against a class that is still being declared is request-local.
+    pub(crate) fn discard_link_dependencies(&self) {
+        *self.recording.borrow_mut() = None;
+    }
+
+    /// Ends a link: the reusable dependencies, and the position it used.
+    pub(crate) fn end_link(
+        &mut self,
+    ) -> (Option<Vec<super::worker_classes::Dependency>>, Option<u32>) {
+        let recorded = self.recording.borrow_mut().take();
         (recorded, self.linking.take())
     }
 

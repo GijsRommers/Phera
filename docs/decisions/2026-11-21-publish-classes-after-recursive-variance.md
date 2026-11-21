@@ -26,8 +26,10 @@ is the class being linked. Ordinary PHP lookups only see completed
 declarations. The loader that defines the subclass can run more PHP
 as soon as both declarations pass their checks.
 
-Classes linked in this context stay request-local. Their dependencies
-include declarations that were visible only to the current linker.
+A link that reads a pending declaration stays request-local. Other
+declarations loaded by the same callback can still reuse and populate
+the worker table. A cached link that recorded a missing type is
+rechecked if that type has a pending declaration in the current request.
 
 ## Turned down
 
