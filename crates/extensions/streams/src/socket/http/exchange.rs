@@ -23,6 +23,7 @@ pub(super) async fn exchange(
     ssl: &PhpArray,
     same_origin: bool,
     use_get: bool,
+    authorization: Option<header::HeaderValue>,
 ) -> io::Result<(
     hyper::Response<hyper::body::Incoming>,
     Vec<Vec<u8>>,
@@ -42,7 +43,12 @@ pub(super) async fn exchange(
         .unwrap_or(if encrypted { 443 } else { 80 });
     let target = format!("{}:{port}", authority.host());
     let address = Address::parse(kind, target.as_bytes()).map_err(invalid)?;
-    let request = build_request(&uri, authority.as_str(), options, same_origin, use_get)?;
+    let host = if authority.port_u16().is_some() {
+        target.as_str()
+    } else {
+        authority.host()
+    };
+    let request = build_request(&uri, host, options, same_origin, use_get, authorization)?;
     let socket = transport::connect(&address, None, false, |_| {}).await?;
     let _ = socket.peer.set(address.host.to_owned());
     let channel: Box<dyn HttpChannel> = if encrypted {
@@ -88,6 +94,7 @@ fn build_request(
     options: &PhpArray,
     same_origin: bool,
     use_get: bool,
+    authorization: Option<header::HeaderValue>,
 ) -> io::Result<Request<Full<Bytes>>> {
     let path = uri.path_and_query().map_or("/", |value| value.as_str());
     let method = match option(options, "method") {
@@ -124,6 +131,11 @@ fn build_request(
                 }
             }
             _ => (),
+        }
+        if let Some(authorization) = authorization {
+            headers
+                .entry(header::AUTHORIZATION)
+                .or_insert(authorization);
         }
         headers.insert(
             header::CONNECTION,

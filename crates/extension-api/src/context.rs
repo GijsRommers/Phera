@@ -125,6 +125,11 @@ pub trait Context {
     /// Replaces the symbol, retaining aliases to the old variable.
     fn replace_request_global(&mut self, _name: &str, _value: Value) {}
 
+    /// Replace a symbol in the executing PHP scope, leaving its old aliases intact.
+    fn replace_caller_variable(&mut self, _name: &str, _value: Value) -> Result<(), NativeError> {
+        Ok(())
+    }
+
     /// Flushes an extension after user shutdown callbacks and output finalization.
     fn register_request_finalizer(&mut self, _callback: crate::AsyncFn) {}
 

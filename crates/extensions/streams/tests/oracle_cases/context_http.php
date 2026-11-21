@@ -54,3 +54,31 @@ show(stream_get_meta_data($stream)['wrapper_data']);
 fclose($stream);
 show(http_clear_last_response_headers());
 show(http_get_last_response_headers());
+
+$http_response_header = 'outer';
+function checkLocalHeaders($url) {
+    // A dynamic name also exercises callers without a predeclared slot.
+    $name = 'http_response_header';
+    show(isset($$name));
+    get_headers($url . '/ok');
+    show($$name === http_get_last_response_headers());
+    $alias =& $$name;
+    @file_get_contents($url . '/missing');
+    show($$name);
+    show($alias);
+    show($$name === http_get_last_response_headers());
+    $$name[] = 'local mutation';
+    show($$name !== http_get_last_response_headers());
+    http_clear_last_response_headers();
+    show(isset($$name));
+}
+checkLocalHeaders($url);
+show($http_response_header);
+show(http_get_last_response_headers());
+
+$authority = substr($url, strlen('http://'));
+$context = stream_context_create(['http' => ['method' => 'GET']]);
+foreach (['user:p%3Aa%40s', 'empty:', 'user', ':pass'] as $userinfo) {
+    show(file_get_contents("http://$userinfo@$authority/received", false, $context));
+}
+show(file_get_contents("http://user:pass@$authority/redirect-credentials", false, $context));

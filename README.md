@@ -187,7 +187,9 @@ clean idle connection on the same worker.
 `fopen()` and `file_get_contents()` support buffered HTTP and HTTPS
 responses. `get_headers()` fetches the response headers, and
 `http_get_last_response_headers()` returns the latest headers in the
-current request. Stream contexts can store default options for these calls.
+current request. HTTP calls also populate the caller's legacy `$http_response_header` variable.
+URL credentials use Basic authentication and stay on their origin. Stream contexts can store
+default options for these calls.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 Legacy `DOMDocument` supports local XSD validation for common content models,

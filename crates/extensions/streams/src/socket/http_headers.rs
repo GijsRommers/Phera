@@ -14,7 +14,7 @@ use phera_extension_api::{
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 #[derive(Default)]
-struct LastHeaders(Option<PhpArray>);
+struct LastHeaders(Option<Rc<PhpArray>>);
 
 pub(super) fn register(registry: &mut Registry) {
     registry.fork_state::<LastHeaders>(phera_extension_api::fresh_state);
@@ -35,7 +35,7 @@ fn get_last(context: &mut dyn Context, _: &[Value]) -> NativeResult {
         .state()
         .get::<LastHeaders>()
         .and_then(|state| state.0.clone())
-        .map_or(Value::Null, Value::from))
+        .map_or(Value::Null, Value::Array))
 }
 
 fn clear_last(context: &mut dyn Context, _: &[Value]) -> NativeResult {
@@ -51,8 +51,9 @@ pub(super) fn save(
     context: &mut dyn Context,
     lines: &[Vec<u8>],
 ) -> Result<(), phera_extension_api::NativeError> {
-    context.state().get_or_default::<LastHeaders>().0 = Some(values(lines, false)?);
-    Ok(())
+    let headers = Rc::new(values(lines, false)?);
+    context.state().get_or_default::<LastHeaders>().0 = Some(headers.clone());
+    context.replace_caller_variable("http_response_header", Value::Array(headers))
 }
 
 pub(super) fn values(

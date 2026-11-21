@@ -27,6 +27,16 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn replace_caller_variable(&mut self, name: &str, value: Value) -> Result<(), NativeError> {
+        if self.current().is_none() {
+            self.set_global(name, value);
+            return Ok(());
+        }
+        let local = self.named_slot(name)?;
+        self.set(local, value);
+        Ok(())
+    }
+
     fn is_snapshot_boot(&self) -> bool {
         self.snapshot.mode == crate::SnapshotMode::Boot
     }

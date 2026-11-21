@@ -4,6 +4,7 @@ mod exchange;
 
 use std::{io, io::Cursor};
 
+use base64::{Engine, engine::general_purpose::STANDARD};
 use http_body_util::{BodyExt, Limited};
 use hyper::{Uri, header};
 use phera_extension_api::{
@@ -187,8 +188,14 @@ async fn fetch(
     };
     loop {
         let uri: Uri = url.as_str().parse().map_err(invalid)?;
+        let same_origin = url.origin() == origin;
+        let authorization = if same_origin {
+            url_authorization(&url)?
+        } else {
+            None
+        };
         let (reply, wire, _task) =
-            exchange(uri, options, ssl, url.origin() == origin, use_get).await?;
+            exchange(uri, options, ssl, same_origin, use_get, authorization).await?;
         let status = reply.status();
         let status_line = wire.first().cloned().unwrap_or_default();
         let location = reply
@@ -239,6 +246,22 @@ async fn fetch(
             .map_err(invalid)?;
         return Ok(bytes.to_bytes().to_vec());
     }
+}
+
+/// Userinfo is decoded as bytes before adding the Basic separator.
+fn url_authorization(url: &Url) -> io::Result<Option<header::HeaderValue>> {
+    let password = url.password();
+    if url.username().is_empty() && password.is_none() {
+        return Ok(None);
+    }
+    let mut credentials: Vec<_> = percent_encoding::percent_decode_str(url.username()).collect();
+    credentials.push(b':');
+    credentials.extend(percent_encoding::percent_decode_str(password.unwrap_or("")));
+    let mut value =
+        header::HeaderValue::from_str(&format!("Basic {}", STANDARD.encode(credentials)))
+            .map_err(invalid)?;
+    value.set_sensitive(true);
+    Ok(Some(value))
 }
 
 fn option<'a>(options: &'a PhpArray, key: &str) -> Option<&'a Value> {
