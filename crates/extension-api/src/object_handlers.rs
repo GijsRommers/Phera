@@ -199,6 +199,8 @@ pub struct ClassHooks {
     pub property_access: Option<&'static crate::NativePropertyAccess>,
     /// The native class's declared instance properties have no backing slots.
     pub virtual_properties: bool,
+    /// Native state contains no strong PHP handles for the cycle collector to walk.
+    pub native_state_is_weak: bool,
     pub iterator: Option<IteratorFactory>,
     /// Cursor creation for foreach by reference. Its current values must be reference cells.
     pub iterator_by_reference: Option<IteratorFactory>,
@@ -228,6 +230,7 @@ impl ClassHooks {
         properties: None,
         property_access: None,
         virtual_properties: false,
+        native_state_is_weak: false,
         iterator: None,
         iterator_by_reference: None,
         iterator_fallback_if_overridden: &[],
