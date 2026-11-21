@@ -27,7 +27,11 @@ pub struct NativeTables {
 impl NativeTables {
     pub fn new(registry: Arc<Registry>) -> Self {
         Self {
-            classes: Rc::new(ClassDefinitions::native(&registry)),
+            classes: Rc::new({
+                let mut classes = ClassDefinitions::native(&registry);
+                classes.number_keys();
+                classes
+            }),
             constants: Rc::new(native_constants(&registry)),
             code: Rc::default(),
             slots: Rc::default(),

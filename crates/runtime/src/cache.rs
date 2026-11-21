@@ -204,7 +204,8 @@ impl CodeCache {
                         .then_some(phera_compiler::NativeFunction::General);
                 };
                 Some(match entry.handler {
-                    phera_extension_api::NativeFn::DeprecatedSync(_) => {
+                    phera_extension_api::NativeFn::DeprecatedSync(_)
+                    | phera_extension_api::NativeFn::DeprecatedAsync(_) => {
                         phera_compiler::NativeFunction::General
                     }
                     phera_extension_api::NativeFn::Async(_)
@@ -248,9 +249,10 @@ impl CodeCache {
             }
         }
         .map(|mut unit| {
-            if matches!(self.mode, FileMode::Web) {
-                unit.metadata = Some(Arc::new(phera_bytecode::UnitMetadata::new(&unit)));
-            }
+            // Every file from the cache gets its process number and name keys,
+            // on the command line too: its classes are then found by key, as
+            // a web request finds them.
+            unit.metadata = Some(Arc::new(phera_bytecode::UnitMetadata::new(&unit)));
             Arc::new(unit)
         })
     }

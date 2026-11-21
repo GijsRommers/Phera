@@ -48,7 +48,9 @@ impl Harness {
                 NativeFn::Sync(function) | NativeFn::DeprecatedSync(function) => {
                     function(self, &arguments)
                 }
-                NativeFn::Async(function) => function(self, arguments).await,
+                NativeFn::Async(function) | NativeFn::DeprecatedAsync(function) => {
+                    function(self, arguments).await
+                }
             }
         })
     }

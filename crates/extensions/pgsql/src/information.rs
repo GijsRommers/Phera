@@ -245,11 +245,10 @@ pub(crate) fn asynchronous_named<'a, const OP: usize>(
             }
             NOTIFY => {
                 let mode = args::int(&a, 1).unwrap_or(1);
-                let notification =
-                    connection::run(&lease, |pg| Box::pin(async move { Ok(pg.notification()) }))
-                        .await
-                        .ok()
-                        .flatten();
+                let notification = connection::run(&lease, |pg| Box::pin(pg.notification()))
+                    .await
+                    .ok()
+                    .flatten();
                 let Some(notification) = notification else {
                     return Ok(Value::Bool(false));
                 };

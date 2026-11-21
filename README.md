@@ -32,7 +32,7 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | WordPress | `mysqli` and the engine fixes it needed are in. The end-to-end comparison with PHP has not been repeated since |
 | PHP's own test suite (php-src) | 9,136 of the 13,388 core tests pass. Of 4,542 tests for the later extensions (dom, the XML family, openssl, session, curl, intl and others) 1,737 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | About 2.2 times PHP's instruction count for one Laravel API request in production mode: 36 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 153 million against 27 million, 5.6 times. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
+| Speed of a framework request | About 2.1 times PHP's instruction count for one Laravel API request in production mode: 34.5 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 138 million against 27 million, 5.0 times, and a Symfony and Doctrine route with 49 statements 301 million against 30 million, 10 times. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
 
 Phera validates union and intersection declarations during compilation and
 checks inherited property types when linking classes. Ordinary typed
@@ -169,6 +169,19 @@ Use `php://filter` or `stream_filter_append()` to transform a stream.
 Register PHP filters with `stream_filter_register()` and combine them with
 built-in filters on native streams or application wrappers. Phera limits
 chains to 16 stages and intermediate buckets to 8 MiB.
+
+Stream sockets use the worker's event loop for TCP, UDP and Unix connections.
+PHP programs can open a client or listener, wait for readiness with
+`stream_select()`, and use the regular read, write, and timeout functions.
+TCP clients can start TLS when connecting or upgrade an existing connection.
+Listeners can accept TLS directly or upgrade an accepted connection.
+By default clients verify the server's certificate and host name.
+A live socket held by the boot prevents `Phera\snapshot()` from creating
+a snapshot. Persistent sockets created during boot connect on first use
+in each fork. `pfsockopen()` and `STREAM_CLIENT_PERSISTENT` can reuse a
+clean idle connection on the same worker.
+`fopen()` supports buffered HTTP and HTTPS responses, including for
+Guzzle's stream handler.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 Legacy `DOMDocument` supports local XSD validation for common content models,

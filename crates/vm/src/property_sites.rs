@@ -77,6 +77,28 @@ impl PropertyEntry {
         })
     }
 
+    /// Stores `value` at `keys` of the array the property holds, for a
+    /// write from `scope`, when this entry was made for the object's class
+    /// and that scope, the property has no hooks and may hold an array, and
+    /// the write is a plain one (see `crate::element_writes`). Gives what
+    /// the element held; `None` with nothing changed otherwise.
+    pub(crate) fn write_element_matching(
+        &self,
+        object: &Object,
+        scope: Option<&Rc<crate::classes::Class>>,
+        keys: (&[ArrayKey], crate::element_writes::Target),
+        value: Value,
+    ) -> Option<Option<Value>> {
+        if !self.matches(object, scope)
+            || self.hooks.is_some()
+            || !self.write_rule.allows(TypeMask::ARRAY)
+            || object.lazy().is_some()
+        {
+            return None;
+        }
+        crate::property_storage::write_element_at(object, &self.key, self.slot(), keys, value)
+    }
+
     /// `++` or `--` of an integer property, for an increment from `scope`,
     /// as [`Vm::increment_property_site`] does: the expression's value, or
     /// `None` with nothing changed.
@@ -263,17 +285,46 @@ impl Vm {
     }
 
     /// Records the property's site for a read of an element held in a
-    /// property (`$this->items[$key]`, `isset($object->map['a']['b'])`), so
-    /// that the interpreter loop can make the next such read itself (see
-    /// `calls::fast_property_elements`). Finding the entry raises nothing:
+    /// property (`$this->items[$key]`, `isset($object->map['a']['b'])`), or
+    /// a write or append to one (`$this->items[] = $item`), so that the
+    /// interpreter loop can make the next one itself (see
+    /// `calls::fast_property_elements` and `calls::fast_element_writes`). Finding the entry raises nothing:
     /// a property that cannot be read from here simply gets no entry, and
     /// the read goes on in the general path, which raises PHP's error.
+    #[cold]
+    #[inline(never)]
     pub(crate) fn prepare_element_site(&mut self, place: &AccessPath) -> Result<(), NativeError> {
         let mut steps = place.steps()?;
-        let (Some(Step::Property(name)), Some(Step::Index(_))) = (steps.next(), steps.next())
+        let (Some(Step::Property(name)), Some(Step::Index(_) | Step::Append)) =
+            (steps.next(), steps.next())
         else {
             return Ok(());
         };
+        self.prepare_site_for(place, name)
+    }
+
+    /// Records the property's site for a compound assignment of a declared
+    /// property or of an element held in one (`$this->count += $n`,
+    /// `$totals->sums[$key] -= $amount`), as [`Vm::prepare_element_site`]
+    /// does for reads, so that the loop can make the next one itself (see
+    /// `calls::fast_compound_assignments`).
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn prepare_update_site(&mut self, place: &AccessPath) -> Result<(), NativeError> {
+        let mut steps = place.steps()?;
+        let Some(Step::Property(name)) = steps.next() else {
+            return Ok(());
+        };
+        if !matches!(steps.next(), None | Some(Step::Index(_))) {
+            return Ok(());
+        }
+        self.prepare_site_for(place, name)
+    }
+
+    /// The site of property `name` of the object at the start of `place`.
+    #[cold]
+    #[inline(never)]
+    fn prepare_site_for(&mut self, place: &AccessPath, name: NameId) -> Result<(), NativeError> {
         let object = match place.base()? {
             phera_bytecode::PathBase::This { .. } => {
                 self.current().and_then(|frame| frame.this().cloned())

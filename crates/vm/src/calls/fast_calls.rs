@@ -94,6 +94,10 @@ impl Machine<'_> {
         let Some(destination) = frame.destination() else {
             return if frame.discards_result() {
                 self.leave_discarded(frame, source)
+            } else if !GUARDED && frame.returns_to_native_loop() {
+                self.leave_to_native_loop(frame, source)
+            } else if !GUARDED && self.stack.depth() == self.stop + 1 {
+                self.leave_to_native(frame, source)
             } else {
                 Step::Slow
             };
@@ -190,6 +194,94 @@ impl Machine<'_> {
         })
     }
 
+    /// A plain return of the function native code called (a callback of
+    /// `array_map`, `usort`, a `Closure` called from native code), as the
+    /// VM makes it (`Vm::finish_return_value` at the boundary): the frame
+    /// goes, and the value is handed to the batch loop, which gives it back
+    /// to the native caller as `BatchExit::Returned`. Generators, includes,
+    /// functions returning by reference, frames with a pending call or side
+    /// state to release, references, and a value the declared type does not
+    /// take as it is stay with the VM.
+    #[cold]
+    #[inline(never)]
+    fn leave_to_native(&mut self, frame: Frame, source: Option<Reg>) -> Step {
+        let facts = self.code.facts(frame.function);
+        let depth = self.stack.depth();
+        let function = self.code.function(frame.function);
+        if facts.local.is_none()
+            || frame.returns_to_native_loop()
+            || function.is_generator
+            || function.returns_reference
+            || (frame.has_extras() && !self.stack.extras(depth - 1).plain_return_can_release())
+            || self.stack.has_calls_from(frame.start())
+        {
+            return Step::Slow;
+        }
+        let kind = frame.kind();
+        let value = match (kind, source) {
+            (CallKind::Constructor, _) => match self.registers.window(frame.base() - 1, 1) {
+                [Some(value)] => value,
+                _ => return Step::Slow,
+            },
+            (_, Some(source)) => match self.registers.window(frame.base() + source.index(), 1) {
+                [Some(value)] if !value.is_reference() => value,
+                _ => return Step::Slow,
+            },
+            (_, None) => &Value::Null,
+        };
+        if kind != CallKind::Constructor
+            && facts
+                .return_mask
+                .is_some_and(|mask| !mask.intersects(crate::types::own_type(value)))
+        {
+            return Step::Slow;
+        }
+        let value = value.clone();
+        self.stack.pop();
+        self.registers.release_frame(frame.start(), frame.base());
+        self.stack.handed_back = Some(super::execution_loop::HandedBack::Native(value));
+        Step::Yield
+    }
+
+    /// A plain return of a callback of a native loop (`array_map`'s
+    /// closure), as the VM makes it: the frame goes, and the value goes to
+    /// the batch loop, which hands it to the built-in's next step
+    /// (`calls::native_loops`). The cases `leave_to_native` leaves to the
+    /// VM stay with it here too.
+    #[cold]
+    #[inline(never)]
+    fn leave_to_native_loop(&mut self, frame: Frame, source: Option<Reg>) -> Step {
+        let facts = self.code.facts(frame.function);
+        let depth = self.stack.depth();
+        let function = self.code.function(frame.function);
+        if facts.local.is_none()
+            || function.is_generator
+            || function.returns_reference
+            || (frame.has_extras() && !self.stack.extras(depth - 1).plain_return_can_release())
+            || self.stack.has_calls_from(frame.start())
+        {
+            return Step::Slow;
+        }
+        let value = match source {
+            Some(source) => match self.registers.window(frame.base() + source.index(), 1) {
+                [Some(value)] if !value.is_reference() => value,
+                _ => return Step::Slow,
+            },
+            None => &Value::Null,
+        };
+        if facts
+            .return_mask
+            .is_some_and(|mask| !mask.intersects(crate::types::own_type(value)))
+        {
+            return Step::Slow;
+        }
+        let value = value.clone();
+        self.stack.pop();
+        self.registers.release_frame(frame.start(), frame.base());
+        self.stack.handed_back = Some(super::execution_loop::HandedBack::NativeLoop(value));
+        Step::Yield
+    }
+
     /// A setter with no suspended caller action returns without publishing a result.
     #[inline(never)]
     fn leave_discarded(&mut self, frame: Frame, source: Option<Reg>) -> Step {
@@ -280,7 +372,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let index = call.sent as usize;
-        let value = match self
+        let mut value = match self
             .registers
             .window(position.frame.base() + source.index(), 1)
         {
@@ -290,9 +382,14 @@ impl Machine<'_> {
         let accepted = match call.callee {
             PreparedCallee::Php(function) => {
                 !call.flags.contains(CallFlags::DETAILS)
-                    && self.accepts_argument(function, index, &value)
+                    && (self.accepts_argument(function, index, &value)
+                        || self.widen_argument(function, index, &mut value))
             }
-            PreparedCallee::General => self.general_accepts(index),
+            // One out-of-line arm for both, so that the match keeps the
+            // shape the loop was laid out with.
+            PreparedCallee::General | PreparedCallee::Native(_) => {
+                self.other_accepts(call.callee, index)
+            }
             PreparedCallee::Constructed => false,
         };
         if !accepted {
@@ -306,11 +403,43 @@ impl Machine<'_> {
         Step::Done(position.ip)
     }
 
+    /// An integer sent to a `float` parameter becomes that float, the one
+    /// conversion PHP makes in strict mode too, so that `new Vec($i, 0)`
+    /// for `float $x` stays in the loop. `false`, with `value` as it was,
+    /// for anything else.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn widen_argument(
+        &self,
+        function: FunctionIndex,
+        index: usize,
+        value: &mut Value,
+    ) -> bool {
+        let facts = self.code.facts(function);
+        let Value::Int(integer) = *value else {
+            return false;
+        };
+        let widens = facts.takes_value(index)
+            && facts
+                .parameter_masks
+                .get(index)
+                .is_some_and(|mask| mask.intersects(phera_bytecode::TypeMask::FLOAT));
+        if widens {
+            *value = Value::Float(integer as f64);
+        }
+        widens
+    }
+
     /// Whether parameter `index` of `function` takes `value` as it is, by
     /// value: no declared type, a built-in type the value has, or a class
     /// type the unit's cache knows the value's class satisfies.
     #[inline(always)]
-    fn accepts_argument(&self, function: FunctionIndex, index: usize, value: &Value) -> bool {
+    pub(super) fn accepts_argument(
+        &self,
+        function: FunctionIndex,
+        index: usize,
+        value: &Value,
+    ) -> bool {
         let facts = self.code.facts(function);
         if !facts.takes_value(index) {
             return false;
@@ -343,6 +472,27 @@ impl Machine<'_> {
         })
     }
 
+    /// [`Machine::general_accepts`] for a described callee; for a lean
+    /// native call, [`Machine::native_accepts`]. Inline, so that a
+    /// described callee costs what it did before lean records existed.
+    #[inline(always)]
+    pub(super) fn other_accepts(&self, callee: PreparedCallee, index: usize) -> bool {
+        match callee {
+            PreparedCallee::Native(id) => self.native_accepts(id, index),
+            _ => self.general_accepts(index),
+        }
+    }
+
+    /// For a lean native call: a by-value parameter that is not variadic
+    /// (its type is the function's to check, at the call).
+    #[inline(never)]
+    fn native_accepts(&self, id: phera_extension_api::NativeId, index: usize) -> bool {
+        self.registry
+            .function_at(id)
+            .and_then(|entry| entry.params.get(index))
+            .is_some_and(|parameter| !parameter.by_ref && !parameter.variadic)
+    }
+
     /// `Call` of a prepared function, method or closure written in PHP whose
     /// arguments all arrived positionally and passed their checks: push the
     /// frame. `$this` and a closure's captures are in the window already.
@@ -354,7 +504,10 @@ impl Machine<'_> {
         let function = match call.callee {
             PreparedCallee::Php(function) => function,
             PreparedCallee::Constructed => return self.finish_construction(position, destination),
-            PreparedCallee::General => {
+            // A lean native record is not a direct method, so it answers
+            // `Step::Slow` there, and the batch loop runs it
+            // (`Vm::call_lean_native`).
+            PreparedCallee::General | PreparedCallee::Native(_) => {
                 return self.finish_direct_method(position, destination, call);
             }
         };

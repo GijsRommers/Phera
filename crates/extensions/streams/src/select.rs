@@ -60,12 +60,30 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                 } else {
                     resource.clone()
                 };
+                let socket = with_stream(&descriptor_resource, |stream| match &stream.backing {
+                    crate::stream::Backing::Socket(socket) => Some(socket.clone()),
+                    _ => None,
+                })
+                .ok()
+                .flatten();
+                let connection = if let Some(socket) = socket {
+                    socket.connect().await.ok()
+                } else {
+                    None
+                };
                 let Ok((descriptor, buffered, is_child, wrapper)) =
                     with_stream(&descriptor_resource, |stream| {
                         (
-                            stream.descriptor().and_then(|file| {
-                                file.try_clone().ok().map(|copy| (file.as_raw_fd(), copy))
-                            }),
+                            if let Some(connection) = &connection {
+                                let fd = connection.descriptor();
+                                rustix::io::dup(fd).ok().map(|copy| (fd.as_raw_fd(), copy))
+                            } else {
+                                stream.descriptor().and_then(|file| {
+                                    file.try_clone()
+                                        .ok()
+                                        .map(|copy| (file.as_raw_fd(), copy.into()))
+                                })
+                            },
                             user.as_ref().map_or_else(
                                 || stream.unread() > 0,
                                 |file| !file.buffer.borrow().is_empty(),
@@ -83,7 +101,7 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                         direction,
                         key,
                         value: Value::Resource(resource),
-                        fd: fd.into(),
+                        fd,
                         original_fd,
                         buffered,
                     });

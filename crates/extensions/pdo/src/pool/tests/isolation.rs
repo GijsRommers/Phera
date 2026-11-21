@@ -109,8 +109,8 @@ pub async fn reset_repeatedly(driver: &mut Lease) {
     assert_eq!(scalar(driver, "SELECT 1").await, Value::Int(1));
 }
 
-/// Private tokio-postgres type-info statements cannot survive DISCARD ALL.
-pub async fn custom_types_retire_client() {
+/// DISCARD ALL removes custom types before the same socket is lent again.
+pub async fn reset_removes_custom_types() {
     let pool = super::TestPool::new("pgsql", super::options(1));
     let mut first = pool.connect().await;
     let original = super::id(&mut first, "pgsql").await;
@@ -128,7 +128,7 @@ pub async fn custom_types_retire_client() {
     );
     drop(first);
     let mut second = pool.connect().await;
-    assert_ne!(super::id(&mut second, "pgsql").await, original);
+    assert_eq!(super::id(&mut second, "pgsql").await, original);
     second
         .run_unprepared("CREATE TEMP TABLE pool_custom_init(id INT)")
         .await

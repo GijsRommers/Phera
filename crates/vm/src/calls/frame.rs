@@ -80,6 +80,9 @@ impl FrameFlags {
     const KIND_MASK: u16 = 0b11 << Self::KIND_SHIFT;
     /// A setter entered for its effects has no result destination or continuation.
     const DISCARD_RESULT: u16 = 1 << 4;
+    /// A callback of a built-in that runs on the frame stack (`array_map`):
+    /// its result goes to that built-in's next step (`calls::native_loops`).
+    const NATIVE_LOOP: u16 = 1 << 5;
     /// The top eight bits hold how many arguments the call passed, when it
     /// passed fewer than the function's parameters (at most 64, see
     /// `FunctionShape::Plain`), so that a call with defaults needs no
@@ -182,6 +185,17 @@ impl Frame {
             base: base as u32,
             ..self
         }
+    }
+
+    /// Marks a callback frame as returning to a built-in's next step.
+    pub(crate) fn mark_native_loop(&mut self) {
+        self.flags.0 |= FrameFlags::CALLBACK | FrameFlags::NATIVE_LOOP;
+    }
+
+    /// Whether this frame returns to a built-in's next step.
+    #[inline]
+    pub(crate) fn returns_to_native_loop(&self) -> bool {
+        self.flags.0 & FrameFlags::NATIVE_LOOP != 0
     }
 
     /// A resumed frame returns to the generator driver.
