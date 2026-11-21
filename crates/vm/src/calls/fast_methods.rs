@@ -163,7 +163,9 @@ impl Machine<'_> {
             }
             // Prepared here as the following `InitMethodCall` would, and
             // its sends run next.
-            SiteOutcome::Native => self.prepare_site_native(position, &object, class, site),
+            SiteOutcome::Native => {
+                self.call_site_native(position, (body, site), (&object, class), destination)
+            }
             // The VM runs the following `InitMethodCall` itself.
             SiteOutcome::Vm => Step::Slow,
         }
@@ -215,17 +217,18 @@ impl Machine<'_> {
     }
 
     /// A method site whose method is native: found again by its key (the
-    /// record says only that it is native) and prepared as the following
-    /// `InitMethodCall` prepares it, with the sends after that running next;
-    /// the general sequence for whatever that leaves to the VM.
+    /// record says only that it is native), prepared as the following
+    /// `InitMethodCall` prepares it, given its arguments as the sends give
+    /// them, and called as `Call` calls it; the written-out sequence from
+    /// whichever of these needs more than the loop does.
     #[cold]
     #[inline(never)]
-    fn prepare_site_native(
+    fn call_site_native(
         &mut self,
         position: Position,
-        object: &Rc<Object>,
-        class: &Class,
-        site: &MethodSite,
+        (body, site): (&phera_bytecode::Function, &MethodSite),
+        (object, class): (&Rc<Object>, &Class),
+        destination: Reg,
     ) -> Step {
         let key = self
             .code
@@ -240,7 +243,28 @@ impl Machine<'_> {
             ip: position.ip + 1,
         };
         match self.prepare_native_site(sends, object, (class, key, found)) {
-            Step::Slow => Step::Done(position.ip),
+            Step::Done(next) if next == sends.ip => {}
+            Step::Slow => return Step::Done(position.ip),
+            step => return step,
+        }
+        // The sends, as the loop makes them; one it refuses leaves the call
+        // to the written-out sends, which write the same slots again.
+        let Some(arguments) = body.site_arguments.get(site.argument_range()) else {
+            return Step::Done(sends.ip);
+        };
+        for argument in arguments {
+            if !matches!(self.send(position, argument.register()), Step::Done(_)) {
+                return Step::Done(sends.ip);
+            }
+        }
+        // The call, as the loop makes it, going on after the written-out
+        // `Call`; one that needs the VM goes there through that `Call`.
+        let after = Position {
+            frame: position.frame,
+            ip: site.after.index(),
+        };
+        match self.enter_prepared(after, destination) {
+            Step::Slow => Step::Done(after.ip - 1),
             step => step,
         }
     }
