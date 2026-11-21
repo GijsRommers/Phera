@@ -374,7 +374,7 @@ impl Machine<'_> {
             PreparedCallee::Php(function) => {
                 !call.flags.contains(CallFlags::DETAILS)
                     && (self.accepts_argument(function, index, &value)
-                        || self.widen_argument(function, index, &mut value))
+                        || self.accepts_on_second_look(function, index, &mut value))
             }
             // One out-of-line arm for both, so that the match keeps the
             // shape the loop was laid out with.
@@ -394,19 +394,32 @@ impl Machine<'_> {
         Step::Done(position.ip)
     }
 
-    /// An integer sent to a `float` parameter becomes that float, the one
+    /// The second look at an argument the first test refused, out of line:
+    /// an integer sent to a `float` parameter becomes that float, the one
     /// conversion PHP makes in strict mode too, so that `new Vec($i, 0)`
-    /// for `float $x` stays in the loop. `false`, with `value` as it was,
-    /// for anything else.
+    /// for `float $x` stays in the loop; an object passes a class type its
+    /// class satisfies. `false`, with `value` as it was, for anything else.
     #[cold]
     #[inline(never)]
-    pub(super) fn widen_argument(
+    pub(super) fn accepts_on_second_look(
         &self,
         function: FunctionIndex,
         index: usize,
         value: &mut Value,
     ) -> bool {
         let facts = self.code.facts(function);
+        if let Value::Object(_) = value {
+            // An object of a class the declared type allows, that the
+            // unit's one-entry cache did not remember.
+            return facts.takes_value(index)
+                && self
+                    .code
+                    .function(function)
+                    .parameters
+                    .get(index)
+                    .and_then(|parameter| parameter.ty)
+                    .is_some_and(|declared| self.declared_class_match(function, declared, value));
+        }
         let Value::Int(integer) = *value else {
             return false;
         };
@@ -441,7 +454,9 @@ impl Machine<'_> {
             return true;
         }
         let declared = self.code.function(function).parameters[index].ty;
-        declared.is_some_and(|declared| self.class_type_matches(function, declared, value))
+        declared.is_some_and(|declared| {
+            crate::class_types::known_class_match(self.code.cache(function), declared, value)
+        })
     }
 
     /// Whether `value` is an object of a class that the class type

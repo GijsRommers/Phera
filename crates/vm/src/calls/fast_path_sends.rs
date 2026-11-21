@@ -48,7 +48,7 @@ impl Machine<'_> {
         let accepted = match call.callee {
             PreparedCallee::Php(function) => {
                 self.accepts_argument(function, index, &value)
-                    || self.widen_argument(function, index, &mut value)
+                    || self.accepts_on_second_look(function, index, &mut value)
             }
             _ => self.other_accepts(call.callee, index, &value),
         };
