@@ -312,6 +312,7 @@ impl Runtime {
             Err(error) => return Err(error),
         };
         vm.set_args(arguments);
+        phera_ext_standard::set_cli_arguments(vm.state_mut(), arguments);
         let server =
             environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
         vm.set_global("_SERVER", Value::from(server));

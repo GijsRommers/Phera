@@ -7,6 +7,8 @@ mod arrays;
 mod constants;
 pub mod csv;
 pub mod environment;
+mod getopt;
+pub use getopt::set_arguments as set_cli_arguments;
 pub mod ini;
 mod last_error;
 mod locale;
@@ -59,6 +61,7 @@ impl Extension for Standard {
             registry.function(*entry);
         }
         environment::register(registry);
+        getopt::register(registry);
         process::register(registry);
         last_error::register(registry);
         locale::register(registry);
