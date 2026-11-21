@@ -272,6 +272,7 @@ impl<'ast> Compiler<'ast> {
         } else {
             self.class_scope.clone()
         };
+        builder.parent_scope = self.parent_scope.clone();
         builder.function.definition_line = line;
         builder.function.returns_reference = declaration.by_reference;
         builder.function.is_generator = declaration.is_generator;
