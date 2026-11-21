@@ -95,18 +95,6 @@ pub(crate) fn table(
     order: Order,
 ) -> Value {
     match order {
-        Order::Single => rows.first().map_or_else(
-            || Value::from(PhpArray::new()),
-            |captures| {
-                row(
-                    subject,
-                    captures,
-                    names,
-                    flags,
-                    marks.first().copied().flatten(),
-                )
-            },
-        ),
         Order::Set => list(rows.iter().enumerate().map(|(index, captures)| {
             row(
                 subject,
