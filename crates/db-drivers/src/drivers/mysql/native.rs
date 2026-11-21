@@ -188,10 +188,14 @@ impl Mysql {
     }
 
     pub fn backslashes_enabled(&self) -> bool {
+        self.observed_backslashes().unwrap_or(true)
+    }
+
+    pub(super) fn observed_backslashes(&self) -> Option<bool> {
         self.connection
             .as_ref()
             .and_then(|connection| connection.last_ok_packet())
-            .is_none_or(|packet| {
+            .map(|packet| {
                 !packet
                     .status_flags()
                     .contains(StatusFlags::SERVER_STATUS_NO_BACKSLASH_ESCAPES)

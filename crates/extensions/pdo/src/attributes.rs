@@ -169,13 +169,7 @@ pub async fn apply(
         (DriverName::Sqlite, ATTR_TIMEOUT) => {
             let seconds = integer(value)?;
             let milliseconds = ((seconds.wrapping_mul(1000) as i32).max(0)) as u64;
-            if let Err(error) = connection
-                .driver
-                .lock()
-                .await
-                .sqlite_timeout(milliseconds)
-                .await
-            {
+            if let Err(error) = connection.driver.sqlite_timeout(milliseconds).await {
                 return connection.fail(context, error, "PDO::setAttribute");
             }
         }
@@ -184,7 +178,7 @@ pub async fn apply(
             if connection.attributes.borrow().autocommit != enabled {
                 connection.attributes.borrow_mut().autocommit = enabled;
                 let result = {
-                    let mut lease = connection.driver.lock().await;
+                    let lease = &connection.driver;
                     let result = lease.mysql_autocommit(enabled).await;
                     if let Some(active) = lease.observed_transaction_state() {
                         connection.transaction.set(active);

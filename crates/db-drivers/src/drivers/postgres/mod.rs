@@ -231,26 +231,22 @@ impl Postgres {
             .iter()
             .map(crate::metadata::postgres)
             .collect();
-        let mut values = Vec::new();
-        let affected;
-        if statement.columns().is_empty() {
-            affected = self
+        let (values, affected) = if statement.columns().is_empty() {
+            let affected = self
                 .client
                 .execute(&statement, &references)
                 .await
                 .map_err(|e| error(e, &query))?;
+            (Vec::new(), affected)
         } else {
             let rows = self
                 .client
                 .query(&statement, &references)
                 .await
                 .map_err(|e| error(e, &query))?;
-            affected = rows.len() as u64;
-            for row in rows {
-                let text = text::convert(&self.client, &row, &query).await?;
-                values.push(Row { binary: row, text });
-            }
-        }
+            let affected = rows.len() as u64;
+            (text::convert(&self.client, rows, &query).await?, affected)
+        };
         Ok(RawRows::Postgres {
             columns,
             rows: values,

@@ -1,5 +1,6 @@
 //! Operations on the live MySQL session, such as `$db->set_charset('utf8mb4')`.
 
+use phera_db_drivers::drivers::RowBuffer;
 use phera_db_drivers::drivers::mysql::identifier;
 use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, PhpArray, Value, args};
 
@@ -63,11 +64,15 @@ pub async fn execute<const OP: usize>(
     }
     let requested = name.clone();
     // A fork replays what the script changed about its session.
-    let noted = match OP {
-        SELECT_DB => Some(format!("USE {}", identifier(&name))),
-        SET_CHARSET => Some(format!("SET NAMES {name}")),
-        AUTOCOMMIT => Some(format!("SET autocommit={}", u8::from(enabled))),
-        _ => None,
+    let noted = if handle.borrow().session.is_recording() {
+        match OP {
+            SELECT_DB => Some(format!("USE {}", identifier(&name))),
+            SET_CHARSET => Some(format!("SET NAMES {name}")),
+            AUTOCOMMIT => Some(format!("SET autocommit={}", u8::from(enabled))),
+            _ => None,
+        }
+    } else {
+        None
     };
     let answer = run(&lease, move |mysql| {
         Box::pin(async move {
@@ -241,8 +246,8 @@ fn transaction(operation: usize, flags: i64, name: Option<&str>) -> String {
     format!("{command}{name}{chain}{release}")
 }
 
-fn charset_object(context: &mut dyn Context, rows: &[Vec<Value>]) -> NativeResult {
-    let Some(row) = rows.first() else {
+fn charset_object(context: &mut dyn Context, rows: &RowBuffer) -> NativeResult {
+    let Some(row) = rows.get(0) else {
         return Ok(Value::Null);
     };
     let mut props = PhpArray::new();
@@ -261,8 +266,8 @@ fn charset_object(context: &mut dyn Context, rows: &[Vec<Value>]) -> NativeResul
     context.create_object("stdClass", props)
 }
 
-fn warning(context: &mut dyn Context, rows: Vec<Vec<Value>>) -> NativeResult {
-    let Some(first) = rows.first() else {
+fn warning(context: &mut dyn Context, rows: RowBuffer) -> NativeResult {
+    let Some(first) = rows.get(0) else {
         return Ok(Value::Bool(false));
     };
     let mut props = PhpArray::new();
@@ -278,8 +283,9 @@ fn warning(context: &mut dyn Context, rows: Vec<Vec<Value>>) -> NativeResult {
     let value = context.create_object("mysqli_warning", props)?;
     if let Value::Object(object) = &value {
         *object.native.borrow_mut() = Some(Box::new(
-            rows.into_iter()
+            rows.iter()
                 .skip(1)
+                .map(<[Value]>::to_vec)
                 .collect::<std::collections::VecDeque<_>>(),
         ));
     }
