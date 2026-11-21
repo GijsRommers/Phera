@@ -39,7 +39,7 @@ impl NativeLink {
     fn new(entry: FunctionEntry, registry: &phera_extension_api::Registry) -> Option<Self> {
         let handler = match entry.handler {
             NativeFn::Sync(handler) => Handler::Sync(handler),
-            NativeFn::DeprecatedSync(_) => return None,
+            NativeFn::DeprecatedSync(_) | NativeFn::DeprecatedAsync(_) => return None,
             NativeFn::Async(_) => Handler::Select(registry.sync_selector(entry.name)?),
         };
         let mut masks = [TypeMask::default(); 4];
