@@ -43,6 +43,8 @@ impl Vm {
             attributes: Vec::new(),
         };
         match target {
+            // `Vm::member_function` turns it into a method by name first.
+            FunctionTarget::Member(_) => return Err(internal_error!("reflected member target")),
             FunctionTarget::Named(name) => {
                 let callee = self
                     .resolve_callee(name)

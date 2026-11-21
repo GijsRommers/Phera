@@ -35,7 +35,17 @@ impl Vm {
         receiver: Option<Rc<Object>>,
         for_closure: bool,
     ) -> Result<Callee, NativeError> {
+        let named;
+        let target = match target {
+            FunctionTarget::Member(handle) => {
+                named = self.member_target(*handle)?;
+                &named
+            }
+            target => target,
+        };
         let callee = match target {
+            // Turned into a method by name above.
+            FunctionTarget::Member(_) => return Err(internal_error!("reflected member target")),
             FunctionTarget::Named(name) => self.resolve_callee(name)?,
             FunctionTarget::Closure(object) => {
                 let object = object
@@ -136,7 +146,17 @@ impl Vm {
 
     pub(super) fn reflection_statics(&mut self, target: &FunctionTarget) -> NativeResult {
         let mut values = PhpArray::new();
+        let named;
+        let target = match target {
+            FunctionTarget::Member(handle) => {
+                named = self.member_target(*handle)?;
+                &named
+            }
+            target => target,
+        };
         let function = match target {
+            // Turned into a method by name above.
+            FunctionTarget::Member(_) => return Err(internal_error!("reflected member target")),
             FunctionTarget::Named(name) => function_of(&self.resolve_callee(name)?.target),
             FunctionTarget::Method { .. } | FunctionTarget::PropertyHook { .. } => {
                 method_function(&self.reflection_target_method(target)?.1)
