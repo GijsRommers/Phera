@@ -204,7 +204,8 @@ impl CodeCache {
                         .then_some(phera_compiler::NativeFunction::General);
                 };
                 Some(match entry.handler {
-                    phera_extension_api::NativeFn::DeprecatedSync(_) => {
+                    phera_extension_api::NativeFn::DeprecatedSync(_)
+                    | phera_extension_api::NativeFn::DeprecatedAsync(_) => {
                         phera_compiler::NativeFunction::General
                     }
                     phera_extension_api::NativeFn::Async(_)
