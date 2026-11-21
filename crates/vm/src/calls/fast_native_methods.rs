@@ -9,7 +9,7 @@
 use std::rc::Rc;
 
 use phera_bytecode::Reg;
-use phera_extension_api::{MethodEntry, NativeMethod};
+use phera_extension_api::MethodEntry;
 
 use super::{
     call_state::{CallTarget, Callee},
@@ -28,15 +28,17 @@ impl Machine<'_> {
         method: Rc<Method>,
         entry: MethodEntry,
     ) -> Step {
+        // A method whose direct handler declines a call (an argument it
+        // does not take, a case it leaves to the method) runs as prepared
+        // here, sync or async, from the batch loop.
         if entry.direct.is_none()
             || entry.preparation.is_some()
-            || !matches!(entry.handler, NativeMethod::Sync(_))
             || entry
                 .params
                 .iter()
-                .any(|param| param.by_ref || param.variadic || param.optional)
+                .any(|param| param.by_ref || param.variadic)
         {
-            return Step::Slow;
+            return self.prepare_native_method(position, context, method);
         }
         let signature = method.signature(self.code);
         let callee = Callee {
@@ -98,7 +100,9 @@ impl Machine<'_> {
         let (Some(direct), Some(receiver)) = (entry.direct, context.receiver.as_deref()) else {
             return Step::Slow;
         };
-        if entry.params.len() != call.sent as usize {
+        let required = entry.params.iter().filter(|param| !param.optional).count();
+        let sent = call.sent as usize;
+        if sent < required || sent > entry.params.len() {
             return Step::Slow;
         }
         let operands = self.registers.window(call.base(), call.sent as usize);
