@@ -33,6 +33,11 @@ impl PropertyEntry {
         self.slot.map(|slot| slot as usize)
     }
 
+    /// The property as this entry knows it, for an object it has matched.
+    fn known(&self) -> crate::property_storage::Known<'_> {
+        crate::property_storage::Known::of(&self.key, self.slot())
+    }
+
     /// The property's value for a read from class scope `scope`, if this
     /// entry was made for the object's class and that scope (see
     /// [`Vm::property_entry`]) and the property holds a value that can be
@@ -72,7 +77,7 @@ impl PropertyEntry {
         {
             return false;
         }
-        crate::property_storage::write_direct_at(object, &self.key, self.slot(), value, || {
+        crate::property_storage::write_direct_known(object, self.known(), value, || {
             !has_magic_properties(object) && object.lazy().is_none()
         })
     }
@@ -96,7 +101,7 @@ impl PropertyEntry {
         {
             return None;
         }
-        crate::property_storage::write_element_at(object, &self.key, self.slot(), keys, value)
+        crate::property_storage::write_element_known(object, self.known(), keys, value)
     }
 
     /// `++` or `--` of an integer property, for an increment from `scope`,
@@ -132,8 +137,7 @@ impl PropertyEntry {
         if !self.write_rule.allows(TypeMask::INT) {
             return None;
         }
-        let Some(Value::Int(old)) =
-            crate::property_storage::read_at(object, &self.key, self.slot())
+        let Some(Value::Int(old)) = crate::property_storage::read_known(object, self.known())
         else {
             return None;
         };
@@ -143,7 +147,7 @@ impl PropertyEntry {
             -1
         };
         let new = old.checked_add(delta)?;
-        crate::property_storage::write_at(object, self.key.clone(), self.slot(), Value::Int(new));
+        crate::property_storage::write_known(object, self.known(), Value::Int(new));
         Some(Value::Int(
             if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
                 old
@@ -157,7 +161,7 @@ impl PropertyEntry {
         if !self.read_without_static_notice {
             return None;
         }
-        crate::property_storage::read_at(object, &self.key, self.slot()).map(|value| match value {
+        crate::property_storage::read_known(object, self.known()).map(|value| match value {
             Value::Reference(_) => value.deref().clone(),
             value => value,
         })

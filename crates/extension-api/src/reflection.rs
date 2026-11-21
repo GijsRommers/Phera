@@ -99,6 +99,57 @@ pub struct MemberInfo {
     /// For a method in a class's member list, where the VM keeps its
     /// reflected function (see [`FunctionTarget::Member`]).
     pub method: Option<MethodHandle>,
+    /// For a plain instance property (no hooks, not virtual), where an
+    /// object keeps it, for the direct methods of `ReflectionProperty`.
+    pub slot_access: Option<SlotAccess>,
+}
+
+/// An instance property in an object's slots (see
+/// `phera_value::Properties`): its key and slot, and the types a write may
+/// store as they are.
+///
+/// The slot is the same in the declaring class and in every class that
+/// extends it, because a layout lists the parent's properties first. So a
+/// direct method checks only that the object's layout has this key there:
+/// any other object (of an unrelated class, or with a lazy or native
+/// table) gets the general path.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlotAccess {
+    pub key: crate::ArrayKey,
+    pub slot: usize,
+    /// `None` when a write must take the general path: a readonly
+    /// property, or a type that names a class.
+    pub writes: Option<phera_bytecode::TypeMask>,
+}
+
+impl SlotAccess {
+    /// The property's value in `properties`, or `None` when it has none:
+    /// `None` outside when the properties do not keep it in this slot.
+    pub fn read<'a>(&self, properties: &'a crate::value::Properties) -> Option<Option<&'a Value>> {
+        (properties.slot_for(&self.key, Some(self.slot)) == Some(self.slot))
+            .then(|| properties.slot(self.slot))
+    }
+
+    /// Whether a write may store `value` as it is: a type the declaration
+    /// accepts without a conversion, and not a PHP reference.
+    pub fn accepts(&self, value: &Value) -> bool {
+        use phera_bytecode::TypeMask;
+        let Some(mask) = self.writes else {
+            return false;
+        };
+        let own = match value {
+            Value::Null => TypeMask::NULL,
+            Value::Bool(true) => TypeMask::TRUE,
+            Value::Bool(false) => TypeMask::FALSE,
+            Value::Int(_) => TypeMask::INT,
+            Value::Float(_) => TypeMask::FLOAT,
+            Value::String(_) => TypeMask::STRING,
+            Value::Array(_) => TypeMask::ARRAY,
+            Value::Object(_) => TypeMask::OBJECT,
+            _ => return false,
+        };
+        mask.intersects(own)
+    }
 }
 
 /// A method by its place in the member list of a linked class: the class's

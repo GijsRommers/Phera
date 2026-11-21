@@ -33,12 +33,8 @@ impl Initialization {
                         "Lazy object initializer must return NULL or no value",
                     ));
                 }
-                self.object.update(|storage| {
-                    *storage = self
-                        .object
-                        .class
-                        .order_lazy_properties(std::mem::take(storage));
-                });
+                // The declared properties are in their slots, in class order
+                // already (`phera_value::Properties`).
                 self.object.replace_lazy(None);
                 self.pending = None;
                 Ok(Value::Object(self.object.clone()))
@@ -64,7 +60,8 @@ impl Initialization {
                     ));
                 }
                 clear_reference_holders(&self.object);
-                self.object.update(|storage| *storage = PhpArray::new());
+                self.object
+                    .update(|storage| storage.replace_all(PhpArray::new()));
                 self.object
                     .replace_lazy(Some(Box::new(LazyObject::Proxy(instance.clone()))));
                 self.pending = None;
@@ -89,7 +86,7 @@ impl Drop for Initialization {
                         );
                     }
                 }
-                self.object.update(|storage| *storage = snapshot);
+                self.object.update(|storage| storage.replace_all(snapshot));
             }
             self.object.replace_lazy(Some(pending));
         }
