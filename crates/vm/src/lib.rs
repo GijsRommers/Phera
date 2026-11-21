@@ -41,6 +41,7 @@ mod class_listings;
 mod class_types;
 mod classes;
 mod closure_binding;
+mod closure_cycles;
 mod closure_drop;
 mod closure_equality;
 mod closure_initializers;
