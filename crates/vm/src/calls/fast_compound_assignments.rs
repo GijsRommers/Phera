@@ -47,7 +47,7 @@ impl Machine<'_> {
         path: PathId,
         source: Reg,
     ) -> Step {
-        if GUARDED || operator == BinaryOp::Concat {
+        if operator == BinaryOp::Concat {
             return Step::Slow;
         }
         let right = match self
@@ -74,9 +74,6 @@ impl Machine<'_> {
         (mode, destination): (IncDec, Reg),
         path: PathId,
     ) -> Step {
-        if GUARDED {
-            return Step::Slow;
-        }
         let up = matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement);
         let post = matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement);
         self.update_place(position, destination, path, |old| {

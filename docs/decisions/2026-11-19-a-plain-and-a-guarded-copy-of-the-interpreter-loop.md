@@ -3,6 +3,7 @@
 - Date: 2026-11-19
 - Area: Speed and method
 - Decided by: Design
+- Superseded in part by 2026-11-21 "The guarded loop runs releasing instructions itself and leaves at the next boundary when a destructor waits": the guarded copy no longer sends stores, writes, `foreach` and `instanceof` to the VM
 
 ## Decision
 
