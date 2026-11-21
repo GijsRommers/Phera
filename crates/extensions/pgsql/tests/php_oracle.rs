@@ -116,6 +116,16 @@ const CALLS: &[(&str, &str)] = &[
         "pg_fetch_row(pg_query($db, \"SELECT 7\\x00; SELECT 8\"))",
     ),
     (
+        "prepare-name-nul",
+        "(function () use ($db) {
+            $pid = pg_get_pid($db);
+            pg_prepare($db, \"nul_oracle\\x00suffix\", 'SELECT 9');
+            $row = pg_fetch_row(pg_execute($db, 'nul_oracle', []));
+            $next = pg_fetch_result(pg_query($db, 'SELECT 11'), 0, 0);
+            return [$row, $next, pg_get_pid($db) === $pid];
+        })()",
+    ),
+    (
         "unescape-bytea-octal",
         "bin2hex(pg_unescape_bytea('\\000\\200\\377'))",
     ),

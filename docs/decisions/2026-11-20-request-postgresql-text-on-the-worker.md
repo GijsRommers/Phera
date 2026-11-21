@@ -41,6 +41,12 @@ notifications each keep up to 4 MiB and drop their oldest entries to make
 room. Limit the parameter map to 128 entries and 128 KiB. Retire a socket
 that exceeds the parameter limit or sends invalid framing.
 
+Keep the full SQL or reject it. The PostgreSQL encoder rejects a NUL in PDO
+SQL and in emulated SQL before writing a message. Native text binding sends
+the full value, which PostgreSQL rejects as invalid text. Both paths keep the
+connection usable. Legacy `pg_prepare` names follow PHP's NUL termination;
+the prepared SQL sent for such a name is unchanged.
+
 ## Verification
 
 Start with a scripted peer for fragmented and coalesced frames, supported

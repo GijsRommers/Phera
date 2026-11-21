@@ -98,6 +98,10 @@ or `phera-postgres 3.0`. The PostgreSQL client accepts messages up to 64 MiB,
 including the four-byte length field, and closes the connection on invalid
 framing.
 
+PDO PostgreSQL rejects embedded NUL bytes in SQL or text parameters with an
+error and the connection remains usable. PHP 8.5 truncates these inputs at
+the first NUL.
+
 ## What is not there
 
 These throw a PDOException that says "... is not supported yet":
