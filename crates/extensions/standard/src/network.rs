@@ -7,6 +7,10 @@ use phera_extension_api::{
     Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
 };
 
+mod host;
+mod interfaces;
+mod services;
+
 pub(crate) fn register(registry: &mut Registry) {
     const TEXT: &[Param] = &[Param::new("ip", ParamType::String)];
     const NUMBER: &[Param] = &[Param::new("ip", ParamType::Int)];
@@ -18,6 +22,25 @@ pub(crate) fn register(registry: &mut Registry) {
     ] {
         registry.function(entry);
     }
+    host::register(registry);
+    interfaces::register(registry);
+    services::register(registry);
+}
+
+fn checked_argument<'a>(
+    arguments: &'a [Value],
+    index: usize,
+    function: &str,
+    name: &str,
+) -> Result<&'a [u8], NativeError> {
+    let bytes = args::bytes(arguments, index);
+    if bytes.contains(&0) {
+        return Err(NativeError::value_error(format!(
+            "{function}(): Argument #{} (${name}) must not contain any null bytes",
+            index + 1,
+        )));
+    }
+    Ok(bytes)
 }
 
 fn checked_text<'a>(arguments: &'a [Value], name: &str) -> Result<Option<&'a str>, NativeError> {
