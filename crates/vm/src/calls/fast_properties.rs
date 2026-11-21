@@ -101,15 +101,19 @@ impl Machine<'_> {
             _ => return Step::Slow,
         };
         let written = self.with_site(position, (path, Shape::Write), |entry, object, scope| {
-            entry.write_matching(object, scope, &value).then_some(())
+            // The assignment's result is the value stored: `1.0` for a
+            // `float` property assigned `1`.
+            let widened = result.and_then(|_| entry.widened(&value));
+            entry.write_matching(object, scope, &value).then_some(widened)
         });
-        if written.is_none() {
+        let Some(widened) = written else {
             return Step::Slow;
-        }
+        };
         if let Some(result) = result {
             // Outside the guarded loop, into a register checked above, a
             // store completes.
-            let _ = store::<false>(self.registers.tail_mut(base), result, value);
+            let stored = widened.unwrap_or(value);
+            let _ = store::<false>(self.registers.tail_mut(base), result, stored);
         }
         Step::Done(position.ip)
     }

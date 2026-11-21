@@ -25,6 +25,9 @@ for ($i = 0; $i < 2; $i++) {
 show('write string to int', function () use ($h) { $h->id = '42'; return $h->id; });
 show('write bad to int', fn () => $h->id = 'x');
 show('write int to float', function () use ($h) { $n = 'f'; $h->$n = 3; return $h->f; });
+show('assigned int to float, its result', function () use ($h) { $v = 1; $all = []; for ($k = 0; $k < 3; $k++) { $x = $h->f = $v; $all[] = $x; } return $all; });
+class U { public $u = 1; public function __get($n) { return "__get($n)"; } }
+show('unset declared, then magic read', function () { $o = new U; unset($o->u); return $o->u; });
 show('read own private', fn () => $h->readOwn('secret'));
 show('empty name', function () use ($h) { $n = ''; return $h->$n = 1; });
 show('nul name', function () use ($h) { $n = "\0x"; return $h->$n; });
@@ -120,16 +123,22 @@ read f: 5.0
 write string to int: 42
 write bad to int: TypeError: Cannot assign string to property H::$id of type int
 write int to float: 3.0
+assigned int to float, its result: array (
+  0 => 1.0,
+  1 => 1.0,
+  2 => 1.0,
+)
+unset declared, then magic read: '__get(u)'
 read own private: 's'
 empty name: 1
 nul name: Error: Cannot access property starting with "\0"
 
-Notice: Accessing static property H::$st as non static in %s on line 28
+Notice: Accessing static property H::$st as non static in %s on line 31
 static as instance: 2
 f,1,,st
 read unset typed: Error: Typed property H::$id must not be accessed before initialization
 
-Warning: Undefined property: H::$u in %s on line 32
+Warning: Undefined property: H::$u in %s on line 35
 read unset untyped: NULL
 isset unset typed: false
 id,u,f,1,,st,dyn

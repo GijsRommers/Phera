@@ -115,6 +115,12 @@ impl PropertyEntry {
         self.increment(object, mode)
     }
 
+    /// What a write of `value` stores instead, when the declared type
+    /// converts it as it is (an int into a `float` property).
+    pub(crate) fn widened(&self, value: &Value) -> Option<Value> {
+        self.write_rule.widened(value)
+    }
+
     /// Whether this entry was made for the object's class and a read or
     /// write from class scope `scope`.
     fn matches(&self, object: &Object, scope: Option<&Rc<crate::classes::Class>>) -> bool {
