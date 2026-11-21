@@ -34,6 +34,11 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
 | Speed of a framework request | About 2.6 times PHP's instruction count for one Laravel API request in production mode: 43 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 173 million against 27 million, 6.3 times. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
 
+Phera validates union and intersection declarations during compilation and
+checks inherited property types when linking classes. Ordinary typed
+parameters with a literal `null` default accept `null` and emit PHP's
+implicit-nullability deprecation.
+
 ## 🧰 The `phera` command
 
 | Command | What it does |

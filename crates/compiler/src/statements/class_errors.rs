@@ -3,6 +3,8 @@
 use crate::{CompileError, Compiler};
 use phera_ast as ast;
 
+use super::type_declarations::{TypeScope, TypeSite, builtin_type};
+
 impl Compiler<'_> {
     /// Reject structurally invalid classes before any top-level instruction runs.
     pub(crate) fn validate_class_declaration(
@@ -31,10 +33,10 @@ impl Compiler<'_> {
             ));
         }
         if let Some(identifier) = &declaration.name
-            && matches!(
-                identifier.name.to_ascii_lowercase().as_str(),
-                "self" | "parent" | "static"
-            )
+            && {
+                let lower = identifier.name.to_ascii_lowercase();
+                builtin_type(&lower) || matches!(lower.as_str(), "self" | "parent" | "static")
+            }
         {
             let message = if is_interface {
                 format!(
@@ -68,17 +70,56 @@ impl Compiler<'_> {
                 ));
             }
         }
+        let parent = (!is_interface)
+            .then(|| declaration.extends.first())
+            .flatten();
+        let scope = if declaration.kind == ast::ClassKind::Trait {
+            TypeScope::Deferred
+        } else {
+            TypeScope::Class { name, parent }
+        };
         let mut properties = std::collections::HashSet::new();
         for member in &declaration.members {
             let line = self.lines.line(member.span.start);
             match &member.kind {
                 ast::ClassMemberKind::Method(method) => {
-                    self.validate_method_declaration(declaration, name, method)?
+                    self.validate_method_declaration(declaration, name, method)?;
+                    for parameter in &method.parameters {
+                        if let Some(ty) = &parameter.ty {
+                            self.validate_declared_type(ty, TypeSite::Parameter, scope)?;
+                            if parameter.is_promoted() {
+                                self.validate_declared_type(
+                                    ty,
+                                    TypeSite::Property {
+                                        class: name,
+                                        name: &parameter.name,
+                                    },
+                                    scope,
+                                )?;
+                            }
+                        }
+                    }
+                    if let Some(ty) = &method.return_type {
+                        self.validate_declared_type(ty, TypeSite::Return, scope)?;
+                    }
                 }
                 ast::ClassMemberKind::Property {
-                    modifiers, items, ..
+                    modifiers,
+                    ty,
+                    items,
+                    ..
                 } => {
                     for property in items {
+                        if let Some(ty) = ty {
+                            self.validate_declared_type(
+                                ty,
+                                TypeSite::Property {
+                                    class: name,
+                                    name: &property.name,
+                                },
+                                scope,
+                            )?;
+                        }
                         if !properties.insert(&property.name) {
                             return Err(self.error(
                                 format!("Cannot redeclare {name}::${}", property.name),
@@ -90,6 +131,22 @@ impl Compiler<'_> {
                                 self.error("Only hooked properties may be declared abstract", line)
                             );
                         }
+                    }
+                }
+                ast::ClassMemberKind::Constant {
+                    ty: Some(ty),
+                    items,
+                    ..
+                } => {
+                    for constant in items {
+                        self.validate_declared_type(
+                            ty,
+                            TypeSite::Constant {
+                                class: name,
+                                name: &constant.name.name,
+                            },
+                            scope,
+                        )?;
                     }
                 }
                 _ => {}
