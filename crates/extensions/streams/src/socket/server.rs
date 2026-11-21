@@ -37,7 +37,7 @@ pub(super) fn accept(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture
             return Ok(Value::Bool(false));
         };
         io.timeout = timeout(context, &args, function, 1)?;
-        if !io.socket.listener {
+        if !io.socket.listening() {
             context.warning(format!("{function}(): Accept failed: Unknown error"));
             return Ok(Value::Bool(false));
         }

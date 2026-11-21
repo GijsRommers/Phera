@@ -3,6 +3,7 @@
 mod address;
 mod client;
 mod datagram;
+pub(crate) mod descriptor;
 mod functions;
 pub(crate) mod http;
 mod http_headers;
@@ -35,7 +36,8 @@ use self::{
 };
 use crate::stream::{Backing, Stream, Wrapper};
 
-pub(crate) use slot::{Socket, StreamIo};
+pub use slot::Socket;
+pub(crate) use slot::StreamIo;
 
 pub(crate) fn register(registry: &mut phera_extension_api::Registry) {
     functions::register(registry);
@@ -44,10 +46,10 @@ pub(crate) fn register(registry: &mut phera_extension_api::Registry) {
     registry.fork_state::<persistent::Resources>(persistent::fork_resources);
 }
 
-pub(crate) struct Connection {
+pub struct Connection {
     wire: Wire,
     transport: Transport,
-    listener: bool,
+    listener: AtomicBool,
     paired: bool,
     eof: AtomicBool,
     timed_out: AtomicBool,
@@ -82,7 +84,7 @@ impl Connection {
         Arc::new(Self {
             wire: Wire(Arc::new(reactor)),
             transport,
-            listener,
+            listener: AtomicBool::new(listener),
             paired,
             eof: AtomicBool::new(false),
             timed_out: AtomicBool::new(false),
@@ -120,6 +122,10 @@ impl Connection {
 
     pub(crate) fn unread(&self) -> usize {
         self.unread.load(Ordering::Relaxed)
+    }
+
+    fn listening(&self) -> bool {
+        self.listener.load(Ordering::Relaxed)
     }
 }
 
