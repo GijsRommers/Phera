@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 phera-db-drivers.workspace = true
 phera-extension-api.workspace = true
-phera-io-pool.workspace = true
 tokio.workspace = true
 
 [lints]

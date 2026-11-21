@@ -22,7 +22,8 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 | `phera-vm` | Executes bytecode: frames, classes, exceptions, generators | bytecode, value |
 | `phera-extension-api` | What native functions and classes see | value |
 | `phera-extensions/*` | Native functions grouped like PHP extensions | extension-api |
-| `phera-io-pool` | Shared PDO and Redis connection pools and TLS policy | tokio, rustls |
+| `phera-io-pool` | Redis connection pool and shared client TLS policy | tokio, rustls |
+| `phera-db-drivers` | Worker-local SQL connections and process-wide admission | io-pool, tokio |
 | `phera-runtime` | Code cache, includes, autoload, superglobals, request lifecycle | compiler, vm, extensions |
 | `phera-server` | HTTP on Tokio, one worker thread per core | |
 | `phera-cli` | `phera run file.php`, `phera serve` | runtime, server |
@@ -48,8 +49,7 @@ to its input without a limit:
 Dependencies point one way. The VM never sees the AST, and the server never sees
 the VM: it talks to a `Handler` trait that the runtime implements.
 
-PDO and Redis share the client TLS policy in `phera-io-pool::tls`, where
-their pooled connections already share an I/O runtime abstraction. Rustls
+PDO and Redis share the client TLS policy in `phera-io-pool::tls`. Rustls
 uses ring's default cipher suites with TLS 1.2 and 1.3. Ring builds its C and
 assembly with the platform toolchain. Phera's crates use the safe Rust API.
 PDO uses platform trust roots with WebPKI fallback and supports driver-specific
@@ -157,8 +157,8 @@ container, routes), freezes that heap as a snapshot, and gives each request a
 fork of it. Arrays and strings are already copy-on-write, so a fork copies only
 objects and references, lazily where possible. Rules that make this safe:
 
-- A snapshot must hold no live resources. Database connections and open files
-  are created per request, or come from a pool the runtime owns.
+- A snapshot holds the state needed to recreate resources. Each fork opens
+  its own database session or file when it needs it.
 - The split between boot and handle must be explicit. Phera follows the same
   contract as the Symfony Runtime component and Laravel Octane.
 - Static properties and globals are part of the fork, so no request can see
@@ -385,12 +385,12 @@ request can change it.
   `WeakMap`, `Closure`, `DateTime`, ...) get a fork hook in the extension API. It
   returns a copy of the state with the objects inside replaced by their copies,
   or says that the object cannot be forked.
-- What cannot be in a snapshot: an open file, socket or process, a database
-  connection in the middle of a transaction, a started session, a running
-  generator or fiber that holds one of these. `Phera\snapshot()` then throws
-  `Phera\SnapshotException`, which names the class and the path from a global or
-  static property to the object. A pooled database handle is fine: it holds the
-  pool's key, and takes a connection again on first use.
+- Live socket and process handles, locked files, and unreplayable database
+  state such as an open transaction refuse the snapshot. `Phera\snapshot()`
+  throws `Phera\SnapshotException` naming the class and path to the object.
+  A boot database handle keeps its connection settings and session changes.
+  Each fork borrows a worker-local socket on first use, then replays those
+  changes. Only the boot records session changes for replay.
 - What is reset in every fork: the superglobals, the request time, the time
   limit, the header list, the seeds of `rand()` and `mt_rand()`. Output written
   before the snapshot is not sent again.

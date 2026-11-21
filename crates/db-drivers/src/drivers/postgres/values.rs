@@ -7,7 +7,7 @@ use phera_extension_api::Value;
 use tokio_postgres::types::{FromSql, Kind, Type};
 
 use super::{Row, error};
-use crate::drivers::{Column, Rows};
+use crate::drivers::{Column, RowBuffer, Rows};
 use crate::errors::DbError;
 
 type DecodeError = Box<dyn Error + Send + Sync>;
@@ -16,11 +16,12 @@ type DecodeError = Box<dyn Error + Send + Sync>;
 /// formatted as text takes that text; every other one is decoded from the
 /// binary format.
 pub fn convert(columns: Vec<Column>, rows: Vec<Row>, affected: u64) -> Result<Rows, DbError> {
-    let mut values = Vec::with_capacity(rows.len());
+    // Cursor batches carry rows only. The statement already has their columns.
+    let width = rows.first().map_or(columns.len(), |row| row.binary.len());
+    let mut values = RowBuffer::with_capacity(width, rows.len());
     for Row { binary, text } in rows {
         let mut text = text.into_iter().peekable();
-        let mut cells = Vec::with_capacity(binary.len());
-        for index in 0..binary.len() {
+        values.try_push((0..binary.len()).map(|index| {
             // `text` is in column order, so its next entry is this column's
             // or a later one's.
             let value = match text.next_if(|(column, _)| *column == index) {
@@ -30,9 +31,8 @@ pub fn convert(columns: Vec<Column>, rows: Vec<Row>, affected: u64) -> Result<Ro
                     cell.map_or(Value::Null, |cell| cell.0)
                 }
             };
-            cells.push(value);
-        }
-        values.push(cells);
+            Ok::<_, DbError>(value)
+        }))?;
     }
     Ok(Rows {
         columns,

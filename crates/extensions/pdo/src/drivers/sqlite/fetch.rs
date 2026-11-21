@@ -21,6 +21,10 @@ async fn fill(context: &mut dyn Context, this: Option<&Rc<Object>>, all: bool) -
         match handle.fetch().await {
             Ok(Some(row)) => {
                 let mut statement = state.borrow_mut();
+                if statement.cursor == statement.rows.values.len() {
+                    statement.rows.values.clear();
+                    statement.cursor = 0;
+                }
                 for (column, cell) in statement.rows.columns.iter_mut().zip(&row) {
                     if let crate::metadata::Metadata::Sqlite(_, kind) = &mut column.metadata {
                         *kind = cell.kind();
@@ -28,8 +32,7 @@ async fn fill(context: &mut dyn Context, this: Option<&Rc<Object>>, all: bool) -
                 }
                 statement.rows.values.push(
                     row.into_iter()
-                        .map(crate::drivers::sqlite::statement::value)
-                        .collect(),
+                        .map(crate::drivers::sqlite::statement::value),
                 );
             }
             Ok(None) => {

@@ -22,12 +22,7 @@ pub fn get<'a>(
         if connection.name != DriverName::Sqlite
             && matches!(attribute, ATTR_CONNECTION_STATUS | ATTR_SERVER_INFO)
         {
-            let result = connection
-                .driver
-                .lock()
-                .await
-                .server_attribute(attribute)
-                .await;
+            let result = connection.driver.server_attribute(attribute).await;
             return match result {
                 Ok(text) => Ok(Value::from(text)),
                 Err(error) => connection.fail(context, error, "PDO::getAttribute"),

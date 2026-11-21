@@ -13,6 +13,16 @@ try {
     var_dump($p->query("SELECT id,label FROM $t WHERE id=1")->fetch(PDO::FETCH_ASSOC));
     $p->setAttribute(PDO::ATTR_CASE,PDO::CASE_LOWER);
     var_dump($p->query("SELECT id AS ID FROM $t WHERE id=1")->fetch(PDO::FETCH_ASSOC));
+
+    $p->setAttribute(PDO::ATTR_CASE, PDO::CASE_NATURAL);
+    $stmt = $p->prepare("SELECT id AS Mixed FROM $t ORDER BY id");
+    $stmt->execute();
+    var_dump($stmt->fetch(PDO::FETCH_NUM));
+    $p->setAttribute(PDO::ATTR_CASE, PDO::CASE_UPPER);
+    var_dump($stmt->fetch(PDO::FETCH_ASSOC));
+    var_dump($stmt->fetchAll(PDO::FETCH_OBJ));
+    $stmt->execute();
+    var_dump($stmt->fetch(PDO::FETCH_ASSOC));
  } finally {
     if ($p->inTransaction()) {$p->rollBack();}
     $p->exec("DROP TABLE IF EXISTS $t");
