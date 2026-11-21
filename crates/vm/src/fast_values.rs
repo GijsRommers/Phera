@@ -19,7 +19,8 @@
 //! An operator is taken here only when both operands are null, booleans,
 //! integers, floats or strings, because then nothing but the value layer's
 //! own operator is involved: no `__toString`, no comparison of objects, no
-//! PHP code. The operator runs with a sink that only notes whether it
+//! PHP code. `===` and `!==` take any operands: identity compares objects
+//! by identity and arrays element by element, and runs no PHP code. The operator runs with a sink that only notes whether it
 //! raised a warning, a notice or a deprecation, or asked for the request's
 //! `precision` setting (a float turned into a string). If it did, or it
 //! failed (`"abc" * 2` throws), the result is dropped before anything is
@@ -151,7 +152,10 @@ fn is_plain(value: &Value) -> bool {
 
 /// A binary operator on two plain values, if it raises nothing.
 pub(crate) fn quiet_binary(operator: BinaryOp, left: &Value, right: &Value) -> Option<Value> {
-    if !is_plain(left) || !is_plain(right) {
+    // Identity runs no PHP code on any operands: objects are compared by
+    // identity, arrays element by element with `===`.
+    let identity = matches!(operator, BinaryOp::Identical | BinaryOp::NotIdentical);
+    if !identity && (!is_plain(left) || !is_plain(right)) {
         return None;
     }
     let mut sink = Silent::default();

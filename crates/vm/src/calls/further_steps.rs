@@ -59,11 +59,23 @@ impl Machine<'_> {
                 path,
                 mode: FetchMode::Read,
             } => match self.fetch_property::<GUARDED>(position, dst, path) {
-                Step::Slow => {
-                    self.fetch_property_element::<GUARDED>(position, dst, (path, FetchMode::Read))
-                }
+                Step::Slow => match self.fetch_property_element::<GUARDED>(
+                    position,
+                    dst,
+                    (path, FetchMode::Read),
+                ) {
+                    Step::Slow => {
+                        self.fetch_local_element::<GUARDED>(position, dst, (path, FetchMode::Read))
+                    }
+                    done => done,
+                },
                 done => done,
             },
+            Instruction::Fetch {
+                dst,
+                path,
+                mode: FetchMode::Destructure,
+            } => self.fetch_local_element::<GUARDED>(position, dst, (path, FetchMode::Destructure)),
             Instruction::Fetch {
                 dst,
                 path,
@@ -72,7 +84,12 @@ impl Machine<'_> {
                 Some(found) => self.store_quiet::<GUARDED>(position, dst, found),
                 None => match self.fetch_property_quietly::<GUARDED>(position, dst, path) {
                     Step::Slow => {
-                        self.fetch_property_element::<GUARDED>(position, dst, (path, mode))
+                        match self.fetch_property_element::<GUARDED>(position, dst, (path, mode)) {
+                            Step::Slow => {
+                                self.fetch_local_element::<GUARDED>(position, dst, (path, mode))
+                            }
+                            done => done,
+                        }
                     }
                     done => done,
                 },
@@ -114,6 +131,9 @@ impl Machine<'_> {
                 }
             }
             Instruction::InitCall { function } => self.prepare_named_call(position, function),
+            Instruction::FetchNamedClassConstant { dst, class, name } => {
+                self.fetch_named_class_constant::<GUARDED>(position, dst, (class, name))
+            }
             Instruction::FetchClassName { dst, class } => {
                 self.fetch_class_name::<GUARDED>(position, dst, class)
             }
@@ -155,7 +175,7 @@ impl Machine<'_> {
     }
 
     /// Stores what a quiet read found.
-    fn store_quiet<const GUARDED: bool>(
+    pub(super) fn store_quiet<const GUARDED: bool>(
         &mut self,
         position: Position,
         destination: Reg,
