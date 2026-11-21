@@ -107,7 +107,7 @@ impl Machine<'_> {
         }
         let operands = self.registers.window(call.base(), call.sent as usize);
         if operands.len() != call.sent as usize
-            || !super::native_signature::accepts(entry.params, operands)
+            || !super::native_signature::accepts_direct(entry.params, operands)
         {
             return Step::Slow;
         }
