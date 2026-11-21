@@ -114,7 +114,7 @@ impl Machine<'_> {
         destination: Reg,
     ) -> Step {
         let code = self.code;
-        let body = code.function(position.frame.function);
+        let (body, cache, facts) = code.function_parts(position.frame.function);
         let Some(site) = body.method_sites.get(site_id.index()) else {
             return Step::Slow;
         };
@@ -125,29 +125,23 @@ impl Machine<'_> {
             [Some(Value::Object(object))] => object,
             _ => return Step::Done(position.ip),
         };
-        let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
-            return Step::Done(position.ip);
-        };
+        let address = SiteRecord::address(&object.class);
         // A closure's scope can change from one call to the next, so its
         // sites keep no record.
         let record = match position.frame.kind() {
             CallKind::Closure => None,
-            _ => code.cache(position.frame.function).site_record(
-                code.facts(position.frame.function),
-                body.method_sites.len(),
-                site_id,
-            ),
+            _ => cache.site_record(facts, body.method_sites.len(), site_id),
         };
         let outcome = match record.map(Cell::get) {
-            Some(SiteRecord {
-                class: Some(index),
-                outcome,
-            }) if index == class.index => outcome,
+            Some(SiteRecord { class, outcome }) if class == address => outcome,
             _ => {
+                let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
+                    return Step::Done(position.ip);
+                };
                 let outcome = self.resolve_site(position, site, class);
                 if let Some(record) = record {
                     record.set(SiteRecord {
-                        class: Some(class.index),
+                        class: address,
                         outcome,
                     });
                 }

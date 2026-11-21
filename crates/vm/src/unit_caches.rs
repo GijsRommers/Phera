@@ -63,10 +63,25 @@ pub(crate) type Records = OnceCell<Box<[Cell<SiteRecord>]>>;
 /// depends only on the class and on the scope the site is written in, so
 /// the next call with a receiver of the same class needs no lookup. A
 /// receiver of another class looks the method up and replaces the record.
+///
+/// The class is held as the address of the receiver's class handle, so
+/// that a hit is one comparison. A VM frees no class while it runs (the
+/// class tables hold every class it linked until the VM ends, and the
+/// records die with the VM), so an address cannot come to mean another
+/// class.
 #[derive(Clone, Copy)]
 pub(crate) struct SiteRecord {
-    pub(crate) class: Option<crate::classes::ClassIndex>,
+    /// 0 for a record not made yet.
+    pub(crate) class: usize,
     pub(crate) outcome: SiteOutcome,
+}
+
+impl SiteRecord {
+    /// The address that identifies `class` in a record.
+    #[inline(always)]
+    pub(crate) fn address(class: &std::rc::Rc<dyn phera_value::ClassHandle>) -> usize {
+        std::rc::Rc::as_ptr(class).cast::<()>() as usize
+    }
 }
 
 /// How a method site calls the method it found.
@@ -87,7 +102,7 @@ pub(crate) enum SiteOutcome {
 
 impl SiteRecord {
     const EMPTY: SiteRecord = SiteRecord {
-        class: None,
+        class: 0,
         outcome: SiteOutcome::Vm,
     };
 }
