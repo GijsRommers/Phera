@@ -94,7 +94,14 @@ impl Watch {
     }
 
     async fn wake(&self) -> io::Result<bool> {
-        let mut guard = self.fd.ready(self.interest).await?;
+        // The kernel may report only an error, which select includes in the read and write sets.
+        let interested =
+            if self.interest == Interest::READABLE || self.interest == Interest::WRITABLE {
+                self.interest | Interest::ERROR
+            } else {
+                self.interest
+            };
+        let mut guard = self.fd.ready(interested).await?;
         let events = guard.ready();
         guard.clear_ready();
         Ok(if self.interest == Interest::WRITABLE {
