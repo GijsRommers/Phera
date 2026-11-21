@@ -62,28 +62,6 @@ impl Compiler<'_> {
                 line: line as u32,
             });
         }
-        if trait_scope.is_some() {
-            for parameter in &method.parameters {
-                let Some(ty) = &parameter.ty else {
-                    continue;
-                };
-                if !matches!(
-                    parameter.default.as_ref().map(|default| &default.kind),
-                    Some(ast::ExpressionKind::Literal(ast::Literal::Null))
-                ) {
-                    continue;
-                }
-                let ty = self.declaration_type(ty);
-                if !ty.starts_with('?')
-                    && !ty.split('|').any(|part| matches!(part, "null" | "mixed"))
-                {
-                    return Err(self.error(
-                        format!("Implicitly marking parameter ${} of {class}::{}() as nullable is not supported by Phera: deprecated since PHP 8.4", parameter.name, method.name.name),
-                        self.lines.line(parameter.span.start),
-                    ));
-                }
-            }
-        }
         use super::functions::{FunctionBody, FunctionSource};
         let name = format!("{class}::{}", method.name.name);
         let implicit_return = (method.return_type.is_none()

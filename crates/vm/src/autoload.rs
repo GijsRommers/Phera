@@ -21,6 +21,12 @@ pub(crate) struct RegisteredLoader {
 }
 
 /// Synchronous class-fetch instructions can suspend before they have a class to act on.
+///
+/// The interpreter runs such an instruction again once the class is loaded
+/// (`Vm::resume_class_fetch`). A native call cannot be run again that way,
+/// because it has taken its prepared call and arguments by then: the native
+/// call boundaries load the class themselves and call the native again
+/// (`calls::native_retries`).
 pub(crate) struct ClassMiss {
     pub(crate) name: String,
     failure: MissFailure,
@@ -216,6 +222,23 @@ impl Vm {
     /// already evaluated into registers before the fetch instruction was entered.
     #[cold]
     pub(crate) async fn resume_class_fetch(&mut self, miss: ClassMiss) -> Result<(), NativeError> {
+        self.resolve_class_miss(miss).await?;
+        let frame = self
+            .call_stack
+            .current_mut()
+            .ok_or_else(|| internal_error!("class fetch frame"))?;
+        let position = frame
+            .ip()
+            .checked_sub(1)
+            .ok_or_else(|| internal_error!("class fetch instruction"))?;
+        frame.set_ip(position);
+        Ok(())
+    }
+
+    /// Loads what a synchronous step that unwound with `miss` was missing:
+    /// the class, through the autoloaders, or the classes of a signature.
+    /// The error PHP raises when one stays missing.
+    pub(crate) async fn resolve_class_miss(&mut self, miss: ClassMiss) -> Result<(), NativeError> {
         if !self.error_handlers.pending.is_empty() {
             self.drain_error_handlers().await?;
         }
@@ -235,15 +258,6 @@ impl Vm {
         } else if self.lookup_class(&miss.name).await?.is_none() {
             return Err(miss.error());
         }
-        let frame = self
-            .call_stack
-            .current_mut()
-            .ok_or_else(|| internal_error!("class fetch frame"))?;
-        let position = frame
-            .ip()
-            .checked_sub(1)
-            .ok_or_else(|| internal_error!("class fetch instruction"))?;
-        frame.set_ip(position);
         Ok(())
     }
 

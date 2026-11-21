@@ -23,7 +23,8 @@ impl Compiler<'_> {
         };
         let declared = type_name(declaration);
         let actual = match constant(default) {
-            Some(Constant::Null) => return Ok(()),
+            Some(Constant::Null) if !parameter.is_promoted() => return Ok(()),
+            Some(Constant::Null) => "null",
             Some(Constant::Bool(true)) => "true",
             Some(Constant::Bool(false)) => "false",
             Some(Constant::Int(_)) => "int",
@@ -33,16 +34,17 @@ impl Compiler<'_> {
             None if matches!(default.kind, ExpressionKind::Array(_)) => "array",
             None => return Ok(()),
         };
-        let accepted = declared
-            .trim_start_matches('?')
-            .split('|')
-            .any(|candidate| {
-                candidate == actual
-                    || candidate == "mixed"
-                    || candidate == "float" && actual == "int"
-                    || candidate == "bool" && matches!(actual, "true" | "false")
-                    || candidate == "iterable" && actual == "array"
-            });
+        let accepted = actual == "null" && declared.starts_with('?')
+            || declared
+                .trim_start_matches('?')
+                .split('|')
+                .any(|candidate| {
+                    candidate == actual
+                        || candidate == "mixed"
+                        || candidate == "float" && actual == "int"
+                        || candidate == "bool" && matches!(actual, "true" | "false")
+                        || candidate == "iterable" && actual == "array"
+                });
         if accepted {
             return Ok(());
         }

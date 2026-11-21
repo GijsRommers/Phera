@@ -30,6 +30,8 @@ use std::rc::{Rc, Weak};
 
 use crate::object::{Object, ObjectIds};
 
+pub(crate) type Incarnation = (usize, Weak<Object>);
+
 /// A weak handle on a PHP object; see the module documentation. The
 /// default handle refers to nothing.
 #[derive(Clone, Debug, Default)]
@@ -58,7 +60,7 @@ impl WeakObject {
         }
         let pool = self.pool.upgrade()?;
         let incarnations = pool.incarnations.try_borrow().ok()?;
-        let (origin, current) = incarnations.get(&self.id)?;
+        let (origin, current) = incarnations.get(self.id as usize)?.as_ref()?;
         if *origin != self.origin {
             return None;
         }
@@ -85,7 +87,7 @@ impl Object {
         if let Some(pool) = &self.pool
             && pool.incarnated
             && let Ok(incarnations) = pool.incarnations.try_borrow()
-            && let Some((origin, _)) = incarnations.get(&self.id)
+            && let Some(Some((origin, _))) = incarnations.get(self.id as usize)
         {
             return *origin;
         }
