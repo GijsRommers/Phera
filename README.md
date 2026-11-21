@@ -148,6 +148,17 @@ Composer's generated class map and files autoload list. The start line gives
 the count and elapsed time. PHP still runs each file when the application
 includes it. The Zend-specific `opcache.preload` directive is unsupported.
 
+After a worker has served enough requests that its requests stop autoloading
+new classes, `phera serve` boots the application once more in the background
+and loads those classes through the application's own autoloaders just before
+`Phera\snapshot()`, so later requests find them declared and run no autoloader
+for them (64 requests without a new class, at most 3 warm-up boots per
+worker; see
+[the decision](docs/decisions/2026-11-21-request-autoloads-are-declared-in-the-snapshot.md)).
+Like `opcache.preload`, a warmed class exists before the request starts:
+`class_exists($name, false)` is true for it. `phera serve --no-class-warmup`
+turns this off.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,

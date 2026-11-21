@@ -41,8 +41,7 @@ pub enum BootReport {
 
 impl WebWorker {
     /// Boots `script` and keeps the result for this worker's requests.
-    pub async fn boot(&self, script: &Path, document_root: &Path) -> BootReport {
-        if !self.snapshots.start_boot(script) {
+    pub async fn boot(&self, script: &Path, document_root: &Path) -> BootReport {        if !self.snapshots.start_boot(script) {
             return BootReport::Failed("a boot of this script is running already".into());
         }
         let started = Instant::now();
@@ -56,14 +55,12 @@ impl WebWorker {
 
     /// Starts a boot in the background of this worker; requests are answered
     /// meanwhile (from the old snapshot, or classically).
-    pub(crate) fn boot_in_background(&self, script: &Path, document_root: &Path) {
-        if !self.background_boots {
+    pub(crate) fn boot_in_background(&self, script: &Path, document_root: &Path) {        if !self.background_boots {
             return;
         }
         let worker = self.clone();
         let (script, document_root) = (script.to_path_buf(), document_root.to_path_buf());
-        tokio::task::spawn_local(async move {
-            if let BootReport::Failed(message) = worker.boot(&script, &document_root).await {
+        tokio::task::spawn_local(async move {            if let BootReport::Failed(message) = worker.boot(&script, &document_root).await {
                 eprintln!(
                     "phera: worker {}: DEFECT: {} cannot be snapshotted, its requests run from the top: {message}",
                     worker.index,
@@ -91,6 +88,11 @@ impl Runtime {
         };
         let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
         vm.set_local_loader(code);
+        if self.class_warmup {
+            let warmup = worker.snapshots.warmup_classes(script);            if !warmup.is_empty() {
+                vm.set_boot_warmup(warmup);
+            }
+        }
         crate::http::define_boot_superglobals(
             &mut vm,
             script,

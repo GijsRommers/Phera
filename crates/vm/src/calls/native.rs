@@ -112,7 +112,7 @@ impl Vm {
                 }
             }
             CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Snapshot) => {
-                self.snapshot_intrinsic(destination, arguments).map(Some)
+                self.snapshot_intrinsic(destination, arguments).await.map(Some)
             }
             CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Clone)
                 if let Some(destination) = destination =>
