@@ -342,10 +342,6 @@ fn compact(function: &mut Function) {
         if let Some(target) = target_mut(&mut instruction) {
             target.0 = offsets.get(target.index()).copied().unwrap_or(target.0);
         }
-        // `FinallyCall`'s target is not part of `optimize::target_mut`.
-        if let Instruction::FinallyCall { target, .. } = &mut instruction {
-            target.0 = offsets.get(target.index()).copied().unwrap_or(target.0);
-        }
         instructions.push(instruction);
         lines.push(function.lines.get(index).copied().unwrap_or(1));
     }

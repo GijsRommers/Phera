@@ -50,6 +50,15 @@ impl Vm {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
             I::Call { dst, .. } => return self.call::<TRACK_GENERATORS>(dst, work),
+            // The loop makes a method site's call at once where it can;
+            // the `InitMethodCall`, sends and `Call` that follow make it
+            // otherwise.
+            // The loop hands a method site here when the VM must prepare
+            // the call (`__call`, a closure, a generator): the following
+            // `InitMethodCall` runs here, by its handler, not through
+            // `execute` again (a recursive `execute` would no longer be
+            // inlined into the batch loop).
+            I::CallMethod { .. } => self.start_written_out_call::<TRACK_GENERATORS>()?,
             I::CallDirect {
                 function,
                 args,
