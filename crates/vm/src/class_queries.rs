@@ -7,6 +7,8 @@
 //! trait_exists('T'); enum_exists('S');
 //! is_a($child, 'Marker');      // the object's class, its parents and interfaces
 //! is_subclass_of($child, 'Base');
+//! method_exists($base, 'pubMethod');   // the class's method table
+//! property_exists($base, 'pub');       // declared, static and own properties
 //! ```
 //!
 //! The general handler ([`Vm::class_intrinsic`]) is the full behaviour: it
@@ -23,7 +25,7 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::{ClassKind, Reg};
+use phera_bytecode::{ClassKind, Reg, Visibility};
 use phera_value::{PhpString, Value};
 
 use crate::Vm;
@@ -70,6 +72,14 @@ impl RelationQuery {
     fn default_allow_string(self) -> bool {
         matches!(self, Self::IsSubclassOf)
     }
+}
+
+/// Which member `method_exists` / `property_exists` asks for, made by the
+/// routing arm in `calls::sync_native`.
+#[derive(Clone, Copy)]
+pub(crate) enum MemberQuery {
+    Method,
+    Property,
 }
 
 /// What a string class name resolves to without running any PHP code.
@@ -125,6 +135,24 @@ impl Vm {
                     Some(Value::String(target)),
                     Some(Value::Bool(allow_string)),
                 ] => self.relation_answer(query, first, target, *allow_string),
+                _ => None,
+            });
+        self.finish_query(answer, call, destination)
+    }
+
+    /// `method_exists` / `property_exists` for a plain call: the answer from
+    /// the class, or the exit for the general handler.
+    #[inline(never)]
+    pub(crate) fn member_query_call(
+        &mut self,
+        query: MemberQuery,
+        call: PreparedCall,
+        destination: Reg,
+    ) -> Option<BatchExit> {
+        let answer = self
+            .plain_window(call, &[2])
+            .and_then(|window| match window {
+                [Some(first), Some(Value::String(name))] => self.member_answer(query, first, name),
                 _ => None,
             });
         self.finish_query(answer, call, destination)
@@ -220,6 +248,58 @@ impl Vm {
         }))
     }
 
+    /// The answer for a `method_exists` / `property_exists` call whose
+    /// arguments are `first` (an object or a class name) and `name`.
+    fn member_answer(&self, query: MemberQuery, first: &Value, name: &PhpString) -> Option<bool> {
+        // Only a valid UTF-8 name takes this path, for the same reason as in
+        // `exists_answer`.
+        let name = std::str::from_utf8(name.as_bytes()).ok()?;
+        let class = match first {
+            Value::Object(object) => {
+                // The general handler runs PHP code for these two shapes of
+                // `property_exists`: a lazy object may need its initializer,
+                // and a native class answers for properties in its own state.
+                if matches!(query, MemberQuery::Property)
+                    && (object.lazy().is_some()
+                        || crate::properties::native_property_access(object).is_some())
+                {
+                    return None;
+                }
+                self.classes.for_object(object)
+            }
+            Value::String(class_name) => {
+                let class_name = std::str::from_utf8(class_name.as_bytes()).ok()?;
+                match self.resolve_name(class_name, true) {
+                    ResolvedName::Found(class) => Some(class),
+                    ResolvedName::Absent => None,
+                    ResolvedName::Fallback => return None,
+                }
+            }
+            // The general handler raises its TypeError for other types.
+            _ => return None,
+        };
+        let Some(class) = class else {
+            return Some(false);
+        };
+        Some(match query {
+            MemberQuery::Property => {
+                class.name != phera_extension_api::serialization::INCOMPLETE_CLASS
+                    && self.class_property_exists(first, &class, name)
+            }
+            MemberQuery::Method => {
+                // The method table is keyed by lowercase names; a name that
+                // does not fit the buffer falls back to the general handler.
+                let mut buffer = [0u8; 64];
+                let lower = lowercase64(name, &mut buffer)?;
+                class.methods.get(lower).is_some_and(|method| {
+                    method.visibility != Visibility::Private
+                        || method.declaring == class.name
+                        || first.is_object()
+                }) || (class.name == "Closure" && name.eq_ignore_ascii_case("__invoke"))
+            }
+        })
+    }
+
     /// Resolve a string class name the way the general lookup's first step
     /// does, without running PHP: the table, then (only when `autoload` is
     /// allowed) the loaders and bundled sources, which may run PHP code.
@@ -236,4 +316,15 @@ impl Vm {
         }
         ResolvedName::Absent
     }
+}
+
+/// The lowercased form of `name` in `buffer`, when it fits: method and
+/// property names are matched case-insensitively, and the general handler
+/// lowercases them into a `String` per call.
+fn lowercase64<'a>(name: &str, buffer: &'a mut [u8; 64]) -> Option<&'a str> {
+    let bytes = name.as_bytes();
+    let slot = buffer.get_mut(..bytes.len())?;
+    slot.copy_from_slice(bytes);
+    slot.make_ascii_lowercase();
+    std::str::from_utf8(slot).ok()
 }

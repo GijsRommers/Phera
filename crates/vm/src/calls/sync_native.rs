@@ -309,6 +309,18 @@ impl Vm {
                                 call,
                                 destination,
                             ),
+                        crate::class_intrinsics::ClassFunction::MethodExists => self
+                            .member_query_call(
+                                crate::class_queries::MemberQuery::Method,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::PropertyExists => self
+                            .member_query_call(
+                                crate::class_queries::MemberQuery::Property,
+                                call,
+                                destination,
+                            ),
                         _ => Some(BatchExit::NativeCall(destination)),
                     })
                 }
