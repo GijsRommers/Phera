@@ -53,7 +53,13 @@ impl Vm {
             I::CallMethod { site, .. } => {
                 let (after, init) = self.method_site_fallback(site)?;
                 self.jump(after)?;
-                return self.execute::<TRACK_GENERATORS>(init, stop, work);
+                // Its handler, not `execute` again: a recursive `execute`
+                // would no longer be inlined into the batch loop.
+                if let I::InitMethodCall { receiver, method } = init {
+                    if !(TRACK_GENERATORS && self.prepare_ready_native_method(receiver, method)) {
+                        self.init_method_call::<TRACK_GENERATORS>(receiver, method)?;
+                    }
+                }
             }
             I::CallDirect {
                 function,
