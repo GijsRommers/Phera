@@ -110,6 +110,15 @@ impl WebWorker {
             .handle_web_request(self, script, document_root, request)
             .await
     }
+
+    /// A fork of the snapshot this worker booted for `script`, without a
+    /// request run in it; `None` if the worker has no snapshot of it. For
+    /// tools that measure what a fork costs by itself (`examples/fork_cost.rs`).
+    pub fn fork_snapshot(&self, script: &Path) -> Option<Result<phera_vm::Vm, String>> {
+        self.snapshots
+            .snapshot(script)
+            .map(|snapshot| snapshot.fork())
+    }
 }
 
 /// What a command-line script did.

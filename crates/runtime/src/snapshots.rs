@@ -150,6 +150,14 @@ impl WorkerSnapshots {
         }
     }
 
+    /// The snapshot of `script`, if its boot finished with one.
+    pub(crate) fn snapshot(&self, script: &Path) -> Option<Rc<Snapshot>> {
+        match self.scripts.borrow().get(script) {
+            Some(ScriptState::Ready(snapshot, ..)) => Some(snapshot.clone()),
+            _ => None,
+        }
+    }
+
     /// Whether this worker knows the script (booted it, or tried).
     pub(crate) fn knows(&self, script: &Path) -> bool {
         self.scripts.borrow().contains_key(script)

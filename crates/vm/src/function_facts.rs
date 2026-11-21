@@ -100,6 +100,16 @@ impl FunctionFacts {
         )
     }
 
+    /// Whether `other` says the same about where this function is and
+    /// which class declares it: what a request writes when it declares a
+    /// class, so that writing what is there already can be skipped.
+    pub(crate) fn same_place_and_class(&self, other: &Self) -> bool {
+        self.unit == other.unit
+            && self.unit_first == other.unit_first
+            && self.local == other.local
+            && self.class == other.class
+    }
+
     pub(crate) fn bind(
         (unit, unit_first, local): (UnitIndex, FunctionIndex, Option<u32>),
         signature: FunctionSignature,

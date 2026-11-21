@@ -22,6 +22,7 @@ use phera_bytecode::{CompiledUnit, Function, FunctionSignature, Instruction};
 
 pub(crate) use crate::function_facts::{FunctionFacts, FunctionShape};
 
+use crate::shared_table::SharedTable;
 use crate::unit_caches::UnitCache;
 
 /// A function's position in the request's code table.
@@ -64,7 +65,10 @@ pub(crate) struct CodeTable {
     /// this request uses, so it also holds placeholders for functions of
     /// files this request has not loaded: whether a function is declared in
     /// the request is its function table's answer, never this vector's.
-    functions: Vec<FunctionFacts>,
+    ///
+    /// A snapshot and its forks hold one table; a request that changes it
+    /// (loads a file, declares a class) copies it first (see `crate::shared_table`).
+    functions: SharedTable<FunctionFacts>,
     worker: std::rc::Rc<crate::worker_code::WorkerCode>,
     /// The numbers this request leased, and those of the snapshot it was
     /// forked from, which it keeps alive.
@@ -72,8 +76,13 @@ pub(crate) struct CodeTable {
     /// Where each loaded file is, by its process number
     /// (`UnitMetadata::id`): its position in `units` plus one, 0 if this
     /// request has not loaded it.
-    slots: Vec<u32>,
-    trait_method_names: std::collections::HashMap<FunctionIndex, String>,
+    slots: SharedTable<u32>,
+    /// The name of each trait method composed into a class, which can differ
+    /// from the name of the body it runs (`use T { foo as bar }`), by the
+    /// method's number, sorted. Read only to name a function in an error or
+    /// a trace, so it is a sorted array searched by number, held like the
+    /// facts by a snapshot and its forks.
+    trait_method_names: std::rc::Rc<Vec<(u32, std::rc::Rc<str>)>>,
     /// While a class links: the trait methods composed into it.
     imports: Option<Vec<crate::classes::worker_classes::Import>>,
 }
@@ -90,10 +99,10 @@ impl CodeTable {
     pub(crate) fn for_worker(worker: &std::rc::Rc<crate::worker_code::WorkerCode>) -> Self {
         CodeTable {
             units: Vec::new(),
-            functions: Vec::new(),
+            functions: SharedTable::default(),
             worker: worker.clone(),
             leases: vec![crate::worker_code::Leases::new(worker)],
-            slots: Vec::new(),
+            slots: SharedTable::default(),
             trait_method_names: Default::default(),
             imports: None,
         }
@@ -125,10 +134,29 @@ impl CodeTable {
         let mut facts = self.facts(FunctionIndex(*source)).clone();
         facts.class = Some(scope);
         let index = *number as usize;
-        self.cover(index + 1);
-        self.functions[index] = facts;
-        self.trait_method_names
-            .insert(FunctionIndex(*number), name.clone());
+        // A class a snapshot declared has these written already: a fork
+        // that declares it again changes nothing, and copies nothing.
+        if !self
+            .functions
+            .get(index)
+            .is_some_and(|written| written.same_place_and_class(&facts))
+        {
+            *self.functions.write(index, FunctionFacts::placeholder) = facts;
+        }
+        self.name_trait_method(*number, name);
+    }
+
+    /// Records the name of the trait method `number`, unless it has it.
+    fn name_trait_method(&mut self, number: u32, name: &str) {
+        let position = self
+            .trait_method_names
+            .binary_search_by_key(&number, |(method, _)| *method);
+        match position {
+            Ok(found) if &*self.trait_method_names[found].1 == name => {}
+            Ok(found) => std::rc::Rc::make_mut(&mut self.trait_method_names)[found].1 = name.into(),
+            Err(at) => std::rc::Rc::make_mut(&mut self.trait_method_names)
+                .insert(at, (number, name.into())),
+        }
     }
 
     /// The worker's numbering this table uses.
@@ -141,13 +169,6 @@ impl CodeTable {
         self.leases
             .last()
             .expect("a code table always has its own leases")
-    }
-
-    /// Makes room for numbers up to `end`, with placeholders.
-    fn cover(&mut self, end: usize) {
-        if self.functions.len() < end {
-            self.functions.resize(end, FunctionFacts::placeholder());
-        }
     }
 
     pub(crate) fn next_unit_index(&self) -> UnitIndex {
@@ -163,10 +184,7 @@ impl CodeTable {
         let index = self.next_unit_index();
         if let Some(metadata) = &unit.metadata {
             let id = metadata.id as usize;
-            if self.slots.len() <= id {
-                self.slots.resize(id + 1, 0);
-            }
-            self.slots[id] = index.0 + 1;
+            *self.slots.write(id, Default::default) = index.0 + 1;
         }
         let count = 1 + unit.functions.len() as u32;
         let first = FunctionIndex(self.worker.number(unit, count, self.own_leases()));
@@ -208,8 +226,10 @@ impl CodeTable {
             )
         };
         let start = first.index();
-        self.cover(start + facts.len());
-        for (slot, facts) in self.functions[start..].iter_mut().zip(facts) {
+        let range =
+            self.functions
+                .write_range(start, start + facts.len(), FunctionFacts::placeholder);
+        for (slot, facts) in range.iter_mut().zip(facts) {
             *slot = facts;
         }
         self.units.push(LoadedUnit {
@@ -293,7 +313,11 @@ impl CodeTable {
         function: FunctionIndex,
         class: crate::classes::ClassIndex,
     ) {
-        self.functions[function.index()].class = Some(class);
+        if self.functions[function.index()].class != Some(class) {
+            self.functions
+                .write(function.index(), FunctionFacts::placeholder)
+                .class = Some(class);
+        }
     }
 
     /// Flattened methods share immutable instructions and own their scope and static cells.
@@ -305,8 +329,9 @@ impl CodeTable {
         let mut facts = self.facts(source).clone();
         facts.class = Some(scope);
         let function = FunctionIndex(self.worker.lease_one(self.own_leases()));
-        self.cover(function.index() + 1);
-        self.functions[function.index()] = facts;
+        *self
+            .functions
+            .write(function.index(), FunctionFacts::placeholder) = facts;
         function
     }
 
@@ -320,14 +345,18 @@ impl CodeTable {
         if let Some(imports) = &mut self.imports {
             imports.push((function.0, source.0, name.clone()));
         }
-        self.trait_method_names.insert(function, name);
+        self.name_trait_method(function.0, &name);
         function
     }
 
     pub(crate) fn function_name(&self, function: FunctionIndex) -> &str {
-        self.trait_method_names
-            .get(&function)
-            .map_or_else(|| self.function(function).name.as_str(), String::as_str)
+        match self
+            .trait_method_names
+            .binary_search_by_key(&function.0, |(method, _)| *method)
+        {
+            Ok(found) => &self.trait_method_names[found].1,
+            Err(_) => self.function(function).name.as_str(),
+        }
     }
 
     /// Composed methods reached through multiple traits can share the original body.
@@ -406,6 +435,7 @@ pub(crate) fn body(unit: &CompiledUnit, local: Option<usize>) -> &Function {
 impl CodeTable {
     /// What a fork's copy of this table holds on the heap, by structure, in
     /// bytes (see `crate::snapshot::footprint`).
+    #[cfg(debug_assertions)]
     pub(crate) fn fork_footprint(&self) -> Vec<(&'static str, usize)> {
         use std::mem::size_of;
         let mut sums = [0; 5];
@@ -423,12 +453,20 @@ impl CodeTable {
             ("closure signatures", closures),
             (
                 "function facts",
-                self.functions.capacity() * size_of::<FunctionFacts>(),
+                if self.functions.is_unique() {
+                    self.functions.heap_bytes()
+                } else {
+                    0
+                },
             ),
             (
                 "loaded-file records",
                 self.units.capacity() * size_of::<LoadedUnit>()
-                    + self.slots.capacity() * size_of::<u32>(),
+                    + if self.slots.is_unique() {
+                        self.slots.heap_bytes()
+                    } else {
+                        0
+                    },
             ),
         ]
     }

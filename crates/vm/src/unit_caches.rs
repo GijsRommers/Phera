@@ -22,18 +22,30 @@ pub(crate) struct UnitCache {
     pub(crate) names: Rc<[phera_value::PhpString]>,
     /// What each function symbol of the file was linked to, once its first call
     /// resolved it.
+    ///
+    /// Empty until a symbol of the file is linked in this request: the
+    /// links the snapshot made are in `base`, and a link is copied here
+    /// when it is first asked for (see [`UnitCache::base_symbol`]).
     pub(crate) symbols: RefCell<Vec<Option<crate::calls::pending::LinkedFunction>>>,
+    /// How many function symbols the file has.
+    symbol_count: usize,
+    /// Whether `symbols` has taken the links the snapshot made (there is
+    /// nothing to take in a cache without a `base`).
+    symbols_adopted: Cell<bool>,
     pub(crate) direct_natives: OnceCell<Box<[Cell<Option<crate::calls::sync_native::NativeLink>>]>>,
     pub(crate) constants: Rc<[phera_value::Value]>,
     pub(crate) class_names: Rc<[phera_value::Value]>,
     /// Keyed by immutable unit TypeId and made at first unit use; spelling cannot
     /// change, so scope classification needs no invalidation. Relative types resolve per call.
     pub(crate) type_scopes: Arc<[crate::types::DeclarationScope]>,
-    pub(crate) class_types: Vec<RefCell<Option<ClassTypeEntry>>>,
+    pub(crate) class_types: ClassTypes,
     /// The site cells of the top-level code and of each function, one per
     /// instruction, made when the function first looks a site up.
     main_sites: Sites,
-    function_sites: Box<[Sites]>,
+    /// The cells of each function, made when the file's first function uses
+    /// one: a request runs few of its files' functions, and a fork that
+    /// made a box per function of every loaded file would pay for them all.
+    function_sites: OnceCell<Box<[Sites]>>,
     /// What each method site (`CallMethod`) of the file found the last time
     /// it ran: one flat array for the whole file, one fixed entry per site,
     /// made when the first of the file's sites runs, so a file whose sites
@@ -45,6 +57,74 @@ pub(crate) struct UnitCache {
     /// with the file, shared by every fork.
     record_starts: Rc<[u32]>,
     pub(crate) closure_signatures: RefCell<Vec<Option<crate::calls::call_state::Callee>>>,
+    /// What the snapshot this cache was forked from had filled in the same
+    /// file, which this request reads and never changes: a cell of this
+    /// cache that is empty is made from the snapshot's cell when it is
+    /// first needed, never copied before. `None` in the snapshot's own
+    /// cache and in a cache that was never forked.
+    base: Option<Rc<UnitCache>>,
+}
+
+/// The per-type class checks of one file, one cell per declared type: made
+/// when the file first stores an answer (a fork's with the answers the
+/// snapshot knew), so that a fork pays nothing for the files of which it
+/// checks no class type.
+pub(crate) struct ClassTypes {
+    cells: OnceCell<Box<[RefCell<Option<ClassTypeEntry>>]>>,
+    /// How many types the file declares.
+    count: usize,
+    /// The snapshot's cache of the file, whose answers the cells start with.
+    base: Option<Rc<UnitCache>>,
+}
+
+impl ClassTypes {
+    fn new(count: usize, base: Option<Rc<UnitCache>>) -> Self {
+        ClassTypes {
+            cells: OnceCell::new(),
+            count,
+            base,
+        }
+    }
+
+    /// The check of declared type `index`, if the file has made them: for a
+    /// read, since a file that has stored no answer knows none.
+    #[inline(always)]
+    pub(crate) fn peek(&self, index: usize) -> Option<&RefCell<Option<ClassTypeEntry>>> {
+        self.cells.get()?.get(index)
+    }
+
+    /// The check of declared type `index`, making the file's cells if it has
+    /// none yet, to store an answer in.
+    #[inline]
+    pub(crate) fn get(&self, index: usize) -> Option<&RefCell<Option<ClassTypeEntry>>> {
+        match self.cells.get() {
+            Some(cells) => cells.get(index),
+            None => self.make(index),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn make(&self, index: usize) -> Option<&RefCell<Option<ClassTypeEntry>>> {
+        self.cells.get_or_init(|| self.new_cells()).get(index)
+    }
+
+    /// Empty cells, or the snapshot's answers: they hold in a fork, which
+    /// shares the snapshot's classes (an answer says "objects of this class
+    /// satisfy this type", and is used only for an object of that class).
+    fn new_cells(&self) -> Box<[RefCell<Option<ClassTypeEntry>>]> {
+        let known = self
+            .base
+            .as_ref()
+            .and_then(|base| base.class_types.cells.get());
+        match known {
+            Some(cells) => cells
+                .iter()
+                .map(|cell| RefCell::new(cell.borrow().clone()))
+                .collect(),
+            None => (0..self.count).map(|_| RefCell::new(None)).collect(),
+        }
+    }
 }
 
 /// Keyed by unit TypeId and guarded by receiver class identity. Entries are made
@@ -135,10 +215,16 @@ impl UnitCache {
     pub(crate) fn fork_bytes(&self) -> [usize; 5] {
         use std::mem::size_of;
         let made = |sites: &Sites| sites.get().map_or(0, |cells| cells.len());
-        let cells = (made(&self.main_sites) + self.function_sites.iter().map(made).sum::<usize>())
+        let cells = (made(&self.main_sites)
+            + self
+                .function_sites
+                .get()
+                .map_or(0, |boxes| boxes.iter().map(made).sum::<usize>()))
             * size_of::<RefCell<CachedSite>>();
-        let boxes = (self.function_sites.len() + 1) * size_of::<Sites>();
-        let types = self.class_types.len() * size_of::<RefCell<Option<ClassTypeEntry>>>();
+        let boxes =
+            (self.function_sites.get().map_or(0, |boxes| boxes.len()) + 1) * size_of::<Sites>();
+        let types = self.class_types.cells.get().map_or(0, |cells| cells.len())
+            * size_of::<RefCell<Option<ClassTypeEntry>>>();
         let functions = self.symbols.borrow().len()
             * size_of::<Option<crate::calls::pending::LinkedFunction>>();
         let closures = self.closure_signatures.borrow().len()
@@ -164,12 +250,67 @@ impl UnitCache {
         ip: usize,
     ) -> Option<&RefCell<CachedSite>> {
         let sites = match facts.local {
-            Some(function) => self.function_sites.get(function as usize)?,
+            Some(function) => match self.function_sites.get() {
+                Some(boxes) => boxes.get(function as usize)?,
+                None => return self.first_site(facts, ip),
+            },
             None => &self.main_sites,
         };
-        sites
-            .get_or_init(|| empty_sites(facts.instructions.len()))
-            .get(ip)
+        sites.get_or_init(|| self.make_sites(facts)).get(ip)
+    }
+
+    /// The cells of a function that first looks a site up: those the
+    /// snapshot filled that a request may use, else empty ones.
+    #[cold]
+    fn make_sites(
+        &self,
+        facts: &crate::function_facts::FunctionFacts,
+    ) -> Box<[RefCell<CachedSite>]> {
+        let wanted = facts.instructions.len() + 1;
+        let known = self
+            .base
+            .as_ref()
+            .and_then(|base| base.sites_of(facts.local));
+        match known {
+            Some(cells) if cells.len() == wanted => cells
+                .iter()
+                .map(|cell| RefCell::new(cell.borrow().shared()))
+                .collect(),
+            _ => empty_sites(facts.instructions.len()),
+        }
+    }
+
+    /// The site, when the file has not made the box of any function's
+    /// cells yet: makes it.
+    #[cold]
+    #[inline(never)]
+    fn first_site(
+        &self,
+        facts: &crate::function_facts::FunctionFacts,
+        ip: usize,
+    ) -> Option<&RefCell<CachedSite>> {
+        let boxes = self
+            .function_sites
+            .get_or_init(|| self.function_site_boxes());
+        let sites = boxes.get(facts.local? as usize)?;
+        sites.get_or_init(|| self.make_sites(facts)).get(ip)
+    }
+
+    /// A box for the cells of each function of the file, all empty.
+    #[cold]
+    fn function_site_boxes(&self) -> Box<[Sites]> {
+        // `record_starts` has an entry for each function and the total.
+        let functions = self.record_starts.len().saturating_sub(1);
+        (0..functions).map(|_| Sites::new()).collect()
+    }
+
+    /// The cells a function has made, if it has.
+    fn sites_of(&self, local: Option<u32>) -> Option<&[RefCell<CachedSite>]> {
+        let sites = match local {
+            Some(function) => self.function_sites.get()?.get(function as usize)?,
+            None => &self.main_sites,
+        };
+        sites.get().map(|cells| &**cells)
     }
 
     /// The record of method site `site` of the function `facts` describes,
@@ -189,8 +330,22 @@ impl UnitCache {
         }
         let total = self.record_starts.last().copied().unwrap_or(0) as usize;
         self.records
-            .get_or_init(|| (0..total).map(|_| Cell::new(SiteRecord::EMPTY)).collect())
+            .get_or_init(|| self.make_records(total))
             .get(start + site.index())
+    }
+
+    /// The records of a file whose first method site runs: a copy of the
+    /// snapshot's, which stay true in every fork (the classes they name are
+    /// the snapshot's, which a fork shares), or empty ones.
+    #[cold]
+    fn make_records(&self, total: usize) -> Box<[Cell<SiteRecord>]> {
+        let known = self.base.as_ref().and_then(|base| base.records.get());
+        match known {
+            Some(cells) if cells.len() == total => {
+                cells.iter().map(|cell| Cell::new(cell.get())).collect()
+            }
+            _ => (0..total).map(|_| Cell::new(SiteRecord::EMPTY)).collect(),
+        }
     }
 }
 
@@ -215,7 +370,9 @@ impl UnitCache {
         Self {
             trace_file: OnceCell::new(),
             names: unit.names.iter().map(|name| name.as_str().into()).collect(),
-            symbols: RefCell::new(vec![None; unit.symbols.len()]),
+            symbols: RefCell::new(Vec::new()),
+            symbol_count: unit.symbols.len(),
+            symbols_adopted: Cell::new(true),
             direct_natives: OnceCell::new(),
             constants: unit
                 .constants
@@ -230,9 +387,9 @@ impl UnitCache {
                     .map(crate::types::DeclarationScope::of)
                     .collect(),
             },
-            class_types: unit.types.iter().map(|_| RefCell::new(None)).collect(),
+            class_types: ClassTypes::new(unit.types.len(), None),
             main_sites: Sites::new(),
-            function_sites: unit.functions.iter().map(|_| Sites::new()).collect(),
+            function_sites: OnceCell::new(),
             records: Records::new(),
             record_starts: {
                 let mut next = unit.main.method_sites.len() as u32;
@@ -250,6 +407,7 @@ impl UnitCache {
                 .iter()
                 .map(|symbol| phera_value::Value::from(symbol.written.as_str()))
                 .collect(),
+            base: None,
         }
     }
 }
@@ -283,56 +441,203 @@ pub(crate) fn value(constant: &Constant) -> Value {
     }
 }
 
-/// A fork keeps the caches warm: classes are shared, resolved callables
-/// are copied (see `crate::snapshot`).
-impl crate::snapshot::ForkCopy for UnitCache {
-    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
-        // Only the functions that used a site before the snapshot have cells.
-        let sites = |sites: &Sites, fork: &mut phera_value::Fork<'_>| {
-            let copy = Sites::new();
-            if let Some(cells) = sites.get() {
-                let _ = copy.set(
-                    cells
-                        .iter()
-                        .map(|site| RefCell::new(site.borrow().fork_copy(fork)))
-                        .collect(),
-                );
-            }
-            copy
-        };
-        // Only a file whose sites ran before the snapshot has records.
-        let records = Records::new();
-        if let Some(cells) = self.records.get() {
-            let _ = records.set(cells.iter().map(|cell| Cell::new(cell.get())).collect());
-        }
+/// How many cells and links of a file's cache a request can use
+/// without making them, which is a snapshot's decision: see
+/// [`UnitCache`]'s `base`.
+impl UnitCache {
+    /// A cache for the same file with nothing filled: the values made from
+    /// the file are shared, every cell is empty.
+    fn without_cells(&self) -> Self {
         UnitCache {
             trace_file: self.trace_file.clone(),
             names: self.names.clone(),
-            symbols: RefCell::new(self.symbols.borrow().fork_copy(fork)),
-            direct_natives: self.direct_natives.clone(),
+            symbols: RefCell::new(Vec::new()),
+            symbol_count: self.symbol_count,
+            symbols_adopted: Cell::new(true),
+            direct_natives: OnceCell::new(),
             constants: self.constants.clone(),
             class_names: self.class_names.clone(),
             type_scopes: self.type_scopes.clone(),
-            class_types: self.class_types.clone(),
-            main_sites: sites(&self.main_sites, fork),
-            function_sites: self
-                .function_sites
-                .iter()
-                .map(|function| sites(function, fork))
-                .collect(),
-            records,
+            class_types: ClassTypes::new(self.class_types.count, None),
+            main_sites: Sites::new(),
+            function_sites: OnceCell::new(),
+            records: Records::new(),
             record_starts: self.record_starts.clone(),
-            closure_signatures: RefCell::new(self.closure_signatures.borrow().fork_copy(fork)),
+            closure_signatures: RefCell::new(Vec::new()),
+            base: None,
         }
+    }
+
+    /// The cells of this cache that a request forked from the snapshot may
+    /// use, in a cache of their own: everything that holds no object of the
+    /// VM it was made in.
+    fn frozen(&self) -> Self {
+        let mut frozen = self.without_cells();
+        frozen.main_sites = frozen_sites(&self.main_sites);
+        if let Some(boxes) = self.function_sites.get() {
+            let _ = frozen
+                .function_sites
+                .set(boxes.iter().map(frozen_sites).collect());
+        }
+        if let Some(cells) = self.records.get() {
+            let _ = frozen
+                .records
+                .set(cells.iter().map(|cell| Cell::new(cell.get())).collect());
+        }
+        *frozen.symbols.get_mut() = self
+            .symbols
+            .borrow()
+            .iter()
+            .map(|linked| linked.as_ref().and_then(|linked| linked.shared()))
+            .collect();
+        if let Some(cells) = self.direct_natives.get() {
+            let _ = frozen
+                .direct_natives
+                .set(cells.iter().map(|cell| Cell::new(cell.get())).collect());
+        }
+        if let Some(cells) = self.class_types.cells.get() {
+            let _ = frozen.class_types.cells.set(
+                cells
+                    .iter()
+                    .map(|cell| RefCell::new(cell.borrow().clone()))
+                    .collect(),
+            );
+        }
+        *frozen.closure_signatures.get_mut() = self
+            .closure_signatures
+            .borrow()
+            .iter()
+            .map(|callee| {
+                callee
+                    .as_ref()
+                    .and_then(crate::calls::call_state::Callee::shared)
+            })
+            .collect();
+        frozen
+    }
+
+    /// What the snapshot linked function symbol `symbol` of this file to.
+    /// The first time a symbol of the file is not linked in this request,
+    /// every link the snapshot made in the file is taken into this cache
+    /// (the loop reads them from there from then on, without leaving it);
+    /// after that a symbol that is not linked here was not linked by the
+    /// snapshot either.
+    pub(crate) fn base_symbol(
+        &self,
+        symbol: usize,
+    ) -> Option<crate::calls::pending::LinkedFunction> {
+        let base = self.base.as_ref()?;
+        // TEMPORARY measurement switch: one symbol at a time.
+        static EACH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *EACH.get_or_init(|| std::env::var_os("PHERA_FORK_SYMBOLS").is_some_and(|v| v == "each")) {
+            let linked = base.symbols.borrow().get(symbol)?.as_ref()?.clone();
+            self.set_symbol(symbol, linked.clone());
+            return Some(linked);
+        }
+        if self.symbols_adopted.replace(true) {
+            return None;
+        }
+        let known = base.symbols.borrow();
+        let mut own = self.symbols.borrow_mut();
+        if own.len() < self.symbol_count {
+            own.resize_with(self.symbol_count, || None);
+        }
+        for (slot, linked) in own.iter_mut().zip(known.iter()) {
+            if slot.is_none() {
+                slot.clone_from(linked);
+            }
+        }
+        own.get(symbol).cloned().flatten()
+    }
+
+    /// Remembers what function symbol `symbol` of this file is linked to.
+    pub(crate) fn set_symbol(&self, symbol: usize, linked: crate::calls::pending::LinkedFunction) {
+        let mut symbols = self.symbols.borrow_mut();
+        if symbols.len() < self.symbol_count {
+            symbols.resize_with(self.symbol_count, || None);
+        }
+        if let Some(slot) = symbols.get_mut(symbol) {
+            *slot = Some(linked);
+        }
+    }
+
+    /// The direct links of this file's native calls, made at the first one,
+    /// with the snapshot's.
+    pub(crate) fn direct_native_cells(
+        &self,
+    ) -> &[Cell<Option<crate::calls::sync_native::NativeLink>>] {
+        self.direct_natives.get_or_init(|| {
+            let known = self
+                .base
+                .as_ref()
+                .and_then(|base| base.direct_natives.get());
+            match known {
+                Some(cells) => cells.iter().map(|cell| Cell::new(cell.get())).collect(),
+                None => (0..self.symbol_count).map(|_| Cell::new(None)).collect(),
+            }
+        })
+    }
+
+    /// The signature a closure expression of this file made in the snapshot.
+    pub(crate) fn base_closure_signature(
+        &self,
+        local: usize,
+    ) -> Option<crate::calls::call_state::Callee> {
+        self.base
+            .as_ref()?
+            .closure_signatures
+            .borrow()
+            .get(local)?
+            .clone()
     }
 }
 
-impl crate::snapshot::ForkCopy for CachedSite {
-    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+/// What a fork does with the caches of its snapshot: the first copy of a
+/// cache (the boot's, which becomes the snapshot) keeps what a request may
+/// use as `base`; a fork of the snapshot starts with empty cells and the
+/// same `base`. Nothing a request fills is ever in `base`.
+impl crate::snapshot::ForkCopy for UnitCache {
+    fn fork_copy(&self, _: &mut phera_value::Fork<'_>) -> Self {
+        let mut copy = self.without_cells();
+        copy.base = match &self.base {
+            Some(base) => Some(base.clone()),
+            None => Some(Rc::new(self.frozen())),
+        };
+        if copy.base.is_some() {
+            copy.class_types.base = copy.base.clone();
+            copy.symbols_adopted.set(false);
+        }
+        copy
+    }
+}
+
+/// The cells of one function that a request forked from the snapshot may
+/// use: the cells that were filled, without those that hold an object of
+/// the VM they were made in.
+fn frozen_sites(sites: &Sites) -> Sites {
+    let copy = Sites::new();
+    if let Some(cells) = sites.get() {
+        let _ = copy.set(
+            cells
+                .iter()
+                .map(|site| RefCell::new(site.borrow().shared()))
+                .collect(),
+        );
+    }
+    copy
+}
+
+impl CachedSite {
+    /// What a request forked from the snapshot may take from this cell:
+    /// everything that holds no object of the VM it was made in.
+    fn shared(&self) -> CachedSite {
         match self {
             CachedSite::Empty => CachedSite::Empty,
             CachedSite::Property(entry) => CachedSite::Property(entry.clone()),
-            CachedSite::Function(linked) => CachedSite::Function(Box::new(linked.fork_copy(fork))),
+            CachedSite::Function(linked) => match linked.shared() {
+                Some(linked) => CachedSite::Function(Box::new(linked)),
+                None => CachedSite::Empty,
+            },
         }
     }
 }

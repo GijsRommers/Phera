@@ -169,6 +169,7 @@ mod request_end;
 mod scope_intrinsics;
 mod sensitive_parameters;
 mod serialization;
+mod shared_table;
 mod snapshot;
 mod spl_autoload;
 mod static_places;
