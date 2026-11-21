@@ -77,7 +77,11 @@ file_put_contents($path, $data);
 echo "deflate read: ", bin2hex(file_get_contents("php://filter/read=zlib.deflate/resource=$path")), "\n";
 foreach ([null, 0, ['level' => 6, 'window' => 15], ['level' => 6, 'window' => 31]] as $params) {
     $h = fopen($path, 'wb');
-    stream_filter_append($h, 'zlib.deflate', STREAM_FILTER_WRITE, $params);
+    if ($params === null) {
+        stream_filter_append($h, 'zlib.deflate', STREAM_FILTER_WRITE);
+    } else {
+        stream_filter_append($h, 'zlib.deflate', STREAM_FILTER_WRITE, $params);
+    }
     fwrite($h, $data);
     fflush($h);
     fwrite($h, $data);
@@ -90,3 +94,24 @@ foreach ([null, 0, ['level' => 6, 'window' => 15], ['level' => 6, 'window' => 31
     echo "deflate write: ", bin2hex($encoded), "\n";
 }
 unlink($path);
+
+function iconvBuckets($filter, $chunks, $flush = false)
+{
+    $h = fopen('php://memory', 'w+');
+    $attachment = stream_filter_append($h, $filter, STREAM_FILTER_WRITE);
+    foreach ($chunks as $chunk) {
+        fwrite($h, $chunk);
+        if ($flush) {
+            fflush($h);
+        }
+    }
+    stream_filter_remove($attachment);
+    rewind($h);
+    echo $filter, ': ', bin2hex(stream_get_contents($h)), "\n";
+    fclose($h);
+}
+
+iconvBuckets('convert.iconv.ISO-2022-JP.UTF-8', ["A\x1b\x24B", 'F|', 'K\\', "\x1b(BZ"]);
+iconvBuckets('convert.iconv.UTF-8.ISO-2022-JP', ['A日', '本', 'Z']);
+iconvBuckets('convert.iconv.UTF-8.ISO-2022-JP', ['A日', '本']);
+iconvBuckets('convert.iconv.UTF-8.ISO-2022-JP', ['A日', '本', 'Z'], true);
