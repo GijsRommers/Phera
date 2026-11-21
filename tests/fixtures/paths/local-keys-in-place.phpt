@@ -50,20 +50,20 @@ var_dump(back_edge(['a' => 1, 'b' => 2]));
 var_dump(loop_write([], 'w'));
 --EXPECTF--
 
-Warning: Undefined variable $k in %s on line 3
-
 Warning: Undefined variable $a in %s on line 3
+
+Warning: Undefined variable $k in %s on line 3
 
 Warning: Trying to access array offset on null in %s on line 3
 NULL
 
-Warning: Undefined variable $i in %s on line 4
-
-Warning: Undefined variable $j in %s on line 4
-
 Warning: Undefined variable $a in %s on line 4
 
+Warning: Undefined variable $i in %s on line 4
+
 Warning: Trying to access array offset on null in %s on line 4
+
+Warning: Undefined variable $j in %s on line 4
 
 Warning: Trying to access array offset on null in %s on line 4
 NULL

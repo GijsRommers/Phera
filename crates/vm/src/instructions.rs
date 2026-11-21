@@ -32,9 +32,6 @@ impl Vm {
         if self.object_ids.has_due() && self.release_and_store(instruction) {
             return Ok(None);
         }
-        // A key or operand that names an undefined local used to be copied by
-        // a `Move`, which warned before the consumer ran. The warning runs in
-        // the consumer arms below, so other instructions pay nothing for it.
         match instruction {
             I::AssignPathFromLocal { .. }
             | I::MakeReference { .. }
@@ -45,7 +42,6 @@ impl Vm {
                 if self.classes.has_dimensions
                     && self.prepare_dimension_instruction(instruction)? =>
             {
-                self.warn_undefined_operands(instruction)?;
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
             I::Call { dst, .. } => return self.call::<TRACK_GENERATORS>(dst, work),
@@ -128,7 +124,6 @@ impl Vm {
             I::SendValue { src } => self.send(SentArgument::Value(src))?,
             I::SendLocal { local } => self.send(SentArgument::Local(local))?,
             I::SendPath { path } => {
-                self.warn_undefined_operands(instruction)?;
                 if !self.send_path(self.path(path)?)? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
@@ -163,10 +158,7 @@ impl Vm {
             } => self.binary_int_branch(op, lhs, rhs, target)?,
             I::BinaryInt { op, dst, lhs, rhs } => self.execute_binary_int(op, dst, lhs, rhs)?,
             I::Binary { dst, op, lhs, rhs } => return self.execute_binary(op, dst, lhs, rhs),
-            I::Unary { dst, op, src } => {
-                self.warn_undefined_operands(instruction)?;
-                self.execute_unary(dst, op, src)?;
-            }
+            I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
             I::BuiltinUnary { op, dst, src } => return self.execute_builtin_unary(op, src, dst),
             I::BuiltinFrame { op, dst } => self.execute_builtin_frame(op, dst)?,
             I::ArrayKeyExists { dst, key, array } => {
@@ -181,7 +173,6 @@ impl Vm {
                 return self.execute_in_literal_array(needle, haystack, strict, dst);
             }
             I::Cast { to, dst, src } => {
-                self.warn_undefined_operands(instruction)?;
                 if to == phera_bytecode::CastKind::String && self.operand(src).is_object() {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
@@ -192,24 +183,19 @@ impl Vm {
             | I::FetchIndex {
                 dst, path, mode, ..
             } => {
-                self.warn_undefined_operands(instruction)?;
                 return self.fetch_path(dst, path, mode);
             }
             I::AssignOpPath { op, dst, path, src } => {
-                self.warn_undefined_operands(instruction)?;
                 return self.assign_op_path(op, dst, path, src);
             }
             I::IncDecPath { mode, dst, path } => {
-                self.warn_undefined_operands(instruction)?;
                 return self.inc_dec_path(mode, dst, path);
             }
             I::AppendLocal { local, src } => self.append_local(local, src)?,
             I::AssignPath { path, src } => {
-                self.warn_undefined_operands(instruction)?;
                 return self.assign_path(path, src);
             }
             I::AssignPathFromLocal { path, src, dst } => {
-                self.warn_undefined_operands(instruction)?;
                 let handled = if let Some(value) = self.read_defined_local(src) {
                     self.assign_property_site(&self.path(path)?, &value, Some((src, dst)))?
                 } else {
@@ -221,21 +207,18 @@ impl Vm {
                 }
             }
             I::MakeReference { dst, path } => {
-                self.warn_undefined_operands(instruction)?;
                 if self.path(path)?.has_properties()? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
                 self.make_reference(dst, path)?;
             }
             I::BindReference { path, src } => {
-                self.warn_undefined_operands(instruction)?;
                 if self.path(path)?.has_properties()? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
                 self.bind_reference(path, src)?;
             }
             I::UnsetPath { path } => {
-                self.warn_undefined_operands(instruction)?;
                 let place = self.path(path)?;
                 if place.has_properties()? {
                     return Ok(Some(BatchExit::Instruction(instruction)));
@@ -350,7 +333,6 @@ impl Vm {
                 path,
                 ..
             } => {
-                self.warn_undefined_operands(instruction)?;
                 if self.path(path)?.has_properties()?
                     || !self.start_reference_iterator(iter, path, subject)?
                 {

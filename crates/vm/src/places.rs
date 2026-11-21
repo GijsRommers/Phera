@@ -85,6 +85,13 @@ impl Vm {
 
     /// Convert path keys in source order while reusing the operator diagnostic buffer.
     pub(crate) fn keys(&mut self, place: &AccessPath) -> Result<InlineStack<PathKey>, NativeError> {
+        if let Ok(steps) = place.steps() {
+            for step in steps {
+                if let Step::Index(register) | Step::DynamicProperty(register) = step {
+                    self.warn_undefined_key(register);
+                }
+            }
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let mut keys = InlineStack::new();
         let result = (|| {
@@ -166,84 +173,38 @@ pub(crate) fn display_key(key: &ArrayKey) -> String {
 }
 
 impl Vm {
-    /// Warn for each key or operand of `instruction` that is a named local
-    /// with no value yet.
+    /// Warn when a path key register names an undefined local.
     ///
-    /// A key or operand used to be a temporary the compiler filled with a
-    /// `Move` from the local, and that `Move` raised PHP's "Undefined
-    /// variable" warning before the consumer ran. The compiler can now name
-    /// the local itself; reading it in place moves the warning here, once, in
-    /// operand order. Temporaries are always assigned before use, so they
-    /// never warn.
+    /// A key used to be a temporary the compiler filled with a `Move` from
+    /// the local, and that `Move` raised PHP's "Undefined variable" warning
+    /// before the path was walked. The compiler can now name the local in the
+    /// path step itself; the warning moves to the conversion of the step's
+    /// register into a key. Only a `None` slot pays for the frame lookup, and
+    /// only a named local can warn: temporaries are always assigned first.
     ///
     /// ```php
     /// $row[$key];   // Undefined variable $key when $key was never assigned
-    /// (int) $x;     // Undefined variable $x
+    /// $o->$prop;
     /// ```
-    pub(crate) fn warn_undefined_operands(
-        &mut self,
-        instruction: phera_bytecode::Instruction,
-    ) -> Result<(), NativeError> {
-        use phera_bytecode::Instruction as I;
-        // One pass over the frame: collect the names of undefined named-local
-        // operands. No allocation unless a warning actually fires.
-        let mut missing: Vec<String> = Vec::new();
+    pub(crate) fn warn_undefined_key(&mut self, register: Reg) {
+        let mut name = None;
         if let Some(frame) = self.current() {
-            let function = frame.function();
-            let locals = function.locals.len();
-            let check = |register: Reg, missing: &mut Vec<String>| {
-                if register.index() >= locals {
-                    return;
-                }
-                let defined = frame
-                    .slots(&self.registers)
-                    .get(register.index())
-                    .is_some_and(Option::is_some);
-                if defined {
-                    return;
-                }
-                if let Some(name) = function
+            let defined = frame
+                .slots(&self.registers)
+                .get(register.index())
+                .is_some_and(Option::is_some);
+            if !defined && register.index() < frame.function().locals.len() {
+                name = frame
+                    .function()
                     .locals
                     .get(register.index())
-                    .and_then(|name| frame.unit().names.get(name.index()))
-                {
-                    missing.push(name.clone());
-                }
-            };
-            match instruction {
-                I::Unary { src, .. } | I::Cast { src, .. } => check(src, &mut missing),
-                I::Fetch { path, .. }
-                | I::FetchIndex { path, .. }
-                | I::AssignPath { path, .. }
-                | I::AssignPathFromLocal { path, .. }
-                | I::AssignOpPath { path, .. }
-                | I::IncDecPath { path, .. }
-                | I::UnsetPath { path }
-                | I::IssetPath { path, .. }
-                | I::MakeReference { path, .. }
-                | I::BindReference { path, .. }
-                | I::SendPath { path }
-                | I::IterStartReference { path, .. } => {
-                    // Read the compiled path table directly: resolving the
-                    // path here would duplicate the handler's own work.
-                    if let Some(definition) = function.paths.get(path.index()) {
-                        for step in &definition.steps {
-                            match step {
-                                Step::Index(register) | Step::DynamicProperty(register) => {
-                                    check(*register, &mut missing)
-                                }
-                                Step::Property(_) | Step::Append => {}
-                            }
-                        }
-                    }
-                }
-                _ => {}
+                    .and_then(|local| frame.unit().names.get(local.index()))
+                    .cloned();
             }
         }
-        for name in missing {
+        if let Some(name) = name {
             self.warn(format!("Undefined variable ${name}"));
         }
-        Ok(())
     }
 
     /// Read a root slot without evaluating array keys, retaining undefined-variable warnings.

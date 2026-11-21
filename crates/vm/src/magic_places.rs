@@ -118,6 +118,7 @@ impl Vm {
                 && let Value::Object(object) = &value
                 && crate::dimensions::has_dimension(object)
             {
+                self.warn_undefined_key(index);
                 let offset = self.get(index);
                 let object = object.clone();
                 let last = steps.peek().is_none();
@@ -144,7 +145,9 @@ impl Vm {
                 } else if matches!(value, Value::Array(_) | Value::String(_)) {
                     PathKey::Index(Some(self.read_index_key(index, missing)?))
                 } else {
-                    // No offset is converted if the container cannot be indexed.
+                    // No offset is converted if the container cannot be indexed,
+                    // but PHP still evaluates it.
+                    self.warn_undefined_key(index);
                     value = self.read_nonarray_offset(value, missing)?;
                     continue;
                 }
@@ -356,6 +359,9 @@ impl Vm {
     /// Resolve dynamic property names as strings. A dimension key keeps
     /// its own PHP conversion rules, which never use __toString.
     pub(crate) async fn magic_path_key(&mut self, step: Step) -> Result<PathKey, NativeError> {
+        if let Step::Index(register) | Step::DynamicProperty(register) = step {
+            self.warn_undefined_key(register);
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let key = match step {
             Step::Property(name) => PathKey::Property(ArrayKey::str(diagnostics.vm.name(name)?)),

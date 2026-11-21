@@ -13,6 +13,7 @@ use crate::{
 
 impl Vm {
     pub(crate) fn path_index_key(&mut self, register: Reg) -> Result<ArrayKey, NativeError> {
+        self.warn_undefined_key(register);
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         Ok(ArrayKey::from_value_diag(
             &diagnostics.vm.operand(register),
@@ -75,6 +76,7 @@ impl Vm {
         current: &Value,
         register: Reg,
     ) -> Result<Option<ArrayKey>, NativeError> {
+        self.warn_undefined_key(register);
         match current {
             Value::Array(_) => {}
             Value::Null => return Ok(None),
