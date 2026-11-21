@@ -16,7 +16,7 @@ impl PhpArray {
     /// dropping it afterwards does nothing more. They go in last first, so
     /// that `pop` frees them in order: PHP destroys an array's elements
     /// first to last, which decides the order of their destructors.
-    fn take_values(&mut self, work: &mut Vec<Value>) {
+    pub(crate) fn take_values(&mut self, work: &mut Vec<Value>) {
         match std::mem::take(&mut self.storage) {
             Storage::List(values) => work.extend(values.into_iter().rev().flatten()),
             Storage::Map(map) => work.extend(

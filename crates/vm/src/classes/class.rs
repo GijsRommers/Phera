@@ -54,8 +54,12 @@ pub(crate) struct Class {
     pub(crate) constructor: Option<Rc<Method>>,
     /// Root-first property keys reproduce the layout used by native testing helpers.
     pub(crate) defaults: Vec<PropertyDefault>,
-    /// Literal defaults are materialized once at linking; objects clone this COW table.
-    pub(crate) property_template: Option<phera_value::PhpArray>,
+    /// Literal defaults are materialized once at linking; objects clone this
+    /// (one box of slots).
+    pub(crate) property_template: Option<phera_value::Properties>,
+    /// The declared instance properties in PHP's order, which every object
+    /// of the class keeps in slots; `None` for a class without any.
+    pub(crate) layout: Option<Rc<phera_value::PropertyLayout>>,
     pub(crate) static_properties: Vec<PropertyDefault>,
     pub(crate) constants: HashMap<String, Rc<LinkedConstant>>,
     pub(crate) declaration: Option<(crate::code_table::FunctionIndex, phera_bytecode::ClassId)>,
@@ -176,6 +180,10 @@ impl ClassHandle for Class {
     fn is_enum(&self) -> bool {
         self.kind == ClassKind::Enum
     }
+
+    fn property_layout(&self) -> Option<Rc<phera_value::PropertyLayout>> {
+        self.layout.clone()
+    }
 }
 
 impl Class {
@@ -270,18 +278,46 @@ pub(crate) fn literal_initializer(
     (destination == *src).then_some(value)
 }
 
-/// Templates are valid for the immutable linked class and contain no evaluated expressions.
-pub(crate) fn property_template(defaults: &[PropertyDefault]) -> Option<phera_value::PhpArray> {
-    let mut template = phera_value::PhpArray::new();
+/// The layout of a class's instance properties: each declared key once, at
+/// its first place (a redeclaration keeps the parent's place), parents first.
+pub(crate) fn property_layout(
+    defaults: &[PropertyDefault],
+) -> Option<Rc<phera_value::PropertyLayout>> {
+    let mut keys: Vec<ArrayKey> = Vec::with_capacity(defaults.len());
     for property in defaults {
-        if property.initializer.is_some() {
-            return None;
-        }
-        if property.initialized {
-            template.insert(property.key.clone(), property.value.clone());
+        if !keys.contains(&property.key) {
+            keys.push(property.key.clone());
         }
     }
-    Some(template)
+    (!keys.is_empty()).then(|| Rc::new(phera_value::PropertyLayout::new(keys)))
+}
+
+/// Templates are valid for the immutable linked class and contain no
+/// evaluated expressions: the literal default of each initialized
+/// property in its slot (the last one, for a redeclared property).
+pub(crate) fn property_template(
+    defaults: &[PropertyDefault],
+    layout: Option<&Rc<phera_value::PropertyLayout>>,
+) -> Option<phera_value::Properties> {
+    if defaults
+        .iter()
+        .any(|property| property.initializer.is_some())
+    {
+        return None;
+    }
+    let Some(layout) = layout else {
+        return Some(phera_value::Properties::default());
+    };
+    let mut slots = vec![None; layout.len()].into_boxed_slice();
+    for property in defaults.iter().filter(|property| property.initialized) {
+        if let Some(slot) = layout
+            .slot(&property.key)
+            .and_then(|slot| slots.get_mut(slot))
+        {
+            *slot = Some(property.value.clone());
+        }
+    }
+    Some(phera_value::Properties::with_layout(layout.clone(), slots))
 }
 
 /// Argument routing metadata is independent of the receiver and shared by calls.

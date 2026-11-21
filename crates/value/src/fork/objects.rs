@@ -33,7 +33,7 @@ impl Fork<'_> {
         let copy = Rc::new(Object {
             id: original.id,
             class: original.class.clone(),
-            properties: RefCell::new(crate::PhpArray::new()),
+            properties: RefCell::new(crate::Properties::default()),
             native: RefCell::new(None),
             destruction: Cell::new(Destruction::Never),
             attachments: Cell::new(None),
@@ -75,9 +75,14 @@ impl Fork<'_> {
     }
 
     pub(super) fn fill_object(&mut self, original: &Rc<Object>, copy: &Rc<Object>) {
-        let properties = original.with_properties(crate::PhpArray::clone);
+        let properties = original.with_properties(crate::Properties::clone);
         let mut properties = properties.unwrap_or_default();
-        self.array_contents(&mut properties);
+        for slot in properties.slots_mut().iter_mut().flatten() {
+            if super::arrays::needs_copy(slot) {
+                *slot = self.value(slot);
+            }
+        }
+        self.array_contents(properties.others_mut());
         *copy.properties.borrow_mut() = properties;
         let native = match original.native.try_borrow() {
             Ok(native) => native.as_deref().map(|state| {

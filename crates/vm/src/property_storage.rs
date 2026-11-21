@@ -3,35 +3,24 @@
 use crate::classes::Class;
 use phera_value::{ArrayKey, Object, Value};
 
-/// Layout positions are computed by root-first linking, including redeclarations.
+/// The declared slot of `key` in the object's class: the property's place
+/// in the class's layout (`Class::layout`), which is also its place in
+/// `Class::defaults`.
 fn position(object: &Object, key: &ArrayKey) -> Option<usize> {
     let class = object.class.as_any().downcast_ref::<Class>()?;
-    class
-        .defaults
-        .iter()
-        .position(|property| property.key == *key)
+    class.layout.as_ref()?.slot(key)
 }
 
-/// Unset/reinsert can change a position; verify its key before using the fast slot.
+/// The value of the property stored under `key`.
 pub(crate) fn read(object: &Object, key: &ArrayKey) -> Option<Value> {
     read_at(object, key, position(object, key))
 }
 
-/// Mirrors read with a cached declaration position; the actual key still guards layout changes.
+/// The same, with the slot a site or a `ReflectionProperty` remembered.
 pub(crate) fn read_at(object: &Object, key: &ArrayKey, slot: Option<usize>) -> Option<Value> {
-    if let Some(position) = slot
-        && let Some(value) = object
-            .update(|properties| {
-                properties
-                    .entry_at(position)
-                    .filter(|(stored, _)| *stored == *key)
-                    .map(|(_, value)| value.clone())
-            })
-            .flatten()
-    {
-        return Some(value);
-    }
-    object.get(key)
+    object
+        .with_properties(|properties| properties.get_at(key, slot).cloned())
+        .flatten()
 }
 
 /// Move an array out of a property so nested append retains its unique owner.
@@ -39,38 +28,23 @@ pub(crate) fn take(object: &Object, key: &ArrayKey) -> Value {
     let position = position(object, key);
     object
         .update(|properties| {
-            if let Some(position) = position
-                && let Some((stored, value)) = properties.entry_at_mut(position)
-                && stored == *key
-            {
-                return std::mem::take(value);
-            }
             properties
-                .get_mut(key)
+                .get_mut_at(key, position)
                 .map(std::mem::take)
                 .unwrap_or_default()
         })
         .unwrap_or_default()
 }
 
-/// Existing declared slots need no key hashing; dynamic/reinserted slots use the map.
+/// Writes the property stored under `key`, creating it if needed.
 pub(crate) fn write(object: &Object, key: ArrayKey, value: Value) {
     let slot = position(object, &key);
     write_at(object, key, slot, value);
 }
 
-/// Mirrors write using a guarded cached position, falling back after unset/reinsertion.
+/// The same, with a remembered slot.
 pub(crate) fn write_at(object: &Object, key: ArrayKey, slot: Option<usize>, value: Value) {
-    object.update(|properties| {
-        if let Some(position) = slot
-            && let Some((stored, target)) = properties.entry_at_mut(position)
-            && stored == key
-        {
-            *target = value;
-            return;
-        }
-        properties.insert(key, value);
-    });
+    object.update(|properties| properties.insert_at(key, slot, value));
 }
 
 /// A cached write may replace a value, but must preserve writable reference cells.
@@ -82,28 +56,17 @@ pub(crate) fn write_direct_at(
     may_initialize: impl FnOnce() -> bool,
 ) -> bool {
     object
-        .update(|properties| {
-            let destination = match slot.and_then(|slot| {
-                properties
-                    .entry_at(slot)
-                    .filter(|(stored, _)| stored == key)
-                    .map(|_| slot)
-            }) {
-                Some(slot) => properties.entry_at_mut(slot).map(|(_, value)| value),
-                None => properties.get_mut(key),
-            };
-            match destination {
-                Some(Value::Reference(_)) => false,
-                Some(destination) => {
-                    *destination = value.clone();
-                    true
-                }
-                None if may_initialize() => {
-                    properties.insert(key.clone(), value.clone());
-                    true
-                }
-                None => false,
+        .update(|properties| match properties.get_mut_at(key, slot) {
+            Some(Value::Reference(_)) => false,
+            Some(destination) => {
+                *destination = value.clone();
+                true
             }
+            None if may_initialize() => {
+                properties.insert_at(key.clone(), slot, value.clone());
+                true
+            }
+            None => false,
         })
         .unwrap_or(false)
 }
@@ -118,17 +81,7 @@ pub(crate) fn append_at(
 ) -> Option<Result<(), phera_extension_api::NativeError>> {
     object
         .update(|properties| {
-            let position = slot.filter(|position| {
-                properties
-                    .entry_at(*position)
-                    .is_some_and(|(stored, _)| stored == *key)
-            });
-            let target = if let Some(position) = position {
-                properties.entry_at_mut(position).map(|(_, value)| value)
-            } else {
-                properties.get_mut(key)
-            };
-            let Some(Value::Array(array)) = target else {
+            let Some(Value::Array(array)) = properties.get_mut_at(key, slot) else {
                 return None;
             };
             Some(
@@ -153,17 +106,7 @@ pub(crate) fn write_element_at(
 ) -> Option<Option<Value>> {
     object
         .update(|properties| {
-            let position = slot.filter(|position| {
-                properties
-                    .entry_at(*position)
-                    .is_some_and(|(stored, _)| stored == *key)
-            });
-            let target = if let Some(position) = position {
-                properties.entry_at_mut(position).map(|(_, value)| value)
-            } else {
-                properties.get_mut(key)
-            };
-            let Some(Value::Array(array)) = target else {
+            let Some(Value::Array(array)) = properties.get_mut_at(key, slot) else {
                 return None;
             };
             if !crate::element_writes::writable(array, keys, place) {
