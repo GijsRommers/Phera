@@ -229,7 +229,7 @@ impl Vm {
         if base.returns.is_some() {
             let source = child.returns.as_deref();
             let target = base.returns.as_deref();
-            if (base.tentative && source.is_none())
+            if source.is_none()
                 || !self.type_subset(source, &method.declaring, target, inherited_scope, unit)
             {
                 // PHP loads a class that the two return types name before it
@@ -399,7 +399,7 @@ impl Vm {
         target_scope: &str,
         unit: &phera_bytecode::CompiledUnit,
     ) -> bool {
-        if target == "mixed" || source == "never" {
+        if source == "never" || target == "mixed" && source != "void" {
             return true;
         }
         if target == "static" {

@@ -25,6 +25,41 @@ use phera_value::Value;
 use std::{cell::RefCell, rc::Rc};
 
 impl Vm {
+    /// Binding an untyped cell may convert it. An already typed cell keeps its value.
+    pub(crate) fn coerce_property_binding(
+        &mut self,
+        reference: &Rc<RefCell<Value>>,
+        property: &PropertyDefault,
+        ty: &phera_bytecode::Type,
+    ) -> Result<(), NativeError> {
+        let value = reference
+            .try_borrow()
+            .map_err(|_| internal_error!("borrowed property alias"))?
+            .clone();
+        let converted = self.coerce_property(value.clone(), property, ty)?;
+        if std::mem::discriminant(&value) == std::mem::discriminant(&converted) {
+            return Ok(());
+        }
+        let holders = self.property_references.borrow();
+        if let Some(holder) = holders
+            .constraints
+            .get(&(Rc::as_ptr(reference) as usize))
+            .and_then(|properties| properties.values().next())
+        {
+            return Err(NativeError::type_error(format!(
+                "Reference with value of type {} held by property {} is not compatible with property {}",
+                crate::types::property_value_type(&value),
+                reference_property_name(holder),
+                reference_property_name(property),
+            )));
+        }
+        drop(holders);
+        *reference
+            .try_borrow_mut()
+            .map_err(|_| internal_error!("borrowed property alias"))? = converted;
+        Ok(())
+    }
+
     /// Only an object assigned through a typed reference can need a callback.
     pub(crate) fn local_reference_needs_string(
         &self,
@@ -60,7 +95,7 @@ impl Vm {
     pub(crate) fn check_reference_assignment(
         &mut self,
         reference: &Rc<RefCell<Value>>,
-        mut value: Value,
+        value: Value,
     ) -> NativeResult {
         let index = self.property_references.borrow();
         if index.constraints.is_empty() {
@@ -74,10 +109,23 @@ impl Vm {
             constraints.push(property.clone());
         }
         drop(index);
-        for property in constraints.iter() {
-            value = self.coerce_reference_property(value, property)?;
+        let mut holders = constraints.iter();
+        let Some(first) = holders.next() else {
+            return Ok(value);
+        };
+        if constraints.len() == 1 {
+            return self.coerce_reference_property(value, first);
         }
-        Ok(value)
+        // All holders must choose the same conversion from the original
+        // input. Scalar conversions here are deterministic for a result type.
+        let converted = self.coerce_reference_property(value.clone(), first)?;
+        for property in holders {
+            let candidate = self.coerce_reference_property(value.clone(), property)?;
+            if std::mem::discriminant(&converted) != std::mem::discriminant(&candidate) {
+                return Err(conflicting_reference_types(&value, first, property));
+            }
+        }
+        Ok(converted)
     }
 
     /// The alias diagnostic names the property holding the type constraint, not the variable.
@@ -89,7 +137,7 @@ impl Vm {
         let Some(declaration) = &property.ty else {
             return Ok(value);
         };
-        let actual = value.type_name();
+        let actual = crate::types::property_value_type(&value);
         self.coerce_property(value, property, declaration)
             .map_err(|_| reference_type_error(&actual, property))
     }
@@ -346,6 +394,14 @@ fn reference_type_error(actual: &str, property: &PropertyDefault) -> NativeError
     ))
 }
 
+pub(crate) fn uninitialized_reference_error(property: &PropertyDefault) -> NativeError {
+    NativeError::error(format!(
+        "Cannot access uninitialized non-nullable property {}::${} by reference",
+        phera_value::class_display_name(&property.declaring),
+        property.name,
+    ))
+}
+
 fn conflicting_reference_types(
     value: &Value,
     first: &PropertyDefault,
@@ -353,7 +409,7 @@ fn conflicting_reference_types(
 ) -> NativeError {
     NativeError::type_error(format!(
         "Cannot assign {} to reference held by property {} and property {}, as this would result in an inconsistent type conversion",
-        value.type_name(),
+        crate::types::property_value_type(value),
         reference_property_name(first),
         reference_property_name(other)
     ))
@@ -366,7 +422,9 @@ fn reference_property_name(property: &PropertyDefault) -> String {
         .map_or("mixed".into(), crate::types::php_type_display);
     format!(
         "{}::${} of type {}",
-        property.declaring, property.name, declaration
+        phera_value::class_display_name(&property.declaring),
+        property.name,
+        declaration
     )
 }
 

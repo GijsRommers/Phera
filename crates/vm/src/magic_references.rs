@@ -209,10 +209,9 @@ impl Vm {
                                 !ty.mask.intersects(phera_bytecode::TypeMask::NULL)
                             })
                         {
-                            return Err(NativeError::error(format!(
-                                "Cannot access uninitialized non-nullable property {}::${} by reference",
-                                property.declaring, property.name,
-                            )));
+                            return Err(crate::typed_references::uninitialized_reference_error(
+                                property,
+                            ));
                         }
                         if stored.is_none()
                             && !slot.as_ref().is_some_and(|key| {
