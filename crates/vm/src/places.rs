@@ -199,33 +199,40 @@ impl Vm {
             | phera_bytecode::Instruction::IterStartReference { path, .. } => path,
             _ => return Ok(()),
         };
-        let place = self.path(path)?;
-        for step in place.steps()? {
-            let register = match step {
-                Step::Index(register) | Step::DynamicProperty(register) => register,
-                Step::Property(_) | Step::Append => continue,
-            };
-            let missing = self.current().and_then(|frame| {
-                if register.index() >= frame.function().locals.len() {
-                    return None;
+        // Read the compiled path table directly: resolving the path here would
+        // duplicate the work the instruction's own handler does right after.
+        let mut missing: Vec<String> = Vec::new();
+        if let Some(frame) = self.current()
+            && let Some(definition) = frame.function().paths.get(path.index())
+        {
+            let function = frame.function();
+            let locals = function.locals.len();
+            for step in &definition.steps {
+                let register = match step {
+                    Step::Index(register) | Step::DynamicProperty(register) => *register,
+                    Step::Property(_) | Step::Append => continue,
+                };
+                if register.index() >= locals {
+                    continue;
                 }
                 let defined = frame
                     .slots(&self.registers)
                     .get(register.index())
                     .is_some_and(Option::is_some);
                 if defined {
-                    return None;
+                    continue;
                 }
-                frame
-                    .function()
+                if let Some(name) = function
                     .locals
                     .get(register.index())
                     .and_then(|name| frame.unit().names.get(name.index()))
-                    .cloned()
-            });
-            if let Some(name) = missing {
-                self.warn(format!("Undefined variable ${name}"));
+                {
+                    missing.push(name.clone());
+                }
             }
+        }
+        for name in missing {
+            self.warn(format!("Undefined variable ${name}"));
         }
         Ok(())
     }
