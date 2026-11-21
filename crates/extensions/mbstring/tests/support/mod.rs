@@ -186,7 +186,7 @@ impl Matrix {
             }
             // `testing::call` runs only sync functions; this does the same
             // for an async one, awaiting it.
-            NativeFn::Async(handler) | NativeFn::DeprecatedAsync(handler) => {
+            NativeFn::Async(handler) => {
                 prepare_arguments(entry, &mut arguments, &mut self.context)?;
                 self.runtime.block_on(handler(&mut self.context, arguments))
             }

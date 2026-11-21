@@ -54,13 +54,12 @@ impl Vm {
         origin: ArgumentOrigin,
         binding: ArgumentBinding,
     ) -> NativeResult {
-        if matches!(
-            entry.handler,
-            NativeFn::DeprecatedSync(_) | NativeFn::DeprecatedAsync(_)
-        ) && let Some(message) = phera_source::deprecations::kept_notice(
-            phera_source::deprecations::ItemKind::Function,
-            entry.name,
-        ) {
+        if matches!(entry.handler, NativeFn::DeprecatedSync(_))
+            && let Some(message) = phera_source::deprecations::kept_notice(
+                phera_source::deprecations::ItemKind::Function,
+                entry.name,
+            )
+        {
             self.diagnostic("Deprecated", message.into());
             self.drain_error_handlers().await?;
         }
@@ -120,7 +119,7 @@ impl Vm {
                 self.call_stack.recycle_native_arguments(arguments);
                 result
             }
-            NativeFn::Async(handler) | NativeFn::DeprecatedAsync(handler) => {
+            NativeFn::Async(handler) => {
                 self.run_async_native_function(entry.name, handler, arguments, binding)
                     .await
             }

@@ -12,7 +12,6 @@ use crate::input::InputStream;
 use crate::io_policy::{CHUNK, IoPolicy};
 
 pub enum Backing {
-    Socket(std::sync::Arc<crate::socket::Socket>),
     Gzip(Box<crate::gzip::Gzip>),
     File(BufReader<File>),
     Memory(Cursor<Vec<u8>>),
@@ -28,8 +27,6 @@ pub enum Wrapper {
     Standard,
     Process,
     ProcessSocket,
-    Socket,
-    Http,
     Memory,
     Temp,
     Data,
@@ -73,7 +70,7 @@ impl Stream {
     pub fn new(backing: Backing, wrapper: Wrapper, mode: &[u8], uri: &[u8]) -> Self {
         let seekable = match &backing {
             Backing::File(file) => file.get_ref().metadata().is_ok_and(|meta| meta.is_file()),
-            Backing::Socket(_) | Backing::Output => false,
+            Backing::Output => false,
             _ => true,
         };
         Self {
@@ -145,7 +142,6 @@ impl Stream {
         match &self.backing {
             Backing::File(file) => file.buffer().len(),
             Backing::Gzip(gzip) => gzip.unread(),
-            Backing::Socket(socket) => socket.unread(),
             _ => 0,
         }
     }
@@ -272,7 +268,6 @@ impl Stream {
             Backing::Gzip(gzip) => gzip.read(buffer),
             Backing::Memory(cursor) => cursor.read(buffer),
             Backing::Input(input) => Ok(input.read(buffer, self.chunk_size)),
-            Backing::Socket(_) => Err(io::ErrorKind::Unsupported.into()),
             Backing::Output => Ok(0),
         }
     }
@@ -316,7 +311,6 @@ impl Stream {
                 );
                 line.len()
             }
-            Backing::Socket(_) => return Err(io::ErrorKind::Unsupported.into()),
             Backing::Output => 0,
         };
         self.position += line.len() as u64;
@@ -412,7 +406,7 @@ impl Stream {
                     .map_err(|_| io::ErrorKind::OutOfMemory)?;
                 cursor.write(bytes)?
             }
-            Backing::Socket(_) | Backing::Memory(_) | Backing::Input(_) => {
+            Backing::Memory(_) | Backing::Input(_) => {
                 return Err(io::ErrorKind::Unsupported.into());
             }
             Backing::Output => bytes.len(),
@@ -459,9 +453,7 @@ impl Stream {
             Backing::Gzip(gzip) => gzip.seek(self.position, position)?,
             Backing::Memory(cursor) => cursor.seek(position)?,
             Backing::Input(cursor) => cursor.seek(position)?,
-            Backing::Socket(_) | Backing::Output => {
-                return Err(io::ErrorKind::Unsupported.into());
-            }
+            Backing::Output => return Err(io::ErrorKind::Unsupported.into()),
         };
         self.position = position;
         self.eof = false;

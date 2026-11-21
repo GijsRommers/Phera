@@ -66,9 +66,7 @@ pub async fn check(name: &str, cases: &[Case], oracle_cwd: &Path, native_cwd: &P
                 NativeFn::Sync(handler) | NativeFn::DeprecatedSync(handler) => {
                     handler(&mut context, &arguments)
                 }
-                NativeFn::Async(handler) | NativeFn::DeprecatedAsync(handler) => {
-                    handler(&mut context, arguments).await
-                }
+                NativeFn::Async(handler) => handler(&mut context, arguments).await,
             },
             Err(error) => Err(error),
         };

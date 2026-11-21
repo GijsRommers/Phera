@@ -42,7 +42,6 @@ mod resource;
 mod scan;
 mod scan_format;
 mod select;
-mod socket;
 mod source_tools;
 mod stream;
 mod stream_copy;
@@ -121,7 +120,6 @@ impl Extension for Streams {
         stream_copy::register(registry);
         stream_options::register(registry);
         select::register(registry);
-        socket::register(registry);
         temporary::register(registry);
         transfer::register(registry);
         user_wrappers::register(registry);
