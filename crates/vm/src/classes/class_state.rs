@@ -137,7 +137,10 @@ impl ClassStates {
 
     /// The storage in `slot`, if this request made it already: a static
     /// property read site's (see `crate::static_sites`).
-    pub(crate) fn existing_slot(&self, StaticSlot(slot): StaticSlot) -> Option<&Rc<StaticProperty>> {
+    pub(crate) fn existing_slot(
+        &self,
+        StaticSlot(slot): StaticSlot,
+    ) -> Option<&Rc<StaticProperty>> {
         self.statics.get(slot as usize)?.as_ref()
     }
 

@@ -97,11 +97,7 @@ impl Vm {
         let is_static = frame.unit().symbols[class.index()].written == "static";
         let entry = StaticEntry {
             scope: frame.scope().map(|scope| scope.index),
-            called: if is_static {
-                Some(found.index)
-            } else {
-                None
-            },
+            called: if is_static { Some(found.index) } else { None },
             slot,
         };
         if let Some(site) = frame.site_cache()
