@@ -423,6 +423,14 @@ pub enum Instruction {
         dst: Reg,
         result: CallResult,
     },
+    /// `InitMethodCall`, its `Send`s and `Call` in one: the method call
+    /// that [`crate::MethodSite`] `site` of the running function describes.
+    /// `dst` receives the return value.
+    CallMethod {
+        site: crate::MethodSiteId,
+        dst: Reg,
+        result: CallResult,
+    },
     /// Calls a function declared unconditionally at the top level of this
     /// file, which therefore exists before any of the file's code runs. The
     /// compiler has put the `count` arguments in the registers from `args`

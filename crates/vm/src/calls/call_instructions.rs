@@ -1,4 +1,5 @@
-//! `MakeCallable`, `ReceiveDefault` and `DeclareFunction`.
+//! `MakeCallable`, `ReceiveDefault`, `DeclareFunction` and the fallback of
+//! `CallMethod`.
 
 use phera_bytecode::{FunctionId, Reg, Target};
 use phera_extension_api::NativeError;
@@ -7,6 +8,21 @@ use phera_value::Value;
 use crate::Vm;
 
 impl Vm {
+    /// Where the running function writes method site `site` out in full
+    /// (see [`phera_bytecode::MethodSite`]).
+    pub(crate) fn method_site_fallback(
+        &self,
+        site: phera_bytecode::MethodSiteId,
+    ) -> Result<Target, NativeError> {
+        let frame = self.current().ok_or_else(|| internal_error!("no frame"))?;
+        frame
+            .function()
+            .method_sites
+            .get(site.index())
+            .map(|site| site.fallback)
+            .ok_or_else(|| internal_error!("method site number"))
+    }
+
     /// Implements PHP MakeCallable semantics outside the dispatch loop.
     pub(crate) fn make_callable(&mut self, destination: Reg) -> Result<(), NativeError> {
         let callee = self.take_prepared_callee()?;

@@ -17,16 +17,19 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::{ClassBinding, Instruction, NameId, Reg, SymbolId, Visibility};
+use phera_bytecode::{
+    ClassBinding, Instruction, MethodSite, MethodSiteId, NameId, Reg, SymbolId, Visibility,
+};
 use phera_value::{Object, Value};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
+use crate::calls::frame::Frame;
 use crate::calls::php_windows::push_php_call;
 use crate::calls::prepared_call::CallKind;
 use crate::calls::window_context::WindowContext;
 use crate::classes::method_table::FoundMethod;
 use crate::classes::{Class, ClassIndex, MethodBody};
-use crate::code_table::{FunctionIndex, NameKey};
+use crate::code_table::{FunctionIndex, FunctionShape, NameKey};
 
 impl Machine<'_> {
     /// `InitMethodCall` of a public instance method written in PHP: reserve
@@ -93,6 +96,101 @@ impl Machine<'_> {
             }
             _ => Step::Slow,
         }
+    }
+
+    /// `CallMethod`: enter the PHP method that method site `site` calls,
+    /// with its arguments in a new window, or else run the call written out
+    /// in full at the site's fallback.
+    #[inline(always)]
+    pub(super) fn call_method(
+        &mut self,
+        position: Position,
+        site: MethodSiteId,
+        destination: Reg,
+    ) -> Step {
+        let body = self.code.function(position.frame.function);
+        let Some(site) = body.method_sites.get(site.index()) else {
+            return Step::Slow;
+        };
+        match self.enter_method_site(position, body, site, destination) {
+            Some(step) => step,
+            None => Step::Done(site.fallback.index()),
+        }
+    }
+
+    /// The quick entry of a method site: a method written in PHP that the
+    /// receiver's class has and the running scope may call, plain in shape,
+    /// with arguments that are defined, not references, and pass their type
+    /// tests. `None`, having changed nothing, for anything else.
+    #[inline(always)]
+    fn enter_method_site(
+        &mut self,
+        position: Position,
+        body: &phera_bytecode::Function,
+        site: &MethodSite,
+        destination: Reg,
+    ) -> Option<Step> {
+        let base = position.frame.base();
+        let object = match self.registers.window(base + site.receiver.index(), 1) {
+            [Some(Value::Object(object))] => object,
+            _ => return None,
+        };
+        let class = object.class.as_any().downcast_ref::<Class>()?;
+        let key = self
+            .code
+            .unit_name_key(position.frame.function, site.method);
+        let found = self.classes.method_table(class).get(key)?;
+        let method = found.method;
+        let MethodBody::User(function) = method.body else {
+            return None;
+        };
+        let scope = self.running_scope();
+        if method.is_abstract
+            || method.is_static
+            || !may_call(&found, scope)
+            || self.shadowed_by_private(scope, key, method)
+        {
+            return None;
+        }
+        let arguments = body.site_arguments.get(site.argument_range())?;
+        let count = arguments.len();
+        let facts = self.code.facts(function);
+        if facts.shape != FunctionShape::Plain
+            || count < facts.required as usize
+            || count > facts.parameters as usize
+            || self.stack.depth() >= self.frame_limit
+        {
+            return None;
+        }
+        for (index, argument) in arguments.iter().enumerate() {
+            match self.registers.window(base + argument.register().index(), 1) {
+                [Some(value)]
+                    if !value.is_reference() && self.accepts_argument(function, index, value) => {}
+                _ => return None,
+            }
+        }
+        let this = Value::Object(object.clone());
+        let start = self.registers.len();
+        let first = start + CallKind::Method.prefix();
+        self.registers
+            .grow_to(first + crate::calls::pending::php_window(self.code, function));
+        self.registers.put(start, this);
+        for (index, argument) in arguments.iter().enumerate() {
+            if let [Some(value)] = self.registers.window(base + argument.register().index(), 1) {
+                let value = value.clone();
+                self.registers.put(first + index, value);
+            }
+        }
+        self.publish(position.ip);
+        let mut frame = Frame::of_kind(function, CallKind::Method, first, Some(destination));
+        if count < facts.parameters as usize {
+            frame = frame.with_passed(count);
+        }
+        self.stack.push(frame);
+        if self.spend_work() {
+            return Some(Step::Yield);
+        }
+        Some(Step::Switched(Position { frame, ip: 0 }))
     }
 
     /// `$object->getter()` of a public native method with no parameters

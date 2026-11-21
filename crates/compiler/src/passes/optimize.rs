@@ -96,7 +96,7 @@ pub(crate) fn target_mut(instruction: &mut Instruction) -> Option<&mut Target> {
 }
 
 /// Preserve source locations and targets after integer fusion removes loads.
-fn compact_nops(function: &mut Function) {
+pub(crate) fn compact_nops(function: &mut Function) {
     let mut offsets = Vec::with_capacity(function.instructions.len() + 1);
     let mut count = 0;
     for instruction in &function.instructions {

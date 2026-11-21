@@ -45,6 +45,12 @@ impl Vm {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
             I::Call { dst, .. } => return self.call::<TRACK_GENERATORS>(dst, work),
+            // The loop enters a method site itself; here, as wherever its
+            // quick entry declines, the call runs written out in full.
+            I::CallMethod { site, .. } => {
+                let fallback = self.method_site_fallback(site)?;
+                self.execute_jump(fallback, work)?;
+            }
             I::CallDirect {
                 function,
                 args,
