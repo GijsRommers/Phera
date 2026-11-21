@@ -124,18 +124,12 @@ impl Machine<'_> {
             None => &Value::Null,
         };
         if let Some(mask) = facts.return_mask
-            && !mask.intersects(crate::types::own_type(value))
+            && !return_fits(mask, value)
             && !self
                 .code
                 .function(frame.function)
                 .return_type
-                .is_some_and(|declared| {
-                    crate::class_types::known_class_match(
-                        self.code.cache(frame.function),
-                        declared,
-                        value,
-                    )
-                })
+                .is_some_and(|declared| self.class_type_matches(frame.function, declared, value))
         {
             return Step::Slow;
         }
@@ -232,7 +226,7 @@ impl Machine<'_> {
         if kind != CallKind::Constructor
             && facts
                 .return_mask
-                .is_some_and(|mask| !mask.intersects(crate::types::own_type(value)))
+                .is_some_and(|mask| !return_fits(mask, value))
         {
             return Step::Slow;
         }
@@ -271,7 +265,7 @@ impl Machine<'_> {
         };
         if facts
             .return_mask
-            .is_some_and(|mask| !mask.intersects(crate::types::own_type(value)))
+            .is_some_and(|mask| !return_fits(mask, value))
         {
             return Step::Slow;
         }
@@ -302,10 +296,7 @@ impl Machine<'_> {
             .code
             .facts(frame.function)
             .return_mask
-            .is_some_and(|mask| {
-                !mask.intersects(crate::types::own_type(value))
-                    && !(mask.intersects(phera_bytecode::TypeMask::VOID) && value.is_null())
-            })
+            .is_some_and(|mask| !return_fits(mask, value))
         {
             return Step::Slow;
         }
@@ -383,12 +374,12 @@ impl Machine<'_> {
             PreparedCallee::Php(function) => {
                 !call.flags.contains(CallFlags::DETAILS)
                     && (self.accepts_argument(function, index, &value)
-                        || self.widen_argument(function, index, &mut value))
+                        || self.accepts_on_second_look(function, index, &mut value))
             }
             // One out-of-line arm for both, so that the match keeps the
             // shape the loop was laid out with.
             PreparedCallee::General | PreparedCallee::Native(_) => {
-                self.other_accepts(call.callee, index)
+                self.other_accepts(call.callee, index, &value)
             }
             PreparedCallee::Constructed => false,
         };
@@ -403,19 +394,32 @@ impl Machine<'_> {
         Step::Done(position.ip)
     }
 
-    /// An integer sent to a `float` parameter becomes that float, the one
+    /// The second look at an argument the first test refused, out of line:
+    /// an integer sent to a `float` parameter becomes that float, the one
     /// conversion PHP makes in strict mode too, so that `new Vec($i, 0)`
-    /// for `float $x` stays in the loop. `false`, with `value` as it was,
-    /// for anything else.
+    /// for `float $x` stays in the loop; an object passes a class type its
+    /// class satisfies. `false`, with `value` as it was, for anything else.
     #[cold]
     #[inline(never)]
-    pub(super) fn widen_argument(
+    pub(super) fn accepts_on_second_look(
         &self,
         function: FunctionIndex,
         index: usize,
         value: &mut Value,
     ) -> bool {
         let facts = self.code.facts(function);
+        if let Value::Object(_) = value {
+            // An object of a class the declared type allows, that the
+            // unit's one-entry cache did not remember.
+            return facts.takes_value(index)
+                && self
+                    .code
+                    .function(function)
+                    .parameters
+                    .get(index)
+                    .and_then(|parameter| parameter.ty)
+                    .is_some_and(|declared| self.declared_class_match(function, declared, value));
+        }
         let Value::Int(integer) = *value else {
             return false;
         };
@@ -455,17 +459,100 @@ impl Machine<'_> {
         })
     }
 
+    /// Whether `value` is an object of a class that the class type
+    /// `declared` of `function` allows: the class the unit's cache last
+    /// matched, or else the declared class found by its name key, with
+    /// the object's linked ancestry walked by pointer.
+    #[inline(always)]
+    fn class_type_matches(
+        &self,
+        function: FunctionIndex,
+        declared: phera_bytecode::TypeId,
+        value: &Value,
+    ) -> bool {
+        crate::class_types::known_class_match(self.code.cache(function), declared, value)
+            || self.declared_class_match(function, declared, value)
+    }
+
+    /// The second half of [`Machine::class_type_matches`]: a union of
+    /// absolute class names (`Type`, `A|B`, `?Model`). `self`, `static`,
+    /// `parent`, intersections and undeclared classes are left to the VM.
+    #[cold]
+    #[inline(never)]
+    fn declared_class_match(
+        &self,
+        function: FunctionIndex,
+        declared: phera_bytecode::TypeId,
+        value: &Value,
+    ) -> bool {
+        let Value::Object(object) = value else {
+            return false;
+        };
+        let Some(class) = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+        else {
+            return false;
+        };
+        let unit = self.code.unit(function);
+        let Some(ty) = unit.types.get(declared.index()) else {
+            return false;
+        };
+        if ty.intersection {
+            return false;
+        }
+        let matches = ty.classes.iter().any(|name| {
+            let relative = unit
+                .names
+                .get(name.index())
+                .is_none_or(|written| matches!(written.as_str(), "self" | "static" | "parent"));
+            !relative
+                && self
+                    .classes
+                    .by_key(self.code.unit_name_key(function, *name))
+                    .is_some_and(|target| {
+                        super::fast_instance_of::derives_from(class, target) == Some(true)
+                    })
+        });
+        // Remember it, as the VM's check does, so that the next value of
+        // this class is the cache's first test.
+        let cache = self.code.cache(function);
+        if matches
+            && cache.type_scopes.get(declared.index())
+                == Some(&crate::types::DeclarationScope::Absolute)
+            && let Some(Ok(mut slot)) = cache
+                .class_types
+                .get(declared.index())
+                .map(|slot| slot.try_borrow_mut())
+        {
+            *slot = Some(crate::unit_caches::ClassTypeEntry {
+                class: object.class.clone(),
+                matches,
+            });
+        }
+        matches
+    }
+
     /// The same for a general callee, which is native code: any value, for
     /// an untyped by-value parameter. A pending named argument takes the
     /// general path.
     #[inline(always)]
-    fn general_accepts(&self, index: usize) -> bool {
+    fn general_accepts(&self, index: usize, value: &Value) -> bool {
         let Some(details) = self.stack.top_details() else {
             return false;
         };
         let Some(callee) = details.callee.as_ref().filter(|_| details.named.is_none()) else {
             return false;
         };
+        // `spl_object_id($object)`: an object needs no coercion, and the
+        // batch loop answers the call (`Vm::object_id_call`).
+        if let CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
+            crate::class_intrinsics::ClassFunction::ObjectId,
+        )) = callee.target
+        {
+            return index == 0 && matches!(value, Value::Object(_));
+        }
         let intrinsic = matches!(callee.target, CallTarget::Intrinsic(_));
         callee.parameters.get(index).is_some_and(|parameter| {
             !intrinsic && !parameter.by_reference && !parameter.variadic && parameter.ty.is_none()
@@ -476,10 +563,15 @@ impl Machine<'_> {
     /// native call, [`Machine::native_accepts`]. Inline, so that a
     /// described callee costs what it did before lean records existed.
     #[inline(always)]
-    pub(super) fn other_accepts(&self, callee: PreparedCallee, index: usize) -> bool {
+    pub(super) fn other_accepts(
+        &self,
+        callee: PreparedCallee,
+        index: usize,
+        value: &Value,
+    ) -> bool {
         match callee {
             PreparedCallee::Native(id) => self.native_accepts(id, index),
-            _ => self.general_accepts(index),
+            _ => self.general_accepts(index, value),
         }
     }
 
@@ -554,4 +646,11 @@ impl Machine<'_> {
             .put(position.frame.base() + destination.index(), object);
         Step::Done(position.ip)
     }
+}
+
+/// Whether a returned value passes the bit test of the declared return
+/// type: `return;` of a `void` function returns null.
+fn return_fits(mask: phera_bytecode::TypeMask, value: &Value) -> bool {
+    mask.intersects(crate::types::own_type(value))
+        || (mask.intersects(phera_bytecode::TypeMask::VOID) && value.is_null())
 }

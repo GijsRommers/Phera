@@ -36,9 +36,7 @@ impl Machine<'_> {
                 !call.flags.contains(CallFlags::DETAILS)
                     && self.code.facts(function).takes_value(index)
             }
-            PreparedCallee::General | PreparedCallee::Native(_) => {
-                self.other_accepts(call.callee, index)
-            }
+            PreparedCallee::General | PreparedCallee::Native(_) => true,
             PreparedCallee::Constructed => false,
         };
         if !takes_value {
@@ -50,9 +48,9 @@ impl Machine<'_> {
         let accepted = match call.callee {
             PreparedCallee::Php(function) => {
                 self.accepts_argument(function, index, &value)
-                    || self.widen_argument(function, index, &mut value)
+                    || self.accepts_on_second_look(function, index, &mut value)
             }
-            _ => true,
+            _ => self.other_accepts(call.callee, index, &value),
         };
         if !accepted {
             return Step::Slow;
@@ -77,26 +75,8 @@ impl Machine<'_> {
             (_, [PathStep::Property(_), PathStep::Index(_), ..]) => {
                 self.property_element(position, path, false)
             }
-            (PathBase::Register(root), [PathStep::Index(_), ..]) => {
-                let keys = self.write_keys(position, &body.steps)?;
-                if !matches!(keys.target, crate::element_writes::Target::Last) {
-                    return None;
-                }
-                let [Some(Value::Array(array))] = self
-                    .registers
-                    .window(position.frame.base() + root.index(), 1)
-                else {
-                    return None;
-                };
-                let (last, levels) = keys.as_slice().split_last()?;
-                let mut current = &**array;
-                for key in levels {
-                    current = match current.get(key)? {
-                        Value::Array(inner) => inner,
-                        _ => return None,
-                    };
-                }
-                match current.get(last)? {
+            (PathBase::Register(_), [PathStep::Index(_), ..]) => {
+                match self.local_element(position, path)?? {
                     Value::Reference(_) => None,
                     value => Some(value.clone()),
                 }
