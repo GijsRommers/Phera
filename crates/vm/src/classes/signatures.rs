@@ -362,7 +362,7 @@ impl Vm {
                     && is_class_type_name(name)
                     && self.class_for_inheritance(name).is_none()
                     && self
-                        .variance_declaration(name, &[declaring], unit)
+                        .variance_declaration(name, &[declaring], unit, false)
                         .is_none()
             })
     }
@@ -374,6 +374,7 @@ impl Vm {
         name: &str,
         owners: &[&str],
         unit: &'unit phera_bytecode::CompiledUnit,
+        include_unlinked_hoists: bool,
     ) -> Option<(
         &'unit phera_bytecode::CompiledUnit,
         &'unit phera_bytecode::ClassDeclaration,
@@ -381,13 +382,14 @@ impl Vm {
         let from_unit = unit.classes.iter().enumerate().find_map(|(index, class)| {
             (class.name.eq_ignore_ascii_case(name)
                 && (owners.iter().any(|owner| name.eq_ignore_ascii_case(owner))
-                    || class.interfaces.is_empty()
-                        && class.traits.is_empty()
-                        && class.parent.is_none_or(|parent| {
-                            self.classes
-                                .get(&unit.symbols[parent.index()].written)
-                                .is_some()
-                        })
+                    || (include_unlinked_hoists
+                        || class.interfaces.is_empty()
+                            && class.traits.is_empty()
+                            && class.parent.is_none_or(|parent| {
+                                self.classes
+                                    .get(&unit.symbols[parent.index()].written)
+                                    .is_some()
+                            }))
                         && unit.hoisted_classes.iter().any(|id| id.index() == index)))
             .then_some((unit, class))
         });
@@ -413,6 +415,31 @@ impl Vm {
         wide_scope: &str,
         unit: &phera_bytecode::CompiledUnit,
     ) -> bool {
+        self.check_type_subset(narrow, narrow_scope, wide, wide_scope, unit, false)
+    }
+
+    /// Constant declarations can use the shape of an unconditional type while
+    /// early binding is still linking the unit's classes.
+    pub(super) fn constant_type_subset(
+        &self,
+        narrow: Option<&str>,
+        narrow_scope: &str,
+        wide: &str,
+        wide_scope: &str,
+        unit: &phera_bytecode::CompiledUnit,
+    ) -> bool {
+        self.check_type_subset(narrow, narrow_scope, Some(wide), wide_scope, unit, true)
+    }
+
+    fn check_type_subset(
+        &self,
+        narrow: Option<&str>,
+        narrow_scope: &str,
+        wide: Option<&str>,
+        wide_scope: &str,
+        unit: &phera_bytecode::CompiledUnit,
+        include_unlinked_hoists: bool,
+    ) -> bool {
         let Some(wide) = wide else {
             return true;
         };
@@ -433,7 +460,14 @@ impl Vm {
             wide.split('|').any(|target| {
                 target.trim_matches(['(', ')']).split('&').all(|bound| {
                     source.trim_matches(['(', ')']).split('&').any(|member| {
-                        self.atomic_subtype(member, narrow_scope, bound, wide_scope, unit)
+                        self.atomic_subtype(
+                            member,
+                            narrow_scope,
+                            bound,
+                            wide_scope,
+                            unit,
+                            include_unlinked_hoists,
+                        )
                     })
                 })
             })
@@ -448,6 +482,7 @@ impl Vm {
         target: &str,
         target_scope: &str,
         unit: &phera_bytecode::CompiledUnit,
+        include_unlinked_hoists: bool,
     ) -> bool {
         if source == "never" || target == "mixed" && source != "void" {
             return true;
@@ -486,9 +521,12 @@ impl Vm {
             {
                 return true;
             }
-            if let Some((owner_unit, class)) =
-                self.variance_declaration(&name, &[source_scope, target_scope], unit)
-            {
+            if let Some((owner_unit, class)) = self.variance_declaration(
+                &name,
+                &[source_scope, target_scope],
+                unit,
+                include_unlinked_hoists,
+            ) {
                 if target == "object"
                     || (target.eq_ignore_ascii_case("Stringable")
                         && class.methods.iter().any(|method| {
