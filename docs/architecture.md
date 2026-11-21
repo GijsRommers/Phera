@@ -1721,6 +1721,117 @@ On the Symfony and Doctrine yardstick, the hydrators and the UnitOfWork make per
 
 The Reflection direct methods come in the same pull request, after the slots. That is the one pull request for item 2, as with the others.
 
+
+### 10.14 The loop core, built to the floor (`speed/loop-core`)
+
+#### Why
+
+The floor (`~/.phera-review/floor/src/bin/calls.rs`, safe Rust, fat LTO, with the six behaviours PHP needs that its first version lacked) runs the four plain shapes at PHP's cost:
+
+| Shape | Floor | PHP 8.5 | Phera main |
+|---|---|---|---|
+| Loop | 70 | 75 | 276 |
+| Function call | 231 | 260 | 808 |
+| Method call | 289 | 314 | 1,230 |
+| Property read | 141 | 118 | 679 |
+
+Half of what separates us from it is structural: the two-function loop, the base added and the bounds check on every register access, the second dispatch, and a trip out of the simple loop for every instruction it cannot finish. No step inside the present structure removes it (see `~/.phera-review/floor/ANSWER-call-protocol.md`). This section replaces the core of the loop and the frame layout in one change. Everything outside the plain shapes keeps going to today's general path, unchanged.
+
+#### The loop
+
+One function, `Machine::run`, holds the running frame's register window, the frame's instructions and the position, and dispatches every instruction with one `match`. A call it can make and the return from it switch the window and the instructions in place. The two-tier split (`run_simple` for scalar arms, `step` for the rest, with the trip between them) goes.
+
+An instruction the loop cannot finish leaves through one exit. The loop publishes the position, gives up the window and returns `LoopExit::Slow(instruction)` to the batch loop, which runs it in `Vm::execute` as today. That exit is the only place the window is given up, other than calls and returns.
+
+#### The window
+
+The register file stays one flat `Vec<Option<Value>>` for the worker. A register keeps `Option<Value>`: it is 16 bytes, the same as `Value`, with `None` in a spare tag, so `Some(Value::Int(a))` is one tag comparison. Fable measured that in the floor (design `f` against `c`: 67 against 65 instructions per loop). An undefined register stays what it is today: not a value at all. There is no `Value::Undef` and no new variant.
+
+The window is a reference to a fixed array, `&mut [Option<Value>; 256]`. It is indexed by the operand's low byte (`reg.0 as u8 as usize`), which cannot be out of bounds by type, so no register access in the loop has a bounds check. On entry to a frame, the register file is grown to `base + 256` and the array reference is taken from the slice at `base` (`try_into`, checked once per entry). A function with more than 256 registers is not run by this loop: the late pass marks it and it takes the general path. If 256 turns out too small, 512 with a 9-bit mask is the same idea. Counted on 2026-11-21 by compiling every file of both app copies with `--dump` (`yardstick-cost/tools/register_counts.py`):
+
+| App | Files | Functions | Over 128 registers | Over 256 registers |
+|---|---|---|---|---|
+| Symfony and Doctrine | 3,476 | 27,717 | 43 | 3 |
+| Laravel | 8,212 | 64,705 | 16 | 3 |
+
+The six functions over 256 are all configuration or debug code, none of it on a request's path: `DebugClassLoader::checkAnnotations` (416), `YamlFileLoader::parseDefinition` (290), `XmlDriver::loadMetadataForClass` (283), PHPUnit's `Merger::merge` (412) and `Builder::fromParameters` (308). So 256 holds.
+
+The window is held only between points where nothing can grow or move the register file. It is given up, and taken again from the frame's base after:
+- every `LoopExit` (the VM may run a native that calls back into PHP, which grows the file);
+- every call and return (the window moves to the callee's or the caller's range);
+- every yield of the work budget.
+
+The borrow checker enforces this: the array reference is a local borrow of `self.registers`, so nothing that takes `&mut Vm` can run while it lives.
+
+#### The frame
+
+A frame is four words: the function, the window's base, the position, and the caller's destination register with a few flag bits (`returns_to_native`, `discards_result`, `has_extras`). The side table (`extras`: iterators, captured `$this` scope, the called class) and the prepared-call stack stay, for the general path only. A plain call pushes one frame and nothing else. The callee's shape bit (`FunctionShape::Plain`: no variadic, no by-reference parameter, no generator, no coercion needed) decides the plain entry; that is php-rust's "simple callee" flag, which our facts already hold.
+
+#### The guarded loop is the main case
+
+A Symfony request runs entirely in the guarded copy: an object with `__destruct` stays alive for the whole request, so `object_ids.has_due()` holds from the first such object on. The new loop is one function generic over `GUARDED`, as today. In the guarded copy the work it adds is the destructor check: after each write that drops a reference-counted value (a store, a `Clear`, a return releasing the callee's registers), it tests `ids.has_doomed()`, one load and a branch. When that holds, it publishes the position and leaves through the one exit, to `Vm::run_destructors`. Writes that drop nothing (an integer over an integer) test nothing, in either copy.
+
+The definition of done holds in the guarded copy: the four shapes are measured with an object that has a destructor alive in the request, within the same limits, and the Symfony route is the number that counts.
+
+#### Calls and returns in the loop
+
+
+- **`CallDirect`:** as today, with the window switched in place.
+- **`CallMethod`:** the site table and per-site record of the call-site train. A hit enters a PHP method, calls a native getter, or prepares a native. A *VM* outcome leaves through the one exit.
+- **`Return`:** moves the value out of the callee's window, releases the callee's registers in PHP's order (locals, then `$this`), switches back to the caller and stores. The guarded loop's copy keeps the release order where a destructor can run. That case leaves through the exit, as today.
+
+#### Type tests on the plain entry and return
+
+**Made inline at the entry**, per parameter:
+- **A built-in type:** the value's own type tested against the callee's parameter mask (one bit test), as today.
+- **A class or interface type:** the receiver of the test is the argument. A one-entry check against the class that type last matched (`known_class_match`), else the declared class found by its name key, with the argument's class ancestry walked (`Class::derives_from`, from #169), as #167 does for property writes.
+- **`self`:** the callee's declaring class (its facts' `class`), then the same ancestry test.
+- **`static`:** the called class (the receiver's class for an instance call, the record's class for a static one), then the ancestry test.
+- **`iterable`:** an array (mask bit), or an object whose class derives from `Traversable`.
+- **The int-to-float widening of a `float` parameter:** made inline, as today's second look.
+
+**Declined to the general path:** `callable` (resolving a string or an array callable needs the VM; a `Closure` object passes by its class), intersection and DNF types beyond a union of classes, `mixed` with a by-reference parameter, any coercion in non-strict mode (`"5"` to `int`), and a failed test (the general path raises the `TypeError`).
+
+**Made inline at the return:** the same tests against the function's return type: mask bits, class, `self`, `static`, `iterable`, `void` (no value), `never` (a return is an error, declined). A failed test, or `callable`, declines.
+
+#### Fused instructions
+
+
+Fused instructions come from one late compiler pass, run after the bytecode engineer's passes, as the method sites do:
+- **`LessJump`:** compare two registers and branch;
+- **`AddLocal`:** `$local += register`;
+- **`IncJump`:** `$k++` and jump back.
+
+They are emitted only where the operands are locals or temporaries, the plain shape. Any other value takes their slow path, which is the general instruction's handler.
+
+#### What stays on the general path
+
+- Generators and fibers: their frames live outside the stack.
+- `__call`, `__get` and the other magic.
+- By-reference parameters, named and spread arguments, variadics.
+- Every native that needs the VM.
+- Exceptions: unwinding starts from the published position.
+- Includes.
+- Every instruction that has no arm in the loop.
+
+#### Failure modes, and what covers each
+
+| Risk | Covered by |
+|---|---|
+| The register file moving under a held window | Compile time: the window is a borrow of `self.registers`, alive only inside the loop between exits. Plus a test: a native that calls back into PHP and grows the register file deep, then returns into the loop |
+| Release order on an inline return | The 34 destructor timing cases (`review/g155`), plus a fixture with locals and `$this` that have destructors, in every return shape |
+| Generators and fibers | Stay on the general path. The fixtures of `tests/fixtures/generators` and the fibers set run unchanged |
+| Codegen under fat LTO | A release build and the four shapes plus the benchmarks at every step, recorded in the draft pull request's description daily |
+| An undefined register read as a value | As today: a register is `Option<Value>`, and an undefined one is `None`, not a value. Plus a fixture of undefined-variable warnings in every operand position |
+
+#### Definition of done
+
+- Loop at most 90, function call at most 290, method call at most 360, all measured on the honest floor's script. The property read is the property engineer's arm.
+- The four shapes in the guarded copy as well: measured with an object that has a destructor alive in the request, within the same limits. The Symfony route is the number that counts.
+- Every fixture, `make test`, both php-src trees on both machines, the 34 destructor timing cases, the three gates at twelve pairs, and all benchmarks pass, with no route rising.
+- At every daily push: the four shapes, and the three routes at twelve pairs each.
+- The count of loop exits per request by instruction kind, before and after. It should fall sharply; what remains is the list of what to move in next.
+
 ## 11. Tools built into the runtime
 
 Tools that PHP projects today get from separate packages written in PHP
