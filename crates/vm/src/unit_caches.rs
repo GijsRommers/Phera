@@ -29,9 +29,6 @@ pub(crate) struct UnitCache {
     pub(crate) symbols: RefCell<Vec<Option<crate::calls::pending::LinkedFunction>>>,
     /// How many function symbols the file has.
     symbol_count: usize,
-    /// Whether `symbols` has taken the links the snapshot made (there is
-    /// nothing to take in a cache without a `base`).
-    symbols_adopted: Cell<bool>,
     pub(crate) direct_natives: OnceCell<Box<[Cell<Option<crate::calls::sync_native::NativeLink>>]>>,
     pub(crate) constants: Rc<[phera_value::Value]>,
     pub(crate) class_names: Rc<[phera_value::Value]>,
@@ -372,7 +369,6 @@ impl UnitCache {
             names: unit.names.iter().map(|name| name.as_str().into()).collect(),
             symbols: RefCell::new(Vec::new()),
             symbol_count: unit.symbols.len(),
-            symbols_adopted: Cell::new(true),
             direct_natives: OnceCell::new(),
             constants: unit
                 .constants
@@ -453,7 +449,6 @@ impl UnitCache {
             names: self.names.clone(),
             symbols: RefCell::new(Vec::new()),
             symbol_count: self.symbol_count,
-            symbols_adopted: Cell::new(true),
             direct_natives: OnceCell::new(),
             constants: self.constants.clone(),
             class_names: self.class_names.clone(),
@@ -516,38 +511,23 @@ impl UnitCache {
         frozen
     }
 
-    /// What the snapshot linked function symbol `symbol` of this file to.
-    /// The first time a symbol of the file is not linked in this request,
-    /// every link the snapshot made in the file is taken into this cache
-    /// (the loop reads them from there from then on, without leaving it);
-    /// after that a symbol that is not linked here was not linked by the
-    /// snapshot either.
+    /// What the snapshot linked function symbol `symbol` of this file to,
+    /// stored in this request's cache as well so that the loop reads it
+    /// from there from now on.
     pub(crate) fn base_symbol(
         &self,
         symbol: usize,
     ) -> Option<crate::calls::pending::LinkedFunction> {
-        let base = self.base.as_ref()?;
-        // TEMPORARY measurement switch: one symbol at a time.
-        static EACH: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        if *EACH.get_or_init(|| std::env::var_os("PHERA_FORK_SYMBOLS").is_some_and(|v| v == "each")) {
-            let linked = base.symbols.borrow().get(symbol)?.as_ref()?.clone();
-            self.set_symbol(symbol, linked.clone());
-            return Some(linked);
-        }
-        if self.symbols_adopted.replace(true) {
-            return None;
-        }
-        let known = base.symbols.borrow();
-        let mut own = self.symbols.borrow_mut();
-        if own.len() < self.symbol_count {
-            own.resize_with(self.symbol_count, || None);
-        }
-        for (slot, linked) in own.iter_mut().zip(known.iter()) {
-            if slot.is_none() {
-                slot.clone_from(linked);
-            }
-        }
-        own.get(symbol).cloned().flatten()
+        let linked = self
+            .base
+            .as_ref()?
+            .symbols
+            .borrow()
+            .get(symbol)?
+            .as_ref()?
+            .clone();
+        self.set_symbol(symbol, linked.clone());
+        Some(linked)
     }
 
     /// Remembers what function symbol `symbol` of this file is linked to.
@@ -605,7 +585,6 @@ impl crate::snapshot::ForkCopy for UnitCache {
         };
         if copy.base.is_some() {
             copy.class_types.base = copy.base.clone();
-            copy.symbols_adopted.set(false);
         }
         copy
     }
