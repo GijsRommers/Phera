@@ -154,7 +154,7 @@ impl Registers {
     pub(crate) fn truncate(&mut self, base: usize) {
         if base < self.top {
             for slot in &mut self.slots[base..self.top] {
-                release(slot);
+                *slot = None;
             }
             self.top = base;
         }
@@ -266,21 +266,6 @@ impl Registers {
             self.slots.resize_with(end + 64, || None);
         }
         (&mut self.slots[base..end]).try_into().ok()
-    }
-}
-
-/// Empty a register. Only a value that owns something (a string, an array,
-/// an object, a resource or a reference) runs its drop; an empty slot or a
-/// scalar is just overwritten, so emptying a frame costs only what it holds.
-#[inline(always)]
-fn release(slot: &mut Option<Value>) {
-    match slot {
-        None | Some(Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_)) => {
-            // Nothing to drop: overwriting runs no destructor.
-            let old = std::mem::replace(slot, None);
-            std::mem::forget(old);
-        }
-        Some(_) => *slot = None,
     }
 }
 
