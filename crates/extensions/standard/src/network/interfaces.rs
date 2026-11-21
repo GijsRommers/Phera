@@ -32,14 +32,7 @@ fn format_address(address: &SockaddrStorage) -> Option<String> {
     if let Some(address) = address.as_sockaddr_in() {
         return Some(address.ip().to_string());
     }
-    let address = address.as_sockaddr_in6()?;
-    let mut ip = address.ip();
-    if cfg!(target_vendor = "apple") && ip.is_unicast_link_local() {
-        let mut bytes = ip.octets();
-        bytes[2..4].fill(0);
-        ip = bytes.into();
-    }
-    Some(ip.to_string())
+    Some(address.as_sockaddr_in6()?.ip().to_string())
 }
 
 fn enumerate() -> nix::Result<IndexMap<String, Interface>> {

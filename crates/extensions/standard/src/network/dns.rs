@@ -1,12 +1,14 @@
 //! `dns_get_record('example.org', DNS_MX)` performs a DNS query on the Tokio reactor.
 
 mod records;
+#[cfg(test)]
+mod tests;
 mod wire;
 
 use hickory_resolver::{
     TokioResolver,
     config::ResolveHosts,
-    proto::rr::{RData, RecordType},
+    proto::rr::{RData, Record, RecordType},
 };
 use phera_extension_api::{
     ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
@@ -145,24 +147,28 @@ fn mx_alias(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, Nati
 
 async fn mx(_: &mut dyn Context, arguments: Vec<Value>, function: &str) -> NativeResult {
     let hostname = checked_argument(&arguments, 0, function, "hostname")?;
-    let mut hosts = PhpArray::new();
-    let mut weights = PhpArray::new();
-    let mut success = false;
     if let Ok(hostname) = std::str::from_utf8(hostname)
         && !hostname.is_empty()
         && let Some(resolver) = resolver().await
         && let Ok(lookup) = resolver.lookup(hostname, RecordType::MX).await
     {
-        for record in lookup.answers() {
-            if let RData::MX(record) = &record.data {
-                hosts.push(Value::from(records::name(&record.exchange)))?;
-                weights.push(Value::Int(record.preference.into()))?;
-            }
-        }
-        success = true;
+        return mx_answer(&arguments, lookup.answers());
     }
-    set_array(&arguments, 1, hosts);
-    set_array(&arguments, 2, weights);
+    mx_answer(&arguments, &[])
+}
+
+fn mx_answer(arguments: &[Value], records: &[Record]) -> NativeResult {
+    let mut hosts = PhpArray::new();
+    let mut weights = PhpArray::new();
+    for record in records {
+        if let RData::MX(record) = &record.data {
+            hosts.push(Value::from(records::name(&record.exchange)))?;
+            weights.push(Value::Int(record.preference.into()))?;
+        }
+    }
+    let success = !hosts.is_empty();
+    set_array(arguments, 1, hosts);
+    set_array(arguments, 2, weights);
     Ok(Value::Bool(success))
 }
 
