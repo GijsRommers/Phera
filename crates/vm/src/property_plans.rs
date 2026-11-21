@@ -214,18 +214,29 @@ impl Vm {
         if class.property_facts().has_any(avoid) {
             return Ok(None);
         }
-        let name = match step {
+        // The name is borrowed, from the file's names or from the string
+        // the program built, not copied.
+        let unit;
+        let dynamic;
+        let name: &str = match step {
             Step::Property(name) => {
                 let frame = self
                     .current()
                     .ok_or_else(|| internal_error!("property path"))?;
-                match frame.unit().names.get(name.index()) {
-                    Some(name) => name.clone(),
+                unit = frame.unit().clone();
+                match unit.names.get(name.index()) {
+                    Some(name) => name,
                     None => return Ok(None),
                 }
             }
             Step::DynamicProperty(register) => match self.read_root(register, Missing::Silent) {
-                Value::String(name) => name.to_string_lossy(),
+                Value::String(name) => {
+                    dynamic = name;
+                    match std::str::from_utf8(dynamic.as_bytes()) {
+                        Ok(name) => name,
+                        Err(_) => return Ok(None),
+                    }
+                }
                 _ => return Ok(None),
             },
             _ => return Ok(None),
@@ -239,7 +250,7 @@ impl Vm {
         {
             return Ok(None);
         }
-        let Ok(key) = self.property_key(&object, &name) else {
+        let Ok(key) = self.property_key(&object, name) else {
             return Ok(None);
         };
         Ok(Some(PlainProperty { object, class, key }))

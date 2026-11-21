@@ -46,14 +46,14 @@ impl Vm {
             })));
         }
         if place.has_properties()? && mode != FetchMode::Destructure {
-            if self.fetch_plain_property(&place, destination, mode)? {
-                return Ok(None);
-            }
             if mode != FetchMode::Read
                 && (!matches!(place.base()?, phera_bytecode::PathBase::This { .. })
                     || self.current().is_some_and(|frame| frame.this().is_some()))
                 && self.start_cached_getter(&place, destination)?
             {
+                return Ok(None);
+            }
+            if self.fetch_plain_property(&place, destination, mode)? {
                 return Ok(None);
             }
             return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
