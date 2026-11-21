@@ -35,6 +35,12 @@ impl<'ast> Compiler<'ast> {
         timing: DeclarationTiming,
         line: usize,
     ) -> Result<(), CompileError> {
+        if declaration.name.name.eq_ignore_ascii_case("assert") {
+            return Err(self.error(
+                "Defining a custom assert() function is not allowed, as the function has special semantics",
+                line,
+            ));
+        }
         self.compile_captured_function(
             &FunctionSource {
                 span: declaration.span,
