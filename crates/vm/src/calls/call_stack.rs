@@ -27,6 +27,9 @@ pub(crate) struct CallStack {
     /// The built-ins whose callbacks run on these frames (`array_map`), with
     /// what each has done so far (see `calls::native_loops`).
     pub(crate) native_loops: Vec<super::native_loops::NativeLoop>,
+    /// What the interpreter loop hands to the batch loop when it leaves as
+    /// if yielding: a return to native code, or to a native loop.
+    pub(crate) handed_back: Option<super::execution_loop::HandedBack>,
 }
 
 impl CallStack {
@@ -39,6 +42,7 @@ impl CallStack {
             callback_depth: 0,
             native_arguments: Vec::new(),
             native_loops: Vec::new(),
+            handed_back: None,
             preparing: Vec::new(),
             details: Vec::new(),
         }
@@ -367,6 +371,7 @@ impl crate::snapshot::ForkCopy for CallStack {
             // A snapshot is taken from top-level code, never inside a
             // built-in's callback.
             native_loops: Vec::new(),
+            handed_back: None,
         }
     }
 }

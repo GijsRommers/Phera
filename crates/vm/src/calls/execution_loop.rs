@@ -83,6 +83,15 @@ enum LoopExit {
 }
 
 /// The parts of the VM the loop borrows, and its counters.
+/// A value the loop hands to the batch loop when it leaves as if yielding
+/// (see `CallStack::handed_back`).
+pub(crate) enum HandedBack {
+    /// The function native code called returned it (`Machine::leave_to_native`).
+    Native(Value),
+    /// A callback of a native loop returned it (`Machine::leave_to_native_loop`).
+    NativeLoop(Value),
+}
+
 pub(super) struct Machine<'a> {
     pub(super) code: &'a CodeTable,
     pub(super) classes: &'a mut ClassTable,
@@ -99,14 +108,6 @@ pub(super) struct Machine<'a> {
     pub(super) ids: &'a phera_value::ObjectIds,
     /// The native functions, for the parameters of a lean native call.
     pub(super) registry: &'a phera_extension_api::Registry,
-    /// What the function that native code called returned, when the loop
-    /// made that return itself (see `Machine::leave_to_native`); the loop
-    /// then leaves as if yielding.
-    pub(super) returned: Option<Value>,
-    /// What a callback of a native loop returned, when the loop made that
-    /// return itself (see `Machine::leave_to_native_loop`): the batch loop
-    /// hands it to the built-in's next step.
-    pub(super) loop_returned: Option<Value>,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -154,8 +155,6 @@ impl Vm {
                 frame_limit: self.frame_limit,
                 ids: &self.object_ids,
                 registry: &self.registry,
-                returned: None,
-                loop_returned: None,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
@@ -171,25 +170,23 @@ impl Vm {
             let instruction = match exit {
                 LoopExit::Slow(instruction) => instruction,
                 LoopExit::Yield => {
-                    let (returned, loop_returned) =
-                        (machine.returned.take(), machine.loop_returned.take());
-                    if let Some(value) = loop_returned {
-                        // The built-in's next step (`calls::native_loops`).
-                        self.resume_native_loop(value)?;
-                        if self.destructors_due() {
-                            return Ok(BatchExit::Destructors);
+                    match self.call_stack.handed_back.take() {
+                        Some(HandedBack::NativeLoop(value)) => {
+                            // The built-in's next step (`calls::native_loops`).
+                            self.resume_native_loop(value)?;
+                            if self.destructors_due() {
+                                return Ok(BatchExit::Destructors);
+                            }
+                            if self.pending_callbacks
+                                || (TRACK_GENERATORS && self.generator_releases_pending())
+                            {
+                                return Ok(BatchExit::Handlers);
+                            }
+                            continue;
                         }
-                        if self.pending_callbacks
-                            || (TRACK_GENERATORS && self.generator_releases_pending())
-                        {
-                            return Ok(BatchExit::Handlers);
-                        }
-                        continue;
+                        Some(HandedBack::Native(value)) => return Ok(BatchExit::Returned(value)),
+                        None => return Ok(BatchExit::Yield),
                     }
-                    return Ok(match returned {
-                        Some(value) => BatchExit::Returned(value),
-                        None => BatchExit::Yield,
-                    });
                 }
                 LoopExit::Destructors => return Ok(BatchExit::Destructors),
                 LoopExit::Invalid => return Err(internal_error!("invalid IP")),

@@ -239,7 +239,7 @@ impl Machine<'_> {
         let value = value.clone();
         self.stack.pop();
         self.registers.release_frame(frame.start(), frame.base());
-        self.returned = Some(value);
+        self.stack.handed_back = Some(super::execution_loop::HandedBack::Native(value));
         Step::Yield
     }
 
@@ -278,7 +278,7 @@ impl Machine<'_> {
         let value = value.clone();
         self.stack.pop();
         self.registers.release_frame(frame.start(), frame.base());
-        self.loop_returned = Some(value);
+        self.stack.handed_back = Some(super::execution_loop::HandedBack::NativeLoop(value));
         Step::Yield
     }
 
