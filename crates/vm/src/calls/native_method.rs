@@ -134,6 +134,12 @@ impl Vm {
                         if track {
                             self.error_handlers.native_site = previous;
                         }
+                        // Kept for a second call (see `calls::native_retries`).
+                        if let Err(error) = &result
+                            && crate::autoload::ClassMiss::is(error)
+                        {
+                            self.keep_missed_arguments(&arguments);
+                        }
                         if let Err(error) = &result {
                             self.record_native_failure(
                                 error,
@@ -158,6 +164,12 @@ impl Vm {
                             }
                             _ => Err(NativeError::error("Cannot call abstract method")),
                         };
+                        // Kept for a second call (see `calls::native_retries`).
+                        if let Err(error) = &result
+                            && crate::autoload::ClassMiss::is(error)
+                        {
+                            self.keep_missed_arguments(retained.as_slice());
+                        }
                         self.finish_native_future(result, NativeFrame::Method(method), retained)
                     }
                 };

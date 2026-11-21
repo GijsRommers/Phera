@@ -3281,6 +3281,7 @@ name = "phera-ext-standard"
 version = "0.1.0"
 dependencies = [
  "indexmap",
+ "memchr",
  "nix",
  "phera-dotenv",
  "phera-extension-api",

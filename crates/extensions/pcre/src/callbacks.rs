@@ -45,7 +45,7 @@ impl Operation<'_> {
             let pattern = context.stringify(pattern).await?;
             let compiled = if self.exception.is_some() {
                 // While an exception is pending PHP gives no new warnings.
-                match cache::lookup(pattern.as_bytes(), crate::compile::Settings::read(context)) {
+                match cache::lookup(pattern.as_bytes(), crate::settings::read(context)) {
                     Ok(compiled) => Some(compiled),
                     Err(_) => {
                         errors::set(context, Error::Internal);

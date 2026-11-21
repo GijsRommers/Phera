@@ -20,12 +20,11 @@ pub(super) fn digits(number: f64) -> (Vec<u8>, i32) {
     } else {
         exponent - 1075
     };
-    let mut digits: Vec<u8> = mantissa
-        .to_string()
-        .bytes()
-        .rev()
-        .map(|byte| byte - b'0')
-        .collect();
+    let mut digits = mantissa.to_string().into_bytes();
+    digits.reverse();
+    for digit in &mut digits {
+        *digit -= b'0';
+    }
     let factor = if power < 0 { 5 } else { 2 };
     for _ in 0..power.unsigned_abs() {
         let mut carry = 0u16;
@@ -80,30 +79,44 @@ fn rounded(mut digits: Vec<u8>, keep: i32, mut point: i32) -> (Vec<u8>, i32) {
     (digits, point)
 }
 
+/// Rounded decimal digits ready to write, without punctuation.
+pub(super) struct FixedDigits {
+    digits: Vec<u8>,
+    point: i32,
+}
+
+impl FixedDigits {
+    pub(super) fn new(number: f64, precision: usize) -> Self {
+        let (digits, point) = digits(number);
+        let (digits, point) = rounded(digits, point + precision as i32, point);
+        Self { digits, point }
+    }
+
+    fn at(&self, index: i32) -> u8 {
+        b'0' + usize::try_from(index)
+            .ok()
+            .and_then(|index| self.digits.get(index).copied())
+            .unwrap_or(0)
+    }
+
+    pub(super) fn whole(&self) -> impl ExactSizeIterator<Item = u8> + '_ {
+        (0..self.point.max(1)).map(|index| if self.point > 0 { self.at(index) } else { b'0' })
+    }
+
+    pub(super) fn fraction(&self, precision: usize) -> impl ExactSizeIterator<Item = u8> + '_ {
+        (0..precision).map(|index| self.at(self.point + index as i32))
+    }
+}
+
 /// Fixed formatting suppresses the sign of exact negative zero, like php_fcvt.
 pub(super) fn fixed(number: f64, precision: usize) -> Vec<u8> {
-    let (digits, point) = digits(number);
-    let (digits, point) = rounded(digits, point + precision as i32, point);
-    let mut result = Vec::new();
-    for index in 0..point.max(1) {
-        result.push(if point <= 0 {
-            b'0'
-        } else {
-            b'0' + digits.get(index as usize).copied().unwrap_or(0)
-        });
-    }
+    let digits = FixedDigits::new(number, precision);
+    let whole = digits.whole();
+    let mut result = Vec::with_capacity(whole.len() + precision + usize::from(precision > 0));
+    result.extend(whole);
     if precision > 0 {
         result.push(b'.');
-    }
-    for index in 0..precision {
-        let digit_index = point + index as i32;
-        result.push(
-            b'0' + if digit_index < 0 {
-                0
-            } else {
-                digits.get(digit_index as usize).copied().unwrap_or(0)
-            },
-        );
+        result.extend(digits.fraction(precision));
     }
     result
 }

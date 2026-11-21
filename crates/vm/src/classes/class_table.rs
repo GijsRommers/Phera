@@ -64,10 +64,30 @@ impl ClassDefinitions {
 // fork's definitions must not touch its classes: the snapshot and the other
 // forks share them.
 
-/// One request owns its class additions and objects. Built-ins keep their indices on the worker.
+/// One request's classes and objects. Built-ins are the worker's; PHP classes
+/// are entries of the worker's table of linked classes (see
+/// `super::worker_classes`), and the request holds which it has declared.
 pub(crate) struct ClassTable {
     native: Rc<ClassDefinitions>,
-    local: ClassDefinitions,
+    worker: Rc<super::worker_classes::WorkerClasses>,
+    /// The entries this request has declared, by worker position: `None`
+    /// where it has not. Whether a class exists in this request is this
+    /// table's answer, never the worker's.
+    local: Vec<Option<Rc<Class>>>,
+    /// The worker positions of the declared classes, in declaration order.
+    declared: Vec<u32>,
+    /// Names in declaration order, aliases included (`get_declared_classes`).
+    order: Vec<Rc<str>>,
+    /// Lowercased names this request resolves to classes, by class number:
+    /// declared names and `class_alias` names (which may name a built-in).
+    names: HashMap<Rc<str>, u32>,
+    /// The position reserved for the class being linked.
+    linking: Option<u32>,
+    /// While a class links: every class name it looked up, and what it was.
+    recording: std::cell::RefCell<Option<Vec<super::worker_classes::Dependency>>>,
+    /// The positions this request (last) and the snapshot it was forked
+    /// from took for classes linked for themselves alone.
+    leases: Vec<Rc<super::worker_classes::PositionLeases>>,
     pub(crate) has_dimensions: bool,
     pub(crate) has_property_views: bool,
     pub(crate) has_lazy_objects: bool,
@@ -86,15 +106,25 @@ impl ClassTable {
         self.native.clone()
     }
 
-    pub(crate) fn new(native: Rc<ClassDefinitions>) -> Self {
+    pub(crate) fn new(
+        native: Rc<ClassDefinitions>,
+        worker: Rc<super::worker_classes::WorkerClasses>,
+    ) -> Self {
         Self {
+            leases: vec![super::worker_classes::PositionLeases::new(&worker)],
+            worker,
+            declared: Vec::new(),
+            order: Vec::new(),
+            names: HashMap::new(),
+            linking: None,
+            recording: Default::default(),
             has_dimensions: false,
             has_property_views: native.has_property_views,
             has_lazy_objects: false,
             native_count: native.numbered.len() as u32,
             native_methods: OnceCell::new(),
             native,
-            local: ClassDefinitions::default(),
+            local: Vec::new(),
             objects: Vec::new(),
             ids: Rc::default(),
             allocations_before_collection: Default::default(),
@@ -102,8 +132,76 @@ impl ClassTable {
         }
     }
 
+    /// The number of the class being linked (see [`ClassTable::begin_link`]).
     pub(crate) fn next_index(&self) -> ClassIndex {
-        ClassIndex((self.native_count as usize + self.local.numbered.len()) as u32)
+        ClassIndex(self.native_count + self.linking.unwrap_or(u32::MAX - self.native_count))
+    }
+
+    /// The worker's table of linked classes.
+    pub(crate) fn worker(&self) -> Rc<super::worker_classes::WorkerClasses> {
+        self.worker.clone()
+    }
+
+    /// Reserves the worker position of a class about to be linked, and
+    /// starts recording the class names its linking looks up.
+    pub(crate) fn begin_link(&mut self) {
+        self.linking = Some(self.worker.reserve());
+        *self.recording.borrow_mut() = Some(Vec::new());
+    }
+
+    /// Ends a link: the names it looked up, and the position it used.
+    pub(crate) fn end_link(&mut self) -> (Vec<super::worker_classes::Dependency>, Option<u32>) {
+        let recorded = self.recording.borrow_mut().take().unwrap_or_default();
+        (recorded, self.linking.take())
+    }
+
+    /// Gives `position` back to the worker when this request (and every fork
+    /// of it) is gone: a class linked for this request alone, or a link
+    /// that failed.
+    pub(crate) fn lease_position(&self, position: u32) {
+        if let Some(own) = self.leases.last() {
+            own.lease(position);
+        }
+    }
+
+    /// The number of the class `lowercase` names in this request, without
+    /// recording the lookup.
+    pub(crate) fn resolve_number(&self, lowercase: &str) -> Option<u32> {
+        match self.names.get(lowercase) {
+            Some(number) => Some(*number),
+            None => self
+                .native
+                .entries
+                .get(lowercase)
+                .map(|class| class.index.0),
+        }
+    }
+
+    /// The class this request linked at worker `position`.
+    pub(crate) fn at_position(&self, position: u32) -> Option<Rc<Class>> {
+        self.local.get(position as usize)?.clone()
+    }
+
+    /// Declares a class another request of the worker linked.
+    pub(crate) fn declare_entry(&mut self, lowercase_name: &str, class: Rc<Class>) {
+        let position = class.index.0 - self.native_count;
+        self.register(position, lowercase_name.into(), class);
+    }
+
+    fn register(&mut self, position: u32, lowercase_name: Rc<str>, class: Rc<Class>) {
+        self.has_property_views |= class
+            .hooks
+            .as_ref()
+            .is_some_and(|hooks| hooks.properties.is_some());
+        let index = position as usize;
+        if self.local.len() <= index {
+            self.local.resize(index + 1, None);
+        }
+        self.order.push(class.name.as_str().into());
+        self.local[index] = Some(class);
+        self.declared.push(position);
+        self.names
+            .insert(lowercase_name, self.native_count + position);
     }
 
     /// The class's methods by name key, built on first use. The keys are
@@ -142,40 +240,41 @@ impl ClassTable {
     /// none yet. Taking a snapshot calls this, so that no fork builds a
     /// table of a class they all share.
     pub(crate) fn build_method_tables(&self) {
-        for class in &self.local.numbered {
+        for class in self.local_classes() {
             class
                 .method_table
                 .get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)));
         }
     }
 
+    /// Declares the class this request just linked, at its reserved position.
     pub(crate) fn insert(&mut self, lowercase_name: String, class: Rc<Class>) {
-        debug_assert_eq!(class.index, self.next_index());
-        self.local.order.push(class.name.clone());
-        self.local.insert(lowercase_name, class);
-        self.has_property_views |= self.local.has_property_views;
+        let position = class.index.0 - self.native_count;
+        self.register(position, lowercase_name.into(), class);
     }
 
     pub(crate) fn alias(&mut self, name: String, class: Rc<Class>) -> bool {
         if self.get_lowercase(&name).is_some() {
             return false;
         }
-        self.local.order.push(name.clone());
-        self.local.entries.insert(name, class);
+        self.order.push(name.as_str().into());
+        self.names.insert(name.into(), class.index.0);
         true
     }
 
     /// The request's own classes, in declaration order.
     pub(crate) fn local_classes(&self) -> impl Iterator<Item = &Rc<Class>> {
-        self.local.numbered.iter()
+        self.declared
+            .iter()
+            .filter_map(|position| self.local.get(*position as usize)?.as_ref())
     }
 
     pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
         self.native
             .order
             .iter()
-            .chain(&self.local.order)
             .map(String::as_str)
+            .chain(self.order.iter().map(|name| &**name))
     }
 
     /// The class with number `index`.
@@ -186,7 +285,9 @@ impl ClassTable {
         if index < base {
             &self.native.numbered[index]
         } else {
-            &self.local.numbered[index - base]
+            self.local[index - base]
+                .as_ref()
+                .expect("a class number of this request names a declared class")
         }
     }
 
@@ -196,7 +297,16 @@ impl ClassTable {
         if index < base {
             self.native.numbered.get(index).cloned()
         } else {
-            self.local.numbered.get(index - base).cloned()
+            self.local.get(index - base)?.clone()
+        }
+    }
+
+    fn by_number(&self, number: u32) -> Option<&Rc<Class>> {
+        let number = number as usize;
+        let base = self.native_count as usize;
+        match number.checked_sub(base) {
+            Some(position) => self.local.get(position)?.as_ref(),
+            None => self.native.numbered.get(number),
         }
     }
 
@@ -207,10 +317,16 @@ impl ClassTable {
     }
 
     pub(crate) fn get_lowercase(&self, name: &str) -> Option<&Rc<Class>> {
-        self.local
-            .entries
-            .get(name)
-            .or_else(|| self.native.entries.get(name))
+        let found = match self.names.get(name) {
+            Some(number) => self.by_number(*number),
+            None => self.native.entries.get(name),
+        };
+        if let Ok(mut recording) = self.recording.try_borrow_mut()
+            && let Some(recorded) = recording.as_mut()
+        {
+            recorded.push((name.to_owned(), found.map(|class| class.index.0)));
+        }
+        found
     }
 
     /// Class identifiers ignore case, including names produced by dynamic expressions.
@@ -335,7 +451,19 @@ impl ClassTable {
     pub(crate) fn forked(&self, ids: Rc<ObjectIds>, objects: Vec<Weak<Object>>) -> ClassTable {
         ClassTable {
             native: self.native.clone(),
+            worker: self.worker.clone(),
             local: self.local.clone(),
+            declared: self.declared.clone(),
+            order: self.order.clone(),
+            names: self.names.clone(),
+            linking: None,
+            recording: Default::default(),
+            leases: self
+                .leases
+                .iter()
+                .cloned()
+                .chain([super::worker_classes::PositionLeases::new(&self.worker)])
+                .collect(),
             has_dimensions: self.has_dimensions,
             has_property_views: self.has_property_views,
             has_lazy_objects: self.has_lazy_objects,
@@ -390,7 +518,10 @@ mod tests {
 
     #[test]
     fn freed_object_ids_reuse_the_most_recently_freed_slot() {
-        let mut table = ClassTable::new(Rc::new(ClassDefinitions::native(&Registry::new())));
+        let mut table = ClassTable::new(
+            Rc::new(ClassDefinitions::native(&Registry::new())),
+            Rc::default(),
+        );
         let class = table.get("stdClass").unwrap();
         let first = table.allocate(class.clone());
         let second = table.allocate(class.clone());
@@ -412,7 +543,10 @@ mod tests {
 
     #[test]
     fn a_million_linked_objects_drop_without_rust_recursion() {
-        let table = ClassTable::new(Rc::new(ClassDefinitions::native(&Registry::new())));
+        let table = ClassTable::new(
+            Rc::new(ClassDefinitions::native(&Registry::new())),
+            Rc::default(),
+        );
         let class = table.get("stdClass").unwrap();
         let mut head = Value::Null;
         for index in 0..1_000_000 {

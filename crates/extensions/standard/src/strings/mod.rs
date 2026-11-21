@@ -14,6 +14,7 @@ mod encode;
 mod escaping;
 pub(crate) mod format;
 mod html;
+mod join;
 mod metaphone;
 mod number_format;
 mod padding;
@@ -49,6 +50,7 @@ pub(crate) fn register(registry: &mut Registry) {
         registry.function(*entry);
     }
     format::register(registry);
+    join::register_sync_selectors(registry);
     let modules = [
         html::FUNCTIONS,
         metaphone::FUNCTIONS,
@@ -115,30 +117,32 @@ pub(super) enum CaseSensitivity {
 }
 
 impl CaseSensitivity {
-    pub(super) fn equal(self, left: &[u8], right: &[u8]) -> bool {
-        match self {
-            Self::Sensitive => left == right,
-            Self::Insensitive => left.eq_ignore_ascii_case(right),
-        }
-    }
-
     /// The first position of `needle` in `haystack`; an empty needle is
     /// found at 0.
     pub(super) fn find(self, haystack: &[u8], needle: &[u8]) -> Option<usize> {
         match (self, needle) {
-            (_, []) => return Some(0),
-            (Self::Sensitive, [byte]) => {
-                return haystack.iter().position(|candidate| candidate == byte);
-            }
-            _ => {}
+            (_, []) => Some(0),
+            (Self::Sensitive, [byte]) => memchr::memchr(*byte, haystack),
+            (Self::Sensitive, _) if haystack.starts_with(needle) => Some(0),
+            (Self::Sensitive, _) => memchr::memmem::find(haystack, needle),
+            (Self::Insensitive, _) => haystack
+                .windows(needle.len())
+                .position(|candidate| candidate.eq_ignore_ascii_case(needle)),
         }
-        // One loop per case, so the sensitive search compares plain slices.
-        let mut candidates = haystack.windows(needle.len());
-        match self {
-            Self::Sensitive => candidates.position(|candidate| candidate == needle),
-            Self::Insensitive => {
-                candidates.position(|candidate| candidate.eq_ignore_ascii_case(needle))
+    }
+
+    /// The last position of the needle, including the end for an empty needle.
+    pub(super) fn rfind(self, haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        match (self, needle) {
+            (_, []) => Some(haystack.len()),
+            (Self::Sensitive, [byte]) => memchr::memrchr(*byte, haystack),
+            (Self::Sensitive, _) if haystack.ends_with(needle) => {
+                Some(haystack.len() - needle.len())
             }
+            (Self::Sensitive, _) => memchr::memmem::rfind(haystack, needle),
+            (Self::Insensitive, _) => haystack
+                .windows(needle.len())
+                .rposition(|candidate| candidate.eq_ignore_ascii_case(needle)),
         }
     }
 }

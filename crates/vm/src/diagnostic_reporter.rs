@@ -14,6 +14,11 @@ pub(crate) struct DiagnosticReporter {
     suppression: Vec<i64>,
     /// Request-owned diagnostic capture.
     diagnostic_capture: Option<Vec<Vec<u8>>>,
+    /// How many diagnostics the request raised so far: a class whose
+    /// linking raised one is not shared with other requests (see
+    /// `crate::classes::worker_classes`), since its diagnostic, and a user
+    /// error handler it may have run, belong to the request that linked it.
+    pub(crate) raised: u64,
 }
 
 impl DiagnosticReporter {
@@ -22,6 +27,7 @@ impl DiagnosticReporter {
             operator_diagnostics: CollectDiagnostics::default(),
             suppression: Vec::new(),
             diagnostic_capture: None,
+            raised: 0,
         }
     }
 }
