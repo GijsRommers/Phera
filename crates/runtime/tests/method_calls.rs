@@ -54,6 +54,16 @@ function insideTry(Shape $shape, int $i) {
     try { return $shape->add($i, 'x'); } catch (TypeError $e) { return 'caught in a function'; }
 }
 echo insideTry($shape, $i), "\n";
+// Native methods through a site: prepared, a getter run at once, a
+// generator's methods, and SPL.
+$list = new ArrayObject([1, 2, 3]); $three = 3;
+echo $list->count(), ' ', $list->offsetExists($three), ' ', $list->offsetGet(1), "\n";
+$reflection = new ReflectionClass($shape); echo $reflection->getShortName(), "\n";
+function numbers() { $sent = yield 1; echo "got $sent\n"; yield 2; }
+$numbers = numbers(); $word = 'hello'; echo $numbers->current(), "\n"; echo $numbers->send($word), "\n";
+$stack = new SplStack(); $stack->push($three); $stack->push($word); echo $stack->pop(), ' ', $stack->count(), "\n";
+// Arguments the quick test refuses at first: widening, a class not cached yet.
+$seven = 7; echo $shape->half($seven), ' ', $square->same($shape), ' ', $shape->same($square), "\n";
 function recursive(Shape $shape, int $depth): int { return $depth === 0 ? 0 : 1 + recursive($shape, $shape->add($depth, -1)); }
 echo recursive($shape, 3), "\n";
 "#;

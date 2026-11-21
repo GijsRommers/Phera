@@ -99,8 +99,10 @@ impl Machine<'_> {
     }
 
     /// `CallMethod`: enter the PHP method that method site `site` calls,
-    /// with its arguments in a new window, or else run the call written out
-    /// in full at the site's fallback.
+    /// with its arguments in a new window. Where that cannot be done here,
+    /// the call is prepared as `InitMethodCall` would prepare it and the
+    /// sends written out at the site's fallback run next; where even that
+    /// is not plain, the whole fallback runs.
     #[inline(always)]
     pub(super) fn call_method(
         &mut self,
@@ -112,16 +114,11 @@ impl Machine<'_> {
         let Some(site) = body.method_sites.get(site.index()) else {
             return Step::Slow;
         };
-        match self.enter_method_site(position, body, site, destination) {
-            Some(step) => step,
-            None => Step::Done(site.fallback.index()),
-        }
+        self.enter_method_site(position, body, site, destination)
     }
 
-    /// The quick entry of a method site: a method written in PHP that the
-    /// receiver's class has and the running scope may call, plain in shape,
-    /// with arguments that are defined, not references, and pass their type
-    /// tests. `None`, having changed nothing, for anything else.
+    /// See [`Machine::call_method`]: the receiver's method found once, then
+    /// entered, prepared, or left to the fallback.
     #[inline(always)]
     fn enter_method_site(
         &mut self,
@@ -129,20 +126,35 @@ impl Machine<'_> {
         body: &phera_bytecode::Function,
         site: &MethodSite,
         destination: Reg,
-    ) -> Option<Step> {
+    ) -> Step {
+        let fallback = site.fallback.index();
         let base = position.frame.base();
         let object = match self.registers.window(base + site.receiver.index(), 1) {
             [Some(Value::Object(object))] => object.clone(),
-            _ => return None,
+            _ => return Step::Done(fallback),
         };
-        let class = object.class.as_any().downcast_ref::<Class>()?;
+        let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
+            return Step::Done(fallback);
+        };
         let key = self
             .code
             .unit_name_key(position.frame.function, site.method);
-        let found = self.classes.method_table(class).get(key)?;
+        let Some(found) = self.classes.method_table(class).get(key) else {
+            return Step::Done(fallback);
+        };
         let method = found.method;
-        let MethodBody::User(function) = method.body else {
-            return None;
+        // The sends written out at the fallback, which follow its
+        // `InitMethodCall`.
+        let sends = Position {
+            frame: position.frame,
+            ip: fallback + 1,
+        };
+        let function = match method.body {
+            MethodBody::User(function) => function,
+            MethodBody::Native(_) => {
+                return self.prepare_native_site(sends, &object, class, key, fallback);
+            }
+            _ => return Step::Done(fallback),
         };
         let scope = self.caller_scope(position);
         if method.is_abstract
@@ -150,37 +162,41 @@ impl Machine<'_> {
             || !may_call(&found, scope)
             || self.shadowed_by_private(scope, key, method)
         {
-            return None;
+            return Step::Done(fallback);
         }
-        let arguments = body.site_arguments.get(site.argument_range())?;
+        let Some(arguments) = body.site_arguments.get(site.argument_range()) else {
+            return Step::Done(fallback);
+        };
         let count = arguments.len();
         let facts = self.code.facts(function);
-        if facts.shape != FunctionShape::Plain
-            || count < facts.required as usize
-            || count > facts.parameters as usize
-            || self.stack.depth() >= self.frame_limit
-        {
-            return None;
-        }
-        // The window, filled as the arguments pass their tests: one that
-        // fails empties it again, which only drops copies.
+        // The window, as `InitMethodCall` reserves it, with `$this`.
         let start = self.registers.len();
         let first = start + CallKind::Method.prefix();
         let window = (facts.registers.max(facts.parameters) as usize).max(1);
         self.registers.grow_to(first + window);
         self.registers.put(start, Value::Object(object));
+        if facts.shape != FunctionShape::Plain
+            || count < facts.required as usize
+            || count > facts.parameters as usize
+            || self.stack.depth() >= self.frame_limit
+        {
+            return self.record_site_call(function, start, sends.ip);
+        }
         for (index, argument) in arguments.iter().enumerate() {
             let value = match self.registers.window(base + argument.register().index(), 1) {
                 [Some(value)] if !value.is_reference() => value,
-                _ => return self.abandon_window(start),
+                _ => return self.record_site_call(function, start, sends.ip),
             };
             let plain = facts.takes_value(index)
                 && (!facts.is_typed(index)
                     || facts.parameter_masks[index].intersects(crate::types::own_type(value)));
-            if !plain && !self.accepts_argument(function, index, value) {
-                return self.abandon_window(start);
+            let mut value = value.clone();
+            if !plain
+                && !self.accepts_argument(function, index, &value)
+                && !self.accepts_on_second_look(function, index, &mut value)
+            {
+                return self.record_site_call(function, start, sends.ip);
             }
-            let value = value.clone();
             self.registers.put(first + index, value);
         }
         self.publish(position.ip);
@@ -190,17 +206,88 @@ impl Machine<'_> {
         }
         self.stack.push(frame);
         if self.spend_work() {
-            return Some(Step::Yield);
+            return Step::Yield;
         }
-        Some(Step::Switched(Position { frame, ip: 0 }))
+        Step::Switched(Position { frame, ip: 0 })
     }
 
-    /// Give back a window a method site's entry started to fill.
+    /// A method site whose PHP method cannot be entered here: its window
+    /// (with `$this`, and any arguments already copied, which the sends
+    /// write again) becomes the prepared call `InitMethodCall` makes, and
+    /// the sends at `sends` run next.
     #[cold]
     #[inline(never)]
-    fn abandon_window(&mut self, start: usize) -> Option<Step> {
-        self.registers.truncate(start);
-        None
+    fn record_site_call(&mut self, function: FunctionIndex, start: usize, sends: usize) -> Step {
+        let call = crate::calls::prepared_call::PreparedCall::of_kind(
+            crate::calls::prepared_call::PreparedCallee::Php(function),
+            CallKind::Method,
+            start,
+        );
+        self.stack.push_call(call, None);
+        Step::Done(sends)
+    }
+
+    /// A method site whose method is native: prepared as `InitMethodCall`
+    /// prepares it, with `sends` as the position after it (a getter with no
+    /// arguments runs at once there, its `Call` being next). The fallback
+    /// runs for whatever that preparation leaves to the VM.
+    #[cold]
+    #[inline(never)]
+    fn prepare_native_site(
+        &mut self,
+        sends: Position,
+        object: &Rc<Object>,
+        class: &Class,
+        key: NameKey,
+        fallback: usize,
+    ) -> Step {
+        match self.prepare_found_native(sends, object, class, key) {
+            Step::Slow => Step::Done(fallback),
+            step => step,
+        }
+    }
+
+    /// `InitMethodCall` of a native method, as [`Machine::prepare_method`]
+    /// prepares it, for a method site that found the method by `key`: a
+    /// getter with no parameters whose `Call` comes next runs at once, any
+    /// other public native method is described for its `Call`.
+    fn prepare_found_native(
+        &mut self,
+        position: Position,
+        object: &Rc<Object>,
+        class: &Class,
+        key: NameKey,
+    ) -> Step {
+        let Some(found) = self.classes.method_table(class).get(key) else {
+            return Step::Slow;
+        };
+        let method = found.method;
+        let MethodBody::Native(entry) = method.body else {
+            return Step::Slow;
+        };
+        if method.is_abstract
+            || method.is_static
+            || class.name == "Closure"
+            || class.name == "Generator"
+        {
+            return Step::Slow;
+        }
+        if entry.direct.is_some()
+            && entry.params.is_empty()
+            && let Some((destination, value)) =
+                self.run_direct_getter(position, object, (&found, key))
+        {
+            self.registers
+                .put(position.frame.base() + destination.index(), value);
+            return Step::Done(position.ip + 1);
+        }
+        let Some((context, method)) = self.native_class_method((object, class), &found, key) else {
+            return Step::Slow;
+        };
+        match entry.direct {
+            Some(_) => self.prepare_direct_method(position, context, method, entry),
+            None => self.prepare_native_method(position, context, method),
+        }
     }
 
     /// The class scope of the code at `position`: for a method, the class
