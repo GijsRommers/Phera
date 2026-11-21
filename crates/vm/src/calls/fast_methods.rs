@@ -17,7 +17,7 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::{ClassBinding, NameId, Reg, SymbolId, Visibility};
+use phera_bytecode::{ClassBinding, Instruction, NameId, Reg, SymbolId, Visibility};
 use phera_value::{Object, Value};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
@@ -69,6 +69,17 @@ impl Machine<'_> {
             MethodBody::Native(_) if class.name == "Closure" || class.name == "Generator" => {
                 Step::Slow
             }
+            // A getter with no parameters whose call comes next runs here.
+            MethodBody::Native(entry)
+                if entry.direct.is_some()
+                    && entry.params.is_empty()
+                    && let Some((destination, value)) =
+                        self.run_direct_getter(position, object, (&found, key)) =>
+            {
+                self.registers
+                    .put(position.frame.base() + destination.index(), value);
+                Step::Done(position.ip + 1)
+            }
             MethodBody::Native(entry) => {
                 let Some((context, method)) =
                     self.native_class_method((object, class), &found, key)
@@ -82,6 +93,42 @@ impl Machine<'_> {
             }
             _ => Step::Slow,
         }
+    }
+
+    /// `$object->getter()` of a public native method with no parameters
+    /// and a direct handler (`$method->getName()`), when the instruction
+    /// after this `InitMethodCall` is its `Call`: the handler runs now and
+    /// its value goes where the `Call` puts its result, with no prepared
+    /// call at all, and both instructions are done: the register and the
+    /// value. `None` when the call is not that shape or the handler
+    /// declines, for the ordinary path.
+    #[inline(never)]
+    fn run_direct_getter(
+        &self,
+        position: Position,
+        object: &Rc<Object>,
+        (found, key): (&FoundMethod<'_>, NameKey),
+    ) -> Option<(Reg, Value)> {
+        let method = found.method;
+        let MethodBody::Native(entry) = method.body else {
+            return None;
+        };
+        let direct = entry.direct?;
+        let Some(Instruction::Call { dst, .. }) = self
+            .code
+            .instructions(position.frame.function)
+            .get(position.ip)
+        else {
+            return None;
+        };
+        let destination = *dst;
+        if method.visibility != Visibility::Public
+            || (self.classes.has_lazy_objects && object.lazy().is_some())
+            || self.shadowed_by_private(self.running_scope(), key, method)
+        {
+            return None;
+        }
+        Some((destination, direct(object, &[])?))
     }
 
     /// The context and method for a call of the public method of a native
