@@ -120,15 +120,26 @@ impl Vm {
         &self,
         object: &Rc<phera_value::Object>,
     ) -> Result<(), phera_extension_api::NativeError> {
-        for (key, value) in object.to_array().iter() {
-            if let Value::Reference(reference) = value {
-                crate::reference_holders::ReferenceHolders::track_object(
-                    &self.property_references,
-                    object,
-                    &key,
-                    reference,
-                )?;
-            }
+        // Only the PHP references: most objects have none, and then nothing
+        // is copied.
+        let references: Vec<_> = object
+            .with_properties(|properties| {
+                properties
+                    .iter()
+                    .filter_map(|(key, value)| match value {
+                        Value::Reference(reference) => Some((key, reference.clone())),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (key, reference) in &references {
+            crate::reference_holders::ReferenceHolders::track_object(
+                &self.property_references,
+                object,
+                key,
+                reference,
+            )?;
         }
         Ok(())
     }
