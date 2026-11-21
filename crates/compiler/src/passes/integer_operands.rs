@@ -74,7 +74,27 @@ const DEAD_AFTER_SCAN: usize = 256;
 
 /// A deliberately conservative proof: only straight-line overwrites are accepted.
 pub(crate) fn dead_after(function: &Function, index: usize, register: phera_bytecode::Reg) -> bool {
-    let mut pending = vec![index + 1];
+    dead_after_from(function, vec![index + 1], register)
+}
+
+/// Same proof, but the instruction at `index` is a jump being removed with its
+/// producer: its target edge is reachable without the register being written,
+/// so it must be explored too. Value-context `($a === $b) || x` compiles to
+/// `Binary`, `JumpIf`, and the jump's landing reads the temporary.
+pub(crate) fn dead_after_jump(
+    function: &Function,
+    index: usize,
+    register: phera_bytecode::Reg,
+    target: phera_bytecode::Target,
+) -> bool {
+    dead_after_from(function, vec![index + 1, target.index()], register)
+}
+
+fn dead_after_from(
+    function: &Function,
+    mut pending: Vec<usize>,
+    register: phera_bytecode::Reg,
+) -> bool {
     // Sorted; at most DEAD_AFTER_SCAN entries, so searching it is cheaper
     // than hashing every position.
     let mut visited: Vec<usize> = Vec::new();
@@ -273,7 +293,7 @@ pub(crate) fn fuse_integer_branches(function: &mut Function) {
         };
         if condition != dst
             || dst.index() < function.locals.len()
-            || !dead_after(function, index, dst)
+            || !dead_after_jump(function, index, dst, target)
         {
             continue;
         }
