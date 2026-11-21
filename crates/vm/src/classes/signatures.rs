@@ -348,8 +348,10 @@ impl Vm {
         let members = |ty: &'a str| ty.split(['?', '|', '&', '(', ')']);
         let may_have_ancestry = |ty: Option<&str>| {
             ty.is_some_and(|ty| {
-                ty.split(['?', '|', '&', '(', ')'])
-                    .any(|name| name == "iterable" || name == "object" || is_class_type_name(name))
+                ty.split(['?', '|', '&', '(', ')']).any(|name| {
+                    matches!(name, "iterable" | "object" | "self" | "parent")
+                        || is_class_type_name(name)
+                })
             })
         };
         let comparable = may_have_ancestry(source) && may_have_ancestry(target);
