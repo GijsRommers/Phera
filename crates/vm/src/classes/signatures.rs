@@ -223,19 +223,29 @@ impl Vm {
             let target = implementation.declaration.as_deref();
             if !self.type_subset(source, inherited_scope, target, &method.declaring, unit) {
                 compatible = false;
-                unresolved.extend(self.unresolved_contract_types(source, target, unit));
+                unresolved.extend(self.unresolved_contract_types(
+                    source,
+                    target,
+                    &method.declaring,
+                    unit,
+                ));
             }
         }
         if base.returns.is_some() {
             let source = child.returns.as_deref();
             let target = base.returns.as_deref();
-            if (base.tentative && source.is_none())
+            if source.is_none()
                 || !self.type_subset(source, &method.declaring, target, inherited_scope, unit)
             {
                 // PHP loads a class that the two return types name before it
                 // compares them, for a tentative return type as well.
                 let previous_missing = unresolved.len();
-                unresolved.extend(self.unresolved_contract_types(source, target, unit));
+                unresolved.extend(self.unresolved_contract_types(
+                    source,
+                    target,
+                    &method.declaring,
+                    unit,
+                ));
                 if base.tentative && compatible && unresolved.len() == previous_missing {
                     if let MethodBody::User(reference) = method.body
                         && !self
@@ -329,6 +339,7 @@ impl Vm {
         &'vm self,
         source: Option<&'a str>,
         target: Option<&'a str>,
+        declaring: &'a str,
         unit: &'vm phera_bytecode::CompiledUnit,
     ) -> impl Iterator<Item = &'a str> + use<'a, 'vm> {
         let members = |ty: &'a str| ty.split(['?', '|', '&', '(', ')']);
@@ -347,10 +358,12 @@ impl Vm {
                 comparable
                     && is_class_type_name(name)
                     && self.classes.get(name).is_none()
-                    && !unit
-                        .classes
-                        .iter()
-                        .any(|class| class.name.eq_ignore_ascii_case(name))
+                    && !name.eq_ignore_ascii_case(declaring)
+                    && !unit.hoisted_classes.iter().any(|index| {
+                        unit.classes
+                            .get(index.index())
+                            .is_some_and(|class| class.name.eq_ignore_ascii_case(name))
+                    })
             })
     }
 
@@ -399,7 +412,7 @@ impl Vm {
         target_scope: &str,
         unit: &phera_bytecode::CompiledUnit,
     ) -> bool {
-        if target == "mixed" || source == "never" {
+        if source == "never" || target == "mixed" && source != "void" {
             return true;
         }
         if target == "static" {
@@ -422,6 +435,9 @@ impl Vm {
         if target == "callable" && source == "Closure" {
             return true;
         }
+        if target == "object" && is_class_type_name(source) {
+            return true;
+        }
         let mut pending = vec![source.to_owned()];
         let mut visited = std::collections::HashSet::new();
         while let Some(name) = pending.pop() {
@@ -436,11 +452,13 @@ impl Vm {
             {
                 return true;
             }
-            if let Some(class) = unit
-                .classes
-                .iter()
-                .find(|class| class.name.eq_ignore_ascii_case(&name))
-            {
+            if let Some(class) = unit.classes.iter().enumerate().find_map(|(index, class)| {
+                (class.name.eq_ignore_ascii_case(&name)
+                    && (name.eq_ignore_ascii_case(source_scope)
+                        || name.eq_ignore_ascii_case(target_scope)
+                        || unit.hoisted_classes.iter().any(|id| id.index() == index)))
+                .then_some(class)
+            }) {
                 if target == "object"
                     || (target.eq_ignore_ascii_case("Stringable")
                         && class.methods.iter().any(|method| {
