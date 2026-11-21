@@ -51,6 +51,7 @@ impl<'a> FrameView<'a> {
         self.code.unit(self.frame.function)
     }
 
+    #[inline]
     pub(crate) fn cache(&self) -> &'a UnitCache {
         self.code.cache(self.frame.function)
     }

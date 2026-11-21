@@ -90,6 +90,7 @@ pub fn register(
             name,
             params: entry.params,
             handler,
+            id: phera_extension_api::NativeId::NONE,
         });
     }
 }

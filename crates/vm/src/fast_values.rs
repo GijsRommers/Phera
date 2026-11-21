@@ -150,7 +150,7 @@ fn is_plain(value: &Value) -> bool {
 }
 
 /// A binary operator on two plain values, if it raises nothing.
-fn quiet_binary(operator: BinaryOp, left: &Value, right: &Value) -> Option<Value> {
+pub(crate) fn quiet_binary(operator: BinaryOp, left: &Value, right: &Value) -> Option<Value> {
     if !is_plain(left) || !is_plain(right) {
         return None;
     }

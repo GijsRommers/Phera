@@ -227,6 +227,10 @@ impl Vm {
         self.call_stack.pop();
         self.call_stack.abandon_calls_from(frame.start());
         self.registers.release_frame(frame.start(), frame.base());
+        if frame.returns_to_native_loop() {
+            self.resume_native_loop(value)?;
+            return Ok(None);
+        }
         if self.call_stack.depth() == stop {
             return Ok(Some(value));
         }

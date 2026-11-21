@@ -78,7 +78,10 @@ impl<'a> CallView<'a> {
                 unit: self.code.unit(function),
             },
             (PreparedCallee::General, Some(callee)) => Parameters::Listed(&callee.parameters),
-            (PreparedCallee::General | PreparedCallee::Constructed, _) => Parameters::Listed(&[]),
+            (
+                PreparedCallee::General | PreparedCallee::Native(_) | PreparedCallee::Constructed,
+                _,
+            ) => Parameters::Listed(&[]),
         }
     }
 
@@ -91,7 +94,10 @@ impl<'a> CallView<'a> {
             (PreparedCallee::Php(function), _) => &self.code.function(function).name,
             (PreparedCallee::General, Some(callee)) => &callee.name,
             // A call with no parameters is never named in a message.
-            (PreparedCallee::General | PreparedCallee::Constructed, _) => "",
+            (
+                PreparedCallee::General | PreparedCallee::Native(_) | PreparedCallee::Constructed,
+                _,
+            ) => "",
         }
     }
 
@@ -115,7 +121,10 @@ impl<'a> CallView<'a> {
             (PreparedCallee::General, Some(callee)) => {
                 crate::calls::pending::general_window(callee)
             }
-            (PreparedCallee::General | PreparedCallee::Constructed, _) => 1,
+            (
+                PreparedCallee::General | PreparedCallee::Native(_) | PreparedCallee::Constructed,
+                _,
+            ) => 1,
         };
         ArgumentSlots {
             base: self.call.base(),

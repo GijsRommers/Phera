@@ -199,7 +199,8 @@ fn builtin_step<const GUARDED: bool>(
     }
 }
 
-/// `+`, `-`, `*` and `%` on two integers, when the result is an integer.
+/// `+`, `-`, `*` and `%` on two integers, when the result is an integer,
+/// and the bitwise operators and shifts through [`integer_bits`].
 ///
 /// `None` sends the instruction to the general handler: an overflow becomes a
 /// float there, and `% 0` throws there. `%` by -1 is 0 in PHP (and would
@@ -212,6 +213,40 @@ fn integer_arithmetic(operator: BinaryOp, left: i64, right: i64) -> Option<i64> 
         BinaryOp::Multiply => left.checked_mul(right),
         BinaryOp::Modulo if right == -1 => Some(0),
         BinaryOp::Modulo if right != 0 => Some(left % right),
+        BinaryOp::BitwiseAnd
+        | BinaryOp::BitwiseOr
+        | BinaryOp::BitwiseXor
+        | BinaryOp::ShiftLeft
+        | BinaryOp::ShiftRight => integer_bits(operator, left, right),
+        _ => None,
+    }
+}
+
+/// `&`, `|`, `^`, `<<` and `>>` on two integers. Out of line: this is
+/// inlined into every loop that runs simple instructions (the generator
+/// runner too), and those stay the size they were.
+///
+/// A negative shift is `None`: the general handler throws `ArithmeticError`.
+/// A shift by 64 or more leaves no bits: 0, or for `>>` of a negative
+/// number -1.
+#[inline(never)]
+fn integer_bits(operator: BinaryOp, left: i64, right: i64) -> Option<i64> {
+    match operator {
+        BinaryOp::BitwiseAnd => Some(left & right),
+        BinaryOp::BitwiseOr => Some(left | right),
+        BinaryOp::BitwiseXor => Some(left ^ right),
+        BinaryOp::ShiftLeft if right >= 0 => Some(
+            u32::try_from(right)
+                .ok()
+                .and_then(|by| left.checked_shl(by))
+                .unwrap_or(0),
+        ),
+        BinaryOp::ShiftRight if right >= 0 => Some(
+            u32::try_from(right)
+                .ok()
+                .and_then(|by| left.checked_shr(by))
+                .unwrap_or(if left < 0 { -1 } else { 0 }),
+        ),
         _ => None,
     }
 }

@@ -140,3 +140,36 @@ pub(crate) fn append_at(
         })
         .flatten()
 }
+
+/// A plain write of an element of the array a property holds (see
+/// `crate::element_writes`): what the element held, or `None` with
+/// nothing changed when the property is not such an array.
+pub(crate) fn write_element_at(
+    object: &Object,
+    key: &ArrayKey,
+    slot: Option<usize>,
+    (keys, place): (&[ArrayKey], crate::element_writes::Target),
+    value: Value,
+) -> Option<Option<Value>> {
+    object
+        .update(|properties| {
+            let position = slot.filter(|position| {
+                properties
+                    .entry_at(*position)
+                    .is_some_and(|(stored, _)| stored == *key)
+            });
+            let target = if let Some(position) = position {
+                properties.entry_at_mut(position).map(|(_, value)| value)
+            } else {
+                properties.get_mut(key)
+            };
+            let Some(Value::Array(array)) = target else {
+                return None;
+            };
+            if !crate::element_writes::writable(array, keys, place) {
+                return None;
+            }
+            crate::element_writes::write(array, keys, place, value)
+        })
+        .flatten()
+}

@@ -99,6 +99,9 @@ impl Vm {
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?
         {
+            // The loop updates the next such property itself (see
+            // `calls::fast_compound_assignments`).
+            self.prepare_update_site(&place)?;
             return Ok(Some(BatchExit::Instruction(Instruction::AssignOpPath {
                 op: operator,
                 dst: destination,
@@ -144,6 +147,7 @@ impl Vm {
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?
         {
+            self.prepare_update_site(&place)?;
             return Ok(Some(BatchExit::Instruction(Instruction::IncDecPath {
                 mode,
                 dst: destination,
@@ -248,6 +252,9 @@ impl Vm {
                 && place.steps()?.next().is_none()
                 && Self::has_string_conversion(&value))
         {
+            // The loop writes the next such element itself (see
+            // `calls::fast_element_writes`).
+            self.prepare_element_site(&place)?;
             return Ok(Some(BatchExit::Instruction(Instruction::AssignPath {
                 path,
                 src: source,

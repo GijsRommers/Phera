@@ -75,7 +75,8 @@ pub(crate) fn register(registry: &mut Registry) {
 const ABSTRACT_METHODS: &[MethodEntry] = &[
     MethodEntry::public("getName", &[], |_, o, _| {
         data(o, |f| Value::from(f.name.as_str()))
-    }),
+    })
+    .with_direct(direct_get_name),
     MethodEntry::public("getShortName", &[], |_, o, _| {
         data(o, |f| Value::from(name_parts(f).1))
     }),
@@ -87,22 +88,28 @@ const ABSTRACT_METHODS: &[MethodEntry] = &[
     }),
     MethodEntry::public("isClosure", &[], |_, o, _| {
         data(o, |f| Value::Bool(f.is_closure))
-    }),
+    })
+    .with_direct(direct_is_closure),
     MethodEntry::public("isDeprecated", &[], |_, o, _| {
         data(o, |f| Value::Bool(f.deprecated))
-    }),
+    })
+    .with_direct(direct_is_deprecated),
     MethodEntry::public("isInternal", &[], |_, o, _| {
         data(o, |f| Value::Bool(f.source.is_none()))
-    }),
+    })
+    .with_direct(direct_is_internal),
     MethodEntry::public("isUserDefined", &[], |_, o, _| {
         data(o, |f| Value::Bool(f.source.is_some()))
-    }),
+    })
+    .with_direct(direct_is_user_defined),
     MethodEntry::public("isGenerator", &[], |_, o, _| {
         data(o, |f| Value::Bool(f.is_generator))
-    }),
+    })
+    .with_direct(direct_is_generator),
     MethodEntry::public("isStatic", &[], |_, o, _| {
         data(o, |f| Value::Bool(f.is_static))
-    }),
+    })
+    .with_direct(direct_is_static),
     MethodEntry::public("isVariadic", &[], |_, o, _| {
         data(o, |f| Value::Bool(f.parameters.iter().any(|p| p.variadic)))
     }),
@@ -179,20 +186,24 @@ const ABSTRACT_METHODS: &[MethodEntry] = &[
     }),
     MethodEntry::public("returnsReference", &[], |_, o, _| {
         data(o, |f| Value::Bool(f.returns_reference))
-    }),
+    })
+    .with_direct(direct_returns_reference),
     MethodEntry::public("hasReturnType", &[], |_, o, _| {
         data(o, |f| Value::Bool(f.return_type.is_some()))
-    }),
+    })
+    .with_direct(direct_has_return_type),
     MethodEntry::public("getReturnType", &[], |c, o, _| {
         crate::types::make(c, reflected(o)?.return_type.as_deref())
-    }),
+    })
+    .with_direct(direct_no_return_type),
     MethodEntry::public("hasTentativeReturnType", &[], |_, o, _| {
         data(o, |f| Value::Bool(f.tentative_return_type.is_some()))
     }),
     MethodEntry::public("getTentativeReturnType", &[], |c, o, _| {
         crate::types::make(c, reflected(o)?.tentative_return_type.as_deref())
     }),
-    MethodEntry::public_async("getAttributes", crate::attribute::FILTER, attributes),
+    MethodEntry::public_async("getAttributes", crate::attribute::FILTER, attributes)
+        .with_direct(direct_no_attributes),
 ];
 
 pub(crate) fn make(context: &mut dyn Context, target: FunctionTarget) -> NativeResult {
@@ -342,4 +353,87 @@ pub(crate) fn method(
         .member
         .as_ref()
         .ok_or_else(|| exception("Not a reflected method"))
+}
+
+/// A getter run by the interpreter loop itself (a direct method): it reads
+/// the reflected function from the object's state, and gives `None`, for
+/// the ordinary call to raise PHP's error, when arguments were passed.
+fn direct(
+    object: &Object,
+    arguments: &[Option<Value>],
+    read: impl FnOnce(&FunctionInfo) -> Value,
+) -> Option<Value> {
+    if !arguments.is_empty() {
+        return None;
+    }
+    let native = object.native.try_borrow().ok()?;
+    let function = native.as_ref()?.downcast_ref::<Rc<FunctionInfo>>()?;
+    Some(read(function))
+}
+
+fn direct_get_name(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    direct(object, arguments, |f| Value::from(f.name.as_str()))
+}
+
+fn direct_is_closure(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    direct(object, arguments, |f| Value::Bool(f.is_closure))
+}
+
+fn direct_is_deprecated(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    direct(object, arguments, |f| Value::Bool(f.deprecated))
+}
+
+fn direct_is_internal(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    direct(object, arguments, |f| Value::Bool(f.source.is_none()))
+}
+
+fn direct_is_user_defined(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    direct(object, arguments, |f| Value::Bool(f.source.is_some()))
+}
+
+fn direct_is_generator(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    direct(object, arguments, |f| Value::Bool(f.is_generator))
+}
+
+fn direct_is_static(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    direct(object, arguments, |f| Value::Bool(f.is_static))
+}
+
+fn direct_returns_reference(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    direct(object, arguments, |f| Value::Bool(f.returns_reference))
+}
+
+fn direct_has_return_type(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    direct(object, arguments, |f| Value::Bool(f.return_type.is_some()))
+}
+
+/// `getAttributes()` of a function with no attributes: an empty array, for
+/// no filter or a class name with no flags (the flags `IS_INSTANCEOF` look
+/// the class up, and others are an error: the ordinary call).
+fn direct_no_attributes(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    let plain = matches!(
+        arguments,
+        [] | [Some(Value::String(_) | Value::Null)]
+            | [Some(Value::String(_) | Value::Null), Some(Value::Int(0))]
+    );
+    if !plain {
+        return None;
+    }
+    let native = object.native.try_borrow().ok()?;
+    let function = native.as_ref()?.downcast_ref::<Rc<FunctionInfo>>()?;
+    function
+        .attributes
+        .is_empty()
+        .then(|| Value::from(phera_extension_api::PhpArray::new()))
+}
+
+/// `getReturnType()` of a function with no declared return type: null. A
+/// declared one is an object (the ordinary call).
+fn direct_no_return_type(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    if !arguments.is_empty() {
+        return None;
+    }
+    let native = object.native.try_borrow().ok()?;
+    let function = native.as_ref()?.downcast_ref::<Rc<FunctionInfo>>()?;
+    function.return_type.is_none().then_some(Value::Null)
 }
