@@ -194,14 +194,16 @@ const ABSTRACT_METHODS: &[MethodEntry] = &[
     .with_direct(direct_has_return_type),
     MethodEntry::public("getReturnType", &[], |c, o, _| {
         crate::types::make(c, reflected(o)?.return_type.as_deref())
-    }),
+    })
+    .with_direct(direct_no_return_type),
     MethodEntry::public("hasTentativeReturnType", &[], |_, o, _| {
         data(o, |f| Value::Bool(f.tentative_return_type.is_some()))
     }),
     MethodEntry::public("getTentativeReturnType", &[], |c, o, _| {
         crate::types::make(c, reflected(o)?.tentative_return_type.as_deref())
     }),
-    MethodEntry::public_async("getAttributes", crate::attribute::FILTER, attributes),
+    MethodEntry::public_async("getAttributes", crate::attribute::FILTER, attributes)
+        .with_direct(direct_no_attributes),
 ];
 
 pub(crate) fn make(context: &mut dyn Context, target: FunctionTarget) -> NativeResult {
@@ -403,4 +405,35 @@ fn direct_returns_reference(object: &Object, arguments: &[Option<Value>]) -> Opt
 
 fn direct_has_return_type(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
     direct(object, arguments, |f| Value::Bool(f.return_type.is_some()))
+}
+
+/// `getAttributes()` of a function with no attributes: an empty array, for
+/// no filter or a class name with no flags (the flags `IS_INSTANCEOF` look
+/// the class up, and others are an error: the ordinary call).
+fn direct_no_attributes(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    let plain = matches!(
+        arguments,
+        [] | [Some(Value::String(_) | Value::Null)]
+            | [Some(Value::String(_) | Value::Null), Some(Value::Int(0))]
+    );
+    if !plain {
+        return None;
+    }
+    let native = object.native.try_borrow().ok()?;
+    let function = native.as_ref()?.downcast_ref::<Rc<FunctionInfo>>()?;
+    function
+        .attributes
+        .is_empty()
+        .then(|| Value::from(phera_extension_api::PhpArray::new()))
+}
+
+/// `getReturnType()` of a function with no declared return type: null. A
+/// declared one is an object (the ordinary call).
+fn direct_no_return_type(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
+    if !arguments.is_empty() {
+        return None;
+    }
+    let native = object.native.try_borrow().ok()?;
+    let function = native.as_ref()?.downcast_ref::<Rc<FunctionInfo>>()?;
+    function.return_type.is_none().then_some(Value::Null)
 }
