@@ -29,7 +29,6 @@ impl Vm {
 }
 
 impl Vm {
-    /// Dynamic static targets accept either an object handle or a class-name string.
     /// `Post::$count`: the class by its symbol's name key. A public
     /// property whose storage this request made already is read through
     /// borrows alone; otherwise the class and name go on to the general
@@ -73,6 +72,7 @@ impl Vm {
             .ok_or_else(|| internal_error!("static property frame"))
     }
 
+    /// Dynamic static targets accept either an object handle or a class-name string.
     pub(crate) fn static_property_names(
         &mut self,
         class: crate::static_places::StaticClass,
