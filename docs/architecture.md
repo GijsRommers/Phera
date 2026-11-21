@@ -1586,9 +1586,14 @@ and the constructed-object call inlined again; `incarnated` kept in the pool
 hold only). What is left of the difference: the `Drop` impl on `Object`
 (which also makes the array drop take an object's properties out instead of
 moving them), the destruction and attachment fields, the allocation count of
-the cycle collector and the destructor check on each `new`. No framework
-request runs on the guarded loop: no live object has a destructor due during
-the Laravel requests measured. Requests with the owner's method (one worker,
+the cycle collector and the destructor check on each `new`. The Laravel
+requests measured then never ran on the guarded loop: no live object had a
+destructor due. That did not hold for Symfony. A Symfony and Doctrine
+request keeps objects with destructors alive for its whole life, so it ran
+entirely on the guarded loop, which left the loop for every `instanceof`,
+`foreach` start and end, element and property write, compound assignment,
+return and store over an array, object or string. Since 21 November 2026
+there is one loop (section 10.12). Requests with the owner's method (one worker,
 `opcache.validate_timestamps=0`, 100 requests, twice): Laravel `/api/hello`
 361.3 to 362.4M instructions on batch 14, 315.5 to 318.3M here; `/api/posts`
 489.3 to 490.1M, 440.1 to 440.4M.

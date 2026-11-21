@@ -331,11 +331,13 @@ impl Machine<'_> {
                 },
                 complete => complete,
             };
-            match step {
-                ScalarStep::Fallback => break Ok(*instruction),
-                // Freeing what a register held may have queued a destructor.
-                ScalarStep::Released if self.ids.has_doomed() => break Err(destructors_due()),
-                ScalarStep::Complete | ScalarStep::Released => {}
+            if step == ScalarStep::Fallback {
+                break Ok(*instruction);
+            }
+            // Only the guarded loop's writes answer `Released`: freeing what
+            // a register held may have queued a destructor.
+            if GUARDED && step == ScalarStep::Released && self.ids.has_doomed() {
+                break Err(destructors_due());
             }
             // Only backward jumps count as work; comparing positions also
             // covers fused compare-and-branch instructions.
