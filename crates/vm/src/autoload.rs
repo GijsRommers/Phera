@@ -207,7 +207,22 @@ impl Vm {
         let result = self.call_autoloaders(callback_name, origin).await;
         self.autoload.active.remove(&key);
         result?;
-        Ok(self.classes.get(name))
+        let loaded = self.classes.get(name);
+        // A fork tells its worker which classes its requests autoload, so
+        // that a re-boot can declare them in the snapshot.
+        if loaded.is_some()
+            && self.snapshot.mode == super::SnapshotMode::Forked
+            && let Some(sink) = &self.snapshot.warmup_sink
+        {
+            let mut list = sink.borrow_mut();
+            if !list
+                .iter()
+                .any(|class| class.eq_ignore_ascii_case(callback_name))
+            {
+                list.push(callback_name.to_owned());
+            }
+        }
+        Ok(loaded)
     }
 
     /// Read the live list after each call so removing or appending loaders takes effect.

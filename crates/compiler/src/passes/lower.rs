@@ -300,6 +300,9 @@ impl Tables<'_> {
         // `fold_operand_copies` read an assignment's source in place too,
         // which would move that source's warning after the key's.
         crate::passes::local_operands::optimize(&mut function);
+        // Last: the passes above never see `CallMethod`, whose site table
+        // reads the argument registers.
+        crate::passes::method_calls::rewrite(&mut function);
         function
     }
 }
