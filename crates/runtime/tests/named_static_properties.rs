@@ -34,7 +34,9 @@ unlink($file);
 
 #[test]
 fn named_static_properties_behave_as_in_php() {
-    let Some(expected) = phera_extension_api::testing::oracle::run_php("named-static-properties", SCRIPT) else {
+    let Some(expected) =
+        phera_extension_api::testing::oracle::run_php("named-static-properties", SCRIPT)
+    else {
         eprintln!("SKIP: PHP 8.5 is not available");
         return;
     };
@@ -42,7 +44,9 @@ fn named_static_properties_behave_as_in_php() {
     std::fs::create_dir_all(&dir).expect("test directory");
     let script = dir.join("index.php");
     std::fs::write(&script, SCRIPT).expect("script");
-    let result = Runtime::new().run_file_blocking(&script, &[], None).expect("run");
+    let result = Runtime::new()
+        .run_file_blocking(&script, &[], None)
+        .expect("run");
     let _ = std::fs::remove_dir_all(&dir);
     let output = String::from_utf8_lossy(&result.output);
     let got: Vec<&str> = output.lines().collect();
