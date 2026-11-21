@@ -56,6 +56,8 @@ const CREDITS: &[(&str, i64, &str, &str)] = &[
 ];
 
 pub(super) fn register(registry: &mut Registry) {
+    const FLAGS: &[Param] =
+        &[Param::new("flags", ParamType::Int).with_default(ConstantValue::Int(ALL))];
     for (name, flags) in [
         ("INFO_GENERAL", INFO_GENERAL),
         ("INFO_CREDITS", INFO_CREDITS),
@@ -73,16 +75,8 @@ pub(super) fn register(registry: &mut Registry) {
     for &(name, flag, _, _) in CREDITS {
         registry.constant(name, flag);
     }
-    registry.function(FunctionEntry::asynchronous(
-        "phpinfo",
-        &[Param::new("flags", ParamType::Int).with_default(ConstantValue::Int(ALL))],
-        phpinfo,
-    ));
-    registry.function(FunctionEntry::sync(
-        "phpcredits",
-        &[Param::new("flags", ParamType::Int).with_default(ConstantValue::Int(ALL))],
-        phpcredits,
-    ));
+    registry.function(FunctionEntry::asynchronous("phpinfo", FLAGS, phpinfo));
+    registry.function(FunctionEntry::sync("phpcredits", FLAGS, phpcredits));
     for name in ["phpinfo", "phpcredits"] {
         registry.describe_function(name, "true", Some("standard"));
     }

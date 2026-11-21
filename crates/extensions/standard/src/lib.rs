@@ -7,6 +7,7 @@ mod arrays;
 mod constants;
 pub mod csv;
 pub mod environment;
+mod forward_call;
 mod getopt;
 pub use getopt::set_arguments as set_cli_arguments;
 mod information;
@@ -65,6 +66,7 @@ impl Extension for Standard {
         }
         environment::register(registry);
         getopt::register(registry);
+        forward_call::register(registry);
         process::register(registry);
         last_error::register(registry);
         locale::register(registry);

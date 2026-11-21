@@ -13,13 +13,13 @@ use crate::request::{directory, path};
 pub(super) fn register(registry: &mut Registry) {
     registry.function(FunctionEntry::sync(
         "linkinfo",
-        &[Param::new("path", ParamType::String)],
+        const { &[Param::new("path", ParamType::String)] },
         linkinfo,
     ));
     registry.function(FunctionEntry::sync("getlastmod", &[], getlastmod));
     registry.function(FunctionEntry::sync(
         "ftok",
-        &[FILENAME, Param::new("project_id", ParamType::String)],
+        const { &[FILENAME, Param::new("project_id", ParamType::String)] },
         ftok,
     ));
     for (name, returns) in [

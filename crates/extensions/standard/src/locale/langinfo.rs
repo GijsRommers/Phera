@@ -69,7 +69,7 @@ pub(super) fn register(registry: &mut Registry) {
     }
     registry.function(FunctionEntry::sync(
         "nl_langinfo",
-        &[Param::new("item", ParamType::Int)],
+        const { &[Param::new("item", ParamType::Int)] },
         info,
     ));
     registry.describe_function("nl_langinfo", "string|false", Some("standard"));

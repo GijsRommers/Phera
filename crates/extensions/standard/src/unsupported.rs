@@ -8,21 +8,25 @@ pub(super) fn register(registry: &mut Registry) {
     for entry in [
         FunctionEntry::sync(
             "get_browser",
-            &[
-                Param::new("user_agent", ParamType::String)
-                    .nullable()
-                    .with_default(ConstantValue::Null),
-                Param::new("return_array", ParamType::Bool)
-                    .with_default(ConstantValue::Bool(false)),
-            ],
+            const {
+                &[
+                    Param::new("user_agent", ParamType::String)
+                        .nullable()
+                        .with_default(ConstantValue::Null),
+                    Param::new("return_array", ParamType::Bool)
+                        .with_default(ConstantValue::Bool(false)),
+                ]
+            },
             |_, _| unsupported("get_browser", "Phera has no browser capability database"),
         ),
         FunctionEntry::sync(
             "register_tick_function",
-            &[
-                Param::new("callback", ParamType::Callable),
-                Param::new("args", ParamType::Mixed).variadic(),
-            ],
+            const {
+                &[
+                    Param::new("callback", ParamType::Callable),
+                    Param::new("args", ParamType::Mixed).variadic(),
+                ]
+            },
             |_, _| {
                 unsupported(
                     "register_tick_function",
@@ -32,15 +36,17 @@ pub(super) fn register(registry: &mut Registry) {
         ),
         FunctionEntry::sync(
             "dl",
-            &[Param::new("extension_filename", ParamType::String)],
+            const { &[Param::new("extension_filename", ParamType::String)] },
             |_, _| unsupported("dl", "Phera uses extensions compiled into the runtime"),
         ),
         FunctionEntry::sync(
             "output_add_rewrite_var",
-            &[
-                Param::new("name", ParamType::String),
-                Param::new("value", ParamType::String),
-            ],
+            const {
+                &[
+                    Param::new("name", ParamType::String),
+                    Param::new("value", ParamType::String),
+                ]
+            },
             |_, _| {
                 unsupported(
                     "output_add_rewrite_var",

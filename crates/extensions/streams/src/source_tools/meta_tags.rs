@@ -14,11 +14,13 @@ use crate::{
 pub(super) fn register(registry: &mut Registry) {
     registry.function(FunctionEntry::asynchronous(
         "get_meta_tags",
-        &[
-            FILENAME,
-            Param::new("use_include_path", ParamType::Bool)
-                .with_default(ConstantValue::Bool(false)),
-        ],
+        const {
+            &[
+                FILENAME,
+                Param::new("use_include_path", ParamType::Bool)
+                    .with_default(ConstantValue::Bool(false)),
+            ]
+        },
         read,
     ));
     registry.describe_function("get_meta_tags", "array|false", Some("standard"));

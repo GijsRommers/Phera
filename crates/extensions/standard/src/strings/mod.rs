@@ -14,6 +14,7 @@ mod decimal;
 mod encode;
 mod escaping;
 pub(crate) mod format;
+mod hebrew;
 mod html;
 mod join;
 mod metaphone;
@@ -38,6 +39,7 @@ mod uuencode;
 pub(crate) const MAX_STRING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.function(hebrew::ENTRY);
     registry.function(quoted_printable::ENCODE);
     registry.function(quoted_printable::DECODE);
     registry.function(encode::UTF8_DECODE);
