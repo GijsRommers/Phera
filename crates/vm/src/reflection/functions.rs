@@ -342,24 +342,27 @@ fn native_parameter(position: usize, param: Param, stub: Option<StubParameter>) 
         Some(name.into())
     };
     let (default, default_constant, default_display) = match stub {
-        Some(parameter) => (
-            param
-                .default_name
-                .filter(|name| parameter.constant_name() == Some(*name))
-                .and(param.default)
-                .map(|value| ParameterDefault::Literal(value.to_value()))
-                .or_else(|| {
+        Some(parameter) => {
+            let default =
+                if param.platform_default && param.default_name == parameter.constant_name() {
+                    param
+                        .default
+                        .map(|value| ParameterDefault::Literal(value.to_value()))
+                } else {
                     parameter.default().and_then(|default| match default {
                         StubDefault::EnumCase(class, case) => {
                             Some(ParameterDefault::NativeEnumCase { class, case })
                         }
                         default => default.literal().map(ParameterDefault::Literal),
                     })
-                }),
-            parameter.constant_name().map(str::to_owned),
-            (!parameter.expression.is_empty() && parameter.expression != "UNKNOWN")
-                .then(|| parameter.expression.to_owned()),
-        ),
+                };
+            (
+                default,
+                parameter.constant_name().map(str::to_owned),
+                (!parameter.expression.is_empty() && parameter.expression != "UNKNOWN")
+                    .then(|| parameter.expression.to_owned()),
+            )
+        }
         None => (
             param
                 .default
@@ -393,7 +396,7 @@ mod tests {
     #[test]
     fn named_native_default_uses_the_registered_value() {
         let parameter = Param::new("backlog", ParamType::Int)
-            .with_constant_default("SOMAXCONN", ConstantValue::Int(4096));
+            .with_platform_constant_default("SOMAXCONN", ConstantValue::Int(4096));
         let stub = signature("socket_create_listen")
             .unwrap()
             .parameters()

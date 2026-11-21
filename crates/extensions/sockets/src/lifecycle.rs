@@ -41,7 +41,7 @@ pub(crate) fn register(registry: &mut Registry) {
             const {
                 &[
                     PORT,
-                    BACKLOG.with_constant_default(
+                    BACKLOG.with_platform_constant_default(
                         "SOMAXCONN",
                         ConstantValue::Int(libc::SOMAXCONN as i64),
                     ),

@@ -6,8 +6,9 @@
 
 ## Decision
 
-When a native registration supplies a named constant default and the
-stub names the same constant, reflection uses the registered value.
+When a native registration marks a named constant default as platform
+dependent and the stub names the same constant, reflection uses the
+value from the current build.
 The stub still supplies the signature, default name and display text.
 
 ## Why
