@@ -291,6 +291,8 @@ impl Vm {
     /// `calls::fast_property_elements` and `calls::fast_element_writes`). Finding the entry raises nothing:
     /// a property that cannot be read from here simply gets no entry, and
     /// the read goes on in the general path, which raises PHP's error.
+    #[cold]
+    #[inline(never)]
     pub(crate) fn prepare_element_site(&mut self, place: &AccessPath) -> Result<(), NativeError> {
         let mut steps = place.steps()?;
         let (Some(Step::Property(name)), Some(Step::Index(_) | Step::Append)) =
@@ -306,6 +308,8 @@ impl Vm {
     /// `$totals->sums[$key] -= $amount`), as [`Vm::prepare_element_site`]
     /// does for reads, so that the loop can make the next one itself (see
     /// `calls::fast_compound_assignments`).
+    #[cold]
+    #[inline(never)]
     pub(crate) fn prepare_update_site(&mut self, place: &AccessPath) -> Result<(), NativeError> {
         let mut steps = place.steps()?;
         let Some(Step::Property(name)) = steps.next() else {
@@ -318,6 +322,8 @@ impl Vm {
     }
 
     /// The site of property `name` of the object at the start of `place`.
+    #[cold]
+    #[inline(never)]
     fn prepare_site_for(&mut self, place: &AccessPath, name: NameId) -> Result<(), NativeError> {
         let object = match place.base()? {
             phera_bytecode::PathBase::This { .. } => {

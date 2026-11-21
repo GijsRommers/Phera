@@ -64,6 +64,11 @@ impl Machine<'_> {
                 let receiver = Some(object.clone());
                 self.prepare_php_method(function, receiver, None, position.ip)
             }
+            // `Closure::__invoke` and the methods of a generator have their
+            // own preparation in the VM.
+            MethodBody::Native(_) if class.name == "Closure" || class.name == "Generator" => {
+                Step::Slow
+            }
             MethodBody::Native(entry) => {
                 let Some((context, method)) =
                     self.native_class_method((object, class), &found, key)

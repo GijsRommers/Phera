@@ -45,6 +45,17 @@ impl Vm {
     /// Relative names (`self`, `parent`, `static`) depend on the frame and
     /// are never linked. A declared class cannot go away, so the link holds
     /// for the rest of the request.
+    /// Links `name` for `instanceof` at `symbol` when it means a class.
+    #[cold]
+    #[inline(never)]
+    fn link_instance_target(&self, symbol: SymbolId, name: &str) {
+        if let Some(target) = self.classes.get(name) {
+            self.link_class_symbol(symbol, &target);
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
     pub(crate) fn link_class_symbol(&self, symbol: SymbolId, class: &Rc<super::Class>) {
         let Some(frame) = self.current() else {
             return;
@@ -216,9 +227,7 @@ impl Vm {
             Value::Object(object) => {
                 // Link the name once it means a class, so that the
                 // interpreter loop answers this site from then on.
-                if let Some(target) = self.classes.get(&name) {
-                    self.link_class_symbol(symbol, &target);
-                }
+                self.link_instance_target(symbol, &name);
                 self.classes
                     .get(object.class.name())
                     .is_some_and(|class| self.class_matches(&class, &name))
