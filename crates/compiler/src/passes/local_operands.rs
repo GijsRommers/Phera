@@ -1,16 +1,18 @@
-//! Read a local as a path key where it was copied only to be read once.
+//! Read a local as an operand where it was copied only to be read once.
 //!
 //! ```php
 //! $row[$key]        // Move t, $key; Fetch [Index(t)]      -> Fetch [Index($key)]
 //! $a[$i][$j] = 1;   // Move t1, $i; Move t2, $j; AssignPath -> AssignPath [Index($i), Index($j)]
+//! (int) $x;         // Move t, $x; Cast t                  -> Cast $x
+//! ! $flag;          // Move t, $flag; Unary Not t           -> Unary Not $flag
 //! ```
 //!
-//! A path key is a register like any operand, but the compiler copies a local
-//! into a temporary first, so that a later operand of the same expression
-//! (`$a[$i][$i++]`) cannot change an earlier one. When nothing between the
-//! copy and the path instruction can write the local, the path reads the
-//! local directly and the copy (and the `Clear` that empties its temporary)
-//! disappears.
+//! A path key or operator operand is a register like any other, but the
+//! compiler copies a local into a temporary first, so that a later operand of
+//! the same expression (`$a[$i][$i++]`) cannot change an earlier one. When
+//! nothing between the copy and the consuming instruction can write the
+//! local, the consumer reads the local directly and the copy (and the `Clear`
+//! that empties its temporary) disappears.
 //!
 //! A local is skipped when it may hold a PHP reference (bound by `&`, `global`,
 //! `static`, a by-reference parameter or capture, `foreach ... as &`, or passed
@@ -34,16 +36,22 @@ use crate::passes::optimize::{target, target_mut};
 
 /// One removable copy: `Move temp, local` at `producer`, read by the path
 /// step of instruction `consumer`.
+/// Where a candidate consumer reads the temporary: as a path key or as an
+/// operator operand.
+enum Slot {
+    Path { path: PathId, step: usize },
+    Operand,
+}
+
 struct Candidate {
     consumer: usize,
-    path: PathId,
-    step: usize,
+    slot: Slot,
     temp: Reg,
     local: Reg,
     producer: usize,
 }
 
-/// Rewrite path keys that are plain copies of locals. Runs after `optimize`,
+/// Rewrite operands that are plain copies of locals. Runs after `optimize`,
 /// on bytecode with valid register and target indices.
 pub(crate) fn optimize(function: &mut Function) {
     if function.instructions.is_empty() {
@@ -81,20 +89,51 @@ pub(crate) fn optimize(function: &mut Function) {
     }
     let mut candidates: Vec<Candidate> = Vec::new();
     for (index, instruction) in function.instructions.iter().enumerate() {
-        let Some(path_id) = path_operand(*instruction) else {
-            continue;
-        };
-        let Some(path) = function.paths.get(path_id.index()) else {
-            continue;
-        };
-        for (position, step) in path.steps.iter().enumerate() {
-            let temp = match step {
-                Step::Index(register) | Step::DynamicProperty(register) => *register,
-                Step::Property(_) | Step::Append => continue,
-            };
-            if temp.index() < locals {
-                continue;
+        if let Some(path_id) = path_operand(*instruction)
+            && let Some(path) = function.paths.get(path_id.index())
+        {
+            for (position, step) in path.steps.iter().enumerate() {
+                let temp = match step {
+                    Step::Index(register) | Step::DynamicProperty(register) => *register,
+                    Step::Property(_) | Step::Append => continue,
+                };
+                if temp.index() < locals {
+                    continue;
+                }
+                if let Some(candidate) = candidate(
+                    function,
+                    &exposed,
+                    &boundaries,
+                    &handler_entries,
+                    &assigns,
+                    &clears,
+                    index,
+                    Slot::Path {
+                        path: path_id,
+                        step: position,
+                    },
+                    temp,
+                ) {
+                    candidates.push(candidate);
+                }
             }
+        }
+        // Operator operands: `Unary`/`Cast` source, `Binary`/`BinaryInt` left
+        // and right. (`BinaryIntBranch` is a condition; conditions belong to
+        // the front end's branch-directly work, not here.)
+        let mut operands: Vec<Reg> = Vec::new();
+        match instruction {
+            Instruction::Unary { src, .. } | Instruction::Cast { src, .. } => operands.push(*src),
+            Instruction::Binary { lhs, rhs, .. } => {
+                operands.push(*lhs);
+                operands.push(*rhs);
+            }
+            Instruction::BinaryInt { lhs, .. } => operands.push(*lhs),
+            _ => {}
+        }
+        operands.retain(|register| register.index() >= locals);
+        operands.dedup();
+        for temp in operands {
             if let Some(candidate) = candidate(
                 function,
                 &exposed,
@@ -103,8 +142,7 @@ pub(crate) fn optimize(function: &mut Function) {
                 &assigns,
                 &clears,
                 index,
-                path_id,
-                position,
+                Slot::Operand,
                 temp,
             ) {
                 candidates.push(candidate);
@@ -128,23 +166,51 @@ pub(crate) fn optimize(function: &mut Function) {
             .collect();
         let consumers: HashSet<usize> = group.iter().map(|candidate| candidate.consumer).collect();
         // One path step can only name one register: candidates that share a
-        // step must agree on the local.
+        // step must agree on the local. (One operator instruction is scanned
+        // once per temporary, so operand slots never repeat.)
         let mut steps: HashMap<(PathId, usize), Reg> = HashMap::new();
-        let same_local = group.iter().all(|candidate| {
-            steps
-                .insert((candidate.path, candidate.step), candidate.local)
-                .is_none_or(|previous| previous == candidate.local)
+        let same_local = group.iter().all(|candidate| match candidate.slot {
+            Slot::Path { path, step } => steps
+                .insert((path, step), candidate.local)
+                .is_none_or(|previous| previous == candidate.local),
+            Slot::Operand => true,
         });
         if !readers.iter().all(|index| consumers.contains(index)) || !same_local {
             continue;
         }
         for candidate in &group {
-            if let Some(path) = function.paths.get_mut(candidate.path.index()) {
-                path.steps[candidate.step] = match path.steps[candidate.step] {
-                    Step::Index(_) => Step::Index(candidate.local),
-                    Step::DynamicProperty(_) => Step::DynamicProperty(candidate.local),
-                    step => step,
-                };
+            match candidate.slot {
+                Slot::Path { path, step } => {
+                    if let Some(path) = function.paths.get_mut(path.index()) {
+                        path.steps[step] = match path.steps[step] {
+                            Step::Index(_) => Step::Index(candidate.local),
+                            Step::DynamicProperty(_) => Step::DynamicProperty(candidate.local),
+                            step => step,
+                        };
+                    }
+                }
+                Slot::Operand => {
+                    let instruction = &mut function.instructions[candidate.consumer];
+                    match instruction {
+                        Instruction::Unary { src, .. } | Instruction::Cast { src, .. }
+                            if *src == temp =>
+                        {
+                            *src = candidate.local;
+                        }
+                        Instruction::Binary { lhs, rhs, .. } => {
+                            if *lhs == temp {
+                                *lhs = candidate.local;
+                            }
+                            if *rhs == temp {
+                                *rhs = candidate.local;
+                            }
+                        }
+                        Instruction::BinaryInt { lhs, .. } if *lhs == temp => {
+                            *lhs = candidate.local;
+                        }
+                        _ => {}
+                    }
+                }
             }
             // `FetchIndex` also names the key outside the path table.
             if let Instruction::FetchIndex { index, .. } =
@@ -171,7 +237,7 @@ pub(crate) fn optimize(function: &mut Function) {
 }
 
 /// Whether the copy that last assigned `temp` before `consumer` can be
-/// dropped for the path step at `consumer`. Every path to `consumer`
+/// dropped for the operand at `consumer`. Every path to `consumer`
 /// passes through that copy: no jump or branch target lies between them,
 /// so control falls straight through the window.
 #[allow(clippy::too_many_arguments)]
@@ -183,8 +249,7 @@ fn candidate(
     assigns: &HashMap<Reg, Vec<usize>>,
     clears: &HashSet<usize>,
     consumer: usize,
-    path: PathId,
-    step: usize,
+    slot: Slot,
     temp: Reg,
 ) -> Option<Candidate> {
     let locals = function.locals.len();
@@ -230,8 +295,7 @@ fn candidate(
     }
     Some(Candidate {
         consumer,
-        path,
-        step,
+        slot,
         temp,
         local,
         producer,

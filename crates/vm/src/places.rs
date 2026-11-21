@@ -166,52 +166,59 @@ pub(crate) fn display_key(key: &ArrayKey) -> String {
 }
 
 impl Vm {
-    /// Warn for each path key of `instruction` that is a named local with no
-    /// value yet.
+    /// Warn for each key or operand of `instruction` that is a named local
+    /// with no value yet.
     ///
-    /// A key used to be a temporary the compiler filled with a `Move` from
-    /// the local, and that `Move` raised PHP's "Undefined variable" warning
-    /// before the path was walked. The compiler can now name the local in the
-    /// path itself; reading it in place moves the warning here, once, in key
-    /// order and before the base is read. Temporaries are always assigned
-    /// before use, so they never warn.
+    /// A key or operand used to be a temporary the compiler filled with a
+    /// `Move` from the local, and that `Move` raised PHP's "Undefined
+    /// variable" warning before the consumer ran. The compiler can now name
+    /// the local itself; reading it in place moves the warning here, once, in
+    /// operand order. Temporaries are always assigned before use, so they
+    /// never warn.
     ///
     /// ```php
     /// $row[$key];   // Undefined variable $key when $key was never assigned
-    /// $o->$prop;
+    /// (int) $x;     // Undefined variable $x
     /// ```
-    pub(crate) fn warn_undefined_path_keys(
+    pub(crate) fn warn_undefined_operands(
         &mut self,
         instruction: phera_bytecode::Instruction,
     ) -> Result<(), NativeError> {
-        let path = match instruction {
-            phera_bytecode::Instruction::Fetch { path, .. }
-            | phera_bytecode::Instruction::FetchIndex { path, .. }
-            | phera_bytecode::Instruction::AssignPath { path, .. }
-            | phera_bytecode::Instruction::AssignPathFromLocal { path, .. }
-            | phera_bytecode::Instruction::AssignOpPath { path, .. }
-            | phera_bytecode::Instruction::IncDecPath { path, .. }
-            | phera_bytecode::Instruction::UnsetPath { path }
-            | phera_bytecode::Instruction::IssetPath { path, .. }
-            | phera_bytecode::Instruction::MakeReference { path, .. }
-            | phera_bytecode::Instruction::BindReference { path, .. }
-            | phera_bytecode::Instruction::SendPath { path }
-            | phera_bytecode::Instruction::IterStartReference { path, .. } => path,
+        use phera_bytecode::Instruction as I;
+        // The registers this instruction reads as keys or operands.
+        let mut registers: Vec<Reg> = Vec::new();
+        match instruction {
+            I::Unary { src, .. } | I::Cast { src, .. } => registers.push(src),
+            I::Fetch { path, .. }
+            | I::FetchIndex { path, .. }
+            | I::AssignPath { path, .. }
+            | I::AssignPathFromLocal { path, .. }
+            | I::AssignOpPath { path, .. }
+            | I::IncDecPath { path, .. }
+            | I::UnsetPath { path }
+            | I::IssetPath { path, .. }
+            | I::MakeReference { path, .. }
+            | I::BindReference { path, .. }
+            | I::SendPath { path }
+            | I::IterStartReference { path, .. } => {
+                // Read the compiled path table directly: resolving the path
+                // here would duplicate the work the handler does right after.
+                if let Some(frame) = self.current()
+                    && let Some(definition) = frame.function().paths.get(path.index())
+                {
+                    registers.extend(definition.steps.iter().filter_map(|step| match step {
+                        Step::Index(register) | Step::DynamicProperty(register) => Some(*register),
+                        Step::Property(_) | Step::Append => None,
+                    }));
+                }
+            }
             _ => return Ok(()),
-        };
-        // Read the compiled path table directly: resolving the path here would
-        // duplicate the work the instruction's own handler does right after.
+        }
         let mut missing: Vec<String> = Vec::new();
-        if let Some(frame) = self.current()
-            && let Some(definition) = frame.function().paths.get(path.index())
-        {
+        if let Some(frame) = self.current() {
             let function = frame.function();
             let locals = function.locals.len();
-            for step in &definition.steps {
-                let register = match step {
-                    Step::Index(register) | Step::DynamicProperty(register) => *register,
-                    Step::Property(_) | Step::Append => continue,
-                };
+            for register in registers {
                 if register.index() >= locals {
                     continue;
                 }

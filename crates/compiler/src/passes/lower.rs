@@ -296,10 +296,10 @@ impl Tables<'_> {
             // Removes the moves that became `Nop`.
             crate::passes::optimize::optimize(&mut function);
         }
-        // After `optimize`, so that a removed key copy does not let
+        // After `optimize`, so that a removed operand copy does not let
         // `fold_operand_copies` read an assignment's source in place too,
         // which would move that source's warning after the key's.
-        crate::passes::local_path_keys::optimize(&mut function);
+        crate::passes::local_operands::optimize(&mut function);
         function
     }
 }

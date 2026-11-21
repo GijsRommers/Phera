@@ -4,7 +4,7 @@ pub(crate) mod direct_calls;
 pub(crate) mod direct_operands;
 pub(crate) mod emission_places;
 pub(crate) mod integer_operands;
-pub(crate) mod local_path_keys;
+pub(crate) mod local_operands;
 pub(crate) mod lower;
 pub(crate) mod lowering;
 pub(crate) mod lowering_tables;
