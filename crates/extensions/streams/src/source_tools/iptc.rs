@@ -149,7 +149,7 @@ fn with_app13(source: &[u8], metadata: &[u8]) -> Option<Vec<u8>> {
             output.extend_from_slice(RESOURCE);
             output.extend_from_slice(&(padded as u32).to_be_bytes());
             output.extend_from_slice(metadata);
-            if metadata.len() % 2 != 0 {
+            if !metadata.len().is_multiple_of(2) {
                 output.push(0);
             }
             inserted = true;
