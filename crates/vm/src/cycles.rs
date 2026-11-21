@@ -242,6 +242,9 @@ impl Vm {
 fn break_apart(garbage: Garbage) {
     let mut contents = Vec::new();
     let mut values = Vec::new();
+    for (key, owner) in &garbage.inactive_attachments {
+        values.extend(key.detach(*owner));
+    }
     for object in &garbage.objects {
         if let Some(properties) = object.update(std::mem::take) {
             contents.push(properties);

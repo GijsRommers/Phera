@@ -8,7 +8,7 @@ use phera_ast::{
 use phera_lexer::TokenKind;
 
 use crate::error::ParseError;
-use crate::parser::Parser;
+use crate::parser::{ParsePurpose, Parser};
 
 mod labels;
 
@@ -89,13 +89,13 @@ impl Parser<'_> {
             TokenKind::Declare => return self.parse_declare(),
             TokenKind::Break => {
                 self.bump()?;
-                let level = self.parse_jump_level()?;
+                let level = self.parse_jump_level("break")?;
                 self.expect_end()?;
                 StatementKind::Break(level)
             }
             TokenKind::Continue => {
                 self.bump()?;
-                let level = self.parse_jump_level()?;
+                let level = self.parse_jump_level("continue")?;
                 self.expect_end()?;
                 StatementKind::Continue(level)
             }
@@ -797,19 +797,31 @@ impl Parser<'_> {
     }
 
     /// `break;` is `Break(1)`; `break 2;` is `Break(2)`.
-    fn parse_jump_level(&mut self) -> Result<u32, ParseError> {
+    fn parse_jump_level(&mut self, keyword: &str) -> Result<u32, ParseError> {
         if self.at(TokenKind::Semicolon) || self.at(TokenKind::CloseTag) {
             return Ok(1);
         }
         // PHP accepts any expression here and rejects invalid levels at
         // compile time; the AST stores a plain level.
         let expression = self.parse_expr(0)?;
-        Ok(match &expression.kind {
-            ExpressionKind::Literal(Literal::Int(value)) => {
-                (*value).clamp(0, u32::MAX as i64) as u32
+        match expression.kind {
+            ExpressionKind::Literal(Literal::Int(value))
+                if value > 0 || self.purpose == ParsePurpose::Syntax =>
+            {
+                Ok(value.clamp(0, u32::MAX as i64) as u32)
             }
-            _ => 1,
-        })
+            _ if self.purpose == ParsePurpose::Syntax => Ok(1),
+            ExpressionKind::Literal(Literal::Int(_) | Literal::Float(_) | Literal::String(_)) => {
+                Err(ParseError::compile(
+                    format!("'{keyword}' operator accepts only positive integers"),
+                    expression.span,
+                ))
+            }
+            _ => Err(ParseError::compile(
+                format!("'{keyword}' operator with non-integer operand is no longer supported"),
+                expression.span,
+            )),
+        }
     }
 
     /// A comma-separated expression list up to (not including) `stop`.
