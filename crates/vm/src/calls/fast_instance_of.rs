@@ -34,7 +34,7 @@ const WALK_VISITS: usize = 256;
 
 impl Machine<'_> {
     /// `InstanceOf`, as `Vm::instance_of` answers it.
-    pub(super) fn instance_of<const GUARDED: bool>(
+    pub(super) fn instance_of(
         &mut self,
         position: Position,
         destination: Reg,
@@ -42,9 +42,9 @@ impl Machine<'_> {
         symbol: SymbolId,
     ) -> Step {
         // A `catch` clause is an `instanceof` of the thrown object, reached
-        // while the unwinding may have left destructors due; the VM's exit
-        // runs them before the clause's code, as PHP does.
-        if GUARDED {
+        // while the unwinding may have left a destructor waiting; the VM's
+        // exit runs it before the clause's code, as PHP does.
+        if self.ids.has_doomed() {
             return Step::Slow;
         }
         let slot = position.frame.base() + source.index();
@@ -69,8 +69,8 @@ impl Machine<'_> {
             _ => return Step::Slow,
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, Value::Bool(answer)) {
-            ScalarStep::Complete => Step::Done(position.ip),
+        match store(slots, destination, Value::Bool(answer)) {
+            ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
     }

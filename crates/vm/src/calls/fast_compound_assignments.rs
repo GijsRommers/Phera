@@ -40,14 +40,14 @@ struct Update {
 
 impl Machine<'_> {
     /// `AssignOpPath` of a declared property or of an array element.
-    pub(super) fn assign_operation<const GUARDED: bool>(
+    pub(super) fn assign_operation(
         &mut self,
         position: Position,
         (operator, destination): (BinaryOp, Reg),
         path: PathId,
         source: Reg,
     ) -> Step {
-        if GUARDED || operator == BinaryOp::Concat {
+        if operator == BinaryOp::Concat {
             return Step::Slow;
         }
         let right = match self
@@ -68,15 +68,12 @@ impl Machine<'_> {
 
     /// `IncDecPath` of an array element holding an integer or a float.
     /// (`++` of a property is `fast_properties::increment_property`.)
-    pub(super) fn increment_element<const GUARDED: bool>(
+    pub(super) fn increment_element(
         &mut self,
         position: Position,
         (mode, destination): (IncDec, Reg),
         path: PathId,
     ) -> Step {
-        if GUARDED {
-            return Step::Slow;
-        }
         let up = matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement);
         let post = matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement);
         self.update_place(position, destination, path, |old| {
@@ -138,7 +135,7 @@ impl Machine<'_> {
         };
         // Outside the guarded loop, into a register checked above, a store
         // completes.
-        let _ = store::<false>(self.registers.tail_mut(base), destination, result);
+        let _ = store(self.registers.tail_mut(base), destination, result);
         Step::Done(position.ip)
     }
 

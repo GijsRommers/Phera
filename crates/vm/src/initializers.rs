@@ -83,9 +83,10 @@ impl Vm {
         let function = crate::code_table::body(&unit, self.code.local(*reference));
         while let Some(instruction) = function.instructions.get(*position).copied() {
             *position += 1;
-            if crate::fast::scalar_step::<false>(&instruction, slots, position)
-                == crate::fast::ScalarStep::Complete
-            {
+            if matches!(
+                crate::fast::scalar_step(&instruction, slots, position),
+                crate::fast::ScalarStep::Complete | crate::fast::ScalarStep::Released
+            ) {
                 continue;
             }
             match self.initializer_callable(instruction, reference, scope, prepared, slots)? {

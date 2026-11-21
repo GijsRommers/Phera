@@ -34,7 +34,7 @@ use phera_value::{Object, Value};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::classes::Class;
-use crate::fast::{ScalarStep, owns_heap_values, store};
+use crate::fast::{ScalarStep, store};
 use crate::property_sites::PropertyEntry;
 use crate::unit_caches::CachedSite;
 
@@ -42,7 +42,7 @@ impl Machine<'_> {
     /// `Fetch` in read mode of a path that is one declared property of
     /// `$this` or of an object in a register.
     #[inline(never)]
-    pub(super) fn fetch_property<const GUARDED: bool>(
+    pub(super) fn fetch_property(
         &mut self,
         position: Position,
         destination: Reg,
@@ -52,8 +52,8 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, value) {
-            ScalarStep::Complete => Step::Done(position.ip),
+        match store(slots, destination, value) {
+            ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
     }
@@ -61,7 +61,7 @@ impl Machine<'_> {
     /// `Fetch` of one declared property in a quiet mode (`??`, `isset`,
     /// `empty`). Unlike a plain read, PHP calls a `get` hook first here,
     /// so a property with hooks is left to the VM.
-    pub(super) fn fetch_property_quietly<const GUARDED: bool>(
+    pub(super) fn fetch_property_quietly(
         &mut self,
         position: Position,
         destination: Reg,
@@ -76,8 +76,8 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, value) {
-            ScalarStep::Complete => Step::Done(position.ip),
+        match store(slots, destination, value) {
+            ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
     }
@@ -85,15 +85,12 @@ impl Machine<'_> {
     /// `AssignPath`, or with `result` `AssignPathFromLocal`, of a value to
     /// one declared property, outside the guarded loop.
     #[inline(never)]
-    pub(super) fn assign_property<const GUARDED: bool>(
+    pub(super) fn assign_property(
         &mut self,
         position: Position,
         path: PathId,
         (source, result): (Reg, Option<Reg>),
     ) -> Step {
-        if GUARDED {
-            return Step::Slow;
-        }
         let base = position.frame.base();
         // Once the property is written, the value must be stored.
         if result.is_some_and(|result| self.registers.window(base + result.index(), 1).is_empty()) {
@@ -112,14 +109,14 @@ impl Machine<'_> {
         if let Some(result) = result {
             // Outside the guarded loop, into a register checked above, a
             // store completes.
-            let _ = store::<false>(self.registers.tail_mut(base), result, value);
+            let _ = store(self.registers.tail_mut(base), result, value);
         }
         Step::Done(position.ip)
     }
 
     /// `IncDecPath` of one declared integer property.
     #[inline(never)]
-    pub(super) fn increment_property<const GUARDED: bool>(
+    pub(super) fn increment_property(
         &mut self,
         position: Position,
         (mode, destination): (IncDec, Reg),
@@ -130,7 +127,7 @@ impl Machine<'_> {
         // over an array or object could free one with a destructor.
         let slot = position.frame.base() + destination.index();
         match self.registers.window(slot, 1) {
-            [held] if !(GUARDED && owns_heap_values(held)) => {}
+            [_] => {}
             _ => return Step::Slow,
         }
         let Some(value) = self.with_site(position, (path, Shape::Write), |entry, object, scope| {

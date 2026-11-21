@@ -21,7 +21,7 @@ use crate::fast::{ScalarStep, store};
 
 impl Machine<'_> {
     /// `FetchClassName`, as `Vm::class_symbol_value` gives it.
-    pub(super) fn fetch_class_name<const GUARDED: bool>(
+    pub(super) fn fetch_class_name(
         &mut self,
         position: Position,
         destination: Reg,
@@ -31,8 +31,8 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, name) {
-            ScalarStep::Complete => Step::Done(position.ip),
+        match store(slots, destination, name) {
+            ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
     }

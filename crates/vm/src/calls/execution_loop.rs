@@ -156,15 +156,9 @@ impl Vm {
                 ids: &self.object_ids,
                 registry: &self.registry,
             };
-            // While no live object has a destructor due, no release can
-            // make one due, and the loop is the plain one (see
-            // `crate::destructors`). Making such an object leaves the loop,
-            // so the next batch is guarded.
-            let exit = if self.object_ids.has_due() {
-                machine.run_guarded()
-            } else {
-                machine.run::<false>()
-            };
+            // A release that frees an object with a destructor leaves the
+            // loop at the next instruction boundary (see `Machine::run`).
+            let exit = machine.run();
             *work = machine.work;
             self.executed_instructions += machine.executed;
             let instruction = match exit {
@@ -247,17 +241,9 @@ impl Vm {
 }
 
 impl Machine<'_> {
-    /// The loop while some object has a destructor due. Kept out of line,
-    /// so that it does not change how the plain loop compiles.
-    #[cold]
-    #[inline(never)]
-    fn run_guarded(&mut self) -> LoopExit {
-        self.run::<true>()
-    }
-
     /// The loop itself. Simple instructions run in [`Machine::run_simple`];
     /// this loop takes the others and switches frames on calls and returns.
-    fn run<const GUARDED: bool>(&mut self) -> LoopExit {
+    fn run(&mut self) -> LoopExit {
         let [.., frame] = self.stack.frames() else {
             return LoopExit::Invalid;
         };
@@ -268,17 +254,24 @@ impl Machine<'_> {
         };
         let mut instructions = self.code.instructions(frame.function);
         loop {
-            let instruction = match self.run_simple::<GUARDED>(instructions, &mut position) {
+            let instruction = match self.run_simple(instructions, &mut position) {
                 Ok(instruction) => instruction,
                 Err(exit) => return exit,
             };
-            match self.step::<GUARDED>(instruction, position) {
-                Step::Done(ip) => position.ip = ip,
+            match self.step(instruction, position) {
+                Step::Done(ip) => {
+                    // A step may have let go of the last handle on an
+                    // object with a destructor: it runs before the next
+                    // instruction, as the VM runs it after one.
+                    if self.ids.has_doomed() {
+                        self.publish(ip);
+                        return destructors_due();
+                    }
+                    position.ip = ip;
+                }
                 Step::Switched(next) => {
-                    // A return releases the frame's variables. Simple
-                    // instructions release nothing (see `crate::fast`), and
-                    // other steps write registers that hold nothing.
-                    if GUARDED && self.ids.has_doomed() {
+                    // A return releases the frame's variables.
+                    if self.ids.has_doomed() {
                         return destructors_due();
                     }
                     position = next;
@@ -297,7 +290,7 @@ impl Machine<'_> {
     /// the counters in locals, until one is not simple. Returns that one,
     /// with `position` just past it.
     #[inline(always)]
-    fn run_simple<const GUARDED: bool>(
+    fn run_simple(
         &mut self,
         instructions: &[Instruction],
         position: &mut Position,
@@ -313,17 +306,20 @@ impl Machine<'_> {
             let previous = ip;
             ip += 1;
             executed += 1;
-            let step = match scalar_step::<GUARDED>(instruction, slots, &mut ip) {
+            let step = match scalar_step(instruction, slots, &mut ip) {
                 ScalarStep::Fallback => match *instruction {
                     Instruction::FetchIndex {
                         dst, base, index, ..
-                    } => array_index_step::<GUARDED>(dst, base, index, slots),
+                    } => array_index_step(dst, base, index, slots),
                     _ => ScalarStep::Fallback,
                 },
                 complete => complete,
             };
-            if step == ScalarStep::Fallback {
-                break Ok(*instruction);
+            match step {
+                ScalarStep::Fallback => break Ok(*instruction),
+                // Freeing what a register held may have queued a destructor.
+                ScalarStep::Released if self.ids.has_doomed() => break Err(destructors_due()),
+                ScalarStep::Complete | ScalarStep::Released => {}
             }
             // Only backward jumps count as work; comparing positions also
             // covers fused compare-and-branch instructions.
@@ -347,7 +343,7 @@ impl Machine<'_> {
     /// The instructions that are not simple but need only the borrowed
     /// state: `foreach` over a snapshot, direct calls and plain returns.
     #[inline(always)]
-    fn step<const GUARDED: bool>(&mut self, instruction: Instruction, position: Position) -> Step {
+    fn step(&mut self, instruction: Instruction, position: Position) -> Step {
         let base = position.frame.base();
         let mut ip = position.ip;
         match instruction {
@@ -373,17 +369,6 @@ impl Machine<'_> {
                 };
                 let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
-                // In the guarded loop, overwriting the variables could let go
-                // of an object whose destructor must run at once.
-                if GUARDED
-                    && [key, value].iter().any(|register| {
-                        slots
-                            .get(register.index())
-                            .is_none_or(crate::fast::owns_heap_values)
-                    })
-                {
-                    return Step::Slow;
-                }
                 match crate::iteration::keyed_step(
                     iter,
                     (key, value),
@@ -425,13 +410,13 @@ impl Machine<'_> {
             Instruction::LoadConst { dst, constant } => self.load_constant(position, dst, constant),
             Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
             Instruction::Call { dst, .. } => self.enter_prepared(position, dst),
-            Instruction::New { class } => self.new_object::<GUARDED>(position, class),
+            Instruction::New { class } => self.new_object(position, class),
             Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
             Instruction::FetchThis { dst } | Instruction::ThisOrNull { dst } => {
                 self.fetch_this(position, dst)
             }
-            Instruction::Return { src } => self.leave_plain::<GUARDED>(Some(src)),
-            Instruction::ReturnNull => self.leave_plain::<GUARDED>(None),
+            Instruction::Return { src } => self.leave_plain(Some(src)),
+            Instruction::ReturnNull => self.leave_plain(None),
             // Listed, so that the instructions further_step never takes do
             // not pay for a call to it on their way to the VM.
             Instruction::Binary { .. }
@@ -450,7 +435,7 @@ impl Machine<'_> {
             | Instruction::InstanceOf { .. }
             | Instruction::SendPath { .. }
             | Instruction::IterStart { .. }
-            | Instruction::IterEnd { .. } => self.further_step::<GUARDED>(instruction, position),
+            | Instruction::IterEnd { .. } => self.further_step(instruction, position),
             _ => Step::Slow,
         }
     }
