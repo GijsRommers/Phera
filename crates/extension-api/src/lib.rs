@@ -42,8 +42,8 @@ pub use function::{
 };
 pub use object_handlers::{
     ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeBinary,
-    NativeClone, NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeForkHook,
-    NativeIterator, NativeRelease, PropertyProjection, PropertyPurpose, fork_clone,
+    NativeClone, NativeCompare, NativeComparison, NativeCount, NativeCycleTrace, NativeDimensions,
+    NativeForkHook, NativeIterator, NativeRelease, PropertyProjection, PropertyPurpose, fork_clone,
     fork_refused_handle,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
