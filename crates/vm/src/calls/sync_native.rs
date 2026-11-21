@@ -247,8 +247,10 @@ impl Vm {
         };
         let NativeFn::Sync(handler) = entry.handler else {
             // Their callbacks run on the frame stack (`calls::native_loops`).
-            if matches!(entry.name, "array_filter" | "array_reduce")
-                && let Some(exit) = self.start_native_function_loop(destination, entry)?
+            if matches!(
+                entry.name,
+                "array_filter" | "array_reduce" | "usort" | "uasort" | "uksort"
+            ) && let Some(exit) = self.start_native_function_loop(destination, entry)?
             {
                 return Ok(exit);
             }

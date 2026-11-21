@@ -18,8 +18,9 @@
 //! closure written in PHP is entered the way the interpreter loop enters
 //! `$f($value)`, and its plain return is made in the loop.
 //!
-//! So far `array_map` over one array, `array_filter` with a callback and
-//! `array_reduce`, each with a closure that is PHP code and takes its
+//! So far `array_map` over one array, `array_filter` with a callback,
+//! `array_reduce`, and `usort`, `uasort` and `uksort` (whose sort asks for
+//! one comparison at a time, `calls::native_sorts`), each with a closure that is PHP code and takes its
 //! parameters by value. Everything else (a string or array callable, which
 //! may need the autoloader; several arrays; a generator; a by-reference
 //! parameter; named arguments; pending error handlers) takes the async path
@@ -37,6 +38,7 @@ use crate::Vm;
 use crate::calls::call_state::{CallTarget, Callee};
 use crate::calls::callback_binding::ArgumentOrigin;
 use crate::calls::execution_loop::BatchExit;
+use crate::calls::native_sorts::{NativeSort, SortStep, UserSort};
 use crate::calls::prepared_call::PreparedCallee;
 use crate::error_traces::NativeCaller;
 
@@ -58,6 +60,8 @@ pub(crate) struct NativeLoop {
     result: PhpArray,
     /// What `array_reduce` carries from one callback to the next.
     carry: Value,
+    /// A user sort's own state, out of the state while its step runs.
+    sort: Option<Box<NativeSort>>,
 }
 
 /// Which built-in, and for `array_filter` what its callback is given.
@@ -66,6 +70,7 @@ enum Kind {
     Map,
     Filter(FilterArguments),
     Reduce,
+    Sort,
 }
 
 /// `array_filter`'s mode: the value, the key (`ARRAY_FILTER_USE_KEY`) or
@@ -88,7 +93,8 @@ impl Vm {
         self.start_native_loop(destination, None)
     }
 
-    /// The same for `array_filter` and `array_reduce`, by `entry`.
+    /// The same for `array_filter`, `array_reduce` and the user sorts, by
+    /// `entry`.
     #[inline(never)]
     pub(crate) fn start_native_function_loop(
         &mut self,
@@ -116,9 +122,10 @@ impl Vm {
         let sent = call.sent as usize;
         let window = self.registers.window(call.base(), sent);
         let name = entry.map(|entry| entry.name);
+        let mut sort = None;
         let (kind, callback, input, carry) = match (name, window) {
             (None, [Some(callback @ Value::Object(_)), Some(Value::Array(input))]) => {
-                (Kind::Map, callback, input, Value::Null)
+                (Kind::Map, callback, input.clone(), Value::Null)
             }
             (
                 Some("array_filter"),
@@ -134,7 +141,12 @@ impl Vm {
                     [Some(Value::Int(2))] => FilterArguments::Key,
                     _ => return Ok(None),
                 };
-                (Kind::Filter(arguments), callback, input, Value::Null)
+                (
+                    Kind::Filter(arguments),
+                    callback,
+                    input.clone(),
+                    Value::Null,
+                )
             }
             (
                 Some("array_reduce"),
@@ -149,11 +161,32 @@ impl Vm {
                     [Some(initial)] if !initial.is_reference() => initial.clone(),
                     _ => return Ok(None),
                 };
-                (Kind::Reduce, callback, input, carry)
+                (Kind::Reduce, callback, input.clone(), carry)
+            }
+            (
+                Some(name),
+                [
+                    Some(Value::Reference(variable)),
+                    Some(callback @ Value::Object(_)),
+                ],
+            ) => {
+                let Some(which) = UserSort::of(name) else {
+                    return Ok(None);
+                };
+                let Ok(held) = variable.try_borrow() else {
+                    return Ok(None);
+                };
+                let Value::Array(input) = &*held else {
+                    return Ok(None);
+                };
+                let input = input.clone();
+                drop(held);
+                sort = Some((which, variable.clone()));
+                (Kind::Sort, callback, input, Value::Null)
             }
             _ => return Ok(None),
         };
-        let (callback, input) = (callback.clone(), input.clone());
+        let callback = callback.clone();
         let Ok(callee) = self.resolve_callable(&callback) else {
             return Ok(None);
         };
@@ -172,6 +205,7 @@ impl Vm {
             let result = match kind {
                 Kind::Reduce => carry,
                 Kind::Map | Kind::Filter(_) => Value::Array(Rc::new(PhpArray::new())),
+                Kind::Sort => Value::Bool(true),
             };
             self.call_stack.recycle_native_arguments(arguments);
             self.set(destination, result);
@@ -189,8 +223,9 @@ impl Vm {
         let origin = callee.argument_binding.origin(ArgumentOrigin::Callback);
         let result = match kind {
             Kind::Map => PhpArray::with_capacity(input.len()),
-            Kind::Filter(_) | Kind::Reduce => PhpArray::new(),
+            Kind::Filter(_) | Kind::Reduce | Kind::Sort => PhpArray::new(),
         };
+        let sort = sort.map(|(which, variable)| NativeSort::new(which, &input, variable));
         self.call_stack.native_loops.push(NativeLoop {
             depth: self.call_stack.depth() + 1,
             destination,
@@ -202,8 +237,12 @@ impl Vm {
             key: ArrayKey::Int(0),
             result,
             carry,
+            sort: sort.map(Box::new),
         });
-        self.enter_loop_callback()?;
+        match kind {
+            Kind::Sort => self.sort_step(None)?,
+            Kind::Map | Kind::Filter(_) | Kind::Reduce => self.enter_element_callback()?,
+        }
         Ok(Some(None))
     }
 
@@ -225,18 +264,14 @@ impl Vm {
         runs
     }
 
-    /// Enters the callback for the element at the state's position. When
-    /// that fails (an argument the callback's type refuses), the built-in
-    /// ends with the error.
-    fn enter_loop_callback(&mut self) -> Result<(), NativeError> {
-        let entered = self.try_enter_loop_callback();
-        if entered.is_err() {
-            self.abandon_native_loop();
-        }
-        entered
+    /// Enters the callback for the element at the state's position.
+    fn enter_element_callback(&mut self) -> Result<(), NativeError> {
+        let arguments = self.element_arguments();
+        self.enter_loop_callback(arguments)
     }
 
-    fn try_enter_loop_callback(&mut self) -> Result<(), NativeError> {
+    /// The callback's arguments for the element at the state's position.
+    fn element_arguments(&mut self) -> Result<[Option<Value>; 2], NativeError> {
         let Some(state) = self.call_stack.native_loops.last_mut() else {
             return Err(internal_error!("native loop"));
         };
@@ -244,13 +279,37 @@ impl Vm {
             return Err(internal_error!("native loop element"));
         };
         let element = element.deref().clone();
-        let arguments: [Option<Value>; 2] = match state.kind {
+        let arguments = match state.kind {
             Kind::Map | Kind::Filter(FilterArguments::Value) => [Some(element), None],
             Kind::Filter(FilterArguments::Key) => [Some(Value::from(key.clone())), None],
             Kind::Filter(FilterArguments::Both) => [Some(element), Some(Value::from(key.clone()))],
             Kind::Reduce => [Some(std::mem::take(&mut state.carry)), Some(element)],
+            Kind::Sort => return Err(internal_error!("native loop sort")),
         };
         state.key = key;
+        Ok(arguments)
+    }
+
+    /// Enters the callback with `arguments`. When that fails (an argument
+    /// the callback's type refuses), the built-in ends with the error.
+    fn enter_loop_callback(
+        &mut self,
+        arguments: Result<[Option<Value>; 2], NativeError>,
+    ) -> Result<(), NativeError> {
+        let entered = arguments.and_then(|arguments| self.try_enter_loop_callback(arguments));
+        if entered.is_err() {
+            self.abandon_native_loop();
+        }
+        entered
+    }
+
+    fn try_enter_loop_callback(
+        &mut self,
+        arguments: [Option<Value>; 2],
+    ) -> Result<(), NativeError> {
+        let Some(state) = self.call_stack.native_loops.last() else {
+            return Err(internal_error!("native loop"));
+        };
         let origin = state.origin;
         let closure = match &state.callee.target {
             CallTarget::Closure(closure) => Some(closure.clone()),
@@ -371,6 +430,7 @@ impl Vm {
                 }
             }
             Kind::Reduce => state.carry = value.deref().clone(),
+            Kind::Sort => return self.sort_step(Some(value)),
         }
         let next = state.input.next_position(state.position);
         if nan && filter {
@@ -380,7 +440,7 @@ impl Vm {
             if let Some(state) = self.call_stack.native_loops.last_mut() {
                 state.position = next;
             }
-            return self.enter_loop_callback();
+            return self.enter_element_callback();
         }
         let Some(state) = self.call_stack.native_loops.pop() else {
             return Err(internal_error!("native loop"));
@@ -389,9 +449,46 @@ impl Vm {
         let result = match state.kind {
             Kind::Reduce => state.carry,
             Kind::Map | Kind::Filter(_) => Value::Array(Rc::new(state.result)),
+            Kind::Sort => Value::Bool(true),
         };
         self.set(state.destination, result);
         Ok(())
+    }
+
+    /// The next step of a user sort: with the value its last callback
+    /// returned, if any, the sort runs to its next comparison and enters
+    /// the callback for it, or it is done and the call returns `true`.
+    fn sort_step(&mut self, returned: Option<Value>) -> Result<(), NativeError> {
+        let Some(mut sort) = self
+            .call_stack
+            .native_loops
+            .last_mut()
+            .and_then(|state| state.sort.take())
+        else {
+            return Err(internal_error!("native loop sort"));
+        };
+        let again = returned.and_then(|value| sort.answered(&value.deref().clone(), self));
+        let step = match again {
+            Some(arguments) => SortStep::Compare(arguments),
+            None => sort.next_step(),
+        };
+        match step {
+            SortStep::Compare([left, right]) => {
+                if let Some(state) = self.call_stack.native_loops.last_mut() {
+                    state.sort = Some(sort);
+                }
+                self.enter_loop_callback(Ok([Some(left), Some(right)]))
+            }
+            SortStep::Done(result) => {
+                let Some(state) = self.call_stack.native_loops.pop() else {
+                    return Err(internal_error!("native loop"));
+                };
+                self.finish_native_loop_site();
+                result?;
+                self.set(state.destination, Value::Bool(true));
+                Ok(())
+            }
+        }
     }
 
     /// An exception left the callback frame of the innermost native loop:
@@ -399,7 +496,10 @@ impl Vm {
     #[cold]
     #[inline(never)]
     pub(crate) fn abandon_native_loop(&mut self) {
-        if self.call_stack.native_loops.pop().is_some() {
+        if let Some(state) = self.call_stack.native_loops.pop() {
+            if let Some(sort) = state.sort {
+                sort.abandon();
+            }
             self.finish_native_loop_site();
         }
     }
