@@ -132,7 +132,7 @@ impl Machine<'_> {
     ) -> Option<Step> {
         let base = position.frame.base();
         let object = match self.registers.window(base + site.receiver.index(), 1) {
-            [Some(Value::Object(object))] => object,
+            [Some(Value::Object(object))] => object.clone(),
             _ => return None,
         };
         let class = object.class.as_any().downcast_ref::<Class>()?;
@@ -144,7 +144,7 @@ impl Machine<'_> {
         let MethodBody::User(function) = method.body else {
             return None;
         };
-        let scope = self.running_scope();
+        let scope = self.caller_scope(position);
         if method.is_abstract
             || method.is_static
             || !may_call(&found, scope)
@@ -162,24 +162,26 @@ impl Machine<'_> {
         {
             return None;
         }
-        for (index, argument) in arguments.iter().enumerate() {
-            match self.registers.window(base + argument.register().index(), 1) {
-                [Some(value)]
-                    if !value.is_reference() && self.accepts_argument(function, index, value) => {}
-                _ => return None,
-            }
-        }
-        let this = Value::Object(object.clone());
+        // The window, filled as the arguments pass their tests: one that
+        // fails empties it again, which only drops copies.
         let start = self.registers.len();
         let first = start + CallKind::Method.prefix();
-        self.registers
-            .grow_to(first + crate::calls::pending::php_window(self.code, function));
-        self.registers.put(start, this);
+        let window = (facts.registers.max(facts.parameters) as usize).max(1);
+        self.registers.grow_to(first + window);
+        self.registers.put(start, Value::Object(object));
         for (index, argument) in arguments.iter().enumerate() {
-            if let [Some(value)] = self.registers.window(base + argument.register().index(), 1) {
-                let value = value.clone();
-                self.registers.put(first + index, value);
+            let value = match self.registers.window(base + argument.register().index(), 1) {
+                [Some(value)] if !value.is_reference() => value,
+                _ => return self.abandon_window(start),
+            };
+            let plain = facts.takes_value(index)
+                && (!facts.is_typed(index)
+                    || facts.parameter_masks[index].intersects(crate::types::own_type(value)));
+            if !plain && !self.accepts_argument(function, index, value) {
+                return self.abandon_window(start);
             }
+            let value = value.clone();
+            self.registers.put(first + index, value);
         }
         self.publish(position.ip);
         let mut frame = Frame::of_kind(function, CallKind::Method, first, Some(destination));
@@ -191,6 +193,30 @@ impl Machine<'_> {
             return Some(Step::Yield);
         }
         Some(Step::Switched(Position { frame, ip: 0 }))
+    }
+
+    /// Give back a window a method site's entry started to fill.
+    #[cold]
+    #[inline(never)]
+    fn abandon_window(&mut self, start: usize) -> Option<Step> {
+        self.registers.truncate(start);
+        None
+    }
+
+    /// The class scope of the code at `position`: for a method, the class
+    /// that declares it, read from the function's facts; a closure's takes
+    /// the general way.
+    #[inline(always)]
+    fn caller_scope(&self, position: Position) -> Option<&Rc<Class>> {
+        match position.frame.kind() {
+            CallKind::Function => None,
+            CallKind::Method | CallKind::Constructor => self
+                .code
+                .facts(position.frame.function)
+                .class
+                .map(|index| self.classes.class(index)),
+            CallKind::Closure => self.running_scope(),
+        }
     }
 
     /// `$object->getter()` of a public native method with no parameters
