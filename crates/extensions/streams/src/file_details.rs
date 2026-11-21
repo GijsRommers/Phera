@@ -2,7 +2,9 @@
 
 use std::{fs, io, os::unix::fs::MetadataExt, path::PathBuf};
 
-use phera_extension_api::{Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args};
+use phera_extension_api::{
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
+};
 
 use crate::errors::{check_path, reason};
 use crate::handles::FILENAME;
@@ -20,7 +22,11 @@ pub(super) fn register(registry: &mut Registry) {
         &[FILENAME, Param::new("project_id", ParamType::String)],
         ftok,
     ));
-    for (name, returns) in [("linkinfo", "int|false"), ("getlastmod", "int|false"), ("ftok", "int")] {
+    for (name, returns) in [
+        ("linkinfo", "int|false"),
+        ("getlastmod", "int|false"),
+        ("ftok", "int"),
+    ] {
         registry.describe_function(name, returns, Some("standard"));
     }
 }
@@ -39,7 +45,8 @@ fn linkinfo(context: &mut dyn Context, values: &[Value]) -> NativeResult {
 }
 
 fn getlastmod(context: &mut dyn Context, _: &[Value]) -> NativeResult {
-    Ok(context.entry_script_path()
+    Ok(context
+        .entry_script_path()
         .and_then(|file| fs::metadata(file).ok())
         .map_or(Value::Bool(false), |metadata| Value::Int(metadata.mtime())))
 }
@@ -48,15 +55,21 @@ fn ftok(context: &mut dyn Context, values: &[Value]) -> NativeResult {
     let name = args::bytes(values, 0);
     check_path("ftok", "#1 ($filename)", name)?;
     if name.is_empty() {
-        return Err(NativeError::value_error("ftok(): Argument #1 ($filename) must not be empty"));
+        return Err(NativeError::value_error(
+            "ftok(): Argument #1 ($filename) must not be empty",
+        ));
     }
     let [id] = args::bytes(values, 1) else {
-        return Err(NativeError::value_error("ftok(): Argument #2 ($project_id) must be a single character"));
+        return Err(NativeError::value_error(
+            "ftok(): Argument #2 ($project_id) must be a single character",
+        ));
     };
     let result = local_file(context, name).and_then(fs::metadata);
     Ok(match result {
         Ok(metadata) => {
-            let key = (u64::from(*id) << 24) | ((metadata.dev() & 0xff) << 16) | (metadata.ino() & 0xffff);
+            let key = (u64::from(*id) << 24)
+                | ((metadata.dev() & 0xff) << 16)
+                | (metadata.ino() & 0xffff);
             Value::Int(i64::from(key as i32))
         }
         Err(error) => {

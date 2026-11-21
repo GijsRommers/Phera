@@ -1,9 +1,8 @@
 //! highlight_file('example.php', true) returns colored HTML without executing the source.
-
-mod meta_tags;
 //! php_strip_whitespace('example.php') returns the same source with trivia collapsed.
 
 mod highlight;
+mod meta_tags;
 mod strip;
 
 use phera_extension_api::{

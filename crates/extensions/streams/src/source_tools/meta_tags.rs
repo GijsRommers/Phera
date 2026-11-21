@@ -1,11 +1,15 @@
 //! `get_meta_tags('page.html')` reads named meta elements before the end of the head.
 
 use phera_extension_api::{
-    ArrayKey, ConstantValue, Context, FunctionEntry, LocalFuture, NativeResult, Param,
-    ParamType, PhpArray, Registry, Value, args,
+    ArrayKey, ConstantValue, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType,
+    PhpArray, Registry, Value, args,
 };
 
-use crate::{errors::check_path, filtered_files, handles::{FILENAME, open_resource}};
+use crate::{
+    errors::check_path,
+    filtered_files,
+    handles::{FILENAME, open_resource},
+};
 
 pub(super) fn register(registry: &mut Registry) {
     registry.function(FunctionEntry::asynchronous(
@@ -26,7 +30,8 @@ fn read(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
         let name = args::bytes(&arguments, 0);
         check_path(FUNCTION, "#1 ($filename)", name)?;
         let include_path = args::bool(&arguments, 1).unwrap_or(false);
-        let stream = open_resource(context, FUNCTION, name, b"rb", include_path, &Value::Null).await?;
+        let stream =
+            open_resource(context, FUNCTION, name, b"rb", include_path, &Value::Null).await?;
         match filtered_files::contents(context, stream, FUNCTION, 0, None).await? {
             Value::String(source) => Ok(Value::from(meta_tags(source.as_bytes()))),
             other => Ok(other),
@@ -107,9 +112,16 @@ fn named_meta(mut attrs: &[u8]) -> Option<(Vec<u8>, &[u8])> {
         attrs = rest;
     }
     let name = name?;
-    let key = name.iter().map(|byte| {
-        if byte.is_ascii_alphanumeric() { byte.to_ascii_lowercase() } else { b'_' }
-    }).collect();
+    let key = name
+        .iter()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() {
+                byte.to_ascii_lowercase()
+            } else {
+                b'_'
+            }
+        })
+        .collect();
     Some((key, content.unwrap_or_default()))
 }
 
@@ -120,7 +132,10 @@ fn attr_value(source: &[u8]) -> Option<(&[u8], &[u8])> {
         let end = rest.iter().position(|&byte| byte == quote)?;
         Some((&rest[..end], &rest[end + 1..]))
     } else {
-        let end = source.iter().position(u8::is_ascii_whitespace).unwrap_or(source.len());
+        let end = source
+            .iter()
+            .position(u8::is_ascii_whitespace)
+            .unwrap_or(source.len());
         Some((&source[..end], &source[end..]))
     }
 }
