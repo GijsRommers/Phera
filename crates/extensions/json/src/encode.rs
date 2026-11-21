@@ -173,7 +173,9 @@ impl Encoder {
                 Work::Value(Value::Object(object), level) => return Some((object, level)),
                 Work::Value(value, level) => self.value(&value, level),
                 Work::ReleaseSerializer(guard) => drop(guard),
-                Work::ReleaseReference(_) => {}
+                Work::ReleaseReference(reference) => {
+                    self.work.leave(Rc::as_ptr(&reference) as usize);
+                }
                 Work::Container(mut container) => {
                     let level = container.level;
                     let object = container.object;
@@ -195,6 +197,7 @@ impl Encoder {
                         }
                         self.value(&value, level);
                     } else {
+                        self.work.leave(container.identity());
                         if level as i64 > self.depth {
                             self.error = Error::Depth;
                             self.halted = !self.flags.partial_output;
@@ -272,7 +275,8 @@ impl Encoder {
                 }
                 // A reference already borrowed for writing is one being changed further up.
                 if let Ok(value) = reference.try_borrow() {
-                    self.work.push(Work::ReleaseReference(reference.clone()));
+                    self.work
+                        .push_active(identity, Work::ReleaseReference(reference.clone()));
                     self.work.push(Work::value(value.clone(), level));
                 } else {
                     self.failure(Error::Recursion);
@@ -289,13 +293,16 @@ impl Encoder {
     }
 
     fn container(&mut self, owner: Owner, object: bool, level: usize) {
-        if self.work.contains(owner.identity()) {
+        let identity = owner.identity();
+        if self.work.contains(identity) {
             self.failure(Error::Recursion);
             return;
         }
         self.output.push(if object { '{' } else { '[' });
-        self.work
-            .push(Work::Container(Container::new(owner, object, level + 1)));
+        self.work.push_active(
+            identity,
+            Work::Container(Container::new(owner, object, level + 1)),
+        );
     }
 
     /// A float in the shortest decimal form that reads back as the same
