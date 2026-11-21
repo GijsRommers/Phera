@@ -80,33 +80,18 @@ impl PhpArray {
             }
         }
     }
+}
 
-    // Keep the iterative walker and its work list off the stack of small drops.
-    #[inline(never)]
-    fn release_storage(&mut self) {
+impl Drop for PhpArray {
+    fn drop(&mut self) {
+        if self.storage.len() == 0 {
+            return;
+        }
         match std::mem::take(&mut self.storage) {
             Storage::List(values) => Self::release_entries(values.into_iter().flatten()),
             Storage::Map(map) => {
                 Self::release_entries(map.entries.into_iter().filter_map(|entry| entry.value))
             }
-        }
-    }
-}
-
-impl Drop for PhpArray {
-    fn drop(&mut self) {
-        match &self.storage {
-            Storage::List(values) if values.is_empty() => {}
-            // Small property maps can use ordinary field drop if their entries cannot nest.
-            Storage::Map(map)
-                if map.index.is_none()
-                    && !map.entries.iter().any(|entry| {
-                        matches!(
-                            entry.value,
-                            Some(Value::Array(_) | Value::Object(_) | Value::Reference(_))
-                        )
-                    }) => {}
-            _ => self.release_storage(),
         }
     }
 }

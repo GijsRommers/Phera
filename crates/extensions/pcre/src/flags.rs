@@ -36,6 +36,8 @@ impl CaptureFlags {
 /// The shape of `$matches`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Order {
+    /// `preg_match`: one match, group by group.
+    Single,
     /// `PREG_PATTERN_ORDER`: one list per group, of that group in every match.
     Pattern,
     /// `PREG_SET_ORDER`: one array per match.

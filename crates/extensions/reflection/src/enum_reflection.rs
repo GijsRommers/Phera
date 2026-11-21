@@ -1,6 +1,6 @@
 //! Enum reflectors share the class and constant snapshots of their parent reflectors.
 
-use std::{borrow::Cow, rc::Rc};
+use std::rc::Rc;
 
 use phera_extension_api::reflection::{MemberInfo, MemberKind, ReflectedClassKind};
 use phera_extension_api::{
@@ -134,7 +134,7 @@ fn construct_case(
     })
 }
 
-fn reflect_target(args: &[Value]) -> Result<Cow<'_, str>, NativeError> {
+fn reflect_target(args: &[Value]) -> Result<String, NativeError> {
     target_class(
         args.first()
             .ok_or_else(|| exception("Missing reflection class name"))?,

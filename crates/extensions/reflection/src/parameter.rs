@@ -231,7 +231,7 @@ fn function_target(value: &Value) -> Result<FunctionTarget, phera_extension_api:
             };
             Ok(crate::method::method_target(
                 class,
-                target_class(class)?.into_owned(),
+                target_class(class)?,
                 method.to_string_lossy(),
             ))
         }

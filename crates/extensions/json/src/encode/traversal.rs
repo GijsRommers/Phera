@@ -1,6 +1,6 @@
 //! The open containers of `json_encode([[1], [2]])` stay on an explicit stack.
 
-use std::{cell::RefCell, collections::HashSet, rc::Rc};
+use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
 use phera_extension_api::value::{PropertyScope, split_property_key};
 use phera_extension_api::{ArrayKey, Object, PhpArray, Value};
@@ -46,10 +46,6 @@ impl Container {
         }
     }
 
-    pub(super) fn identity(&self) -> usize {
-        self.owner.identity()
-    }
-
     pub(super) fn next_entry(&mut self) -> Option<(ArrayKey, Value)> {
         let entries = self.owner.entries();
         while let Some(position) = self.next {
@@ -81,7 +77,7 @@ impl Work {
 
     fn identity(&self) -> Option<usize> {
         match self {
-            Self::Container(container) => Some(container.identity()),
+            Self::Container(container) => Some(container.owner.identity()),
             Self::ReleaseReference(reference) => Some(Rc::as_ptr(reference) as usize),
             _ => None,
         }
@@ -93,55 +89,42 @@ impl Work {
 pub(super) struct Stack {
     top: Option<Work>,
     parents: Vec<Work>,
-    ancestors: Option<HashSet<usize>>,
+    older: BTreeSet<usize>,
 }
 
-/// Search short paths directly. Deep traversals index the active identities
-/// once and update them only when a container or reference opens or closes.
-const INDEX_DEPTH: usize = 32;
+/// Search the nearest parents directly. Beyond this depth, an ordered set
+/// prevents repeated searches of the whole ancestry of a deeply nested value.
+const NEARBY_PARENTS: usize = 32;
 
 impl Stack {
     pub(super) fn push(&mut self, work: Work) {
         if let Some(parent) = self.top.replace(work) {
+            if let Some(identity) = self.oldest_nearby_identity() {
+                self.older.insert(identity);
+            }
             self.parents.push(parent);
         }
-    }
-
-    pub(super) fn push_active(&mut self, identity: usize, work: Work) {
-        if let Some(ancestors) = &mut self.ancestors {
-            ancestors.insert(identity);
-        } else if self.parents.len() >= INDEX_DEPTH {
-            let mut ancestors = HashSet::with_capacity(self.parents.len() + 2);
-            ancestors.extend(self.open_identities());
-            ancestors.insert(identity);
-            self.ancestors = Some(ancestors);
-        }
-        self.push(work);
     }
 
     pub(super) fn pop(&mut self) -> Option<Work> {
         let top = self.top.take()?;
         self.top = self.parents.pop();
+        if let Some(identity) = self.oldest_nearby_identity() {
+            self.older.remove(&identity);
+        }
         Some(top)
     }
 
-    pub(super) fn leave(&mut self, identity: usize) {
-        if let Some(ancestors) = &mut self.ancestors {
-            ancestors.remove(&identity);
-        }
+    fn oldest_nearby_identity(&self) -> Option<usize> {
+        let oldest = self.parents.len().checked_sub(NEARBY_PARENTS)?;
+        self.parents.get(oldest)?.identity()
     }
 
     pub(super) fn contains(&self, identity: usize) -> bool {
-        match &self.ancestors {
-            Some(ancestors) => ancestors.contains(&identity),
-            None => self.open_identities().any(|ancestor| ancestor == identity),
-        }
-    }
-
-    fn open_identities(&self) -> impl Iterator<Item = usize> + '_ {
         self.top
             .iter()
-            .chain(self.parents.iter().rev())
-            .filter_map(Work::identity)
+            .chain(self.parents.iter().rev().take(NEARBY_PARENTS))
+            .any(|work| work.identity() == Some(identity))
+            || self.older.contains(&identity)
     }
 }

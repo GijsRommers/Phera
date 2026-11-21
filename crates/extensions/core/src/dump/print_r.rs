@@ -1,7 +1,7 @@
 use phera_extension_api::value::{NoDiagnostics, PropertyScope, split_property_key, to_php_string};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
-    args, write_after_diagnostics,
+    args,
 };
 
 use super::{Container, Place, Style, spaces, walk};
@@ -31,7 +31,7 @@ async fn render(context: &mut dyn Context, arguments: Vec<Value>) -> NativeResul
     if args::bool(arguments, 1).unwrap_or(false) {
         Ok(Value::from(out))
     } else {
-        write_after_diagnostics(context, &out).await?;
+        context.write(&out);
         Ok(Value::Bool(true))
     }
 }

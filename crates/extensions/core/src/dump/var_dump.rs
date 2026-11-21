@@ -3,7 +3,6 @@
 use phera_extension_api::value::{PropertyScope, float_repr_with_precision, split_property_key};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
-    write_after_diagnostics,
 };
 
 use super::{Container, Place, Style, spaces, walk};
@@ -21,7 +20,7 @@ fn var_dump(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
         for value in &arguments {
             let mut out = Vec::new();
             walk(&mut VarDump(&arguments), &mut out, value, context).await?;
-            write_after_diagnostics(context, &out).await?;
+            context.write(&out);
         }
         Ok(Value::Null)
     })
@@ -44,9 +43,10 @@ impl Style for VarDump<'_> {
         ("var_dump", self.0)
     }
 
-    fn before_debug(&mut self, out: &mut Vec<u8>, place: Place) -> bool {
+    fn before_debug(&mut self, out: &mut Vec<u8>, place: Place, context: &mut dyn Context) {
         Self::lead(out, place);
-        true
+        context.write(out);
+        out.clear();
     }
 
     fn enum_case(

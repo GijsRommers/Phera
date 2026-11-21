@@ -6,7 +6,6 @@ use phera_extension_api::value::{float_repr_with_precision, split_property_key};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray,
     PropertyPurpose, PropertyViewContinuation, PropertyViewRequest, Registry, Value, args,
-    write_after_diagnostics,
 };
 
 use super::walker::{WalkView, Walker};
@@ -80,7 +79,7 @@ async fn render(context: &mut dyn Context, mut export: Export, start: bool) -> N
     if args::bool(&export.arguments, 1).unwrap_or(false) {
         Ok(Value::from(export.out))
     } else {
-        write_after_diagnostics(context, &export.out).await?;
+        context.write(&export.out);
         Ok(Value::Null)
     }
 }

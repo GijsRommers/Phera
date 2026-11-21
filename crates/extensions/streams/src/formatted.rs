@@ -58,11 +58,6 @@ async fn format_write(
     };
     let data = render_format(context, format, &values, function, source).await?;
     let requested = data.len() as i64;
-    let unwind = phera_extension_api::before_output(context).await?;
-    let written = write(context, stream, &data, function).await;
-    if let Some(error) = unwind {
-        return Err(error);
-    }
-    written?;
+    write(context, stream, &data, function).await?;
     Ok(Value::Int(requested))
 }
