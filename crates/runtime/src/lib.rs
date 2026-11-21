@@ -312,9 +312,14 @@ impl Runtime {
             Err(error) => return Err(error),
         };
         vm.set_args(arguments);
-        let server =
-            environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
-        vm.set_global("_SERVER", Value::from(server));
+        phera_ext_standard::set_cli_arguments(vm.state_mut(), arguments);
+        let server = Rc::new(environment::cli_server(
+            php_array(self.environment.iter()),
+            path.as_ref(),
+            arguments,
+        ));
+        phera_ext_filter::capture_server(vm.state_mut(), &server);
+        vm.set_global("_SERVER", Value::Array(server));
         for name in ["_GET", "_POST", "_COOKIE", "_FILES"] {
             vm.set_global(name, Value::from(PhpArray::new()));
         }
@@ -538,6 +543,7 @@ impl Runtime {
             vm.set_startup_ini("opcache.revalidate_freq", "0");
         }
         // A script's writes copy the inherited array before changing it.
+        phera_ext_filter::capture_environment(vm.state_mut(), &environment);
         vm.set_global("_ENV", Value::Array(environment));
         *vm.state_mut().get_or_default::<RequestEnvironment>() =
             RequestEnvironment::new(self.environment.clone());

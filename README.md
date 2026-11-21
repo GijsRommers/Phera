@@ -233,7 +233,15 @@ functions. Backticks emit PHP 8.5's compile-time deprecation. On Unix, `mail()`
 and `mb_send_mail()` pipe the message to the command in `sendmail_path`.
 `phera serve --no-process public` disables program launches for web requests,
 including `mail()` and `mb_send_mail()`.
-The standard library retains PHP’s deprecated `utf8_encode()` Latin-1 conversion.
+The standard library retains PHP’s deprecated Latin-1 conversions
+`utf8_encode()` and `utf8_decode()`, plus C-locale `strftime()` and
+`gmstrftime()`. The input filters read the original request values even
+after the script changes its superglobals. The `phpinfo()` text report
+redacts process environment and request variable values.
+
+`get_browser()`, `register_tick_function()`, `dl()`,
+`output_add_rewrite_var()`, `assert_options()` and `strptime()` throw
+`Phera\NotSupportedException`.
 
 BCMath provides arbitrary-precision decimal functions and the immutable
 `BcMath\Number` class. Set the default procedural scale with `bcmath.scale`

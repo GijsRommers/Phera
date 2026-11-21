@@ -351,6 +351,19 @@ pub trait Context {
         ))))
     }
 
+    /// Calls a PHP callback with the active late-static class when it has a compatible scope.
+    fn forward_static_callback(
+        &mut self,
+        function: &str,
+        _callable: &Value,
+        _arguments: &PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        let error = NativeError::error(format!(
+            "Cannot call {function}() when no class scope is active"
+        ));
+        Box::pin(std::future::ready(Err(error)))
+    }
+
     /// Calls an instance method with ordinary PHP method dispatch.
     fn call_method(
         &mut self,

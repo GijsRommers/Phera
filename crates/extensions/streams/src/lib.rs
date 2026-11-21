@@ -27,6 +27,7 @@ mod handles;
 mod include_path;
 mod include_stream;
 pub use include_stream::{IncludeSource, include_source, wraps_include};
+mod file_details;
 mod ini;
 mod input;
 mod io_policy;
@@ -117,6 +118,7 @@ impl Extension for Streams {
         ini::register(registry);
         locking::register(registry);
         metadata::register(registry);
+        file_details::register(registry);
         mutations::register(registry);
         path_text::register(registry);
         pattern::register(registry);
