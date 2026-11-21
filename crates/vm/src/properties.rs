@@ -30,33 +30,91 @@ impl Vm {
 
 impl Vm {
     /// Dynamic static targets accept either an object handle or a class-name string.
+    /// `Post::$count` whose storage this request made already: a public
+    /// property of a class found by key, read through borrows alone. Any
+    /// other case (a class not declared yet, a protected or private
+    /// property, a trait, storage not made yet) takes the general path.
+    #[inline]
+    fn ready_named_static(
+        &self,
+        symbol: phera_bytecode::SymbolId,
+        property: phera_bytecode::NameId,
+    ) -> Option<Value> {
+        let function = self.current()?.frame.function;
+        let class = self
+            .classes
+            .by_key(self.code.unit_symbol_key(function, symbol))?;
+        if class.kind == phera_bytecode::ClassKind::Trait {
+            return None;
+        }
+        let name = &self.code.unit(function).names[property.index()];
+        let property = class
+            .static_properties
+            .iter()
+            .rev()
+            .find(|candidate| candidate.name == *name)?;
+        if property.visibility != Visibility::Public {
+            return None;
+        }
+        let storage = self.class_states.existing_static(property)?;
+        storage
+            .initialized
+            .get()
+            .then(|| Value::Reference(storage.reference.borrow().clone()))
+    }
+
+    /// The compiled file of the running frame.
+    fn running_unit(&self) -> Result<std::sync::Arc<phera_bytecode::CompiledUnit>, NativeError> {
+        self.current()
+            .map(|frame| frame.unit().clone())
+            .ok_or_else(|| internal_error!("static property frame"))
+    }
+
     pub(crate) fn static_property_names(
         &mut self,
-        class: phera_bytecode::Reg,
-        name: phera_bytecode::Reg,
+        class: crate::static_places::StaticClass,
+        name: crate::static_places::StaticName,
     ) -> Result<(String, String), NativeError> {
-        let class = match self.read_local(class) {
-            Value::Object(object) => object.class.name().to_owned(),
-            Value::String(name) => name.to_string_lossy(),
-            _ => {
-                return Err(NativeError::error(
-                    "Class name must be a valid object or a string",
-                ));
+        use crate::static_places::{StaticClass, StaticName};
+        let class = match class {
+            StaticClass::Named(symbol) => {
+                self.running_unit()?.symbols[symbol.index()].written.clone()
+            }
+            StaticClass::Register(class) => match self.read_local(class) {
+                Value::Object(object) => object.class.name().to_owned(),
+                Value::String(name) => name.to_string_lossy(),
+                _ => {
+                    return Err(NativeError::error(
+                        "Class name must be a valid object or a string",
+                    ));
+                }
+            },
+        };
+        let name = match name {
+            StaticName::Named(name) => self.running_unit()?.names[name.index()].clone(),
+            StaticName::Register(name) => {
+                let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
+                phera_value::to_php_string(&diagnostics.vm.operand(name), &mut diagnostics.buffer)?
+                    .to_string_lossy()
             }
         };
-        let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
-        let name =
-            phera_value::to_php_string(&diagnostics.vm.operand(name), &mut diagnostics.buffer)?
-                .to_string_lossy();
         Ok((class, name))
     }
 
     /// Inherited static declarations share reference cells until a child redeclares them.
     pub(crate) fn static_property(
         &mut self,
-        class: phera_bytecode::Reg,
-        name: phera_bytecode::Reg,
+        class: crate::static_places::StaticClass,
+        name: crate::static_places::StaticName,
     ) -> NativeResult {
+        if let (
+            crate::static_places::StaticClass::Named(symbol),
+            crate::static_places::StaticName::Named(property),
+        ) = (class, name)
+            && let Some(value) = self.ready_named_static(symbol, property)
+        {
+            return Ok(value);
+        }
         let (class_name, name) = self.static_property_names(class, name)?;
         let class = self
             .classes
