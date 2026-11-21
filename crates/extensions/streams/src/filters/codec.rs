@@ -48,7 +48,6 @@ impl Codec {
                 Self::Zlib(Zlib::deflate(
                     level,
                     integer(params, "window").unwrap_or(-15),
-                    integer(params, "memory").unwrap_or(9),
                 )?)
             }
             b"consumed" => Self::Consumed {

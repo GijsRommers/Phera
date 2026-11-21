@@ -66,34 +66,9 @@ foreach ([1, 3, 8192] as $chunk) {
     }
     stream_filter_remove($filter);
     rewind($h);
-    $compressed = stream_get_contents($h);
-    echo "zlib.deflate/$chunk: ", bin2hex($compressed), " ", bin2hex(gzinflate($compressed)), "\n";
+    echo "zlib.deflate/$chunk: ", bin2hex(gzinflate(stream_get_contents($h))), "\n";
     fclose($h);
 }
-
-$data = "Hello, World!\nSecond line with é and ü\n";
-$path = tempnam(sys_get_temp_dir(), 'deflate');
-file_put_contents($path, $data);
-echo "deflate read: ", bin2hex(file_get_contents("php://filter/read=zlib.deflate/resource=$path")), "\n";
-foreach ([null, 0, ['level' => 6, 'window' => 15], ['level' => 6, 'window' => 31]] as $params) {
-    $h = fopen($path, 'wb');
-    if ($params === null) {
-        stream_filter_append($h, 'zlib.deflate', STREAM_FILTER_WRITE);
-    } else {
-        stream_filter_append($h, 'zlib.deflate', STREAM_FILTER_WRITE, $params);
-    }
-    fwrite($h, $data);
-    fflush($h);
-    fwrite($h, $data);
-    fclose($h);
-    $encoded = file_get_contents($path);
-    // Gzip's OS header byte depends on the platform's zlib build.
-    if (($params['window'] ?? null) === 31) {
-        $encoded[9] = "\0";
-    }
-    echo "deflate write: ", bin2hex($encoded), "\n";
-}
-unlink($path);
 
 function iconvBuckets($filter, $chunks, $flush = false)
 {
