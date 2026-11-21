@@ -368,6 +368,19 @@ impl CodeTable {
         self.facts(function).local.map(|local| local as usize)
     }
 
+    /// The function's bytecode, its file's request-local cache and its
+    /// facts, from one lookup of the facts.
+    #[inline]
+    pub(crate) fn function_parts(
+        &self,
+        function: FunctionIndex,
+    ) -> (&Function, &UnitCache, &FunctionFacts) {
+        let facts = self.facts(function);
+        let loaded = &self.units[facts.unit.0 as usize];
+        let local = facts.local.map(|local| local as usize);
+        (body(&loaded.unit, local), &loaded.cache, facts)
+    }
+
     /// The function's bytecode.
     pub(crate) fn function(&self, function: FunctionIndex) -> &Function {
         body(self.unit(function), self.local(function))
