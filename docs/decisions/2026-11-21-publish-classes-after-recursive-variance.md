@@ -33,6 +33,9 @@ rechecked if that type has a pending declaration in the current request.
 The worker validates the ordinary class numbers first, then checks the
 missing names against the pending declarations. Nominal comparisons use
 borrowed names and consult linked ancestry before walking declarations.
+The loader retains the original unwind allocation across its await.
+Variance obligations have their own storage so ordinary name misses
+stay small, and the loader reuses the folded name when checking results.
 
 ## Turned down
 
