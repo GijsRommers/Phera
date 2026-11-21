@@ -34,6 +34,7 @@ struct Encoder {
     depth: i64,
     output: String,
     error: Error,
+    halted: bool,
     work: Stack,
 }
 
@@ -140,6 +141,7 @@ impl Encoder {
             depth: i64::from(args::int(arguments, 2).unwrap_or(512) as i32),
             output: String::new(),
             error: Error::None,
+            halted: false,
             work: Stack::default(),
         }
     }
@@ -166,7 +168,7 @@ impl Encoder {
 
     /// Writes until done or until an object needs services from the runtime.
     fn advance(&mut self) -> Option<(Rc<Object>, usize)> {
-        while self.error == Error::None || self.flags.partial_output {
+        while !self.halted {
             match self.work.pop()? {
                 Work::Value(Value::Object(object), level) => return Some((object, level)),
                 Work::Value(value, level) => self.value(&value, level),
@@ -187,15 +189,15 @@ impl Encoder {
                                 .push_str(if self.flags.pretty_print { ": " } else { ":" });
                         }
                         self.work.push(Work::Container(container));
-                        if self.error == Error::None || self.flags.partial_output {
-                            if let Value::Object(object) = value {
-                                return Some((object, level));
-                            }
-                            self.value(&value, level);
+                        // A bad key records an error, but its value still runs.
+                        if let Value::Object(object) = value {
+                            return Some((object, level));
                         }
+                        self.value(&value, level);
                     } else {
                         if level as i64 > self.depth {
                             self.error = Error::Depth;
+                            self.halted = !self.flags.partial_output;
                         }
                         if container.wrote_entry {
                             self.indent(level - 1);
@@ -212,6 +214,8 @@ impl Encoder {
     /// 0 for a float that is not finite, null for anything else.
     fn failure(&mut self, error: Error) {
         self.error = error;
+        // Non-finite numbers still yield a placeholder and let later values run.
+        self.halted = !self.flags.partial_output && error != Error::Infinite;
         self.output
             .push_str(if matches!(error, Error::Infinite | Error::NonBackedEnum) {
                 "0"
