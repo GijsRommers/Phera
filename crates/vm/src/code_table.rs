@@ -358,6 +358,7 @@ impl CodeTable {
     }
 
     /// The request-local values made from that file (names, literals, sites).
+    #[inline]
     pub(crate) fn cache(&self, function: FunctionIndex) -> &UnitCache {
         &self.loaded(function).cache
     }

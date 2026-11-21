@@ -274,7 +274,7 @@ impl CallStack {
 
     /// Finish preparing the innermost call when the caller does not need
     /// its details (the interpreter loop enters only calls without any).
-    #[inline]
+    #[inline(always)]
     pub(crate) fn pop_plain(&mut self) -> Option<PreparedCall> {
         let call = self.preparing.pop()?;
         if call.flags.contains(CallFlags::DETAILS) {
