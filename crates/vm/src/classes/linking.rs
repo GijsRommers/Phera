@@ -551,6 +551,8 @@ impl Vm {
         }
         let declaration_location = Some((unit_first, declaration_index));
         let operations = operations.with_native_dimensions(hooks.as_deref(), &methods);
+        let layout = super::class::property_layout(&defaults);
+        let property_template = super::class::property_template(&defaults, layout.as_ref());
         let class = Rc::new_cyclic(|identity| Class {
             index,
             property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
@@ -581,7 +583,8 @@ impl Vm {
             methods,
             method_table: std::cell::OnceCell::new(),
             serialized_fields: std::cell::OnceCell::new(),
-            property_template: super::class::property_template(&defaults),
+            property_template,
+            layout,
             defaults,
             static_properties,
             constants,
