@@ -181,8 +181,8 @@ impl Vm {
         Ok(())
     }
 
-    /// Static reads use internal cells too; index them only when PHP acquires an alias.
-    pub(crate) fn track_static_property_reference(
+    /// Acquiring a PHP alias initializes a nullable static slot to null.
+    pub(crate) fn acquire_static_property_reference(
         &mut self,
         class: phera_bytecode::Reg,
         name: phera_bytecode::Reg,
@@ -202,6 +202,16 @@ impl Vm {
             .class_states
             .static_property(property)
             .ok_or_else(|| internal_error!("static storage"))?;
+        if !storage.value_initialized.get() {
+            if property
+                .ty
+                .as_ref()
+                .is_some_and(|ty| !ty.mask.intersects(phera_bytecode::TypeMask::NULL))
+            {
+                return Err(uninitialized_reference_error(property));
+            }
+            storage.value_initialized.set(true);
+        }
         storage.track(&self.property_references, property);
         Ok(())
     }

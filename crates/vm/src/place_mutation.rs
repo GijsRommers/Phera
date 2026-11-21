@@ -237,7 +237,7 @@ impl Vm {
             if let PathBase::StaticProperty { class, name, .. } = place.base()?
                 && place.steps()?.next().is_none()
             {
-                self.track_static_property_reference(class, name)?;
+                self.acquire_static_property_reference(class, name)?;
             }
             return Ok(raw);
         }
