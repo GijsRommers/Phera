@@ -57,7 +57,10 @@ struct Inner {
     entries: Vec<Option<Rc<EntryFacts>>>,
     /// The entries made from each declaration: file revision (its process
     /// number) and class number in the file.
-    declarations: HashMap<(u32, u32), Vec<u32>>,
+    /// Indexed by the file revision's process number, then by class number
+    /// in the file: the positions of the entries made from that declaration
+    /// (usually one).
+    declarations: Vec<Vec<Vec<u32>>>,
     /// Entries by file revision, to drop them when the revision is gone.
     revisions: Vec<RevisionEntries>,
     /// Positions given back by requests, handed out again first.
@@ -115,23 +118,24 @@ impl WorkerClasses {
     }
 
     /// The entries made from declaration `class` of `unit`, newest first.
-    pub(crate) fn candidates(
+    /// The newest entry made from declaration `class` of `unit` that
+    /// `usable` accepts.
+    pub(crate) fn find_entry(
         &self,
         unit: &Arc<phera_bytecode::CompiledUnit>,
         class: u32,
-    ) -> Vec<Rc<EntryFacts>> {
-        let Some(metadata) = &unit.metadata else {
-            return Vec::new();
-        };
+        usable: impl Fn(&EntryFacts) -> bool,
+    ) -> Option<Rc<EntryFacts>> {
+        let metadata = unit.metadata.as_ref()?;
         let inner = self.inner.borrow();
-        inner
+        let positions = inner
             .declarations
-            .get(&(metadata.id, class))
-            .into_iter()
-            .flatten()
-            .rev()
-            .filter_map(|position| inner.entries.get(*position as usize)?.clone())
-            .collect()
+            .get(metadata.id as usize)?
+            .get(class as usize)?;
+        positions.iter().rev().find_map(|position| {
+            let entry = inner.entries.get(*position as usize)?.as_ref()?;
+            usable(entry).then(|| entry.clone())
+        })
     }
 
     /// Keeps a class a request linked at `position`, for every request of
@@ -149,7 +153,15 @@ impl WorkerClasses {
         let mut inner = self.inner.borrow_mut();
         inner.drop_dead_revisions();
         let key = (metadata.id, declaration);
-        inner.declarations.entry(key).or_default().push(position);
+        let (revision, class) = (key.0 as usize, key.1 as usize);
+        if inner.declarations.len() <= revision {
+            inner.declarations.resize_with(revision + 1, Vec::new);
+        }
+        let classes = &mut inner.declarations[revision];
+        if classes.len() <= class {
+            classes.resize_with(class + 1, Vec::new);
+        }
+        classes[class].push(position);
         inner.chain(&facts.lowercase_name, position);
         if let Some(slot) = inner.entries.get_mut(position as usize) {
             *slot = Some(Rc::new(facts));
@@ -251,7 +263,14 @@ impl Inner {
             }
             let (_, entries) = self.revisions.swap_remove(position);
             for (unit, class, entry) in entries {
-                self.declarations.remove(&(unit, class));
+                if let Some(classes) = self.declarations.get_mut(unit as usize) {
+                    if let Some(positions) = classes.get_mut(class as usize) {
+                        positions.clear();
+                    }
+                    if classes.iter().all(Vec::is_empty) {
+                        *classes = Vec::new();
+                    }
+                }
                 if let Some(slot) = self.entries.get_mut(entry as usize) {
                     *slot = None;
                 }

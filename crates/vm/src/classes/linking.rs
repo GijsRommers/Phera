@@ -137,9 +137,7 @@ impl Vm {
     ) -> Option<Rc<super::worker_classes::EntryFacts>> {
         self.classes
             .worker()
-            .candidates(unit, index.index() as u32)
-            .into_iter()
-            .find(|entry| {
+            .find_entry(unit, index.index() as u32, |entry| {
                 entry
                     .dependencies
                     .iter()
