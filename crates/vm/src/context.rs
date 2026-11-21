@@ -796,7 +796,9 @@ impl Context for Vm {
     ) -> Option<std::rc::Rc<phera_value::Object>> {
         let class = class.as_any().downcast_ref::<crate::classes::Class>()?;
         let class = class.identity.upgrade()?;
-        Some(self.classes.allocate_with_properties(class, properties))
+        let mut table = phera_value::Properties::for_class(&*class);
+        table.replace_all(properties);
+        Some(self.classes.allocate_with_properties(class, table))
     }
 
     fn serialization_properties(
@@ -1078,7 +1080,7 @@ impl Vm {
         if !properties.is_empty() {
             object.update(|storage| {
                 if storage.is_empty() {
-                    *storage = properties;
+                    storage.replace_all(properties);
                 } else {
                     for (key, value) in properties.iter() {
                         storage.insert(key, value.clone());

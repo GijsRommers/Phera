@@ -127,7 +127,7 @@ impl Vm {
         }
         self.check_constant_access(&constant, name, *access)?;
         match &constant.initializer {
-            ConstantInitializer::EnumCase { name, backing } => {
+            ConstantInitializer::EnumCase { name, backing, .. } => {
                 let class = linked.ok_or_else(|| internal_error!("unlinked enum"))?;
                 Ok(Progress::Next(InitializerTask::Case(CaseLookup {
                     class,
@@ -318,11 +318,14 @@ impl Vm {
     fn ready_value(&self, initializer: &ConstantInitializer) -> Option<Value> {
         match initializer {
             ConstantInitializer::Value(value) => Some(value.clone()),
-            ConstantInitializer::Compiled { slot, .. } => match self.class_states.constant(*slot) {
+            ConstantInitializer::Compiled { slot, .. }
+            | ConstantInitializer::EnumCase {
+                slot: Some(slot), ..
+            } => match self.class_states.constant(*slot) {
                 ConstantState::Ready(value) => Some(value.clone()),
                 _ => None,
             },
-            ConstantInitializer::EnumCase { .. } => None,
+            ConstantInitializer::EnumCase { slot: None, .. } => None,
         }
     }
 }
