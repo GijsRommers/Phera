@@ -89,7 +89,7 @@ impl Vm {
         }
         if let Some(declaration_type) = &property.ty {
             match value {
-                Value::Reference(reference) if change == PropertyChange::Bind => {
+                Value::Reference(reference) if matches!(change, PropertyChange::Bind) => {
                     self.coerce_property_binding(reference, property, declaration_type)?;
                 }
                 _ => {
