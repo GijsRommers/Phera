@@ -256,6 +256,7 @@ fn path_writes(function: &Function, instruction: Instruction) -> Option<[Option<
         PathBase::Register(root) | PathBase::Named(root) => (Some(root), None),
         PathBase::This { scratch }
         | PathBase::StaticProperty { scratch, .. }
+        | PathBase::NamedStaticProperty { scratch, .. }
         | PathBase::GlobalNamed { scratch, .. } => (None, Some(scratch)),
         PathBase::Globals => (None, None),
     };

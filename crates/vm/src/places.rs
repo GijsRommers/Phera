@@ -21,11 +21,11 @@ impl Vm {
                 self.fetch_this(scratch)?;
                 return Ok(Some(scratch));
             }
-            PathBase::StaticProperty {
-                class,
-                name,
-                scratch,
-            } => {
+            PathBase::StaticProperty { scratch, .. }
+            | PathBase::NamedStaticProperty { scratch, .. } => {
+                let Some((class, name)) = crate::static_places::static_base(place.base()?) else {
+                    return Err(internal_error!("static property base"));
+                };
                 let reference = match self.static_property(class, name) {
                     Ok(reference) => reference,
                     Err(error)
@@ -132,7 +132,7 @@ impl Vm {
         place: &AccessPath,
         missing: Missing,
     ) -> Result<(), NativeError> {
-        if let PathBase::StaticProperty { class, name, .. } = place.base()? {
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
             let (class_name, name) = self.static_property_names(class, name)?;
             let states = &mut self.class_states;
             if missing == Missing::Warn

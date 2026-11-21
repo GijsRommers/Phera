@@ -129,6 +129,14 @@ pub enum PathBase {
     This { scratch: Reg },
     /// Static storage is shared by inherited declarations and aliased through a scratch slot.
     StaticProperty { class: Reg, name: Reg, scratch: Reg },
+    /// `Post::$count`: a static property of a class the source names, with
+    /// its name written in the source; the class is found by its symbol's
+    /// name key.
+    NamedStaticProperty {
+        class: crate::SymbolId,
+        name: crate::NameId,
+        scratch: Reg,
+    },
     /// A register: a local variable, or a temporary holding a value.
     Register(Reg),
     /// `$$name`: the variable whose name is the string in this register.

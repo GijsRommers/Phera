@@ -21,6 +21,9 @@ impl Instruction {
                 *name = mapping(*name);
                 *scratch = mapping(*scratch);
             }
+            if let crate::ir::PlaceScope::NamedStaticProperty { scratch, .. } = &mut target.scope {
+                *scratch = mapping(*scratch);
+            }
             for step in &mut target.path {
                 if let crate::ir::PathStep::Index(register)
                 | crate::ir::PathStep::DynamicProperty(register) = step

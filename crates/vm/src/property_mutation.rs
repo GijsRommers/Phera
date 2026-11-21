@@ -67,8 +67,8 @@ impl Vm {
     /// Static property assignments enforce their declaration before replacing the shared cell.
     pub(crate) fn validate_static_mutation(
         &mut self,
-        class: phera_bytecode::Reg,
-        name: phera_bytecode::Reg,
+        class: crate::static_places::StaticClass,
+        name: crate::static_places::StaticName,
         value: &mut Value,
         change: PropertyChange,
     ) -> Result<(), NativeError> {

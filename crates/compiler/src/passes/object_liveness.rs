@@ -117,7 +117,7 @@ fn path_effect(
         PathBase::Register(base) | PathBase::Named(base) => base == register,
         PathBase::StaticProperty { class, name, .. } => class == register || name == register,
         PathBase::GlobalNamed { name, .. } => name == register,
-        PathBase::This { .. } | PathBase::Globals => false,
+        PathBase::This { .. } | PathBase::NamedStaticProperty { .. } | PathBase::Globals => false,
     };
     if source == Some(register) || base_reads || path.steps.iter().any(|step| matches!(step, Step::Index(index) | Step::DynamicProperty(index) if *index == register)) { return RegisterEffect::Read; }
     if destination == Some(register) {

@@ -17,6 +17,15 @@ pub(crate) fn path(tables: &mut Tables<'_>, function: &mut Function, place: ir::
                 name,
                 scratch,
             },
+            ir::PlaceScope::NamedStaticProperty {
+                class,
+                name,
+                scratch,
+            } => PathBase::NamedStaticProperty {
+                class: tables.symbol(&class, None, crate::policies::NameKind::Class),
+                name: tables.name(&name),
+                scratch,
+            },
             ir::PlaceScope::Local => PathBase::Register(place.base),
             ir::PlaceScope::Dynamic => PathBase::Named(place.base),
             ir::PlaceScope::Global(scratch) => PathBase::GlobalNamed {
