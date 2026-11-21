@@ -310,6 +310,11 @@ impl Vm {
 
     /// A constant's value if it needs no evaluation, or was evaluated in
     /// this request already.
+    /// The value of a constant that needs no evaluation, for the named fetch.
+    pub(crate) fn ready_constant_value(&self, initializer: &ConstantInitializer) -> Option<Value> {
+        self.ready_value(initializer)
+    }
+
     fn ready_value(&self, initializer: &ConstantInitializer) -> Option<Value> {
         match initializer {
             ConstantInitializer::Value(value) => Some(value.clone()),

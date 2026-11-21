@@ -448,8 +448,10 @@ impl Vm {
         Ok(())
     }
 
-    /// `Post::LIMIT`: the class is found by its symbol's name key; a class
-    /// not declared yet takes the string path, which autoloads it.
+    /// `Post::LIMIT`: the class is found by its symbol's name key. A
+    /// visible constant whose value is ready is read through borrows alone;
+    /// anything else (a class not declared yet, which autoloads; a value to
+    /// evaluate; a deprecation; an error) takes the path out of line.
     fn fetch_named_class_constant(
         &mut self,
         destination: Reg,
@@ -460,31 +462,59 @@ impl Vm {
             .current()
             .ok_or_else(|| internal_error!("constant frame"))?;
         let function = frame.frame.function;
-        let unit = frame.unit().clone();
+        if let Some(value) = self.ready_named_class_constant(function, class, name) {
+            self.set(destination, value);
+            return Ok(());
+        }
+        self.named_class_constant_slow(destination, function, class, name)
+    }
+
+    #[inline]
+    fn ready_named_class_constant(
+        &self,
+        function: crate::code_table::FunctionIndex,
+        class: phera_bytecode::SymbolId,
+        name: phera_bytecode::NameId,
+    ) -> Option<Value> {
+        let key = self.code.unit_symbol_key(function, class);
+        let linked = self.classes.by_key(key)?;
+        let constant = linked
+            .constants
+            .get(&self.code.unit(function).names[name.index()])?;
+        if constant.deprecated.is_some()
+            || self.needs_enum_backing(linked)
+            || !self.can_read_class_constant(constant)
+        {
+            return None;
+        }
+        self.ready_constant_value(&constant.initializer)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn named_class_constant_slow(
+        &mut self,
+        destination: Reg,
+        function: crate::code_table::FunctionIndex,
+        class: phera_bytecode::SymbolId,
+        name: phera_bytecode::NameId,
+    ) -> Result<(), NativeError> {
+        let unit = self.code.unit(function).clone();
         let name = &unit.names[name.index()];
         let written = &unit.symbols[class.index()].written;
         let key = self.code.unit_symbol_key(function, class);
-        let value = match self.classes.by_key(key).cloned() {
+        let linked = self.classes.by_key(key).cloned();
+        let value = match linked {
             Some(linked) => self.class_constant_resolved(
                 Some(linked),
                 written,
                 name,
                 crate::class_constants::ConstantAccess::Read,
             )?,
-            None => self.named_class_constant_miss(written, name)?,
+            None => self.class_constant(written, name)?,
         };
         self.set(destination, value);
         Ok(())
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn named_class_constant_miss(
-        &mut self,
-        class: &str,
-        name: &str,
-    ) -> phera_extension_api::NativeResult {
-        self.class_constant(class, name)
     }
 
     /// `Foo::class`, `self::class` and friends.
