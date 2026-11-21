@@ -102,9 +102,17 @@ impl Vm {
         // The second argument is only looked up in the table; PHP never
         // autoloads it.
         let target_class = self.classes.get(target);
-        Some(class.zip(target_class).is_some_and(|(class, target)| {
-            class.is_a(&target.name)
-                && !(matches!(query, RelationQuery::IsSubclassOf) && class.index == target.index)
-        }))
+        class.zip(target_class).and_then(|(class, target)| {
+            match class.derives_from(&target) {
+                // An ancestry walk that outgrew its bounds: the general
+                // handler answers it.
+                None => None,
+                Some(derives) => Some(
+                    derives
+                        && !(matches!(query, RelationQuery::IsSubclassOf)
+                            && class.index == target.index),
+                ),
+            }
+        })
     }
 }

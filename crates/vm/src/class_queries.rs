@@ -200,12 +200,13 @@ impl Vm {
         match query {
             ClassNameQuery::GetClass => {
                 // The parameter is `object`, so only an object arrives plainly;
-                // the class name is the object's own, and a lazy object stays
-                // uninitialized, as in the general handler.
+                // the class name is the object's own, ready-made as the class's
+                // `name_value`, and a lazy object stays uninitialized, as in
+                // the general handler.
                 let Value::Object(object) = first else {
                     return None;
                 };
-                Some(Value::from(object.class.name()))
+                Some(self.classes.for_object(object)?.name_value.clone())
             }
             ClassNameQuery::GetParentClass => {
                 let class = match first {
