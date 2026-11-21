@@ -183,7 +183,16 @@ impl<'a> Target<'a> {
         change: impl FnOnce(&mut PhpArray) -> Result<T, NativeError>,
     ) -> Result<T, NativeError> {
         if self.is_properties() {
-            return self.owner().update(change).ok_or_else(crate::busy)?;
+            // The object's properties as one array, changed and put back.
+            return self
+                .owner()
+                .update(|properties| {
+                    let mut array = properties.to_array();
+                    let result = change(&mut array);
+                    properties.replace_all(array);
+                    result
+                })
+                .ok_or_else(crate::busy)?;
         }
         check_mutable(self.owner())?;
         update(self.owner(), |state| {

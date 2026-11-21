@@ -35,6 +35,12 @@ impl<'ast> Compiler<'ast> {
         timing: DeclarationTiming,
         line: usize,
     ) -> Result<(), CompileError> {
+        if declaration.name.name.eq_ignore_ascii_case("assert") {
+            return Err(self.error(
+                "Defining a custom assert() function is not allowed, as the function has special semantics",
+                line,
+            ));
+        }
         self.compile_captured_function(
             &FunctionSource {
                 span: declaration.span,
@@ -266,6 +272,7 @@ impl<'ast> Compiler<'ast> {
         } else {
             self.class_scope.clone()
         };
+        builder.parent_scope = self.parent_scope.clone();
         builder.function.definition_line = line;
         builder.function.returns_reference = declaration.by_reference;
         builder.function.is_generator = declaration.is_generator;

@@ -37,6 +37,15 @@ pub(crate) fn own_type(value: &Value) -> TypeMask {
     }
 }
 
+/// Property diagnostics distinguish both boolean literals and hide anonymous class identities.
+pub(crate) fn property_value_type(value: &Value) -> String {
+    match &*value.deref() {
+        Value::Bool(value) => value.to_string(),
+        Value::Object(object) => phera_value::class_display_name(object.class.name()).to_owned(),
+        value => value.type_name(),
+    }
+}
+
 /// Whether a value passes a declared type exactly as it is: `5` for `int`,
 /// `"a"` for `?string`, anything for `mixed`.
 ///

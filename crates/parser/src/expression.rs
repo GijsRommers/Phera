@@ -16,7 +16,7 @@ use phera_lexer::TokenKind;
 use phera_source::Span;
 
 use crate::error::ParseError;
-use crate::parser::{Parser, is_word_token};
+use crate::parser::{ParsePurpose, Parser, is_word_token};
 
 /// Operator precedence levels, in the order PHP's grammar declares them
 /// (later declarations bind tighter).
@@ -182,8 +182,29 @@ impl Parser<'_> {
                 if prec::TERNARY < min_prec {
                     break;
                 }
+                if banned == Some(prec::TERNARY)
+                    && self.purpose == ParsePurpose::Compilation
+                    && let ExpressionKind::Ternary { then, .. } = &left.kind
+                {
+                    // The middle operand and parentheses start their own
+                    // expression loop. Only a chain at this level is ambiguous.
+                    let forms = match (then.is_some(), self.kind2() != TokenKind::Colon) {
+                        (true, true) => Some(("? b :", "c", "? d : e")),
+                        (true, false) => Some(("? b :", "c", "?: d")),
+                        (false, true) => Some(("?:", "b", "? c : d")),
+                        (false, false) => None,
+                    };
+                    if let Some((first, middle, second)) = forms {
+                        return Err(ParseError::compile(
+                            format!(
+                                "Unparenthesized `a {first} {middle} {second}` is not supported. Use either `(a {first} {middle}) {second}` or `a {first} ({middle} {second})`"
+                            ),
+                            left.span,
+                        ));
+                    }
+                }
                 left = self.parse_ternary(left)?;
-                banned = None;
+                banned = Some(prec::TERNARY);
                 continue;
             }
 
@@ -246,9 +267,8 @@ impl Parser<'_> {
         Ok(left)
     }
 
-    /// `cond ? then : otherwise`, or `cond ?: otherwise`. The grammar declares
-    /// `?` `:` left-associative, so a following `?` chains onto the whole
-    /// ternary: `a ? b : c ? d : e` is `(a ? b : c) ? d : e`.
+    /// `cond ? then : otherwise`, or `cond ?: otherwise`.
+    /// An unparenthesized chain of short ternaries groups from the left.
     fn parse_ternary(&mut self, condition: Expression) -> Result<Expression, ParseError> {
         let start = condition.span;
         self.expect(TokenKind::Question, "'?'")?;

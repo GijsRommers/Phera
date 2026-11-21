@@ -171,25 +171,35 @@ pub(crate) fn protocol(path: &[u8]) -> Option<&[u8]> {
 
 /// The first lookup is case sensitive, then PHP retries with lowercase.
 pub(crate) fn locate(context: &mut dyn Context, path: &[u8]) -> Option<UserWrapper> {
-    let wrappers = context
-        .state()
-        .get::<crate::request::Files>()?
-        .wrappers
-        .as_ref()?;
+    let wrappers = active(context)?;
     if matches!(
         crate::wrapper::Target::parse(path),
         crate::wrapper::Target::RemoteFile
     ) {
         return None;
     }
-    let protocol = protocol(path).unwrap_or(b"file");
-    let handler = wrappers
-        .get(protocol)
-        .or_else(|| wrappers.get(&protocol.to_ascii_lowercase()))
-        .or_else(|| wrappers.get(b"file"))?;
-    match handler {
-        Handler::Builtin => None,
-        Handler::User(wrapper) => Some(wrapper.clone()),
+    wrappers.locate(path)
+}
+
+pub(crate) fn active(context: &mut dyn Context) -> Option<&Wrappers> {
+    context
+        .state()
+        .get::<crate::request::Files>()?
+        .wrappers
+        .as_ref()
+}
+
+impl Wrappers {
+    pub(crate) fn locate(&self, path: &[u8]) -> Option<UserWrapper> {
+        let protocol = protocol(path).unwrap_or(b"file");
+        let handler = self
+            .get(protocol)
+            .or_else(|| self.get(&protocol.to_ascii_lowercase()))
+            .or_else(|| self.get(b"file"))?;
+        match handler {
+            Handler::Builtin => None,
+            Handler::User(wrapper) => Some(wrapper.clone()),
+        }
     }
 }
 
@@ -227,11 +237,7 @@ pub(crate) fn protocol_disabled(context: &mut dyn Context, name: &[u8]) -> bool 
 }
 
 pub(crate) fn file_disabled(context: &mut dyn Context) -> bool {
-    context
-        .state()
-        .get::<crate::request::Files>()
-        .and_then(|files| files.wrappers.as_ref())
-        .is_some_and(|wrappers| wrappers.get(b"file").is_none())
+    active(context).is_some_and(|wrappers| wrappers.get(b"file").is_none())
 }
 
 fn unregister(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {

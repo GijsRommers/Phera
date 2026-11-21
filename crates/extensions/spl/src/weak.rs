@@ -224,6 +224,7 @@ const NO_DYNAMIC_PROPERTIES: NativePropertyAccess = NativePropertyAccess {
 };
 
 const MAP_HOOKS: ClassHooks = ClassHooks {
+    trace_native: Some(|_, _| true),
     fork: Some(crate::native_state::fork_spl),
     clone: Some(NativeClone::Copy(clone_map)),
     properties: Some(view),
@@ -245,6 +246,7 @@ const MAP_HOOKS: ClassHooks = ClassHooks {
 };
 
 const REFERENCE_HOOKS: ClassHooks = ClassHooks {
+    trace_native: Some(|_, _| true),
     fork: Some(crate::native_state::fork_spl),
     clone: Some(NativeClone::Forbidden),
     properties: Some(reference_view),

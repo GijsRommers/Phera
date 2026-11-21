@@ -57,6 +57,20 @@ impl Compiler<'_> {
                 class,
                 name: ast::MemberName::Identifier(name),
             } => {
+                // `self::K` / `parent::K` in a method of a named class: the
+                // class is known here, so read the constant by its symbol.
+                if let Some(class_name) = self.relative_class_name(class) {
+                    let destination = self.allocate_register()?;
+                    self.emit(
+                        Instruction::NamedClassConstant {
+                            destination,
+                            class: class_name,
+                            name: name.name.clone(),
+                        },
+                        line,
+                    );
+                    return Ok(destination);
+                }
                 let class = self.compile_class_target(class, line)?;
                 let destination = self.allocate_register()?;
                 self.emit(
@@ -249,6 +263,36 @@ impl Compiler<'_> {
             Ok(destination)
         } else {
             self.compile_expression(expression)
+        }
+    }
+
+    /// The name a `self::` / `parent::` constant target resolves to at compile
+    /// time. Only a method body of a named, non-trait class qualifies: in a
+    /// trait `self` is the class that uses the trait, in a closure or arrow
+    /// function it can be rebound, an anonymous class keeps the general form,
+    /// and an initializer does too, so the self-referencing-constant message
+    /// keeps the written `self::`. `static` is only known at run time.
+    fn relative_class_name(&self, class: &ast::Expression) -> Option<String> {
+        let ast::ExpressionKind::Name(name) = &class.kind else {
+            return None;
+        };
+        let keyword = name.text.to_ascii_lowercase();
+        if !matches!(keyword.as_str(), "self" | "parent") {
+            return None;
+        }
+        if self.trait_scope.is_some()
+            || !self.function.name.contains("::")
+            || self.function.name.starts_with("{closure:")
+        {
+            return None;
+        }
+        let scope = self.class_scope.as_deref()?;
+        if scope.contains('\0') {
+            return None;
+        }
+        match keyword.as_str() {
+            "self" => Some(scope.to_owned()),
+            _ => self.parent_scope.clone(),
         }
     }
 

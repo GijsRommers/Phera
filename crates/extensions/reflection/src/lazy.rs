@@ -52,7 +52,8 @@ pub(crate) const CLASS_METHODS: &[MethodEntry] = const {
         MethodEntry::public("isUninitializedLazyObject", &[OBJECT], |c, o, a| {
             query(c, o, a, IsUninitialized, "isUninitializedLazyObject")
         })
-        .returning("bool"),
+        .returning("bool")
+        .with_direct(direct_is_uninitialized_lazy_object),
         MethodEntry::public("getLazyInitializer", &[OBJECT], |c, o, a| {
             query(c, o, a, GetInitializer, "getLazyInitializer")
         })
@@ -169,4 +170,27 @@ fn receiver(
     Err(NativeError::type_error(format!(
         "{reflector}::{method}(): Argument #1 ($object) must be of type {class}, {given} given",
     )))
+}
+
+/// `isUninitializedLazyObject($object)` run where the call is (a direct
+/// method): `false` for an instance of the class that is not lazy. A lazy
+/// object, or an argument of another class, takes the method itself.
+fn direct_is_uninitialized_lazy_object(
+    reflection: &Object,
+    arguments: &[Option<Value>],
+) -> Option<Value> {
+    let [Some(Value::Object(object))] = arguments else {
+        return None;
+    };
+    if object.lazy().is_some() {
+        return None;
+    }
+    let native = reflection.native.try_borrow().ok()?;
+    let class = native
+        .as_ref()?
+        .downcast_ref::<crate::class::ReflectedClass>()?;
+    object
+        .class
+        .is_instance_of(&class.info.name)
+        .then_some(Value::Bool(false))
 }

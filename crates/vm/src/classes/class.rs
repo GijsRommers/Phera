@@ -54,8 +54,12 @@ pub(crate) struct Class {
     pub(crate) constructor: Option<Rc<Method>>,
     /// Root-first property keys reproduce the layout used by native testing helpers.
     pub(crate) defaults: Vec<PropertyDefault>,
-    /// Literal defaults are materialized once at linking; objects clone this COW table.
-    pub(crate) property_template: Option<phera_value::PhpArray>,
+    /// Literal defaults are materialized once at linking; objects clone this
+    /// (one box of slots).
+    pub(crate) property_template: Option<phera_value::Properties>,
+    /// The declared instance properties in PHP's order, which every object
+    /// of the class keeps in slots; `None` for a class without any.
+    pub(crate) layout: Option<Rc<phera_value::PropertyLayout>>,
     pub(crate) static_properties: Vec<PropertyDefault>,
     pub(crate) constants: HashMap<String, Rc<LinkedConstant>>,
     pub(crate) declaration: Option<(crate::code_table::FunctionIndex, phera_bytecode::ClassId)>,
@@ -123,6 +127,17 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
+    fn trace_native_values(
+        &self,
+        payload: &dyn std::any::Any,
+        visit: &mut dyn FnMut(&Value),
+    ) -> bool {
+        self.hooks
+            .as_ref()
+            .and_then(|hooks| hooks.trace_native)
+            .is_some_and(|trace| trace(payload, visit))
+    }
+
     fn is_traversable(&self) -> bool {
         self.operations
             .has(super::operations::ClassOperations::TRAVERSABLE)
@@ -176,6 +191,16 @@ impl ClassHandle for Class {
     fn is_enum(&self) -> bool {
         self.kind == ClassKind::Enum
     }
+
+    fn property_layout(&self) -> Option<Rc<phera_value::PropertyLayout>> {
+        self.layout.clone()
+    }
+
+    fn has_property_magic(&self) -> bool {
+        self.magic
+            .as_ref()
+            .is_some_and(|magic| magic.has_properties())
+    }
 }
 
 impl Class {
@@ -220,6 +245,10 @@ pub(crate) enum ConstantInitializer {
     EnumCase {
         name: String,
         backing: Option<crate::code_table::FunctionIndex>,
+        /// Where the request keeps the case object once it may be read
+        /// directly (see `EnumCases`). A native enum's cases have none and
+        /// are always fetched through the case lookup.
+        slot: Option<super::class_state::ConstantSlot>,
     },
 }
 
@@ -270,18 +299,46 @@ pub(crate) fn literal_initializer(
     (destination == *src).then_some(value)
 }
 
-/// Templates are valid for the immutable linked class and contain no evaluated expressions.
-pub(crate) fn property_template(defaults: &[PropertyDefault]) -> Option<phera_value::PhpArray> {
-    let mut template = phera_value::PhpArray::new();
+/// The layout of a class's instance properties: each declared key once, at
+/// its first place (a redeclaration keeps the parent's place), parents first.
+pub(crate) fn property_layout(
+    defaults: &[PropertyDefault],
+) -> Option<Rc<phera_value::PropertyLayout>> {
+    let mut keys: Vec<ArrayKey> = Vec::with_capacity(defaults.len());
     for property in defaults {
-        if property.initializer.is_some() {
-            return None;
-        }
-        if property.initialized {
-            template.insert(property.key.clone(), property.value.clone());
+        if !keys.contains(&property.key) {
+            keys.push(property.key.clone());
         }
     }
-    Some(template)
+    (!keys.is_empty()).then(|| Rc::new(phera_value::PropertyLayout::new(keys)))
+}
+
+/// Templates are valid for the immutable linked class and contain no
+/// evaluated expressions: the literal default of each initialized
+/// property in its slot (the last one, for a redeclared property).
+pub(crate) fn property_template(
+    defaults: &[PropertyDefault],
+    layout: Option<&Rc<phera_value::PropertyLayout>>,
+) -> Option<phera_value::Properties> {
+    if defaults
+        .iter()
+        .any(|property| property.initializer.is_some())
+    {
+        return None;
+    }
+    let Some(layout) = layout else {
+        return Some(phera_value::Properties::default());
+    };
+    let mut slots = vec![None; layout.len()].into_boxed_slice();
+    for property in defaults.iter().filter(|property| property.initialized) {
+        if let Some(slot) = layout
+            .slot(&property.key)
+            .and_then(|slot| slots.get_mut(slot))
+        {
+            *slot = Some(property.value.clone());
+        }
+    }
+    Some(phera_value::Properties::with_layout(layout.clone(), slots))
 }
 
 /// Argument routing metadata is independent of the receiver and shared by calls.
@@ -374,4 +431,37 @@ impl Class {
 pub(crate) fn widen_property_value(value: Value, ty: Option<&phera_bytecode::Type>) -> Value {
     ty.and_then(|ty| crate::types::widen_int_to_float(&value, ty.mask))
         .unwrap_or(value)
+}
+
+/// How many classes the ancestry walk keeps waiting at once, and how many
+/// it visits in all (an interface reached along two paths is visited
+/// twice). Real hierarchies stay far below both; a larger one answers
+/// `None`, for the caller's general path.
+const WALK_DEPTH: usize = 32;
+const WALK_VISITS: usize = 256;
+
+impl Class {
+    /// Whether this class is `target`, extends it or implements it: the same
+    /// ancestry as `Class::ancestors`, its parent and interfaces and theirs.
+    /// `None` when the walk outgrows its stack or its visits.
+    pub(crate) fn derives_from(&self, target: &Class) -> Option<bool> {
+        let mut waiting: [Option<&Class>; WALK_DEPTH] = [None; WALK_DEPTH];
+        waiting[0] = Some(self);
+        let mut count: usize = 1;
+        for _ in 0..WALK_VISITS {
+            let Some(last) = count.checked_sub(1) else {
+                return Some(false);
+            };
+            count = last;
+            let class = waiting.get(last).copied().flatten()?;
+            if std::ptr::eq(class, target) {
+                return Some(true);
+            }
+            for ancestor in class.parent.iter().chain(&class.interfaces) {
+                *waiting.get_mut(count)? = Some(&**ancestor);
+                count += 1;
+            }
+        }
+        None
+    }
 }

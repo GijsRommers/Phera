@@ -130,7 +130,7 @@ impl ClassHandle for DateClass {
 
 fn object(class: &str, properties: PhpArray) -> Rc<Object> {
     let object = Object::new(1, Rc::new(DateClass(class.into())));
-    object.update(|stored| *stored = properties);
+    object.update(|stored| stored.replace_all(properties));
     Rc::new(object)
 }
 
