@@ -298,6 +298,17 @@ impl Vm {
                                 call,
                                 destination,
                             ),
+                        crate::class_intrinsics::ClassFunction::IsA => self.relation_query_call(
+                            crate::class_queries::RelationQuery::IsA,
+                            call,
+                            destination,
+                        ),
+                        crate::class_intrinsics::ClassFunction::IsSubclassOf => self
+                            .relation_query_call(
+                                crate::class_queries::RelationQuery::IsSubclassOf,
+                                call,
+                                destination,
+                            ),
                         _ => Some(BatchExit::NativeCall(destination)),
                     })
                 }
