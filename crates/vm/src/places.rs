@@ -185,49 +185,22 @@ impl Vm {
         instruction: phera_bytecode::Instruction,
     ) -> Result<(), NativeError> {
         use phera_bytecode::Instruction as I;
-        // The registers this instruction reads as keys or operands.
-        let mut registers: Vec<Reg> = Vec::new();
-        match instruction {
-            I::Unary { src, .. } | I::Cast { src, .. } => registers.push(src),
-            I::Fetch { path, .. }
-            | I::FetchIndex { path, .. }
-            | I::AssignPath { path, .. }
-            | I::AssignPathFromLocal { path, .. }
-            | I::AssignOpPath { path, .. }
-            | I::IncDecPath { path, .. }
-            | I::UnsetPath { path }
-            | I::IssetPath { path, .. }
-            | I::MakeReference { path, .. }
-            | I::BindReference { path, .. }
-            | I::SendPath { path }
-            | I::IterStartReference { path, .. } => {
-                // Read the compiled path table directly: resolving the path
-                // here would duplicate the work the handler does right after.
-                if let Some(frame) = self.current()
-                    && let Some(definition) = frame.function().paths.get(path.index())
-                {
-                    registers.extend(definition.steps.iter().filter_map(|step| match step {
-                        Step::Index(register) | Step::DynamicProperty(register) => Some(*register),
-                        Step::Property(_) | Step::Append => None,
-                    }));
-                }
-            }
-            _ => return Ok(()),
-        }
+        // One pass over the frame: collect the names of undefined named-local
+        // operands. No allocation unless a warning actually fires.
         let mut missing: Vec<String> = Vec::new();
         if let Some(frame) = self.current() {
             let function = frame.function();
             let locals = function.locals.len();
-            for register in registers {
+            let check = |register: Reg, missing: &mut Vec<String>| {
                 if register.index() >= locals {
-                    continue;
+                    return;
                 }
                 let defined = frame
                     .slots(&self.registers)
                     .get(register.index())
                     .is_some_and(Option::is_some);
                 if defined {
-                    continue;
+                    return;
                 }
                 if let Some(name) = function
                     .locals
@@ -236,6 +209,35 @@ impl Vm {
                 {
                     missing.push(name.clone());
                 }
+            };
+            match instruction {
+                I::Unary { src, .. } | I::Cast { src, .. } => check(src, &mut missing),
+                I::Fetch { path, .. }
+                | I::FetchIndex { path, .. }
+                | I::AssignPath { path, .. }
+                | I::AssignPathFromLocal { path, .. }
+                | I::AssignOpPath { path, .. }
+                | I::IncDecPath { path, .. }
+                | I::UnsetPath { path }
+                | I::IssetPath { path, .. }
+                | I::MakeReference { path, .. }
+                | I::BindReference { path, .. }
+                | I::SendPath { path }
+                | I::IterStartReference { path, .. } => {
+                    // Read the compiled path table directly: resolving the
+                    // path here would duplicate the handler's own work.
+                    if let Some(definition) = function.paths.get(path.index()) {
+                        for step in &definition.steps {
+                            match step {
+                                Step::Index(register) | Step::DynamicProperty(register) => {
+                                    check(*register, &mut missing)
+                                }
+                                Step::Property(_) | Step::Append => {}
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         for name in missing {
