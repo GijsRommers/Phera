@@ -17,6 +17,18 @@ pub(crate) struct UserHandle<T> {
     release: Option<ResourceRelease>,
 }
 
+impl<T> UserHandle<T> {
+    pub fn new(value: Rc<T>, release: Option<ResourceRelease>) -> Self {
+        Self { value, release }
+    }
+
+    pub fn cancel_release(&mut self) {
+        if let Some(release) = self.release.as_mut() {
+            release.cancel();
+        }
+    }
+}
+
 enum Handle {
     File(Rc<UserFile>),
     Directory(Rc<UserDirectory>),
@@ -54,7 +66,7 @@ pub(crate) fn make_directory(context: &mut dyn Context, dir: Rc<UserDirectory>) 
 fn make<T: 'static>(context: &mut dyn Context, value: Rc<T>, handle: Handle) -> Value {
     let id = request::files(context).claim_id();
     let release = context.resource_release("stream", id);
-    let resource = request::resource(id, "stream", UserHandle { value, release });
+    let resource = request::resource(id, "stream", UserHandle::new(value, release));
     request::track_standard(context.state(), &resource);
     if let Value::Resource(resource) = &resource {
         context
@@ -100,6 +112,8 @@ fn close_released(context: &mut dyn Context, id: i64) -> LocalFuture<'_, Result<
             .remove(&id);
         if let Some((_, handle)) = handle {
             close_handle(context, id, handle, None).await?;
+        } else {
+            crate::filters::user::close_last_native_owner(context, id).await?;
         }
         Ok(())
     })
@@ -114,19 +128,18 @@ async fn close_handle(
     match handle {
         Handle::File(value) => {
             let filtered = if crate::filters::user::lookup(context, id).is_some() {
-                let resource = resource.unwrap_or_else(|| {
-                    Rc::new(Resource::new(
+                if let Some(resource) = resource {
+                    let result = crate::filters::user::close(context, &resource).await;
+                    retire(&resource);
+                    result
+                } else {
+                    let resource = Rc::new(Resource::new(
                         id,
                         "stream",
-                        Some(Box::new(UserHandle {
-                            value: value.clone(),
-                            release: None,
-                        })),
-                    ))
-                });
-                let result = crate::filters::user::close_released(context, &resource).await;
-                retire(&resource);
-                result
+                        Some(Box::new(UserHandle::new(value.clone(), None))),
+                    ));
+                    crate::filters::user::close_released(context, &resource).await
+                }
             } else {
                 if let Some(resource) = resource {
                     retire(&resource);

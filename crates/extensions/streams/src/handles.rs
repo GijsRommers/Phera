@@ -190,6 +190,14 @@ pub(crate) async fn close_arguments(
         file.close(context).await?;
         return Ok(Value::Bool(true));
     }
+    finish_native(context, resource, function).await
+}
+
+pub(crate) async fn finish_native(
+    context: &mut dyn Context,
+    resource: &Resource,
+    function: &str,
+) -> NativeResult {
     let (gzip, filtered) = with_stream(resource, |stream| {
         if let crate::stream::Backing::Socket(socket) = &stream.backing {
             socket.retire();

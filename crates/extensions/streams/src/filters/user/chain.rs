@@ -9,7 +9,7 @@ use std::{
 
 use phera_extension_api::{Context, NativeError, NativeResult, Value, value::Resource};
 
-use crate::resource::with_stream;
+use crate::resource::{FilteredBacking, with_stream};
 
 use super::super::Flush;
 use super::stage::{Stage, StageOutput};
@@ -19,7 +19,7 @@ mod lifecycle;
 
 pub(in crate::filters) use attachment::{Placement, attach, attach_native};
 pub(in crate::filters) use lifecycle::remove;
-pub(crate) use lifecycle::{close, close_released};
+pub(crate) use lifecycle::{close, close_last_native_owner, close_released};
 
 #[derive(Default)]
 struct Streams(HashMap<i64, Rc<Chains>>);
@@ -54,6 +54,8 @@ pub(crate) struct Chains {
     exhausted: Cell<bool>,
     buffered: RefCell<VecDeque<u8>>,
     stream: RefCell<Weak<Resource>>,
+    backing: RefCell<Option<FilteredBacking>>,
+    released: Cell<bool>,
 }
 
 pub(crate) fn lookup(context: &mut dyn Context, id: i64) -> Option<Rc<Chains>> {
@@ -63,6 +65,14 @@ pub(crate) fn lookup(context: &mut dyn Context, id: i64) -> Option<Rc<Chains>> {
 impl Chains {
     pub(crate) fn len(&self) -> usize {
         self.read.borrow().len() + self.write.borrow().len()
+    }
+
+    fn has_php(&self) -> bool {
+        self.read
+            .borrow()
+            .iter()
+            .chain(self.write.borrow().iter())
+            .any(Stage::is_php)
     }
 
     pub(crate) fn reading(&self) -> bool {
@@ -191,7 +201,11 @@ impl Chains {
         count_input: bool,
     ) -> Result<Option<Vec<u8>>, NativeError> {
         for (index, stage) in stages.iter().enumerate() {
-            let stream = self.stream.borrow().upgrade();
+            let stream = if self.released.get() && stage.is_php() {
+                None
+            } else {
+                self.stream.borrow().upgrade()
+            };
             match stage
                 .apply(
                     context,

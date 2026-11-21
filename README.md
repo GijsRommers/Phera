@@ -168,7 +168,8 @@ created after the snapshot.
 Use `php://filter` or `stream_filter_append()` to transform a stream.
 Register PHP filters with `stream_filter_register()` and combine them with
 built-in filters on native streams or application wrappers. Phera limits
-chains to 16 stages and intermediate buckets to 8 MiB.
+chains to 16 stages and intermediate buckets to 8 MiB. PHP filters flush
+and run their close callbacks when the last reference to the stream goes away.
 
 Stream sockets use the worker's event loop for TCP, UDP and Unix connections.
 PHP programs can open a client or listener, wait for readiness with

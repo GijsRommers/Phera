@@ -43,6 +43,9 @@ pub(crate) fn fork_stream(data: &dyn Any, _fork: &mut Fork<'_>) -> Result<Box<dy
             directory.value.object.class.name()
         ));
     }
+    if data.is::<crate::resource::FilteredStream>() {
+        return Err("an attached PHP stream filter belongs to the boot".into());
+    }
     let stream = data
         .downcast_ref::<Stream>()
         .ok_or("a directory handle belongs to one request")?;

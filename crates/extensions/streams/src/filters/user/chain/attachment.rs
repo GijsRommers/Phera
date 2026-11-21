@@ -1,12 +1,19 @@
 //! A PHP filter takes over the chain when its first callback stage is attached.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+};
 
 use phera_extension_api::{
     ArrayKey, Context, NativeError, NativeResult, PhpArray, Value, value::Resource,
 };
 
-use crate::{request::new_resource, resource::with_stream, user_file::invoke};
+use crate::{
+    request::new_resource,
+    resource::{retain_filtered, with_stream},
+    user_file::invoke,
+};
 
 use super::super::super::{Filter, functions::Attachment};
 use super::lifecycle::finish;
@@ -89,15 +96,22 @@ pub(in crate::filters) async fn attach(
             Attachment(Rc::downgrade(stream)),
         )
     };
-    let id = match &attachment {
-        Value::Resource(resource) => resource.id,
-        _ => 0,
+    let (id, weak_attachment) = match &attachment {
+        Value::Resource(resource) => (resource.id, Rc::downgrade(resource)),
+        _ => (0, Weak::new()),
     };
     chains.promote(stream)?;
+    if let Some(backing) = retain_filtered(context, stream) {
+        *chains.backing.borrow_mut() = Some(backing);
+    }
     let mut objects = objects.into_iter();
     for (enabled, stages) in [(read, &chains.read), (write, &chains.write)] {
         if enabled && let Some(filter) = objects.next() {
-            Chains::insert(stages, Stage::php(id, filter), placement);
+            Chains::insert(
+                stages,
+                Stage::php(id, filter, weak_attachment.clone()),
+                placement,
+            );
         }
     }
     Ok(attachment)
