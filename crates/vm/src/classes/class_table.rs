@@ -129,6 +129,22 @@ pub(crate) struct ClassTable {
     collection_requested: bool,
 }
 
+/// Fold short class names in a local buffer for lookups and ancestry checks.
+pub(super) fn with_lowercase_name<T>(name: &str, use_name: impl FnOnce(&str) -> T) -> T {
+    if !name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        return use_name(name);
+    }
+    let mut buffer = [0; 64];
+    if let Some(bytes) = buffer.get_mut(..name.len()) {
+        bytes.copy_from_slice(name.as_bytes());
+        bytes.make_ascii_lowercase();
+        if let Ok(lowercase) = std::str::from_utf8(bytes) {
+            return use_name(lowercase);
+        }
+    }
+    use_name(&name.to_ascii_lowercase())
+}
+
 impl ClassTable {
     pub(crate) fn native_definitions(&self) -> Rc<ClassDefinitions> {
         self.native.clone()
@@ -417,18 +433,7 @@ impl ClassTable {
     /// Class identifiers ignore case, including names produced by dynamic expressions.
     pub(crate) fn get(&self, name: &str) -> Option<Rc<Class>> {
         let name = name.strip_prefix('\\').unwrap_or(name);
-        if !name.bytes().any(|byte| byte.is_ascii_uppercase()) {
-            return self.get_lowercase(name).cloned();
-        }
-        let mut buffer = [0; 64];
-        if let Some(bytes) = buffer.get_mut(..name.len()) {
-            bytes.copy_from_slice(name.as_bytes());
-            bytes.make_ascii_lowercase();
-            if let Ok(name) = std::str::from_utf8(bytes) {
-                return self.get_lowercase(name).cloned();
-            }
-        }
-        self.get_lowercase(&name.to_ascii_lowercase()).cloned()
+        with_lowercase_name(name, |lowercase| self.get_lowercase(lowercase).cloned())
     }
 
     /// Value-owned leases implement PHP's LIFO reuse without inspecting weak handles.
