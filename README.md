@@ -175,8 +175,10 @@ A live socket held by the boot prevents `Phera\snapshot()` from creating
 a snapshot. Persistent sockets created during boot connect on first use
 in each fork. `pfsockopen()` and `STREAM_CLIENT_PERSISTENT` can reuse a
 clean idle connection on the same worker.
-`fopen()` supports buffered HTTP and HTTPS responses, including for
-Guzzle's stream handler.
+`fopen()` and `file_get_contents()` support buffered HTTP and HTTPS
+responses. `get_headers()` fetches the response headers, and
+`http_get_last_response_headers()` returns the latest headers in the
+current request. Stream contexts can store default options for these calls.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 Legacy `DOMDocument` supports local XSD validation for common content models,
