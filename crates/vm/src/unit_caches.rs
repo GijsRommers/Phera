@@ -34,11 +34,16 @@ pub(crate) struct UnitCache {
     /// instruction, made when the function first looks a site up.
     main_sites: Sites,
     function_sites: Box<[Sites]>,
-    /// What each method site (`CallMethod`) of the top-level code and of each
-    /// function found the last time it ran: one fixed entry per site, made
-    /// when the function's first site runs.
-    main_records: Records,
-    function_records: Box<[Records]>,
+    /// What each method site (`CallMethod`) of the file found the last time
+    /// it ran: one flat array for the whole file, one fixed entry per site,
+    /// made when the first of the file's sites runs, so a file whose sites
+    /// never run in a request costs nothing. A function's sites start at
+    /// its entry in `record_starts`.
+    records: Records,
+    /// Where each function's sites start in `records`: the top-level code's
+    /// at 0, function `i`'s at `record_starts[i]`, and the total last. Made
+    /// with the file, shared by every fork.
+    record_starts: Rc<[u32]>,
     pub(crate) closure_signatures: RefCell<Vec<Option<crate::calls::call_state::Callee>>>,
 }
 
@@ -56,7 +61,7 @@ pub(crate) struct ClassTypeEntry {
 pub(crate) type Getter =
     fn(&phera_value::Object, &[Option<phera_value::Value>]) -> Option<phera_value::Value>;
 
-/// The method site records of one function, one per site.
+/// The method site records of one file, one per site.
 pub(crate) type Records = OnceCell<Box<[Cell<SiteRecord>]>>;
 
 /// What a method site found for a receiver of class `class`: the method
@@ -175,13 +180,17 @@ impl UnitCache {
         sites: usize,
         site: phera_bytecode::MethodSiteId,
     ) -> Option<&Cell<SiteRecord>> {
-        let records = match facts.local {
-            Some(function) => self.function_records.get(function as usize)?,
-            None => &self.main_records,
+        let start = match facts.local {
+            Some(function) => *self.record_starts.get(function as usize)? as usize,
+            None => 0,
         };
-        records
-            .get_or_init(|| (0..sites).map(|_| Cell::new(SiteRecord::EMPTY)).collect())
-            .get(site.index())
+        if site.index() >= sites {
+            return None;
+        }
+        let total = self.record_starts.last().copied().unwrap_or(0) as usize;
+        self.records
+            .get_or_init(|| (0..total).map(|_| Cell::new(SiteRecord::EMPTY)).collect())
+            .get(start + site.index())
     }
 }
 
@@ -224,8 +233,17 @@ impl UnitCache {
             class_types: unit.types.iter().map(|_| RefCell::new(None)).collect(),
             main_sites: Sites::new(),
             function_sites: unit.functions.iter().map(|_| Sites::new()).collect(),
-            main_records: Records::new(),
-            function_records: unit.functions.iter().map(|_| Records::new()).collect(),
+            records: Records::new(),
+            record_starts: {
+                let mut next = unit.main.method_sites.len() as u32;
+                let mut starts = Vec::with_capacity(unit.functions.len() + 1);
+                for function in &unit.functions {
+                    starts.push(next);
+                    next += function.method_sites.len() as u32;
+                }
+                starts.push(next);
+                starts.into()
+            },
             closure_signatures: RefCell::new(Vec::new()),
             class_names: unit
                 .symbols
@@ -282,13 +300,11 @@ impl crate::snapshot::ForkCopy for UnitCache {
             }
             copy
         };
-        let records = |records: &Records| {
-            let copy = Records::new();
-            if let Some(cells) = records.get() {
-                let _ = copy.set(cells.iter().map(|cell| Cell::new(cell.get())).collect());
-            }
-            copy
-        };
+        // Only a file whose sites ran before the snapshot has records.
+        let records = Records::new();
+        if let Some(cells) = self.records.get() {
+            let _ = records.set(cells.iter().map(|cell| Cell::new(cell.get())).collect());
+        }
         UnitCache {
             trace_file: self.trace_file.clone(),
             names: self.names.clone(),
@@ -304,8 +320,8 @@ impl crate::snapshot::ForkCopy for UnitCache {
                 .iter()
                 .map(|function| sites(function, fork))
                 .collect(),
-            main_records: records(&self.main_records),
-            function_records: self.function_records.iter().map(records).collect(),
+            records,
+            record_starts: self.record_starts.clone(),
             closure_signatures: RefCell::new(self.closure_signatures.borrow().fork_copy(fork)),
         }
     }
