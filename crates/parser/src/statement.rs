@@ -8,7 +8,7 @@ use phera_ast::{
 use phera_lexer::TokenKind;
 
 use crate::error::ParseError;
-use crate::parser::Parser;
+use crate::parser::{ParsePurpose, Parser};
 
 mod labels;
 
@@ -805,9 +805,12 @@ impl Parser<'_> {
         // compile time; the AST stores a plain level.
         let expression = self.parse_expr(0)?;
         match expression.kind {
-            ExpressionKind::Literal(Literal::Int(value)) if value > 0 => {
-                Ok(value.min(u32::MAX as i64) as u32)
+            ExpressionKind::Literal(Literal::Int(value))
+                if value > 0 || self.purpose == ParsePurpose::Syntax =>
+            {
+                Ok(value.clamp(0, u32::MAX as i64) as u32)
             }
+            _ if self.purpose == ParsePurpose::Syntax => Ok(1),
             ExpressionKind::Literal(Literal::Int(_) | Literal::Float(_) | Literal::String(_)) => {
                 Err(ParseError::compile(
                     format!("'{keyword}' operator accepts only positive integers"),

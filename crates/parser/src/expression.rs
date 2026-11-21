@@ -16,7 +16,7 @@ use phera_lexer::TokenKind;
 use phera_source::Span;
 
 use crate::error::ParseError;
-use crate::parser::{Parser, is_word_token};
+use crate::parser::{ParsePurpose, Parser, is_word_token};
 
 /// Operator precedence levels, in the order PHP's grammar declares them
 /// (later declarations bind tighter).
@@ -183,6 +183,7 @@ impl Parser<'_> {
                     break;
                 }
                 if banned == Some(prec::TERNARY)
+                    && self.purpose == ParsePurpose::Compilation
                     && let ExpressionKind::Ternary { then, .. } = &left.kind
                 {
                     // The middle operand and parentheses start their own

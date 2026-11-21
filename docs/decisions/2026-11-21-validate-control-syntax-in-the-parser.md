@@ -13,12 +13,15 @@ loops. Consecutive short ternaries can still group from the left.
 Validate loop operands before lowering them to a depth. Validate the
 first namespace against the parsed file prelude, where leading declare
 statements can be distinguished from other statements.
+Apply these checks when parsing for compilation. Syntax-only parsing
+continues to accept these programs so `TOKEN_PARSE` can return their tokens.
 
 ## Why
 
 The parser already knows which operators shared a precedence level and
 whether loop depth came from an integer literal. Keeping those facts
 here avoids extending every expression node or adding a runtime check.
+PHP's tokenizer accepts the grammar before these compile checks run.
 
 ## Turned down
 
