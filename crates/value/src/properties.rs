@@ -285,7 +285,7 @@ impl Properties {
         // are distinct and the array is built in one go.
         let entries = self
             .iter()
-            .map(|(key, value)| Ok::<_, std::convert::Infallible>((key, value.clone())));
+            .map(|(key, value)| Ok::<_, std::convert::Infallible>((key, copy_element(value))));
         match PhpArray::try_from_distinct(entries) {
             Ok(array) => array,
             Err(never) => match never {},
@@ -304,11 +304,23 @@ impl Properties {
 
     /// Replaces every property with those of `array`, by key: declared
     /// keys go to their slots, the rest to the other properties.
+    ///
+    /// A table whose order the slots cannot keep (`ArrayObject::ksort` on
+    /// an object reorders its properties, declared ones included) leaves
+    /// the layout: every property is then kept by key, in the given order,
+    /// and slot access finds nothing, so sites and `ReflectionProperty`
+    /// take the general path for this object.
     pub fn replace_all(&mut self, array: PhpArray) {
         let Some(layout) = self.layout.clone() else {
             self.others = (!array.is_empty()).then(|| Box::new(array));
             return;
         };
+        if !in_layout_order(&layout, &array) {
+            self.layout = None;
+            self.slots = Box::default();
+            self.others = (!array.is_empty()).then(|| Box::new(array));
+            return;
+        }
         self.slots.iter_mut().for_each(|slot| *slot = None);
         self.others = None;
         for (key, value) in array.iter() {
@@ -330,4 +342,32 @@ impl Properties {
         }
         work.extend(self.slots.into_vec().into_iter().rev().flatten());
     }
+}
+
+/// Whether `array` lists the declared keys of `layout` in layout order and
+/// every other key after them: the only order the slots can keep.
+fn in_layout_order(layout: &PropertyLayout, array: &PhpArray) -> bool {
+    let mut last = None;
+    let mut others = false;
+    for (key, _) in array.iter() {
+        match layout.slot(&key) {
+            Some(slot) if !others && last.is_none_or(|last| slot > last) => last = Some(slot),
+            Some(_) => return false,
+            None => others = true,
+        }
+    }
+    true
+}
+
+/// A property's value as a copy of the properties holds it: a PHP
+/// reference that only the property holds is copied as its value, as an
+/// array's copy does (`PhpArray`'s `Clone`).
+fn copy_element(value: &Value) -> Value {
+    if let Value::Reference(reference) = value
+        && Rc::strong_count(reference) == 1
+        && let Ok(inner) = reference.try_borrow()
+    {
+        return inner.clone();
+    }
+    value.clone()
 }

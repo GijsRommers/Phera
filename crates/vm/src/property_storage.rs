@@ -101,43 +101,46 @@ pub(crate) fn append_at(
         .flatten()
 }
 
-/// The property's slot as a site knows it (the entry matched the object's
-/// class), or its key for an undeclared one.
+/// A property as a site knows it (the entry matched the object's class):
+/// its key, and its slot when the class declares it.
 #[derive(Clone, Copy)]
-pub(crate) enum Known<'a> {
-    Slot(usize),
-    Key(&'a ArrayKey),
+pub(crate) struct Known<'a> {
+    key: &'a ArrayKey,
+    slot: Option<usize>,
 }
 
 impl<'a> Known<'a> {
     pub(crate) fn of(key: &'a ArrayKey, slot: Option<usize>) -> Self {
-        match slot {
-            Some(slot) => Self::Slot(slot),
-            None => Self::Key(key),
-        }
+        Self { key, slot }
+    }
+
+    /// The slot, when the object keeps its declared properties in slots
+    /// (an object whose table left its layout keeps them by key).
+    fn slot_in(self, properties: &phera_value::Properties) -> Option<usize> {
+        self.slot.filter(|_| properties.layout().is_some())
     }
 
     fn get(self, properties: &phera_value::Properties) -> Option<&Value> {
-        match self {
-            Self::Slot(slot) => properties.slot(slot),
-            Self::Key(key) => properties.get(key),
+        match self.slot_in(properties) {
+            Some(slot) => properties.slot(slot),
+            None => properties.get(self.key),
         }
     }
 
     fn get_mut(self, properties: &mut phera_value::Properties) -> Option<&mut Value> {
-        match self {
-            Self::Slot(slot) => properties.slot_mut(slot),
-            Self::Key(key) => properties.get_mut(key),
+        match self.slot_in(properties) {
+            Some(slot) => properties.slot_mut(slot),
+            None => properties.get_mut(self.key),
         }
     }
 
     fn set(self, properties: &mut phera_value::Properties, value: Value) {
-        match self {
-            Self::Slot(slot) => {
+        match self.slot_in(properties) {
+            Some(slot) => {
                 properties.set_slot(slot, value);
             }
-            Self::Key(key) => {
-                properties.insert(key.clone(), value);
+            None => {
+                properties.insert(self.key.clone(), value);
             }
         }
     }
