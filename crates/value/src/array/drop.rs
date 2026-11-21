@@ -66,7 +66,7 @@ impl PhpArray {
         }
     }
 
-    fn release_entries(values: impl Iterator<Item = Value>) {
+    pub(crate) fn release_entries(values: impl Iterator<Item = Value>) {
         let mut work = Vec::new();
         for value in values {
             match value {

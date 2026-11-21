@@ -336,11 +336,17 @@ impl Properties {
     /// Moves every value out, for a release that must not recurse. They go
     /// in last first, so that `pop` frees them in PHP's order: the
     /// declared properties first to last, then the others.
-    pub(crate) fn take_values(self, work: &mut Vec<Value>) {
-        if let Some(mut others) = self.others {
+    pub(crate) fn take_values(mut self, work: &mut Vec<Value>) {
+        if let Some(mut others) = self.others.take() {
             others.take_values(work);
         }
-        work.extend(self.slots.into_vec().into_iter().rev().flatten());
+        work.extend(
+            std::mem::take(&mut self.slots)
+                .into_vec()
+                .into_iter()
+                .rev()
+                .flatten(),
+        );
     }
 }
 
@@ -370,4 +376,19 @@ fn copy_element(value: &Value) -> Value {
         return inner.clone();
     }
     value.clone()
+}
+
+impl Drop for Properties {
+    /// Releases the slots as an array releases its values: a nested array,
+    /// object or reference goes through a work list instead of recursion,
+    /// so that a list of 300,000 linked objects is freed without
+    /// overflowing the stack. The other properties are a `PhpArray`, which
+    /// does the same itself.
+    fn drop(&mut self) {
+        if self.slots.is_empty() {
+            return;
+        }
+        let slots = std::mem::take(&mut self.slots);
+        PhpArray::release_entries(slots.into_vec().into_iter().flatten());
+    }
 }
