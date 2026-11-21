@@ -311,13 +311,24 @@ impl Vm {
                             ),
                         crate::class_intrinsics::ClassFunction::MethodExists => self
                             .member_query_call(
-                                crate::class_queries::MemberQuery::Method,
+                                crate::class_member_queries::MemberQuery::Method,
                                 call,
                                 destination,
                             ),
                         crate::class_intrinsics::ClassFunction::PropertyExists => self
                             .member_query_call(
-                                crate::class_queries::MemberQuery::Property,
+                                crate::class_member_queries::MemberQuery::Property,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::GetClass => self.class_name_call(
+                            crate::class_queries::ClassNameQuery::GetClass,
+                            call,
+                            destination,
+                        ),
+                        crate::class_intrinsics::ClassFunction::GetParentClass => self
+                            .class_name_call(
+                                crate::class_queries::ClassNameQuery::GetParentClass,
                                 call,
                                 destination,
                             ),

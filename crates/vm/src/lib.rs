@@ -38,6 +38,7 @@ mod class_constants;
 mod class_function;
 mod class_intrinsics;
 mod class_listings;
+mod class_member_queries;
 mod class_queries;
 mod class_types;
 mod classes;
