@@ -1,5 +1,5 @@
 --TEST--
-Undeclared properties written in the loop: stdClass, AllowDynamicProperties, the creation deprecation, __set, a readonly class, references, order, a lazy ghost, json_decode rows
+Undeclared properties written in the loop: stdClass, AllowDynamicProperties, the creation deprecation, __set, a readonly class, references, order, a lazy ghost, json_decode rows, a static name, private properties of the class and its parent
 --FILE--
 <?php
 #[AllowDynamicProperties] class Allowed { public int $n = 0; }
@@ -26,6 +26,23 @@ $rows = json_decode('[{"id":1,"name":"a"},{"id":2,"name":"b"}]');
 foreach ($rows as $row) { $row->seen = true; $row->id += 100; }
 echo json_encode($rows), "\n";
 
+// A name an inherited static property has: PHP's notice, every time.
+class StaticBase { public static $st = 1; }
+class StaticChild extends StaticBase {}
+$c = new StaticChild; for ($i = 0; $i < 2; $i++) { $c->st = $i; } echo json_encode(get_object_vars($c)), ' ', StaticChild::$st, "\n";
+// From outside: the class's own private property is an error; a parent's
+// private one is not visible, so a dynamic property is made, with the deprecation.
+class PrivateBase { private $p = 'base'; public function own() { return $this->p; } }
+class PrivateChild extends PrivateBase { private $q = 'child'; }
+$pc = new PrivateChild;
+for ($i = 0; $i < 2; $i++) {
+    try { $pc->q = $i; } catch (Error $e) { echo get_class($e), ': ', $e->getMessage(), "\n"; }
+    $pc->p = $i;
+}
+echo $pc->p, ' ', $pc->own(), "\n";
+$pb = new PrivateBase;
+for ($i = 0; $i < 2; $i++) { try { $pb->p = $i; } catch (Error $e) { echo get_class($e), ': ', $e->getMessage(), "\n"; } }
+
 --EXPECTF--
 stdClass: {"dyn":2,"k0":0,"k1":1,"k2":2}
 Allowed: {"n":0,"dyn":2,"k0":0,"k1":1,"k2":2}
@@ -49,3 +66,17 @@ b,a
   init
 5 e
 [{"id":101,"name":"a","seen":true},{"id":102,"name":"b","seen":true}]
+
+Notice: Accessing static property StaticChild::$st as non static in %s on line 29
+
+Deprecated: Creation of dynamic property StaticChild::$st is deprecated in %s on line 29
+
+Notice: Accessing static property StaticChild::$st as non static in %s on line 29
+{"st":1} 1
+Error: Cannot access private property PrivateChild::$q
+
+Deprecated: Creation of dynamic property PrivateChild::$p is deprecated in %s on line 37
+Error: Cannot access private property PrivateChild::$q
+1 base
+Error: Cannot access private property PrivateBase::$p
+Error: Cannot access private property PrivateBase::$p
