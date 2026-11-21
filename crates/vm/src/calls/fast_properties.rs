@@ -101,21 +101,35 @@ impl Machine<'_> {
             _ => return Step::Slow,
         };
         let written = self.with_site(position, (path, Shape::Write), |entry, object, scope| {
-            // The assignment's result is the value stored: `1.0` for a
-            // `float` property assigned `1`.
-            let widened = result.and_then(|_| entry.widened(&value));
-            entry.write_matching(object, scope, &value).then_some(widened)
+            entry.write_matching(object, scope, &value).then_some(())
         });
-        let Some(widened) = written else {
+        if written.is_none() {
             return Step::Slow;
-        };
+        }
         if let Some(result) = result {
+            // The assignment's result is the value stored: `1.0` for a
+            // `float` property assigned `1`. Only an integer can differ.
+            let stored = match value {
+                Value::Int(_) => self.stored_integer(position, path, value),
+                value => value,
+            };
             // Outside the guarded loop, into a register checked above, a
             // store completes.
-            let stored = widened.unwrap_or(value);
             let _ = store::<false>(self.registers.tail_mut(base), result, stored);
         }
         Step::Done(position.ip)
+    }
+
+    /// What the property `path` names stored for the integer `value` the
+    /// loop just wrote to it: the float a `float` property converts it to,
+    /// or the integer. Out of line, so the write's arm stays as small.
+    #[cold]
+    #[inline(never)]
+    fn stored_integer(&self, position: Position, path: PathId, value: Value) -> Value {
+        self.with_site(position, (path, Shape::Write), |entry, _, _| {
+            entry.widened(&value)
+        })
+        .unwrap_or(value)
     }
 
     /// `IncDecPath` of one declared integer property.
