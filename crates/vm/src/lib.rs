@@ -178,6 +178,7 @@ mod traversable_foreach;
 mod traversable_unpack;
 mod traversal;
 mod trigger_errors;
+mod typed_increment;
 mod typed_references;
 mod types;
 mod unit_caches;

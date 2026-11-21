@@ -378,7 +378,10 @@ impl Vm {
     }
 }
 
-fn path_reference(root: &Value, keys: &InlineStack<PathKey>) -> Option<Rc<RefCell<Value>>> {
+pub(crate) fn path_reference(
+    root: &Value,
+    keys: &InlineStack<PathKey>,
+) -> Option<Rc<RefCell<Value>>> {
     let mut target = root.clone();
     for key in keys.iter() {
         let next = match (&*target.deref(), key) {
@@ -449,7 +452,7 @@ fn conflicting_reference_types(
     ))
 }
 
-fn reference_property_name(property: &PropertyDefault) -> String {
+pub(crate) fn reference_property_name(property: &PropertyDefault) -> String {
     let declaration = property
         .ty
         .as_ref()
