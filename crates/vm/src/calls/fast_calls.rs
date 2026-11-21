@@ -511,9 +511,7 @@ impl Machine<'_> {
                 && self
                     .classes
                     .by_key(self.code.unit_name_key(function, *name))
-                    .is_some_and(|target| {
-                        super::fast_instance_of::derives_from(class, target) == Some(true)
-                    })
+                    .is_some_and(|target| class.derives_from(target) == Some(true))
         });
         // Remember it, as the VM's check does, so that the next value of
         // this class is the cache's first test.
