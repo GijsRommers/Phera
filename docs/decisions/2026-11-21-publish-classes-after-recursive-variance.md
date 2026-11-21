@@ -30,6 +30,9 @@ A link that reads a pending declaration stays request-local. Other
 declarations loaded by the same callback can still reuse and populate
 the worker table. A cached link that recorded a missing type is
 rechecked if that type has a pending declaration in the current request.
+The worker validates the ordinary class numbers first, then checks the
+missing names against the pending declarations. Nominal comparisons use
+borrowed names and consult linked ancestry before walking declarations.
 
 ## Turned down
 

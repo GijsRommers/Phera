@@ -141,10 +141,11 @@ impl Vm {
         self.classes
             .worker()
             .find_entry(unit, index.index() as u32, |entry| {
-                entry.dependencies.iter().all(|(name, number)| {
-                    self.classes.resolve_number(name) == *number
-                        && (number.is_some() || !self.inheritance_type_pending(name))
-                })
+                entry
+                    .dependencies
+                    .iter()
+                    .all(|(name, number)| self.classes.resolve_number(name) == *number)
+                    && !self.inherits_from_pending_type(&entry.dependencies)
             })
     }
 

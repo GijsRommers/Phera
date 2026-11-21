@@ -1,5 +1,7 @@
 //! Override contracts compare accepted parameter sets and produced return sets at class linking.
 
+use std::borrow::Cow;
+
 use super::{Method, MethodBody};
 use crate::{Vm, autoload::MethodVariance};
 use phera_extension_api::NativeError;
@@ -499,8 +501,8 @@ impl Vm {
         }
         let source_name = self.resolve_signature_keyword(source, source_scope, unit);
         let target_name = self.resolve_signature_keyword(target, target_scope, unit);
-        let source = source_name.as_str();
-        let target = target_name.as_str();
+        let source = source_name.as_ref();
+        let target = target_name.as_ref();
         if source.eq_ignore_ascii_case(target) {
             return true;
         }
@@ -510,7 +512,13 @@ impl Vm {
         if target == "callable" && source == "Closure" {
             return true;
         }
-        let mut pending = vec![source.to_owned()];
+        if let Some(class) = self.class_for_inheritance(source)
+            && (target == "object" || self.class_matches(&class, target))
+        {
+            return true;
+        }
+        let mut pending = crate::inline_stack::InlineStack::new();
+        pending.push(source);
         let mut visited = std::collections::HashSet::new();
         while let Some(name) = pending.pop() {
             if !visited.insert(name.to_ascii_lowercase()) {
@@ -519,13 +527,14 @@ impl Vm {
             if name.eq_ignore_ascii_case(target) {
                 return true;
             }
-            if let Some(class) = self.class_for_inheritance(&name)
+            if name != source
+                && let Some(class) = self.class_for_inheritance(name)
                 && (target == "object" || self.class_matches(&class, target))
             {
                 return true;
             }
             if let Some((owner_unit, class)) = self.variance_declaration(
-                &name,
+                name,
                 &[source_scope, target_scope],
                 unit,
                 include_unlinked_hoists,
@@ -538,41 +547,41 @@ impl Vm {
                 {
                     return true;
                 }
-                pending.extend(
-                    class
-                        .parent
-                        .iter()
-                        .chain(&class.interfaces)
-                        .map(|symbol| owner_unit.symbols[symbol.index()].written.clone()),
-                );
+                for symbol in class.parent.iter().chain(&class.interfaces) {
+                    pending.push(&owner_unit.symbols[symbol.index()].written);
+                }
             }
         }
         false
     }
 
     /// Relative declaration types refer to the method's declaring class, including ancestors.
-    fn resolve_signature_keyword(
+    fn resolve_signature_keyword<'name>(
         &self,
-        name: &str,
-        scope: &str,
-        unit: &phera_bytecode::CompiledUnit,
-    ) -> String {
+        name: &'name str,
+        scope: &'name str,
+        unit: &'name phera_bytecode::CompiledUnit,
+    ) -> Cow<'name, str> {
         match name {
-            "self" | "static" => scope.to_owned(),
+            "self" | "static" => Cow::Borrowed(scope),
             "parent" => self
                 .classes
                 .get(scope)
-                .and_then(|class| class.parent.clone())
-                .map(|class| class.name.clone())
+                .and_then(|class| {
+                    class
+                        .parent
+                        .as_ref()
+                        .map(|parent| Cow::Owned(parent.name.clone()))
+                })
                 .or_else(|| {
                     unit.classes
                         .iter()
                         .find(|class| class.name.eq_ignore_ascii_case(scope))
                         .and_then(|class| class.parent)
-                        .map(|symbol| unit.symbols[symbol.index()].written.clone())
+                        .map(|symbol| Cow::Borrowed(unit.symbols[symbol.index()].written.as_str()))
                 })
-                .unwrap_or_else(|| name.to_owned()),
-            _ => name.to_owned(),
+                .unwrap_or(Cow::Borrowed(name)),
+            _ => Cow::Borrowed(name),
         }
     }
 }

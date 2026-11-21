@@ -13,7 +13,7 @@ use phera_extension_api::{NativeError, Unwind};
 
 use crate::{
     Vm,
-    classes::{Class, ClassIndex, Method},
+    classes::{Class, ClassIndex, Method, worker_classes::Dependency},
     error_traces::DeclarationFailure,
 };
 
@@ -67,16 +67,22 @@ impl Vm {
         })
     }
 
-    pub(crate) fn inheritance_type_pending(&self, name: &str) -> bool {
+    /// A cached link may have depended on a name remaining unavailable.
+    pub(crate) fn inherits_from_pending_type(&self, dependencies: &[Dependency]) -> bool {
+        let differs = |name: &str| {
+            dependencies
+                .iter()
+                .any(|(key, number)| number.is_none() && key.eq_ignore_ascii_case(name))
+        };
         self.autoload
             .pending
             .iter()
-            .any(|entry| entry.class.name.eq_ignore_ascii_case(name))
-            || self.autoload.declaring.iter().any(|entry| {
-                entry.unit.classes[entry.index.index()]
-                    .name
-                    .eq_ignore_ascii_case(name)
-            })
+            .any(|entry| differs(&entry.class.name))
+            || self
+                .autoload
+                .declaring
+                .iter()
+                .any(|entry| differs(&entry.unit.classes[entry.index.index()].name))
     }
 
     pub(crate) fn is_pending_class(&self, index: ClassIndex) -> bool {

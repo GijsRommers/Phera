@@ -73,23 +73,21 @@ impl ClassMiss {
     }
 
     pub(crate) fn during_declaration(
-        error: NativeError,
+        mut error: NativeError,
         unit: &std::sync::Arc<phera_bytecode::CompiledUnit>,
         index: phera_bytecode::ClassId,
     ) -> NativeError {
-        match Self::take(error) {
-            Ok(mut miss) => {
-                if !matches!(miss.failure, MissFailure::MethodSignatures(_)) {
-                    miss.declaring = Some(DeclaringClass {
-                        unit: unit.clone(),
-                        index,
-                        required: Default::default(),
-                    });
-                }
-                NativeError::Unwind(Unwind(Box::new(miss)))
-            }
-            Err(error) => error,
+        if let NativeError::Unwind(Unwind(payload)) = &mut error
+            && let Some(miss) = payload.downcast_mut::<Self>()
+            && !matches!(miss.failure, MissFailure::MethodSignatures(_))
+        {
+            miss.declaring = Some(DeclaringClass {
+                unit: unit.clone(),
+                index,
+                required: Default::default(),
+            });
         }
+        error
     }
 
     pub(crate) fn property_signature(
@@ -277,10 +275,11 @@ impl Vm {
         if let MissFailure::MethodSignatures(pending) = miss.failure {
             return self.finish_pending_class(pending).await;
         }
+        let Some(declaring) = miss.declaring.take() else {
+            return self.load_class_miss(miss).await;
+        };
         let depth = self.autoload.declaring.len();
-        if let Some(declaring) = miss.declaring.take() {
-            self.autoload.declaring.push(declaring);
-        }
+        self.autoload.declaring.push(declaring);
         let result = self.load_class_miss(miss).await;
         let required = self
             .autoload
