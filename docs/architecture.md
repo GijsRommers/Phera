@@ -1627,6 +1627,42 @@ Where the Symfony and Doctrine request goes now, from a private counter of loop 
 
 Native Reflection property access goes through the general path: `setRawValueWithoutLazyInitialization` costs 5,082 machine instructions against PHP's 483. These are the next items, in that order: loop coverage of these shapes, property slots with Reflection property access on a slot, array literals.
 
+### 10.12 The guarded loop runs releases itself (`speed/guarded-loop`)
+
+The guarded copy of the interpreter loop runs while any live object of a class with `__destruct` exists. A Symfony request always has one. That copy used to send every instruction that could free an object to the VM:
+- `instanceof`;
+- `foreach` start, end and next;
+- element and property writes;
+- compound assignments;
+- returns;
+- every store over an array, object or string.
+
+Now the guarded copy runs these instructions itself.
+- A store that drops the last handle on something answers `ScalarStep::Released`, and only then does the loop read `ObjectIds::has_doomed()`.
+- Every other completed step reads that flag once.
+- When a destructor waits, the loop leaves at the next instruction boundary, where the VM runs the destructor, as before.
+
+The plain copy is unchanged. A single loop for both cases was measured and cost 2.0 to 3.6 percent on four benchmarks.
+
+Loop exits per request on the Symfony and Doctrine yardstick (49 statements), from a private counter:
+
+| shape | before | after |
+| --- | ---: | ---: |
+| `foreach` start / end / keyed next | 1,900 / 1,899 / 1,404 | 93 / 2 / 83 |
+| `instanceof` | 2,038 | 646 |
+| `$a[k] = v` (local array) | 1,105 | 0 |
+| `$this->p = v` (and from a local) | 1,852 + 503 | 852 + 206 |
+| total | 39,248 | 28,733 |
+
+Instructions per request: 294.7M before, 276.0M after; PHP is 29.5M. The Laravel routes never run guarded and do not move.
+
+What is left:
+- calls, returns and native calls: about 8,000, the call-protocol item;
+- class constants: 3,078; the named form is in `speed/loop-coverage`;
+- array literal construction: 2,786;
+- identity: 2,200; local element reads: 1,554; both are in `speed/loop-coverage`;
+- `(array)` casts and the property paths the sites do not take: the rest.
+
 ## 11. Tools built into the runtime
 
 Tools that PHP projects today get from separate packages written in PHP
