@@ -154,3 +154,44 @@ fn utf8_encode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     Ok(Value::from(output))
 }
+
+/// `utf8_decode("café")` converts UTF-8 to ISO-8859-1 and substitutes unsupported characters.
+pub(super) const UTF8_DECODE: FunctionEntry = FunctionEntry::deprecated_sync(
+    "utf8_decode",
+    &[Param::new("string", ParamType::String)],
+    utf8_decode,
+);
+
+fn utf8_decode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let mut bytes = args::bytes(arguments, 0);
+    let mut output = buffer(bytes.len())?;
+    while let Some((&first, remaining)) = bytes.split_first() {
+        bytes = remaining;
+        let (width, mut number) = match first {
+            0..=127 => {
+                output.push(first);
+                continue;
+            }
+            0xc2..=0xdf => (1, u32::from(first & 31)),
+            0xe0..=0xef => (2, u32::from(first & 15)),
+            0xf0..=0xf4 => (3, u32::from(first & 7)),
+            _ => {
+                output.push(b'?');
+                continue;
+            }
+        };
+        for _ in 0..width {
+            let Some((&byte @ 0x80..=0xbf, remaining)) = bytes.split_first() else {
+                break;
+            };
+            number = number << 6 | u32::from(byte & 63);
+            bytes = remaining;
+        }
+        if width == 1 && remaining.len() - bytes.len() == 1 {
+            output.push(u8::try_from(number).unwrap_or(b'?'));
+        } else {
+            output.push(b'?');
+        }
+    }
+    Ok(Value::from(output))
+}

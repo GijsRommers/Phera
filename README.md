@@ -175,8 +175,14 @@ A live socket held by the boot prevents `Phera\snapshot()` from creating
 a snapshot. Persistent sockets created during boot connect on first use
 in each fork. `pfsockopen()` and `STREAM_CLIENT_PERSISTENT` can reuse a
 clean idle connection on the same worker.
-`fopen()` supports buffered HTTP and HTTPS responses, including for
-Guzzle's stream handler.
+`fopen()` and `file_get_contents()` support buffered HTTP and HTTPS
+responses. `get_headers()` fetches the response headers, and
+`http_get_last_response_headers()` returns the latest headers in the
+current request. Stream contexts can store default options for these calls.
+
+PHP host, DNS and MX lookups leave the worker available while waiting.
+Service and protocol lookups use the system tables, and
+`net_get_interfaces()` exposes local interface addresses.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 Legacy `DOMDocument` supports local XSD validation for common content models,
@@ -250,7 +256,12 @@ thumbnail operations, filters, and the five built-in fonts. The same build
 includes `getimagesize()` and `exif_imagetype()`. Compatibility limits are
 listed in the [GD coverage notes](crates/extensions/gd/README.md).
 
-Not started: zip, sockets.
+The sockets extension supports TCP, UDP and Unix sockets, including
+descriptor passing with Unix socket messages. A `Socket` and an exported
+stream share the same connection. Some platform-specific options, resolver
+hints and out-of-band operations remain incomplete.
+
+Not started: zip.
 
 ### Database connection pool
 

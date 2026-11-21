@@ -156,6 +156,7 @@ impl Runtime {
         registry.load(&phera_ext_standard::Standard);
         registry.load(&phera_ext_tokenizer::Tokenizer);
         registry.load(&phera_ext_streams::Streams);
+        registry.load(&phera_ext_sockets::Sockets);
         registry.load(&phera_ext_process::Process);
         registry.load(&phera_ext_process::Posix);
         registry.load(&phera_ext_zlib::Zlib);
@@ -311,6 +312,7 @@ impl Runtime {
             Err(error) => return Err(error),
         };
         vm.set_args(arguments);
+        phera_ext_standard::set_cli_arguments(vm.state_mut(), arguments);
         let server =
             environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
         vm.set_global("_SERVER", Value::from(server));
