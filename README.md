@@ -187,6 +187,11 @@ clean idle connection on the same worker.
 `fopen()` supports buffered HTTP and HTTPS responses, including for
 Guzzle's stream handler.
 
+PHP host, DNS and MX lookups leave the worker available while waiting.
+Service and protocol lookups use the system tables, and
+`net_get_interfaces()` exposes local interface addresses, including the system's IPv6 scope
+bits on Apple. `getmxrr()` and `dns_get_mx()` return false when the answer contains no mail exchanger.
+
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 Legacy `DOMDocument` supports local XSD validation for common content models,
 including Symfony's service configuration. Complex type derivation and XSD
