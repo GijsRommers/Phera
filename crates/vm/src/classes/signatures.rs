@@ -1,157 +1,13 @@
 //! Override contracts compare accepted parameter sets and produced return sets at class linking.
 
+use std::borrow::Cow;
+
 use super::{Method, MethodBody};
 use crate::{Vm, autoload::MethodVariance};
 use phera_extension_api::NativeError;
 
-/// Parameter spelling is retained for PHP's declaration-compatibility diagnostics.
-struct ParameterContract {
-    name: String,
-    declaration: Option<String>,
-    by_reference: bool,
-    variadic: bool,
-    optional: bool,
-    /// Original scalar or constant default for PHP diagnostics.
-    default_display: Option<String>,
-}
-
-/// User signatures carry returns; the native API currently exposes parameters only.
-struct Contract {
-    parameters: Vec<ParameterContract>,
-    returns: Option<String>,
-    tentative: bool,
-    /// A child must preserve reference returns from its prototype.
-    returns_reference: bool,
-}
-
-impl Contract {
-    /// Copy small declaration metadata without executing default expressions.
-    fn from_method(method: &Method, code: &crate::code_table::CodeTable) -> Option<Self> {
-        if let MethodBody::Native(entry) = method.body {
-            use phera_extension_api::MethodReturn;
-            let (returns, tentative) = match entry.return_type? {
-                MethodReturn::Required(ty) => (ty, false),
-                MethodReturn::Tentative(ty) => (ty, true),
-            };
-            return Some(Self {
-                parameters: entry
-                    .params
-                    .iter()
-                    .map(|parameter| ParameterContract {
-                        name: parameter.name.into(),
-                        declaration: Some(native_parameter_type(parameter)),
-                        by_reference: parameter.by_ref,
-                        variadic: parameter.variadic,
-                        optional: parameter.optional,
-                        default_display: native_default(parameter),
-                    })
-                    .collect(),
-                returns: Some(returns.into()),
-                tentative,
-                returns_reference: false,
-            });
-        }
-        let MethodBody::User(reference) = &method.body else {
-            return None;
-        };
-        let function = code.function(*reference);
-        Some(Self {
-            returns_reference: function.returns_reference,
-            tentative: false,
-            parameters: function
-                .parameters
-                .iter()
-                .map(|parameter| ParameterContract {
-                    name: code.unit(*reference).names[parameter.name.index()].clone(),
-                    declaration: parameter
-                        .ty
-                        .map(|index| code.unit(*reference).types[index.index()].display.clone()),
-                    by_reference: parameter.by_reference,
-                    variadic: parameter.variadic,
-                    optional: parameter.has_default,
-                    default_display: parameter.default_display.clone(),
-                })
-                .collect(),
-            returns: function
-                .return_type
-                .map(|index| code.unit(*reference).types[index.index()].display.clone()),
-        })
-    }
-
-    /// PHP lists declaration modifiers before names, then optional defaults and return types.
-    fn display(&self, method: &Method, type_name: impl Fn(&str) -> String) -> String {
-        let declared = |name: &str| {
-            let name = type_name(name);
-            if super::magic::MagicMethods::is_linked_magic(&method.name)
-                || method.name.starts_with('$')
-            {
-                ordered_magic_union(&name)
-            } else {
-                name
-            }
-        };
-        let parameters = self
-            .parameters
-            .iter()
-            .map(|parameter| {
-                format!(
-                    "{}{}{}${}{}",
-                    parameter
-                        .declaration
-                        .as_ref()
-                        .map(|name| format!("{} ", declared(name)))
-                        .unwrap_or_default(),
-                    if parameter.by_reference { "&" } else { "" },
-                    if parameter.variadic { "..." } else { "" },
-                    parameter.name,
-                    parameter
-                        .default_display
-                        .as_ref()
-                        .map(|value| format!(" = {value}"))
-                        .unwrap_or_default()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!(
-            "{}{}::{}({parameters}){}",
-            if self.returns_reference { "& " } else { "" },
-            super::trait_methods::display(&method.declaring),
-            method.name,
-            self.returns
-                .as_ref()
-                .map(|name| format!(": {}", declared(name)))
-                .unwrap_or_default()
-        )
-    }
-}
-
-/// Native argument metadata also supplies the spelling used in compatibility errors.
-fn native_parameter_type(parameter: &phera_extension_api::Param) -> String {
-    let ty = parameter.ty.name();
-    if !parameter.nullable || ty == "mixed" {
-        ty.into()
-    } else if ty.contains('|') {
-        format!("{ty}|null")
-    } else {
-        format!("?{ty}")
-    }
-}
-
-fn native_default(parameter: &phera_extension_api::Param) -> Option<String> {
-    use phera_extension_api::ConstantValue;
-    if let Some(name) = parameter.default_name {
-        return Some(name.into());
-    }
-    Some(match parameter.default? {
-        ConstantValue::Null => "null".into(),
-        ConstantValue::Bool(value) => value.to_string(),
-        ConstantValue::Int(value) => value.to_string(),
-        ConstantValue::Float(value) => phera_value::float_repr(value),
-        ConstantValue::String(value) => format!("{value:?}"),
-        ConstantValue::EmptyArray => "[]".into(),
-    })
-}
+mod contract;
+use contract::Contract;
 
 impl Vm {
     /// Contravariant parameters may widen inputs; covariant returns may narrow outputs.
@@ -174,7 +30,7 @@ impl Vm {
         self.check_contract(inherited, method, Some(consuming_class), unit)
     }
 
-    fn check_contract(
+    pub(crate) fn check_contract(
         &mut self,
         inherited: &Method,
         method: &Method,
@@ -195,16 +51,7 @@ impl Vm {
         let inherited_scope = trait_scope.unwrap_or(&inherited.declaring);
         let mut unresolved = Vec::new();
         let mut compatible = !base.returns_reference || child.returns_reference;
-        compatible &= child
-            .parameters
-            .iter()
-            .filter(|parameter| !parameter.optional && !parameter.variadic)
-            .count()
-            <= base
-                .parameters
-                .iter()
-                .filter(|parameter| !parameter.optional && !parameter.variadic)
-                .count();
+        compatible &= child.parameters.required() <= base.parameters.required();
         for (index, parameter) in base.parameters.iter().enumerate() {
             let implementation = child.parameters.get(index).or_else(|| {
                 child
@@ -223,19 +70,25 @@ impl Vm {
             let target = implementation.declaration.as_deref();
             if !self.type_subset(source, inherited_scope, target, &method.declaring, unit) {
                 compatible = false;
-                unresolved.extend(self.unresolved_contract_types(source, target, unit));
+                unresolved.extend(
+                    self.unresolved_contract_types(source, target, &method.declaring, unit)
+                        .map(str::to_owned),
+                );
             }
         }
         if base.returns.is_some() {
-            let source = child.returns.as_deref();
-            let target = base.returns.as_deref();
-            if (base.tentative && source.is_none())
+            let source = child.returns;
+            let target = base.returns;
+            if source.is_none()
                 || !self.type_subset(source, &method.declaring, target, inherited_scope, unit)
             {
                 // PHP loads a class that the two return types name before it
                 // compares them, for a tentative return type as well.
                 let previous_missing = unresolved.len();
-                unresolved.extend(self.unresolved_contract_types(source, target, unit));
+                unresolved.extend(
+                    self.unresolved_contract_types(source, target, &method.declaring, unit)
+                        .map(str::to_owned),
+                );
                 if base.tentative && compatible && unresolved.len() == previous_missing {
                     if let MethodBody::User(reference) = method.body
                         && !self
@@ -256,17 +109,26 @@ impl Vm {
                             file: self.code.unit(reference).file.clone(),
                             line: self.code.function(reference).definition_line as usize,
                         };
-                        let previous = self.diagnostic_location.replace(location);
-                        self.diagnostic("Deprecated", format!(
+                        let message = format!(
                             "Return type of {} should either be compatible with {}, or the #[\\ReturnTypeWillChange] attribute should be used to temporarily suppress the notice",
-                            child.display(method, |ty| self.contract_type_name(ty, &method.declaring, unit)),
-                            base.display(inherited, |ty| self.contract_type_name(ty, inherited_scope, unit))
-                        ));
+                            child.display(method, |ty| self.contract_type_name(
+                                ty,
+                                &method.declaring,
+                                unit
+                            )),
+                            base.display(inherited, |ty| self.contract_type_name(
+                                ty,
+                                inherited_scope,
+                                unit
+                            ))
+                        );
+                        let previous = self.diagnostic_location.replace(location);
+                        self.diagnostic("Deprecated", message);
                         self.diagnostic_location = previous;
                     }
-                } else {
-                    compatible = false;
+                    return Ok(None);
                 }
+                compatible = false;
             }
         }
         if compatible {
@@ -285,11 +147,14 @@ impl Vm {
         let line = self.code.function(*reference).definition_line as usize;
         if !unresolved.is_empty() {
             return Ok(Some(MethodVariance {
-                names: unresolved.into_iter().map(str::to_owned).collect(),
+                names: unresolved,
                 child,
                 base,
                 file,
                 line,
+                inherited: method_for_variance(inherited),
+                implementation: method_for_variance(method),
+                trait_scope: trait_scope.map(str::to_owned),
             }));
         }
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
@@ -329,13 +194,16 @@ impl Vm {
         &'vm self,
         source: Option<&'a str>,
         target: Option<&'a str>,
+        declaring: &'a str,
         unit: &'vm phera_bytecode::CompiledUnit,
     ) -> impl Iterator<Item = &'a str> + use<'a, 'vm> {
         let members = |ty: &'a str| ty.split(['?', '|', '&', '(', ')']);
         let may_have_ancestry = |ty: Option<&str>| {
             ty.is_some_and(|ty| {
-                ty.split(['?', '|', '&', '(', ')'])
-                    .any(|name| name == "iterable" || name == "object" || is_class_type_name(name))
+                ty.split(['?', '|', '&', '(', ')']).any(|name| {
+                    matches!(name, "iterable" | "object" | "self" | "parent")
+                        || is_class_type_name(name)
+                })
             })
         };
         let comparable = may_have_ancestry(source) && may_have_ancestry(target);
@@ -346,12 +214,51 @@ impl Vm {
             .filter(move |name| {
                 comparable
                     && is_class_type_name(name)
-                    && self.classes.get(name).is_none()
-                    && !unit
-                        .classes
-                        .iter()
-                        .any(|class| class.name.eq_ignore_ascii_case(name))
+                    && self.class_for_inheritance(name).is_none()
+                    && self
+                        .variance_declaration(name, &[declaring], unit, false)
+                        .is_none()
             })
+    }
+
+    /// A declaration suspended while loading its parent still has a known
+    /// shape. Other conditional declarations contribute when executed.
+    fn variance_declaration<'unit>(
+        &'unit self,
+        name: &str,
+        owners: &[&str],
+        unit: &'unit phera_bytecode::CompiledUnit,
+        include_unlinked_hoists: bool,
+    ) -> Option<(
+        &'unit phera_bytecode::CompiledUnit,
+        &'unit phera_bytecode::ClassDeclaration,
+    )> {
+        let from_unit = unit.classes.iter().enumerate().find_map(|(index, class)| {
+            (class.name.eq_ignore_ascii_case(name)
+                && (owners.iter().any(|owner| name.eq_ignore_ascii_case(owner))
+                    || (include_unlinked_hoists
+                        || class.interfaces.is_empty()
+                            && class.traits.is_empty()
+                            && class.parent.is_none_or(|parent| {
+                                self.classes
+                                    .get(&unit.symbols[parent.index()].written)
+                                    .is_some()
+                            }))
+                        && unit.hoisted_classes.iter().any(|id| id.index() == index)))
+            .then_some((unit, class))
+        });
+        from_unit.or_else(|| {
+            self.autoload.declaring.iter().rev().find_map(|declaring| {
+                let class = declaring.unit.classes.get(declaring.index.index())?;
+                if class.name.eq_ignore_ascii_case(name) {
+                    declaring.required.set(true);
+                    self.classes.discard_link_dependencies();
+                    Some((&*declaring.unit, class))
+                } else {
+                    None
+                }
+            })
+        })
     }
 
     /// Union members must each fit some destination member; intersections require all bounds.
@@ -362,6 +269,31 @@ impl Vm {
         wide: Option<&str>,
         wide_scope: &str,
         unit: &phera_bytecode::CompiledUnit,
+    ) -> bool {
+        self.check_type_subset(narrow, narrow_scope, wide, wide_scope, unit, false)
+    }
+
+    /// Constant declarations can use the shape of an unconditional type while
+    /// early binding is still linking the unit's classes.
+    pub(super) fn constant_type_subset(
+        &self,
+        narrow: Option<&str>,
+        narrow_scope: &str,
+        wide: &str,
+        wide_scope: &str,
+        unit: &phera_bytecode::CompiledUnit,
+    ) -> bool {
+        self.check_type_subset(narrow, narrow_scope, Some(wide), wide_scope, unit, true)
+    }
+
+    fn check_type_subset(
+        &self,
+        narrow: Option<&str>,
+        narrow_scope: &str,
+        wide: Option<&str>,
+        wide_scope: &str,
+        unit: &phera_bytecode::CompiledUnit,
+        include_unlinked_hoists: bool,
     ) -> bool {
         let Some(wide) = wide else {
             return true;
@@ -383,7 +315,14 @@ impl Vm {
             wide.split('|').any(|target| {
                 target.trim_matches(['(', ')']).split('&').all(|bound| {
                     source.trim_matches(['(', ')']).split('&').any(|member| {
-                        self.atomic_subtype(member, narrow_scope, bound, wide_scope, unit)
+                        self.atomic_subtype(
+                            member,
+                            narrow_scope,
+                            bound,
+                            wide_scope,
+                            unit,
+                            include_unlinked_hoists,
+                        )
                     })
                 })
             })
@@ -398,8 +337,9 @@ impl Vm {
         target: &str,
         target_scope: &str,
         unit: &phera_bytecode::CompiledUnit,
+        include_unlinked_hoists: bool,
     ) -> bool {
-        if target == "mixed" || source == "never" {
+        if source == "never" || target == "mixed" && source != "void" {
             return true;
         }
         if target == "static" {
@@ -411,8 +351,8 @@ impl Vm {
         }
         let source_name = self.resolve_signature_keyword(source, source_scope, unit);
         let target_name = self.resolve_signature_keyword(target, target_scope, unit);
-        let source = source_name.as_str();
-        let target = target_name.as_str();
+        let source = source_name.as_ref();
+        let target = target_name.as_ref();
         if source.eq_ignore_ascii_case(target) {
             return true;
         }
@@ -422,7 +362,13 @@ impl Vm {
         if target == "callable" && source == "Closure" {
             return true;
         }
-        let mut pending = vec![source.to_owned()];
+        if let Some(class) = self.class_for_inheritance(source)
+            && (target == "object" || self.class_matches(&class, target))
+        {
+            return true;
+        }
+        let mut pending = crate::inline_stack::InlineStack::new();
+        pending.push(source);
         let mut visited = std::collections::HashSet::new();
         while let Some(name) = pending.pop() {
             if !visited.insert(name.to_ascii_lowercase()) {
@@ -431,60 +377,75 @@ impl Vm {
             if name.eq_ignore_ascii_case(target) {
                 return true;
             }
-            if let Some(class) = self.classes.get(&name)
+            if name != source
+                && let Some(class) = self.class_for_inheritance(name)
                 && (target == "object" || self.class_matches(&class, target))
             {
                 return true;
             }
-            if let Some(class) = unit
-                .classes
-                .iter()
-                .find(|class| class.name.eq_ignore_ascii_case(&name))
-            {
+            if let Some((owner_unit, class)) = self.variance_declaration(
+                name,
+                &[source_scope, target_scope],
+                unit,
+                include_unlinked_hoists,
+            ) {
                 if target == "object"
                     || (target.eq_ignore_ascii_case("Stringable")
                         && class.methods.iter().any(|method| {
-                            unit.names[method.name.index()].eq_ignore_ascii_case("__toString")
+                            owner_unit.names[method.name.index()].eq_ignore_ascii_case("__toString")
                         }))
                 {
                     return true;
                 }
-                pending.extend(
-                    class
-                        .parent
-                        .iter()
-                        .chain(&class.interfaces)
-                        .map(|symbol| unit.symbols[symbol.index()].written.clone()),
-                );
+                for symbol in class.parent.iter().chain(&class.interfaces) {
+                    pending.push(&owner_unit.symbols[symbol.index()].written);
+                }
             }
         }
         false
     }
 
     /// Relative declaration types refer to the method's declaring class, including ancestors.
-    fn resolve_signature_keyword(
+    fn resolve_signature_keyword<'name>(
         &self,
-        name: &str,
-        scope: &str,
-        unit: &phera_bytecode::CompiledUnit,
-    ) -> String {
+        name: &'name str,
+        scope: &'name str,
+        unit: &'name phera_bytecode::CompiledUnit,
+    ) -> Cow<'name, str> {
         match name {
-            "self" | "static" => scope.to_owned(),
+            "self" | "static" => Cow::Borrowed(scope),
             "parent" => self
                 .classes
                 .get(scope)
-                .and_then(|class| class.parent.clone())
-                .map(|class| class.name.clone())
+                .and_then(|class| {
+                    class
+                        .parent
+                        .as_ref()
+                        .map(|parent| Cow::Owned(parent.name.clone()))
+                })
                 .or_else(|| {
                     unit.classes
                         .iter()
                         .find(|class| class.name.eq_ignore_ascii_case(scope))
                         .and_then(|class| class.parent)
-                        .map(|symbol| unit.symbols[symbol.index()].written.clone())
+                        .map(|symbol| Cow::Borrowed(unit.symbols[symbol.index()].written.as_str()))
                 })
-                .unwrap_or_else(|| name.to_owned()),
-            _ => name.to_owned(),
+                .unwrap_or(Cow::Borrowed(name)),
+            _ => Cow::Borrowed(name),
         }
+    }
+}
+
+fn method_for_variance(method: &Method) -> Method {
+    Method {
+        signature: Default::default(),
+        name: method.name.clone(),
+        declaring: method.declaring.clone(),
+        visibility: method.visibility,
+        is_static: method.is_static,
+        is_final: method.is_final,
+        is_abstract: method.is_abstract,
+        body: method.body.clone(),
     }
 }
 

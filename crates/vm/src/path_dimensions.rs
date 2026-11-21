@@ -138,14 +138,8 @@ impl Vm {
             && stored
                 .as_ref()
                 .is_none_or(|value| matches!(&*value.deref(), Value::Null | Value::Bool(false)))
-            && let Some(ty) = &property.ty
-            && !ty.mask.intersects(phera_bytecode::TypeMask::ARRAY)
         {
-            return Err(NativeError::type_error(format!(
-                "Cannot auto-initialize an array inside property {}::${name} of type {}",
-                property.declaring,
-                crate::types::php_type_display(ty)
-            )));
+            check_property_array_promotion(property)?;
         }
         if let Some(value) = stored {
             return Ok(value);
@@ -222,4 +216,25 @@ impl Vm {
         }
         Ok(Value::Null)
     }
+}
+
+pub(crate) fn accepts_promoted_array(ty: &phera_bytecode::Type) -> bool {
+    ty.mask
+        .intersects(phera_bytecode::TypeMask::ARRAY.union(phera_bytecode::TypeMask::ITERABLE))
+}
+
+pub(crate) fn check_property_array_promotion(
+    property: &crate::classes::class::PropertyDefault,
+) -> Result<(), NativeError> {
+    if let Some(ty) = &property.ty
+        && !accepts_promoted_array(ty)
+    {
+        return Err(NativeError::type_error(format!(
+            "Cannot auto-initialize an array inside property {}::${} of type {}",
+            phera_value::class_display_name(&property.declaring),
+            property.name,
+            crate::types::php_type_display(ty)
+        )));
+    }
+    Ok(())
 }

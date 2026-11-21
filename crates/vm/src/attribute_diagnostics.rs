@@ -73,7 +73,7 @@ impl Vm {
         self.diagnostic_location = previous;
         Ok(())
     }
-    fn attribute_deprecated(&mut self, message: String) {
+    pub(crate) fn attribute_deprecated(&mut self, message: String) {
         let event = crate::error_handlers::DiagnosticEvent {
             level: 16384,
             kind: "Deprecated".into(),
