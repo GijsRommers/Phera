@@ -132,8 +132,15 @@ impl Vm {
 
     /// `UnsetPath` of a one-step property path, when nothing is planned
     /// for it. A declared property's slot stays, empty.
+    ///
+    /// A class with any property magic keeps the general path: an unset
+    /// declared property is then one its `__get`, `__set` and `__isset`
+    /// answer for, which the general path records.
     pub(crate) fn unset_plain_property(&mut self, place: &AccessPath) -> Result<bool, NativeError> {
         let avoid = PropertyFacts::MAGIC_UNSET
+            .with(PropertyFacts::MAGIC_GET)
+            .with(PropertyFacts::MAGIC_SET)
+            .with(PropertyFacts::MAGIC_ISSET)
             .with(PropertyFacts::HOOKS)
             .with(PropertyFacts::READONLY);
         let Some(property) = self.plain_property(place, avoid)? else {

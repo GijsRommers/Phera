@@ -23,7 +23,7 @@ The flags that matter:
 | read | `__get`, hooks |
 | quiet fetch | also `__isset` |
 | write | `__set`, hooks, readonly |
-| unset | `__unset`, hooks, readonly |
+| unset | all four magic methods (a later access of an unset declared property asks them), hooks, readonly |
 
 Everything that warns, throws or runs PHP code keeps the general path:
 - an undefined or uninitialized plain read;
