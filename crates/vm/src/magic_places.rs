@@ -1,7 +1,7 @@
 //! `$object->items['key']` walks properties and offsets in source order.
 //! The last step of isset/empty uses a different hook protocol from ??.
 
-use phera_bytecode::{FetchMode, PathBase, Reg, Step};
+use phera_bytecode::{FetchMode, Reg, Step};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object, Value};
 use std::rc::Rc;
@@ -79,7 +79,7 @@ impl Vm {
     ) -> Result<PathRead, NativeError> {
         let missing = fetch_missing(mode);
         let register = self.base_register(&place, Creation::Existing, missing)?;
-        if register.is_some() && matches!(place.base()?, PathBase::StaticProperty { .. }) {
+        if register.is_some() && crate::static_places::static_base(place.base()?).is_some() {
             self.check_static_read(&place, missing)?;
         }
         let value = register.map_or(Value::Null, |register| self.read_root(register, missing));

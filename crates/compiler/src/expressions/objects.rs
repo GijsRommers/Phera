@@ -306,7 +306,7 @@ impl Compiler<'_> {
 /// Whether `class` names a class in the source (`Post`, not `self`,
 /// `parent`, `static` or an expression): its constants are looked up by the
 /// class's symbol.
-fn is_named_class(class: &ast::Expression) -> bool {
+pub(crate) fn is_named_class(class: &ast::Expression) -> bool {
     match &class.kind {
         ast::ExpressionKind::Name(name) => !matches!(
             name.text.to_ascii_lowercase().as_str(),

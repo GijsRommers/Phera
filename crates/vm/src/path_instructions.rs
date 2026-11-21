@@ -194,7 +194,7 @@ impl Vm {
     ) -> Result<(Option<Reg>, InlineStack<PathKey>, Value), NativeError> {
         let register = self.base_register(place, Creation::Existing, Missing::Warn)?;
         self.check_static_read(place, Missing::Warn)?;
-        if let phera_bytecode::PathBase::StaticProperty { class, name, .. } = place.base()? {
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
             self.validate_static_mutation(
                 class,
                 name,
@@ -257,10 +257,7 @@ impl Vm {
             || place.has_properties()?
             || (self.may_cast_typed_reference(&value) && place.steps()?.next().is_some())
             || (matches!(value, phera_value::Value::Object(_))
-                && matches!(
-                    place.base()?,
-                    phera_bytecode::PathBase::StaticProperty { .. }
-                )
+                && crate::static_places::static_base(place.base()?).is_some()
                 && place.steps()?.next().is_none()
                 && Self::has_string_conversion(&value))
         {
