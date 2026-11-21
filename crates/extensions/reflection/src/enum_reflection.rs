@@ -1,6 +1,6 @@
 //! Enum reflectors share the class and constant snapshots of their parent reflectors.
 
-use std::rc::Rc;
+use std::{borrow::Cow, rc::Rc};
 
 use phera_extension_api::reflection::{MemberInfo, MemberKind, ReflectedClassKind};
 use phera_extension_api::{
@@ -12,7 +12,7 @@ use crate::{
     UNCLONEABLE, allocate, bind,
     class::{ReflectedClass, reflected_class, target_class},
     class_members::{find, members},
-    engine, exception, member, receiver,
+    engine, exception, inspect, member, receiver,
 };
 
 const CASE_NAME: &[Param] = &[Param::new("name", ParamType::String)];
@@ -36,11 +36,14 @@ pub(crate) fn register(registry: &mut Registry) {
                     .returning("ReflectionEnumUnitCase"),
                 MethodEntry::public("getCases", &[], get_cases).returning("array"),
                 MethodEntry::public("isBacked", &[], |_, o, _| {
-                    Ok(Value::Bool(reflected_class(o)?.info.enum_backing.is_some()))
+                    inspect(o, |class: &ReflectedClass| {
+                        Value::Bool(class.info.enum_backing.is_some())
+                    })
                 })
                 .returning("bool"),
                 MethodEntry::public("getBackingType", &[], |c, o, _| {
-                    crate::types::make(c, reflected_class(o)?.info.enum_backing)
+                    let backing = inspect(o, |class: &ReflectedClass| class.info.enum_backing)?;
+                    crate::types::make(c, backing)
                 })
                 .returning("?ReflectionNamedType"),
             ]
@@ -134,7 +137,7 @@ fn construct_case(
     })
 }
 
-fn reflect_target(args: &[Value]) -> Result<String, NativeError> {
+fn reflect_target(args: &[Value]) -> Result<Cow<'_, str>, NativeError> {
     target_class(
         args.first()
             .ok_or_else(|| exception("Missing reflection class name"))?,

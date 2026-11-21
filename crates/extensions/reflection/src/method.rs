@@ -144,7 +144,7 @@ fn construct(
             .first()
             .ok_or_else(|| exception("Expected a class or method name"))?;
         let (class, name) = match args::string(&arguments, 1) {
-            Some(name) => (target_class(first)?, name.to_string_lossy()),
+            Some(name) => (target_class(first)?.into_owned(), name.to_string_lossy()),
             None => match first {
                 Value::String(name) => split_method(
                     &name.to_string_lossy(),

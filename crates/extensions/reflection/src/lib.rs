@@ -105,13 +105,22 @@ fn receiver(this: Option<&Rc<Object>>) -> Result<&Rc<Object>, NativeError> {
 }
 
 fn load<T: Any + Clone>(this: Option<&Rc<Object>>) -> Result<T, NativeError> {
+    inspect(this, T::clone)
+}
+
+/// Read native reflector data without taking an owned copy. The reader
+/// works on the data only, since the reflector stays borrowed until it returns.
+fn inspect<T: Any, R>(
+    this: Option<&Rc<Object>>,
+    read: impl FnOnce(&T) -> R,
+) -> Result<R, NativeError> {
     receiver(this)?
         .native
         .try_borrow()
         .map_err(|_| NativeError::error("Reflection object is already in use"))?
         .as_ref()
         .and_then(|state| state.downcast_ref::<T>())
-        .cloned()
+        .map(read)
         .ok_or_else(|| {
             NativeError::error("Internal error: Failed to retrieve the reflection object")
         })

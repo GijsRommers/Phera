@@ -208,15 +208,19 @@ const ABSTRACT_METHODS: &[MethodEntry] = &[
 
 pub(crate) fn make(context: &mut dyn Context, target: FunctionTarget) -> NativeResult {
     let function = engine(context)?.reflect_function(&target)?;
-    let name = function.name.clone();
     let class = if function.member.is_some() {
         "ReflectionMethod"
     } else {
         "ReflectionFunction"
     };
-    let value = allocate(context, class, Some(&name), function.clone())?;
+    let value = allocate(context, class, Some(&function.name), function.clone())?;
     if let Value::Object(object) = &value {
-        keep_closure(object, &function.target);
+        if matches!(
+            function.target,
+            FunctionTarget::Closure(_) | FunctionTarget::ClosureInvoke(_)
+        ) {
+            keep_closure(object, &function.target);
+        }
         if let Some(member) = &function.member {
             set_class(object, member);
         }

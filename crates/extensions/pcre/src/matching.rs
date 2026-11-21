@@ -35,11 +35,11 @@ impl Function {
     }
 
     /// The shape of `$matches` that the low byte of `$flags` asks for.
-    fn order(self, bits: i64) -> Result<Order, NativeError> {
+    fn order(self, bits: i64) -> Result<Option<Order>, NativeError> {
         match (self, bits & 0xff) {
-            (Self::Match, 0) => Ok(Order::Single),
-            (Self::MatchAll, 0 | flags::PATTERN_ORDER) => Ok(Order::Pattern),
-            (Self::MatchAll, flags::SET_ORDER) => Ok(Order::Set),
+            (Self::Match, 0) => Ok(None),
+            (Self::MatchAll, 0 | flags::PATTERN_ORDER) => Ok(Some(Order::Pattern)),
+            (Self::MatchAll, flags::SET_ORDER) => Ok(Some(Order::Set)),
             _ => Err(NativeError::value_error(format!(
                 "{}(): Argument #4 ($flags) must be a PREG_* constant",
                 self.name()
@@ -104,6 +104,27 @@ fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> Na
     }
     let capture_flags = CaptureFlags::parse(flags);
     let names = compiled.regex.capture_names();
+    let Some(order) = order else {
+        let result = match compiled.marks.as_deref() {
+            Some(probe) => scanner.next_marked(probe),
+            None => scanner
+                .next()
+                .map(|captures| captures.map(|captures| (captures, None))),
+        };
+        let (count, row) = match result {
+            Some(Ok((captures, mark))) => (
+                Value::Int(1),
+                matches::row(subject, &captures, names, capture_flags, mark),
+            ),
+            None => (Value::Int(0), Value::from(PhpArray::new())),
+            Some(Err(error)) => {
+                errors::set(context, error);
+                (Value::Bool(false), Value::from(PhpArray::new()))
+            }
+        };
+        matches::assign(arguments, 2, row);
+        return Ok(count);
+    };
     let mut rows = Vec::new();
     let mut marks = Vec::new();
     let found = if let Some(probe) = compiled.marks.as_deref() {
@@ -124,13 +145,14 @@ fn run(context: &mut dyn Context, arguments: &[Value], function: Function) -> Na
                 Ok(())
             })
     };
-    if let Err(error) = found {
-        errors::set(context, error);
-        let table = matches::table(subject, &rows, &marks, names, capture_flags, order);
-        matches::assign(arguments, 2, table);
-        return Ok(Value::Bool(false));
-    }
+    let result = match found {
+        Ok(()) => Value::Int(rows.len() as i64),
+        Err(error) => {
+            errors::set(context, error);
+            Value::Bool(false)
+        }
+    };
     let table = matches::table(subject, &rows, &marks, names, capture_flags, order);
     matches::assign(arguments, 2, table);
-    Ok(Value::Int(rows.len() as i64))
+    Ok(result)
 }
