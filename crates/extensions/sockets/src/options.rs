@@ -1,6 +1,8 @@
 //! `socket_set_option($socket, SOL_SOCKET, SO_REUSEADDR, 1)` changes the live descriptor.
 
-use std::io;
+mod multicast;
+
+use std::{io, rc::Rc};
 
 use nix::{
     libc,
@@ -17,6 +19,8 @@ use phera_extension_api::{
 use socket2::SockRef;
 
 use crate::{SOCKET, classes, data, failure, status};
+
+pub(crate) use multicast::{MCAST_JOIN_GROUP, MCAST_LEAVE_GROUP};
 
 pub(crate) fn register(registry: &mut Registry) {
     const LEVEL: Param = Param::new("level", ParamType::Int);
@@ -101,6 +105,7 @@ fn get_value(connection: &SocketConnection, level: i32, option: i32) -> io::Resu
         ),
         (libc::IPPROTO_TCP, libc::TCP_NODELAY) => i64::from(socket.tcp_nodelay()?),
         (libc::IPPROTO_IP, libc::IP_TTL) => i64::from(socket.ttl_v4()?),
+        (libc::IPPROTO_IP, libc::IP_MULTICAST_IF) => i64::from(multicast::ipv4_index(&socket)?),
         (libc::IPPROTO_IP, libc::IP_MULTICAST_LOOP) => i64::from(socket.multicast_loop_v4()?),
         (libc::IPPROTO_IP, libc::IP_MULTICAST_TTL) => i64::from(socket.multicast_ttl_v4()?),
         (libc::IPPROTO_IPV6, libc::IPV6_V6ONLY) => i64::from(socket.only_v6()?),
@@ -144,6 +149,21 @@ fn set_value(
     function: &str,
 ) -> Result<io::Result<()>, NativeError> {
     let socket = SockRef::from(connection);
+    match (level, option) {
+        (libc::IPPROTO_IP, libc::IP_MULTICAST_IF) => {
+            return Ok(multicast::interface_index(value)
+                .and_then(multicast::ipv4_address)
+                .and_then(|address| socket.set_multicast_if_v4(&address)));
+        }
+        (libc::IPPROTO_IPV6, libc::IPV6_MULTICAST_IF) => {
+            return Ok(multicast::interface_index(value)
+                .and_then(|index| socket.set_multicast_if_v6(index)));
+        }
+        (libc::IPPROTO_IP | libc::IPPROTO_IPV6, MCAST_JOIN_GROUP | MCAST_LEAVE_GROUP) => {
+            return multicast::membership(&socket, option, value, function);
+        }
+        _ => {}
+    }
     if level == libc::SOL_SOCKET {
         let case = match option {
             libc::SO_LINGER => Some(("SO_LINGER", "l_onoff", "l_linger")),
@@ -154,9 +174,20 @@ fn set_value(
         if let Some((name, first, second)) = case {
             let (a, b) = option_pair(context, value, function, name, first, second)?;
             return Ok(if option == libc::SO_LINGER {
+                let linger_field = |name, number| {
+                    i32::try_from(number)
+                        .ok()
+                        .filter(|value| *value >= 0)
+                        .ok_or_else(|| {
+                            NativeError::value_error(format!(
+                                "{function}(): Argument #4 ($value) \"{name}\" must be between 0 and {}",
+                                i32::MAX
+                            ))
+                        })
+                };
                 let value = libc::linger {
-                    l_onoff: a as i32,
-                    l_linger: b as i32,
+                    l_onoff: linger_field(first, a)?,
+                    l_linger: linger_field(second, b)?,
                 };
                 setsockopt(connection, sockopt::Linger, &value).map_err(Into::into)
             } else if a < 0 || !(0..1_000_000).contains(&b) {
@@ -190,7 +221,6 @@ fn set_value(
         (libc::IPPROTO_IP, libc::IP_MULTICAST_TTL) => socket.set_multicast_ttl_v4(number as u32),
         (libc::IPPROTO_IPV6, libc::IPV6_V6ONLY) => socket.set_only_v6(enabled),
         (libc::IPPROTO_IPV6, libc::IPV6_UNICAST_HOPS) => socket.set_unicast_hops_v6(number as u32),
-        (libc::IPPROTO_IPV6, libc::IPV6_MULTICAST_IF) => socket.set_multicast_if_v6(number as u32),
         (libc::IPPROTO_IPV6, libc::IPV6_MULTICAST_LOOP) => socket.set_multicast_loop_v6(enabled),
         (libc::IPPROTO_IPV6, libc::IPV6_MULTICAST_HOPS) => {
             socket.set_multicast_hops_v6(number as u32)
@@ -207,13 +237,7 @@ fn option_pair(
     first: &str,
     second: &str,
 ) -> Result<(i64, i64), NativeError> {
-    let value = value.deref();
-    let Value::Array(fields) = &*value else {
-        return Err(NativeError::type_error(format!(
-            "{function}(): Argument #4 ($value) must be of type array when argument #3 ($option) is {name}, {} given",
-            value.type_name()
-        )));
-    };
+    let fields = option_fields(value, function, name)?;
     let mut field = |key: &str| {
         let value = fields.get(&ArrayKey::str(key)).ok_or_else(|| {
             NativeError::value_error(format!(
@@ -223,6 +247,17 @@ fn option_pair(
         to_int(value, context.diagnostics()).map_err(NativeError::from)
     };
     Ok((field(first)?, field(second)?))
+}
+
+fn option_fields(value: &Value, function: &str, name: &str) -> Result<Rc<PhpArray>, NativeError> {
+    match &*value.deref() {
+        Value::Array(fields) => Ok(fields.clone()),
+        Value::Object(object) => Ok(Rc::new(object.lazy_properties())),
+        _ => Err(NativeError::type_error(format!(
+            "{function}(): Argument #4 ($value) must be of type array when argument #3 ($option) is {name}, {} given",
+            value.type_name()
+        ))),
+    }
 }
 
 fn pair(first: (&str, i64), second: (&str, i64)) -> Value {

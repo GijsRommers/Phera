@@ -82,11 +82,28 @@ fn parts(args: &[Value], function: &str) -> Result<(Domain, Type, Option<Protoco
     #[cfg(target_os = "linux")]
     let valid = valid || domain == libc::AF_PACKET;
     if !valid {
+        let domains = if cfg!(target_os = "linux") {
+            "AF_UNIX, AF_PACKET, AF_INET6, or AF_INET"
+        } else {
+            "AF_UNIX, AF_INET6, or AF_INET"
+        };
         return Err(NativeError::value_error(format!(
-            "{function}(): Argument #1 ($domain) must be one of AF_UNIX, AF_PACKET, AF_INET6, or AF_INET"
+            "{function}(): Argument #1 ($domain) must be one of {domains}"
         )));
     }
     let socket_type = args::int(args, 1).unwrap_or_default() as i32;
+    if !matches!(
+        socket_type,
+        libc::SOCK_STREAM
+            | libc::SOCK_DGRAM
+            | libc::SOCK_SEQPACKET
+            | libc::SOCK_RAW
+            | libc::SOCK_RDM
+    ) {
+        return Err(NativeError::value_error(format!(
+            "{function}(): Argument #2 ($type) must be one of SOCK_STREAM, SOCK_DGRAM, SOCK_SEQPACKET, SOCK_RAW, or SOCK_RDM"
+        )));
+    }
     let protocol = args::int(args, 2).unwrap_or_default() as i32;
     Ok((
         domain.into(),
@@ -254,7 +271,7 @@ fn import(context: &mut dyn Context, args: &[Value]) -> NativeResult {
             Ok(Value::Bool(false))
         }
         Value::Resource(_) => Err(NativeError::type_error(
-            "socket_import_stream(): Argument #1 ($stream) must be a valid stream resource",
+            "socket_import_stream(): supplied resource is not a valid stream resource",
         )),
         other => Err(NativeError::type_error(format!(
             "socket_import_stream(): Argument #1 ($stream) must be of type resource, {} given",

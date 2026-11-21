@@ -57,6 +57,8 @@ const COMMON: &[(&str, i32)] = &[
     ("IP_MULTICAST_IF", libc::IP_MULTICAST_IF),
     ("IP_MULTICAST_TTL", libc::IP_MULTICAST_TTL),
     ("IP_MULTICAST_LOOP", libc::IP_MULTICAST_LOOP),
+    ("MCAST_JOIN_GROUP", crate::options::MCAST_JOIN_GROUP),
+    ("MCAST_LEAVE_GROUP", crate::options::MCAST_LEAVE_GROUP),
     ("IP_TTL", libc::IP_TTL),
     ("IPV6_MULTICAST_IF", libc::IPV6_MULTICAST_IF),
     ("IPV6_MULTICAST_HOPS", libc::IPV6_MULTICAST_HOPS),

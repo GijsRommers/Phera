@@ -28,6 +28,7 @@ socket_clear_error($a);
 item('clear', socket_last_error($a));
 item('send', socket_send($b, "one\rtwo", 7, 0));
 $read = [3 => $a, 'again' => $a];
+$readAlias =& $read[3];
 $write = $except = null;
 item('select', socket_select($read, $write, $except, 0));
 item('ready keys', array_keys($read));
@@ -101,6 +102,13 @@ foreach (['listener' => $listener, 'client' => $client, 'accepted' => $accepted]
 
 $receiver = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
 $sender = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+item('set default multicast interface', socket_set_option($receiver, IPPROTO_IP, IP_MULTICAST_IF, 0));
+item('default multicast interface', socket_get_option($receiver, IPPROTO_IP, IP_MULTICAST_IF) === 0);
+try {
+    socket_bind($receiver, '127.0.0.1', -1);
+} catch (ValueError $error) {
+    item('invalid port', $error->getMessage());
+}
 socket_bind($receiver, '127.0.0.1', 0);
 socket_bind($sender, '127.0.0.1', 0);
 [$host, $port] = address($receiver);

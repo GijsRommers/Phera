@@ -56,7 +56,7 @@ fn select(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, Native
                         resolved.type_name()
                     )));
                 }
-                let handle = classes::argument(std::slice::from_ref(object), FUNCTION)?;
+                let handle = classes::argument(std::slice::from_ref(&*resolved), FUNCTION)?;
                 match handle.raw(FUNCTION)?.connect().await {
                     Ok(socket) => candidates.push(Candidate {
                         group,

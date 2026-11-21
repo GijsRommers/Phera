@@ -94,9 +94,19 @@ pub(crate) async fn destination(
     let bytes = args::bytes(arguments, address);
     let value = args::int(arguments, port);
     match domain {
-        Ok(Domain::UNIX) => Ok(SockAddr::unix(Path::new(std::ffi::OsStr::from_bytes(
-            bytes,
-        )))),
+        Ok(Domain::UNIX) => {
+            let limit = std::mem::size_of::<libc::sockaddr_un>()
+                - std::mem::offset_of!(libc::sockaddr_un, sun_path);
+            if function == "socket_sendto" && bytes.len() >= limit {
+                return Err(NativeError::value_error(format!(
+                    "{function}(): Argument #{} ($address) must be less than {limit} bytes",
+                    address + 1
+                )));
+            }
+            Ok(SockAddr::unix(Path::new(std::ffi::OsStr::from_bytes(
+                bytes,
+            ))))
+        }
         Ok(domain @ (Domain::IPV4 | Domain::IPV6)) => {
             let ipv4 = domain == Domain::IPV4;
             if require_port && value.is_none() {
@@ -108,8 +118,13 @@ pub(crate) async fn destination(
             }
             let text = bytes.split(|&byte| byte == 0).next().unwrap_or_default();
             let host = String::from_utf8_lossy(text);
-            let port = value.unwrap_or_default() as u16;
-            let resolved = tokio::net::lookup_host((host.as_ref(), port))
+            let port_number = u16::try_from(value.unwrap_or_default()).map_err(|_| {
+                NativeError::value_error(format!(
+                    "{function}(): Argument #{} ($port) must be between 0 and 65535",
+                    port + 1
+                ))
+            })?;
+            let resolved = tokio::net::lookup_host((host.as_ref(), port_number))
                 .await
                 .and_then(|mut addresses| {
                     addresses
