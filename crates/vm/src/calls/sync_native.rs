@@ -269,9 +269,20 @@ impl Vm {
                         None => Ok(Some(BatchExit::NativeCall(destination))),
                     }
                 }
-                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
-                    crate::class_intrinsics::ClassFunction::ObjectId,
-                )) => Ok(self.object_id_call(call, destination)),
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(function)) => {
+                    Ok(match function {
+                        crate::class_intrinsics::ClassFunction::ObjectId => {
+                            self.object_id_call(call, destination)
+                        }
+                        function @ (crate::class_intrinsics::ClassFunction::ClassExists
+                        | crate::class_intrinsics::ClassFunction::InterfaceExists
+                        | crate::class_intrinsics::ClassFunction::TraitExists
+                        | crate::class_intrinsics::ClassFunction::EnumExists) => {
+                            self.class_query_call(function, call, destination)
+                        }
+                        _ => Some(BatchExit::NativeCall(destination)),
+                    })
+                }
                 _ => Ok(Some(BatchExit::NativeCall(destination))),
             };
         };
