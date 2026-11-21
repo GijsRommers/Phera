@@ -50,6 +50,7 @@ mod native_calls;
 mod native_defaults;
 pub(crate) mod native_frames;
 mod native_function;
+mod native_loops;
 mod native_method;
 mod native_ready;
 mod native_signature;

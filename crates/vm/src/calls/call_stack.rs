@@ -24,6 +24,9 @@ pub(crate) struct CallStack {
     callback_depth: usize,
     /// Sync natives return their temporary API buffers to this request-local pool.
     native_arguments: Vec<Vec<phera_value::Value>>,
+    /// The built-ins whose callbacks run on these frames (`array_map`), with
+    /// what each has done so far (see `calls::native_loops`).
+    pub(crate) native_loops: Vec<super::native_loops::NativeLoop>,
 }
 
 impl CallStack {
@@ -35,6 +38,7 @@ impl CallStack {
             empty: FrameExtras::new(),
             callback_depth: 0,
             native_arguments: Vec::new(),
+            native_loops: Vec::new(),
             preparing: Vec::new(),
             details: Vec::new(),
         }
@@ -360,6 +364,9 @@ impl crate::snapshot::ForkCopy for CallStack {
             details: self.details.fork_copy(fork),
             callback_depth: self.callback_depth,
             native_arguments: Vec::new(),
+            // A snapshot is taken from top-level code, never inside a
+            // built-in's callback.
+            native_loops: Vec::new(),
         }
     }
 }

@@ -207,6 +207,7 @@ impl Machine<'_> {
         let depth = self.stack.depth();
         let function = self.code.function(frame.function);
         if facts.local.is_none()
+            || frame.returns_to_native_loop()
             || function.is_generator
             || function.returns_reference
             || (frame.has_extras() && !self.stack.extras(depth - 1).plain_return_can_release())

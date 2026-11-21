@@ -192,10 +192,16 @@ impl Vm {
             return Ok(Some(BatchExit::NativeCall(destination)));
         };
         let CallTarget::Native(entry) = callee.target else {
-            return if matches!(callee.target, CallTarget::Method { .. }) {
-                self.call_sync_native_method(call, destination)
-            } else {
-                Ok(Some(BatchExit::NativeCall(destination)))
+            return match callee.target {
+                CallTarget::Method { .. } => self.call_sync_native_method(call, destination),
+                // Its callbacks run on the frame stack (`calls::native_loops`).
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::ArrayMap) => {
+                    match self.start_array_map(destination)? {
+                        Some(exit) => Ok(exit),
+                        None => Ok(Some(BatchExit::NativeCall(destination))),
+                    }
+                }
+                _ => Ok(Some(BatchExit::NativeCall(destination))),
             };
         };
         let NativeFn::Sync(handler) = entry.handler else {
