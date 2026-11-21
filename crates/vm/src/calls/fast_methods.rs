@@ -132,8 +132,18 @@ impl Machine<'_> {
             CallKind::Closure => None,
             _ => cache.site_record(facts, body.method_sites.len(), site_id),
         };
+        // The scope the site's code runs in (see `caller_scope`): a method's
+        // declaring class, from its facts; none for a function.
+        let scope = match position.frame.kind() {
+            CallKind::Function => None,
+            _ => facts.class,
+        };
         let outcome = match record.map(Cell::get) {
-            Some(SiteRecord { class, outcome }) if class == address => outcome,
+            Some(SiteRecord {
+                class,
+                scope: recorded,
+                outcome,
+            }) if class == address && recorded == scope => outcome,
             _ => {
                 let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
                     return Step::Done(position.ip);
@@ -142,6 +152,7 @@ impl Machine<'_> {
                 if let Some(record) = record {
                     record.set(SiteRecord {
                         class: address,
+                        scope,
                         outcome,
                     });
                 }
@@ -255,11 +266,27 @@ impl Machine<'_> {
             Step::Slow => return Step::Done(position.ip),
             step => return step,
         }
-        // The sends, as the loop makes them; one it refuses leaves the call
-        // to the written-out sends, which write the same slots again.
+        // The sends, as the loop makes them; if any is refused, none is
+        // made and the written-out sends make them all.
         let Some(arguments) = body.site_arguments.get(site.argument_range()) else {
             return Step::Done(sends.ip);
         };
+        // Every argument is tested before any is sent: `send` writes at the
+        // next position, so the written-out sends, which start from the
+        // first argument, must find none sent yet.
+        let Some(call) = self.stack.last_call().copied() else {
+            return Step::Done(sends.ip);
+        };
+        let base = position.frame.base();
+        for (index, argument) in arguments.iter().enumerate() {
+            let accepted = match self.registers.window(base + argument.register().index(), 1) {
+                [Some(value)] => self.other_accepts(call.callee, index, &value.deref()),
+                _ => false,
+            };
+            if !accepted {
+                return Step::Done(sends.ip);
+            }
+        }
         for argument in arguments {
             if !matches!(self.send(position, argument.register()), Step::Done(_)) {
                 return Step::Done(sends.ip);

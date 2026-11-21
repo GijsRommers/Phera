@@ -39,6 +39,11 @@ use phera_bytecode::{Function, Instruction, MethodSite, MethodSiteId, Reg, SiteA
 /// A call that gets a `CallMethod`: where its instructions are.
 struct FoundCall {
     init: usize,
+    /// What its `InitMethodCall` and `Call` say.
+    receiver: Reg,
+    method: phera_bytecode::NameId,
+    dst: Reg,
+    result: phera_bytecode::CallResult,
     /// The literal loads between `InitMethodCall` and `Call`.
     loads: Vec<usize>,
     /// Each `Send`, with what the site records for it.
@@ -84,11 +89,13 @@ pub(crate) fn rewrite(function: &mut Function) {
             instructions.push(old[load]);
             lines.push(line(load));
         }
-        let (Instruction::InitMethodCall { receiver, method }, Instruction::Call { dst, result }) =
-            (old[call.init], old[call.call])
-        else {
-            continue;
-        };
+        let FoundCall {
+            receiver,
+            method,
+            dst,
+            result,
+            ..
+        } = call;
         let site = MethodSiteId(function.method_sites.len() as u32);
         let first_argument = function.site_arguments.len() as u32;
         function
@@ -210,7 +217,7 @@ fn plain_call(
     locals: usize,
     targets: &HashSet<usize>,
 ) -> Option<FoundCall> {
-    let Instruction::InitMethodCall { receiver, .. } = function.instructions[init] else {
+    let Instruction::InitMethodCall { receiver, method } = function.instructions[init] else {
         return None;
     };
     // The literal registers loaded so far, with where the last load is
@@ -250,9 +257,13 @@ fn plain_call(
                 }
                 sends.push((index, SiteArgument::Value(src)));
             }
-            Instruction::Call { .. } => {
+            Instruction::Call { dst, result } => {
                 return (sends.len() <= usize::from(u16::MAX)).then_some(FoundCall {
                     init,
+                    receiver,
+                    method,
+                    dst,
+                    result,
                     loads,
                     sends,
                     call: index,

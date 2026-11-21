@@ -9,7 +9,14 @@
 - `$order->total($tax, 2)` gets one `CallMethod { site, dst, result }` in front of its `InitMethodCall`, `Send`s and `Call` when every argument is a local or a literal. The function's `method_sites` table holds the receiver register, the method name, the run of `site_arguments` (a local, which a by-reference parameter would bind to, or a temporary holding a literal) and `after`, the instruction after the `Call`.
 - `CallMethod` enters a method written in PHP that the receiver's class has and the caller's scope may call, plain in shape, with arguments that are defined, not references, by value and accepted by their types; the caller goes on at `after`. For anything else the loop simply goes on with the next instruction, the general sequence, which applies every rule: a native method, `__call`, an error, a closure or a generator; a PHP method whose arguments need the general rules gets the prepared call `InitMethodCall` would make, and its sends run.
 - The literal loads of such a call come before `CallMethod`; a literal loaded into a register the call loaded before gets a register of its own. Jumps to the call land on its start, and `try` ranges and `finally` targets are renumbered, so calls inside a `try` get a `CallMethod` too.
-- Each site keeps a record per VM (one fixed entry, made when its function first runs a site): the receiver's class index and what the site does for it (enter this PHP method, leave a native method to the general sequence, leave it to the VM). A receiver of another class looks the method up and replaces the record; closures keep none, since their scope can change.
+- Each site keeps a record per VM: one fixed entry, made when its function first runs a site. It holds three things:
+  - the address of the receiver's class handle;
+  - the class scope the site's code ran in;
+  - what the site does: enter this PHP method, run this native getter, prepare and call a native method, or hand the call to the VM.
+
+  A hit needs both the address and the scope to match. A receiver of another class, or the same code running in another scope, looks the method up and replaces the record. That second case is the composed copies of a trait method, which share their records. Closures keep no record, since their scope can change from call to call.
+
+  The address is sound as an identity: a VM frees no class while it runs, because the class tables hold every class it linked until the VM ends, and the records die with the VM. So an address cannot come to mean another class.
 - The pass runs after every other compiler pass, so the optimizing passes never see `CallMethod`.
 
 ## Why nothing observable happens between the lookup and the arguments

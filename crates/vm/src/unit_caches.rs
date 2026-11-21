@@ -65,7 +65,9 @@ pub(crate) type Records = OnceCell<Box<[Cell<SiteRecord>]>>;
 /// receiver of another class looks the method up and replaces the record.
 ///
 /// The class is held as the address of the receiver's class handle, so
-/// that a hit is one comparison. A VM frees no class while it runs (the
+/// that a hit is one comparison. The record also holds the class scope it
+/// was made in: the composed copies of a trait method share their records
+/// but run in different scopes, and what a scope may call differs. A VM frees no class while it runs (the
 /// class tables hold every class it linked until the VM ends, and the
 /// records die with the VM), so an address cannot come to mean another
 /// class.
@@ -73,6 +75,8 @@ pub(crate) type Records = OnceCell<Box<[Cell<SiteRecord>]>>;
 pub(crate) struct SiteRecord {
     /// 0 for a record not made yet.
     pub(crate) class: usize,
+    /// The class scope of the code the record was made for.
+    pub(crate) scope: Option<crate::classes::ClassIndex>,
     pub(crate) outcome: SiteOutcome,
 }
 
@@ -103,6 +107,7 @@ pub(crate) enum SiteOutcome {
 impl SiteRecord {
     const EMPTY: SiteRecord = SiteRecord {
         class: 0,
+        scope: None,
         outcome: SiteOutcome::Vm,
     };
 }
