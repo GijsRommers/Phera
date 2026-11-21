@@ -101,12 +101,11 @@ impl Machine<'_> {
     }
 
     /// `CallMethod`: what method site `site` found for the receiver's class
-    /// the last time (its record) or else finds now, then done. A PHP method
-    /// is entered from here, with its arguments in a new window; a native
-    /// method is prepared by the site's written-out `InitMethodCall`, which
-    /// runs next; whatever the VM must prepare (`__call`, an error, a
-    /// closure or a generator) goes to the VM, which starts the written-out
-    /// call.
+    /// the last time (its record) or else finds now. A PHP method is
+    /// entered from here, with its arguments in a new window, and the caller
+    /// goes on after the call; for anything else (a native method, `__call`,
+    /// an error, a closure, a generator) the loop goes on with the
+    /// `InitMethodCall`, sends and `Call` that follow.
     #[inline(never)]
     pub(super) fn call_method(
         &mut self,
@@ -124,10 +123,10 @@ impl Machine<'_> {
             .window(position.frame.base() + site.receiver.index(), 1)
         {
             [Some(Value::Object(object))] => object.clone(),
-            _ => return Step::Slow,
+            _ => return Step::Done(position.ip),
         };
         let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
-            return Step::Slow;
+            return Step::Done(position.ip);
         };
         // A closure's scope can change from one call to the next, so its
         // sites keep no record.
@@ -159,8 +158,7 @@ impl Machine<'_> {
             SiteOutcome::Enter(function) => {
                 self.enter_site_method(position, (body, site), function, object, destination)
             }
-            SiteOutcome::Native => Step::Done(site.fallback.index()),
-            SiteOutcome::Vm => Step::Slow,
+            SiteOutcome::Native | SiteOutcome::Vm => Step::Done(position.ip),
         }
     }
 
@@ -202,8 +200,8 @@ impl Machine<'_> {
     /// Enter the PHP method `function` of method site `site` with `object`
     /// as `$this`: plain in shape, with arguments that are defined, not
     /// references, passed by value and accepted by their types. Otherwise
-    /// the call becomes the prepared call `InitMethodCall` makes and the
-    /// site's written-out sends run next.
+    /// the call becomes the prepared call the following `InitMethodCall`
+    /// makes, and the sends after it run next.
     #[inline(always)]
     fn enter_site_method(
         &mut self,
@@ -213,7 +211,8 @@ impl Machine<'_> {
         object: Rc<Object>,
         destination: Reg,
     ) -> Step {
-        let sends = site.fallback.index() + 1;
+        // The sends, after the `InitMethodCall` that follows `CallMethod`.
+        let sends = position.ip + 1;
         let Some(arguments) = body.site_arguments.get(site.argument_range()) else {
             return Step::Slow;
         };
@@ -254,7 +253,8 @@ impl Machine<'_> {
             }
             self.registers.put(first + index, value);
         }
-        self.publish(position.ip);
+        // The caller goes on after the call's `Call`.
+        self.publish(site.after.index());
         let mut frame = Frame::of_kind(function, CallKind::Method, first, Some(destination));
         if count < facts.parameters as usize {
             frame = frame.with_passed(count);

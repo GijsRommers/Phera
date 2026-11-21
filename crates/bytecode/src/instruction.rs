@@ -423,9 +423,10 @@ pub enum Instruction {
         dst: Reg,
         result: CallResult,
     },
-    /// `InitMethodCall`, its `Send`s and `Call` in one: the method call
-    /// that [`crate::MethodSite`] `site` of the running function describes.
-    /// `dst` receives the return value.
+    /// The method call that [`crate::MethodSite`] `site` of the running
+    /// function describes, made at once when it is plain; otherwise the
+    /// `InitMethodCall`, `Send`s and `Call` that follow make it. `dst`
+    /// receives the return value.
     CallMethod {
         site: crate::MethodSiteId,
         dst: Reg,

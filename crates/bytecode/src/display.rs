@@ -60,8 +60,8 @@ impl CompiledUnit {
                 .unwrap_or_default();
             writeln!(
                 f,
-                "  site#{index} = {:?}->{:?}({arguments:?}), fallback {:?}",
-                site.receiver, site.method, site.fallback
+                "  site#{index} = {:?}->{:?}({arguments:?}), after {:?}",
+                site.receiver, site.method, site.after
             )?;
         }
         for (index, handler) in function.handlers.iter().enumerate() {

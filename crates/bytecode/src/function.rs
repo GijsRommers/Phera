@@ -57,15 +57,15 @@ pub struct Function {
     pub site_arguments: Vec<SiteArgument>,
 }
 
-/// `$order->total($tax, 2)` as one instruction: the receiver, the method
-/// name and the arguments, all locals or literals, so that nothing PHP
-/// could observe happens between finding the method and reading them.
+/// `$order->total($tax, 2)` for `CallMethod`: the receiver, the method name
+/// and the arguments, all locals or literals, so that nothing PHP could
+/// observe happens between finding the method and reading them.
 ///
-/// `fallback` is the call written out the general way (`InitMethodCall`,
-/// one `Send` per argument, `Call`, then a jump back after `CallMethod`).
-/// Whenever the quick entry declines (a magic `__call`, a by-reference
-/// parameter, an argument its type test refuses, an undefined method),
-/// `CallMethod` jumps there and the VM applies every rule.
+/// The call written out the general way (`InitMethodCall`, one `Send` per
+/// argument, `Call`) follows `CallMethod`, and runs whenever the quick
+/// entry declines (a native method, `__call`, a by-reference parameter, an
+/// argument its type test refuses). `after` is the instruction after its
+/// `Call`, where a call the quick entry made returns.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MethodSite {
     pub receiver: Reg,
@@ -73,7 +73,7 @@ pub struct MethodSite {
     /// The first of the site's entries in [`Function::site_arguments`].
     pub first_argument: u32,
     pub arguments: u16,
-    pub fallback: Target,
+    pub after: Target,
 }
 
 impl MethodSite {

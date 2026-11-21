@@ -1,6 +1,5 @@
-//! Method calls whose arguments are all locals or literals become one
-//! `CallMethod` instead of `InitMethodCall`, one `Send` per argument and
-//! `Call`.
+//! Method calls whose arguments are all locals or literals get one
+//! `CallMethod` in front of their `InitMethodCall`, `Send`s and `Call`.
 //!
 //! ```php
 //! $sum += $point->add($i, 2);
@@ -8,42 +7,40 @@
 //!
 //! ```text
 //! before                              after
-//! InitMethodCall $point, add          Nop
-//! SendLocal $i                        Nop
-//! LoadInt r6, 2                       LoadInt r6, 2
-//! SendValue r6                        Nop
-//! Call r7                             CallMethod site#0, r7
-//!                                     ...
-//!                                     site#0's fallback, after the code:
-//!                                     InitMethodCall $point, add
-//!                                     SendLocal $i
-//!                                     SendValue r6
+//! InitMethodCall $point, add          LoadInt r6, 2
+//! SendLocal $i                        CallMethod site#0, r7
+//! LoadInt r6, 2                       InitMethodCall $point, add
+//! SendValue r6                        SendLocal $i
+//! Call r7                             SendValue r6
 //!                                     Call r7
-//!                                     Jump back after CallMethod
 //! ```
 //!
-//! PHP finds the method before it evaluates the arguments: an undefined
-//! method throws before an argument with a side effect runs. Reading a
-//! local or a literal has no effect PHP code can see before the call, so
-//! for these calls finding the method and reading the arguments may happen
-//! together; any argument computed some other way keeps the general
-//! sequence. Where `CallMethod` declines (a magic `__call`, a by-reference
-//! parameter, a type test the value fails), it jumps to the call written
-//! out the general way after the function's code, and the VM runs that
-//! with every rule; the local's warning for being undefined, for instance,
-//! comes after the lookup there, as in PHP.
+//! `CallMethod` enters a method written in PHP with the arguments the site
+//! names, and the caller goes on after the `Call`. Where it does not (a
+//! native method, `__call`, a by-reference parameter, a type the value
+//! fails), the loop simply goes on with the next instruction: the call
+//! written out the general way, which applies every rule, so there is one
+//! definition of the behaviour.
 //!
-//! Calls inside a `try` keep the general sequence: the fallback lies
-//! outside the protected range, where the `catch` would not see an
-//! exception the call throws.
+//! PHP finds the method before it evaluates the arguments: an undefined
+//! method throws before an argument with a side effect runs. Loading a
+//! literal or reading a local has no effect a program can see, so for these
+//! calls the literal loads may come before `CallMethod`, and finding the
+//! method and reading the arguments may happen together; any argument
+//! computed some other way keeps the general sequence alone. The undefined
+//! local's warning comes from the general sequence, after the lookup, as in
+//! PHP. Because the call stays where it was, a `try` around it covers it
+//! either way.
 
 use std::collections::HashSet;
 
 use phera_bytecode::{Function, Instruction, MethodSite, MethodSiteId, Reg, SiteArgument, Target};
 
-/// A call that becomes `CallMethod`: where its instructions are.
+/// A call that gets a `CallMethod`: where its instructions are.
 struct FoundCall {
     init: usize,
+    /// The literal loads between `InitMethodCall` and `Call`.
+    loads: Vec<usize>,
     /// Each `Send`, with what the site records for it.
     sends: Vec<(usize, SiteArgument)>,
     call: usize,
@@ -52,70 +49,85 @@ struct FoundCall {
     renamed: Vec<(usize, usize)>,
 }
 
-/// Rewrite the eligible method calls of one function, after its other
-/// passes have run.
+/// Give the eligible method calls of one function a `CallMethod`, after
+/// its other passes have run.
 pub(crate) fn rewrite(function: &mut Function) {
     let mut calls = find_calls(function);
+    calls.retain_mut(|call| give_own_registers(function, call));
     if calls.is_empty() {
         return;
     }
-    calls.retain_mut(|call| give_own_registers(function, call));
-    // The general sequences, kept for the fallbacks before they are
-    // replaced.
-    let originals: Vec<Vec<(Instruction, u32)>> = calls
-        .iter()
-        .map(|call| {
-            std::iter::once(call.init)
-                .chain(call.sends.iter().map(|&(send, _)| send))
-                .chain(std::iter::once(call.call))
-                .map(|index| (function.instructions[index], line(function, index)))
-                .collect()
-        })
-        .collect();
-    for call in &calls {
-        let site = MethodSiteId(function.method_sites.len() as u32);
-        let Instruction::InitMethodCall { receiver, method } = function.instructions[call.init]
+    let old = function.instructions.to_vec();
+    let old_lines = std::mem::take(&mut function.lines);
+    let line = |index: usize| old_lines.get(index).copied().unwrap_or(1);
+    let mut instructions = Vec::with_capacity(old.len() + calls.len());
+    let mut lines = Vec::with_capacity(old.len() + calls.len());
+    // Where each old instruction went, and one past the end.
+    let mut moved = vec![0u32; old.len() + 1];
+    let mut calls = calls.into_iter().peekable();
+    let mut index = 0;
+    while index < old.len() {
+        let Some(call) = calls.next_if(|call| call.init == index) else {
+            moved[index] = instructions.len() as u32;
+            instructions.push(old[index]);
+            lines.push(line(index));
+            index += 1;
+            continue;
+        };
+        // A jump to the call's start lands on its literal loads, which now
+        // come first.
+        for slot in &mut moved[call.init..=call.call] {
+            *slot = instructions.len() as u32;
+        }
+        for &load in &call.loads {
+            moved[load] = instructions.len() as u32;
+            instructions.push(old[load]);
+            lines.push(line(load));
+        }
+        let (Instruction::InitMethodCall { receiver, method }, Instruction::Call { dst, result }) =
+            (old[call.init], old[call.call])
         else {
             continue;
         };
+        let site = MethodSiteId(function.method_sites.len() as u32);
         let first_argument = function.site_arguments.len() as u32;
-        for &(send, argument) in &call.sends {
-            function.site_arguments.push(argument);
-            function.instructions[send] = Instruction::Nop;
+        function
+            .site_arguments
+            .extend(call.sends.iter().map(|&(_, argument)| argument));
+        instructions.push(Instruction::CallMethod { site, dst, result });
+        lines.push(line(call.call));
+        // The general sequence. A jump to the call keeps landing on its
+        // start (set above), not on this `InitMethodCall`.
+        instructions.push(old[call.init]);
+        lines.push(line(call.init));
+        for written_out in call
+            .sends
+            .iter()
+            .map(|&(send, _)| send)
+            .chain(std::iter::once(call.call))
+        {
+            moved[written_out] = instructions.len() as u32;
+            instructions.push(old[written_out]);
+            lines.push(line(written_out));
         }
         function.method_sites.push(MethodSite {
             receiver,
             method,
             first_argument,
             arguments: call.sends.len() as u16,
-            // Set below, once the code has its final positions.
-            fallback: Target(0),
+            after: Target(instructions.len() as u32),
         });
-        function.instructions[call.init] = Instruction::Nop;
-        if let Instruction::Call { dst, result } = function.instructions[call.call] {
-            function.instructions[call.call] = Instruction::CallMethod { site, dst, result };
-        }
+        index = call.call + 1;
     }
-    compact(function);
-    append_fallbacks(function, &originals);
-}
-
-/// Removes the `Nop`s the rewrite left (and any other), renumbering the
-/// jump targets, the `finally` entries and the `try` ranges, so that a
-/// function with a `try` runs no empty instructions either.
-fn compact(function: &mut Function) {
-    let mut offsets = Vec::with_capacity(function.instructions.len() + 1);
-    let mut kept = 0u32;
-    for instruction in function.instructions.iter() {
-        offsets.push(kept);
-        if !matches!(instruction, Instruction::Nop) {
-            kept += 1;
-        }
-    }
-    offsets.push(kept);
+    moved[old.len()] = instructions.len() as u32;
     let renumber = |target: &mut Target| {
-        target.0 = offsets.get(target.index()).copied().unwrap_or(target.0);
+        target.0 = moved.get(target.index()).copied().unwrap_or(target.0);
     };
+    for instruction in &mut instructions {
+        if let Some(target) = crate::passes::optimize::target_mut(instruction) {
+            renumber(target);
+        }
+    }
     for handler in &mut function.handlers {
         renumber(&mut handler.start);
         renumber(&mut handler.end);
@@ -126,15 +138,15 @@ fn compact(function: &mut Function) {
             renumber(finally);
         }
     }
-    crate::passes::optimize::compact_nops(function);
+    function.instructions = instructions.into();
+    function.lines = lines;
 }
 
 /// `CallMethod` reads every argument at the call, so a literal loaded into
 /// a register the call loaded before (the optimizer reuses temporaries:
 /// `$o->m(1, 2)` may load both into one) moves to a register of its own,
-/// with the send that reads it.
-/// `false`, having changed nothing for the call, when the function has no
-/// register left.
+/// with the send that reads it. `false`, having changed nothing for the
+/// call, when the function has no register left.
 fn give_own_registers(function: &mut Function, call: &mut FoundCall) -> bool {
     let needed = u16::try_from(call.renamed.len()).ok();
     if needed
@@ -166,40 +178,6 @@ fn give_own_registers(function: &mut Function, call: &mut FoundCall) -> bool {
     true
 }
 
-/// After the code: each site's general sequence and a jump back after its
-/// `CallMethod`.
-fn append_fallbacks(function: &mut Function, originals: &[Vec<(Instruction, u32)>]) {
-    let positions: Vec<usize> = function
-        .instructions
-        .iter()
-        .enumerate()
-        .filter_map(|(index, instruction)| {
-            matches!(instruction, Instruction::CallMethod { .. }).then_some(index)
-        })
-        .collect();
-    let mut instructions = function.instructions.to_vec();
-    for (position, original) in positions.iter().zip(originals) {
-        let Instruction::CallMethod { site, .. } = instructions[*position] else {
-            continue;
-        };
-        function.method_sites[site.index()].fallback = Target(instructions.len() as u32);
-        let call_line = original.last().map_or(1, |(_, line)| *line);
-        for &(instruction, line) in original {
-            instructions.push(instruction);
-            function.lines.push(line);
-        }
-        instructions.push(Instruction::Jump {
-            target: Target(*position as u32 + 1),
-        });
-        function.lines.push(call_line);
-    }
-    function.instructions = instructions.into();
-}
-
-fn line(function: &Function, index: usize) -> u32 {
-    function.lines.get(index).copied().unwrap_or(1)
-}
-
 /// The method calls whose instructions between `InitMethodCall` and `Call`
 /// are only sends of locals, literal loads and the sends of those literals.
 fn find_calls(function: &Function) -> Vec<FoundCall> {
@@ -225,22 +203,20 @@ fn find_calls(function: &Function) -> Vec<FoundCall> {
     found
 }
 
-/// The call that starts at `init`, if it can be one `CallMethod`.
+/// The call that starts at `init`, if it can have a `CallMethod`.
 fn plain_call(
     function: &Function,
     init: usize,
     locals: usize,
     targets: &HashSet<usize>,
 ) -> Option<FoundCall> {
-    if protected(function, init) {
-        return None;
-    }
     let Instruction::InitMethodCall { receiver, .. } = function.instructions[init] else {
         return None;
     };
     // The literal registers loaded so far, with where the last load is
     // and whether it moves to a register of its own.
     let mut literals: Vec<(Reg, usize, bool)> = Vec::new();
+    let mut loads = Vec::new();
     let mut sends = Vec::new();
     let mut renamed = Vec::new();
     for index in init + 1..function.instructions.len() {
@@ -248,10 +224,9 @@ fn plain_call(
             return None;
         }
         match function.instructions[index] {
-            Instruction::Nop => {}
             // A load into the receiver's register keeps the general
-            // sequence; a second load into one register moves to its own
-            // (see `give_own_registers`).
+            // sequence alone; a second load into one register moves to its
+            // own (see `give_own_registers`).
             Instruction::LoadInt { dst, .. }
             | Instruction::LoadConst { dst, .. }
             | Instruction::LoadNull { dst }
@@ -260,6 +235,7 @@ fn plain_call(
             {
                 let again = literals.iter().any(|(register, ..)| *register == dst);
                 literals.push((dst, index, again));
+                loads.push(index);
             }
             Instruction::SendLocal { local } if local.index() < locals => {
                 sends.push((index, SiteArgument::Local(local)));
@@ -277,6 +253,7 @@ fn plain_call(
             Instruction::Call { .. } => {
                 return (sends.len() <= usize::from(u16::MAX)).then_some(FoundCall {
                     init,
+                    loads,
                     sends,
                     call: index,
                     renamed,
@@ -288,53 +265,39 @@ fn plain_call(
     None
 }
 
-/// Whether a `try` block covers the instruction.
-fn protected(function: &Function, index: usize) -> bool {
-    function
-        .handlers
-        .iter()
-        .any(|handler| handler.start.index() <= index && index < handler.end.index())
-}
-
 #[cfg(test)]
 mod tests {
-    use phera_bytecode::Instruction;
+    use phera_bytecode::{Function, Instruction, Target};
 
-    /// How many calls of the function named `name` became `CallMethod`, and
-    /// how many kept `InitMethodCall` in the code itself (the fallbacks,
-    /// after the code, are not counted).
-    fn calls(source: &str, name: &str) -> (usize, usize) {
+    fn function(source: &str, name: &str) -> Function {
         let unit = crate::compile(source, "calls.php").expect("compiles");
-        let function = unit
-            .functions
-            .iter()
+        unit.functions
+            .into_iter()
             .find(|function| function.name == name)
-            .expect("function");
-        let end = function
-            .method_sites
-            .iter()
-            .map(|site| site.fallback.index())
-            .min()
-            .unwrap_or(function.instructions.len());
-        let code = &function.instructions[..end];
-        let count = |test: fn(&Instruction) -> bool| code.iter().filter(|i| test(i)).count();
-        (
-            count(|i| matches!(i, Instruction::CallMethod { .. })),
-            count(|i| matches!(i, Instruction::InitMethodCall { .. })),
-        )
+            .expect("function")
+    }
+
+    /// How many method calls of `name` got a `CallMethod`, and how many
+    /// kept only the general sequence.
+    fn calls(source: &str, name: &str) -> (usize, usize) {
+        let function = function(source, name);
+        let count = |test: fn(&Instruction) -> bool| {
+            function.instructions.iter().filter(|i| test(i)).count()
+        };
+        let fused = count(|i| matches!(i, Instruction::CallMethod { .. }));
+        let started = count(|i| matches!(i, Instruction::InitMethodCall { .. }));
+        (fused, started - fused)
     }
 
     #[test]
-    fn locals_and_literals_make_one_instruction() {
+    fn locals_and_literals_get_a_call_method() {
         let source = "<?php function f($o, $a) { $o->m(); $o->m($a, 1, 'x', null, true); }";
         assert_eq!(calls(source, "f"), (2, 0));
     }
 
     #[test]
     fn two_literals_read_at_the_call_need_two_registers() {
-        let unit = crate::compile("<?php function f($o) { return $o->m(1, 2); }", "f.php")
-            .expect("compiles");
-        let function = unit.functions.iter().find(|f| f.name == "f").expect("f");
+        let function = function("<?php function f($o) { return $o->m(1, 2); }", "f");
         for site in &function.method_sites {
             let registers: Vec<_> = function.site_arguments[site.argument_range()]
                 .iter()
@@ -345,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn arguments_that_could_be_seen_keep_the_general_sequence() {
+    fn arguments_that_could_be_seen_keep_the_general_sequence_alone() {
         let source = r#"<?php function f($o, $a, $b) {
             $o->m(g());
             $o->m($a + 1);
@@ -354,48 +317,13 @@ mod tests {
             $o->m($o->n($a));
             try { $o->m($a); } catch (Exception $e) {}
         }"#;
-        // Only the inner `$o->n($a)` of the fifth call is one instruction.
-        assert_eq!(calls(source, "f"), (1, 6));
+        // The inner `$o->n($a)` and the call inside the `try` get one.
+        assert_eq!(calls(source, "f"), (2, 5));
     }
 
     #[test]
-    fn a_function_with_a_try_keeps_no_empty_instructions() {
-        let source = r#"<?php function f($o, $a) {
-            $o->m($a, 1);
-            try { $o->m(thrower()); } catch (Exception $e) { $o->m($a); } finally { $o->m(); }
-            return $o->m($a);
-        }"#;
-        let unit = crate::compile(source, "f.php").expect("compiles");
-        let function = unit.functions.iter().find(|f| f.name == "f").expect("f");
-        assert!(
-            !function
-                .instructions
-                .iter()
-                .any(|i| matches!(i, Instruction::Nop)),
-            "{:?}",
-            function.instructions
-        );
-        // `try`/`catch`/`finally` has two handlers; the innermost is first.
-        let handler = function.handlers.first().expect("a handler");
-        // The protected range still starts at the call inside the `try`.
-        let protected = &function.instructions[handler.start.index()..handler.end.index()];
-        assert!(
-            protected
-                .iter()
-                .any(|i| matches!(i, Instruction::InitMethodCall { .. }))
-        );
-        assert!(
-            !protected
-                .iter()
-                .any(|i| matches!(i, Instruction::CallMethod { .. }))
-        );
-    }
-
-    #[test]
-    fn a_fallback_jumps_back_after_its_call() {
-        let unit = crate::compile("<?php function f($o, $a) { return $o->m($a); }", "f.php")
-            .expect("compiles");
-        let function = unit.functions.iter().find(|f| f.name == "f").expect("f");
+    fn the_general_sequence_follows_and_the_site_returns_after_it() {
+        let function = function("<?php function f($o, $a) { return $o->m($a, 7); }", "f");
         let [site] = function.method_sites.as_slice() else {
             panic!("one site");
         };
@@ -404,15 +332,49 @@ mod tests {
             .iter()
             .position(|i| matches!(i, Instruction::CallMethod { .. }))
             .expect("CallMethod");
-        let fallback = &function.instructions[site.fallback.index()..];
-        assert!(matches!(fallback[0], Instruction::InitMethodCall { .. }));
-        assert!(matches!(fallback[1], Instruction::SendLocal { .. }));
-        assert!(matches!(fallback[2], Instruction::Call { .. }));
-        assert_eq!(
-            fallback[3],
-            Instruction::Jump {
-                target: phera_bytecode::Target(call as u32 + 1)
+        let code = &function.instructions;
+        assert!(matches!(
+            code[call - 1],
+            Instruction::LoadInt { value: 7, .. }
+        ));
+        assert!(matches!(code[call + 1], Instruction::InitMethodCall { .. }));
+        assert!(matches!(code[call + 2], Instruction::SendLocal { .. }));
+        assert!(matches!(code[call + 3], Instruction::SendValue { .. }));
+        assert!(matches!(code[call + 4], Instruction::Call { .. }));
+        assert_eq!(site.after, Target(call as u32 + 5));
+    }
+
+    #[test]
+    fn jumps_and_try_ranges_follow_the_moved_instructions() {
+        let source = r#"<?php function f($o, $a) {
+            for ($i = 0; $i < 3; $i++) { $o->m($a, 1); }
+            try { $o->m(thrower()); } catch (Exception $e) { $o->m($a); } finally { $o->m(); }
+            return $o->m($a);
+        }"#;
+        let function = function(source, "f");
+        let length = function.instructions.len();
+        for instruction in function.instructions.iter() {
+            let mut instruction = *instruction;
+            if let Some(target) = crate::passes::optimize::target_mut(&mut instruction) {
+                assert!(target.index() <= length, "{instruction:?}");
+                assert!(
+                    !matches!(
+                        function.instructions.get(target.index()),
+                        Some(Instruction::InitMethodCall { .. })
+                    ) || !matches!(
+                        function.instructions.get(target.index().wrapping_sub(1)),
+                        Some(Instruction::CallMethod { .. })
+                    )
+                );
             }
+        }
+        // The innermost handler still covers the call inside the `try`.
+        let handler = function.handlers.first().expect("a handler");
+        let protected = &function.instructions[handler.start.index()..handler.end.index()];
+        assert!(
+            protected
+                .iter()
+                .any(|i| matches!(i, Instruction::InitMethodCall { .. }))
         );
     }
 }

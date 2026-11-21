@@ -6,10 +6,11 @@
 
 ## Decision
 
-- `$order->total($tax, 2)` compiles to one `CallMethod { site, dst, result }` when every argument is a local or a literal. The function's `method_sites` table holds the receiver register, the method name and the run of `site_arguments` (a local, which a by-reference parameter would bind to, or a temporary holding a literal).
-- The call written out the general way (`InitMethodCall`, one `Send` per argument, `Call`, then a jump back after `CallMethod`) follows the function's code. The loop's quick entry takes a method written in PHP that the receiver's class has and the caller's scope may call, plain in shape, with arguments that are defined, not references, and pass their type tests. Everything else jumps to that general sequence, which the VM runs with every rule.
-- Calls inside a `try` keep the general sequence: the fallback lies outside the protected range.
-- The pass runs after every other compiler pass, so the optimizing passes never see `CallMethod`. Where the optimizer reused one temporary for two literals, the second load gets a register of its own, because the site reads all arguments at the call.
+- `$order->total($tax, 2)` gets one `CallMethod { site, dst, result }` in front of its `InitMethodCall`, `Send`s and `Call` when every argument is a local or a literal. The function's `method_sites` table holds the receiver register, the method name, the run of `site_arguments` (a local, which a by-reference parameter would bind to, or a temporary holding a literal) and `after`, the instruction after the `Call`.
+- `CallMethod` enters a method written in PHP that the receiver's class has and the caller's scope may call, plain in shape, with arguments that are defined, not references, by value and accepted by their types; the caller goes on at `after`. For anything else the loop simply goes on with the next instruction, the general sequence, which applies every rule: a native method, `__call`, an error, a closure or a generator; a PHP method whose arguments need the general rules gets the prepared call `InitMethodCall` would make, and its sends run.
+- The literal loads of such a call come before `CallMethod`; a literal loaded into a register the call loaded before gets a register of its own. Jumps to the call land on its start, and `try` ranges and `finally` targets are renumbered, so calls inside a `try` get a `CallMethod` too.
+- Each site keeps a record per VM (one fixed entry, made when its function first runs a site): the receiver's class index and what the site does for it (enter this PHP method, leave a native method to the general sequence, leave it to the VM). A receiver of another class looks the method up and replaces the record; closures keep none, since their scope can change.
+- The pass runs after every other compiler pass, so the optimizing passes never see `CallMethod`.
 
 ## Why nothing observable happens between the lookup and the arguments
 
@@ -17,5 +18,6 @@ PHP finds the method (`INIT_METHOD_CALL`) before it evaluates the arguments: an 
 
 ## Turned down
 
-- Replaying `InitMethodCall`, the sends and `Call` inside one VM handler: a handler that needs the async shell midway (autoload, `__call` running PHP code) could not resume the rest. The out-of-line general sequence keeps one definition of the behaviour.
-- A per-site memo of the resolved method: not built in this step (see the pull request for what the lookup costs).
+- Replacing the three instructions by one and keeping the general sequence out of line after the function's code (the first version, #165): every call the quick entry did not make paid a jump there and back, 250 to 400 instructions per native method call.
+- Replaying `InitMethodCall`, the sends and `Call` inside one VM handler: a handler that needs the async shell midway (autoload, `__call` running PHP code) could not resume the rest.
+- A hash table or a growing list of classes per site: the record is one fixed entry, replaced when the class changes.
