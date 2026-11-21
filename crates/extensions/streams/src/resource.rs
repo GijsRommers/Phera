@@ -10,7 +10,11 @@ use crate::stream::Stream;
 use crate::user_resource::UserHandle;
 
 pub(crate) type FilteredBacking = Rc<RefCell<Option<Box<Stream>>>>;
-pub(crate) type FilteredStream = UserHandle<RefCell<Option<Box<Stream>>>>;
+
+pub(crate) struct FilteredStream {
+    handle: UserHandle<RefCell<Option<Box<Stream>>>>,
+    pub(crate) class_name: String,
+}
 
 pub fn register(registry: &mut Registry) {
     const PARAMS: &[Param] = &[Param::new("resource", ParamType::Mixed)];
@@ -98,7 +102,7 @@ pub fn with_stream<T>(
         .as_ref()
         .and_then(|stream| stream.downcast_ref::<FilteredStream>())
         .ok_or_else(unavailable)?;
-    let mut backing = filtered.value.borrow_mut();
+    let mut backing = filtered.handle.value.borrow_mut();
     let stream = backing.as_deref_mut().ok_or_else(unavailable)?;
     Ok(work(stream))
 }
@@ -117,7 +121,12 @@ pub async fn operate<T: Send + 'static>(
             let filtered = data
                 .downcast::<FilteredStream>()
                 .map_err(|_| unavailable())?;
-            let stream = filtered.value.borrow_mut().take().ok_or_else(unavailable)?;
+            let stream = filtered
+                .handle
+                .value
+                .borrow_mut()
+                .take()
+                .ok_or_else(unavailable)?;
             (stream, Some(filtered))
         }
     };
@@ -129,7 +138,7 @@ pub async fn operate<T: Send + 'static>(
         .await?;
     *resource.data.borrow_mut() = Some(match filtered {
         Some(filtered) => {
-            *filtered.value.borrow_mut() = Some(stream);
+            *filtered.handle.value.borrow_mut() = Some(stream);
             filtered
         }
         None => stream,
@@ -141,6 +150,7 @@ pub async fn operate<T: Send + 'static>(
 pub(crate) fn retain_filtered(
     context: &dyn Context,
     resource: &Resource,
+    class_name: &str,
 ) -> Option<FilteredBacking> {
     let mut slot = resource.data.borrow_mut();
     if !slot.as_ref().is_some_and(|data| data.is::<Stream>()) {
@@ -149,19 +159,27 @@ pub(crate) fn retain_filtered(
     let stream = slot.take()?.downcast::<Stream>().ok()?;
     let backing = Rc::new(RefCell::new(Some(stream)));
     let release = context.resource_release("stream", resource.id);
-    *slot = Some(Box::new(FilteredStream::new(backing.clone(), release)));
+    *slot = Some(Box::new(FilteredStream {
+        handle: UserHandle::new(backing.clone(), release),
+        class_name: class_name.to_owned(),
+    }));
     Some(backing)
 }
 
-pub(crate) fn restore_unfiltered(resource: &Resource) {
+pub(crate) fn update_filtered(resource: &Resource, class_name: Option<String>) {
     let mut slot = resource.data.borrow_mut();
     if let Some(filtered) = slot
         .as_mut()
         .and_then(|data| data.downcast_mut::<FilteredStream>())
     {
-        filtered.cancel_release();
-        let stream = filtered.value.borrow_mut().take();
-        *slot = stream.map(|stream| stream as Box<dyn std::any::Any>);
+        match class_name {
+            Some(name) => filtered.class_name = name,
+            None => {
+                filtered.handle.cancel_release();
+                let stream = filtered.handle.value.borrow_mut().take();
+                *slot = stream.map(|stream| stream as Box<dyn std::any::Any>);
+            }
+        }
     }
 }
 
@@ -171,7 +189,7 @@ pub(crate) fn close_backing(resource: &Resource) {
         .as_mut()
         .and_then(|data| data.downcast_mut::<FilteredStream>())
     {
-        filtered.cancel_release();
+        filtered.handle.cancel_release();
     }
     slot.take();
 }

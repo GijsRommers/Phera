@@ -6,7 +6,7 @@ use phera_extension_api::{
     Context, LocalFuture, NativeError, NativeResult, Value, value::Resource,
 };
 
-use crate::{handles::finish_native, resource::restore_unfiltered};
+use crate::{handles::finish_native, resource::update_filtered};
 
 use super::super::super::{Flush, bounded};
 use super::{Chains, StageOutput, Streams, lookup};
@@ -135,11 +135,13 @@ pub(in crate::filters) async fn remove(
         stage.close(context).await?;
     }
     resource.data.borrow_mut().take();
-    if let Some(stream) = stream
-        && !chains.has_php()
-        && chains.backing.take().is_some()
-    {
-        restore_unfiltered(&stream);
+    let retained = chains.backing.borrow().is_some();
+    if retained && let Some(stream) = stream {
+        let class_name = chains.php_filter_class();
+        if class_name.is_none() {
+            chains.backing.take();
+        }
+        update_filtered(&stream, class_name);
     }
     Ok(Value::Bool(true))
 }

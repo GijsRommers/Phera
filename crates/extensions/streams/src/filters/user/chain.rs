@@ -67,12 +67,13 @@ impl Chains {
         self.read.borrow().len() + self.write.borrow().len()
     }
 
-    fn has_php(&self) -> bool {
+    fn php_filter_class(&self) -> Option<String> {
         self.read
             .borrow()
             .iter()
             .chain(self.write.borrow().iter())
-            .any(Stage::is_php)
+            .find(|stage| stage.is_php())
+            .map(|stage| stage.name().to_owned())
     }
 
     pub(crate) fn reading(&self) -> bool {

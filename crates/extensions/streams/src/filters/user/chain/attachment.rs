@@ -101,7 +101,7 @@ pub(in crate::filters) async fn attach(
         _ => (0, Weak::new()),
     };
     chains.promote(stream)?;
-    if let Some(backing) = retain_filtered(context, stream) {
+    if let Some(backing) = retain_filtered(context, stream, class_handle.name()) {
         *chains.backing.borrow_mut() = Some(backing);
     }
     let mut objects = objects.into_iter();
