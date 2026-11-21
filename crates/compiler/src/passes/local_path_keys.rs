@@ -66,16 +66,17 @@ pub(crate) fn optimize(function: &mut Function) {
         .filter_map(|handler| handler.catch.or(handler.finally))
         .map(|target| target.index())
         .collect();
-    // Every write per register, split into assignments and clears: a `Clear`
-    // empties a temporary but does not assign it.
-    let mut writes: HashMap<Reg, Vec<usize>> = HashMap::new();
+    // Every assignment per register, split from clears: a `Clear` empties a
+    // temporary but does not assign it.
+    let mut assigns: HashMap<Reg, Vec<usize>> = HashMap::new();
     let mut clears: HashSet<usize> = HashSet::new();
     for (index, instruction) in function.instructions.iter().enumerate() {
-        for register in operand_regs(function, *instruction).writes {
-            writes.entry(register).or_default().push(index);
-        }
         if matches!(instruction, Instruction::Clear { .. }) {
             clears.insert(index);
+            continue;
+        }
+        for register in operand_regs(function, *instruction).writes {
+            assigns.entry(register).or_default().push(index);
         }
     }
     let mut candidates: Vec<Candidate> = Vec::new();
@@ -99,7 +100,7 @@ pub(crate) fn optimize(function: &mut Function) {
                 &exposed,
                 &boundaries,
                 &handler_entries,
-                &writes,
+                &assigns,
                 &clears,
                 index,
                 path_id,
@@ -111,20 +112,30 @@ pub(crate) fn optimize(function: &mut Function) {
         }
     }
     // Group by temporary: every reader of a temporary must be a candidate
-    // consumer, or that temporary's copies all stay.
+    // consumer, and candidates sharing one path step must name the same
+    // local, or that temporary's copies all stay.
     let mut by_temp: HashMap<Reg, Vec<Candidate>> = HashMap::new();
     for candidate in candidates {
         by_temp.entry(candidate.temp).or_default().push(candidate);
     }
     for (temp, group) in by_temp {
-        let consumers: HashSet<usize> = group.iter().map(|candidate| candidate.consumer).collect();
-        let complete = function
+        let readers: Vec<usize> = function
             .instructions
             .iter()
             .enumerate()
             .filter(|(_, instruction)| operand_regs(function, **instruction).reads(temp))
-            .all(|(index, _)| consumers.contains(&index));
-        if !complete {
+            .map(|(index, _)| index)
+            .collect();
+        let consumers: HashSet<usize> = group.iter().map(|candidate| candidate.consumer).collect();
+        // One path step can only name one register: candidates that share a
+        // step must agree on the local.
+        let mut steps: HashMap<(PathId, usize), Reg> = HashMap::new();
+        let same_local = group.iter().all(|candidate| {
+            steps
+                .insert((candidate.path, candidate.step), candidate.local)
+                .is_none_or(|previous| previous == candidate.local)
+        });
+        if !readers.iter().all(|index| consumers.contains(index)) || !same_local {
             continue;
         }
         for candidate in &group {
@@ -142,27 +153,34 @@ pub(crate) fn optimize(function: &mut Function) {
             {
                 *index = candidate.local;
             }
+        }
+        // Only the copies go: each candidate's `Move` and every `Clear` of
+        // the temporary. Another instruction can also write the temporary
+        // (a path base scratch, a call result); it keeps running, it merely
+        // writes a register that nobody reads anymore.
+        for candidate in &group {
             function.instructions[candidate.producer] = Instruction::Nop;
         }
-        // The temporary's only assignment is gone, so its clears empty nothing.
-        for instruction in function.instructions.iter_mut() {
-            if matches!(instruction, Instruction::Clear { reg } if *reg == temp) {
-                *instruction = Instruction::Nop;
+        for index in &clears {
+            if matches!(function.instructions[*index], Instruction::Clear { reg } if reg == temp) {
+                function.instructions[*index] = Instruction::Nop;
             }
         }
     }
     compact(function);
 }
 
-/// Whether the copy at `producer` can be dropped for the path step at
-/// `consumer`, with every path to `consumer` passing through the copy.
+/// Whether the copy that last assigned `temp` before `consumer` can be
+/// dropped for the path step at `consumer`. Every path to `consumer`
+/// passes through that copy: no jump or branch target lies between them,
+/// so control falls straight through the window.
 #[allow(clippy::too_many_arguments)]
 fn candidate(
     function: &Function,
     exposed: &HashSet<Reg>,
     boundaries: &HashSet<usize>,
     handler_entries: &HashSet<usize>,
-    writes: &HashMap<Reg, Vec<usize>>,
+    assigns: &HashMap<Reg, Vec<usize>>,
     clears: &HashSet<usize>,
     consumer: usize,
     path: PathId,
@@ -170,25 +188,16 @@ fn candidate(
     temp: Reg,
 ) -> Option<Candidate> {
     let locals = function.locals.len();
-    let assigns: Vec<usize> = writes
-        .get(&temp)
-        .map(|indices| {
-            indices
-                .iter()
-                .copied()
-                .filter(|index| !clears.contains(index))
-                .collect()
-        })
-        .unwrap_or_default();
-    let [producer] = assigns.as_slice() else {
-        return None;
-    };
-    let producer = *producer;
+    let producer = assigns
+        .get(&temp)?
+        .iter()
+        .copied()
+        .filter(|index| *index < consumer)
+        .next_back()?;
     // No clear of the temporary between the copy and the consumer either.
-    if producer >= consumer
-        || clears
-            .iter()
-            .any(|index| *index > producer && *index <= consumer)
+    if clears
+        .iter()
+        .any(|index| *index > producer && *index <= consumer)
     {
         return None;
     }

@@ -146,7 +146,7 @@ pub(crate) fn operand_regs(function: &Function, instruction: Instruction) -> Ope
             ops!(w [dst]; r [src])
         }
         I::IncDecPath { dst, .. } => ops!(w [dst]; r []),
-        I::UnsetPath { .. } => ops!(w []; r []),
+        I::UnsetPath { .. } | I::AssignPath { .. } | I::SendPath { .. } => ops!(w []; r []),
         I::MakeReference { dst, .. } => ops!(w [dst]; r []),
         I::BindReference { src, .. } => ops!(w []; r [src]),
         I::BindDynamicGlobal { name } => ops!(w []; r [name]),
