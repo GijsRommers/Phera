@@ -3,6 +3,7 @@
 - Date: 2026-11-21
 - Area: Class linking
 - Decided by: Design
+- Status: Superseded by [Publish classes after recursive variance checks](2026-11-21-publish-classes-after-recursive-variance.md).
 
 ## Decision
 

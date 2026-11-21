@@ -67,6 +67,7 @@ impl Vm {
             ));
         }
         self.link_new_class(&unit, unit_first, index, key)
+            .map_err(|error| crate::autoload::ClassMiss::during_declaration(error, &unit, index))
     }
 
     /// Both callers have checked the declaration's case-insensitive name.
@@ -77,7 +78,8 @@ impl Vm {
         index: ClassId,
         key: String,
     ) -> Result<(), NativeError> {
-        if let Some(entry) = self.reusable_entry(unit, index) {
+        let deferred_context = self.links_against_pending_classes();
+        if !deferred_context && let Some(entry) = self.reusable_entry(unit, index) {
             self.declare_linked(&entry, unit, unit_first, index);
             return Ok(());
         }
@@ -101,6 +103,7 @@ impl Vm {
         // use (`EnumCases`). Only a file revision from the code cache has a
         // number to key the entry by: `eval`'d code's classes are the request's.
         let shared = raised == self.diagnostic_reporter.raised
+            && !deferred_context
             && unit.metadata.is_some()
             && declaration.kind != ClassKind::Anonymous;
         if shared
@@ -189,8 +192,7 @@ impl Vm {
             .parent
             .map(|symbol| {
                 let parent_name = &unit.symbols[symbol.index()].written;
-                self.classes
-                    .get(parent_name)
+                self.class_for_inheritance(parent_name)
                     .ok_or_else(|| Self::class_miss(parent_name, "Class"))
             })
             .transpose()?;
@@ -238,8 +240,7 @@ impl Vm {
             .map(|symbol| {
                 let interface_name = &unit.symbols[symbol.index()].written;
                 let interface = self
-                    .classes
-                    .get(interface_name)
+                    .class_for_inheritance(interface_name)
                     .ok_or_else(|| Self::class_miss(interface_name, "Interface"))?;
                 if interface.kind != ClassKind::Interface {
                     return Err(NativeError::error(format!(
@@ -475,12 +476,6 @@ impl Vm {
                     .or_insert_with(|| method.clone());
             }
         }
-        if !pending.is_empty() {
-            pending.sort_by(|(left, _), (right, _)| left.cmp(right));
-            return Err(crate::autoload::ClassMiss::method_signatures(
-                pending.into_iter().map(|(_, miss)| miss).collect(),
-            ));
-        }
         super::inheritance_checks::check_abstract(
             name,
             declaration.kind,
@@ -597,6 +592,23 @@ impl Vm {
             return Err(NativeError::error(format!(
                 "Enum {name} cannot implement the Serializable interface"
             )));
+        }
+        if !pending.is_empty()
+            || class
+                .parent
+                .iter()
+                .chain(&class.interfaces)
+                .any(|dependency| self.is_pending_class(dependency.index))
+        {
+            pending.sort_by(|(left, _), (right, _)| left.cmp(right));
+            return Err(crate::autoload::ClassMiss::method_signatures(
+                crate::autoload::PendingClass {
+                    class,
+                    unit: unit.clone(),
+                    methods: pending.into_iter().map(|(_, miss)| miss).collect(),
+                    requested: Default::default(),
+                },
+            ));
         }
         self.classes.insert(class);
         Ok(())

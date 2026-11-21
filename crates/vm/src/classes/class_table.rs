@@ -326,6 +326,13 @@ impl ClassTable {
         self.register(position, class);
     }
 
+    /// A declaration completed across an autoload is request-local.
+    pub(crate) fn publish_delayed(&mut self, class: Rc<Class>) {
+        let position = class.index.0 - self.native_count;
+        self.own_name(&class.name.to_ascii_lowercase(), position);
+        self.insert(class);
+    }
+
     pub(crate) fn alias(&mut self, name: String, class: Rc<Class>) -> bool {
         if self.get_lowercase(&name).is_some() {
             return false;

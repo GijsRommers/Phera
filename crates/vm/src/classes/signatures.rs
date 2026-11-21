@@ -174,7 +174,7 @@ impl Vm {
         self.check_contract(inherited, method, Some(consuming_class), unit)
     }
 
-    fn check_contract(
+    pub(crate) fn check_contract(
         &mut self,
         inherited: &Method,
         method: &Method,
@@ -300,6 +300,9 @@ impl Vm {
                 base,
                 file,
                 line,
+                inherited: method_for_variance(inherited),
+                implementation: method_for_variance(method),
+                trait_scope: trait_scope.map(str::to_owned),
             }));
         }
         Err(NativeError::Unwind(phera_extension_api::Unwind(Box::new(
@@ -357,29 +360,47 @@ impl Vm {
             .filter(move |name| {
                 comparable
                     && is_class_type_name(name)
-                    && self.classes.get(name).is_none()
+                    && self.class_for_inheritance(name).is_none()
                     && self
                         .variance_declaration(name, &[declaring], unit)
                         .is_none()
             })
     }
 
-    /// In a class declaration outside an autoloader, a branch that has not
-    /// run cannot supply ancestry. Existing autoload cycles still rely on
-    /// source declarations until the linker can expose pending class shapes.
+    /// A declaration suspended while loading its parent still has a known
+    /// shape. Other conditional declarations contribute when executed.
     fn variance_declaration<'unit>(
-        &self,
+        &'unit self,
         name: &str,
         owners: &[&str],
         unit: &'unit phera_bytecode::CompiledUnit,
-    ) -> Option<&'unit phera_bytecode::ClassDeclaration> {
-        let in_autoload = !self.autoload.active.is_empty();
-        unit.classes.iter().enumerate().find_map(|(index, class)| {
+    ) -> Option<(
+        &'unit phera_bytecode::CompiledUnit,
+        &'unit phera_bytecode::ClassDeclaration,
+    )> {
+        let from_unit = unit.classes.iter().enumerate().find_map(|(index, class)| {
             (class.name.eq_ignore_ascii_case(name)
-                && (in_autoload
-                    || owners.iter().any(|owner| name.eq_ignore_ascii_case(owner))
-                    || unit.hoisted_classes.iter().any(|id| id.index() == index)))
-            .then_some(class)
+                && (owners.iter().any(|owner| name.eq_ignore_ascii_case(owner))
+                    || class.interfaces.is_empty()
+                        && class.traits.is_empty()
+                        && class.parent.is_none_or(|parent| {
+                            self.classes
+                                .get(&unit.symbols[parent.index()].written)
+                                .is_some()
+                        })
+                        && unit.hoisted_classes.iter().any(|id| id.index() == index)))
+            .then_some((unit, class))
+        });
+        from_unit.or_else(|| {
+            self.autoload.declaring.iter().rev().find_map(|declaring| {
+                let class = declaring.unit.classes.get(declaring.index.index())?;
+                if class.name.eq_ignore_ascii_case(name) {
+                    declaring.required.set(true);
+                    Some((&*declaring.unit, class))
+                } else {
+                    None
+                }
+            })
         })
     }
 
@@ -460,18 +481,18 @@ impl Vm {
             if name.eq_ignore_ascii_case(target) {
                 return true;
             }
-            if let Some(class) = self.classes.get(&name)
+            if let Some(class) = self.class_for_inheritance(&name)
                 && (target == "object" || self.class_matches(&class, target))
             {
                 return true;
             }
-            if let Some(class) =
+            if let Some((owner_unit, class)) =
                 self.variance_declaration(&name, &[source_scope, target_scope], unit)
             {
                 if target == "object"
                     || (target.eq_ignore_ascii_case("Stringable")
                         && class.methods.iter().any(|method| {
-                            unit.names[method.name.index()].eq_ignore_ascii_case("__toString")
+                            owner_unit.names[method.name.index()].eq_ignore_ascii_case("__toString")
                         }))
                 {
                     return true;
@@ -481,7 +502,7 @@ impl Vm {
                         .parent
                         .iter()
                         .chain(&class.interfaces)
-                        .map(|symbol| unit.symbols[symbol.index()].written.clone()),
+                        .map(|symbol| owner_unit.symbols[symbol.index()].written.clone()),
                 );
             }
         }
@@ -512,6 +533,19 @@ impl Vm {
                 .unwrap_or_else(|| name.to_owned()),
             _ => name.to_owned(),
         }
+    }
+}
+
+fn method_for_variance(method: &Method) -> Method {
+    Method {
+        signature: Default::default(),
+        name: method.name.clone(),
+        declaring: method.declaring.clone(),
+        visibility: method.visibility,
+        is_static: method.is_static,
+        is_final: method.is_final,
+        is_abstract: method.is_abstract,
+        body: method.body.clone(),
     }
 }
 
