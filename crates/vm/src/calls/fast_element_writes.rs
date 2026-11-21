@@ -42,7 +42,7 @@ impl Keys {
 impl Machine<'_> {
     /// `AssignPath`, or with `result` `AssignPathFromLocal`, of an array
     /// element.
-    pub(super) fn assign_element(
+    pub(super) fn assign_element<const GUARDED: bool>(
         &mut self,
         position: Position,
         path: PathId,
@@ -115,7 +115,7 @@ impl Machine<'_> {
         if let Some(result) = result {
             // Outside the guarded loop, into a register checked above, a
             // store completes.
-            let _ = store(self.registers.tail_mut(base), result, value);
+            let _ = store::<false>(self.registers.tail_mut(base), result, value);
         }
         Step::Done(position.ip)
     }

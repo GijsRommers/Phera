@@ -28,7 +28,11 @@ impl Machine<'_> {
     /// `New` of a class this file has linked, with literal defaults and no
     /// constructor or a public one written in PHP.
     #[inline(always)]
-    pub(super) fn new_object(&mut self, position: Position, symbol: SymbolId) -> Step {
+    pub(super) fn new_object<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        symbol: SymbolId,
+    ) -> Step {
         let key = self.code.unit_symbol_key(position.frame.function, symbol);
         let Some(class) = self.classes.by_key(key).cloned() else {
             return Step::Slow;
@@ -36,16 +40,17 @@ impl Machine<'_> {
         let Some(template) = class.property_template.as_ref() else {
             return Step::Slow;
         };
-        // An object with a destructor is made by the general handler,
-        // which records it for its destructor.
+        // An object with a destructor makes the plain loop unsafe: the
+        // general handler creates it, and the next batch is guarded.
         if class.origin != ClassOrigin::User
             || class.kind != ClassKind::Class
             || class.is_abstract
             || class.is_throwable
-            || class
-                .magic
-                .as_ref()
-                .is_some_and(|magic| magic.destruct.is_some())
+            || (!GUARDED
+                && class
+                    .magic
+                    .as_ref()
+                    .is_some_and(|magic| magic.destruct.is_some()))
         {
             return Step::Slow;
         }

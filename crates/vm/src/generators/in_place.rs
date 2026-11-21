@@ -115,10 +115,7 @@ impl Vm {
                 break None;
             };
             let mut next = ip + 1;
-            if matches!(
-                scalar_step(&instruction, registers, &mut next),
-                ScalarStep::Complete | ScalarStep::Released
-            ) {
+            if scalar_step::<false>(&instruction, registers, &mut next) == ScalarStep::Complete {
                 executed += 1;
                 if next <= ip {
                     work += 1;

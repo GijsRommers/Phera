@@ -19,9 +19,10 @@ use crate::operators::fast_binary;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScalarStep {
     Complete,
-    /// Complete, and the write dropped the last handle on an array, object,
-    /// resource or PHP reference: a destructor may now be waiting, which
-    /// the loop asks about before the next instruction.
+    /// Complete, in the guarded loop, and the write dropped the last
+    /// handle on an array, object, resource or PHP reference: a destructor
+    /// may now be waiting, which the loop asks about before the next
+    /// instruction.
     Released,
     Fallback,
 }
@@ -62,13 +63,17 @@ pub(crate) fn duplicate(value: &Value) -> Value {
 /// value, write the new one", which has to ask whether the old value owns
 /// memory.
 ///
-/// A register that holds an array, object or reference is written out of
-/// line, where its release is looked at.
+/// `GUARDED` (see [`scalar_step`]): a register that holds an array, object
+/// or reference is written out of line, where its release is looked at.
 #[inline(always)]
-fn store_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -> ScalarStep {
+fn store_integer<const GUARDED: bool>(
+    slots: &mut [Option<Value>],
+    register: Reg,
+    integer: i64,
+) -> ScalarStep {
     match slots.get_mut(register.index()) {
         Some(Some(Value::Int(target))) => *target = integer,
-        Some(slot) if owns_heap_values(slot) => {
+        Some(slot) if GUARDED && owns_heap_values(slot) => {
             return replace(slot, Value::Int(integer));
         }
         Some(slot) => {
@@ -102,9 +107,13 @@ fn overwrite_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -
 
 /// Stores any result, dropping what the register held before.
 #[inline(always)]
-pub(crate) fn store(slots: &mut [Option<Value>], register: Reg, value: Value) -> ScalarStep {
+pub(crate) fn store<const GUARDED: bool>(
+    slots: &mut [Option<Value>],
+    register: Reg,
+    value: Value,
+) -> ScalarStep {
     match slots.get_mut(register.index()) {
-        Some(slot) if owns_heap_values(slot) => replace(slot, value),
+        Some(slot) if GUARDED && owns_heap_values(slot) => replace(slot, value),
         Some(slot) => {
             *slot = Some(value);
             ScalarStep::Complete
@@ -130,9 +139,10 @@ fn clear(slot: &mut Option<Value>) -> ScalarStep {
     write_releasing(slot, None)
 }
 
-/// Writes a register that holds a value. When that was the last handle on
-/// what it held, the answer is `Released`: freeing it may have queued a
-/// destructor, which the loop runs before the next instruction.
+/// Writes a register that holds a value, in the guarded loop. When that
+/// was the last handle on what it held, the answer is `Released`: freeing
+/// it may have queued a destructor, which the loop runs before the next
+/// instruction.
 #[inline(always)]
 fn write_releasing(slot: &mut Option<Value>, value: Option<Value>) -> ScalarStep {
     let last = frees_on_drop(slot);
@@ -171,7 +181,7 @@ fn frees_on_drop(slot: &Option<Value>) -> bool {
 
 /// Builtins with no coercion can read the local directly.
 #[inline(never)]
-fn builtin_step(
+fn builtin_step<const GUARDED: bool>(
     operation: phera_bytecode::BuiltinUnary,
     destination: Reg,
     source: Reg,
@@ -181,8 +191,8 @@ fn builtin_step(
         return ScalarStep::Fallback;
     };
     match crate::builtin_calls::builtin_value(operation, value) {
-        Some(Value::Int(value)) => store_integer(slots, destination, value),
-        Some(value) => store(slots, destination, value),
+        Some(Value::Int(value)) => store_integer::<GUARDED>(slots, destination, value),
+        Some(value) => store::<GUARDED>(slots, destination, value),
         None => ScalarStep::Fallback,
     }
 }
@@ -242,7 +252,7 @@ fn integer_bits(operator: BinaryOp, left: i64, right: i64) -> Option<i64> {
 /// A binary operator on two integers: arithmetic gives an integer, a
 /// comparison gives a boolean. Anything else falls back.
 #[inline(always)]
-fn integer_binary(
+fn integer_binary<const GUARDED: bool>(
     slots: &mut [Option<Value>],
     operator: BinaryOp,
     destination: Reg,
@@ -250,10 +260,10 @@ fn integer_binary(
     right: i64,
 ) -> ScalarStep {
     if let Some(result) = integer_arithmetic(operator, left, right) {
-        return store_integer(slots, destination, result);
+        return store_integer::<GUARDED>(slots, destination, result);
     }
     match integer_condition(operator, left, right) {
-        Some(condition) => store(slots, destination, Value::Bool(condition)),
+        Some(condition) => store::<GUARDED>(slots, destination, Value::Bool(condition)),
         None => ScalarStep::Fallback,
     }
 }
@@ -267,17 +277,19 @@ fn integer_binary(
 /// reference, an unset variable, an overflow) returns `Fallback`, and the
 /// general handler for that instruction does it with full PHP semantics.
 #[inline(always)]
-pub(crate) fn scalar_step(
+pub(crate) fn scalar_step<const GUARDED: bool>(
     instruction: &Instruction,
     slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> ScalarStep {
     match *instruction {
         Instruction::Nop => ScalarStep::Complete,
-        Instruction::LoadInt { dst, value } => store_integer(slots, dst, i64::from(value)),
-        Instruction::LoadNull { dst } => store(slots, dst, Value::Null),
-        Instruction::LoadBool { dst, value } => store(slots, dst, Value::Bool(value)),
-        Instruction::BuiltinUnary { op, dst, src } => builtin_step(op, dst, src, slots),
+        Instruction::LoadInt { dst, value } => {
+            store_integer::<GUARDED>(slots, dst, i64::from(value))
+        }
+        Instruction::LoadNull { dst } => store::<GUARDED>(slots, dst, Value::Null),
+        Instruction::LoadBool { dst, value } => store::<GUARDED>(slots, dst, Value::Bool(value)),
+        Instruction::BuiltinUnary { op, dst, src } => builtin_step::<GUARDED>(op, dst, src, slots),
         Instruction::Unary {
             op: phera_bytecode::UnaryOp::Negate,
             dst,
@@ -286,7 +298,7 @@ pub(crate) fn scalar_step(
             let Some(negative) = integer_at(slots, src).and_then(i64::checked_neg) else {
                 return ScalarStep::Fallback;
             };
-            store_integer(slots, dst, negative)
+            store_integer::<GUARDED>(slots, dst, negative)
         }
         Instruction::Cast {
             to: phera_bytecode::CastKind::Bool,
@@ -298,17 +310,17 @@ pub(crate) fn scalar_step(
                 return ScalarStep::Fallback;
             };
             let value = *value;
-            store(slots, dst, Value::Bool(value))
+            store::<GUARDED>(slots, dst, Value::Bool(value))
         }
         Instruction::Move { dst, src } => {
             if let Some(integer) = integer_at(slots, src) {
-                return store_integer(slots, dst, integer);
+                return store_integer::<GUARDED>(slots, dst, integer);
             }
             let Some(Some(value)) = slots.get(src.index()) else {
                 return ScalarStep::Fallback;
             };
             let value = duplicate(&value.deref());
-            store(slots, dst, value)
+            store::<GUARDED>(slots, dst, value)
         }
         Instruction::Assign { local, src } => {
             // Assigning to a PHP reference writes through it: general handler.
@@ -316,13 +328,13 @@ pub(crate) fn scalar_step(
                 return ScalarStep::Fallback;
             }
             if let Some(integer) = integer_at(slots, src) {
-                return store_integer(slots, local, integer);
+                return store_integer::<GUARDED>(slots, local, integer);
             }
             let Some(Some(value)) = slots.get(src.index()) else {
                 return ScalarStep::Fallback;
             };
             let value = duplicate(&value.deref());
-            store(slots, local, value)
+            store::<GUARDED>(slots, local, value)
         }
         Instruction::AppendLocal { local, src } => {
             let Some(Some(value)) = slots.get(src.index()) else {
@@ -366,13 +378,13 @@ pub(crate) fn scalar_step(
         Instruction::BinaryInt { op, dst, lhs, rhs } => {
             let right = i64::from(rhs);
             if let Some(left) = integer_at(slots, lhs) {
-                return integer_binary(slots, op, dst, left, right);
+                return integer_binary::<GUARDED>(slots, op, dst, left, right);
             }
             let Some(Some(left)) = slots.get(lhs.index()) else {
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, &Value::Int(right)) {
-                Some(value) => store(slots, dst, value),
+                Some(value) => store::<GUARDED>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -380,7 +392,7 @@ pub(crate) fn scalar_step(
             if let Some(left) = integer_at(slots, lhs)
                 && let Some(right) = integer_at(slots, rhs)
             {
-                return integer_binary(slots, op, dst, left, right);
+                return integer_binary::<GUARDED>(slots, op, dst, left, right);
             }
             let (Some(Some(left)), Some(Some(right))) =
                 (slots.get(lhs.index()), slots.get(rhs.index()))
@@ -388,7 +400,7 @@ pub(crate) fn scalar_step(
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, right) {
-                Some(value) => store(slots, dst, value),
+                Some(value) => store::<GUARDED>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -397,7 +409,7 @@ pub(crate) fn scalar_step(
                 && let Some(right) = integer_at(slots, src)
             {
                 return match integer_arithmetic(op, left, right) {
-                    Some(result) => store_integer(slots, local, result),
+                    Some(result) => store_integer::<GUARDED>(slots, local, result),
                     None => ScalarStep::Fallback,
                 };
             }
@@ -407,7 +419,7 @@ pub(crate) fn scalar_step(
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, right) {
-                Some(value) => store(slots, local, value),
+                Some(value) => store::<GUARDED>(slots, local, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -427,7 +439,7 @@ pub(crate) fn scalar_step(
                 IncDec::PostIncrement | IncDec::PostDecrement => old,
                 IncDec::PreIncrement | IncDec::PreDecrement => new,
             };
-            if store_integer(slots, local, new) == ScalarStep::Fallback {
+            if store_integer::<GUARDED>(slots, local, new) == ScalarStep::Fallback {
                 return ScalarStep::Fallback;
             }
             // The variable has changed, so this store must not fall back.
@@ -471,7 +483,7 @@ pub(crate) fn scalar_step(
             _ => ScalarStep::Fallback,
         },
         Instruction::Clear { reg: register } => match slots.get_mut(register.index()) {
-            Some(slot) if owns_heap_values(slot) => clear(slot),
+            Some(slot) if GUARDED && owns_heap_values(slot) => clear(slot),
             Some(slot) => {
                 *slot = None;
                 ScalarStep::Complete
@@ -501,7 +513,7 @@ fn integer_condition(operator: BinaryOp, left: i64, right: i64) -> Option<bool> 
 /// Keep this out of scalar_step's arithmetic dispatch; every failed guard uses
 /// the normal PHP offset/reference/diagnostic handler.
 #[inline]
-pub(crate) fn array_index_step(
+pub(crate) fn array_index_step<const GUARDED: bool>(
     destination: Reg,
     base: Reg,
     index: Reg,
@@ -520,12 +532,13 @@ pub(crate) fn array_index_step(
     let Some(target) = slots.get_mut(destination.index()) else {
         return ScalarStep::Fallback;
     };
-    if frees_on_drop(target) {
-        *target = Some(value);
-        return ScalarStep::Released;
-    }
+    let released = GUARDED && frees_on_drop(target);
     *target = Some(value);
-    ScalarStep::Complete
+    if released {
+        ScalarStep::Released
+    } else {
+        ScalarStep::Complete
+    }
 }
 
 /// Runs a simple store that fell back only because the register it writes

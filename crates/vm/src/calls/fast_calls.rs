@@ -87,16 +87,16 @@ impl Machine<'_> {
     /// return type's bit test: write the value (for a constructor, the new
     /// object) into the caller's register and empty the callee's.
     #[inline(always)]
-    pub(super) fn leave_plain(&mut self, source: Option<Reg>) -> Step {
+    pub(super) fn leave_plain<const GUARDED: bool>(&mut self, source: Option<Reg>) -> Step {
         let Some(frame) = self.stack.current().copied() else {
             return Step::Slow;
         };
         let Some(destination) = frame.destination() else {
             return if frame.discards_result() {
                 self.leave_discarded(frame, source)
-            } else if !self.ids.has_due() && frame.returns_to_native_loop() {
+            } else if !GUARDED && frame.returns_to_native_loop() {
                 self.leave_to_native_loop(frame, source)
-            } else if !self.ids.has_due() && self.stack.depth() == self.stop + 1 {
+            } else if !GUARDED && self.stack.depth() == self.stop + 1 {
                 self.leave_to_native(frame, source)
             } else {
                 Step::Slow
@@ -145,7 +145,7 @@ impl Machine<'_> {
             (_, None) => Value::Null,
         };
         // Where the order of releases can be seen, the slower way out.
-        if self.ids.has_due()
+        if GUARDED
             && ((kind != CallKind::Constructor && frees_on_drop(&value))
                 || (start != frame.base()
                     && self.registers.holds_last_reference(start, frame.base())))

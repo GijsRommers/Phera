@@ -31,7 +31,11 @@ impl Machine<'_> {
     /// which keeps tight loops that never take it as they were.
     #[cold]
     #[inline(never)]
-    pub(super) fn further_step(&mut self, instruction: Instruction, position: Position) -> Step {
+    pub(super) fn further_step<const GUARDED: bool>(
+        &mut self,
+        instruction: Instruction,
+        position: Position,
+    ) -> Step {
         match instruction {
             // An object with ArrayAccess first, then an array.
             Instruction::FetchIndex {
@@ -41,7 +45,7 @@ impl Machine<'_> {
                 mode: FetchMode::Read,
                 ..
             } => match self.fetch_native_dimension(position, dst, base, index) {
-                Step::Slow => self.value_step(&instruction, position),
+                Step::Slow => self.value_step::<GUARDED>(&instruction, position),
                 done => done,
             },
             Instruction::Binary { .. }
@@ -49,13 +53,15 @@ impl Machine<'_> {
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
             | Instruction::NewArray { .. }
-            | Instruction::FetchIndex { .. } => self.value_step(&instruction, position),
+            | Instruction::FetchIndex { .. } => self.value_step::<GUARDED>(&instruction, position),
             Instruction::Fetch {
                 dst,
                 path,
                 mode: FetchMode::Read,
-            } => match self.fetch_property(position, dst, path) {
-                Step::Slow => self.fetch_property_element(position, dst, (path, FetchMode::Read)),
+            } => match self.fetch_property::<GUARDED>(position, dst, path) {
+                Step::Slow => {
+                    self.fetch_property_element::<GUARDED>(position, dst, (path, FetchMode::Read))
+                }
                 done => done,
             },
             Instruction::Fetch {
@@ -63,9 +69,11 @@ impl Machine<'_> {
                 path,
                 mode: mode @ (FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty),
             } => match self.quiet_variable(path, position) {
-                Some(found) => self.store_quiet(position, dst, found),
-                None => match self.fetch_property_quietly(position, dst, path) {
-                    Step::Slow => self.fetch_property_element(position, dst, (path, mode)),
+                Some(found) => self.store_quiet::<GUARDED>(position, dst, found),
+                None => match self.fetch_property_quietly::<GUARDED>(position, dst, path) {
+                    Step::Slow => {
+                        self.fetch_property_element::<GUARDED>(position, dst, (path, mode))
+                    }
                     done => done,
                 },
             },
@@ -77,41 +85,45 @@ impl Machine<'_> {
                     Step::Slow
                 };
                 match written {
-                    Step::Slow => match self.assign_property(position, path, (src, None)) {
-                        Step::Slow => self.assign_element(position, path, (src, None)),
-                        done => done,
-                    },
+                    Step::Slow => {
+                        match self.assign_property::<GUARDED>(position, path, (src, None)) {
+                            Step::Slow => {
+                                self.assign_element::<GUARDED>(position, path, (src, None))
+                            }
+                            done => done,
+                        }
+                    }
                     done => done,
                 }
             }
             // Only arrays are written here, so an `ArrayAccess` object on
             // the path is left to the VM as well.
             Instruction::AssignPathFromLocal { path, src, dst } => {
-                match self.assign_property(position, path, (src, Some(dst))) {
-                    Step::Slow => self.assign_element(position, path, (src, Some(dst))),
+                match self.assign_property::<GUARDED>(position, path, (src, Some(dst))) {
+                    Step::Slow => self.assign_element::<GUARDED>(position, path, (src, Some(dst))),
                     done => done,
                 }
             }
             Instruction::AssignOpPath { op, dst, path, src } => {
-                self.assign_operation(position, (op, dst), path, src)
+                self.assign_operation::<GUARDED>(position, (op, dst), path, src)
             }
             Instruction::IncDecPath { mode, dst, path } => {
-                match self.increment_property(position, (mode, dst), path) {
-                    Step::Slow => self.increment_element(position, (mode, dst), path),
+                match self.increment_property::<GUARDED>(position, (mode, dst), path) {
+                    Step::Slow => self.increment_element::<GUARDED>(position, (mode, dst), path),
                     done => done,
                 }
             }
             Instruction::InitCall { function } => self.prepare_named_call(position, function),
             Instruction::FetchClassName { dst, class } => {
-                self.fetch_class_name(position, dst, class)
+                self.fetch_class_name::<GUARDED>(position, dst, class)
             }
             Instruction::SendPath { path } => self.send_path_value(position, path),
             Instruction::IterStart { iter, src, .. } => {
-                self.start_array_iteration(position, iter, src)
+                self.start_array_iteration::<GUARDED>(position, iter, src)
             }
-            Instruction::IterEnd { iter } => self.end_array_iteration(position, iter),
+            Instruction::IterEnd { iter } => self.end_array_iteration::<GUARDED>(position, iter),
             Instruction::InstanceOf { dst, src, class } => {
-                self.instance_of(position, dst, src, class)
+                self.instance_of::<GUARDED>(position, dst, src, class)
             }
             _ => Step::Slow,
         }
@@ -143,9 +155,14 @@ impl Machine<'_> {
     }
 
     /// Stores what a quiet read found.
-    fn store_quiet(&mut self, position: Position, destination: Reg, value: Value) -> Step {
+    fn store_quiet<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        destination: Reg,
+        value: Value,
+    ) -> Step {
         let slots = self.registers.tail_mut(position.frame.base());
-        match store(slots, destination, value) {
+        match store::<GUARDED>(slots, destination, value) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
@@ -153,10 +170,14 @@ impl Machine<'_> {
 
     /// A simple instruction on values other than integers, on the running
     /// frame's registers.
-    fn value_step(&mut self, instruction: &Instruction, position: Position) -> Step {
+    fn value_step<const GUARDED: bool>(
+        &mut self,
+        instruction: &Instruction,
+        position: Position,
+    ) -> Step {
         let slots = self.registers.tail_mut(position.frame.base());
         let mut ip = position.ip;
-        match value_step(instruction, slots, &mut ip) {
+        match value_step::<GUARDED>(instruction, slots, &mut ip) {
             ScalarStep::Fallback => Step::Slow,
             // A jump back is a loop round, like one in the inner loop.
             ScalarStep::Complete if ip < position.ip && self.spend_work() => {

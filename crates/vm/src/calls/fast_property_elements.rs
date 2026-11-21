@@ -34,7 +34,7 @@ const MOST_KEYS: usize = 3;
 
 impl Machine<'_> {
     /// `Fetch` of `$this->property[$key]...` or `$object->property[$key]...`.
-    pub(super) fn fetch_property_element(
+    pub(super) fn fetch_property_element<const GUARDED: bool>(
         &mut self,
         position: Position,
         destination: Reg,
@@ -49,7 +49,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store(slots, destination, value) {
+        match store::<GUARDED>(slots, destination, value) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }

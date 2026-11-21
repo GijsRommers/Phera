@@ -26,7 +26,7 @@ use crate::calls::frame::{IteratorState, TraversalMode};
 impl Machine<'_> {
     /// `IterStart` of an array. Making the frame's side table marks the
     /// frame, so the step continues with the frame as it now is.
-    pub(super) fn start_array_iteration(
+    pub(super) fn start_array_iteration<const GUARDED: bool>(
         &mut self,
         position: Position,
         iterator: IterId,
@@ -63,7 +63,11 @@ impl Machine<'_> {
     }
 
     /// `IterEnd` of a loop over an array snapshot.
-    pub(super) fn end_array_iteration(&mut self, position: Position, iterator: IterId) -> Step {
+    pub(super) fn end_array_iteration<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        iterator: IterId,
+    ) -> Step {
         if !position.frame.has_extras() {
             return Step::Slow;
         }

@@ -42,7 +42,7 @@ impl Machine<'_> {
     /// `Fetch` in read mode of a path that is one declared property of
     /// `$this` or of an object in a register.
     #[inline(never)]
-    pub(super) fn fetch_property(
+    pub(super) fn fetch_property<const GUARDED: bool>(
         &mut self,
         position: Position,
         destination: Reg,
@@ -52,7 +52,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store(slots, destination, value) {
+        match store::<GUARDED>(slots, destination, value) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
@@ -61,7 +61,7 @@ impl Machine<'_> {
     /// `Fetch` of one declared property in a quiet mode (`??`, `isset`,
     /// `empty`). Unlike a plain read, PHP calls a `get` hook first here,
     /// so a property with hooks is left to the VM.
-    pub(super) fn fetch_property_quietly(
+    pub(super) fn fetch_property_quietly<const GUARDED: bool>(
         &mut self,
         position: Position,
         destination: Reg,
@@ -76,7 +76,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store(slots, destination, value) {
+        match store::<GUARDED>(slots, destination, value) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
@@ -85,7 +85,7 @@ impl Machine<'_> {
     /// `AssignPath`, or with `result` `AssignPathFromLocal`, of a value to
     /// one declared property, outside the guarded loop.
     #[inline(never)]
-    pub(super) fn assign_property(
+    pub(super) fn assign_property<const GUARDED: bool>(
         &mut self,
         position: Position,
         path: PathId,
@@ -109,14 +109,14 @@ impl Machine<'_> {
         if let Some(result) = result {
             // Outside the guarded loop, into a register checked above, a
             // store completes.
-            let _ = store(self.registers.tail_mut(base), result, value);
+            let _ = store::<false>(self.registers.tail_mut(base), result, value);
         }
         Step::Done(position.ip)
     }
 
     /// `IncDecPath` of one declared integer property.
     #[inline(never)]
-    pub(super) fn increment_property(
+    pub(super) fn increment_property<const GUARDED: bool>(
         &mut self,
         position: Position,
         (mode, destination): (IncDec, Reg),
