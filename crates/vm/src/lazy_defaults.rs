@@ -35,7 +35,7 @@ impl Vm {
                 merged.insert(key, value.clone());
             }
         }
-        object.update(|storage| *storage = merged);
+        object.update(|storage| storage.replace_all(merged));
         Ok(())
     }
 

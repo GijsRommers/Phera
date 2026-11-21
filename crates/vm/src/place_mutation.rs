@@ -80,11 +80,33 @@ impl Vm {
         binding: Binding,
     ) -> Result<(), NativeError> {
         if let Some((class, name)) = crate::static_places::static_base(place.base()?)
-            && keys.iter().next().is_some()
-            && !self.get(register).is_object()
+            && !keys.is_empty()
         {
-            self.validate_static_mutation(class, name, &mut value, PropertyChange::Indirect)?;
+            let current = self.get(register);
+            let promote_array = matches!(&*current.deref(), Value::Null | Value::Bool(false))
+                && matches!(keys.iter().next(), Some(PathKey::Index(_)));
+            if promote_array {
+                drop(current);
+                let storage = self.prepare_static_array_promotion(class, name)?;
+                self.write_validated_place(place, register, keys, value, binding)?;
+                storage.value_initialized.set(true);
+                return Ok(());
+            }
+            if !current.is_object() {
+                self.validate_static_mutation(class, name, &mut value, PropertyChange::Indirect)?;
+            }
         }
+        self.write_validated_place(place, register, keys, value, binding)
+    }
+
+    fn write_validated_place(
+        &mut self,
+        place: &AccessPath,
+        register: phera_bytecode::Reg,
+        keys: crate::inline_stack::InlineStack<PathKey>,
+        mut value: Value,
+        binding: Binding,
+    ) -> Result<(), NativeError> {
         if binding == Binding::ByReference
             && matches!(keys.iter().last(), Some(PathKey::Index(_)))
             && let Value::Reference(reference) = &value
@@ -190,25 +212,41 @@ impl Vm {
                             .unwrap_or_default();
                         return Ok(Value::Reference(Rc::new(RefCell::new(value))));
                     }
-                    let value = crate::property_storage::read(&object, &key).unwrap_or_default();
+                    let stored = crate::property_storage::read(&object, &key);
+                    let uninitialized = stored.is_none();
+                    let value = stored.unwrap_or_default();
                     if (steps.peek().is_none() || !value.deref().is_object())
                         && let Some(class) = object
                             .class
                             .as_any()
                             .downcast_ref::<crate::classes::Class>()
-                        && let Some(property) = class.defaults.iter().find(|item| {
-                            item.key == key && (item.is_readonly || item.set_visibility.is_some())
-                        })
+                        && let Some(property) = class.defaults.iter().find(|item| item.key == key)
                     {
-                        let access = self.check_set_visibility(property, PropertyChange::Indirect);
-                        // A detached reference can still mutate the object without replacing the slot.
-                        if value.deref().is_object() && (property.is_readonly || access.is_err()) {
-                            return Ok(Value::Reference(Rc::new(RefCell::new(
-                                value.deref().clone(),
-                            ))));
+                        if property.is_readonly || property.set_visibility.is_some() {
+                            let access =
+                                self.check_set_visibility(property, PropertyChange::Indirect);
+                            // A detached alias can change the object without replacing the slot.
+                            if value.deref().is_object()
+                                && (property.is_readonly || access.is_err())
+                            {
+                                return Ok(Value::Reference(Rc::new(RefCell::new(
+                                    value.deref().clone(),
+                                ))));
+                            }
+                            if !property.is_readonly {
+                                access?;
+                            }
                         }
-                        if !property.is_readonly {
-                            access?;
+                        if steps.peek().is_none()
+                            && uninitialized
+                            && !property.is_readonly
+                            && property.ty.as_ref().is_some_and(|ty| {
+                                !ty.mask.intersects(phera_bytecode::TypeMask::NULL)
+                            })
+                        {
+                            return Err(crate::typed_references::uninitialized_reference_error(
+                                property,
+                            ));
                         }
                     }
                     value
@@ -221,7 +259,7 @@ impl Vm {
             if let Some((class, name)) = crate::static_places::static_base(place.base()?)
                 && place.steps()?.next().is_none()
             {
-                self.track_static_property_reference(class, name)?;
+                self.acquire_static_property_reference(class, name)?;
             }
             return Ok(raw);
         }

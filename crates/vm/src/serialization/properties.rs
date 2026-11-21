@@ -183,7 +183,7 @@ impl Vm {
             object.set(key, value);
         }
         let properties = self.ordered_serialization_properties(object)?;
-        object.update(|storage| *storage = properties);
+        object.update(|storage| storage.replace_all(properties));
         Ok(())
     }
 

@@ -25,6 +25,7 @@ mod method;
 mod modifiers;
 mod parameter;
 mod property;
+mod property_slots;
 mod reference;
 mod types;
 

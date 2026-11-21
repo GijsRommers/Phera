@@ -140,6 +140,45 @@ fn syntax_errors_do_not_hide_other_files_and_code_is_never_executed() {
 }
 
 #[test]
+fn source_tools_report_parser_compile_errors() {
+    let project = Project::new();
+    let files = [
+        ("ternary.php", "<?php 1 ?: 2 ? 3 : 4;", "Unparenthesized"),
+        (
+            "jump.php",
+            "<?php while (true) { break '2'; }",
+            "operator accepts only positive integers",
+        ),
+        (
+            "namespace.php",
+            "<?php function f() {} namespace Project;",
+            "Namespace declaration statement has to be the very first statement",
+        ),
+        (
+            "mixed.php",
+            "<?php namespace A; namespace B {}",
+            "Cannot mix bracketed namespace declarations",
+        ),
+    ];
+    for (file, source, _) in files {
+        project.write(file, source);
+    }
+    for command in ["check", "lint"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_phera"))
+            .current_dir(&project.0)
+            .args([command, "--format", "json", "."])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "{command}");
+        let text = String::from_utf8(output.stdout).unwrap();
+        for (file, _, message) in files {
+            assert!(text.contains(file), "{command}: {file}: {text}");
+            assert!(text.contains(message), "{command}: {message}: {text}");
+        }
+    }
+}
+
+#[test]
 fn deep_chains_are_bounded_without_crashing() {
     let project = Project::new();
     let chain = std::iter::repeat_n("isset($x)", 20_000)

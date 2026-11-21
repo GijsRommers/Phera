@@ -175,6 +175,11 @@ impl Vm {
         };
         drop(diagnostics);
         let value = value?;
+        if let Some(limit) = crate::typed_increment::IntegerLimit::reached(&old, &value, mode)
+            && let Some(register) = register
+        {
+            self.check_increment_place(&place, register, &keys, limit)?;
+        }
         self.finish_indexed_update(&place, register, keys, value.clone())?;
         self.set(
             destination,

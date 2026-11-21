@@ -2,8 +2,8 @@
 
 use phera_extension_api::value::{loose_equals, strict_equals};
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
-    PhpString, Registry, Value, args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpString,
+    Registry, Value, args,
 };
 
 use crate::arguments::required_array;
@@ -131,7 +131,16 @@ pub(super) const IN_ARRAY: FunctionEntry = FunctionEntry::asynchronous(
 );
 
 fn in_array(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move { Ok(Value::Bool(search(context, &arguments).await?.is_some())) })
+    Box::pin(async move {
+        let equality = Equality::from_strict_argument(&arguments);
+        let needle = &arguments[0];
+        for value in required_array(&arguments, 1).values() {
+            if equality.equal(context, needle, value).await? {
+                return Ok(Value::Bool(true));
+            }
+        }
+        Ok(Value::Bool(false))
+    })
 }
 
 /// `array_search(mixed $needle, array $haystack, bool $strict = false):
@@ -153,22 +162,13 @@ pub(super) const ARRAY_SEARCH: FunctionEntry = FunctionEntry::asynchronous(
 
 fn array_search(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        let found = search(context, &arguments).await?;
-        Ok(found.map_or(Value::Bool(false), Value::from))
-    })
-}
-
-/// The first key of `$haystack` whose value equals `$needle`.
-async fn search(
-    context: &mut dyn Context,
-    arguments: &[Value],
-) -> Result<Option<ArrayKey>, NativeError> {
-    let needle = &arguments[0];
-    let equality = Equality::from_strict_argument(arguments);
-    for (key, value) in required_array(arguments, 1).iter() {
-        if equality.equal(context, needle, value).await? {
-            return Ok(Some(key));
+        let equality = Equality::from_strict_argument(&arguments);
+        let needle = &arguments[0];
+        for (key, value) in required_array(&arguments, 1).iter() {
+            if equality.equal(context, needle, value).await? {
+                return Ok(Value::from(key));
+            }
         }
-    }
-    Ok(None)
+        Ok(Value::Bool(false))
+    })
 }

@@ -56,9 +56,12 @@ pub use class::{
     TraitAdaptation, TraitUse, Visibility,
 };
 pub use code::Code;
-pub use function::{ArgumentLayout, Function, Handler, Parameter, Path, PathBase, Step};
+pub use function::{
+    ArgumentLayout, Function, Handler, MethodSite, Parameter, Path, PathBase, SiteArgument, Step,
+};
 pub use ids::{
-    ClassId, ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId, Target, TypeId,
+    ClassId, ConstId, FunctionId, IterId, MethodSiteId, NameId, PathId, Reg, StaticId, SymbolId,
+    Target, TypeId,
 };
 pub use instruction::{
     BinaryOp, CallResult, CaptureKind, CastKind, ClassBinding, ClosureBinding, FetchMode,
