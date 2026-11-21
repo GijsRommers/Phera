@@ -26,6 +26,30 @@ struct Inputs {
     cookie: Option<Rc<PhpArray>>,
     env: Option<Rc<PhpArray>>,
     server: Option<Rc<PhpArray>>,
+    server_mode: ServerMode,
+}
+
+#[derive(Clone, Copy, Default)]
+enum ServerMode {
+    #[default]
+    Cli,
+    Http,
+}
+
+impl ServerMode {
+    fn exposes(self, key: &ArrayKey) -> bool {
+        let ArrayKey::String(name) = key else {
+            return false;
+        };
+        let name = name.as_bytes();
+        match self {
+            Self::Cli => matches!(name, b"SCRIPT_FILENAME" | b"SCRIPT_NAME" | b"PHP_SELF"),
+            Self::Http => {
+                name.starts_with(b"HTTP_")
+                    || matches!(name, b"QUERY_STRING" | b"CONTENT_TYPE" | b"CONTENT_LENGTH")
+            }
+        }
+    }
 }
 
 pub fn capture_environment(state: &mut RequestState, env: &Rc<PhpArray>) {
@@ -33,7 +57,9 @@ pub fn capture_environment(state: &mut RequestState, env: &Rc<PhpArray>) {
 }
 
 pub fn capture_server(state: &mut RequestState, server: &Rc<PhpArray>) {
-    state.get_or_default::<Inputs>().server = nonempty(server);
+    let inputs = state.get_or_default::<Inputs>();
+    inputs.server = nonempty(server);
+    inputs.server_mode = ServerMode::Cli;
 }
 
 pub fn capture_http_inputs(
@@ -48,6 +74,7 @@ pub fn capture_http_inputs(
     inputs.post = nonempty(post);
     inputs.cookie = nonempty(cookie);
     inputs.server = nonempty(server);
+    inputs.server_mode = ServerMode::Http;
 }
 
 fn nonempty(value: &Rc<PhpArray>) -> Option<Rc<PhpArray>> {
@@ -89,14 +116,43 @@ pub(super) fn register(registry: &mut Registry) {
     ));
 }
 
+struct Source<'a> {
+    values: Option<&'a Rc<PhpArray>>,
+    server: Option<ServerMode>,
+}
+
+impl Source<'_> {
+    fn get(&self, key: &ArrayKey) -> Option<&Value> {
+        if self.server.is_some_and(|mode| !mode.exposes(key)) {
+            return None;
+        }
+        self.values?.get(key)
+    }
+
+    fn array(self) -> Option<Rc<PhpArray>> {
+        let values = self.values?;
+        let Some(mode) = self.server else {
+            return Some(values.clone());
+        };
+        let filtered = PhpArray::from_iter(
+            values
+                .iter()
+                .filter(|(key, _)| mode.exposes(key))
+                .map(|(key, value)| (key, value.clone())),
+        );
+        (!filtered.is_empty()).then(|| Rc::new(filtered))
+    }
+}
+
 fn source<'a>(
     context: &'a mut dyn Context,
     arguments: &[Value],
     function: &str,
     parameter: &str,
-) -> Result<Option<&'a Rc<PhpArray>>, NativeError> {
+) -> Result<Source<'a>, NativeError> {
     let fields = context.state().get::<Inputs>();
-    let select = match args::int(arguments, 0).unwrap_or_default() {
+    let kind = args::int(arguments, 0).unwrap_or_default();
+    let values = match kind {
         INPUT_GET => fields.and_then(|fields| fields.get.as_ref()),
         INPUT_POST => fields.and_then(|fields| fields.post.as_ref()),
         INPUT_COOKIE => fields.and_then(|fields| fields.cookie.as_ref()),
@@ -108,15 +164,18 @@ fn source<'a>(
             )));
         }
     };
-    Ok(select)
+    let server = if kind == INPUT_SERVER {
+        fields.map(|fields| fields.server_mode)
+    } else {
+        None
+    };
+    Ok(Source { values, server })
 }
 
 fn has_var(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let source = source(context, arguments, "filter_has_var", "input_type")?;
     let name = ArrayKey::from_string(args::bytes(arguments, 1).into());
-    Ok(Value::Bool(
-        source.is_some_and(|input| input.get(&name).is_some()),
-    ))
+    Ok(Value::Bool(source.get(&name).is_some()))
 }
 
 fn input(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -124,7 +183,7 @@ fn input(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let call = Call::Input;
         let name = ArrayKey::from_string(args::bytes(&arguments, 1).into());
         let value = source(context, &arguments, call.name(), "type")?
-            .and_then(|input| input.get(&name))
+            .get(&name)
             .cloned();
         let definition = call.union(context, args::value(&arguments, 3))?;
         let id = args::int(&arguments, 2).unwrap_or(DEFAULT);
@@ -147,7 +206,7 @@ fn input(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
 fn input_array(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let call = Call::InputArray;
-        let input = source(context, &arguments, call.name(), "type")?.cloned();
+        let input = source(context, &arguments, call.name(), "type")?.array();
         let definition = call.union(context, args::value(&arguments, 1))?;
         let Some(input) = input else {
             return Ok(Value::Null);

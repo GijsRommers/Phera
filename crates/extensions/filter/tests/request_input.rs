@@ -25,6 +25,9 @@ echo json_encode([
     filter_input(INPUT_GET, 'missing', FILTER_DEFAULT, FILTER_NULL_ON_FAILURE),
     filter_input_array(INPUT_GET, ['count' => FILTER_VALIDATE_INT, 'name' => FILTER_DEFAULT]),
     filter_input(INPUT_SERVER, 'REQUEST_METHOD'),
+    filter_input(INPUT_SERVER, 'HTTP_HOST'),
+    filter_input(INPUT_SERVER, 'QUERY_STRING'),
+    $_REQUEST['count'],
 ]);
 "#,
     )
