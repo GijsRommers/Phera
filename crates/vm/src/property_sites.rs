@@ -248,6 +248,17 @@ impl Vm {
                     },
                 }
             }
+            // A name a static property of the class has gets PHP's notice
+            // on the general path.
+            None if class.is_some_and(|class| {
+                class
+                    .static_properties
+                    .iter()
+                    .any(|property| property.name == *name)
+            }) =>
+            {
+                WriteRule::General
+            }
             None => match class.map(crate::classes::Class::property_facts) {
                 Some(facts)
                     if !facts.has(PropertyFacts::MAGIC_SET)
