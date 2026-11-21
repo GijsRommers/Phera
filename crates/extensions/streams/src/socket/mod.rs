@@ -5,6 +5,7 @@ mod client;
 mod datagram;
 mod functions;
 pub(crate) mod http;
+mod http_headers;
 mod io;
 mod line;
 mod persistent;
@@ -38,6 +39,7 @@ pub(crate) use slot::{Socket, StreamIo};
 
 pub(crate) fn register(registry: &mut phera_extension_api::Registry) {
     functions::register(registry);
+    http::register(registry);
     line::register(registry);
     registry.fork_state::<persistent::Resources>(persistent::fork_resources);
 }
