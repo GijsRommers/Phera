@@ -41,24 +41,6 @@ impl Vm {
         }
     }
 
-    /// Remember which class a named class symbol of the running file means.
-    /// Relative names (`self`, `parent`, `static`) depend on the frame and
-    /// are never linked. A declared class cannot go away, so the link holds
-    /// for the rest of the request.
-    pub(crate) fn link_class_symbol(&self, symbol: SymbolId, class: &Rc<super::Class>) {
-        let Some(frame) = self.current() else {
-            return;
-        };
-        let relative = frame
-            .unit()
-            .symbols
-            .get(symbol.index())
-            .is_none_or(|symbol| matches!(symbol.written.as_str(), "self" | "parent" | "static"));
-        if !relative && let Some(slot) = frame.cache().classes.get(symbol.index()) {
-            *slot.borrow_mut() = Some(class.clone());
-        }
-    }
-
     /// Literal class cache is keyed by unit/symbol, filled after successful lookup.
     /// Relative keywords bypass it. Linked classes cannot be replaced in a request,
     /// and the unit/class owners keep identities alive until request teardown.
@@ -75,25 +57,13 @@ impl Vm {
             let name = self.class_symbol(symbol)?;
             return self.new_named_object(&name);
         }
-        let cached = frame
-            .cache()
-            .classes
-            .get(symbol.index())
-            .and_then(|slot| slot.borrow().clone());
-        let class = if let Some(class) = cached {
-            class
-        } else {
-            let class = self
+        let key = self.code.unit_symbol_key(frame.frame.function, symbol);
+        let class = match self.classes.by_key(key) {
+            Some(class) => class.clone(),
+            None => self
                 .classes
                 .get(written)
-                .ok_or_else(|| Self::class_miss(written, "Class"))?;
-            if let Some(slot) = self
-                .current()
-                .and_then(|frame| frame.cache().classes.get(symbol.index()))
-            {
-                *slot.borrow_mut() = Some(class.clone());
-            }
-            class
+                .ok_or_else(|| Self::class_miss(written, "Class"))?,
         };
         self.new_linked_object(class)
     }

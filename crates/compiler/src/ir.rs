@@ -99,6 +99,12 @@ pub enum Instruction {
         class: Reg,
         name: String,
     },
+    /// A constant of a class the source names (`Post::LIMIT`).
+    NamedClassConstant {
+        destination: Reg,
+        class: String,
+        name: String,
+    },
     /// Publish a request-local class declaration.
     DeclareClass(usize),
     /// Prepare a constructor using the same sends as a function call.

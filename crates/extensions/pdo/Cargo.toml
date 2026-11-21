@@ -11,7 +11,7 @@ phera-sqlite.workspace = true
 phera-io-pool.workspace = true
 phera-extension-api.workspace = true
 tokio.workspace = true
-tokio-postgres.workspace = true
+postgres-types.workspace = true
 mysql_async.workspace = true
 [dev-dependencies]
 tempfile.workspace = true

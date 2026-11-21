@@ -181,11 +181,11 @@ impl Machine<'_> {
         self.current_context().and_then(|context| context.scope())
     }
 
-    /// The class a named class symbol was linked to, once some earlier
-    /// operation of this file resolved it.
+    /// The class a named class symbol of the running file means in this
+    /// request, by the symbol's process name key.
     fn linked_class(&self, position: Position, symbol: SymbolId) -> Option<Rc<Class>> {
-        let cache = self.code.cache(position.frame.function);
-        cache.classes.get(symbol.index())?.borrow().clone()
+        let key = self.code.unit_symbol_key(position.frame.function, symbol);
+        self.classes.by_key(key).cloned()
     }
 
     /// The window of the running frame, if it is a method or closure.

@@ -168,7 +168,7 @@ impl Lease {
         let syntax = if Sql::needs_string_mode(&source) {
             self.run(async |driver| match driver {
                 Driver::Postgres(postgres) => Ok(Syntax::Postgres {
-                    backslash_strings: postgres.backslash_strings().await?,
+                    backslash_strings: postgres.backslash_strings(),
                 }),
                 Driver::Mysql(mysql) => mysql.placeholder_syntax().await,
                 Driver::Sqlite(_) => Err(connection_error("Mismatched database driver")),
@@ -206,23 +206,23 @@ impl Lease {
         owner: Arc<()>,
         all: bool,
     ) -> Result<Option<(Rows, bool)>, DbError> {
-        let result = self
-            .run(async |driver| match driver {
-                Driver::Mysql(mysql) => mysql.read_stream(&owner, all).await,
-                Driver::Postgres(postgres) => postgres.read_lazy(&owner, all).await,
-                Driver::Sqlite(_) => Ok(None),
-            })
-            .await?;
-        result
-            .map(|(rows, done)| rows.into_php().map(|rows| (rows, done)))
-            .transpose()
+        self.run(async |driver| match driver {
+            Driver::Mysql(mysql) => mysql
+                .read_stream(&owner, all)
+                .await?
+                .map(|(rows, done)| rows.into_php().map(|rows| (rows, done)))
+                .transpose(),
+            Driver::Postgres(postgres) => postgres.read_lazy(&owner, all).await,
+            Driver::Sqlite(_) => Ok(None),
+        })
+        .await
     }
 
     pub async fn close_stream(&self, owner: Arc<()>) -> Result<(), DbError> {
         self.run(async |driver| {
             match driver {
                 Driver::Mysql(mysql) => mysql.close_stream(&owner).await,
-                Driver::Postgres(postgres) => postgres.close_lazy(&owner),
+                Driver::Postgres(postgres) => postgres.close_lazy(&owner).await?,
                 Driver::Sqlite(_) => {}
             }
             Ok(())
@@ -304,10 +304,7 @@ impl Lease {
     pub async fn server_attribute(&self, attribute: i64) -> Result<String, DbError> {
         self.run(async |driver| match (driver, attribute) {
             (Driver::Mysql(mysql), ATTR_SERVER_INFO) => mysql.server_info().await,
-            (Driver::Postgres(postgres), ATTR_SERVER_INFO) => {
-                postgres.buffer_lazy().await;
-                postgres.server_info().await
-            }
+            (Driver::Postgres(postgres), ATTR_SERVER_INFO) => Ok(postgres.server_info()),
             (Driver::Mysql(mysql), _) => Ok(mysql.connection_status()),
             (Driver::Postgres(postgres), _) => Ok(postgres.connection_status().into()),
             (Driver::Sqlite(_), _) => Err(connection_error("Missing server connection")),
