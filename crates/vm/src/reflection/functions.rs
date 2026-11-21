@@ -52,7 +52,9 @@ impl Vm {
                 reflected.name = callee.name.to_string();
                 self.reflect_callee(&mut reflected, &callee.target, None);
             }
-            FunctionTarget::Method { .. } | FunctionTarget::PropertyHook { .. } => {
+            FunctionTarget::Method { .. }
+            | FunctionTarget::LinkedMethod { .. }
+            | FunctionTarget::PropertyHook { .. } => {
                 let (class, method) = self.reflection_target_method(target)?;
                 self.reflect_method_signature(&mut reflected, &method, &class.name);
                 reflected.member = Some(MemberInfo {
