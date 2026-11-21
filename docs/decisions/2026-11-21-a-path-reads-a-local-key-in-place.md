@@ -29,10 +29,15 @@ directly (`$row[$key]` is `FetchIndex { index: $key }`), and the `Move` and the
   between the copy and the consumer, so that not every path reaches the
   consumer through the copy.
 
-Reading an undefined local key still warns exactly once, in the same order as
-the removed `Move` did: `Vm::execute` raises "Undefined variable $name" for
-every path key that is a named local with no value, before the path is walked.
-Temporaries never warn.
+Reading an undefined local key still warns exactly once per evaluation: the
+warning runs where the path resolution turns a step's register into a key
+(`path_index_key`, `magic_path_key`, `keys`, `property_keys_for`,
+`unset_index_key`, the overloaded-dimension divert arms), and on the skip
+paths where the container cannot be indexed but PHP still evaluates the
+offset. Only a `None` slot pays for the frame lookup, and only a named local
+can warn, so a defined key pays one branch and temporaries never warn. On a
+read with both base and key undefined the warning order is base before key,
+which is PHP's order; `main` warned the key first because the copy did.
 
 ## Why
 
