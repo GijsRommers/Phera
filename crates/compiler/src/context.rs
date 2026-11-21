@@ -255,6 +255,8 @@ impl<'ast> Compiler<'ast> {
             | Instruction::BranchNotNull { target: t, .. }
             | Instruction::BranchCompare { target: t, .. }
             | Instruction::BranchCompareInt { target: t, .. }
+            | Instruction::BranchInstanceOf { target: t, .. }
+            | Instruction::BranchDynamicInstanceOf { target: t, .. }
             | Instruction::IterNext { end: t, .. },
         ) = self.function.instructions.get_mut(i)
         {

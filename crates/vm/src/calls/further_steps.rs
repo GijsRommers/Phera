@@ -149,6 +149,12 @@ impl Machine<'_> {
             Instruction::InstanceOf { dst, src, class } => {
                 self.instance_of::<GUARDED>(position, dst, src, class)
             }
+            Instruction::InstanceOfBranch { src, class, target } => {
+                self.instance_of_branch::<GUARDED>(position, src, class, target, false)
+            }
+            Instruction::InstanceOfBranchIf { src, class, target } => {
+                self.instance_of_branch::<GUARDED>(position, src, class, target, true)
+            }
             _ => Step::Slow,
         }
     }

@@ -228,6 +228,10 @@ impl Tables<'_> {
                 | Instruction::BinaryIntBranchIf { target, .. }
                 | Instruction::BinaryBranch { target, .. }
                 | Instruction::BinaryBranchIf { target, .. }
+                | Instruction::InstanceOfBranch { target, .. }
+                | Instruction::InstanceOfBranchIf { target, .. }
+                | Instruction::DynamicInstanceOfBranch { target, .. }
+                | Instruction::DynamicInstanceOfBranchIf { target, .. }
                 | Instruction::IterNext { end: target, .. }
                 | Instruction::IterNextKeyed { end: target, .. } => Some(target),
                 _ => None,

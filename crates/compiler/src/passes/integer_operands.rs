@@ -194,6 +194,24 @@ fn dead_after_from(
                     }
                     pending.push(target.index());
                 }
+                Instruction::InstanceOfBranch { src, target, .. }
+                | Instruction::InstanceOfBranchIf { src, target, .. } => {
+                    if src == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::DynamicInstanceOfBranch {
+                    src, class, target, ..
+                }
+                | Instruction::DynamicInstanceOfBranchIf {
+                    src, class, target, ..
+                } => {
+                    if src == register || class == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
                 Instruction::ReturnNull => break,
                 Instruction::AssignOp { src, local, .. } => {
                     if src == register || local == register {

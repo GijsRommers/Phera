@@ -439,6 +439,49 @@ impl Tables<'_> {
                     }
                 }
             }
+            Old::BranchInstanceOf {
+                source,
+                class,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                let class = self.symbol(&class, None, crate::policies::NameKind::Class);
+                if when {
+                    Instruction::InstanceOfBranchIf {
+                        src: source,
+                        class,
+                        target,
+                    }
+                } else {
+                    Instruction::InstanceOfBranch {
+                        src: source,
+                        class,
+                        target,
+                    }
+                }
+            }
+            Old::BranchDynamicInstanceOf {
+                source,
+                class,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                if when {
+                    Instruction::DynamicInstanceOfBranchIf {
+                        src: source,
+                        class,
+                        target,
+                    }
+                } else {
+                    Instruction::DynamicInstanceOfBranch {
+                        src: source,
+                        class,
+                        target,
+                    }
+                }
+            }
             Old::Suppress(true) => Instruction::BeginSilence,
             Old::Suppress(false) => Instruction::EndSilence,
             Old::ReturnReference(src) => Instruction::ReturnReference { src },

@@ -17,6 +17,8 @@
 use phera_ast as ast;
 use phera_bytecode::Reg;
 
+use phera_bytecode::FetchMode;
+
 use crate::ir::{Constant, Instruction, Target};
 use crate::{CompileError, Compiler, binary, constant};
 
@@ -92,6 +94,9 @@ impl Compiler<'_> {
                         Ok(right)
                     }
                 }
+                ast::BinaryOperator::NullCoalesce => {
+                    self.compile_coalesce_condition(left, right, when, line)
+                }
                 operator
                     if is_comparison(*operator)
                         && !(constant(left).is_some() && constant(right).is_some()) =>
@@ -104,6 +109,11 @@ impl Compiler<'_> {
                 operator: ast::UnaryOperator::Not,
                 operand,
             } => self.compile_condition(operand, !when, line),
+            ast::ExpressionKind::InstanceOf { value, class } => {
+                self.compile_instanceof_condition(value, class, when, line)
+            }
+            ast::ExpressionKind::Isset(values) => self.compile_isset_condition(values, when, line),
+            ast::ExpressionKind::Empty(value) => self.compile_empty_condition(value, when, line),
             _ => self.compile_value_condition(expression, when, line),
         }
     }
@@ -251,6 +261,150 @@ impl Compiler<'_> {
                 operation_line,
             ),
         ])
+    }
+
+    /// `instanceof` as a condition: one branch instruction, no boolean
+    /// temporary. A plain local on the left reads its own register.
+    fn compile_instanceof_condition(
+        &mut self,
+        value: &ast::Expression,
+        class: &ast::Expression,
+        when: bool,
+        line: usize,
+    ) -> Result<Vec<usize>, CompileError> {
+        let source = if let Some(local) = self.compiled_variable(value)? {
+            local
+        } else {
+            self.compile_expression(value)?
+        };
+        if matches!(class.kind, ast::ExpressionKind::Name(_)) {
+            let class = self.object_class_name(class, line)?;
+            Ok(vec![self.emit(
+                Instruction::BranchInstanceOf {
+                    source,
+                    class,
+                    target: Target(0),
+                    when,
+                },
+                line,
+            )])
+        } else {
+            let class = self.compile_expression(class)?;
+            Ok(vec![self.emit(
+                Instruction::BranchDynamicInstanceOf {
+                    source,
+                    class,
+                    target: Target(0),
+                    when,
+                },
+                line,
+            )])
+        }
+    }
+
+    /// `isset(...)` as a condition: the quiet isset reads branch directly;
+    /// no boolean is materialized. `when == false` jumps when any value is
+    /// null (not set); `when == true` jumps when all are set.
+    fn compile_isset_condition(
+        &mut self,
+        values: &[ast::Expression],
+        when: bool,
+        line: usize,
+    ) -> Result<Vec<usize>, CompileError> {
+        if !when {
+            let mut patches = Vec::with_capacity(values.len());
+            for value in values {
+                let mark = self.mark_temporaries();
+                let register = self.quiet_access(value, FetchMode::Isset)?;
+                patches.push(self.emit(
+                    Instruction::BranchNull {
+                        value: register,
+                        target: Target(0),
+                    },
+                    line,
+                ));
+                self.release_temporaries(mark);
+            }
+            return Ok(patches);
+        }
+        if let [value] = values {
+            let register = self.quiet_access(value, FetchMode::Isset)?;
+            return Ok(vec![self.emit(
+                Instruction::BranchNotNull {
+                    value: register,
+                    target: Target(0),
+                },
+                line,
+            )]);
+        }
+        let mut ends = Vec::with_capacity(values.len());
+        for value in values {
+            let mark = self.mark_temporaries();
+            let register = self.quiet_access(value, FetchMode::Isset)?;
+            ends.push(self.emit(
+                Instruction::BranchNull {
+                    value: register,
+                    target: Target(0),
+                },
+                line,
+            ));
+            self.release_temporaries(mark);
+        }
+        let jump = self.emit(Instruction::Jump(Target(0)), line);
+        let after = self.position();
+        for end in ends {
+            self.patch(end, after);
+        }
+        Ok(vec![jump])
+    }
+
+    /// `empty(...)` as a condition: the quiet empty read branches on the
+    /// inverted truthiness directly, without the `Unary Not`.
+    fn compile_empty_condition(
+        &mut self,
+        value: &ast::Expression,
+        when: bool,
+        line: usize,
+    ) -> Result<Vec<usize>, CompileError> {
+        let register = self.quiet_access(value, FetchMode::Empty)?;
+        Ok(vec![self.emit(
+            Instruction::Branch {
+                value: register,
+                target: Target(0),
+                when: !when,
+            },
+            line,
+        )])
+    }
+
+    /// `??` as a condition: when the left is set and not null, its truthiness
+    /// decides; otherwise the right side is the condition.
+    fn compile_coalesce_condition(
+        &mut self,
+        left: &ast::Expression,
+        right: &ast::Expression,
+        when: bool,
+        line: usize,
+    ) -> Result<Vec<usize>, CompileError> {
+        let value = self.quiet(left)?;
+        let to_right = self.emit(
+            Instruction::BranchNull {
+                value,
+                target: Target(0),
+            },
+            line,
+        );
+        let mut patches = vec![self.emit(
+            Instruction::Branch {
+                value,
+                target: Target(0),
+                when,
+            },
+            line,
+        )];
+        self.patch(to_right, self.position());
+        patches.extend(self.compile_condition(right, when, line)?);
+        Ok(patches)
     }
 
     /// One comparison operand: a plain local's register, a literal's load, or

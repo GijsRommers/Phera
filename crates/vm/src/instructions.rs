@@ -253,6 +253,18 @@ impl Vm {
             I::ThisOrNull { dst } => self.this_or_null(dst),
             I::Clone { .. } => return Ok(Some(BatchExit::Instruction(instruction))),
             I::InstanceOf { dst, src, class } => self.instance_of(dst, src, class)?,
+            I::InstanceOfBranch { src, class, target } => {
+                self.instance_of_branch(src, class, target, false, work)?
+            }
+            I::InstanceOfBranchIf { src, class, target } => {
+                self.instance_of_branch(src, class, target, true, work)?
+            }
+            I::DynamicInstanceOfBranch { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, false, work)?
+            }
+            I::DynamicInstanceOfBranchIf { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, true, work)?
+            }
 
             I::CheckReturn { source } => {
                 if self.return_string_coercion_needed(&self.raw_local(source)) {

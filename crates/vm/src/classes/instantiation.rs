@@ -1,6 +1,6 @@
 //! Allocation prepares constructors before sends and shallow clones preserve nested handles.
 
-use phera_bytecode::{ClassKind, Reg, SymbolId};
+use phera_bytecode::{ClassKind, Reg, SymbolId, Target};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
@@ -190,6 +190,33 @@ impl Vm {
             _ => false,
         };
         self.set(destination, Value::Bool(matches));
+        Ok(())
+    }
+
+    /// `instanceof` whose answer only decides a jump: compute it exactly as
+    /// `instance_of` does, then jump when it equals `when`.
+    pub(crate) fn instance_of_branch(
+        &mut self,
+        source: Reg,
+        symbol: SymbolId,
+        target: Target,
+        when: bool,
+        work: &mut usize,
+    ) -> Result<(), NativeError> {
+        let name = self.class_symbol(symbol)?;
+        let matches = match self.read_local(source) {
+            Value::Object(object) => self
+                .classes
+                .get(object.class.name())
+                .is_some_and(|class| self.class_matches(&class, &name)),
+            _ => false,
+        };
+        if matches == when {
+            if self.backward(target) {
+                *work += 1;
+            }
+            self.jump(target)?;
+        }
         Ok(())
     }
 

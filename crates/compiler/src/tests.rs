@@ -369,3 +369,101 @@ fn comparison_as_a_value_keeps_binary() {
         0
     );
 }
+
+/// `if ($o instanceof C)` is one branch instruction, no boolean temporary.
+#[test]
+fn instanceof_condition_is_one_branch() {
+    let code = function_instructions(
+        "<?php class C {} function f($o) { if ($o instanceof C) { return 1; } return 0; }",
+    );
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::InstanceOfBranch { .. })),
+        1
+    );
+    assert_eq!(
+        count(&code, |i| matches!(
+            i,
+            Instruction::InstanceOfBranchIf { .. }
+        )),
+        0
+    );
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::InstanceOf { .. })),
+        0
+    );
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNot { .. })),
+        0
+    );
+    let negated = function_instructions(
+        "<?php class C {} function f($o) { if (!($o instanceof C)) { return 1; } return 0; }",
+    );
+    assert_eq!(
+        count(&negated, |i| matches!(
+            i,
+            Instruction::InstanceOfBranchIf { .. }
+        )),
+        1
+    );
+    let dynamic = function_instructions(
+        "<?php function f($o, $c) { if ($o instanceof $c) { return 1; } return 0; }",
+    );
+    assert_eq!(
+        count(&dynamic, |i| matches!(
+            i,
+            Instruction::DynamicInstanceOfBranch { .. }
+        )),
+        1
+    );
+}
+
+/// `if (isset($x))` branches on the quiet isset read directly.
+#[test]
+fn isset_condition_branches_on_the_read() {
+    let code = function_instructions(
+        "<?php function f($a) { if (isset($a['k'])) { return 1; } return 0; }",
+    );
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNull { .. })),
+        1
+    );
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNot { .. })),
+        0
+    );
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Unary { .. })), 0);
+    let negated = function_instructions(
+        "<?php function f($a) { if (!isset($a['k'])) { return 1; } return 0; }",
+    );
+    assert_eq!(
+        count(&negated, |i| matches!(i, Instruction::JumpIfNotNull { .. })),
+        1
+    );
+}
+
+/// `if (empty($x))` reads emptiness and jumps on the inverted truthiness.
+#[test]
+fn empty_condition_has_no_not() {
+    let code = function_instructions(
+        "<?php function f($a) { if (empty($a['k'])) { return 1; } return 0; }",
+    );
+    assert_eq!(count(&code, |i| matches!(i, Instruction::JumpIf { .. })), 1);
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Unary { .. })), 0);
+}
+
+/// `if ($a ?? $b)` decides on the left when set, else compiles the right.
+#[test]
+fn coalesce_condition_branches_on_the_left() {
+    let code =
+        function_instructions("<?php function f($a, $b) { if ($a ?? $b) { return 1; } return 0; }");
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNull { .. })),
+        1
+    );
+    // One truthiness jump for the left when set, one for the right side.
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNot { .. })),
+        2
+    );
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Unary { .. })), 0);
+}
