@@ -102,6 +102,11 @@ for ($round = 0; $round < 3; $round++) {
 $f = function ($o) { try { return $o->secret(); } catch (Error $e) { return $e->getMessage(); } };
 $inP = Closure::bind($f, null, P::class); $inQ = Closure::bind($f, null, Q::class);
 for ($round = 0; $round < 2; $round++) { echo $inP($p), ' | ', $inQ($p), ' | ', $f($p), "\n"; }
+// The reverse order, and a static closure bound to each scope.
+for ($round = 0; $round < 2; $round++) { echo $inQ($p), ' | ', $f($p), ' | ', $inP($p), "\n"; }
+$s = static function ($o) { try { return $o->secret(); } catch (Error $e) { return $e->getMessage(); } };
+$sP = Closure::bind($s, null, P::class); $sQ = Closure::bind($s, null, Q::class);
+for ($round = 0; $round < 2; $round++) { echo $sQ($p), ' | ', $sP($p), ' | ', $s($p), "\n"; }
 // Inherited method called on behalf of a child: scope is the declaring class.
 class Base { public function viaBase($o) { return $o->hidden(); } private function hidden() { return 'Base hidden'; } }
 class Child extends Base { public function hidden() { return 'Child hidden'; } }

@@ -126,17 +126,15 @@ impl Machine<'_> {
             _ => return Step::Done(position.ip),
         };
         let address = SiteRecord::address(&object.class);
-        // A closure's scope can change from one call to the next, so its
-        // sites keep no record.
-        let record = match position.frame.kind() {
-            CallKind::Closure => None,
-            _ => cache.site_record(facts, body.method_sites.len(), site_id),
-        };
+        let record = cache.site_record(facts, body.method_sites.len(), site_id);
         // The scope the site's code runs in (see `caller_scope`): a method's
-        // declaring class, from its facts; none for a function.
+        // declaring class, from its facts; a closure's bound scope, which two
+        // closure objects of one function may have differently; none for a
+        // function, a static closure or an unbound one.
         let scope = match position.frame.kind() {
             CallKind::Function => None,
-            _ => facts.class,
+            CallKind::Closure => self.running_scope().map(|scope| scope.index),
+            CallKind::Method | CallKind::Constructor => facts.class,
         };
         let outcome = match record.map(Cell::get) {
             Some(SiteRecord {
