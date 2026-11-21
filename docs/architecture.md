@@ -1804,6 +1804,19 @@ Fused instructions come from one late compiler pass, run after the bytecode engi
 
 They are emitted only where the operands are locals or temporaries, the plain shape. Any other value takes their slow path, which is the general instruction's handler.
 
+#### Natives called from the loop
+
+A native that needs no VM declares a handler that takes only its arguments: `pure: fn(&[Value]) -> Option<Value>` on its `FunctionEntry`, beside the existing handler. `None` means "decline", and the general path then runs the ordinary handler, so every error, warning and coercion stays there.
+
+A native qualifies when it:
+- reads only its arguments;
+- writes no global state, runs no PHP code, takes no callback and no reference;
+- raises nothing on the arguments it accepts.
+
+Examples: the type tests (`is_null`, `is_array`, `is_int`, `is_string`), `strlen`, `str_starts_with`, `str_contains`, `array_key_exists`, `in_array` with scalars, `substr`, `strtolower`, `count` on an array.
+
+The loop knows from the entry: `CallNativeDirect` (and the function form of the site record) reads the arguments from the window, tests their types against the entry's parameter masks, calls `pure` and stores the value. A decline, or a native without `pure`, leaves through the one exit to the general path, as today. No prepared-call record is made, and nothing is allocated.
+
 #### What stays on the general path
 
 - Generators and fibers: their frames live outside the stack.
