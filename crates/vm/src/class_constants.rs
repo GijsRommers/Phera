@@ -65,7 +65,19 @@ impl Vm {
         name: &str,
         access: ConstantAccess,
     ) -> NativeResult {
-        let (linked, constant) = self.resolve_class_constant(class, name, access)?;
+        let linked = self.classes.get(class);
+        self.class_constant_resolved(linked, class, name, access)
+    }
+
+    /// [`Vm::class_constant_with_access`] of a class looked up already.
+    pub(crate) fn class_constant_resolved(
+        &mut self,
+        linked: Option<Rc<crate::classes::Class>>,
+        class: &str,
+        name: &str,
+        access: ConstantAccess,
+    ) -> NativeResult {
+        let (linked, constant) = self.resolve_class_constant_from(linked, class, name, access)?;
         // A linked value can return directly. The dependency stack is needed
         // only for unfinished initializers or the initial backing-table build.
         if !linked
@@ -154,7 +166,16 @@ impl Vm {
         name: &str,
         access: ConstantAccess,
     ) -> Result<(Option<Rc<crate::classes::Class>>, Rc<LinkedConstant>), NativeError> {
-        let linked = self.classes.get(class);
+        self.resolve_class_constant_from(self.classes.get(class), class, name, access)
+    }
+
+    fn resolve_class_constant_from(
+        &self,
+        linked: Option<Rc<crate::classes::Class>>,
+        class: &str,
+        name: &str,
+        access: ConstantAccess,
+    ) -> Result<(Option<Rc<crate::classes::Class>>, Rc<LinkedConstant>), NativeError> {
         let (display, constants) = if let Some(linked) = &linked {
             (&linked.name, &linked.constants)
         } else if let Some(pending) = self

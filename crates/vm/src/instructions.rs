@@ -223,6 +223,9 @@ impl Vm {
             I::FetchClassConstant { dst, class, name } => {
                 self.fetch_class_constant(dst, class, name)?
             }
+            I::FetchNamedClassConstant { dst, class, name } => {
+                self.fetch_named_class_constant(dst, class, name)?
+            }
             I::FetchDynamicClassConstant { dst, class, name } => {
                 self.fetch_dynamic_class_constant(dst, class, name)?;
             }
@@ -443,6 +446,45 @@ impl Vm {
         let value = self.class_constant(&class, name)?;
         self.set(destination, value);
         Ok(())
+    }
+
+    /// `Post::LIMIT`: the class is found by its symbol's name key; a class
+    /// not declared yet takes the string path, which autoloads it.
+    fn fetch_named_class_constant(
+        &mut self,
+        destination: Reg,
+        class: phera_bytecode::SymbolId,
+        name: phera_bytecode::NameId,
+    ) -> Result<(), NativeError> {
+        let frame = self
+            .current()
+            .ok_or_else(|| internal_error!("constant frame"))?;
+        let function = frame.frame.function;
+        let unit = frame.unit().clone();
+        let name = &unit.names[name.index()];
+        let written = &unit.symbols[class.index()].written;
+        let key = self.code.unit_symbol_key(function, class);
+        let value = match self.classes.by_key(key).cloned() {
+            Some(linked) => self.class_constant_resolved(
+                Some(linked),
+                written,
+                name,
+                crate::class_constants::ConstantAccess::Read,
+            )?,
+            None => self.named_class_constant_miss(written, name)?,
+        };
+        self.set(destination, value);
+        Ok(())
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn named_class_constant_miss(
+        &mut self,
+        class: &str,
+        name: &str,
+    ) -> phera_extension_api::NativeResult {
+        self.class_constant(class, name)
     }
 
     /// `Foo::class`, `self::class` and friends.
