@@ -3071,7 +3071,6 @@ dependencies = [
  "mysql_async",
  "phera-db-drivers",
  "phera-extension-api",
- "phera-io-pool",
 ]
 
 [[package]]
@@ -3144,7 +3143,6 @@ version = "0.1.0"
 dependencies = [
  "phera-db-drivers",
  "phera-extension-api",
- "phera-io-pool",
  "tokio",
 ]
 
@@ -3283,6 +3281,7 @@ name = "phera-ext-standard"
 version = "0.1.0"
 dependencies = [
  "indexmap",
+ "memchr",
  "nix",
  "phera-dotenv",
  "phera-extension-api",

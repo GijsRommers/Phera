@@ -103,11 +103,11 @@ impl Postgres {
             while let Some(row) = next(&mut source, &query).await? {
                 buffered.push(row);
             }
-            let mut formatted = VecDeque::with_capacity(buffered.len());
-            for row in buffered {
-                let text = text::convert(&self.client, &row, &query).await?;
-                formatted.push_back(Ok(Row { binary: row, text }));
-            }
+            let formatted = text::convert(&self.client, buffered, &query)
+                .await?
+                .into_iter()
+                .map(Ok)
+                .collect();
             Pending::Buffered(formatted)
         } else {
             Pending::Stream {

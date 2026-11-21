@@ -121,6 +121,20 @@ const CALLS: &[(&str, &str)] = &[
         return pg_fetch_row(pg_execute($db, 'q1', ['hello'])); })()",
     ),
     (
+        "text-result-groups",
+        r#"(function () use ($db) {
+            pg_query($db, "SET extra_float_digits TO 0; SET IntervalStyle TO 'iso_8601'");
+            $result = pg_query_params($db, "SELECT n, CASE WHEN n % 2 = 0 THEN TRUE END AS b,
+                CASE WHEN n % 3 = 0 THEN 'x'::character(4) END AS padded,
+                CASE WHEN n % 5 = 0 THEN '192.0.2.1'::inet END AS address,
+                CASE WHEN n % 7 = 0 THEN ARRAY[n, NULL] END AS a,
+                1.2345678901234567::float8 AS f, 12.50::numeric AS d, 12.50::money AS m,
+                '2 months -4 days 05:06:07'::interval AS i, decode('00ff', 'hex') AS bytes
+                FROM generate_series(1, $1::int) n ORDER BY n DESC", [130]);
+            $rows = pg_fetch_all($result);
+            return [count($rows), $rows[63], $rows[64], hash('sha256', serialize($rows))]; })()"#,
+    ),
+    (
         "send-query",
         "(function () use ($db) { $sent = pg_send_query($db, 'SELECT 1; SELECT 2');
         return [$sent, pg_fetch_row(pg_get_result($db)), pg_fetch_row(pg_get_result($db)),

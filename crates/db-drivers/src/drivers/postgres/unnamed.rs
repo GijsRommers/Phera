@@ -7,7 +7,7 @@ use std::sync::Arc;
 use futures_core::Stream;
 use tokio_postgres::types::{ToSql, Type};
 
-use super::{Postgres, Row, TextParameter, error, text};
+use super::{Postgres, TextParameter, error, text};
 use crate::drivers::RawRows;
 use crate::errors::DbError;
 use crate::parameters::BoundValue;
@@ -52,11 +52,7 @@ impl Postgres {
             binary.push(row);
         }
         let affected = stream.rows_affected().unwrap_or_default();
-        let mut rows = Vec::with_capacity(binary.len());
-        for row in binary {
-            let text = text::convert(&self.client, &row, &query).await?;
-            rows.push(Row { binary: row, text });
-        }
+        let rows = text::convert(&self.client, binary, &query).await?;
         Ok(RawRows::Postgres {
             columns,
             rows,

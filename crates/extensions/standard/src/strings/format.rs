@@ -10,15 +10,79 @@ use phera_extension_api::{
     Value, args,
 };
 
-use super::buffer;
-
 mod parser;
+mod render;
 mod value;
 
+use self::render::Formatter;
+pub use self::render::render;
+
 pub(super) fn register(registry: &mut Registry) {
+    registry.register_sync_selector("sprintf", |slots| {
+        scalar_arguments(slots).then_some(|context, arguments| {
+            format_sync(
+                context,
+                arguments,
+                "sprintf",
+                Values::Arguments,
+                Destination::Return,
+            )
+        })
+    });
+    registry.register_sync_selector("printf", |slots| {
+        scalar_arguments(slots).then_some(|context, arguments| {
+            format_sync(
+                context,
+                arguments,
+                "printf",
+                Values::Arguments,
+                Destination::Output,
+            )
+        })
+    });
+    registry.register_sync_selector("vsprintf", |slots| {
+        scalar_array(slots).then_some(|context, arguments| {
+            format_sync(
+                context,
+                arguments,
+                "vsprintf",
+                Values::Array,
+                Destination::Return,
+            )
+        })
+    });
+    registry.register_sync_selector("vprintf", |slots| {
+        scalar_array(slots).then_some(|context, arguments| {
+            format_sync(
+                context,
+                arguments,
+                "vprintf",
+                Values::Array,
+                Destination::Output,
+            )
+        })
+    });
     for entry in [SPRINTF, PRINTF, VSPRINTF, VPRINTF] {
         registry.function_with_native_frame(entry);
     }
+}
+
+fn scalar(value: &Value) -> bool {
+    !matches!(
+        value,
+        Value::Object(_) | Value::Reference(_) | Value::Array(_)
+    )
+}
+
+fn scalar_arguments(slots: &[Option<Value>]) -> bool {
+    slots
+        .iter()
+        .skip(1)
+        .all(|slot| slot.as_ref().is_some_and(scalar))
+}
+
+fn scalar_array(slots: &[Option<Value>]) -> bool {
+    matches!(slots, [_, Some(Value::Array(array))] if array.values().all(scalar))
 }
 
 /// Where the values come from: the arguments, or one array of them.
@@ -129,15 +193,8 @@ fn vprintf(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
     ))
 }
 
-async fn format(
-    context: &mut dyn Context,
-    arguments: Vec<Value>,
-    function: &str,
-    source: Values,
-    destination: Destination,
-) -> NativeResult {
-    let arguments = &arguments;
-    let values: Cow<[Value]> = match source {
+fn format_values(arguments: &[Value], source: Values) -> Cow<'_, [Value]> {
+    match source {
         Values::Arguments | Values::StreamArguments => Cow::Borrowed(&arguments[1..]),
         Values::Array => Cow::Owned(
             crate::arguments::required_array(arguments, 1)
@@ -145,81 +202,53 @@ async fn format(
                 .cloned()
                 .collect(),
         ),
-    };
+    }
+}
+
+fn format_sync(
+    context: &mut dyn Context,
+    arguments: &[Value],
+    function: &str,
+    source: Values,
+    destination: Destination,
+) -> NativeResult {
+    let values = format_values(arguments, source);
+    let mut formatter = Formatter::new(args::bytes(arguments, 0), &values)?;
+    if formatter.advance(context, function, source)?.is_some() {
+        return Err(NativeError::error(
+            "Object conversion requires the native call frame",
+        ));
+    }
+    Ok(destination.finish(context, formatter.result))
+}
+
+async fn format(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+    source: Values,
+    destination: Destination,
+) -> NativeResult {
+    let values = format_values(&arguments, source);
     let result = render(
         context,
-        args::bytes(arguments, 0),
+        args::bytes(&arguments, 0),
         &values,
         function,
         source,
     )
     .await?;
-    match destination {
-        Destination::Return => Ok(Value::from(result)),
-        Destination::Output => {
-            context.write(&result);
-            Ok(Value::Int(result.len() as i64))
-        }
-    }
+    Ok(destination.finish(context, result))
 }
 
-/// The whole result is built before anything is written, so `printf`
-/// writes nothing when a later specifier fails.
-pub async fn render(
-    context: &mut dyn Context,
-    format: &[u8],
-    values: &[Value],
-    function: &str,
-    source: Values,
-) -> Result<Vec<u8>, NativeError> {
-    let mut result = buffer(format.len())?;
-    let mut parser = parser::Parser::new(format, values);
-    while let Some(&byte) = format.get(parser.cursor) {
-        parser.cursor += 1;
-        if byte != b'%' {
-            result.push(byte);
-            continue;
-        }
-        if format.get(parser.cursor) == Some(&b'%') {
-            result.push(b'%');
-            parser.cursor += 1;
-            continue;
-        }
-        let Some((specifier, value)) = parser.specifier()? else {
-            continue;
-        };
-        let Some(text) = specifier
-            .convert(context, value, function, &mut result)
-            .await?
-        else {
-            continue;
-        };
-        specifier.append(&mut result, text)?;
-    }
-    if parser.needed > 0 {
-        return Err(too_few_values(source, parser.needed, values.len()));
-    }
-    Ok(result)
-}
-
-/// PHP's error when the format refers to more values than there are. The
-/// argument forms count the format as an argument too.
-fn too_few_values(source: Values, needed: usize, given: usize) -> NativeError {
-    match source {
-        Values::Array => NativeError::value_error(format!(
-            "The arguments array must contain {needed} items, {given} given"
-        )),
-        Values::Arguments | Values::StreamArguments => {
-            let preceding = if source == Values::StreamArguments {
-                2
-            } else {
-                1
-            };
-            NativeError::argument_count_error(format!(
-                "{} arguments are required, {} given",
-                needed + preceding,
-                given + preceding,
-            ))
+impl Destination {
+    fn finish(self, context: &mut dyn Context, result: Vec<u8>) -> Value {
+        match self {
+            Self::Return => Value::from(result),
+            Self::Output => {
+                context.write(&result);
+                Value::Int(result.len() as i64)
+            }
         }
     }
 }

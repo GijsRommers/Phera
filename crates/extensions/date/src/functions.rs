@@ -47,10 +47,12 @@ pub fn idate(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let date = DateFormat::new(timestamp, &zone::current(context), false);
     let value = match format[0] {
         b'd' | b'j' | b'N' | b'w' | b'z' | b'W' | b'm' | b'n' | b't' | b'L' | b'y' | b'B'
-        | b'g' | b'h' | b'H' | b'G' | b'i' | b's' | b'I' | b'Z' => date
-            .letter(format[0])
-            .and_then(|text| text.parse().ok())
-            .unwrap_or_default(),
+        | b'g' | b'h' | b'H' | b'G' | b'i' | b's' | b'I' | b'Z' => {
+            std::str::from_utf8(&date.render(format))
+                .ok()
+                .and_then(|text| text.parse().ok())
+                .unwrap_or_default()
+        }
         b'Y' => i64::from(date.civil.year as i32),
         b'o' => i64::from(date.civil.iso_week().0 as i32),
         b'U' => i64::from(timestamp as i32),

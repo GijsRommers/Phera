@@ -19,7 +19,7 @@ pub(super) enum NativeArguments {
 }
 
 impl NativeArguments {
-    fn as_slice(&self) -> &[Value] {
+    pub(super) fn as_slice(&self) -> &[Value] {
         match self {
             Self::Empty => &[],
             Self::One(value) => std::slice::from_ref(value),

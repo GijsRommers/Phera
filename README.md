@@ -32,7 +32,12 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | WordPress | `mysqli` and the engine fixes it needed are in. The end-to-end comparison with PHP has not been repeated since |
 | PHP's own test suite (php-src) | 9,136 of the 13,388 core tests pass. Of 4,542 tests for the later extensions (dom, the XML family, openssl, session, curl, intl and others) 1,737 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | About 2.2 times PHP's instruction count for one Laravel API request in production mode: 37 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 160 million against 27 million, 5.9 times. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
+| Speed of a framework request | About 2.2 times PHP's instruction count for one Laravel API request in production mode: 36 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 153 million against 27 million, 5.6 times. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
+
+Phera validates union and intersection declarations during compilation and
+checks inherited property types when linking classes. Ordinary typed
+parameters with a literal `null` default accept `null` and emit PHP's
+implicit-nullability deprecation.
 
 ## 🧰 The `phera` command
 
@@ -233,6 +238,21 @@ includes `getimagesize()` and `exif_imagetype()`. Compatibility limits are
 listed in the [GD coverage notes](crates/extensions/gd/README.md).
 
 Not started: zip, sockets.
+
+### Database connection pool
+
+MySQL and PostgreSQL sockets stay on the worker that opens them.
+`PHERA_PDO_POOL_SIZE` (20 by default) limits pooled sockets to each database
+across the process. An idle worker can close one of its sockets when
+another worker is waiting for a turn. `PHERA_PDO_POOL_IDLE_SECONDS` (60),
+`PHERA_PDO_POOL_LIFETIME_SECONDS` (1800) and
+`PHERA_PDO_POOL_WAIT_SECONDS` (30) control the pool's timeouts.
+`PHERA_PDO_IO_THREADS` is accepted for compatibility and has no effect.
+Unpooled connections, including PDO with `PHERA_ATTR_POOL => false` and
+nonpersistent mysqli and pgsql connections opened by a request, are outside
+the pool limit. Each fork reconnects a boot connection on first use and
+replays the boot's session changes. The fork can borrow a pooled socket for
+a nonpersistent mysqli or pgsql connection opened during boot.
 
 ### Sodium
 

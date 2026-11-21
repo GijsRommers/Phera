@@ -7,11 +7,12 @@ use crate::classes::MethodContext;
 /// Resolve keywords before binding while the caller is still the active frame.
 pub(crate) fn parameter_type(declaration: &Type, context: &MethodContext) -> Type {
     let mut declaration = declaration.clone();
+    let separators = ['|', '&', '?', '(', ')'];
     declaration.display = declaration
         .display
-        .split_inclusive(['|', '&', '?'])
+        .split_inclusive(separators)
         .map(|part| {
-            let name = part.trim_end_matches(['|', '&', '?']);
+            let name = part.trim_end_matches(separators);
             let suffix = &part[name.len()..];
             let resolved = match name {
                 "self" => context.scope.name.as_str(),

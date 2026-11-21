@@ -12,10 +12,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use phera_extension_api::Value;
-use phera_io_pool::{Options, Pool};
+use phera_io_pool::Options;
 
-use super::{Key, Lease, Policy, RUNTIME, acquire, acquire_from};
-use crate::drivers::{Driver, Prepared, Rows};
+use super::{Lease, Policy, Pool, acquire, acquire_from};
+use crate::drivers::{Prepared, Rows};
 use crate::dsn::Dsn;
 use crate::errors::DbError;
 use crate::placeholders::Sql;
@@ -40,18 +40,18 @@ fn options(size: usize) -> Options {
     }
 }
 
-/// A pool of its own with small limits, on the process's I/O runtime.
+/// An independent pool with small limits.
 #[derive(Clone)]
 struct TestPool {
     name: &'static str,
-    pool: Arc<Pool<Key, Driver>>,
+    pool: Arc<Pool>,
 }
 
 impl TestPool {
     fn new(name: &'static str, options: Options) -> Self {
         Self {
             name,
-            pool: Arc::new(Pool::with_options(&RUNTIME, options)),
+            pool: Arc::new(Pool::with_options(options)),
         }
     }
 
@@ -66,7 +66,7 @@ impl TestPool {
 
 /// A connection outside every pool, to watch or kill the pooled ones.
 async fn direct(name: &str) -> Lease {
-    acquire(&dsn(name), USER, USER, Policy::Unpooled)
+    acquire(&dsn(name), USER, USER, Policy::Unpooled, false)
         .await
         .unwrap()
 }
@@ -84,7 +84,7 @@ async fn rows(driver: &mut Lease, sql: &str) -> Rows {
 }
 
 async fn scalar(driver: &mut Lease, sql: &str) -> Value {
-    rows(driver, sql).await.values[0][0].clone()
+    rows(driver, sql).await.values.get(0).unwrap()[0].clone()
 }
 
 /// The server's id for the session, which tells whether two leases got the
@@ -105,8 +105,11 @@ async fn process_pool_live_contract() {
     for name in ["pgsql", "mysql"] {
         // These run before the tests of the process pool, so that the server's
         // connection counts are not mixed with its connections.
-        threads::bounded_users(name).await;
+        threads::bounded_workers(name, 1, 4).await;
+        threads::bounded_workers(name, 8, 2).await;
+        threads::idle_handoff(name).await;
         limits::fifo_timeout_cancellation(name).await;
+        limits::interrupted_socket_is_retired(name).await;
         limits::expiry_and_killed(name).await;
         let pool = TestPool::new(name, options(1));
         let mut first = pool.connect().await;
@@ -122,23 +125,23 @@ async fn process_pool_live_contract() {
         if name == "pgsql" {
             isolation::custom_types_retire_client().await;
         }
-        threads::shared_registry(name).await;
+        threads::slow_query_yields_to_another_connection(name).await;
         let mut other_dsn = dsn(name);
         other_dsn.fields.insert("host".into(), "localhost".into());
-        let mut first = acquire(&dsn(name), USER, USER, Policy::Pooled)
+        let mut first = acquire(&dsn(name), USER, USER, Policy::Pooled, false)
             .await
             .unwrap();
-        let mut other = acquire(&other_dsn, USER, USER, Policy::Pooled)
+        let mut other = acquire(&other_dsn, USER, USER, Policy::Pooled, false)
             .await
             .unwrap();
         assert_ne!(id(&mut first, name).await, id(&mut other, name).await);
         assert!(
-            acquire(&dsn(name), USER, "incorrect", Policy::Pooled)
+            acquire(&dsn(name), USER, "incorrect", Policy::Pooled, false)
                 .await
                 .is_err()
         );
         eprintln!(
-            "{name}: reuse, isolation, keys, cross-worker sharing, FIFO, expiry, kill passed"
+            "{name}: reuse, isolation, keys, worker-local sockets, FIFO, expiry, kill passed"
         );
     }
 }
