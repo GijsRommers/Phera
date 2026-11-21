@@ -1,5 +1,6 @@
 //! Monomorphic property sites retain visibility decisions, never property values.
 
+use crate::classes::property_facts::PropertyFacts;
 use crate::{
     AccessPath, Vm,
     property_hook_sites::CachedPropertyHooks,
@@ -73,7 +74,7 @@ impl PropertyEntry {
             return false;
         }
         crate::property_storage::write_direct_known(object, self.known(), value, || {
-            !has_magic_properties(object) && object.lazy().is_none()
+            self.write_rule.may_create() && !has_magic_properties(object) && object.lazy().is_none()
         })
     }
 
@@ -247,6 +248,27 @@ impl Vm {
                     },
                 }
             }
+            // A name a static property of the class has gets PHP's notice
+            // on the general path.
+            None if class.is_some_and(|class| {
+                class
+                    .static_properties
+                    .iter()
+                    .any(|property| property.name == *name)
+            }) =>
+            {
+                WriteRule::General
+            }
+            None => match class.map(crate::classes::Class::property_facts) {
+                Some(facts)
+                    if !facts.has(PropertyFacts::MAGIC_SET)
+                        && !facts.has(PropertyFacts::HOOKS)
+                        && !facts.has(PropertyFacts::READONLY) =>
+                {
+                    WriteRule::Undeclared(facts.has(PropertyFacts::DYNAMIC))
+                }
+                _ => WriteRule::General,
+            },
             _ => WriteRule::General,
         };
         let entry = Rc::new(PropertyEntry {
@@ -413,7 +435,13 @@ enum WriteRule {
     /// was made: an object fits when its class is one of them or extends or
     /// implements one (all of them, for an intersection).
     TypedClasses(TypeMask, Rc<ClassTargets>),
-    /// Readonly, or not a declared property: always take the full path.
+    /// A property the class does not declare, of a class with no `__set`,
+    /// no hooks and nothing readonly: any value fits. One that does not
+    /// exist yet is made here only when the class allows that without a
+    /// deprecation (`true`: `stdClass`, `#[AllowDynamicProperties]`).
+    Undeclared(bool),
+    /// Readonly, or a property whose writes need more: always take the
+    /// full path.
     General,
 }
 
@@ -428,7 +456,7 @@ impl WriteRule {
     /// Whether a value of this built-in type may be stored as it is.
     fn allows(&self, own_type: TypeMask) -> bool {
         match self {
-            WriteRule::Untyped => true,
+            WriteRule::Untyped | WriteRule::Undeclared(_) => true,
             WriteRule::Typed(declared) | WriteRule::TypedClasses(declared, _) => {
                 declared.intersects(own_type)
             }
@@ -458,6 +486,12 @@ impl WriteRule {
         } else {
             targets.classes.iter().any(derives)
         }
+    }
+
+    /// Whether a write may make the property when the object does not have
+    /// it yet: all but an undeclared property of a class that warns.
+    fn may_create(&self) -> bool {
+        !matches!(self, WriteRule::Undeclared(false))
     }
 
     /// `public float $x` assigned an int stores the float, as PHP does.
@@ -544,7 +578,11 @@ impl Vm {
             &entry.key,
             entry.slot(),
             value,
-            || !has_magic_properties(&object) && object.lazy().is_none(),
+            || {
+                entry.write_rule.may_create()
+                    && !has_magic_properties(&object)
+                    && object.lazy().is_none()
+            },
         ) {
             return Ok(false);
         }
