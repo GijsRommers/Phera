@@ -1,4 +1,5 @@
-//! `MakeCallable`, `ReceiveDefault` and `DeclareFunction`.
+//! `MakeCallable`, `ReceiveDefault`, `DeclareFunction` and the start of a
+//! method site's written-out call.
 
 use phera_bytecode::{FunctionId, Reg, Target};
 use phera_extension_api::NativeError;
@@ -7,6 +8,25 @@ use phera_value::Value;
 use crate::Vm;
 
 impl Vm {
+    /// `CallMethod` that the loop handed over: run the `InitMethodCall` that
+    /// follows it and go on after that, with the sends.
+    pub(crate) fn start_written_out_call<const TRACK_GENERATORS: bool>(
+        &mut self,
+    ) -> Result<(), NativeError> {
+        let frame = self.current().ok_or_else(|| internal_error!("no frame"))?;
+        let ip = frame.ip();
+        let Some(&phera_bytecode::Instruction::InitMethodCall { receiver, method }) =
+            frame.function().instructions.get(ip)
+        else {
+            return Err(internal_error!("a method site without its InitMethodCall"));
+        };
+        self.jump(Target(ip as u32 + 1))?;
+        if !(TRACK_GENERATORS && self.prepare_ready_native_method(receiver, method)) {
+            self.init_method_call::<TRACK_GENERATORS>(receiver, method)?;
+        }
+        Ok(())
+    }
+
     /// Implements PHP MakeCallable semantics outside the dispatch loop.
     pub(crate) fn make_callable(&mut self, destination: Reg) -> Result<(), NativeError> {
         let callee = self.take_prepared_callee()?;

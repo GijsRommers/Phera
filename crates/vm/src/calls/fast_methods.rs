@@ -161,7 +161,11 @@ impl Machine<'_> {
             SiteOutcome::Getter(getter) => {
                 self.run_site_getter(position, site, &object, getter, destination)
             }
-            SiteOutcome::Native | SiteOutcome::Vm => Step::Done(position.ip),
+            // Prepared here as the following `InitMethodCall` would, and
+            // its sends run next.
+            SiteOutcome::Native => self.prepare_site_native(position, &object, class, site),
+            // The VM runs the following `InitMethodCall` itself.
+            SiteOutcome::Vm => Step::Slow,
         }
     }
 
@@ -207,6 +211,37 @@ impl Machine<'_> {
             }
             MethodBody::Native(_) => SiteOutcome::Native,
             _ => SiteOutcome::Vm,
+        }
+    }
+
+    /// A method site whose method is native: found again by its key (the
+    /// record says only that it is native) and prepared as the following
+    /// `InitMethodCall` prepares it, with the sends after that running next;
+    /// the general sequence for whatever that leaves to the VM.
+    #[cold]
+    #[inline(never)]
+    fn prepare_site_native(
+        &mut self,
+        position: Position,
+        object: &Rc<Object>,
+        class: &Class,
+        site: &MethodSite,
+    ) -> Step {
+        let key = self
+            .code
+            .unit_name_key(position.frame.function, site.method);
+        let Some(found) = self.classes.method_table(class).get(key) else {
+            return Step::Done(position.ip);
+        };
+        // Owned, so that the preparation may change the machine.
+        let found = (found.method.clone(), found.scope.clone());
+        let sends = Position {
+            frame: position.frame,
+            ip: position.ip + 1,
+        };
+        match self.prepare_native_site(sends, object, (class, key, found)) {
+            Step::Slow => Step::Done(position.ip),
+            step => step,
         }
     }
 
@@ -316,6 +351,65 @@ impl Machine<'_> {
         );
         self.stack.push_call(call, None);
         Step::Done(sends)
+    }
+
+    /// A method site whose method is native: prepared as `InitMethodCall`
+    /// prepares it, with `sends` as the position after it (a getter with no
+    /// arguments runs at once there, its `Call` being next). `Step::Slow`
+    /// for whatever that preparation leaves to the VM.
+    #[cold]
+    #[inline(never)]
+    fn prepare_native_site(
+        &mut self,
+        sends: Position,
+        object: &Rc<Object>,
+        (class, key, (method, scope)): (&Class, NameKey, FoundParts),
+    ) -> Step {
+        let found = FoundMethod {
+            method: &method,
+            scope: &scope,
+        };
+        self.prepare_found_native(sends, object, (class, key), &found)
+    }
+
+    /// `InitMethodCall` of a native method, as [`Machine::prepare_method`]
+    /// prepares it, for a method site that found the method by `key`: a
+    /// getter with no parameters whose `Call` comes next runs at once, any
+    /// other public native method is described for its `Call`.
+    fn prepare_found_native(
+        &mut self,
+        position: Position,
+        object: &Rc<Object>,
+        (class, key): (&Class, NameKey),
+        found: &FoundMethod<'_>,
+    ) -> Step {
+        let method = found.method;
+        let MethodBody::Native(entry) = method.body else {
+            return Step::Slow;
+        };
+        if method.is_abstract
+            || method.is_static
+            || class.name == "Closure"
+            || class.name == "Generator"
+        {
+            return Step::Slow;
+        }
+        if entry.direct.is_some()
+            && entry.params.is_empty()
+            && let Some((destination, value)) =
+                self.run_direct_getter(position, object, (found, key))
+        {
+            self.registers
+                .put(position.frame.base() + destination.index(), value);
+            return Step::Done(position.ip + 1);
+        }
+        let Some((context, method)) = self.native_class_method((object, class), found, key) else {
+            return Step::Slow;
+        };
+        match entry.direct {
+            Some(_) => self.prepare_direct_method(position, context, method, entry),
+            None => self.prepare_native_method(position, context, method),
+        }
     }
 
     /// The class scope of the code at `position`: for a method, the class
@@ -568,3 +662,6 @@ fn descends_from(class: &Rc<Class>, ancestor: &Class) -> bool {
     }
     false
 }
+
+/// A found method held by value: the method and the class that declares it.
+type FoundParts = (Rc<crate::classes::Method>, std::rc::Weak<Class>);
