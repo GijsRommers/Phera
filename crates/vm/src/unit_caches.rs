@@ -52,6 +52,10 @@ pub(crate) struct ClassTypeEntry {
     pub(crate) matches: bool,
 }
 
+/// A native getter's direct handler (`MethodEntry::direct`).
+pub(crate) type Getter =
+    fn(&phera_value::Object, &[Option<phera_value::Value>]) -> Option<phera_value::Value>;
+
 /// The method site records of one function, one per site.
 pub(crate) type Records = OnceCell<Box<[Cell<SiteRecord>]>>;
 
@@ -59,19 +63,23 @@ pub(crate) type Records = OnceCell<Box<[Cell<SiteRecord>]>>;
 /// depends only on the class and on the scope the site is written in, so
 /// the next call with a receiver of the same class needs no lookup. A
 /// receiver of another class looks the method up and replaces the record.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub(crate) struct SiteRecord {
     pub(crate) class: Option<crate::classes::ClassIndex>,
     pub(crate) outcome: SiteOutcome,
 }
 
 /// How a method site calls the method it found.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub(crate) enum SiteOutcome {
     /// A method written in PHP the site's scope may call: entered from the
     /// site.
     Enter(crate::code_table::FunctionIndex),
-    /// A native method: the written-out `InitMethodCall` prepares it.
+    /// A public native getter with no parameters and a direct handler
+    /// (`$method->getName()`): the site runs it and stores its value.
+    Getter(Getter),
+    /// Any other native method: the general sequence that follows prepares
+    /// and calls it.
     Native,
     /// The VM prepares it (`__call`, an error, a closure, a generator).
     Vm,

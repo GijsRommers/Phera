@@ -158,6 +158,9 @@ impl Machine<'_> {
             SiteOutcome::Enter(function) => {
                 self.enter_site_method(position, (body, site), function, object, destination)
             }
+            SiteOutcome::Getter(getter) => {
+                self.run_site_getter(position, site, &object, getter, destination)
+            }
             SiteOutcome::Native | SiteOutcome::Vm => Step::Done(position.ip),
         }
     }
@@ -192,9 +195,42 @@ impl Machine<'_> {
             MethodBody::Native(_) if class.name == "Closure" || class.name == "Generator" => {
                 SiteOutcome::Vm
             }
+            // A getter, as `run_direct_getter` takes it for `InitMethodCall`.
+            MethodBody::Native(entry)
+                if site.arguments == 0
+                    && entry.params.is_empty()
+                    && method.visibility == Visibility::Public
+                    && !self.shadowed_by_private(self.caller_scope(position), key, method)
+                    && let Some(getter) = entry.direct =>
+            {
+                SiteOutcome::Getter(getter)
+            }
             MethodBody::Native(_) => SiteOutcome::Native,
             _ => SiteOutcome::Vm,
         }
+    }
+
+    /// A method site whose method is a native getter: its value goes where
+    /// the call's result goes, and the caller goes on after the call. A lazy
+    /// object, or a getter that declines, takes the general sequence.
+    #[inline(always)]
+    fn run_site_getter(
+        &mut self,
+        position: Position,
+        site: &MethodSite,
+        object: &Rc<Object>,
+        getter: crate::unit_caches::Getter,
+        destination: Reg,
+    ) -> Step {
+        if self.classes.has_lazy_objects && object.lazy().is_some() {
+            return Step::Done(position.ip);
+        }
+        let Some(value) = getter(object, &[]) else {
+            return Step::Done(position.ip);
+        };
+        self.registers
+            .put(position.frame.base() + destination.index(), value);
+        Step::Done(site.after.index())
     }
 
     /// Enter the PHP method `function` of method site `site` with `object`

@@ -71,6 +71,10 @@ function aroundTry(Shape $shape, int $i): string {
     return "$before $inside $after " . $shape->add($i);
 }
 echo aroundTry($shape, $i), "\n";
+foreach ((new ReflectionClass(Shape::class))->getMethods() as $method) {
+    echo $method->getName(), $method->isStatic() ? ' static' : '', ' ', $method->getReturnType() ?? '-', "; ";
+}
+echo "\n";
 function recursive(Shape $shape, int $depth): int { return $depth === 0 ? 0 : 1 + recursive($shape, $shape->add($depth, -1)); }
 echo recursive($shape, 3), "\n";
 "#;
