@@ -104,7 +104,7 @@ impl Machine<'_> {
     /// sends written out at the site's fallback run next; where the VM must
     /// prepare it (`__call`, an error, a closure or a generator), the
     /// instruction goes to the VM, which starts the written-out call.
-    #[inline(always)]
+    #[inline(never)]
     pub(super) fn call_method(
         &mut self,
         position: Position,
@@ -152,6 +152,11 @@ impl Machine<'_> {
         };
         let function = match method.body {
             MethodBody::User(function) => function,
+            // `Closure::__invoke` and the methods of a generator have
+            // their own preparation in the VM.
+            MethodBody::Native(_) if class.name == "Closure" || class.name == "Generator" => {
+                return Step::Slow;
+            }
             MethodBody::Native(_) => {
                 // Owned, so that the preparation may change the machine.
                 let found = (found.method.clone(), found.scope.clone());
