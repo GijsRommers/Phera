@@ -184,8 +184,8 @@ impl Vm {
     /// Acquiring a PHP alias initializes a nullable static slot to null.
     pub(crate) fn acquire_static_property_reference(
         &mut self,
-        class: phera_bytecode::Reg,
-        name: phera_bytecode::Reg,
+        class: crate::static_places::StaticClass,
+        name: crate::static_places::StaticName,
     ) -> Result<(), phera_extension_api::NativeError> {
         let (class_name, name) = self.static_property_names(class, name)?;
         let class = self
@@ -219,8 +219,8 @@ impl Vm {
     /// Rebinding replaces the shared static slot, leaving the previous alias unconstrained.
     pub(crate) fn bind_static_property_reference(
         &mut self,
-        class: phera_bytecode::Reg,
-        name: phera_bytecode::Reg,
+        class: crate::static_places::StaticClass,
+        name: crate::static_places::StaticName,
         value: Value,
     ) -> Result<(), phera_extension_api::NativeError> {
         let (class_name, name) = self.static_property_names(class, name)?;

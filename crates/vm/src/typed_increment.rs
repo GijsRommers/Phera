@@ -4,7 +4,7 @@ use crate::{
     AccessPath, Vm, classes::class::PropertyDefault, inline_stack::InlineStack,
     path_update::PathKey, typed_references::reference_property_name,
 };
-use phera_bytecode::{IncDec, PathBase, Reg, TypeMask};
+use phera_bytecode::{IncDec, Reg, TypeMask};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object, Value};
 use std::{cell::RefCell, rc::Rc};
@@ -95,7 +95,7 @@ impl Vm {
     ) -> Result<(), NativeError> {
         self.check_increment_target(&self.raw_local(register), keys, limit)?;
         if keys.iter().next().is_none()
-            && let PathBase::StaticProperty { class, name, .. } = place.base()?
+            && let Some((class, name)) = crate::static_places::static_base(place.base()?)
         {
             let (class, name) = self.static_property_names(class, name)?;
             if let Some(class) = self.classes.get(&class)

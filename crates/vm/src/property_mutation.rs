@@ -9,8 +9,8 @@ impl Vm {
     /// An indexed write that promotes an empty static slot initializes it on success.
     pub(crate) fn prepare_static_array_promotion(
         &mut self,
-        class: phera_bytecode::Reg,
-        name: phera_bytecode::Reg,
+        class: crate::static_places::StaticClass,
+        name: crate::static_places::StaticName,
     ) -> Result<std::rc::Rc<crate::reference_holders::StaticProperty>, NativeError> {
         let (class_name, name) = self.static_property_names(class, name)?;
         let class = self
@@ -91,8 +91,8 @@ impl Vm {
     /// Static property assignments enforce their declaration before replacing the shared cell.
     pub(crate) fn validate_static_mutation(
         &mut self,
-        class: phera_bytecode::Reg,
-        name: phera_bytecode::Reg,
+        class: crate::static_places::StaticClass,
+        name: crate::static_places::StaticName,
         value: &mut Value,
         change: PropertyChange,
     ) -> Result<(), NativeError> {

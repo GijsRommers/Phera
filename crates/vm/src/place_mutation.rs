@@ -40,7 +40,7 @@ impl Vm {
             }
             return Ok(());
         }
-        if let PathBase::StaticProperty { class, name, .. } = place.base()?
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?)
             && place.steps()?.next().is_none()
         {
             let change = match binding {
@@ -79,7 +79,8 @@ impl Vm {
         mut value: Value,
         binding: Binding,
     ) -> Result<(), NativeError> {
-        let static_promotion = if let PathBase::StaticProperty { class, name, .. } = place.base()?
+        let static_promotion = if let Some((class, name)) =
+            crate::static_places::static_base(place.base()?)
             && let Some(first) = keys.iter().next()
         {
             let current = self.get(register);
@@ -175,7 +176,7 @@ impl Vm {
         register: phera_bytecode::Reg,
         keys: crate::inline_stack::InlineStack<PathKey>,
     ) -> NativeResult {
-        if let PathBase::StaticProperty { class, name, .. } = place.base()? {
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
             self.validate_static_mutation(class, name, &mut Value::Null, PropertyChange::Indirect)?;
         }
         let mut raw = self.raw_local(register);
@@ -253,7 +254,7 @@ impl Vm {
         }
         drop(steps);
         if matches!(raw, Value::Reference(_)) {
-            if let PathBase::StaticProperty { class, name, .. } = place.base()?
+            if let Some((class, name)) = crate::static_places::static_base(place.base()?)
                 && place.steps()?.next().is_none()
             {
                 self.acquire_static_property_reference(class, name)?;
@@ -275,7 +276,7 @@ impl Vm {
 
     /// Remove the slot itself without assigning null through an existing alias.
     pub(crate) fn unset_place(&mut self, place: &AccessPath) -> Result<(), NativeError> {
-        if let PathBase::StaticProperty { class, name, .. } = place.base()?
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?)
             && place.steps()?.next().is_none()
         {
             let (class, name) = self.static_property_names(class, name)?;
@@ -288,7 +289,7 @@ impl Vm {
                 class.name
             )));
         }
-        if let PathBase::StaticProperty { class, name, .. } = place.base()? {
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
             self.validate_static_mutation(class, name, &mut Value::Null, PropertyChange::Indirect)?;
         }
         let Some(register) = self.base_register(place, Creation::Existing, Missing::Silent)? else {
