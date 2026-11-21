@@ -36,7 +36,7 @@ use tokio_postgres::{Client, SimpleQueryMessage, Statement};
 use super::{Column, Execution, Prepared, RawRows, connection_error};
 use crate::errors::DbError;
 use crate::parameters::{BoundValue, literal, quote};
-use crate::placeholders::Sql;
+use crate::placeholders::{Sql, Syntax};
 
 /// The status byte of PostgreSQL's last ReadyForQuery message: `I` idle,
 /// `T` in a transaction, `E` in a failed transaction.
@@ -174,15 +174,27 @@ impl Postgres {
                     .await;
             }
             Prepared::Emulated => {
+                if !values.is_empty() {
+                    sql.check_emulation()?;
+                }
+                let backslash_strings = !values.is_empty()
+                    && (sql.has_sensitive_quotes()
+                        || values
+                            .iter()
+                            .any(|value| matches!(value, BoundValue::String(_))))
+                    && self.backslash_strings().await?;
+                if !values.is_empty() && sql.has_sensitive_quotes() {
+                    sql.check_string_mode(Syntax::Postgres { backslash_strings })?;
+                }
                 let mut literals = Vec::new();
                 for value in values {
                     literals.push(match value {
-                        BoundValue::String(bytes) => self.quote(bytes).await?,
+                        BoundValue::String(bytes) => quote_string(bytes, backslash_strings),
                         value => literal(value, false),
                     });
                 }
                 let rendered = if values.is_empty() {
-                    sql.source.clone()
+                    sql.unbound_sql().into_owned()
                 } else {
                     sql.render(|i| literals[i].clone())
                 };
@@ -276,21 +288,19 @@ impl Postgres {
     }
 
     pub async fn quote(&self, bytes: &[u8]) -> Result<String, DbError> {
+        Ok(quote_string(bytes, self.backslash_strings().await?))
+    }
+
+    pub async fn backslash_strings(&self) -> Result<bool, DbError> {
         let rows = self
             .client
             .simple_query("SHOW standard_conforming_strings")
             .await
             .map_err(|e| error(e, ""))?;
-        let escape = rows.iter().any(|row| {
+        Ok(rows.iter().any(|row| {
             matches!(row,
             SimpleQueryMessage::Row(row) if row.get(0) == Some("off"))
-        });
-        let quoted = quote(bytes, false);
-        Ok(if escape {
-            quoted.replace('\\', "\\\\")
-        } else {
-            quoted
-        })
+        }))
     }
 
     pub async fn last_id(&self, name: Option<&str>) -> Result<String, DbError> {
@@ -305,5 +315,14 @@ impl Postgres {
         .map_err(|e| error(e, ""))?;
         let id: i64 = row.try_get(0).map_err(|e| error(e, ""))?;
         Ok(id.to_string())
+    }
+}
+
+fn quote_string(bytes: &[u8], backslash_strings: bool) -> String {
+    let quoted = quote(bytes, false);
+    if backslash_strings {
+        quoted.replace('\\', "\\\\")
+    } else {
+        quoted
     }
 }
