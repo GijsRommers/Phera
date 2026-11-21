@@ -840,8 +840,9 @@ async fn forty_shared_enums_keep_their_cases_per_request() {
 /// A fork shares the snapshot's code table and the cells the boot filled,
 /// and copies a table only when its request changes it. Each request below
 /// changes one of them (declares a class of its own under a name another
-/// request uses differently, loads a file, composes a trait method, fills a
-/// property site and a method site with a class the boot never saw); every
+/// request uses differently, loads a file, composes a trait method, links a
+/// function symbol the boot left unlinked, fills a property site and a
+/// method site with a class the boot never saw); every
 /// other request, at the same time or after it, and the snapshot see none
 /// of it.
 #[tokio::test(flavor = "current_thread")]
@@ -870,6 +871,10 @@ async fn a_forks_code_table_and_caches_are_its_own_when_it_changes_them() {
         function slow(): void { usleep(3000); }
         function doubled(): int { return array_sum(array_map(fn(int $x) => $x * 2, [1, 2])) + strlen('ab'); }
         function bound_n(object $o): int { return (fn() => $this->n)->call($o); }
+        function via_symbol(): string {
+            return (function_exists('loaded_a') ? loaded_a() : 0) . '/' . (function_exists('loaded_b') ? loaded_b() : 0);
+        }
+        via_symbol();
         call_name(new Boot); read_n(new Boot); (new Boot)->hi(); doubled(); bound_n(new Boot);
         Phera\snapshot();
         $mode = $_GET['mode'] ?? 'plain';
@@ -892,6 +897,7 @@ async fn a_forks_code_table_and_caches_are_its_own_when_it_changes_them() {
         $out[] = call_name(new Boot);
         $out[] = read_n(new Boot) + bound_n(new Boot) + doubled();
         $out[] = (new Boot)->hi();
+        $out[] = via_symbol();
         $out[] = (class_exists('Other', false) ? 'O' : 'o')
             . (function_exists('loaded_a') ? 'A' : 'a')
             . (function_exists('loaded_b') ? 'B' : 'b');
@@ -900,9 +906,9 @@ async fn a_forks_code_table_and_caches_are_its_own_when_it_changes_them() {
     )
     .expect("index.php");
     let expected = |mode: &str| match mode {
-        "a" => "other-a,20,hi base,boot,10,hi boot,OAb",
-        "b" => "other-b,40,hi base,boot,10,hi boot,OaB",
-        _ => "boot,10,hi boot,oab",
+        "a" => "other-a,20,hi base,boot,10,hi boot,1/0,OAb",
+        "b" => "other-b,40,hi base,boot,10,hi boot,0/2,OaB",
+        _ => "boot,10,hi boot,0/0,oab",
     };
     let local = tokio::task::LocalSet::new();
     local
