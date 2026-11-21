@@ -423,3 +423,36 @@ pub(crate) fn widen_property_value(value: Value, ty: Option<&phera_bytecode::Typ
     ty.and_then(|ty| crate::types::widen_int_to_float(&value, ty.mask))
         .unwrap_or(value)
 }
+
+/// How many classes the ancestry walk keeps waiting at once, and how many
+/// it visits in all (an interface reached along two paths is visited
+/// twice). Real hierarchies stay far below both; a larger one answers
+/// `None`, for the caller's general path.
+const WALK_DEPTH: usize = 32;
+const WALK_VISITS: usize = 256;
+
+impl Class {
+    /// Whether this class is `target`, extends it or implements it: the same
+    /// ancestry as `Class::ancestors`, its parent and interfaces and theirs.
+    /// `None` when the walk outgrows its stack or its visits.
+    pub(crate) fn derives_from(&self, target: &Class) -> Option<bool> {
+        let mut waiting: [Option<&Class>; WALK_DEPTH] = [None; WALK_DEPTH];
+        waiting[0] = Some(self);
+        let mut count: usize = 1;
+        for _ in 0..WALK_VISITS {
+            let Some(last) = count.checked_sub(1) else {
+                return Some(false);
+            };
+            count = last;
+            let class = waiting.get(last).copied().flatten()?;
+            if std::ptr::eq(class, target) {
+                return Some(true);
+            }
+            for ancestor in class.parent.iter().chain(&class.interfaces) {
+                *waiting.get_mut(count)? = Some(&**ancestor);
+                count += 1;
+            }
+        }
+        None
+    }
+}

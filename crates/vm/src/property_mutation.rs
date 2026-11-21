@@ -30,16 +30,20 @@ impl Vm {
         if let Some(float) = crate::types::widen_int_to_float(&value, declaration_type.mask) {
             return Ok(float);
         }
+        let parent = self
+            .classes
+            .get(&property.declaring)
+            .and_then(|declaring| declaring.parent.as_ref().map(|parent| parent.name.clone()));
         if let Value::Object(object) = &*value.deref() {
             let matches = declaration_type
                 .display
                 .trim_start_matches('?')
                 .split('|')
                 .any(|name| {
-                    let name = if name == "self" {
-                        property.declaring.as_str()
-                    } else {
-                        name
+                    let name = match name {
+                        "self" => property.declaring.as_str(),
+                        "parent" => parent.as_deref().unwrap_or(name),
+                        name => name,
                     };
                     self.classes
                         .get(object.class.name())
@@ -59,7 +63,11 @@ impl Vm {
                 "Cannot assign {actual} to property {}::${} of type {}",
                 property.declaring,
                 property.name,
-                crate::types::php_type_display(declaration_type)
+                resolved_type_display(
+                    &crate::types::php_type_display(declaration_type),
+                    &property.declaring,
+                    parent.as_deref(),
+                )
             ))
         })
     }
@@ -303,4 +311,29 @@ impl Vm {
             );
         }
     }
+}
+
+/// A property type as PHP prints it in a TypeError: `self` and `parent`
+/// are the classes they stand for, from the declaring class.
+fn resolved_type_display(display: &str, declaring: &str, parent: Option<&str>) -> String {
+    let mut resolved = String::with_capacity(display.len());
+    let mut atom = String::new();
+    let flush = |atom: &mut String, resolved: &mut String| {
+        match atom.as_str() {
+            "self" => resolved.push_str(declaring),
+            "parent" => resolved.push_str(parent.unwrap_or("parent")),
+            other => resolved.push_str(other),
+        }
+        atom.clear();
+    };
+    for character in display.chars() {
+        if matches!(character, '?' | '|' | '&' | '(' | ')') {
+            flush(&mut atom, &mut resolved);
+            resolved.push(character);
+        } else {
+            atom.push(character);
+        }
+    }
+    flush(&mut atom, &mut resolved);
+    resolved
 }
