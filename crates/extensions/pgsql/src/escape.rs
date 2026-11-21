@@ -148,7 +148,7 @@ pub fn unescape_bytea(_: &mut dyn Context, a: &[Value]) -> NativeResult {
             let second = bytes.next_if(|byte| matches!(byte, b'0'..=b'7'));
             let third = bytes.next_if(|byte| matches!(byte, b'0'..=b'7'));
             if let (Some(second), Some(third)) = (second, third) {
-                output.push((first - b'0') * 64 + (second - b'0') * 8 + third - b'0');
+                output.push((first - b'0') * 64 + (second - b'0') * 8 + (third - b'0'));
             } else {
                 output.push(first);
                 output.extend(second);

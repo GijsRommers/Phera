@@ -1,25 +1,42 @@
-//! Catalog lookups happen only when PHP explicitly asks for getColumnMeta().
+//! Catalog lookups happen when PHP explicitly asks for getColumnMeta().
 
-use tokio_postgres::Client;
-
-use super::error;
-use crate::drivers::Column;
+use super::Postgres;
+use crate::drivers::{Column, connection_error};
 use crate::errors::DbError;
 use crate::metadata::{Metadata, PostgresColumn};
+use crate::parameters::BoundValue;
 
-pub async fn get(client: &Client, column: &Column) -> Result<(i16, Option<String>), DbError> {
-    let Metadata::Postgres(PostgresColumn { oid, table_oid, .. }) = &column.metadata else {
-        return Err(crate::drivers::connection_error(
-            "Mismatched metadata driver",
-        ));
-    };
-    let query = "SELECT t.typlen, c.relname FROM pg_type t \
-        LEFT JOIN pg_class c ON c.oid=$2 WHERE t.oid=$1";
-    let row = client
-        .query_one(query, &[oid, table_oid])
-        .await
-        .map_err(|e| error(e, query))?;
-    let length: i16 = row.get(0);
-    let table: Option<String> = row.get(1);
-    Ok((length, table))
+impl Postgres {
+    pub async fn metadata(&mut self, column: &Column) -> Result<(i16, Option<String>), DbError> {
+        let Metadata::Postgres(PostgresColumn { oid, table_oid, .. }) = &column.metadata else {
+            return Err(connection_error("Mismatched metadata driver"));
+        };
+        let query = "SELECT t.typlen, c.relname FROM pg_type t \
+            LEFT JOIN pg_class c ON c.oid=$2 WHERE t.oid=$1";
+        let mut cells = self
+            .single_row(
+                query,
+                &[
+                    BoundValue::Int(i64::from(*oid)),
+                    BoundValue::Int(i64::from(*table_oid)),
+                ],
+            )
+            .await?
+            .into_iter();
+        let length = cells
+            .next()
+            .flatten()
+            .ok_or_else(|| connection_error("PostgreSQL did not return a type length"))?;
+        let length = std::str::from_utf8(&length)
+            .map_err(connection_error)?
+            .parse()
+            .map_err(connection_error)?;
+        let table = cells
+            .next()
+            .flatten()
+            .map(String::from_utf8)
+            .transpose()
+            .map_err(connection_error)?;
+        Ok((length, table))
+    }
 }

@@ -5,14 +5,14 @@
 //! if ($this instanceof Model) { ... }        // InstanceOf, a parent class
 //! ```
 //!
-//! The class the name means is the one the file linked the name to
-//! (`UnitCache::classes`), or the running code's class for `self`,
+//! The class the name means is the request's class for the name's key
+//! (`ClassTable::by_key`), or the running code's class for `self`,
 //! `static` and `parent`. The answer follows the object's linked ancestry
 //! by pointer: its class, its parents and the interfaces each one
 //! implements. No name is hashed or lowercased.
 //!
 //! The loop leaves the instruction to the VM ([`Step::Slow`]) when the name
-//! is not linked yet (the VM links it), when the operand is undefined or a
+//! means no declared class, when the operand is undefined or a
 //! PHP reference, when the object's class is not a linked class, and when
 //! the interfaces to walk do not fit the walk's fixed stack, and in the
 //! guarded loop (some object has a destructor due).
@@ -89,13 +89,7 @@ impl Machine<'_> {
             "self" => context?.scope().cloned(),
             "static" => context?.called(),
             "parent" => context?.scope()?.parent.clone(),
-            _ => self
-                .code
-                .cache(function)
-                .classes
-                .get(symbol.index())?
-                .borrow()
-                .clone(),
+            _ => self.linked_class(position, symbol),
         }
     }
 
