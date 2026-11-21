@@ -70,8 +70,8 @@ impl Vm {
             .map_err(|error| crate::autoload::ClassMiss::during_declaration(error, &unit, index))
     }
 
-    /// Both callers have checked the declaration's case-insensitive name.
-    fn link_new_class(
+    /// The caller has checked that the declaration's name is available.
+    pub(crate) fn link_new_class(
         &mut self,
         unit: &Arc<CompiledUnit>,
         unit_first: FunctionIndex,
@@ -88,7 +88,10 @@ impl Vm {
         let linked = self.link_class_body(unit, unit_first, index);
         let (dependencies, position) = self.classes.end_link();
         let imports = self.code.end_imports();
-        if let Err(error) = linked {
+        if let Err(mut error) = linked {
+            if dependencies.is_none() || self.diagnostic_reporter.raised != raised {
+                crate::autoload::ClassMiss::keep_pending_shape(&mut error);
+            }
             if let Some(position) = position {
                 self.classes.lease_position(position);
             }
@@ -607,6 +610,13 @@ impl Vm {
                     unit: unit.clone(),
                     methods: pending.into_iter().map(|(_, miss)| miss).collect(),
                     requested: Default::default(),
+                    publication: std::cell::Cell::new(
+                        if unit.metadata.is_some() && declaration.kind != ClassKind::Anonymous {
+                            crate::autoload::PendingPublication::RetryLink
+                        } else {
+                            crate::autoload::PendingPublication::KeepShape
+                        },
+                    ),
                 },
             ));
         }

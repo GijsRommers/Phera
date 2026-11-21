@@ -28,6 +28,13 @@ pub(crate) struct PendingClass {
     pub(crate) unit: Arc<CompiledUnit>,
     pub(crate) methods: Vec<MethodVariance>,
     pub(crate) requested: HashSet<String>,
+    pub(crate) publication: Cell<PendingPublication>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PendingPublication {
+    RetryLink,
+    KeepShape,
 }
 
 pub(crate) struct MethodVariance {
@@ -63,6 +70,7 @@ impl Vm {
                 .iter()
                 .find(|entry| entry.class.name.eq_ignore_ascii_case(name))?;
             self.classes.discard_link_dependencies();
+            entry.publication.set(PendingPublication::KeepShape);
             Some(entry.class.clone())
         })
     }
@@ -165,6 +173,21 @@ impl Vm {
                 continue;
             }
             let pending = self.autoload.pending.remove(position);
+            if pending.publication.get() == PendingPublication::RetryLink
+                && pending
+                    .methods
+                    .iter()
+                    .flat_map(|method| &method.names)
+                    .all(|name| self.classes.get(name).is_some())
+                && let Some((unit_first, declaration)) = pending.class.declaration
+            {
+                let key = pending.class.name.to_ascii_lowercase();
+                if self.classes.get_lowercase(&key).is_none() {
+                    self.link_new_class(&pending.unit, unit_first, declaration, key)?;
+                    work.pop();
+                    continue;
+                }
+            }
             for method in &pending.methods {
                 if let Some(remaining) = self.check_contract(
                     &method.inherited,

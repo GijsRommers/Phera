@@ -36,7 +36,9 @@ pub(crate) struct ClassMiss {
 }
 
 mod method_variance;
-pub(crate) use method_variance::{DeclaringClass, MethodVariance, PendingClass};
+pub(crate) use method_variance::{
+    DeclaringClass, MethodVariance, PendingClass, PendingPublication,
+};
 
 enum MissFailure {
     Lookup(&'static str),
@@ -49,6 +51,15 @@ enum MissFailure {
 }
 
 impl ClassMiss {
+    pub(crate) fn keep_pending_shape(error: &mut NativeError) {
+        if let NativeError::Unwind(Unwind(payload)) = error
+            && let Some(miss) = payload.downcast_mut::<Self>()
+            && let MissFailure::MethodSignatures(pending) = &miss.failure
+        {
+            pending.publication.set(PendingPublication::KeepShape);
+        }
+    }
+
     pub(crate) fn take(error: NativeError) -> Result<Self, NativeError> {
         match error {
             NativeError::Unwind(Unwind(payload)) => payload

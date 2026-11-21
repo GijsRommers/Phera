@@ -34,6 +34,12 @@ The worker validates the ordinary class numbers first, then checks the
 missing names against the pending declarations. Nominal comparisons use
 borrowed names and consult linked ancestry before walking declarations.
 
+Once the missing types are loaded, a diagnostic-free file declaration
+whose pending shape was never used returns to the ordinary linker.
+This lets later forks reuse its completed class and method table.
+A recursive consumer or a diagnostic commits publication to the
+original shape within the request.
+
 ## Turned down
 
 Publishing a half-linked class through ordinary lookup. An autoloader
