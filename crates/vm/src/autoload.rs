@@ -229,14 +229,18 @@ impl Vm {
                     )),
                 });
         }
-        let result = self.call_autoloaders_in_order(name).await;
+        let result = self.call_autoloaders_in_order(name, key).await;
         if origin.is_some() {
             self.native_callback_sites.pop();
         }
         result
     }
 
-    async fn call_autoloaders_in_order(&mut self, name: &str) -> Result<(), NativeError> {
+    async fn call_autoloaders_in_order(
+        &mut self,
+        name: &str,
+        key: &str,
+    ) -> Result<(), NativeError> {
         let mut position = 0;
         while let Some(slot) = self.autoload.callbacks.get(position) {
             let loader = slot.clone();
