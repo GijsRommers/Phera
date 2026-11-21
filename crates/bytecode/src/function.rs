@@ -50,6 +50,55 @@ pub struct Function {
     /// `try` blocks, innermost first. Unwinding searches this table; it is
     /// consulted only when an exception leaves an instruction.
     pub handlers: Vec<Handler>,
+    /// The method calls that `CallMethod` makes in one instruction.
+    pub method_sites: Vec<MethodSite>,
+    /// The arguments of every method site, one site after another; a site
+    /// names its run of them.
+    pub site_arguments: Vec<SiteArgument>,
+}
+
+/// `$order->total($tax, 2)` for `CallMethod`: the receiver, the method name
+/// and the arguments, all locals or literals, so that nothing PHP could
+/// observe happens between finding the method and reading them.
+///
+/// The call written out the general way (`InitMethodCall`, one `Send` per
+/// argument, `Call`) follows `CallMethod`, and runs whenever the quick
+/// entry declines (a native method, `__call`, a by-reference parameter, an
+/// argument its type test refuses). `after` is the instruction after its
+/// `Call`, where a call the quick entry made returns.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MethodSite {
+    pub receiver: Reg,
+    pub method: NameId,
+    /// The first of the site's entries in [`Function::site_arguments`].
+    pub first_argument: u32,
+    pub arguments: u16,
+    pub after: Target,
+}
+
+impl MethodSite {
+    /// Where the site's arguments are in [`Function::site_arguments`].
+    pub fn argument_range(&self) -> std::ops::Range<usize> {
+        let first = self.first_argument as usize;
+        first..first + self.arguments as usize
+    }
+}
+
+/// One argument of a method site: what the general sequence would send.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SiteArgument {
+    /// `SendLocal`: a named local, which a by-reference parameter binds to.
+    Local(Reg),
+    /// `SendValue`: a temporary holding a literal.
+    Value(Reg),
+}
+
+impl SiteArgument {
+    pub fn register(self) -> Reg {
+        match self {
+            SiteArgument::Local(register) | SiteArgument::Value(register) => register,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

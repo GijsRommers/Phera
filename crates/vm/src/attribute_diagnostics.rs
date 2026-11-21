@@ -29,6 +29,9 @@ impl Vm {
                     } | Instruction::CallDirect {
                         result: CallResult::Discarded,
                         ..
+                    } | Instruction::CallMethod {
+                        result: CallResult::Discarded,
+                        ..
                     }
                 )
             )
