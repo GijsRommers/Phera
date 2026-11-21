@@ -122,6 +122,15 @@ impl Vm {
                     };
                     (dst, Value::from(name))
                 }
+                Instruction::FetchNamedClassConstant { dst, class, name } => {
+                    let lookup = crate::initializer_tasks::ConstantLookup {
+                        class: unit.symbols[class.index()].written.clone(),
+                        name: unit.names[name.index()].clone(),
+                        spelling: None,
+                        access: crate::class_constants::ConstantAccess::Read,
+                    };
+                    return Ok(InitializerStep::Read(lookup, dst));
+                }
                 Instruction::FetchClassConstant { dst, class, name } => {
                     let name = &unit.names[name.index()];
                     if name.eq_ignore_ascii_case("class")

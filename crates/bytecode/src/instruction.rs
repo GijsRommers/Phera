@@ -68,6 +68,13 @@ pub enum Instruction {
         class: Reg,
         name: NameId,
     },
+    /// `FetchClassConstant` of a class the source names (`Post::LIMIT`):
+    /// the class is found by its symbol's name key, without a string.
+    FetchNamedClassConstant {
+        dst: Reg,
+        class: SymbolId,
+        name: NameId,
+    },
     /// Does nothing. Left behind when the compiler removes an instruction.
     Nop,
     /// Link a declaration once execution reaches its source position.

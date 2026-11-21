@@ -40,6 +40,22 @@ impl Compiler<'_> {
             ast::ExpressionKind::ClassConstant {
                 class,
                 name: ast::MemberName::Identifier(name),
+            } if is_named_class(class) => {
+                let class = self.object_class_name(class, line)?;
+                let destination = self.allocate_register()?;
+                self.emit(
+                    Instruction::NamedClassConstant {
+                        destination,
+                        class,
+                        name: name.name.clone(),
+                    },
+                    line,
+                );
+                Ok(destination)
+            }
+            ast::ExpressionKind::ClassConstant {
+                class,
+                name: ast::MemberName::Identifier(name),
             } => {
                 let class = self.compile_class_target(class, line)?;
                 let destination = self.allocate_register()?;
@@ -284,5 +300,18 @@ impl Compiler<'_> {
             return Ok(destination);
         }
         self.compile_expression(target)
+    }
+}
+
+/// Whether `class` names a class in the source (`Post`, not `self`,
+/// `parent`, `static` or an expression): its constants are looked up by the
+/// class's symbol.
+fn is_named_class(class: &ast::Expression) -> bool {
+    match &class.kind {
+        ast::ExpressionKind::Name(name) => !matches!(
+            name.text.to_ascii_lowercase().as_str(),
+            "self" | "parent" | "static"
+        ),
+        _ => false,
     }
 }

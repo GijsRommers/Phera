@@ -73,6 +73,9 @@ impl Instruction {
                 *destination = map(*destination);
                 *class = map(*class);
             }
+            Instruction::NamedClassConstant { destination, .. } => {
+                *destination = map(*destination);
+            }
 
             Instruction::NewDynamic { class } => *class = map(*class),
             Instruction::DynamicMethodCall { receiver, method } => {

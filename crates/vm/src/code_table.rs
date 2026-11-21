@@ -394,17 +394,19 @@ impl CodeTable {
     /// bytes (see `crate::snapshot::footprint`).
     pub(crate) fn fork_footprint(&self) -> Vec<(&'static str, usize)> {
         use std::mem::size_of;
-        let (mut cells, mut boxes, mut slots) = (0, 0, 0);
+        let mut sums = [0; 5];
         for loaded in &self.units {
-            let (c, b, s) = loaded.cache.fork_bytes();
-            cells += c;
-            boxes += b;
-            slots += s;
+            for (sum, bytes) in sums.iter_mut().zip(loaded.cache.fork_bytes()) {
+                *sum += bytes;
+            }
         }
+        let [cells, boxes, types, functions, closures] = sums;
         vec![
             ("site cells", cells),
             ("per-function site boxes", boxes),
-            ("per-symbol resolution slots", slots),
+            ("per-type class checks", types),
+            ("per-symbol function links", functions),
+            ("closure signatures", closures),
             (
                 "function facts",
                 self.functions.capacity() * size_of::<FunctionFacts>(),

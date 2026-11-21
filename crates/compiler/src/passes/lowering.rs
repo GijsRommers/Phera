@@ -88,6 +88,15 @@ impl Tables<'_> {
                 class,
                 name: self.name(&name),
             },
+            Old::NamedClassConstant {
+                destination,
+                class,
+                name,
+            } => Instruction::FetchNamedClassConstant {
+                dst: destination,
+                class: self.symbol(&class, None, crate::policies::NameKind::Class),
+                name: self.name(&name),
+            },
             Old::NewDynamic { class } => Instruction::NewDynamic { class },
             Old::DynamicMethodCall { receiver, method } => {
                 Instruction::DynamicMethodCall { receiver, method }
