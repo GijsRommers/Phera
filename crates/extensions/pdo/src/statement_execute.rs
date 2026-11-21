@@ -59,7 +59,8 @@ pub fn execute_named<'a>(
                     let ordered = match statement.prepared {
                         Prepared::Emulated
                             if bindings.is_empty()
-                                || statement.sql.has_only_unterminated_markers() =>
+                                || (statement.connection.name == DriverName::Mysql
+                                    && statement.sql.has_only_unterminated_markers()) =>
                         {
                             Ok(Vec::new())
                         }

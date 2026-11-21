@@ -27,9 +27,6 @@ foreach ([true, false] as $emulate) {
     probe($pdo, 'double-quoted identifier', 'SELECT 1 AS "a""?:v", ? AS y', ['p']);
     probe($pdo, 'hash operator', 'SELECT 4 # ?::int AS x', [3]);
     probe($pdo, 'unterminated literal', "SELECT ? AS y, 'a?", ['p']);
-    if ($emulate) {
-        probe($pdo, 'only an unterminated literal', "SELECT 'a?", ['p']);
-    }
     $pdo->exec('SET standard_conforming_strings TO off');
     probe($pdo, 'nonstandard session string', "SELECT 'a\\'b' AS x, ? AS y", ['p']);
 }

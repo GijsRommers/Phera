@@ -22,4 +22,13 @@ mode during prepare. Emulated execution checks those templates again before
 interpolating a value. A changed mode that moves a placeholder returns a
 binding error. Native execution sends parameter values separately.
 
-Run the same quoting, comment, and binding cases on PHP and Phera.
+Two PostgreSQL emulation cases deliberately differ from PHP 8.5. Phera skips
+the whole nested comment `/* a /* ? */ :v */` and returns `HY093` if a binding
+is supplied for `:v`. PostgreSQL still reads it as a comment after the first
+`*/`, so substituting there could let parameter data terminate the comment.
+Phera also returns `HY093` before sending a binding in an unterminated
+literal such as `SELECT 'abc ? AS y`. PHP substitutes the value and lets
+PostgreSQL report a syntax error.
+
+Run the same quoting, comment, and binding cases on PHP and Phera. Test the
+two deliberate differences against their expected Phera results.
