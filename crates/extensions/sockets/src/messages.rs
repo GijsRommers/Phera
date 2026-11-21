@@ -104,7 +104,7 @@ fn receive(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, Nativ
     Box::pin(async move {
         const FUNCTION: &str = "socket_recvmsg";
         let handle = classes::argument(&args, FUNCTION)?;
-        let Some(message) = args::array(&args, 1) else {
+        let Value::Array(message) = args::value(&args, 1).deref().clone() else {
             return Ok(Value::Bool(false));
         };
         let Some(space) = message.get(&ArrayKey::str("controllen")) else {

@@ -1,7 +1,7 @@
 //! `socket_select($read, $write, $except, 0)` keeps only sockets that are ready.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     os::fd::{AsFd, AsRawFd},
     sync::Arc,
     time::Duration,
@@ -101,11 +101,20 @@ async fn wait(
     timeout: Option<Duration>,
 ) -> rustix::io::Result<Vec<usize>> {
     let start = tokio::time::Instant::now();
-    let mut fds: Vec<_> = candidates
-        .iter()
-        .map(|candidate| {
-            PollFd::from_borrowed_fd(candidate.socket.as_fd(), READINESS[candidate.group])
-        })
+    let mut positions = HashMap::new();
+    let mut descriptors = Vec::new();
+    for candidate in candidates {
+        let fd = candidate.socket.as_fd();
+        let position = *positions.entry(fd.as_raw_fd()).or_insert_with(|| {
+            let position = descriptors.len();
+            descriptors.push((fd, PollFlags::empty()));
+            position
+        });
+        descriptors[position].1 |= READINESS[candidate.group];
+    }
+    let mut fds: Vec<_> = descriptors
+        .into_iter()
+        .map(|(fd, events)| PollFd::from_borrowed_fd(fd, events))
         .collect();
     loop {
         let count = poll(
@@ -116,11 +125,11 @@ async fn wait(
             }),
         )?;
         if count != 0 {
-            let ready = fds
+            let ready = candidates
                 .iter()
-                .zip(candidates)
                 .enumerate()
-                .filter_map(|(index, (fd, candidate))| {
+                .filter_map(|(index, candidate)| {
+                    let fd = &fds[positions[&candidate.socket.as_fd().as_raw_fd()]];
                     let mut want = READINESS[candidate.group];
                     if candidate.group == 0 {
                         want |= PollFlags::HUP | PollFlags::ERR;
