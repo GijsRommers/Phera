@@ -57,18 +57,99 @@ pub(crate) struct LoadedUnit {
 }
 
 /// The code of one request: every loaded file and every function in them.
-#[derive(Default)]
 pub(crate) struct CodeTable {
     units: Vec<LoadedUnit>,
+    /// The facts of every function by its number, which the worker gives
+    /// (see `crate::worker_code`). It covers every number up to the highest
+    /// this request uses, so it also holds placeholders for functions of
+    /// files this request has not loaded: whether a function is declared in
+    /// the request is its function table's answer, never this vector's.
     functions: Vec<FunctionFacts>,
+    worker: std::rc::Rc<crate::worker_code::WorkerCode>,
+    /// The numbers this request leased, and those of the snapshot it was
+    /// forked from, which it keeps alive.
+    leases: Vec<std::rc::Rc<crate::worker_code::Leases>>,
     /// Where each loaded file is, by its process number
     /// (`UnitMetadata::id`): its position in `units` plus one, 0 if this
     /// request has not loaded it.
     slots: Vec<u32>,
     trait_method_names: std::collections::HashMap<FunctionIndex, String>,
+    /// While a class links: the trait methods composed into it.
+    imports: Option<Vec<crate::classes::worker_classes::Import>>,
+}
+
+impl Default for CodeTable {
+    /// A table with a numbering of its own (a command-line run, a test).
+    fn default() -> Self {
+        Self::for_worker(&std::rc::Rc::default())
+    }
 }
 
 impl CodeTable {
+    /// A request's table, numbered by its worker.
+    pub(crate) fn for_worker(worker: &std::rc::Rc<crate::worker_code::WorkerCode>) -> Self {
+        CodeTable {
+            units: Vec::new(),
+            functions: Vec::new(),
+            worker: worker.clone(),
+            leases: vec![crate::worker_code::Leases::new(worker)],
+            slots: Vec::new(),
+            trait_method_names: Default::default(),
+            imports: None,
+        }
+    }
+
+    /// Starts recording the trait methods composed into a class being linked.
+    pub(crate) fn begin_imports(&mut self) {
+        self.imports = Some(Vec::new());
+    }
+
+    /// The trait methods composed since [`CodeTable::begin_imports`].
+    pub(crate) fn end_imports(&mut self) -> Vec<crate::classes::worker_classes::Import> {
+        self.imports.take().unwrap_or_default()
+    }
+
+    /// Keeps the number of a composed trait method for every request of the
+    /// worker, instead of giving it back with this request.
+    pub(crate) fn keep_import(&self, number: u32) {
+        self.own_leases().keep(number);
+    }
+
+    /// Writes the facts of a trait method another request composed into a
+    /// class this request now declares.
+    pub(crate) fn write_import(
+        &mut self,
+        (number, source, name): &crate::classes::worker_classes::Import,
+        scope: crate::classes::ClassIndex,
+    ) {
+        let mut facts = self.facts(FunctionIndex(*source)).clone();
+        facts.class = Some(scope);
+        let index = *number as usize;
+        self.cover(index + 1);
+        self.functions[index] = facts;
+        self.trait_method_names
+            .insert(FunctionIndex(*number), name.clone());
+    }
+
+    /// The worker's numbering this table uses.
+    pub(crate) fn worker(&self) -> std::rc::Rc<crate::worker_code::WorkerCode> {
+        self.worker.clone()
+    }
+
+    /// The leases of this request, the last of `leases`.
+    fn own_leases(&self) -> &crate::worker_code::Leases {
+        self.leases
+            .last()
+            .expect("a code table always has its own leases")
+    }
+
+    /// Makes room for numbers up to `end`, with placeholders.
+    fn cover(&mut self, end: usize) {
+        if self.functions.len() < end {
+            self.functions.resize(end, FunctionFacts::placeholder());
+        }
+    }
+
     pub(crate) fn next_unit_index(&self) -> UnitIndex {
         UnitIndex(self.units.len() as u32)
     }
@@ -87,30 +168,30 @@ impl CodeTable {
             }
             self.slots[id] = index.0 + 1;
         }
-        let first = FunctionIndex(self.functions.len() as u32);
+        let count = 1 + unit.functions.len() as u32;
+        let first = FunctionIndex(self.worker.number(unit, count, self.own_leases()));
+        let mut facts = Vec::with_capacity(count as usize);
         let (name_keys, symbol_keys) = if let Some(metadata) = &unit.metadata {
-            self.functions
-                .extend(metadata.functions.iter().cloned().enumerate().map(
-                    |(offset, signature)| {
-                        let local = offset.checked_sub(1).map(|local| local as u32);
-                        let instructions = body(unit, local.map(|local| local as usize))
-                            .instructions
-                            .clone();
-                        FunctionFacts::bind((index, first, local), signature, instructions)
-                    },
-                ));
+            facts.extend(metadata.functions.iter().cloned().enumerate().map(
+                |(offset, signature)| {
+                    let local = offset.checked_sub(1).map(|local| local as u32);
+                    let instructions = body(unit, local.map(|local| local as usize))
+                        .instructions
+                        .clone();
+                    FunctionFacts::bind((index, first, local), signature, instructions)
+                },
+            ));
             (metadata.name_keys.clone(), metadata.symbol_keys.clone())
         } else {
             let bodies = std::iter::once(&unit.main).chain(&unit.functions);
-            self.functions
-                .extend(bodies.enumerate().map(|(offset, body)| {
-                    let local = offset.checked_sub(1).map(|local| local as u32);
-                    FunctionFacts::bind(
-                        (index, first, local),
-                        FunctionSignature::new(body, &unit.types),
-                        body.instructions.clone(),
-                    )
-                }));
+            facts.extend(bodies.enumerate().map(|(offset, body)| {
+                let local = offset.checked_sub(1).map(|local| local as u32);
+                FunctionFacts::bind(
+                    (index, first, local),
+                    FunctionSignature::new(body, &unit.types),
+                    body.instructions.clone(),
+                )
+            }));
             let names: Vec<String> = unit
                 .names
                 .iter()
@@ -126,6 +207,11 @@ impl CodeTable {
                 phera_bytecode::name_keys::keys(symbols.iter().map(String::as_str)),
             )
         };
+        let start = first.index();
+        self.cover(start + facts.len());
+        for (slot, facts) in self.functions[start..].iter_mut().zip(facts) {
+            *slot = facts;
+        }
         self.units.push(LoadedUnit {
             unit: unit.clone(),
             cache: UnitCache::new(unit),
@@ -218,8 +304,9 @@ impl CodeTable {
     ) -> FunctionIndex {
         let mut facts = self.facts(source).clone();
         facts.class = Some(scope);
-        let function = FunctionIndex(self.functions.len() as u32);
-        self.functions.push(facts);
+        let function = FunctionIndex(self.worker.lease_one(self.own_leases()));
+        self.cover(function.index() + 1);
+        self.functions[function.index()] = facts;
         function
     }
 
@@ -230,6 +317,9 @@ impl CodeTable {
         name: String,
     ) -> FunctionIndex {
         let function = self.import_trait_body(source, scope);
+        if let Some(imports) = &mut self.imports {
+            imports.push((function.0, source.0, name.clone()));
+        }
         self.trait_method_names.insert(function, name);
         function
     }
@@ -299,6 +389,35 @@ pub(crate) fn body(unit: &CompiledUnit, local: Option<usize>) -> &Function {
     }
 }
 
+impl CodeTable {
+    /// What a fork's copy of this table holds on the heap, by structure, in
+    /// bytes (see `crate::snapshot::footprint`).
+    pub(crate) fn fork_footprint(&self) -> Vec<(&'static str, usize)> {
+        use std::mem::size_of;
+        let (mut cells, mut boxes, mut slots) = (0, 0, 0);
+        for loaded in &self.units {
+            let (c, b, s) = loaded.cache.fork_bytes();
+            cells += c;
+            boxes += b;
+            slots += s;
+        }
+        vec![
+            ("site cells", cells),
+            ("per-function site boxes", boxes),
+            ("per-symbol resolution slots", slots),
+            (
+                "function facts",
+                self.functions.capacity() * size_of::<FunctionFacts>(),
+            ),
+            (
+                "loaded-file records",
+                self.units.capacity() * size_of::<LoadedUnit>()
+                    + self.slots.capacity() * size_of::<u32>(),
+            ),
+        ]
+    }
+}
+
 /// A fork has the snapshot's files with the same numbers, and its own
 /// copies of their caches (see `crate::snapshot`).
 impl crate::snapshot::ForkCopy for CodeTable {
@@ -316,8 +435,17 @@ impl crate::snapshot::ForkCopy for CodeTable {
                 })
                 .collect(),
             functions: self.functions.clone(),
+            worker: self.worker.clone(),
+            // The snapshot's leases stay given out while this fork lives.
+            leases: self
+                .leases
+                .iter()
+                .cloned()
+                .chain([crate::worker_code::Leases::new(&self.worker)])
+                .collect(),
             slots: self.slots.clone(),
             trait_method_names: self.trait_method_names.clone(),
+            imports: None,
         }
     }
 }

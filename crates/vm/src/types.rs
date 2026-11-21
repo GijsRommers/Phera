@@ -261,9 +261,12 @@ pub(crate) fn php_type_display(declaration: &Type) -> std::borrow::Cow<'_, str> 
     if !declaration.mask.intersects(TypeMask::ITERABLE) {
         return declaration.display.as_str().into();
     }
-    let nullable = declaration.display.starts_with('?');
-    let expanded = declaration
-        .display
+    expanded_iterable_display(&declaration.display).into()
+}
+
+pub(crate) fn expanded_iterable_display(display: &str) -> String {
+    let nullable = display.starts_with('?');
+    let expanded = display
         .trim_start_matches('?')
         .split('|')
         .flat_map(|name| match name {
@@ -274,5 +277,5 @@ pub(crate) fn php_type_display(declaration: &Type) -> std::borrow::Cow<'_, str> 
         .filter(|name| !name.is_empty())
         .collect::<Vec<_>>()
         .join("|");
-    phera_bytecode::union_in_php_order(&expanded).into()
+    phera_bytecode::union_in_php_order(&expanded)
 }

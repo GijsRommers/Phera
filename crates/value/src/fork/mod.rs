@@ -116,6 +116,52 @@ impl<'n> Fork<'n> {
         }
     }
 
+    /// What this copy allocated, by structure, in bytes (by capacity), for
+    /// `phera serve` debug builds and tests: the copied objects with their
+    /// property tables, the rebuilt arrays, the reference cells, and the
+    /// copier's own maps from an original's address to its copy. The native
+    /// state of built-in objects and what strings point to are not counted
+    /// (strings are shared, not copied).
+    pub fn footprint(&self) -> Vec<(&'static str, usize)> {
+        use std::mem::size_of;
+        // An Rc allocation holds two counters before the value.
+        let rc = 2 * size_of::<usize>();
+        let map = |entries: usize, entry: usize| entries * (entry + 1);
+        let objects = self.objects.len() * (rc + size_of::<Object>())
+            + self
+                .objects
+                .values()
+                .map(|copy| {
+                    copy.with_properties(crate::PhpArray::heap_bytes)
+                        .unwrap_or(0)
+                })
+                .sum::<usize>();
+        let arrays = self.arrays.len() * (rc + size_of::<crate::PhpArray>())
+            + self
+                .arrays
+                .values()
+                .map(|copy| copy.heap_bytes())
+                .sum::<usize>();
+        let references = self.references.len() * (rc + size_of::<RefCell<Value>>());
+        let maps = map(self.objects.capacity(), size_of::<(usize, Rc<Object>)>())
+            + map(self.identities.capacity(), size_of::<(usize, usize)>())
+            + map(self.references.capacity(), size_of::<(usize, Cell)>())
+            + map(
+                self.resources.capacity(),
+                size_of::<(usize, Rc<Resource>)>(),
+            )
+            + map(
+                self.arrays.capacity(),
+                size_of::<(usize, Rc<crate::PhpArray>)>(),
+            );
+        vec![
+            ("objects copied (with property tables)", objects),
+            ("arrays rebuilt", arrays),
+            ("reference cells", references),
+            ("copier's address maps", maps),
+        ]
+    }
+
     /// The id pool of the copies.
     pub fn ids(&self) -> &Rc<ObjectIds> {
         &self.ids

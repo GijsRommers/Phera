@@ -62,7 +62,7 @@ fn object_parser_matches_php() {
                     associative,
                     ..DecodeFlags::default()
                 };
-                let result = parse(document.as_bytes(), depth, flags, &mut factory);
+                let result = parse(document.as_bytes(), depth, flags, Some(&mut factory));
                 let code = result.as_ref().err().map_or(0, |error| *error as i64);
                 let mut values = PhpArray::new();
                 values.push(result.unwrap_or(Value::Null)).unwrap();

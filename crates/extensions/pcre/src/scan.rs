@@ -100,6 +100,13 @@ impl<'a> Scanner<'a> {
         Ok(())
     }
 
+    /// Counts matches without copying capture positions into Rust vectors.
+    pub(crate) fn count_up_to(&mut self, limit: usize) -> Result<usize, Error> {
+        std::iter::from_fn(|| self.next_with(|_, _, _, _| ()))
+            .take(limit)
+            .try_fold(0, |count, found| found.map(|()| count + 1))
+    }
+
     pub(crate) fn next_marked<'m>(
         &mut self,
         marks: &'m Marks,

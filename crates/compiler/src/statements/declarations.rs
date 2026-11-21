@@ -22,6 +22,17 @@ impl Compiler<'_> {
                 ast::UseKind::Function => NameKind::Function,
                 ast::UseKind::Constant => NameKind::Constant,
             };
+            if key == NameKind::Class
+                && super::type_declarations::builtin_type(&alias.to_ascii_lowercase())
+            {
+                return Err(self.error(
+                    format!(
+                        "Cannot use {} as {alias} because '{alias}' is a special class name",
+                        i.name.text
+                    ),
+                    self.lines.line(i.name.span.start),
+                ));
+            }
             let imports = self.imports.get_or_insert_with(Default::default);
             Arc::make_mut(imports).insert((key, alias.to_ascii_lowercase()), i.name.text.clone());
         }
@@ -61,18 +72,68 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Apply strict_types to the function containing the declaration.
-    pub(crate) fn compile_declare(
+    /// The file prelude consists of consecutive declare statements.
+    pub(crate) fn compile_file_body(
+        &mut self,
+        mut statements: &[ast::Statement],
+    ) -> Result<(), CompileError> {
+        while let Some((first, rest)) = statements.split_first() {
+            let ast::StatementKind::Declare { directives, body } = &first.kind else {
+                break;
+            };
+            self.compile_declare(
+                directives,
+                body,
+                DeclarationTiming::Hoisted,
+                self.lines.line(first.span.start),
+                DeclarePosition::Prelude,
+            )?;
+            statements = rest;
+        }
+        self.block(statements, DeclarationTiming::Hoisted)
+    }
+
+    /// Apply strict_types from a standalone directive in the file prelude.
+    pub(super) fn compile_declare(
         &mut self,
         directives: &[ast::DeclareDirective],
         body: &Option<Vec<ast::Statement>>,
         timing: DeclarationTiming,
         line: usize,
+        position: DeclarePosition,
     ) -> Result<(), CompileError> {
         for directive in directives {
-            if directive.name.name == "strict_types" {
-                self.function.strict_types =
-                    matches!(constant(&directive.value), Some(Constant::Int(1)))
+            if directive.name.name.eq_ignore_ascii_case("strict_types") {
+                let line = self.lines.line(directive.name.span.start);
+                let ast::ExpressionKind::Literal(
+                    value @ (ast::Literal::Int(_)
+                    | ast::Literal::Float(_)
+                    | ast::Literal::String(_)),
+                ) = &directive.value.kind
+                else {
+                    return Err(self.error("declare(strict_types) value must be a literal", line));
+                };
+                if position != DeclarePosition::Prelude {
+                    return Err(self.error(
+                        "strict_types declaration must be the very first statement in the script",
+                        line,
+                    ));
+                }
+                if body.is_some() {
+                    return Err(
+                        self.error("strict_types declaration must not use block mode", line)
+                    );
+                }
+                self.function.strict_types = match value {
+                    ast::Literal::Int(0) => false,
+                    ast::Literal::Int(1) => true,
+                    _ => {
+                        return Err(self.error(
+                            "strict_types declaration must have 0 or 1 as its value",
+                            line,
+                        ));
+                    }
+                };
             } else if directive.name.name != "ticks"
                 || !matches!(constant(&directive.value), Some(Constant::Int(0)))
             {
@@ -154,4 +215,10 @@ impl Compiler<'_> {
 
         Ok(())
     }
+}
+
+#[derive(PartialEq, Eq)]
+pub(super) enum DeclarePosition {
+    Prelude,
+    Body,
 }
