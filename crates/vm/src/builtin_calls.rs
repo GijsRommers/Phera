@@ -18,13 +18,19 @@ impl Vm {
         operation: BuiltinFrame,
         destination: Reg,
     ) -> Result<(), NativeError> {
-        let frame = self
-            .current()
-            .ok_or_else(|| internal_error!("builtin caller frame"))?;
         let value = match operation {
-            BuiltinFrame::ArgumentCount => Value::Int(frame.argument_count() as i64),
-            BuiltinFrame::ArgumentsFrom(first) => self.argument_array(frame, first as usize)?,
+            BuiltinFrame::ArgumentCount | BuiltinFrame::ArgumentsFrom(_) => {
+                let frame = self
+                    .current()
+                    .ok_or_else(|| internal_error!("builtin caller frame"))?;
+                if let BuiltinFrame::ArgumentsFrom(first) = operation {
+                    self.argument_array(frame, first as usize)?
+                } else {
+                    Value::Int(frame.argument_count() as i64)
+                }
+            }
             BuiltinFrame::CalledClass => self.called_class_name()?,
+            BuiltinFrame::AssertionsDisabled => Value::Bool(self.assertions_disabled()),
         };
         self.set(destination, value);
         Ok(())
