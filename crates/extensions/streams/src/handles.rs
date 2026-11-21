@@ -4,7 +4,7 @@ use std::io::{self, SeekFrom, Write};
 
 use phera_extension_api::{
     ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
-    ParamType, Registry, Value, args,
+    ParamType, Registry, Value, args, value::Resource,
 };
 
 use crate::context_options::{OPTIONAL_CONTEXT, validate};
