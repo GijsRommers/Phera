@@ -1663,6 +1663,64 @@ What is left:
 - identity: 2,200; local element reads: 1,554; both are in `speed/loop-coverage`;
 - `(array)` casts and the property paths the sites do not take: the rest.
 
+### 10.13 Design: declared properties in slots (`speed/property-slots`)
+
+**What it is today.** An object's properties are one `RefCell<PhpArray>` keyed by PHP's mangled names (`name`, `\0*\0name`, `\0Class\0name`).
+- **`new`:** clones the class's default table (`Class::property_template`), with its keys, and drops it all again at release.
+- **A property site:** remembers the position of the property in that table, and compares the stored key on every read, because `unset` and re-adding move an entry to the end.
+- **Property order:** that move is also why the order is wrong. After `unset($o->a); $o->x = 9; $o->a = 1;` PHP lists `a b c x` and Phera lists `b c x a`.
+- **Reflection:** `ReflectionProperty` finds the property by name on every call, through the async native method path.
+
+Measured on main ded81397, machine instructions per operation, with PHP from the probe's baseline file (the empty loop subtracted in both):
+
+| operation | Phera | PHP |
+| --- | ---: | ---: |
+| `new P` with three properties, one read, release | 1,704 | 406 |
+| `clone` of it | 4,673 | |
+| array of four plus object, the array stored and read through the object | 7,327 | 1,276 |
+| `$rp->setRawValueWithoutLazyInitialization($o, $v)` | 5,082 | 483 |
+| `$rp->isLazy($o)` | 3,529 | 279 |
+| `$rp->isInitialized($o)` / `getValue` / `setValue` | 2,175 / 2,172 / 2,566 | 292 / 297 / 398 |
+
+On the Symfony and Doctrine yardstick, the hydrators and the UnitOfWork make per request:
+- 467 `setRawValueWithoutLazyInitialization` calls;
+- 325 `isLazy` calls;
+- 122 `isUninitializedLazyObject` calls;
+- several hundred `isInitialized` and `getValue` calls;
+- 544 `((array) $object)[$key]` reads;
+- 855 `$this->p = v` writes that the property sites do not take.
+
+**What it becomes.**
+- **The class owns the layout:** `PropertyLayout`, built once at linking, root first.
+  - the mangled keys of the declared instance properties, in declaration order, as a flat `Box<[ArrayKey]>`;
+  - for each property, its slot number.
+
+  A property site, a `ReflectionProperty` and the compiler's property names all resolve to that number when they are linked, so no name is looked up per access.
+- **The object holds:**
+  - `slots: RefCell<Box<[Option<Value>]>>`: one entry per declared property, in layout order; `None` is unset or not yet initialized, as an absent key is today;
+  - `dynamic: RefCell<Option<Box<PhpArray>>>`: properties that are not declared, in insertion order; most objects have none.
+- **`new`** copies the class's default values into the slot box: one allocation, no keys. **`clone`** copies the slots.
+- **A property site** reads and writes `slots[n]` with no key compare. `unset` sets the slot to `None`, and writing it again fills the same slot, so the declared order is PHP's (the `weakmap-and-property-order` fixture).
+- **Code that needs the whole table** goes through a `PropertyView`, which walks the declared slots in order and then the dynamic table. That covers `(array)`, `foreach` over an object, `get_object_vars`, `var_dump`, `serialize`, `json_encode` and `==`. `Object::get`, `set`, `has`, `remove` and `to_array` keep their signatures. `Object::update` and `with_properties`, which hand out a `&mut PhpArray`, become two calls on the view (read and write by key), so extensions do not see the change.
+- **Direct native methods on a slot** for `ReflectionProperty`, the pattern of #134's `MethodHandle` (they run where `Call` runs them, no frame): `isInitialized`, `getValue`, `setValue`, `setRawValue`, `setRawValueWithoutLazyInitialization`, `isLazy`, and `ReflectionClass::isUninitializedLazyObject`. The fast case is:
+  - an object that is not lazy;
+  - a public property with no hooks;
+  - and, for writes, a value whose type passes the property's bit test as it is.
+
+  Everything else (hooks, lazy objects, coercion, readonly, an error to raise) declines to the general path, as today.
+- **`(array) $object`** builds its result from the slots at its final size.
+- **The fork copies** the slot box and the dynamic table, as it copies the table today.
+
+**Expected.**
+- `new` and release from 1,704 towards 800 to 900.
+- A property read through a site about a third cheaper (no key compare, no table probe).
+- The Reflection property calls from 2,000 to 5,000 down to 300 to 500 each.
+- On the yardstick: the Reflection calls alone are about 3 to 4M per request, plus the hydration writes and `(array)` casts.
+
+**Size.** The value crate's object, destruction, cycles, fork and lazy-object code; the VM's property storage, sites, defaults, cloning and Reflection; and the whole-table users in the extensions (serialize, var_dump, json, spl `ArrayObject`): 30 to 40 files.
+
+The Reflection direct methods come in the same pull request, after the slots. That is the one pull request for item 2, as with the others.
+
 ## 11. Tools built into the runtime
 
 Tools that PHP projects today get from separate packages written in PHP

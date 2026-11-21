@@ -305,7 +305,7 @@ impl Cases {
                     (key, value.clone())
                 })
                 .collect();
-            object.update(|storage| *storage = properties);
+            object.update(|storage| storage.replace_all(properties));
         }
         self.labels.push(label);
         self.lines.push(oracle::encode_case(
