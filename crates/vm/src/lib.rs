@@ -40,6 +40,7 @@ mod class_intrinsics;
 mod class_listings;
 mod class_member_queries;
 mod class_queries;
+mod class_relation_queries;
 mod class_types;
 mod classes;
 mod closure_binding;

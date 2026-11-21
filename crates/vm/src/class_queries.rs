@@ -5,14 +5,14 @@
 //! class_exists('A', false);    // only asks the class table
 //! interface_exists('Marker');  // the table says what kind of entry a name is
 //! trait_exists('T'); enum_exists('S');
-//! is_a($child, 'Marker');      // the object's class, its parents and interfaces
-//! is_subclass_of($child, 'Base');
 //! get_class($base);            // the object's class name
 //! get_parent_class($child);    // its parent's name, or false
+//! function_exists('strlen');   // the function tables
 //! ```
 //!
-//! (The member queries `method_exists` / `property_exists` are in
-//! `class_member_queries.rs`.)
+//! (The relation queries `is_a` / `is_subclass_of` are in
+//! `class_relation_queries.rs`; the member queries `method_exists` /
+//! `property_exists` in `class_member_queries.rs`.)
 //!
 //! The general handler ([`Vm::class_intrinsic`]) is the full behaviour: it
 //! coerces arguments, runs the autoloader for a miss when the call allows it,
@@ -59,24 +59,6 @@ impl ExistsKind {
     }
 }
 
-/// Which relation `is_a` / `is_subclass_of` asks for, made by the routing
-/// arm in `calls::sync_native`.
-#[derive(Clone, Copy)]
-pub(crate) enum RelationQuery {
-    /// `is_a`: the class itself, a parent, or an implemented interface.
-    IsA,
-    /// `is_subclass_of`: the same, except the class itself.
-    IsSubclassOf,
-}
-
-impl RelationQuery {
-    /// PHP's default for the third argument: `is_a` does not look a string
-    /// first argument up, `is_subclass_of` does.
-    fn default_allow_string(self) -> bool {
-        matches!(self, Self::IsSubclassOf)
-    }
-}
-
 /// Which class-name function `get_class` / `get_parent_class` is, made by the
 /// routing arm in `calls::sync_native`.
 #[derive(Clone, Copy)]
@@ -118,31 +100,6 @@ impl Vm {
         self.finish_query(answer.map(Value::Bool), call, destination)
     }
 
-    /// `is_a` / `is_subclass_of` for a plain call: the answer from the class
-    /// table, or the exit for the general handler.
-    #[inline(never)]
-    pub(crate) fn relation_query_call(
-        &mut self,
-        query: RelationQuery,
-        call: PreparedCall,
-        destination: Reg,
-    ) -> Option<BatchExit> {
-        let answer = self
-            .plain_window(call, &[2, 3])
-            .and_then(|window| match window {
-                [Some(first), Some(Value::String(target))] => {
-                    self.relation_answer(query, first, target, query.default_allow_string())
-                }
-                [
-                    Some(first),
-                    Some(Value::String(target)),
-                    Some(Value::Bool(allow_string)),
-                ] => self.relation_answer(query, first, target, *allow_string),
-                _ => None,
-            });
-        self.finish_query(answer.map(Value::Bool), call, destination)
-    }
-
     /// `get_class` / `get_parent_class` for a plain call with one argument:
     /// the answer from the object's class or the table, or the exit for the
     /// general handler.
@@ -160,6 +117,28 @@ impl Vm {
                 _ => None,
             });
         self.finish_query(answer, call, destination)
+    }
+
+    /// `function_exists($name)` for a plain call: the answer from the
+    /// function tables, or the exit for the general handler.
+    #[inline(never)]
+    pub(crate) fn function_exists_call(
+        &mut self,
+        call: PreparedCall,
+        destination: Reg,
+    ) -> Option<BatchExit> {
+        let answer = self
+            .plain_window(call, &[1])
+            .and_then(|window| match window {
+                [Some(Value::String(name))] => {
+                    // Only a valid UTF-8 name takes this path; the general
+                    // handler lossy-converts other bytes first.
+                    let name = std::str::from_utf8(name.as_bytes()).ok()?;
+                    Some(self.exists(name.strip_prefix('\\').unwrap_or(name)))
+                }
+                _ => None,
+            });
+        self.finish_query(answer.map(Value::Bool), call, destination)
     }
 
     /// The argument window of a plain positional call with one of `counts`
@@ -213,47 +192,6 @@ impl Vm {
             ResolvedName::Absent => Some(false),
             ResolvedName::Fallback => None,
         }
-    }
-
-    /// The answer for an `is_a` / `is_subclass_of` call whose arguments are
-    /// `first` (an object or a class name), `target` (a class name) and
-    /// `allow_string`.
-    fn relation_answer(
-        &self,
-        query: RelationQuery,
-        first: &Value,
-        target: &PhpString,
-        allow_string: bool,
-    ) -> Option<bool> {
-        // Only a valid UTF-8 target takes this path, for the same reason as
-        // in `exists_answer`.
-        let target = std::str::from_utf8(target.as_bytes()).ok()?;
-        let class = match first {
-            // An object's class is known; PHP never autoloads it.
-            Value::Object(object) => self.classes.for_object(object),
-            Value::String(name) => {
-                let name = std::str::from_utf8(name.as_bytes()).ok()?;
-                if !allow_string {
-                    // Without allow_string a string first argument names no
-                    // class, even one that is loaded.
-                    None
-                } else {
-                    match self.resolve_name(name, true) {
-                        ResolvedName::Found(class) => Some(class),
-                        ResolvedName::Absent => None,
-                        ResolvedName::Fallback => return None,
-                    }
-                }
-            }
-            _ => return None,
-        };
-        // The second argument is only looked up in the table; PHP never
-        // autoloads it.
-        let target_class = self.classes.get(target);
-        Some(class.zip(target_class).is_some_and(|(class, target)| {
-            class.is_a(&target.name)
-                && !(matches!(query, RelationQuery::IsSubclassOf) && class.index == target.index)
-        }))
     }
 
     /// The answer for `get_class` / `get_parent_class` with one argument:

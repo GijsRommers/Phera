@@ -269,6 +269,9 @@ impl Vm {
                         None => Ok(Some(BatchExit::NativeCall(destination))),
                     }
                 }
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::FunctionExists) => {
+                    Ok(self.function_exists_call(call, destination))
+                }
                 CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(function)) => {
                     Ok(match function {
                         crate::class_intrinsics::ClassFunction::ObjectId => {
@@ -299,13 +302,13 @@ impl Vm {
                                 destination,
                             ),
                         crate::class_intrinsics::ClassFunction::IsA => self.relation_query_call(
-                            crate::class_queries::RelationQuery::IsA,
+                            crate::class_relation_queries::RelationQuery::IsA,
                             call,
                             destination,
                         ),
                         crate::class_intrinsics::ClassFunction::IsSubclassOf => self
                             .relation_query_call(
-                                crate::class_queries::RelationQuery::IsSubclassOf,
+                                crate::class_relation_queries::RelationQuery::IsSubclassOf,
                                 call,
                                 destination,
                             ),
