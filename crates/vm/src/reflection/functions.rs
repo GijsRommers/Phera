@@ -343,12 +343,19 @@ fn native_parameter(position: usize, param: Param, stub: Option<StubParameter>) 
     };
     let (default, default_constant, default_display) = match stub {
         Some(parameter) => (
-            parameter.default().and_then(|default| match default {
-                StubDefault::EnumCase(class, case) => {
-                    Some(ParameterDefault::NativeEnumCase { class, case })
-                }
-                default => default.literal().map(ParameterDefault::Literal),
-            }),
+            param
+                .default_name
+                .filter(|name| parameter.constant_name() == Some(*name))
+                .and(param.default)
+                .map(|value| ParameterDefault::Literal(value.to_value()))
+                .or_else(|| {
+                    parameter.default().and_then(|default| match default {
+                        StubDefault::EnumCase(class, case) => {
+                            Some(ParameterDefault::NativeEnumCase { class, case })
+                        }
+                        default => default.literal().map(ParameterDefault::Literal),
+                    })
+                }),
             parameter.constant_name().map(str::to_owned),
             (!parameter.expression.is_empty() && parameter.expression != "UNKNOWN")
                 .then(|| parameter.expression.to_owned()),
@@ -375,5 +382,27 @@ fn native_parameter(position: usize, param: Param, stub: Option<StubParameter>) 
         default_display,
         internal: true,
         attributes: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ParameterDefault, native_parameter, signature};
+    use phera_extension_api::{ConstantValue, Param, ParamType, Value};
+
+    #[test]
+    fn named_native_default_uses_the_registered_value() {
+        let parameter = Param::new("backlog", ParamType::Int)
+            .with_constant_default("SOMAXCONN", ConstantValue::Int(4096));
+        let stub = signature("socket_create_listen")
+            .unwrap()
+            .parameters()
+            .nth(1);
+        let reflected = native_parameter(1, parameter, stub);
+        assert_eq!(reflected.default_constant.as_deref(), Some("SOMAXCONN"));
+        assert!(matches!(
+            reflected.default,
+            Some(ParameterDefault::Literal(Value::Int(4096)))
+        ));
     }
 }
