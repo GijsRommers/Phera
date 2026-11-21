@@ -2,6 +2,7 @@
 //! php_strip_whitespace('example.php') returns the same source with trivia collapsed.
 
 mod highlight;
+mod iptc;
 mod meta_tags;
 mod strip;
 
@@ -21,6 +22,7 @@ const RETURN: Param =
     Param::new("return", ParamType::Bool).with_default(ConstantValue::Bool(false));
 
 pub(crate) fn register(registry: &mut Registry) {
+    iptc::register(registry);
     meta_tags::register(registry);
     registry.function(FunctionEntry::sync(
         "highlight_string",

@@ -3,7 +3,8 @@
 use std::{fs, io, os::unix::fs::MetadataExt, path::PathBuf};
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Registry, Value, args,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray, Registry, Value,
+    args,
 };
 
 use crate::errors::{check_path, reason};
@@ -17,6 +18,12 @@ pub(super) fn register(registry: &mut Registry) {
         linkinfo,
     ));
     registry.function(FunctionEntry::sync("getlastmod", &[], getlastmod));
+    registry.function(FunctionEntry::sync("realpath_cache_get", &[], |_, _| {
+        Ok(Value::from(PhpArray::new()))
+    }));
+    registry.function(FunctionEntry::sync("realpath_cache_size", &[], |_, _| {
+        Ok(Value::Int(0))
+    }));
     registry.function(FunctionEntry::sync(
         "ftok",
         const { &[FILENAME, Param::new("project_id", ParamType::String)] },
@@ -26,6 +33,8 @@ pub(super) fn register(registry: &mut Registry) {
         ("linkinfo", "int|false"),
         ("getlastmod", "int|false"),
         ("ftok", "int"),
+        ("realpath_cache_get", "array"),
+        ("realpath_cache_size", "int"),
     ] {
         registry.describe_function(name, returns, Some("standard"));
     }
