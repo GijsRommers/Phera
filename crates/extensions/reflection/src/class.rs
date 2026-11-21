@@ -1,6 +1,9 @@
 //! `ReflectionClass` exposes class identity, source locations and construction.
 
-use std::rc::{Rc, Weak};
+use std::{
+    borrow::Cow,
+    rc::{Rc, Weak},
+};
 
 use phera_extension_api::reflection::lazy::{SKIP_DESTRUCTOR, SKIP_INITIALIZATION_ON_SERIALIZE};
 use phera_extension_api::reflection::{ClassInfo, ReflectedClassKind};
@@ -316,10 +319,12 @@ fn construct(
     })
 }
 
-pub(crate) fn target_class(value: &Value) -> Result<String, phera_extension_api::NativeError> {
+pub(crate) fn target_class(
+    value: &Value,
+) -> Result<Cow<'_, str>, phera_extension_api::NativeError> {
     match value {
-        Value::Object(object) => Ok(object.class.name().to_owned()),
-        Value::String(name) => Ok(name.to_string_lossy()),
+        Value::Object(object) => Ok(Cow::Borrowed(object.class.name())),
+        Value::String(name) => Ok(String::from_utf8_lossy(name.as_bytes())),
         _ => Err(exception("Expected a class name or object")),
     }
 }
