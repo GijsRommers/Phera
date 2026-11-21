@@ -5,7 +5,7 @@ use std::sync::atomic::Ordering;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use super::{Io, Socket};
+use super::{Connection, Io, tls::State};
 
 impl Io {
     pub(crate) async fn read(
@@ -114,30 +114,36 @@ impl Io {
     }
 }
 
-impl Socket {
+impl Connection {
     async fn receive(&self, target: &mut [u8], blocked: bool) -> io::Result<usize> {
         let mut secure = self.secure.lock().await;
-        if let Some(stream) = secure.as_mut() {
-            stream.read(target).await
-        } else if blocked {
-            drop(secure);
-            self.wire.clone().read(target).await
-        } else {
-            Ok(rustix::io::read(self.descriptor(), target)?)
+        match &mut *secure {
+            State::Established(stream) => stream.read(target).await,
+            State::Plain if blocked => {
+                drop(secure);
+                self.wire.clone().read(target).await
+            }
+            State::Plain => Ok(rustix::io::read(self.descriptor(), target)?),
+            State::Negotiating(_) => Err(io::ErrorKind::WouldBlock.into()),
+            State::Failed => Err(io::ErrorKind::NotConnected.into()),
         }
     }
 
     async fn send(&self, bytes: &[u8], blocked: bool) -> io::Result<usize> {
         let mut secure = self.secure.lock().await;
-        if let Some(stream) = secure.as_mut() {
-            let written = stream.write(bytes).await?;
-            stream.flush().await?;
-            Ok(written)
-        } else if blocked {
-            drop(secure);
-            self.wire.clone().write(bytes).await
-        } else {
-            self.sockref().send(bytes)
+        match &mut *secure {
+            State::Established(stream) => {
+                let written = stream.write(bytes).await?;
+                stream.flush().await?;
+                Ok(written)
+            }
+            State::Plain if blocked => {
+                drop(secure);
+                self.wire.clone().write(bytes).await
+            }
+            State::Plain => self.sockref().send(bytes),
+            State::Negotiating(_) => Err(io::ErrorKind::WouldBlock.into()),
+            State::Failed => Err(io::ErrorKind::NotConnected.into()),
         }
     }
 }

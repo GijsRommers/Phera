@@ -90,3 +90,87 @@ Phera\snapshot();
     .expect_err("snapshot must refuse a live socket");
     assert!(failure.contains("open stream socket"), "{failure}");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn persistent_streams_reopen_in_forks_and_reuse_only_clean_sockets() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::TcpListener;
+    use tokio::time::{Duration, timeout};
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("listen");
+    let endpoint = listener.local_addr().expect("address");
+    let site = crate::Site::new("persistent-streams");
+    let script = site.root.join("index.php");
+    std::fs::write(
+        &script,
+        format!(
+            r#"<?php
+$socket = pfsockopen('{endpoint}');
+stream_set_timeout($socket, 2);
+Phera\snapshot();
+$same = pfsockopen('{endpoint}');
+echo $same === $socket ? 'same ' : 'other ';
+fwrite($socket, $_GET['cmd'] . "\n");
+echo fgets($socket);
+"#
+        ),
+    )
+    .expect("write front controller");
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let worker = phera_runtime::Runtime::new().web_worker(0);
+            let boot = worker.boot(&script, &site.root).await;
+            assert!(matches!(boot, phera_runtime::BootReport::Snapshot { .. }));
+            assert!(
+                timeout(Duration::from_millis(30), listener.accept())
+                    .await
+                    .is_err()
+            );
+
+            let peer = tokio::spawn(async move {
+                let mut connection_id = 0;
+                while let Ok((socket, _)) = listener.accept().await {
+                    connection_id += 1;
+                    tokio::spawn(async move {
+                        let mut socket = BufReader::new(socket);
+                        let mut command = String::new();
+                        while socket
+                            .read_line(&mut command)
+                            .await
+                            .is_ok_and(|count| count > 0)
+                        {
+                            let packet = if command.trim_end() == "dirty" {
+                                format!("{connection_id}\nunread\n")
+                            } else {
+                                format!("{connection_id}\n")
+                            };
+                            if socket.get_mut().write_all(packet.as_bytes()).await.is_err() {
+                                break;
+                            }
+                            if command.trim_end() == "drop" {
+                                socket.get_mut().shutdown().await.expect("close the peer");
+                                break;
+                            }
+                            command.clear();
+                        }
+                    });
+                }
+            });
+            for (command, expected) in [
+                ("get", "same 1\n"),
+                ("get", "same 1\n"),
+                ("dirty", "same 1\n"),
+                ("drop", "same 2\n"),
+                ("get", "same 3\n"),
+            ] {
+                let path = format!("/index.php?cmd={command}");
+                let response = worker
+                    .handle_request(&script, &site.root, crate::request(&path))
+                    .await;
+                assert_eq!(response.body, expected.as_bytes());
+            }
+            peer.abort();
+        })
+        .await;
+}

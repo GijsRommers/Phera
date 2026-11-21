@@ -164,10 +164,14 @@ Stream sockets use the worker's event loop for TCP, UDP and Unix connections.
 PHP programs can open a client or listener, wait for readiness with
 `stream_select()`, and use the regular read, write, and timeout functions.
 TCP clients can start TLS when connecting or upgrade an existing connection.
-Certificate and host-name verification are enabled by default. A live socket
-held by the boot prevents `Phera\snapshot()` from creating a snapshot.
+Listeners can accept TLS directly or upgrade an accepted connection.
+Client certificate and host-name verification are enabled by default.
+A live socket held by the boot prevents `Phera\snapshot()` from creating
+a snapshot. Persistent sockets created during boot connect on first use
+in each fork. `pfsockopen()` and `STREAM_CLIENT_PERSISTENT` can reuse a
+clean idle connection on the same worker.
 `fopen()` supports buffered HTTP and HTTPS responses, including for
-Guzzle's stream handler. `pfsockopen()` opens a request-owned connection.
+Guzzle's stream handler.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 Legacy `DOMDocument` supports local XSD validation for common content models,

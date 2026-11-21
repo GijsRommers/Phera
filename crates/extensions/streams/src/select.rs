@@ -60,11 +60,22 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                 } else {
                     resource.clone()
                 };
+                let socket = with_stream(&descriptor_resource, |stream| match &stream.backing {
+                    crate::stream::Backing::Socket(socket) => Some(socket.clone()),
+                    _ => None,
+                })
+                .ok()
+                .flatten();
+                let connection = if let Some(socket) = socket {
+                    socket.connect().await.ok()
+                } else {
+                    None
+                };
                 let Ok((descriptor, buffered, is_child, wrapper)) =
                     with_stream(&descriptor_resource, |stream| {
                         (
-                            if let crate::stream::Backing::Socket(socket) = &stream.backing {
-                                let fd = socket.descriptor();
+                            if let Some(connection) = &connection {
+                                let fd = connection.descriptor();
                                 rustix::io::dup(fd).ok().map(|copy| (fd.as_raw_fd(), copy))
                             } else {
                                 stream.descriptor().and_then(|file| {

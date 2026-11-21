@@ -39,7 +39,7 @@ fn get_line(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
             length as u64
         };
         let ending = args::bytes(&arguments, 2);
-        let result = if let Some(io) = super::Io::for_resource(resource) {
+        let result = if let Some(io) = super::StreamIo::for_resource(resource) {
             io.read(Some(limit), Some(ending)).await
         } else if ending.is_empty() {
             crate::transfer::read_context(context, resource, function, Some(limit), false).await?

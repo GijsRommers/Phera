@@ -7,7 +7,9 @@ mod functions;
 pub(crate) mod http;
 mod io;
 mod line;
+mod persistent;
 mod server;
+mod slot;
 mod tls;
 mod transport;
 mod wire;
@@ -17,43 +19,44 @@ use std::{
     io as std_io,
     sync::{
         Arc,
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
 
-use phera_extension_api::{Context, Value, value::Resource};
+use phera_extension_api::{Context, Value};
 use socket2::Socket as Descriptor;
 use tokio::sync::Mutex;
-use tokio_rustls::client::TlsStream;
 
 use self::{
     address::Transport,
     wire::{Reactor, Wire},
 };
-use crate::resource::with_stream;
 use crate::stream::{Backing, Stream, Wrapper};
+
+pub(crate) use slot::{Socket, StreamIo};
 
 pub(crate) fn register(registry: &mut phera_extension_api::Registry) {
     functions::register(registry);
     line::register(registry);
+    registry.fork_state::<persistent::Resources>(persistent::fork_resources);
 }
 
-pub(crate) struct Socket {
+pub(crate) struct Connection {
     wire: Wire,
     transport: Transport,
     listener: bool,
     paired: bool,
     eof: AtomicBool,
     timed_out: AtomicBool,
-    timeout: AtomicU64,
+    retired: AtomicBool,
     unread: AtomicUsize,
     input: Mutex<VecDeque<u8>>,
-    secure: Mutex<Option<TlsStream<Wire>>>,
+    secure: Mutex<tls::State>,
     peer: std::sync::OnceLock<String>,
 }
 
-impl Socket {
+impl Connection {
     fn new(
         descriptor: Descriptor,
         transport: Transport,
@@ -81,10 +84,10 @@ impl Socket {
             paired,
             eof: AtomicBool::new(false),
             timed_out: AtomicBool::new(false),
-            timeout: AtomicU64::new(u64::MAX),
+            retired: AtomicBool::new(false),
             unread: AtomicUsize::new(0),
             input: Mutex::new(VecDeque::new()),
-            secure: Mutex::new(None),
+            secure: Mutex::new(tls::State::Plain),
             peer: std::sync::OnceLock::new(),
         })
     }
@@ -109,18 +112,6 @@ impl Socket {
         self.eof.load(Ordering::Relaxed) && self.unread() == 0
     }
 
-    pub(crate) fn set_timeout(&self, timeout: Option<Duration>) {
-        let nanos = timeout.map_or(u64::MAX, |duration| {
-            duration.as_nanos().min(u128::from(u64::MAX - 1)) as u64
-        });
-        self.timeout.store(nanos, Ordering::Relaxed);
-    }
-
-    fn timeout(&self) -> Option<Duration> {
-        let nanos = self.timeout.load(Ordering::Relaxed);
-        (nanos != u64::MAX).then(|| Duration::from_nanos(nanos))
-    }
-
     pub(crate) fn timed_out(&self) -> bool {
         self.timed_out.load(Ordering::Relaxed)
     }
@@ -132,35 +123,14 @@ impl Socket {
 
 #[derive(Clone)]
 pub(crate) struct Io {
-    pub socket: Arc<Socket>,
+    pub socket: Arc<Connection>,
     pub blocked: bool,
     pub timeout: Option<Duration>,
     pub chunk: usize,
 }
 
-impl Io {
-    pub(crate) fn of(stream: &Stream) -> Option<Self> {
-        let Backing::Socket(socket) = &stream.backing else {
-            return None;
-        };
-        Some(Self {
-            socket: socket.clone(),
-            blocked: stream.blocked,
-            timeout: socket.timeout(),
-            chunk: stream.chunk_size,
-        })
-    }
-
-    pub(crate) fn for_resource(resource: &Resource) -> Option<Self> {
-        with_stream(resource, Self::from_stream).ok().flatten()
-    }
-
-    fn from_stream(stream: &mut Stream) -> Option<Self> {
-        Self::of(stream)
-    }
-}
-
-fn wrap(context: &mut dyn Context, socket: Arc<Socket>, uri: &[u8], attached: &Value) -> Value {
+fn wrap(context: &mut dyn Context, socket: Socket, uri: &[u8], attached: &Value) -> Value {
+    let socket = Arc::new(socket);
     socket.set_timeout(default_timeout(context));
     let stream = Stream::new(Backing::Socket(socket), Wrapper::Socket, b"r+", uri);
     let value = crate::request::new_resource(context.state(), "stream", stream);

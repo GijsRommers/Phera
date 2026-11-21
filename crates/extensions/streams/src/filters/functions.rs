@@ -157,7 +157,7 @@ async fn attach(
     };
     if user_stream.is_some()
         || super::user::lookup(context, stream.id).is_some()
-        || crate::socket::Io::for_resource(stream).is_some()
+        || crate::socket::StreamIo::for_resource(stream).is_some()
     {
         for stage in read_filter.iter_mut().chain(&mut write_filter) {
             stage.id = filter.id;

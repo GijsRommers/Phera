@@ -1,5 +1,7 @@
 # Keep initial stream sockets request owned
 
+Superseded by [Reuse clean persistent stream sockets](2026-11-21-reuse-clean-persistent-stream-sockets.md).
+
 - Date: 2026-11-20
 - Area: Streams
 - Decided by: Design

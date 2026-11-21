@@ -191,6 +191,9 @@ pub(crate) async fn close_arguments(
         return Ok(Value::Bool(true));
     }
     let (gzip, filtered) = with_stream(resource, |stream| {
+        if let crate::stream::Backing::Socket(socket) = &stream.backing {
+            socket.retire();
+        }
         (
             stream.wrapper.is_gzip(),
             stream

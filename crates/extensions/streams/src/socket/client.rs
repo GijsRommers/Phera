@@ -1,11 +1,15 @@
 //! `fsockopen('localhost', 25)` and `stream_socket_client('tcp://localhost:25')` connect.
 
-use std::{io, time::Duration};
+use std::{io, sync::Arc, time::Duration};
 
 use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Value, args};
 
 use super::address::{Address, Transport};
-use super::{Io, default_timeout, tls, transport, wrap};
+use super::{
+    Socket, default_timeout,
+    persistent::{self, Dial, IdKind, Key},
+    tls, wrap,
+};
 use crate::{context_options, errors::reason};
 
 pub(super) fn client(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -23,13 +27,14 @@ pub(super) fn pfsockopen(
     context: &mut dyn Context,
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    Box::pin(open(context, args, "pfsockopen", Layout::HostPort))
+    Box::pin(open(context, args, "pfsockopen", Layout::Persistent))
 }
 
 #[derive(Clone, Copy)]
 enum Layout {
     Stream,
     HostPort,
+    Persistent,
 }
 
 async fn open(
@@ -46,14 +51,13 @@ async fn open(
             args::value(&arguments, 5),
         ),
         Layout::HostPort => (2, 4, 4, &Value::Null),
+        Layout::Persistent => (2, 4, 5, &Value::Null),
     };
     context_options::validate(supplied, function, 6)?;
     let deadline = timeout(context, &arguments, function, timeout_at)?;
     let mut uri = args::bytes(&arguments, 0).to_vec();
-    if matches!(layout, Layout::HostPort)
-        && let Some(port) = args::int(&arguments, 1)
-        && port != -1
-    {
+    let port = args::int(&arguments, 1).unwrap_or(-1);
+    if !matches!(layout, Layout::Stream) && port != -1 {
         uri.extend(format!(":{port}").bytes());
     }
     let attached = if supplied.is_null() {
@@ -62,35 +66,64 @@ async fn open(
         supplied.clone()
     };
     set_error(&arguments, error_at, 0, "");
-    let connected = async {
+    let connect = async {
         let (kind, authority) = Transport::parse(&uri).map_err(transport_error)?;
-        let address = Address::parse(kind, authority).map_err(transport_error)?;
-        if deadline.is_some_and(|wait| wait.is_zero()) && !kind.datagram() && flags & 2 == 0 {
-            return Err(io::Error::from_raw_os_error(nix::libc::ETIMEDOUT));
-        }
-        let operation = transport::connect(&address, flags & 2 != 0);
-        let socket = match deadline {
-            Some(duration) => tokio::time::timeout(duration, operation)
-                .await
-                .map_err(|_| io::Error::from_raw_os_error(nix::libc::ETIMEDOUT))??,
-            None => operation.await?,
+        Address::parse(kind, authority).map_err(transport_error)?;
+        let source =
+            context_options::option(&attached, "socket", "bindto").and_then(|value| match &*value
+                .deref()
+            {
+                Value::String(source) => Some(source.as_bytes().to_vec()),
+                _ => None,
+            });
+        let tls = if matches!(kind, Transport::Tls(_)) {
+            Some(tls::Options::parse(
+                &context_options::for_wrapper(&attached, "ssl"),
+                true,
+            )?)
+        } else {
+            None
         };
-        let _ = socket.peer.set(address.host.to_owned());
-        if let Transport::Tls(method) = kind {
-            let ssl = context_options::for_wrapper(&attached, "ssl");
-            let io = Io {
-                socket: socket.clone(),
-                blocked: true,
-                timeout: deadline,
-                chunk: 8192,
-            };
-            tls::enable(&io, &ssl, method).await?;
+        let is_persistent = flags & 1 != 0;
+        let dial = Dial {
+            key: Key {
+                application: is_persistent.then(|| context.entry_script_path()).flatten(),
+                id: match layout {
+                    Layout::Stream => IdKind::Stream,
+                    _ => IdKind::HostPort(port),
+                },
+                uri: uri.clone(),
+                source,
+                tls,
+            },
+            deadline,
+            kind,
+            asynchronous: flags & 2 != 0,
+        };
+        if !is_persistent {
+            return Ok(wrap(
+                context,
+                Socket::live(dial.open().await?),
+                &uri,
+                &attached,
+            ));
         }
-        Ok(socket)
+        if let Some(value) = persistent::existing(context, &dial.key) {
+            return Ok(value);
+        }
+        let dial = Arc::new(dial);
+        let socket = if context.is_snapshot_boot() {
+            Socket::deferred(dial.clone())
+        } else {
+            Socket::with_lease(dial.lease().await?)
+        };
+        let value = wrap(context, socket, &uri, &attached);
+        persistent::remember(context, dial, &value);
+        Ok(value)
     }
     .await;
-    match connected {
-        Ok(socket) => Ok(wrap(context, socket, &uri, &attached)),
+    match connect {
+        Ok(value) => Ok(value),
         Err(error) => Ok(open_failure(
             context, &arguments, function, &uri, error_at, error,
         )),

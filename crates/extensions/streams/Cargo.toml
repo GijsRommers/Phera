@@ -18,6 +18,11 @@ rustix = { workspace = true, features = ["event", "net"] }
 tempfile.workspace = true
 socket2.workspace = true
 rustls.workspace = true
+webpki.workspace = true
+md-5.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+pkcs8.workspace = true
 tokio-rustls.workspace = true
 phera-io-pool.workspace = true
 hyper = { workspace = true, features = ["client"] }

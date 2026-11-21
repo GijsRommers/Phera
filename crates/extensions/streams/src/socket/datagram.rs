@@ -20,7 +20,7 @@ pub(super) fn receive(
                 "stream_socket_recvfrom(): Argument #2 ($length) must be greater than 0",
             ));
         }
-        let Some(socket) = socket_arg(&args, function, "socket")? else {
+        let Some(socket) = socket_arg(&args, function, "socket", context).await? else {
             return Ok(Value::Bool(false));
         };
         let flags = args::int(&args, 2).unwrap_or_default();
@@ -50,7 +50,7 @@ pub(super) fn receive(
 pub(super) fn send(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let function = "stream_socket_sendto";
-        let Some(socket) = socket_arg(&args, function, "socket")? else {
+        let Some(socket) = socket_arg(&args, function, "socket", context).await? else {
             return Ok(Value::Bool(false));
         };
         let flags = args::int(&args, 2).unwrap_or_default() as i32;

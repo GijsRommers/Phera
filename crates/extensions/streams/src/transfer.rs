@@ -127,7 +127,7 @@ pub async fn read_unfiltered(
         return file.read(context, function, length, by_line).await;
     }
     let action = with_stream(resource, |stream| {
-        if let Some(socket) = crate::socket::Io::of(stream) {
+        if let Some(socket) = crate::socket::StreamIo::of(stream) {
             ReadAction::Socket(socket)
         } else if let Some(pipe) = stream.child_pipe.clone() {
             ReadAction::Pipe(pipe)
@@ -164,7 +164,7 @@ pub async fn read_unfiltered(
 }
 
 enum ReadAction {
-    Socket(crate::socket::Io),
+    Socket(crate::socket::StreamIo),
     Pipe(crate::child_pipe::ChildPipe),
     Blocking,
     Done(io::Result<Vec<u8>>),
@@ -185,7 +185,7 @@ pub async fn line(
     if let Some(pipe) = crate::child_pipe::of(resource)? {
         return pipe.line(resource, length).await;
     }
-    if let Some(socket) = crate::socket::Io::for_resource(resource) {
+    if let Some(socket) = crate::socket::StreamIo::for_resource(resource) {
         return Ok(socket.read(length, Some(b"\n")).await);
     }
     let policy = with_stream(resource, |stream| stream.read_policy(length))?;
@@ -199,7 +199,7 @@ pub async fn read(
     if let Some(pipe) = crate::child_pipe::of(resource)? {
         return pipe.read(resource, length).await;
     }
-    if let Some(socket) = crate::socket::Io::for_resource(resource) {
+    if let Some(socket) = crate::socket::StreamIo::for_resource(resource) {
         return Ok(socket.read(length, None).await);
     }
     let policy = with_stream(resource, |stream| stream.read_policy(length))?;
@@ -258,7 +258,7 @@ pub async fn write_unfiltered(
     let length = data.len();
     let (wrapper, action) = with_stream(resource, |stream| {
         let wrapper = stream.wrapper;
-        let action = if let Some(socket) = crate::socket::Io::of(stream) {
+        let action = if let Some(socket) = crate::socket::StreamIo::of(stream) {
             WriteAction::Socket(socket)
         } else if let Some(pipe) = stream.child_pipe.clone() {
             WriteAction::Pipe(pipe)
@@ -314,7 +314,7 @@ pub async fn write_unfiltered(
 }
 
 enum WriteAction {
-    Socket(crate::socket::Io),
+    Socket(crate::socket::StreamIo),
     Pipe(crate::child_pipe::ChildPipe),
     Blocking,
     Output(io::Result<Vec<u8>>),

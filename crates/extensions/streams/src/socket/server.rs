@@ -5,7 +5,7 @@ use socket2::{Domain, Protocol, Socket as Descriptor, Type};
 
 use super::address::{Address, Transport, name};
 use super::client::{open_failure, set_error, timeout, transport_error};
-use super::{Socket, functions::socket_arg, transport, wrap};
+use super::{Connection, Io, Socket, functions::socket_arg, tls, transport, wrap};
 use crate::{context_options, errors::reason};
 
 pub(super) fn server(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -18,17 +18,12 @@ pub(super) fn server(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture
         set_error(&args, 1, 0, "");
         let result = async {
             let (kind, authority) = Transport::parse(uri).map_err(transport_error)?;
-            if matches!(kind, Transport::Tls(_)) {
-                return Err(transport_error(
-                    "TLS server sockets need a server certificate".into(),
-                ));
-            }
             let address = Address::parse(kind, authority).map_err(transport_error)?;
             transport::bind(&address, flags & 4 != 0, flags & 8 != 0).await
         }
         .await;
         Ok(match result {
-            Ok(socket) => wrap(context, socket, uri, supplied),
+            Ok(socket) => wrap(context, Socket::live(socket), uri, supplied),
             Err(error) => open_failure(context, &args, function, uri, 1, error),
         })
     })
@@ -37,7 +32,7 @@ pub(super) fn server(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture
 pub(super) fn accept(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let function = "stream_socket_accept";
-        let Some(mut io) = socket_arg(&args, function, "socket")? else {
+        let Some(mut io) = socket_arg(&args, function, "socket", context).await? else {
             context.warning(format!("{function}(): Accept failed: Unknown error"));
             return Ok(Value::Bool(false));
         };
@@ -58,10 +53,35 @@ pub(super) fn accept(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture
                 return Ok(Value::Bool(false));
             }
         };
+        let listener =
+            crate::resource::stream_argument(args::value(&args, 0), function, "#1 ($socket)")?;
+        let attached = crate::request::files(context)
+            .stream_contexts
+            .get(&listener.id)
+            .map_or(Value::Null, |context| Value::Resource(context.clone()));
+        if let Transport::Tls(method) = socket.transport {
+            let connection = Io {
+                socket: socket.clone(),
+                blocked: true,
+                ..io
+            };
+            let options = context_options::for_wrapper(&attached, "ssl");
+            let result = match tls::Options::parse(&options, false) {
+                Ok(options) => {
+                    tls::enable(&connection, &options, options.method.unwrap_or(method) & !1).await
+                }
+                Err(error) => Err(error),
+            };
+            if let Err(error) = result {
+                context.warning(format!("{function}(): {error}"));
+                context.warning(format!("{function}(): Failed to enable crypto"));
+                return Ok(Value::Bool(false));
+            }
+        }
         if let Some(output) = args::reference(&args, 2) {
             *output.borrow_mut() = name(&address).map_or(Value::Bool(false), Value::from);
         }
-        Ok(wrap(context, socket, b"", &Value::Null))
+        Ok(wrap(context, Socket::live(socket), b"", &attached))
     })
 }
 
@@ -81,15 +101,15 @@ pub(super) fn pair(context: &mut dyn Context, arguments: &[Value]) -> NativeResu
             Transport::Unix
         };
         Ok((
-            Socket::new(left, transport, false, true)?,
-            Socket::new(right, transport, false, true)?,
+            Connection::new(left, transport, false, true)?,
+            Connection::new(right, transport, false, true)?,
         ))
     });
     match sockets {
         Ok((left, right)) => {
             let mut streams = PhpArray::new();
-            streams.push(wrap(context, left, b"", &Value::Null))?;
-            streams.push(wrap(context, right, b"", &Value::Null))?;
+            streams.push(wrap(context, Socket::live(left), b"", &Value::Null))?;
+            streams.push(wrap(context, Socket::live(right), b"", &Value::Null))?;
             Ok(Value::from(streams))
         }
         Err(error) => {

@@ -143,3 +143,18 @@ pub(super) fn name(address: &SockAddr) -> Option<Vec<u8>> {
     }
     None
 }
+
+pub(super) fn source(address: &[u8]) -> io::Result<SocketAddr> {
+    use std::net::IpAddr;
+
+    let address = std::str::from_utf8(address).unwrap_or_default();
+    if let Ok(ip) = address.parse::<IpAddr>() {
+        return Ok(SocketAddr::new(ip, 0));
+    }
+    address.parse().map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Invalid IP Address: {address}"),
+        )
+    })
+}

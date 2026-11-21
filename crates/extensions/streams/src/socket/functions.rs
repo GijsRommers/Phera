@@ -7,7 +7,7 @@ use phera_extension_api::{
     ParamType, PhpArray, Registry, Value, args,
 };
 
-use super::{Io, address, client, datagram, server, tls};
+use super::{Io, StreamIo, address, client, datagram, server, tls};
 
 const SOCKET: Param = Param::new("socket", ParamType::Mixed);
 const STREAM: Param = crate::handles::STREAM;
@@ -87,12 +87,12 @@ pub(crate) fn register(registry: &mut Registry) {
             },
             server::pair,
         ),
-        FunctionEntry::sync(
+        FunctionEntry::asynchronous(
             "stream_socket_get_name",
             const { &[SOCKET, Param::new("remote", ParamType::Bool)] },
             get_name,
         ),
-        FunctionEntry::sync(
+        FunctionEntry::asynchronous(
             "stream_socket_shutdown",
             const { &[STREAM, Param::new("mode", ParamType::Int)] },
             shutdown,
@@ -177,50 +177,68 @@ fn transports(_: &mut dyn Context, _: &[Value]) -> NativeResult {
     Ok(Value::from(output))
 }
 
-pub(super) fn socket_arg(
+pub(super) async fn socket_arg(
     args: &[Value],
     function: &str,
     name: &str,
+    context: &mut dyn Context,
 ) -> Result<Option<Io>, NativeError> {
     let resource =
         crate::resource::stream_argument(args::value(args, 0), function, &format!("#1 (${name})"))?;
-    Ok(Io::for_resource(resource))
-}
-
-fn get_name(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let Some(io) = socket_arg(arguments, "stream_socket_get_name", "socket")? else {
-        return Ok(Value::Bool(false));
+    let Some(socket) = StreamIo::for_resource(resource) else {
+        return Ok(None);
     };
-    let descriptor = io.socket.sockref();
-    let addr = if args::bool(arguments, 1).unwrap_or(false) {
-        descriptor.peer_addr()
-    } else {
-        descriptor.local_addr()
-    };
-    Ok(addr
-        .ok()
-        .as_ref()
-        .and_then(address::name)
-        .map_or(Value::Bool(false), Value::from))
-}
-
-fn shutdown(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let function = "stream_socket_shutdown";
-    let io = socket_arg(arguments, function, "stream")?;
-    let how = match args::int(arguments, 1) {
-        Some(0) => Shutdown::Read,
-        Some(1) => Shutdown::Write,
-        Some(2) => Shutdown::Both,
-        _ => {
-            return Err(NativeError::value_error(
-                "stream_socket_shutdown(): Argument #2 ($mode) must be one of \
-            STREAM_SHUT_RD, STREAM_SHUT_WR, or STREAM_SHUT_RDWR",
-            ));
+    match socket.resolve().await {
+        Ok(io) => Ok(Some(io)),
+        Err(error) => {
+            context.warning(format!("{function}(): {error}"));
+            Ok(None)
         }
-    };
-    Ok(Value::Bool(io.is_some_and(|io| {
-        io.socket.sockref().shutdown(how).is_ok()
-    })))
+    }
+}
+
+fn get_name(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let Some(io) = socket_arg(&arguments, "stream_socket_get_name", "socket", context).await?
+        else {
+            return Ok(Value::Bool(false));
+        };
+        let descriptor = io.socket.sockref();
+        let addr = if args::bool(&arguments, 1).unwrap_or(false) {
+            descriptor.peer_addr()
+        } else {
+            descriptor.local_addr()
+        };
+        Ok(addr
+            .ok()
+            .as_ref()
+            .and_then(address::name)
+            .map_or(Value::Bool(false), Value::from))
+    })
+}
+
+fn shutdown(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let function = "stream_socket_shutdown";
+        let io = socket_arg(&arguments, function, "stream", context).await?;
+        let how = match args::int(&arguments, 1) {
+            Some(0) => Shutdown::Read,
+            Some(1) => Shutdown::Write,
+            Some(2) => Shutdown::Both,
+            _ => {
+                return Err(NativeError::value_error(
+                    "stream_socket_shutdown(): Argument #2 ($mode) must be one of \
+                STREAM_SHUT_RD, STREAM_SHUT_WR, or STREAM_SHUT_RDWR",
+                ));
+            }
+        };
+        Ok(Value::Bool(io.is_some_and(|io| {
+            io.socket
+                .retired
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            io.socket.sockref().shutdown(how).is_ok()
+        })))
+    })
 }
 
 fn crypto(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -228,7 +246,6 @@ fn crypto(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
         let function = "stream_socket_enable_crypto";
         let resource = crate::resource::stream_arg(&arguments, function)?;
         let enable = args::bool(&arguments, 1).unwrap_or(false);
-        let io = Io::for_resource(resource);
         let options = crate::request::files(context)
             .stream_contexts
             .get(&resource.id)
@@ -247,11 +264,13 @@ fn crypto(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                 "stream_socket_enable_crypto(): Argument #3 ($crypto_method) must be specified when enabling encryption",
             ));
         }
+        let io = socket_arg(&arguments, function, "stream", context).await?;
         let Some(io) = io.filter(|io| {
-            matches!(
-                io.socket.transport,
-                address::Transport::Tcp | address::Transport::Tls(_)
-            )
+            !io.socket.listener
+                && matches!(
+                    io.socket.transport,
+                    address::Transport::Tcp | address::Transport::Tls(_)
+                )
         }) else {
             context.warning(format!(
                 "{function}(): This stream does not support SSL/crypto"
@@ -262,15 +281,25 @@ fn crypto(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
             tls::disable(&io).await;
             return Ok(Value::Bool(true));
         }
-        Ok(
-            match tls::enable(&io, &options, method.unwrap_or(121)).await {
-                Ok(()) => Value::Bool(true),
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Value::Int(0),
-                Err(error) => {
-                    context.warning(format!("{function}(): {error}"));
-                    Value::Bool(false)
+        let method = method.unwrap_or(121);
+        let progress = match tls::Options::parse(&options, method & 1 != 0) {
+            Ok(options) => {
+                if matches!(io.socket.transport, address::Transport::Tcp) {
+                    io.socket
+                        .retired
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
                 }
-            },
-        )
+                tls::enable(&io, &options, method).await
+            }
+            Err(error) => Err(error),
+        };
+        Ok(match progress {
+            Ok(()) => Value::Bool(true),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Value::Int(0),
+            Err(error) => {
+                context.warning(format!("{function}(): {error}"));
+                Value::Bool(false)
+            }
+        })
     })
 }

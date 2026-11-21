@@ -59,7 +59,7 @@ fn get_contents(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture
             chains.read(context, resource, name, size, false).await?
         } else if let Some(file) = crate::user_file::resource_file(resource) {
             Ok(file.collect(context, name, length).await?)
-        } else if let Some(socket) = crate::socket::Io::for_resource(resource) {
+        } else if let Some(socket) = crate::socket::StreamIo::for_resource(resource) {
             socket.read(length, Some(b"")).await
         } else if let Some(pipe) = crate::child_pipe::of(resource)? {
             crate::child_pipe::bounded(context, resource, pipe.contents(resource, length)).await??
@@ -119,7 +119,7 @@ pub async fn copy(
                 .await?
         } else if let Some(file) = crate::user_file::resource_file(from) {
             file.read(context, name, requested as usize, false).await?
-        } else if let Some(socket) = crate::socket::Io::for_resource(from) {
+        } else if let Some(socket) = crate::socket::StreamIo::for_resource(from) {
             socket.read(Some(requested), None).await
         } else {
             let policy = if length > crate::io_policy::INLINE_LIMIT {

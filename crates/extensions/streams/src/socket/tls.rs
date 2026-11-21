@@ -1,183 +1,202 @@
-//! `stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)` upgrades TCP.
+//! `stream_socket_enable_crypto($socket, true, $method)` negotiates or resumes TLS.
 
-use std::io;
-use std::path::PathBuf;
-use std::sync::Arc;
+mod material;
+mod options;
+mod verify;
 
-use phera_extension_api::{ArrayKey, PhpArray, Value, value::to_bool};
-use rustls::{
-    DigitallySignedStruct, Error, RootCertStore, SignatureScheme,
-    client::{
-        danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-        verify_server_cert_signed_by_trust_anchor, verify_server_name,
-    },
-    crypto::{WebPkiSupportedAlgorithms, verify_tls12_signature, verify_tls13_signature},
-    pki_types::{CertificateDer, ServerName, UnixTime, pem::PemObject},
-    server::ParsedCertificate,
+use std::{
+    future::Future,
+    io::{self, Read},
+    pin::Pin,
+    sync::{Arc, atomic::Ordering},
+    task::{Context, Poll, Waker},
 };
+
+use rustls::{ClientConfig, ServerConfig, pki_types::ServerName};
 use tokio::io::AsyncWriteExt;
-use tokio_rustls::TlsConnector;
+use tokio_rustls::{TlsAcceptor, TlsConnector, TlsStream};
 
-use super::Io;
+use super::{Connection, Io, wire::Wire};
 
-pub(super) async fn enable(io: &Io, options: &PhpArray, requested_method: i64) -> io::Result<()> {
-    for restrictive in ["capath", "peer_fingerprint", "verify_depth", "local_cert"] {
-        if option(options, restrictive).is_some() {
+pub(super) use material::Material;
+pub(super) use options::Options;
+
+type Handshake = Pin<Box<dyn Future<Output = io::Result<TlsStream<Wire>>> + Send>>;
+
+#[derive(Default)]
+pub(super) enum State {
+    #[default]
+    Plain,
+    Negotiating(Handshake),
+    Established(Box<TlsStream<Wire>>),
+    Failed,
+}
+
+pub(super) async fn enable(io: &Io, options: &Options, method: i64) -> io::Result<()> {
+    start(io, options, method, None).await
+}
+
+pub(super) async fn start(
+    io: &Io,
+    options: &Options,
+    method: i64,
+    material: Option<Material>,
+) -> io::Result<()> {
+    let mut state = io.socket.secure.lock().await;
+    match &mut *state {
+        State::Plain => {
+            let material = match material {
+                Some(material) => material,
+                None => Material::load(options).await?,
+            };
+            let handshake = handshake(&io.socket, options, method, material)?;
+            *state = State::Negotiating(handshake);
+        }
+        State::Negotiating(_) => (),
+        State::Established(_) => {
             return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                format!("The SSL context option {restrictive} is not supported"),
+                io::ErrorKind::AlreadyExists,
+                "SSL/TLS already set-up for this stream",
             ));
         }
+        State::Failed => return Err(io::ErrorKind::NotConnected.into()),
     }
-    let mut secure = io.socket.secure.lock().await;
-    if secure.is_some() {
-        return Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "SSL/TLS already set-up for this stream",
-        ));
+
+    let State::Negotiating(handshake) = &mut *state else {
+        return Err(io::ErrorKind::NotConnected.into());
+    };
+    let result = if io.blocked {
+        io.wait(handshake).await
+    } else {
+        let mut cx = Context::from_waker(Waker::noop());
+        match handshake.as_mut().poll(&mut cx) {
+            Poll::Ready(result) => result,
+            Poll::Pending => return Err(io::ErrorKind::WouldBlock.into()),
+        }
+    };
+    match result {
+        Ok(stream) => {
+            *state = State::Established(Box::new(stream));
+            Ok(())
+        }
+        Err(error) => {
+            *state = State::Failed;
+            let _ = io.socket.sockref().shutdown(std::net::Shutdown::Both);
+            Err(error)
+        }
     }
-    let name = string(options, "peer_name")
-        .or_else(|| io.socket.peer.get().cloned())
-        .unwrap_or_default();
-    let name = ServerName::try_from(name).map_err(invalid)?;
+}
+
+fn handshake(
+    socket: &Connection,
+    options: &Options,
+    method: i64,
+    material: Material,
+) -> io::Result<Handshake> {
     let mut versions = Vec::new();
-    if requested_method & 64 != 0 {
+    if method & 64 != 0 {
         versions.push(&rustls::version::TLS13);
     }
-    if requested_method & 32 != 0 {
+    if method & 32 != 0 {
         versions.push(&rustls::version::TLS12);
     }
-    if versions.is_empty() || requested_method & 1 == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "No supported SSL/TLS client protocol",
-        ));
+    if versions.is_empty() {
+        return Err(invalid("No supported SSL/TLS protocol"));
     }
-    let provider = phera_io_pool::tls::provider();
-    let builder = rustls::ClientConfig::builder_with_provider(provider.clone())
-        .with_protocol_versions(&versions)
-        .map_err(invalid)?;
-    let verify_peer = option(options, "verify_peer").is_none_or(to_bool);
-    let verify_name = option(options, "verify_peer_name").is_none_or(to_bool);
-    let root_store = if verify_peer {
-        Some(roots(options).await?)
-    } else {
-        None
-    };
-    let mut config = match root_store {
-        Some(roots) if verify_name => builder.with_root_certificates(roots).with_no_client_auth(),
-        roots => builder
+    let provider = phera_io_pool::tls::provider().clone();
+    let wire = socket.wire.clone();
+    if method & 1 != 0 {
+        let name = options
+            .peer_name
+            .clone()
+            .or_else(|| socket.peer.get().cloned())
+            .unwrap_or_default();
+        let name = ServerName::try_from(name).map_err(invalid)?;
+        let verifier = verify::Verifier::new(
+            options,
+            material.roots,
+            provider.signature_verification_algorithms,
+        )?;
+        let builder = ClientConfig::builder_with_provider(provider)
+            .with_protocol_versions(&versions)
+            .map_err(invalid)?
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(Verifier {
-                roots,
-                verify_name,
-                algorithms: provider.signature_verification_algorithms,
-            }))
-            .with_no_client_auth(),
-    };
-    config.enable_sni = option(options, "SNI_enabled").is_none_or(to_bool);
-    let connector = TlsConnector::from(Arc::new(config));
-    let upgraded = io
-        .wait(connector.connect(name, io.socket.wire.clone()))
-        .await?;
-    *secure = Some(upgraded);
-    Ok(())
+            .with_custom_certificate_verifier(Arc::new(verifier));
+        let mut config = if let Some((cert, key)) = material.identity {
+            builder.with_client_auth_cert(cert, key).map_err(invalid)?
+        } else {
+            builder.with_no_client_auth()
+        };
+        config.enable_sni = options.sni;
+        let connector = TlsConnector::from(Arc::new(config));
+        Ok(Box::pin(async move {
+            connector.connect(name, wire).await.map(TlsStream::from)
+        }))
+    } else {
+        let Some((cert, key)) = material.identity else {
+            return Err(invalid("TLS server sockets need a server certificate"));
+        };
+        let builder = ServerConfig::builder_with_provider(provider.clone())
+            .with_protocol_versions(&versions)
+            .map_err(invalid)?;
+        let builder = if options.verify_peer {
+            let verifier = rustls::server::WebPkiClientVerifier::builder_with_provider(
+                Arc::new(material.roots),
+                provider,
+            )
+            .build()
+            .map_err(invalid)?;
+            builder.with_client_cert_verifier(verifier)
+        } else {
+            builder.with_no_client_auth()
+        };
+        let config = builder.with_single_cert(cert, key).map_err(invalid)?;
+        let acceptor = TlsAcceptor::from(Arc::new(config));
+        Ok(Box::pin(async move {
+            acceptor.accept(wire).await.map(TlsStream::from)
+        }))
+    }
 }
 
 pub(super) async fn disable(io: &Io) {
-    let mut secure = io.socket.secure.lock().await;
-    if let Some(mut stream) = secure.take() {
-        stream.get_mut().1.send_close_notify();
-        let _ = io.wait(stream.flush()).await;
+    let mut state = io.socket.secure.lock().await;
+    match std::mem::take(&mut *state) {
+        State::Established(mut stream) => {
+            stream.get_mut().1.send_close_notify();
+            let _ = io.wait(stream.flush()).await;
+            io.socket.retired.store(true, Ordering::Relaxed);
+        }
+        State::Negotiating(_) | State::Failed => {
+            *state = State::Failed;
+            let _ = io.socket.sockref().shutdown(std::net::Shutdown::Both);
+        }
+        State::Plain => (),
     }
 }
 
-fn option<'a>(options: &'a PhpArray, key: &str) -> Option<&'a Value> {
-    options.get(&ArrayKey::str(key))
+pub(super) async fn take_channel(socket: &Connection) -> Option<Box<TlsStream<Wire>>> {
+    let mut secure = socket.secure.lock().await;
+    if let State::Established(stream) = std::mem::take(&mut *secure) {
+        Some(stream)
+    } else {
+        None
+    }
 }
 
-fn string(options: &PhpArray, key: &str) -> Option<String> {
-    let Value::String(value) = &*option(options, key)?.deref() else {
-        return None;
+pub(super) async fn no_buffered_input(socket: &Connection) -> bool {
+    let mut secure = socket.secure.lock().await;
+    let mut bytes = [0; 1];
+    let result = match &mut *secure {
+        State::Plain => return true,
+        State::Established(stream) => match stream.as_mut() {
+            TlsStream::Client(stream) => stream.get_mut().1.reader().read(&mut bytes),
+            TlsStream::Server(stream) => stream.get_mut().1.reader().read(&mut bytes),
+        },
+        State::Failed | State::Negotiating(_) => return false,
     };
-    std::str::from_utf8(value.as_bytes())
-        .ok()
-        .map(str::to_owned)
+    matches!(result, Err(error) if error.kind() == io::ErrorKind::WouldBlock)
 }
 
-async fn roots(options: &PhpArray) -> io::Result<RootCertStore> {
-    let Some(file) = string(options, "cafile") else {
-        return Ok(phera_io_pool::tls::system_store().await);
-    };
-    let bytes = tokio::fs::read(PathBuf::from(file)).await?;
-    let mut roots = RootCertStore::empty();
-    for certificate in CertificateDer::pem_slice_iter(&bytes) {
-        roots.add(certificate.map_err(invalid)?).map_err(invalid)?;
-    }
-    if roots.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "No certificates found in cafile",
-        ));
-    }
-    Ok(roots)
-}
-
-fn invalid(error: impl std::fmt::Display) -> io::Error {
+pub(super) fn invalid(error: impl std::fmt::Display) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, error.to_string())
-}
-
-#[derive(Debug)]
-struct Verifier {
-    roots: Option<RootCertStore>,
-    verify_name: bool,
-    algorithms: WebPkiSupportedAlgorithms,
-}
-
-impl ServerCertVerifier for Verifier {
-    fn verify_server_cert(
-        &self,
-        certificate: &CertificateDer<'_>,
-        intermediates: &[CertificateDer<'_>],
-        name: &ServerName<'_>,
-        _: &[u8],
-        now: UnixTime,
-    ) -> Result<ServerCertVerified, Error> {
-        let certificate = ParsedCertificate::try_from(certificate)?;
-        if let Some(roots) = &self.roots {
-            verify_server_cert_signed_by_trust_anchor(
-                &certificate,
-                roots,
-                intermediates,
-                now,
-                self.algorithms.all,
-            )?;
-        }
-        if self.verify_name {
-            verify_server_name(&certificate, name)?;
-        }
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signature: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, Error> {
-        verify_tls12_signature(message, certificate, signature, &self.algorithms)
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        message: &[u8],
-        certificate: &CertificateDer<'_>,
-        signature: &DigitallySignedStruct,
-    ) -> Result<HandshakeSignatureValid, Error> {
-        verify_tls13_signature(message, certificate, signature, &self.algorithms)
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        self.algorithms.supported_schemes()
-    }
 }
