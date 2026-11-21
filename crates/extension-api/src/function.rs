@@ -347,6 +347,7 @@ impl FunctionEntry {
             name,
             params,
             handler: NativeFn::DeprecatedAsync(handler),
+            id: NativeId::NONE,
         }
     }
 
