@@ -47,15 +47,19 @@ struct FoundCall {
     /// Each `Send`, with what the site records for it.
     sends: Vec<(usize, SiteArgument)>,
     call: usize,
+    /// Literal loads into a register the call already loaded, with the
+    /// send that reads them: each gets a register of its own.
+    renamed: Vec<(usize, usize)>,
 }
 
 /// Rewrite the eligible method calls of one function, after its other
 /// passes have run.
 pub(crate) fn rewrite(function: &mut Function) {
-    let calls = find_calls(function);
+    let mut calls = find_calls(function);
     if calls.is_empty() {
         return;
     }
+    calls.retain_mut(|call| give_own_registers(function, call));
     // The general sequences, kept for the fallbacks before they are
     // replaced.
     let originals: Vec<Vec<(Instruction, u32)>> = calls
@@ -96,6 +100,43 @@ pub(crate) fn rewrite(function: &mut Function) {
         crate::passes::optimize::compact_nops(function);
     }
     append_fallbacks(function, &originals);
+}
+
+/// `CallMethod` reads every argument at the call, so a literal loaded into
+/// a register the call loaded before (the optimizer reuses temporaries:
+/// `$o->m(1, 2)` may load both into one) moves to a register of its own,
+/// with the send that reads it.
+/// `false`, having changed nothing for the call, when the function has no
+/// register left.
+fn give_own_registers(function: &mut Function, call: &mut FoundCall) -> bool {
+    let needed = u16::try_from(call.renamed.len()).ok();
+    if needed
+        .and_then(|needed| function.registers.checked_add(needed))
+        .is_none()
+    {
+        return false;
+    }
+    for &(load, send) in &call.renamed {
+        let fresh = Reg(function.registers);
+        function.registers += 1;
+        function.instructions[load] = match function.instructions[load] {
+            Instruction::LoadInt { value, .. } => Instruction::LoadInt { dst: fresh, value },
+            Instruction::LoadConst { constant, .. } => Instruction::LoadConst {
+                dst: fresh,
+                constant,
+            },
+            Instruction::LoadNull { .. } => Instruction::LoadNull { dst: fresh },
+            Instruction::LoadBool { value, .. } => Instruction::LoadBool { dst: fresh, value },
+            other => other,
+        };
+        function.instructions[send] = Instruction::SendValue { src: fresh };
+        for (index, argument) in &mut call.sends {
+            if *index == send {
+                *argument = SiteArgument::Value(fresh);
+            }
+        }
+    }
+    true
 }
 
 /// After the code: each site's general sequence and a jump back after its
@@ -167,26 +208,43 @@ fn plain_call(
     if protected(function, init) {
         return None;
     }
-    let mut literals: Vec<Reg> = Vec::new();
+    let Instruction::InitMethodCall { receiver, .. } = function.instructions[init] else {
+        return None;
+    };
+    // The literal registers loaded so far, with where the last load is
+    // and whether it moves to a register of its own.
+    let mut literals: Vec<(Reg, usize, bool)> = Vec::new();
     let mut sends = Vec::new();
+    let mut renamed = Vec::new();
     for index in init + 1..function.instructions.len() {
         if targets.contains(&index) {
             return None;
         }
         match function.instructions[index] {
             Instruction::Nop => {}
+            // A load into the receiver's register keeps the general
+            // sequence; a second load into one register moves to its own
+            // (see `give_own_registers`).
             Instruction::LoadInt { dst, .. }
             | Instruction::LoadConst { dst, .. }
             | Instruction::LoadNull { dst }
             | Instruction::LoadBool { dst, .. }
-                if dst.index() >= locals =>
+                if dst.index() >= locals && dst != receiver =>
             {
-                literals.push(dst);
+                let again = literals.iter().any(|(register, ..)| *register == dst);
+                literals.push((dst, index, again));
             }
             Instruction::SendLocal { local } if local.index() < locals => {
                 sends.push((index, SiteArgument::Local(local)));
             }
-            Instruction::SendValue { src } if literals.contains(&src) => {
+            Instruction::SendValue { src } => {
+                let (_, load, again) = *literals
+                    .iter()
+                    .rev()
+                    .find(|(register, ..)| *register == src)?;
+                if again {
+                    renamed.push((load, index));
+                }
                 sends.push((index, SiteArgument::Value(src)));
             }
             Instruction::Call { .. } => {
@@ -194,6 +252,7 @@ fn plain_call(
                     init,
                     sends,
                     call: index,
+                    renamed,
                 });
             }
             _ => return None,
@@ -208,4 +267,92 @@ fn protected(function: &Function, index: usize) -> bool {
         .handlers
         .iter()
         .any(|handler| handler.start.index() <= index && index < handler.end.index())
+}
+
+#[cfg(test)]
+mod tests {
+    use phera_bytecode::Instruction;
+
+    /// How many calls of the function named `name` became `CallMethod`, and
+    /// how many kept `InitMethodCall` in the code itself (the fallbacks,
+    /// after the code, are not counted).
+    fn calls(source: &str, name: &str) -> (usize, usize) {
+        let unit = crate::compile(source, "calls.php").expect("compiles");
+        let function = unit
+            .functions
+            .iter()
+            .find(|function| function.name == name)
+            .expect("function");
+        let end = function
+            .method_sites
+            .iter()
+            .map(|site| site.fallback.index())
+            .min()
+            .unwrap_or(function.instructions.len());
+        let code = &function.instructions[..end];
+        let count = |test: fn(&Instruction) -> bool| code.iter().filter(|i| test(i)).count();
+        (
+            count(|i| matches!(i, Instruction::CallMethod { .. })),
+            count(|i| matches!(i, Instruction::InitMethodCall { .. })),
+        )
+    }
+
+    #[test]
+    fn locals_and_literals_make_one_instruction() {
+        let source = "<?php function f($o, $a) { $o->m(); $o->m($a, 1, 'x', null, true); }";
+        assert_eq!(calls(source, "f"), (2, 0));
+    }
+
+    #[test]
+    fn two_literals_read_at_the_call_need_two_registers() {
+        let unit = crate::compile("<?php function f($o) { return $o->m(1, 2); }", "f.php")
+            .expect("compiles");
+        let function = unit.functions.iter().find(|f| f.name == "f").expect("f");
+        for site in &function.method_sites {
+            let registers: Vec<_> = function.site_arguments[site.argument_range()]
+                .iter()
+                .map(|argument| argument.register())
+                .collect();
+            assert!(registers.first() != registers.get(1), "{registers:?}");
+        }
+    }
+
+    #[test]
+    fn arguments_that_could_be_seen_keep_the_general_sequence() {
+        let source = r#"<?php function f($o, $a, $b) {
+            $o->m(g());
+            $o->m($a + 1);
+            $o->m(x: $a);
+            $o->m(...$b);
+            $o->m($o->n($a));
+            try { $o->m($a); } catch (Exception $e) {}
+        }"#;
+        // Only the inner `$o->n($a)` of the fifth call is one instruction.
+        assert_eq!(calls(source, "f"), (1, 6));
+    }
+
+    #[test]
+    fn a_fallback_jumps_back_after_its_call() {
+        let unit = crate::compile("<?php function f($o, $a) { return $o->m($a); }", "f.php")
+            .expect("compiles");
+        let function = unit.functions.iter().find(|f| f.name == "f").expect("f");
+        let [site] = function.method_sites.as_slice() else {
+            panic!("one site");
+        };
+        let call = function
+            .instructions
+            .iter()
+            .position(|i| matches!(i, Instruction::CallMethod { .. }))
+            .expect("CallMethod");
+        let fallback = &function.instructions[site.fallback.index()..];
+        assert!(matches!(fallback[0], Instruction::InitMethodCall { .. }));
+        assert!(matches!(fallback[1], Instruction::SendLocal { .. }));
+        assert!(matches!(fallback[2], Instruction::Call { .. }));
+        assert_eq!(
+            fallback[3],
+            Instruction::Jump {
+                target: phera_bytecode::Target(call as u32 + 1)
+            }
+        );
+    }
 }
