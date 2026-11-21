@@ -103,16 +103,13 @@ impl Vm {
         // autoloads it.
         let target_class = self.classes.get(target);
         class.zip(target_class).and_then(|(class, target)| {
-            match class.derives_from(&target) {
-                // An ancestry walk that outgrew its bounds: the general
-                // handler answers it.
-                None => None,
-                Some(derives) => Some(
-                    derives
-                        && !(matches!(query, RelationQuery::IsSubclassOf)
-                            && class.index == target.index),
-                ),
-            }
+            // A walk that outgrew its bounds (`None`) falls back to the
+            // general handler.
+            class.derives_from(&target).map(|derives| {
+                derives
+                    && !(matches!(query, RelationQuery::IsSubclassOf)
+                        && class.index == target.index)
+            })
         })
     }
 }
