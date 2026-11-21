@@ -77,25 +77,11 @@ impl Compiler<'_> {
             line,
         );
         if let Some(then_expression) = then {
-            let src = self.compile_expression(then_expression)?;
-            self.emit(
-                Instruction::Move {
-                    destination: dst,
-                    source: src,
-                },
-                line,
-            );
+            self.compile_branch_value(then_expression, dst, line)?;
         }
         let end = self.emit(Instruction::Jump(Target(0)), line);
         self.patch(jump, self.position());
-        let src = self.compile_expression(otherwise)?;
-        self.emit(
-            Instruction::Move {
-                destination: dst,
-                source: src,
-            },
-            line,
-        );
+        self.compile_branch_value(otherwise, dst, line)?;
         self.patch(end, self.position());
         Ok(dst)
     }

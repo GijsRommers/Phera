@@ -62,7 +62,7 @@ pub use ids::{
 };
 pub use instruction::{
     BinaryOp, CallResult, CaptureKind, CastKind, ClassBinding, ClosureBinding, FetchMode,
-    FinallyEntry, IncDec, IncludeKind, Instruction, RuntimeError, UnaryOp,
+    FinallyEntry, IncDec, IncludeKind, Instruction, RuntimeError, StrictComparison, UnaryOp,
 };
 pub use unit::{
     CompiledUnit, Constant, ConstantKey, DeclarationWarning, Symbol, Type, TypeMask,

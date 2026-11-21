@@ -118,6 +118,11 @@ pub enum Instruction {
         dst: Reg,
         constant: ConstId,
     },
+    /// Assign a literal to a local when the assignment's result is discarded.
+    AssignConst {
+        local: Reg,
+        constant: ConstId,
+    },
     LoadNull {
         dst: Reg,
     },
@@ -279,6 +284,13 @@ pub enum Instruction {
         dst: Reg,
         lhs: Reg,
         rhs: Reg,
+    },
+    /// Strict identity against a string literal held in the unit's table.
+    StrictCompareConst {
+        dst: Reg,
+        lhs: Reg,
+        rhs: ConstId,
+        comparison: StrictComparison,
     },
     Unary {
         op: UnaryOp,
@@ -617,6 +629,12 @@ pub enum Instruction {
 // The interpreter copies one instruction per step. Keep them register-sized;
 // move anything bigger into a table.
 const _: () = assert!(std::mem::size_of::<Instruction>() <= 16);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StrictComparison {
+    Identical,
+    NotIdentical,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {

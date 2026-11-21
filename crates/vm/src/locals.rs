@@ -1,6 +1,6 @@
 //! PHP locals instruction handlers, separate from dispatch.
 
-use phera_bytecode::{Instruction, Reg, TypeId};
+use phera_bytecode::{ConstId, Instruction, Reg, TypeId};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
@@ -8,6 +8,17 @@ use crate::Vm;
 use crate::calls::execution_loop::BatchExit;
 
 impl Vm {
+    /// Share the literal and keep the normal reference checks at the store.
+    pub(crate) fn assign_const(
+        &mut self,
+        local: Reg,
+        constant: ConstId,
+    ) -> Result<(), NativeError> {
+        let value = self.literal_constant(constant)?.clone();
+        self.restart_subject_iterators(local);
+        self.assign_local(local, value)
+    }
+
     /// Implements PHP Move semantics outside the dispatch loop.
     pub(crate) fn move_local(&mut self, destination: Reg, source: Reg) -> Result<(), NativeError> {
         let value = self.read_local(source);

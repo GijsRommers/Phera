@@ -1,0 +1,49 @@
+# Lower expressions into their destinations
+
+- Date: 2026-11-21
+- Area: Compiler
+- Decided by: Design
+
+## Decision
+
+Use an expression's destination when the operation can write the completed
+value there with the same assignment and lifetime semantics. The current
+lowering generally returns a temporary register, so a consumer can emit a
+copy or assignment followed by a release of that temporary. An expression
+with an explicit destination can use the existing output register of its
+instruction.
+
+Read a constant from its unit slot when an instruction has an operand that
+can address that slot. Keep the assignment commit point, expression order,
+and diagnostics. A destination must still write through a reference if PHP
+would and release its prior value at the same point. In particular,
+lowering into a local must account for any callback or exception before
+the new value is complete.
+
+Measure executed opcodes by kind on Symfony's database yardstick and
+Laravel's posts route before choosing which producers and consumers to
+change. Measure native instructions separately on all three gated routes
+and verify each change against PHP.
+
+## First lowering cases
+
+- For a literal on a `match` or ternary branch, load it into the result
+  register that both branches agree on. Nonliteral branches keep the value
+  copy for results that may carry a reference.
+- A scalar assignment statement to a plain local selects the unit constant
+  and uses the reference-aware assignment handler. Used assignment results
+  keep their own value. Replacing a local still restarts its foreach subject
+  and applies any property type bound through a reference.
+- A strict comparison with a string literal on the right reads the literal
+  by its unit index. PHP's strict comparison needs no scalar conversion,
+  object hook or recursive value comparison with a string. Missing variables
+  still use the existing warning and error-handler path before the store.
+  Other operators keep their original operand evaluation and coercion.
+
+The two new instructions are `AssignConst` and `StrictCompareConst`. They
+stay within the existing 16-byte instruction size. The general handlers
+live outside the interpreter loop and can run without a loop-specific arm.
+
+Assigning a unit constant writes the local and reads no temporary operands.
+Record that effect in liveness so an assignment after a loop preserves
+fusion of the loop's integer comparison and branch.

@@ -13,6 +13,29 @@ use crate::ir::Constant;
 use crate::{CompileError, Compiler, constant};
 
 impl Compiler<'_> {
+    /// Write the value of a branch to its join temporary. Moving nonliteral
+    /// results still takes a value copy if their expression returned a reference.
+    pub(crate) fn compile_branch_value(
+        &mut self,
+        expression: &ast::Expression,
+        destination: Reg,
+        line: usize,
+    ) -> Result<(), CompileError> {
+        if let Some(value) = constant(expression) {
+            self.load_literal(destination, value, self.lines.line(expression.span.start));
+        } else {
+            let source = self.compile_expression(expression)?;
+            self.emit(
+                crate::ir::Instruction::Move {
+                    destination,
+                    source,
+                },
+                line,
+            );
+        }
+        Ok(())
+    }
+
     /// Dispatch an individual AST node after recognizing literal constants.
     pub(crate) fn compile_expression_node(
         &mut self,

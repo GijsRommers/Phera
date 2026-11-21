@@ -134,6 +134,7 @@ impl Vm {
             I::LoadBool { dst, value } => self.set(dst, Value::Bool(value)),
             I::LoadInt { dst, value } => self.set(dst, Value::Int(i64::from(value))),
             I::LoadConst { dst, constant } => self.load_constant(dst, constant)?,
+            I::AssignConst { local, constant } => self.assign_const(local, constant)?,
             I::Move { dst, src } => self.move_local(dst, src)?,
             I::Clear { reg } | I::UnsetLocal { local: reg } => self.clear_local(reg)?,
             I::Assign { local, src } => return self.execute_assign(local, src),
@@ -149,6 +150,14 @@ impl Vm {
             } => self.binary_int_branch(op, lhs, rhs, target)?,
             I::BinaryInt { op, dst, lhs, rhs } => self.execute_binary_int(op, dst, lhs, rhs)?,
             I::Binary { dst, op, lhs, rhs } => return self.execute_binary(op, dst, lhs, rhs),
+            I::StrictCompareConst {
+                dst,
+                lhs,
+                rhs,
+                comparison,
+            } => {
+                return self.execute_strict_compare_const(dst, lhs, rhs, comparison);
+            }
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
             I::BuiltinUnary { op, dst, src } => return self.execute_builtin_unary(op, src, dst),
             I::BuiltinFrame { op, dst } => self.execute_builtin_frame(op, dst)?,

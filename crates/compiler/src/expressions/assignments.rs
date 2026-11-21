@@ -7,6 +7,30 @@ use crate::ir::{Instruction, Target};
 use crate::{CompileError, Compiler, binary, writable};
 
 impl Compiler<'_> {
+    /// A discarded scalar assignment to a plain local has no result to snapshot.
+    pub(crate) fn compile_literal_assignment_statement(
+        &mut self,
+        target: &ast::Expression,
+        value: &ast::Expression,
+        line: usize,
+    ) -> Result<bool, CompileError> {
+        let ast::ExpressionKind::Variable(ast::Variable::Named(name)) = &target.kind else {
+            return Ok(false);
+        };
+        let Some(constant) = crate::constant(value) else {
+            return Ok(false);
+        };
+        if matches!(constant, crate::ir::Constant::EmptyArray) {
+            return Ok(false);
+        }
+        let Some(local) = self.compiled_variable(target)? else {
+            return Ok(false);
+        };
+        self.declare_file_symbol(name);
+        self.emit(Instruction::AssignConst { local, constant }, line);
+        Ok(true)
+    }
+
     /// Evaluate property receivers and keys before the source. A simple local
     /// source is read only when the destination is ready to be written.
     pub(crate) fn compile_assignment(

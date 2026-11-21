@@ -1,7 +1,9 @@
 //! Borrowed arithmetic operands and amortised in-place string assignment.
 
 use crate::calls::execution_loop::BatchExit;
-use phera_bytecode::{BinaryOp, CastKind, IncDec, Instruction, Reg, UnaryOp};
+use phera_bytecode::{
+    BinaryOp, CastKind, ConstId, IncDec, Instruction, Reg, StrictComparison, UnaryOp,
+};
 use phera_extension_api::{Context, NativeError, PropertyPurpose};
 use phera_value::{StringComparisonStep, Value, to_php_string};
 
@@ -12,6 +14,52 @@ use crate::string_comparison::{
 use crate::{Vm, ops};
 
 impl Vm {
+    /// Compare against a borrowed table literal without populating another slot.
+    pub(crate) fn execute_strict_compare_const(
+        &mut self,
+        dst: Reg,
+        lhs: Reg,
+        rhs: ConstId,
+        comparison: StrictComparison,
+    ) -> Result<Option<BatchExit>, NativeError> {
+        let frame = self
+            .current()
+            .ok_or_else(|| internal_error!("operator frame"))?;
+        let Some(Some(left)) = frame.slots(&self.registers).get(lhs.index()) else {
+            return Ok(Some(BatchExit::Instruction(
+                Instruction::StrictCompareConst {
+                    dst,
+                    lhs,
+                    rhs,
+                    comparison,
+                },
+            )));
+        };
+        let right = frame
+            .cache()
+            .constants
+            .get(rhs.index())
+            .ok_or_else(|| internal_error!("constant"))?;
+        let value = strict_compare_const(left, right, comparison)?;
+        self.set(dst, value);
+        Ok(None)
+    }
+
+    pub(crate) async fn strict_compare_const_with_undefined_operand(
+        &mut self,
+        dst: Reg,
+        lhs: Reg,
+        rhs: ConstId,
+        comparison: StrictComparison,
+    ) -> Result<(), NativeError> {
+        let missing = self.warn_missing_operand(lhs).await?;
+        let left = if missing { Value::Null } else { self.get(lhs) };
+        let right = self.literal_constant(rhs)?;
+        let value = strict_compare_const(&left, right, comparison)?;
+        self.set(dst, value);
+        Ok(())
+    }
+
     /// Read a local before applying the literal, retaining undefined-variable warnings.
     pub(crate) fn execute_binary_int(
         &mut self,
@@ -201,6 +249,20 @@ impl Vm {
         drop(diagnostics);
         Ok(changed)
     }
+}
+
+/// A string literal cannot trigger object conversions or recursive comparisons.
+pub(crate) fn strict_compare_const(
+    left: &Value,
+    right: &Value,
+    comparison: StrictComparison,
+) -> Result<Value, NativeError> {
+    let equal = phera_value::strict_equals(left, right, &mut phera_value::NoDiagnostics)?;
+    let equal = matches!(equal, Value::Bool(true));
+    Ok(Value::Bool(match comparison {
+        StrictComparison::Identical => equal,
+        StrictComparison::NotIdentical => !equal,
+    }))
 }
 
 /// The common scalar cases do not need PHP's general coercion machinery.

@@ -83,14 +83,7 @@ impl Compiler<'_> {
                     self.patch(jump, self.position())
                 }
                 let mark = self.mark_temporaries();
-                let src = self.compile_expression(&arm.body)?;
-                self.emit(
-                    Instruction::Move {
-                        destination: dst,
-                        source: src,
-                    },
-                    line,
-                );
+                self.compile_branch_value(&arm.body, dst, line)?;
                 self.release_temporaries(mark);
                 done.push(self.emit(Instruction::Jump(Target(0)), line));
                 self.patch(skip, self.position());
@@ -99,14 +92,7 @@ impl Compiler<'_> {
             }
         }
         if let Some(expression) = default {
-            let src = self.compile_expression(expression)?;
-            self.emit(
-                Instruction::Move {
-                    destination: dst,
-                    source: src,
-                },
-                line,
-            );
+            self.compile_branch_value(expression, dst, line)?;
         } else {
             self.emit(
                 Instruction::MatchError {

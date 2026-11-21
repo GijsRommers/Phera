@@ -26,8 +26,14 @@ pub(crate) fn effect(
         | Instruction::InitStaticCall { .. }
         | Instruction::DeclareClass { .. }
         | Instruction::IterEnd { .. } => Unrelated,
-        Instruction::FetchClassName { dst, .. } | Instruction::FetchThis { dst } => {
-            if dst == register { Write } else { Unrelated }
+        Instruction::FetchClassName { dst, .. }
+        | Instruction::FetchThis { dst }
+        | Instruction::AssignConst { local: dst, .. } => {
+            if dst == register {
+                Write
+            } else {
+                Unrelated
+            }
         }
         Instruction::NewDynamic { class } => {
             if class == register {

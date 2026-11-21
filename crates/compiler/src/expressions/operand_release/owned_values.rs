@@ -152,6 +152,9 @@ fn scalar_write(instruction: &Instruction, register: Reg) -> Option<bool> {
             operator,
             ..
         } if *destination == register => Some(*operator != Binary::Add),
+        Instruction::StrictCompareConst { destination, .. } if *destination == register => {
+            Some(true)
+        }
         Instruction::Unary {
             destination,
             operator,
@@ -215,6 +218,9 @@ fn reads_only(instruction: &Instruction, register: Reg) -> bool {
             right,
             ..
         } => *destination != register && (*left == register || *right == register),
+        Instruction::StrictCompareConst {
+            destination, left, ..
+        } => *destination != register && *left == register,
         Instruction::Unary {
             destination,
             source,

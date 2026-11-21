@@ -14,6 +14,11 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         self.clear_temporaries_after(line, |compiler| {
+            if let ast::ExpressionKind::Assign { target, value } = &expression.kind
+                && compiler.compile_literal_assignment_statement(target, value, line)?
+            {
+                return Ok(());
+            }
             // `(void) f();` evaluates the operand and discards it outright.
             if let ast::ExpressionKind::Cast {
                 kind: ast::CastKind::Void,

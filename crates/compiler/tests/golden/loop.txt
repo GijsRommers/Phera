@@ -1,11 +1,15 @@
 file golden.php
+  const#0 = Int(0)
+  const#1 = Bool(true)
 
-function {main} (5 registers, dynamic scope)
+function {main} (6 registers, dynamic scope)
   r0 = $index
-  0000  line 1    LoadInt { dst: r1, value: 0 }
-  0001  line 1    Assign { local: r0, src: r1 }
-  0002  line 1    BinaryIntBranch { op: Less, lhs: r0, rhs: 3, target: @5 }
-  0003  line 1    IncDecLocal { mode: PostIncrement, dst: r3, local: r0 }
-  0004  line 1    Jump { target: @2 }
-  0005  line 1    LoadInt { dst: r3, value: 1 }
-  0006  line 1    Return { src: r3 }
+  r1 = $finished
+  0000  line 1    AssignConst { local: r0, constant: const#0 }
+  0001  line 1    BinaryIntBranch { op: Less, lhs: r0, rhs: 3, target: @4 }
+  0002  line 1    IncDecLocal { mode: PostIncrement, dst: r3, local: r0 }
+  0003  line 1    Jump { target: @1 }
+  0004  line 1    AssignConst { local: r1, constant: const#1 }
+  0005  line 1    Clear { reg: r3 }
+  0006  line 1    LoadInt { dst: r4, value: 1 }
+  0007  line 1    Return { src: r4 }

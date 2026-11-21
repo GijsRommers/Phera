@@ -165,10 +165,12 @@ fn update_facts(function: &Function, facts: &mut [Fact], instruction: Instructio
         Instruction::Move { dst, src } | Instruction::Assign { local: dst, src } => {
             set_fact(facts, dst, fact(facts, src))
         }
+        Instruction::AssignConst { local, .. } => set_fact(facts, local, Unknown),
         Instruction::Binary { op, dst, lhs, rhs } => {
             let value = arithmetic(op, fact(facts, lhs), fact(facts, rhs));
             set_fact(facts, dst, value)
         }
+        Instruction::StrictCompareConst { dst, .. } => set_fact(facts, dst, Scalar),
         Instruction::AssignOp { op, local, src } => {
             let value = arithmetic(op, fact(facts, local), fact(facts, src));
             set_fact(facts, local, value)

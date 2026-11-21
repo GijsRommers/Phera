@@ -50,9 +50,19 @@ fn locals_precede_temporaries() {
             .collect::<Vec<_>>(),
         ["a", "b"]
     );
+    use phera_bytecode::Instruction;
     assert!(matches!(
-        compiler.main.instructions.get(1),
-        Some(phera_bytecode::Instruction::Assign { local: Reg(0), .. })
+        &compiler.main.instructions[..3],
+        [
+            Instruction::AssignConst { local: Reg(0), .. },
+            Instruction::AssignConst { local: Reg(1), .. },
+            Instruction::Binary {
+                dst: Reg(2),
+                lhs: Reg(0),
+                rhs: Reg(1),
+                ..
+            },
+        ]
     ));
 }
 
