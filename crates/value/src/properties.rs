@@ -281,11 +281,15 @@ impl Properties {
         if self.layout.is_none() {
             return self.others.as_deref().cloned().unwrap_or_default();
         }
-        let mut array = PhpArray::with_capacity(self.len());
-        for (key, value) in self.iter() {
-            array.insert(key, value.clone());
+        // A declared key and an undeclared one never coincide, so the keys
+        // are distinct and the array is built in one go.
+        let entries = self
+            .iter()
+            .map(|(key, value)| Ok::<_, std::convert::Infallible>((key, value.clone())));
+        match PhpArray::try_from_distinct(entries) {
+            Ok(array) => array,
+            Err(never) => match never {},
         }
-        array
     }
 
     /// The properties that are not declared, in insertion order, if any.
