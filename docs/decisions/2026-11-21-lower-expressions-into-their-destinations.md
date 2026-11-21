@@ -43,3 +43,7 @@ and verify each change against PHP.
 The two new instructions are `AssignConst` and `StrictCompareConst`. They
 stay within the existing 16-byte instruction size. The general handlers
 live outside the interpreter loop and can run without a loop-specific arm.
+
+Assigning a unit constant writes the local and reads no temporary operands.
+Record that effect in liveness so an assignment after a loop preserves
+fusion of the loop's integer comparison and branch.

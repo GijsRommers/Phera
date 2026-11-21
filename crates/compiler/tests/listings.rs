@@ -2,8 +2,11 @@
 
 #[test]
 fn loop_listing() {
-    let unit = phera_compiler::compile("<?php $index=0;while($index<3){$index++;}", "golden.php")
-        .expect("valid PHP");
+    let unit = phera_compiler::compile(
+        "<?php $index=0;while($index<3){$index++;}$finished=true;",
+        "golden.php",
+    )
+    .expect("valid PHP");
     assert_eq!(unit.to_string(), include_str!("golden/loop.txt"));
 }
 
