@@ -27,6 +27,22 @@ The entries give retired instructions and elapsed cycles per iteration, each the
 
 At whole-instruction precision the function reached the lower estimate. The method fell four instructions short. All four shapes retired fewer instructions, so the reviewer advanced this candidate to the three request routes. The focused fixture matched PHP 8.5.12 and both controls.
 
+## Request gate
+
+Drop this candidate. The parent of this item is #200. The posts regression repeated, and settled Symfony also rose. The named pre-#200 main control measures both items together.
+
+| Route | Private `main-3ba1578a` → `phera-item2`, M instructions/request | Private `parent-c970da78` → `phera-item2`, M instructions/request |
+| --- | ---: | ---: |
+| Laravel hello | 25.50 → 25.20 (−1.18%) | 25.10 → 25.20 (+0.40%), repeat 25.08 → 25.10 (+0.07%) |
+| Laravel posts, page 2 | 108.07 → 106.87 (−1.11%) | 106.48 → 106.90 (+0.39%), repeat 106.40 → 106.80 (+0.38%) |
+| Settled Symfony | 445.27 → 443.08 (−0.49%) | 440.89 → 442.58 (+0.38%) |
+
+Every Laravel comparison used six alternating pairs. The parent comparison was repeated because the first pairs varied by more than 0.3 percentage points. Each Symfony comparison used two pairs after 300 warm-up requests, with matching response hashes.
+
+A typed return, a frame with extras, or a call returning while an outer send is pending now checks eligibility for the untyped path and then calls `leave_checked`. The parent inlined that handler. In the candidate's ordinary loop, AArch64 disassembly shows a branch-with-link into `leave_checked` from both return arms. The checked path reloads the frame and checks its contract. Method entry also loads the eligibility byte and packs it into the frame flags. These are identifiable extra costs outside the simple shape. The route measurement counts whole requests and cannot apportion the increase among those paths.
+
+The new fixture passed on PHP 8.5.12 and the candidate. Its output also matched both private controls. The route failure stopped the trial before the ten benchmarks, full fixture suite, VM/runtime tests, destructor and take scripts, and both php-src sweeps.
+
 ## Structure: was, is
 
 | Structure | Was | Is |
