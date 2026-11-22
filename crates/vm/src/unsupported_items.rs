@@ -2,7 +2,7 @@
 //!
 //! ```php
 //! namespace App;
-//! strftime('%Y'); // Resolves App\strftime first, then the unsupported PHP name.
+//! date_sunset(0); // Resolves App\date_sunset first, then the unsupported PHP name.
 //! ```
 
 use phera_extension_api::NativeError;

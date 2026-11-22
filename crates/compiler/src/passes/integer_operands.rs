@@ -74,7 +74,27 @@ const DEAD_AFTER_SCAN: usize = 256;
 
 /// A deliberately conservative proof: only straight-line overwrites are accepted.
 pub(crate) fn dead_after(function: &Function, index: usize, register: phera_bytecode::Reg) -> bool {
-    let mut pending = vec![index + 1];
+    dead_after_from(function, vec![index + 1], register)
+}
+
+/// Same proof, but the instruction at `index` is a jump being removed with its
+/// producer: its target edge is reachable without the register being written,
+/// so it must be explored too. Value-context `($a === $b) || x` compiles to
+/// `Binary`, `JumpIf`, and the jump's landing reads the temporary.
+pub(crate) fn dead_after_jump(
+    function: &Function,
+    index: usize,
+    register: phera_bytecode::Reg,
+    target: phera_bytecode::Target,
+) -> bool {
+    dead_after_from(function, vec![index + 1, target.index()], register)
+}
+
+fn dead_after_from(
+    function: &Function,
+    mut pending: Vec<usize>,
+    register: phera_bytecode::Reg,
+) -> bool {
     // Sorted; at most DEAD_AFTER_SCAN entries, so searching it is cheaper
     // than hashing every position.
     let mut visited: Vec<usize> = Vec::new();
@@ -152,6 +172,24 @@ pub(crate) fn dead_after(function: &Function, index: usize, register: phera_byte
                 Instruction::JumpIfNull { value, target }
                 | Instruction::JumpIfNotNull { value, target } => {
                     if value == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::BinaryIntBranch { lhs, target, .. }
+                | Instruction::BinaryIntBranchIf { lhs, target, .. } => {
+                    if lhs == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::BinaryBranch {
+                    lhs, rhs, target, ..
+                }
+                | Instruction::BinaryBranchIf {
+                    lhs, rhs, target, ..
+                } => {
+                    if lhs == register || rhs == register {
                         return false;
                     }
                     pending.push(target.index());
@@ -239,15 +277,23 @@ pub(crate) fn fuse_integer_branches(function: &mut Function) {
         if boundaries.contains(&index) {
             continue;
         }
-        let Instruction::BinaryInt { op, dst, lhs, rhs } = function.instructions[index - 1] else {
-            continue;
+        let (condition, target, when) = match function.instructions[index] {
+            Instruction::JumpIfNot { condition, target } => (condition, target, false),
+            Instruction::JumpIf { condition, target } => (condition, target, true),
+            _ => continue,
         };
-        let Instruction::JumpIfNot { condition, target } = function.instructions[index] else {
-            continue;
+        let (op, dst, branch) = match function.instructions[index - 1] {
+            Instruction::BinaryInt { op, dst, lhs, rhs } => {
+                (op, dst, BranchShape::Int { lhs, rhs })
+            }
+            Instruction::Binary { op, dst, lhs, rhs } => {
+                (op, dst, BranchShape::General { lhs, rhs })
+            }
+            _ => continue,
         };
         if condition != dst
             || dst.index() < function.locals.len()
-            || !dead_after(function, index, dst)
+            || !dead_after_jump(function, index, dst, target)
         {
             continue;
         }
@@ -264,12 +310,44 @@ pub(crate) fn fuse_integer_branches(function: &mut Function) {
         ) {
             continue;
         }
-        function.instructions[index - 1] = Instruction::BinaryIntBranch {
-            op,
-            lhs,
-            rhs,
-            target,
+        function.instructions[index - 1] = match (branch, when) {
+            (BranchShape::Int { lhs, rhs }, false) => Instruction::BinaryIntBranch {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
+            (BranchShape::Int { lhs, rhs }, true) => Instruction::BinaryIntBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
+            (BranchShape::General { lhs, rhs }, false) => Instruction::BinaryBranch {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
+            (BranchShape::General { lhs, rhs }, true) => Instruction::BinaryBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            },
         };
         function.instructions[index] = Instruction::Nop;
     }
+}
+
+/// Which compare-and-jump instruction a fused comparison lowers to.
+enum BranchShape {
+    Int {
+        lhs: phera_bytecode::Reg,
+        rhs: i32,
+    },
+    General {
+        lhs: phera_bytecode::Reg,
+        rhs: phera_bytecode::Reg,
+    },
 }

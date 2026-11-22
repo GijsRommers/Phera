@@ -235,6 +235,7 @@ pub(crate) mod assignments;
 pub(crate) mod calls;
 pub(crate) mod chains;
 pub(crate) mod conditionals;
+pub(crate) mod conditions;
 mod generators;
 mod match_constants;
 pub(crate) mod matching;
