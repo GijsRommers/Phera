@@ -229,6 +229,12 @@ impl Registers {
         self.slots[index].take().unwrap_or_default()
     }
 
+    /// Empty a slot, giving back what it held, if anything.
+    #[inline(always)]
+    pub(crate) fn take_defined(&mut self, index: usize) -> Option<Value> {
+        self.slots.get_mut(index).and_then(Option::take)
+    }
+
     /// Store a value in a slot, dropping what it held.
     #[inline(always)]
     pub(crate) fn put(&mut self, index: usize, value: Value) {
@@ -251,6 +257,66 @@ impl Registers {
     #[inline(always)]
     pub(crate) fn tail_mut(&mut self, base: usize) -> &mut [Option<Value>] {
         &mut self.slots[base..]
+    }
+
+    /// The register window of a frame at `base`: [`WINDOW`] slots, so that
+    /// an operand indexed by its low byte (see [`slot`]) needs no bounds
+    /// check. The file is grown first, so the window always exists. Slots
+    /// above the frame's own registers may belong to a call being prepared;
+    /// the frame's code never names them (its operands stay below its
+    /// register count, which is at most [`WINDOW`] for code run this way).
+    #[inline(always)]
+    pub(crate) fn window_at(&mut self, base: usize) -> Option<&mut Window> {
+        let end = base + WINDOW;
+        if self.slots.len() < end {
+            self.slots.resize_with(end + 64, || None);
+        }
+        (&mut self.slots[base..end]).try_into().ok()
+    }
+}
+
+/// How many registers a frame's window has: a register is named by a `u16`,
+/// and code that uses at most this many runs on a window indexed by the
+/// low byte, which cannot be out of bounds by type.
+pub(crate) const WINDOW: usize = 256;
+
+/// A frame's register window (see [`Registers::window_at`]).
+pub(crate) type Window = [Option<Value>; WINDOW];
+
+/// The window position of register `register`: its low byte, always below
+/// [`WINDOW`], so that indexing the window needs no bounds check.
+#[inline(always)]
+pub(crate) fn slot(register: phera_bytecode::Reg) -> usize {
+    usize::from(register.0 as u8)
+}
+
+/// Registers as the scalar steps read and write them: a frame's fixed
+/// window (no bounds check), or the tail of the register file (checked),
+/// for the callers that have only that.
+pub(crate) trait Slots {
+    fn slot(&self, register: phera_bytecode::Reg) -> Option<&Option<Value>>;
+    fn slot_mut(&mut self, register: phera_bytecode::Reg) -> Option<&mut Option<Value>>;
+}
+
+impl Slots for [Option<Value>] {
+    #[inline(always)]
+    fn slot(&self, register: phera_bytecode::Reg) -> Option<&Option<Value>> {
+        self.get(register.index())
+    }
+    #[inline(always)]
+    fn slot_mut(&mut self, register: phera_bytecode::Reg) -> Option<&mut Option<Value>> {
+        self.get_mut(register.index())
+    }
+}
+
+impl Slots for Window {
+    #[inline(always)]
+    fn slot(&self, register: phera_bytecode::Reg) -> Option<&Option<Value>> {
+        Some(&self[slot(register)])
+    }
+    #[inline(always)]
+    fn slot_mut(&mut self, register: phera_bytecode::Reg) -> Option<&mut Option<Value>> {
+        Some(&mut self[slot(register)])
     }
 }
 
