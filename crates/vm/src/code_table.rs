@@ -22,8 +22,7 @@ use phera_bytecode::{CompiledUnit, Function, FunctionSignature, Instruction};
 
 pub(crate) use crate::function_facts::{FunctionFacts, FunctionShape};
 
-use crate::shared_table::SharedTable;
-use crate::unit_caches::UnitCache;
+use crate::unit_caches::{CachedSite, Sites, UnitCache};
 
 /// A function's position in the request's code table.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
@@ -66,9 +65,11 @@ pub(crate) struct CodeTable {
     /// files this request has not loaded: whether a function is declared in
     /// the request is its function table's answer, never this vector's.
     ///
-    /// A snapshot and its forks hold one table; a request that changes it
-    /// (loads a file, declares a class) copies it first (see `crate::shared_table`).
-    functions: SharedTable<FunctionFacts>,
+    /// A fork has its own copy, a vector read as it always was: sharing it
+    /// with the snapshot (an `Rc<[FunctionFacts]>`) made every read of the
+    /// facts dearer than a `Vec`'s, by more than the copy costs a fork (see
+    /// the decision file of 2026-11-22).
+    functions: Vec<FunctionFacts>,
     worker: std::rc::Rc<crate::worker_code::WorkerCode>,
     /// The numbers this request leased, and those of the snapshot it was
     /// forked from, which it keeps alive.
@@ -76,7 +77,15 @@ pub(crate) struct CodeTable {
     /// Where each loaded file is, by its process number
     /// (`UnitMetadata::id`): its position in `units` plus one, 0 if this
     /// request has not loaded it.
-    slots: SharedTable<u32>,
+    slots: Vec<u32>,
+    /// The site cells of every function by its number (top-level code
+    /// included), made when the function first looks a site up: one cell
+    /// per instruction. A fork's start empty, with `base_sites` to make them
+    /// from. Grows with `functions`.
+    sites: Vec<Sites>,
+    /// What the snapshot's functions had filled: shared by its forks, never
+    /// changed.
+    base_sites: Option<std::rc::Rc<[Sites]>>,
     /// The name of each trait method composed into a class, which can differ
     /// from the name of the body it runs (`use T { foo as bar }`), by the
     /// method's number, sorted. Read only to name a function in an error or
@@ -99,10 +108,12 @@ impl CodeTable {
     pub(crate) fn for_worker(worker: &std::rc::Rc<crate::worker_code::WorkerCode>) -> Self {
         CodeTable {
             units: Vec::new(),
-            functions: SharedTable::default(),
+            functions: Vec::new(),
             worker: worker.clone(),
             leases: vec![crate::worker_code::Leases::new(worker)],
-            slots: SharedTable::default(),
+            slots: Vec::new(),
+            sites: Vec::new(),
+            base_sites: None,
             trait_method_names: Default::default(),
             imports: None,
         }
@@ -134,15 +145,8 @@ impl CodeTable {
         let mut facts = self.facts(FunctionIndex(*source)).clone();
         facts.class = Some(scope);
         let index = *number as usize;
-        // A class a snapshot declared has these written already: a fork
-        // that declares it again changes nothing, and copies nothing.
-        if !self
-            .functions
-            .get(index)
-            .is_some_and(|written| written.same_place_and_class(&facts))
-        {
-            *self.functions.write(index, FunctionFacts::placeholder) = facts;
-        }
+        self.cover(index + 1);
+        self.functions[index] = facts;
         self.name_trait_method(*number, name);
     }
 
@@ -184,7 +188,10 @@ impl CodeTable {
         let index = self.next_unit_index();
         if let Some(metadata) = &unit.metadata {
             let id = metadata.id as usize;
-            *self.slots.write(id, Default::default) = index.0 + 1;
+            if self.slots.len() <= id {
+                self.slots.resize(id + 1, 0);
+            }
+            self.slots[id] = index.0 + 1;
         }
         let count = 1 + unit.functions.len() as u32;
         let first = FunctionIndex(self.worker.number(unit, count, self.own_leases()));
@@ -226,10 +233,8 @@ impl CodeTable {
             )
         };
         let start = first.index();
-        let range =
-            self.functions
-                .write_range(start, start + facts.len(), FunctionFacts::placeholder);
-        for (slot, facts) in range.iter_mut().zip(facts) {
+        self.cover(start + facts.len());
+        for (slot, facts) in self.functions[start..].iter_mut().zip(facts) {
             *slot = facts;
         }
         self.units.push(LoadedUnit {
@@ -323,11 +328,7 @@ impl CodeTable {
         function: FunctionIndex,
         class: crate::classes::ClassIndex,
     ) {
-        if self.functions[function.index()].class != Some(class) {
-            self.functions
-                .write(function.index(), FunctionFacts::placeholder)
-                .class = Some(class);
-        }
+        self.functions[function.index()].class = Some(class);
     }
 
     /// Flattened methods share immutable instructions and own their scope and static cells.
@@ -339,9 +340,8 @@ impl CodeTable {
         let mut facts = self.facts(source).clone();
         facts.class = Some(scope);
         let function = FunctionIndex(self.worker.lease_one(self.own_leases()));
-        *self
-            .functions
-            .write(function.index(), FunctionFacts::placeholder) = facts;
+        self.cover(function.index() + 1);
+        self.functions[function.index()] = facts;
         function
     }
 
@@ -380,6 +380,51 @@ impl CodeTable {
     #[inline]
     pub(crate) fn facts(&self, function: FunctionIndex) -> &FunctionFacts {
         &self.functions[function.index()]
+    }
+
+    /// Makes room for numbers up to `end`, with placeholders, and for their
+    /// site cells.
+    fn cover(&mut self, end: usize) {
+        if self.functions.len() < end {
+            self.functions.resize(end, FunctionFacts::placeholder());
+            self.sites.resize_with(end, Sites::new);
+        }
+    }
+
+    /// The site of the instruction of `function` that ends at `ip`: the VM
+    /// looks it up after the instruction pointer has advanced. The cells of
+    /// the function are made here, the first time any of its sites is
+    /// looked up.
+    #[inline]
+    pub(crate) fn site(
+        &self,
+        function: FunctionIndex,
+        ip: usize,
+    ) -> Option<&std::cell::RefCell<CachedSite>> {
+        self.sites
+            .get(function.index())?
+            .get_or_init(|| self.make_sites(function))
+            .get(ip)
+    }
+
+    /// The cells of a function that first looks a site up: those the
+    /// snapshot filled that a request may use, else empty ones.
+    #[cold]
+    #[inline(never)]
+    fn make_sites(&self, function: FunctionIndex) -> Box<[std::cell::RefCell<CachedSite>]> {
+        let instructions = self.facts(function).instructions.len();
+        let known = self
+            .base_sites
+            .as_ref()
+            .and_then(|base| base.get(function.index()))
+            .and_then(|sites| sites.get());
+        match known {
+            Some(cells) if cells.len() == instructions + 1 => cells
+                .iter()
+                .map(|cell| std::cell::RefCell::new(cell.borrow().shared()))
+                .collect(),
+            _ => crate::unit_caches::empty_sites(instructions),
+        }
     }
 
     fn loaded(&self, function: FunctionIndex) -> &LoadedUnit {
@@ -448,13 +493,20 @@ impl CodeTable {
     #[cfg(debug_assertions)]
     pub(crate) fn fork_footprint(&self) -> Vec<(&'static str, usize)> {
         use std::mem::size_of;
-        let mut sums = [0; 5];
+        let mut sums = [0; 3];
         for loaded in &self.units {
             for (sum, bytes) in sums.iter_mut().zip(loaded.cache.fork_bytes()) {
                 *sum += bytes;
             }
         }
-        let [cells, boxes, types, functions, closures] = sums;
+        let [types, functions, closures] = sums;
+        let cells = self
+            .sites
+            .iter()
+            .map(|sites| sites.get().map_or(0, |cells| cells.len()))
+            .sum::<usize>()
+            * size_of::<std::cell::RefCell<CachedSite>>();
+        let boxes = self.sites.capacity() * size_of::<Sites>();
         vec![
             ("site cells", cells),
             ("per-function site boxes", boxes),
@@ -463,20 +515,12 @@ impl CodeTable {
             ("closure signatures", closures),
             (
                 "function facts",
-                if self.functions.is_unique() {
-                    self.functions.heap_bytes()
-                } else {
-                    0
-                },
+                self.functions.capacity() * size_of::<FunctionFacts>(),
             ),
             (
                 "loaded-file records",
                 self.units.capacity() * size_of::<LoadedUnit>()
-                    + if self.slots.is_unique() {
-                        self.slots.heap_bytes()
-                    } else {
-                        0
-                    },
+                    + self.slots.capacity() * size_of::<u32>(),
             ),
         ]
     }
@@ -508,6 +552,16 @@ impl crate::snapshot::ForkCopy for CodeTable {
                 .chain([crate::worker_code::Leases::new(&self.worker)])
                 .collect(),
             slots: self.slots.clone(),
+            sites: (0..self.sites.len()).map(|_| Sites::new()).collect(),
+            base_sites: match &self.base_sites {
+                Some(base) => Some(base.clone()),
+                None => Some(
+                    self.sites
+                        .iter()
+                        .map(crate::unit_caches::frozen_sites)
+                        .collect(),
+                ),
+            },
             trait_method_names: self.trait_method_names.clone(),
             imports: None,
         }

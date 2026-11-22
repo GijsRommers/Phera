@@ -36,13 +36,6 @@ pub(crate) struct UnitCache {
     /// change, so scope classification needs no invalidation. Relative types resolve per call.
     pub(crate) type_scopes: Arc<[crate::types::DeclarationScope]>,
     pub(crate) class_types: ClassTypes,
-    /// The site cells of the top-level code and of each function, one per
-    /// instruction, made when the function first looks a site up.
-    main_sites: Sites,
-    /// The cells of each function, made when the file's first function uses
-    /// one: a request runs few of its files' functions, and a fork that
-    /// made a box per function of every loaded file would pay for them all.
-    function_sites: OnceCell<Box<[Sites]>>,
     /// What each method site (`CallMethod`) of the file found the last time
     /// it ran: one flat array for the whole file, one fixed entry per site,
     /// made when the first of the file's sites runs, so a file whose sites
@@ -219,26 +212,16 @@ pub(crate) enum CachedSite {
 
 impl UnitCache {
     /// What a fork's copy of this cache holds on the heap, in bytes: the
-    /// site cells made so far, the per-function cell boxes, and the
     /// per-symbol and per-type resolution slots. The shared literal tables
     /// cost a fork nothing. See `crate::snapshot::footprint`.
-    pub(crate) fn fork_bytes(&self) -> [usize; 5] {
+    pub(crate) fn fork_bytes(&self) -> [usize; 3] {
         use std::mem::size_of;
-        let made = |sites: &Sites| sites.get().map_or(0, |cells| cells.len());
-        let cells = (made(&self.main_sites)
-            + self
-                .function_sites
-                .get()
-                .map_or(0, |boxes| boxes.iter().map(made).sum::<usize>()))
-            * size_of::<RefCell<CachedSite>>();
-        let boxes =
-            (self.function_sites.get().map_or(0, |boxes| boxes.len()) + 1) * size_of::<Sites>();
         let types = self.class_types.cells.len() * size_of::<RefCell<Option<ClassTypeEntry>>>();
         let functions = self.symbols.borrow().len()
             * size_of::<Option<crate::calls::pending::LinkedFunction>>();
         let closures = self.closure_signatures.borrow().len()
             * size_of::<Option<crate::calls::call_state::Callee>>();
-        [cells, boxes, types, functions, closures]
+        [types, functions, closures]
     }
 
     pub(crate) fn trace_file(&self, unit: &CompiledUnit) -> Value {
@@ -247,79 +230,6 @@ impl UnitCache {
                 .get_or_init(|| unit.file.as_str().into())
                 .clone(),
         )
-    }
-
-    /// The site of the instruction of the function `facts` describes that
-    /// ends at `ip`: the VM looks it up after the instruction pointer has
-    /// advanced.
-    #[inline]
-    pub(crate) fn site(
-        &self,
-        facts: &crate::function_facts::FunctionFacts,
-        ip: usize,
-    ) -> Option<&RefCell<CachedSite>> {
-        let sites = match facts.local {
-            Some(function) => match self.function_sites.get() {
-                Some(boxes) => boxes.get(function as usize)?,
-                None => return self.first_site(facts, ip),
-            },
-            None => &self.main_sites,
-        };
-        sites.get_or_init(|| self.make_sites(facts)).get(ip)
-    }
-
-    /// The cells of a function that first looks a site up: those the
-    /// snapshot filled that a request may use, else empty ones.
-    #[cold]
-    fn make_sites(
-        &self,
-        facts: &crate::function_facts::FunctionFacts,
-    ) -> Box<[RefCell<CachedSite>]> {
-        let wanted = facts.instructions.len() + 1;
-        let known = self
-            .base
-            .as_ref()
-            .and_then(|base| base.sites_of(facts.local));
-        match known {
-            Some(cells) if cells.len() == wanted => cells
-                .iter()
-                .map(|cell| RefCell::new(cell.borrow().shared()))
-                .collect(),
-            _ => empty_sites(facts.instructions.len()),
-        }
-    }
-
-    /// The site, when the file has not made the box of any function's
-    /// cells yet: makes it.
-    #[cold]
-    #[inline(never)]
-    fn first_site(
-        &self,
-        facts: &crate::function_facts::FunctionFacts,
-        ip: usize,
-    ) -> Option<&RefCell<CachedSite>> {
-        let boxes = self
-            .function_sites
-            .get_or_init(|| self.function_site_boxes());
-        let sites = boxes.get(facts.local? as usize)?;
-        sites.get_or_init(|| self.make_sites(facts)).get(ip)
-    }
-
-    /// A box for the cells of each function of the file, all empty.
-    #[cold]
-    fn function_site_boxes(&self) -> Box<[Sites]> {
-        // `record_starts` has an entry for each function and the total.
-        let functions = self.record_starts.len().saturating_sub(1);
-        (0..functions).map(|_| Sites::new()).collect()
-    }
-
-    /// The cells a function has made, if it has.
-    fn sites_of(&self, local: Option<u32>) -> Option<&[RefCell<CachedSite>]> {
-        let sites = match local {
-            Some(function) => self.function_sites.get()?.get(function as usize)?,
-            None => &self.main_sites,
-        };
-        sites.get().map(|cells| &**cells)
     }
 
     /// The record of method site `site` of the function `facts` describes,
@@ -347,6 +257,7 @@ impl UnitCache {
     /// snapshot's, which stay true in every fork (the classes they name are
     /// the snapshot's, which a fork shares), or empty ones.
     #[cold]
+    #[inline(never)]
     fn make_records(&self, total: usize) -> Box<[Cell<SiteRecord>]> {
         let known = self.base.as_ref().and_then(|base| base.records.get());
         match known {
@@ -367,7 +278,7 @@ pub(crate) type Sites = OnceCell<Box<[RefCell<CachedSite>]>>;
 /// the position after its instruction. What a site resolves to is allocated
 /// when it is first used.
 #[cold]
-fn empty_sites(instructions: usize) -> Box<[RefCell<CachedSite>]> {
+pub(crate) fn empty_sites(instructions: usize) -> Box<[RefCell<CachedSite>]> {
     (0..=instructions)
         .map(|_| RefCell::new(CachedSite::Empty))
         .collect()
@@ -396,8 +307,6 @@ impl UnitCache {
                     .collect(),
             },
             class_types: ClassTypes::made(unit.types.len()),
-            main_sites: Sites::new(),
-            function_sites: OnceCell::new(),
             records: Records::new(),
             record_starts: {
                 let mut next = unit.main.method_sites.len() as u32;
@@ -466,8 +375,6 @@ impl UnitCache {
             class_names: self.class_names.clone(),
             type_scopes: self.type_scopes.clone(),
             class_types: ClassTypes::not_made(self.class_types.count),
-            main_sites: Sites::new(),
-            function_sites: OnceCell::new(),
             records: Records::new(),
             record_starts: self.record_starts.clone(),
             closure_signatures: RefCell::new(Vec::new()),
@@ -480,12 +387,6 @@ impl UnitCache {
     /// VM it was made in.
     fn frozen(&self) -> Self {
         let mut frozen = self.without_cells();
-        frozen.main_sites = frozen_sites(&self.main_sites);
-        if let Some(boxes) = self.function_sites.get() {
-            let _ = frozen
-                .function_sites
-                .set(boxes.iter().map(frozen_sites).collect());
-        }
         if let Some(cells) = self.records.get() {
             let _ = frozen
                 .records
@@ -603,7 +504,7 @@ impl crate::snapshot::ForkCopy for UnitCache {
 /// The cells of one function that a request forked from the snapshot may
 /// use: the cells that were filled, without those that hold an object of
 /// the VM they were made in.
-fn frozen_sites(sites: &Sites) -> Sites {
+pub(crate) fn frozen_sites(sites: &Sites) -> Sites {
     let copy = Sites::new();
     if let Some(cells) = sites.get() {
         let _ = copy.set(
@@ -619,7 +520,7 @@ fn frozen_sites(sites: &Sites) -> Sites {
 impl CachedSite {
     /// What a request forked from the snapshot may take from this cell:
     /// everything that holds no object of the VM it was made in.
-    fn shared(&self) -> CachedSite {
+    pub(crate) fn shared(&self) -> CachedSite {
         match self {
             CachedSite::Empty => CachedSite::Empty,
             CachedSite::Property(entry) => CachedSite::Property(entry.clone()),
