@@ -47,7 +47,9 @@ mod unit;
 mod unit_metadata;
 
 pub use name_keys::NameKey;
-pub use unit_metadata::{DeclarationScope, FunctionShape, FunctionSignature, UnitMetadata};
+pub use unit_metadata::{
+    DeclarationScope, FunctionShape, FunctionSignature, UnitMetadata, class_keys,
+};
 
 pub use builtin::{BuiltinFrame, BuiltinUnary, CallbackArguments};
 pub use class::{

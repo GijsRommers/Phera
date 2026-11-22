@@ -184,7 +184,7 @@ impl Vm {
             {
                 let key = pending.class.name.to_ascii_lowercase();
                 if self.classes.get_lowercase(&key).is_none() {
-                    self.link_new_class(&pending.unit, unit_first, declaration, key)?;
+                    self.link_new_class(&pending.unit, unit_first, declaration)?;
                     work.pop();
                     continue;
                 }

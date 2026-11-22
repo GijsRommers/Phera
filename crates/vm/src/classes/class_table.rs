@@ -90,6 +90,15 @@ impl ClassDefinitions {
 // fork's definitions must not touch its classes: the snapshot and the other
 // forks share them.
 
+/// One entry of a request's declaration order.
+#[derive(Clone, Copy)]
+enum Declared {
+    /// The class at this position of the request's table.
+    Class(u32),
+    /// This request's `class_alias` at this index.
+    Alias(u32),
+}
+
 /// One request's classes and objects. Built-ins are the worker's; PHP classes
 /// are entries of the worker's table of linked classes (see
 /// `super::worker_classes`), and the request holds which it has declared.
@@ -102,8 +111,10 @@ pub(crate) struct ClassTable {
     local: Vec<Option<Rc<Class>>>,
     /// The worker positions of the declared classes, in declaration order.
     declared: Vec<u32>,
-    /// Names in declaration order, aliases included (`get_declared_classes`).
-    order: Vec<Rc<str>>,
+    /// What was declared, in order, aliases included (`get_declared_classes`):
+    /// a position of `local` or an index of `aliases`, so that declaring a
+    /// class copies no name.
+    order: Vec<Declared>,
     /// This request's `class_alias` names, with their process key and the
     /// number of the class they name (which may be a built-in). Checked
     /// after the worker's names and the built-ins, so that a lookup of a
@@ -279,7 +290,7 @@ impl ClassTable {
         if self.local.len() <= index {
             self.local.resize(index + 1, None);
         }
-        self.order.push(class.name.as_str().into());
+        self.order.push(Declared::Class(position));
         self.local[index] = Some(class);
         self.declared.push(position);
     }
@@ -344,7 +355,7 @@ impl ClassTable {
         if self.get_lowercase(&name).is_some() {
             return false;
         }
-        self.order.push(name.as_str().into());
+        self.order.push(Declared::Alias(self.aliases.len() as u32));
         let key = phera_bytecode::name_keys::key(&name);
         self.aliases.push((name.into(), key, class.index.0));
         true
@@ -362,7 +373,18 @@ impl ClassTable {
             .order
             .iter()
             .map(String::as_str)
-            .chain(self.order.iter().map(|name| &**name))
+            .chain(self.order.iter().filter_map(|declared| {
+                match declared {
+                    Declared::Class(position) => self
+                        .local
+                        .get(*position as usize)?
+                        .as_ref()
+                        .map(|class| class.name.as_str()),
+                    Declared::Alias(index) => {
+                        self.aliases.get(*index as usize).map(|alias| &*alias.0)
+                    }
+                }
+            }))
     }
 
     /// The class with number `index`.

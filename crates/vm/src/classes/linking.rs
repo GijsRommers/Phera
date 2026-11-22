@@ -24,11 +24,14 @@ impl Vm {
                         .is_some()
                 })
             {
-                let key = declaration.name.to_ascii_lowercase();
-                if self.classes.get_lowercase(&key).is_some() {
+                if self
+                    .classes
+                    .by_key(self.code.unit_class_key(unit_first, index))
+                    .is_some()
+                {
                     continue;
                 }
-                if let Err(error) = self.link_new_class(unit, unit_first, index, key) {
+                if let Err(error) = self.link_new_class(unit, unit_first, index) {
                     if crate::autoload::ClassMiss::is(&error) {
                         continue;
                     }
@@ -55,8 +58,10 @@ impl Vm {
             return Ok(());
         }
         let declaration = &unit.classes[index.index()];
-        let key = declaration.name.to_ascii_lowercase();
-        if let Some(existing) = self.classes.get_lowercase(&key) {
+        if let Some(existing) = self
+            .classes
+            .by_key(self.code.unit_class_key(unit_first, index))
+        {
             if declaration.kind == ClassKind::Anonymous {
                 return Ok(());
             }
@@ -66,7 +71,7 @@ impl Vm {
                 NativeError::error(self.class_redeclaration_message(existing, &existing.name)),
             ));
         }
-        self.link_new_class(&unit, unit_first, index, key)
+        self.link_new_class(&unit, unit_first, index)
             .map_err(|error| crate::autoload::ClassMiss::during_declaration(error, &unit, index))
     }
 
@@ -76,7 +81,6 @@ impl Vm {
         unit: &Arc<CompiledUnit>,
         unit_first: FunctionIndex,
         index: ClassId,
-        key: String,
     ) -> Result<(), NativeError> {
         match self.reusable_entry(unit, unit_first, index) {
             Reuse::Entry(entry) => {
@@ -104,6 +108,7 @@ impl Vm {
             return Err(super::declaration_errors::link_failure(unit, index, error));
         }
         let declaration = &unit.classes[index.index()];
+        let key = declaration.name.to_ascii_lowercase();
         // A class whose linking raised a diagnostic is linked by each request
         // that declares it, so that each sees the diagnostic (and runs its
         // handler); an anonymous class is the request's. An enum is shared
