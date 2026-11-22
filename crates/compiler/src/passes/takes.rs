@@ -260,19 +260,10 @@ fn remove_nops(function: &mut Function) {
     let renumber = |target: &mut Target| {
         target.0 = moved.get(target.index()).copied().unwrap_or(target.0);
     };
-    for handler in &mut function.handlers {
-        renumber(&mut handler.start);
-        renumber(&mut handler.end);
-        if let Some(catch) = &mut handler.catch {
-            renumber(catch);
-        }
-        if let Some(finally) = &mut handler.finally {
-            renumber(finally);
-        }
-    }
     for site in &mut function.method_sites {
         renumber(&mut site.after);
     }
-    // `compact_nops` renumbers the instructions' own targets and the lines.
+    // `compact_nops` renumbers the instructions' own targets, the `try`
+    // ranges, the `catch` and `finally` entries, and the lines.
     crate::passes::optimize::compact_nops(function);
 }
