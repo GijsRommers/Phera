@@ -48,7 +48,7 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         for expression in init {
             let mark = self.temporaries_start();
-            self.compile_expression(expression)?;
+            self.compile_discarded_expression(expression)?;
             let temporaries = self.temporaries_since(mark);
             self.clear_owning_temporaries(&temporaries, line);
         }
@@ -56,7 +56,7 @@ impl Compiler<'_> {
         let mark = self.temporaries_start();
         // Only the last condition controls the loop; earlier ones still run.
         for expression in condition.iter().take(condition.len().saturating_sub(1)) {
-            self.compile_expression(expression)?;
+            self.compile_discarded_expression(expression)?;
         }
         let end = condition
             .last()
@@ -75,7 +75,7 @@ impl Compiler<'_> {
         self.fresh_temporaries();
         for expression in step {
             let mark = self.temporaries_start();
-            self.compile_expression(expression)?;
+            self.compile_discarded_expression(expression)?;
             let temporaries = self.temporaries_since(mark);
             self.clear_owning_temporaries(&temporaries, line);
         }

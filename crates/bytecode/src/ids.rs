@@ -29,6 +29,13 @@ index!(
     /// local variables (parameters first); temporaries follow.
     Reg(u16), "r"
 );
+
+impl Reg {
+    /// No destination for a discarded direct native result, as in
+    /// `strtoupper($text);`. This index is outside every register window.
+    pub const DISCARD_NATIVE_RESULT: Self = Self(u16::MAX);
+}
+
 index!(
     /// An instruction index within the same function: where a jump lands.
     Target(u32), "@"

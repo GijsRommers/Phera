@@ -7,8 +7,8 @@
 use std::{collections::VecDeque, ops::Range};
 
 use phera_bytecode::{
-    BinaryOp, BuiltinFrame, BuiltinUnary, CastKind, Constant, Function, Handler, Instruction as I,
-    Reg, Type, TypeMask, UnaryOp,
+    BinaryOp, BuiltinFrame, BuiltinUnary, CallResult, CastKind, Constant, Function, Handler,
+    Instruction as I, Reg, Type, TypeMask, UnaryOp,
 };
 
 use super::{
@@ -46,7 +46,7 @@ struct Block {
 /// Remove only redundant releases. The existing operand folds run before this
 /// pass, and method-site formation runs after it.
 pub(super) fn elide(function: &mut Function, constants: &[Constant], types: &[Type]) {
-    let (clears, cleanups) = candidates(function, constants, types);
+    let (clears, cleanups, discarded_calls) = candidates(function, constants, types);
     let compact = !clears.is_empty();
     for offset in clears {
         function.instructions[offset] = I::Nop;
@@ -55,6 +55,11 @@ pub(super) fn elide(function: &mut Function, constants: &[Constant], types: &[Ty
         handler
             .cleanup
             .retain(|register| !removed.contains(register));
+    }
+    for offset in discarded_calls {
+        if let I::CallNativeDirect { dst, .. } = &mut function.instructions[offset] {
+            *dst = Reg::DISCARD_NATIVE_RESULT;
+        }
     }
     if compact {
         compact_nops(function);
@@ -65,7 +70,7 @@ fn candidates(
     function: &Function,
     constants: &[Constant],
     types: &[Type],
-) -> (Vec<usize>, Vec<Vec<Reg>>) {
+) -> (Vec<usize>, Vec<Vec<Reg>>, Vec<usize>) {
     let cleanup = vec![Vec::new(); function.handlers.len()];
     if !function
         .instructions
@@ -76,22 +81,26 @@ fn candidates(
             .iter()
             .all(|handler| handler.cleanup.is_empty())
     {
-        return (Vec::new(), cleanup);
+        return (Vec::new(), cleanup, Vec::new());
     }
     let (blocks, at) = blocks(function);
     if blocks.is_empty() {
-        return (Vec::new(), cleanup);
+        return (Vec::new(), cleanup, Vec::new());
     }
     let live = live_at_entries(function, &blocks, &at);
     let (incoming, unwound) = ownership(function, constants, types, &blocks, &at);
     let locals = function.locals.len();
     let mut clears = Vec::new();
+    let mut discarded_calls = Vec::new();
     for (index, block) in blocks.iter().enumerate() {
         let Some(mut facts) = incoming[index].clone() else {
             continue;
         };
         let mut releases = vec![Fact::Unknown; block.instructions.len()];
         for ip in block.instructions.clone() {
+            if empty_discarded_native_destination(function.instructions[ip], &facts).is_some() {
+                discarded_calls.push(ip);
+            }
             if let I::Clear { reg } = function.instructions[ip]
                 && reg.index() >= locals
             {
@@ -136,7 +145,22 @@ fn candidates(
                 .collect()
         })
         .collect();
-    (clears, cleanup)
+    (clears, cleanup, discarded_calls)
+}
+
+/// `strtoupper($text);` needs no destination when the unused result would
+/// have overwritten an empty slot. If there is an earlier value, the
+/// ordinary call still releases it when it writes its result.
+fn empty_discarded_native_destination(instruction: I, facts: &[Fact]) -> Option<Reg> {
+    let I::CallNativeDirect {
+        dst,
+        result: CallResult::Discarded,
+        ..
+    } = instruction
+    else {
+        return None;
+    };
+    (facts[dst.index()] == Fact::Empty).then_some(dst)
 }
 
 // An empty slot can remain empty even when it has a reader. A scalar can
@@ -504,6 +528,9 @@ fn transfer(function: &Function, constants: &[Constant], facts: &mut [Fact], ins
         }
     };
     let result = match instruction {
+        I::CallNativeDirect { .. } => {
+            empty_discarded_native_destination(instruction, facts).map(|dst| (dst, Empty))
+        }
         I::Clear { reg } | I::UnsetLocal { local: reg } => Some((reg, Empty)),
         I::LoadConst { dst, constant } => Some((
             dst,
@@ -662,6 +689,33 @@ mod tests {
         );
         elide(&mut code, &[], &[]);
         assert_eq!(code.instructions.len(), 3);
+    }
+
+    #[test]
+    fn a_discarded_native_result_preserves_an_occupied_destination() {
+        let destination = Reg(0);
+        let call = I::CallNativeDirect {
+            function: phera_bytecode::SymbolId(0),
+            args: Reg(1),
+            count: 0,
+            dst: destination,
+            result: CallResult::Discarded,
+        };
+        let mut code = function(
+            vec![
+                I::LoadConst {
+                    dst: destination,
+                    constant: ConstId(0),
+                },
+                call,
+                I::Clear { reg: destination },
+                I::ReturnNull,
+            ],
+            1,
+        );
+        elide(&mut code, &[Constant::String(b"occupied".to_vec())], &[]);
+        assert_eq!(code.instructions.len(), 4);
+        assert_eq!(code.instructions[1], call);
     }
 
     #[test]

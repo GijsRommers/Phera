@@ -56,6 +56,70 @@ fn locals_precede_temporaries() {
     ));
 }
 
+#[test]
+fn unused_for_calls_mark_only_the_results_the_loop_does_not_read() {
+    use phera_bytecode::{CallResult, Instruction};
+
+    let unit = compile(
+        "<?php function f() { return 1; } for (f(); f(), f(); f()) { break; }",
+        "for-calls.php",
+    )
+    .unwrap();
+    let results: Vec<_> = unit
+        .main
+        .instructions
+        .iter()
+        .filter_map(|instruction| match instruction {
+            Instruction::CallDirect { result, .. } => Some(*result),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        results,
+        [
+            CallResult::Discarded,
+            CallResult::Discarded,
+            CallResult::Used,
+            CallResult::Discarded,
+        ]
+    );
+}
+
+#[test]
+fn discarded_direct_native_result_has_no_register_when_its_slot_is_empty() {
+    use phera_bytecode::{CallResult, Instruction};
+
+    let natives = super::NativeFunctions {
+        lookup: &|name| {
+            (name == "native_example").then_some(super::NativeFunction::Direct {
+                positional_by_value: 1,
+            })
+        },
+        fold_string_call: &|_, _| None,
+    };
+    let unit = super::compile_bytes_with_natives(
+        b"<?php function example($value) { try { native_example($value); } finally {} }",
+        "native-result.php",
+        &natives,
+    )
+    .unwrap();
+    let function = &unit.functions[0];
+    assert!(function.instructions.iter().any(|instruction| matches!(
+        instruction,
+        Instruction::CallNativeDirect {
+            dst: Reg::DISCARD_NATIVE_RESULT,
+            result: CallResult::Discarded,
+            ..
+        }
+    )));
+    assert!(
+        function
+            .handlers
+            .iter()
+            .all(|handler| !handler.cleanup.contains(&Reg(1)))
+    );
+}
+
 /// The public listing must expose property steps and static roots in one path vocabulary.
 #[test]
 fn class_paths_have_a_golden_listing() {

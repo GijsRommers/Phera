@@ -14,42 +14,50 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<(), CompileError> {
         self.clear_temporaries_after(line, |compiler| {
-            // `(void) f();` evaluates the operand and discards it outright.
-            if let ast::ExpressionKind::Cast {
-                kind: ast::CastKind::Void,
-                operand,
-            } = &expression.kind
-            {
-                return compiler.compile_expression(operand).map(drop);
-            }
-            let result = compiler.compile_expression(expression)?;
-            // The call is the last instruction but for the clears of its
-            // operands (`expressions::operand_release`).
-            let call = compiler
-                .function
-                .instructions
-                .iter_mut()
-                .rev()
-                .find(|instruction| {
-                    !matches!(instruction, Instruction::Clear { register } if *register != result)
-                });
-            if let Some(
-                Instruction::FinishCall {
-                    destination,
-                    result: use_of_result,
-                }
-                | Instruction::Call {
-                    destination,
-                    result: use_of_result,
-                    ..
-                },
-            ) = call
-                && *destination == result
-            {
-                *use_of_result = phera_bytecode::CallResult::Discarded;
-            }
-            Ok(())
+            compiler.compile_discarded_expression(expression)
         })
+    }
+
+    /// Mark an unused outer call, such as `f();` or the update in
+    /// `for (; running(); advance()) {}`. The enclosing construct releases
+    /// the expression's temporaries.
+    pub(super) fn compile_discarded_expression(
+        &mut self,
+        expression: &ast::Expression,
+    ) -> Result<(), CompileError> {
+        // An explicit `(void) f()` suppresses the NoDiscard diagnostic.
+        if let ast::ExpressionKind::Cast {
+            kind: ast::CastKind::Void,
+            operand,
+        } = &expression.kind
+        {
+            return self.compile_expression(operand).map(drop);
+        }
+        let start = self.position();
+        let result = self.compile_expression(expression)?;
+        // A call can end with the releases of the temporaries it was built from.
+        let call = self.function.instructions[start..]
+            .iter_mut()
+            .rev()
+            .find(|instruction| {
+                !matches!(instruction, Instruction::Clear { register } if *register != result)
+            });
+        if let Some(
+            Instruction::FinishCall {
+                destination,
+                result: use_of_result,
+            }
+            | Instruction::Call {
+                destination,
+                result: use_of_result,
+                ..
+            },
+        ) = call
+            && *destination == result
+        {
+            *use_of_result = phera_bytecode::CallResult::Discarded;
+        }
+        Ok(())
     }
 
     /// Evaluate and print each argument in source order.

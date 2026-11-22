@@ -356,7 +356,8 @@ impl Vm {
                 if self.output_writer.buffers.pending.is_some() {
                     self.output_writer.chunk_caller = Some(name);
                 }
-                if let Some(frame) = self.call_stack.current()
+                if destination != Reg::DISCARD_NATIVE_RESULT
+                    && let Some(frame) = self.call_stack.current()
                     && let [slot] = self
                         .registers
                         .window_mut(frame.base() + destination.index(), 1)
