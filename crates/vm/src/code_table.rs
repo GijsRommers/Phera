@@ -411,6 +411,12 @@ impl CodeTable {
     pub(crate) fn instructions(&self, function: FunctionIndex) -> &[Instruction] {
         &self.facts(function).instructions
     }
+
+    /// The materialized literals for a frame, such as the string in `echo "ok";`.
+    #[inline]
+    pub(crate) fn literals(&self, facts: &FunctionFacts) -> &[phera_value::Value] {
+        &self.units[facts.unit.0 as usize].cache.constants
+    }
 }
 
 /// Function `local` of a file, or its top-level code for `None`.

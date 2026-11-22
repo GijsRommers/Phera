@@ -126,6 +126,19 @@ pub(crate) fn store<const GUARDED: bool, S: crate::calls::registers::Slots + ?Si
     }
 }
 
+/// Copies a materialized literal into its temporary, as in `return "ok";`.
+#[inline(always)]
+pub(crate) fn load_literal<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
+    slots: &mut S,
+    register: Reg,
+    value: &Value,
+) -> ScalarStep {
+    match value {
+        Value::Int(value) => store_integer::<GUARDED, _>(slots, register, *value),
+        value => store::<GUARDED, _>(slots, register, duplicate(value)),
+    }
+}
+
 /// Overwrites a register that holds a value, unless dropping that value
 /// could free an object. Out of line, so that the common writes (into an
 /// empty register, or an integer over an integer) stay as short as they

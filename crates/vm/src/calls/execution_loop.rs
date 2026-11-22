@@ -24,7 +24,7 @@ use crate::calls::frame::Frame;
 use crate::calls::registers::{Registers, WINDOW};
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
-use crate::fast::{ScalarStep, array_index_step, assign_literal, scalar_step};
+use crate::fast::{ScalarStep, array_index_step, assign_literal, load_literal, scalar_step};
 
 /// How many loop rounds or calls a script may run before it lets other tasks
 /// on the same thread have a turn.
@@ -284,14 +284,17 @@ impl Machine<'_> {
             frame,
             ip: frame.ip(),
         };
-        let mut instructions = self.code.instructions(frame.function);
+        let facts = self.code.facts(frame.function);
+        let mut instructions = &facts.instructions[..];
+        let mut literals = self.code.literals(facts);
         // Whether the frame's registers fit a window (see
         // `registers::WINDOW`): decided when the frame is entered, not per
         // instruction.
-        let mut windowed = self.windowed(frame);
+        let mut windowed = facts.registers as usize <= WINDOW;
         loop {
             let instruction =
-                match self.run_simple::<GUARDED>(instructions, &mut position, windowed) {
+                match self.run_simple::<GUARDED>((instructions, literals), &mut position, windowed)
+                {
                     Ok(instruction) => instruction,
                     Err(exit) => return exit,
                 };
@@ -314,8 +317,10 @@ impl Machine<'_> {
                         return destructors_due();
                     }
                     position = next;
-                    instructions = self.code.instructions(next.frame.function);
-                    windowed = self.windowed(next.frame);
+                    let facts = self.code.facts(next.frame.function);
+                    instructions = &facts.instructions[..];
+                    literals = self.code.literals(facts);
+                    windowed = facts.registers as usize <= WINDOW;
                 }
                 Step::Slow => {
                     self.publish(position.ip);
@@ -332,7 +337,7 @@ impl Machine<'_> {
     #[inline(always)]
     fn run_simple<const GUARDED: bool>(
         &mut self,
-        instructions: &[Instruction],
+        (instructions, literals): (&[Instruction], &[Value]),
         position: &mut Position,
         windowed: bool,
     ) -> Result<Instruction, LoopExit> {
@@ -367,6 +372,12 @@ impl Machine<'_> {
                     Instruction::FetchIndex {
                         dst, base, index, ..
                     } => array_index_step::<GUARDED, _>(dst, base, index, slots),
+                    Instruction::LoadConst { dst, constant } => {
+                        match literals.get(constant.index()) {
+                            Some(value) => load_literal::<GUARDED, _>(slots, dst, value),
+                            None => ScalarStep::Fallback,
+                        }
+                    }
                     _ => ScalarStep::Fallback,
                 },
                 complete => complete,
@@ -505,12 +516,6 @@ impl Machine<'_> {
             }
             _ => Step::Slow,
         }
-    }
-
-    /// Whether `frame`'s code fits a register window.
-    #[inline(always)]
-    fn windowed(&self, frame: Frame) -> bool {
-        self.code.facts(frame.function).registers as usize <= WINDOW
     }
 
     /// The instructions that are not simple but need only the borrowed
