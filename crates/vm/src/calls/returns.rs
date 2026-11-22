@@ -75,6 +75,9 @@ impl Vm {
 
     /// Coercion precedes finally, allowing a surrounding catch to handle an invalid return.
     pub(crate) fn check_return_value(&mut self, value: Value) -> Result<Value, NativeError> {
+        if let Some(function) = self.current().map(|frame| frame.frame.function) {
+            self.code.make_class_types(function);
+        }
         if let Some(declaration) = self.current().and_then(|frame| {
             frame
                 .function()

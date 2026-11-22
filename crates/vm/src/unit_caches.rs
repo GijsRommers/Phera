@@ -62,12 +62,16 @@ pub(crate) struct UnitCache {
     base: Option<Rc<UnitCache>>,
 }
 
-/// The per-type class checks of one file, one cell per declared type: made
-/// when the file first stores an answer (a fork's with the answers the
-/// snapshot knew), so that a fork pays nothing for the files of which it
-/// checks no class type.
+/// The per-type class checks of one file, one cell per declared type.
+///
+/// A file loaded by a request has them from the start. A fork's start as an
+/// empty array, which costs nothing to make and which the loop reads exactly
+/// as it reads a full one (one bounds check, no test for "not made yet");
+/// the first time the file checks a class type in slow path, with the code
+/// table borrowed mutably, [`ClassTypes::make`] fills it with the snapshot's
+/// answers (or empty ones).
 pub(crate) struct ClassTypes {
-    cells: OnceCell<Box<[RefCell<Option<ClassTypeEntry>>]>>,
+    cells: Box<[RefCell<Option<ClassTypeEntry>>]>,
     /// How many types the file declares.
     count: usize,
     /// The snapshot's cache of the file, whose answers the cells start with.
@@ -75,52 +79,50 @@ pub(crate) struct ClassTypes {
 }
 
 impl ClassTypes {
-    fn new(count: usize, base: Option<Rc<UnitCache>>) -> Self {
+    /// The cells of a file made now, with no answers.
+    fn made(count: usize) -> Self {
         ClassTypes {
-            cells: OnceCell::new(),
+            cells: (0..count).map(|_| RefCell::new(None)).collect(),
             count,
-            base,
+            base: None,
         }
     }
 
-    /// The check of declared type `index`, if the file has made them: for a
-    /// read, since a file that has stored no answer knows none.
+    /// The cells of a fork's file: not made yet.
+    fn not_made(count: usize) -> Self {
+        ClassTypes {
+            cells: Box::default(),
+            count,
+            base: None,
+        }
+    }
+
+    /// The check of declared type `index`, if the cells are made.
     #[inline(always)]
-    pub(crate) fn peek(&self, index: usize) -> Option<&RefCell<Option<ClassTypeEntry>>> {
-        self.cells.get()?.get(index)
-    }
-
-    /// The check of declared type `index`, making the file's cells if it has
-    /// none yet, to store an answer in.
-    #[inline]
     pub(crate) fn get(&self, index: usize) -> Option<&RefCell<Option<ClassTypeEntry>>> {
-        match self.cells.get() {
-            Some(cells) => cells.get(index),
-            None => self.make(index),
+        self.cells.get(index)
+    }
+
+    /// Makes the cells if they are not, with the answers the snapshot found
+    /// out: they hold in a fork, which shares the snapshot's classes (an
+    /// answer says "objects of this class satisfy this type", and is used
+    /// only for an object of that class).
+    pub(crate) fn make(&mut self) {
+        if !self.cells.is_empty() || self.count == 0 {
+            return;
         }
-    }
-
-    #[cold]
-    #[inline(never)]
-    fn make(&self, index: usize) -> Option<&RefCell<Option<ClassTypeEntry>>> {
-        self.cells.get_or_init(|| self.new_cells()).get(index)
-    }
-
-    /// Empty cells, or the snapshot's answers: they hold in a fork, which
-    /// shares the snapshot's classes (an answer says "objects of this class
-    /// satisfy this type", and is used only for an object of that class).
-    fn new_cells(&self) -> Box<[RefCell<Option<ClassTypeEntry>>]> {
         let known = self
             .base
             .as_ref()
-            .and_then(|base| base.class_types.cells.get());
-        match known {
+            .map(|base| &base.class_types.cells)
+            .filter(|cells| cells.len() == self.count);
+        self.cells = match known {
             Some(cells) => cells
                 .iter()
                 .map(|cell| RefCell::new(cell.borrow().clone()))
                 .collect(),
             None => (0..self.count).map(|_| RefCell::new(None)).collect(),
-        }
+        };
     }
 }
 
@@ -220,8 +222,7 @@ impl UnitCache {
             * size_of::<RefCell<CachedSite>>();
         let boxes =
             (self.function_sites.get().map_or(0, |boxes| boxes.len()) + 1) * size_of::<Sites>();
-        let types = self.class_types.cells.get().map_or(0, |cells| cells.len())
-            * size_of::<RefCell<Option<ClassTypeEntry>>>();
+        let types = self.class_types.cells.len() * size_of::<RefCell<Option<ClassTypeEntry>>>();
         let functions = self.symbols.borrow().len()
             * size_of::<Option<crate::calls::pending::LinkedFunction>>();
         let closures = self.closure_signatures.borrow().len()
@@ -383,7 +384,7 @@ impl UnitCache {
                     .map(crate::types::DeclarationScope::of)
                     .collect(),
             },
-            class_types: ClassTypes::new(unit.types.len(), None),
+            class_types: ClassTypes::made(unit.types.len()),
             main_sites: Sites::new(),
             function_sites: OnceCell::new(),
             records: Records::new(),
@@ -453,7 +454,7 @@ impl UnitCache {
             constants: self.constants.clone(),
             class_names: self.class_names.clone(),
             type_scopes: self.type_scopes.clone(),
-            class_types: ClassTypes::new(self.class_types.count, None),
+            class_types: ClassTypes::not_made(self.class_types.count),
             main_sites: Sites::new(),
             function_sites: OnceCell::new(),
             records: Records::new(),
@@ -490,14 +491,12 @@ impl UnitCache {
                 .direct_natives
                 .set(cells.iter().map(|cell| Cell::new(cell.get())).collect());
         }
-        if let Some(cells) = self.class_types.cells.get() {
-            let _ = frozen.class_types.cells.set(
-                cells
-                    .iter()
-                    .map(|cell| RefCell::new(cell.borrow().clone()))
-                    .collect(),
-            );
-        }
+        frozen.class_types.cells = self
+            .class_types
+            .cells
+            .iter()
+            .map(|cell| RefCell::new(cell.borrow().clone()))
+            .collect();
         *frozen.closure_signatures.get_mut() = self
             .closure_signatures
             .borrow()

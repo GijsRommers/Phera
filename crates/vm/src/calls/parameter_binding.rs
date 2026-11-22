@@ -102,6 +102,7 @@ impl Vm {
         offset: usize,
         value: Value,
     ) -> Result<Value, NativeError> {
+        self.code.make_class_types(entry);
         let parameter = &self.code.function(entry).parameters[index];
         let Some(declaration) = parameter.ty else {
             return Ok(value);

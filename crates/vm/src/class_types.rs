@@ -96,7 +96,7 @@ pub(crate) fn known_class_match(
     };
     let index = declaration.index();
     cache.type_scopes.get(index) == Some(&crate::types::DeclarationScope::Absolute)
-        && cache.class_types.peek(index).is_some_and(|slot| {
+        && cache.class_types.get(index).is_some_and(|slot| {
             slot.borrow().as_ref().is_some_and(|entry| {
                 entry.matches && std::rc::Rc::ptr_eq(&entry.class, &object.class)
             })

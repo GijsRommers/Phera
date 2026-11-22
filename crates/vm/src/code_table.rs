@@ -242,6 +242,16 @@ impl CodeTable {
         first
     }
 
+    /// Makes the class checks of the file `function` belongs to, if a fork has
+    /// not yet (see [`crate::unit_caches::ClassTypes`]): the slow path of a
+    /// typed parameter or return value does it before it looks a check up.
+    pub(crate) fn make_class_types(&mut self, function: FunctionIndex) {
+        let unit = self.facts(function).unit;
+        if let Some(loaded) = self.units.get_mut(unit.0 as usize) {
+            loaded.cache.class_types.make();
+        }
+    }
+
     /// The key of symbol `symbol` of the file `function` belongs to.
     #[inline]
     pub(crate) fn unit_symbol_key(
