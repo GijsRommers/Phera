@@ -111,6 +111,19 @@ pub(crate) fn compact_nops(function: &mut Function) {
         }
     }
     offsets.push(count);
+    if count as usize == function.instructions.len() {
+        return;
+    }
+    for handler in &mut function.handlers {
+        handler.start.0 = offsets[handler.start.index()];
+        handler.end.0 = offsets[handler.end.index()];
+        for target in [&mut handler.catch, &mut handler.finally]
+            .into_iter()
+            .flatten()
+        {
+            target.0 = offsets[target.index()];
+        }
+    }
     let mut lines = Vec::new();
     let mut instructions = Vec::new();
     for (index, mut instruction) in function.instructions.iter().copied().enumerate() {
