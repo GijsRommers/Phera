@@ -126,6 +126,7 @@ impl CodeTable {
     ) {
         let mut facts = self.facts(FunctionIndex(*source)).clone();
         facts.class = Some(scope);
+        facts.this_slots = std::cell::OnceCell::new();
         let index = *number as usize;
         self.cover(index + 1);
         self.functions[index] = facts;
@@ -311,7 +312,9 @@ impl CodeTable {
         function: FunctionIndex,
         class: crate::classes::ClassIndex,
     ) {
-        self.functions[function.index()].class = Some(class);
+        let facts = &mut self.functions[function.index()];
+        facts.class = Some(class);
+        facts.this_slots = std::cell::OnceCell::new();
     }
 
     /// Flattened methods share immutable instructions and own their scope and static cells.
@@ -322,6 +325,7 @@ impl CodeTable {
     ) -> FunctionIndex {
         let mut facts = self.facts(source).clone();
         facts.class = Some(scope);
+        facts.this_slots = std::cell::OnceCell::new();
         let function = FunctionIndex(self.worker.lease_one(self.own_leases()));
         self.cover(function.index() + 1);
         self.functions[function.index()] = facts;

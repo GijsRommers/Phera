@@ -48,8 +48,12 @@ impl Machine<'_> {
         destination: Reg,
         path: PathId,
     ) -> Step {
-        let Some(value) = self.cached_property(position, path) else {
-            return Step::Slow;
+        let value = match self.this_slot_value(position, path) {
+            Some(value) => value,
+            None => match self.cached_property(position, path) {
+                Some(value) => value,
+                None => return Step::Slow,
+            },
         };
         let slots = self.registers.tail_mut(position.frame.base());
         match store::<GUARDED, _>(slots, destination, value) {
@@ -100,10 +104,13 @@ impl Machine<'_> {
             [Some(value)] => value.deref().clone(),
             _ => return Step::Slow,
         };
-        let written = self.with_site(position, (path, Shape::Write), |entry, object, scope| {
-            entry.write_matching(object, scope, &value).then_some(())
-        });
-        if written.is_none() {
+        let written = self.write_this_slot(position, path, &value)
+            || self
+                .with_site(position, (path, Shape::Write), |entry, object, scope| {
+                    entry.write_matching(object, scope, &value).then_some(())
+                })
+                .is_some();
+        if !written {
             return Step::Slow;
         }
         if let Some(result) = result {

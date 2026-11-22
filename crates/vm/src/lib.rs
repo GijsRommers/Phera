@@ -180,6 +180,7 @@ mod static_variables;
 mod string_comparison;
 mod string_offsets;
 mod stringable;
+mod this_slots;
 mod traversable_foreach;
 mod traversable_unpack;
 mod traversal;

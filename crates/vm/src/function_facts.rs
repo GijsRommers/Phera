@@ -49,6 +49,10 @@ pub(crate) struct FunctionFacts {
     /// The class that declares this function as a method: a method frame's
     /// class scope.
     pub(crate) class: Option<crate::classes::ClassIndex>,
+    /// The slot of each `$this->p` path whose slot `class` fixes (see
+    /// `crate::this_slots`), made the first time the method reads or writes
+    /// one. Emptied whenever `class` changes.
+    pub(crate) this_slots: std::cell::OnceCell<std::rc::Rc<[crate::this_slots::ThisSlot]>>,
 }
 
 impl FunctionFacts {
@@ -120,6 +124,7 @@ impl FunctionFacts {
             return_mask: signature.return_mask,
             shape: signature.shape,
             class: None,
+            this_slots: std::cell::OnceCell::new(),
         }
     }
 }
