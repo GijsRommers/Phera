@@ -38,6 +38,8 @@ pub(crate) struct DirectCallee {
     pub(crate) parameters: usize,
     /// A variadic or by-reference parameter: arguments need the general path.
     pub(crate) needs_general_call: bool,
+    /// The first parameter accepts an ordinary local without type conversion.
+    pub(crate) first_untyped: bool,
 }
 
 /// The top-level functions of a file, by lowercased name.
@@ -309,6 +311,13 @@ fn rewrite_call(function: &mut Function, call: &DirectCall, area: usize) {
         let dst = Reg((area + position) as u16);
         function.instructions[send] = match function.instructions[send] {
             Instruction::SendValue { src, .. } => Instruction::Move { dst, src },
+            Instruction::SendLocal { local }
+                if call.sends.len() == 1
+                    && send + 1 == call.call
+                    && matches!(call.callee, DirectTarget::Php(callee) if callee.first_untyped) =>
+            {
+                Instruction::CallDirectLocal { local, area: dst }
+            }
             Instruction::SendLocal { local } => Instruction::Move { dst, src: local },
             Instruction::SendPath { path } => Instruction::Fetch {
                 dst,

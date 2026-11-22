@@ -154,7 +154,11 @@ impl Vm {
             I::LoadBool { dst, value } => self.set(dst, Value::Bool(value)),
             I::LoadInt { dst, value } => self.set(dst, Value::Int(i64::from(value))),
             I::LoadConst { dst, constant } => self.load_constant(dst, constant)?,
-            I::Move { dst, src } => self.move_local(dst, src)?,
+            I::Move { dst, src }
+            | I::CallDirectLocal {
+                area: dst,
+                local: src,
+            } => self.move_local(dst, src)?,
             I::Clear { reg } | I::UnsetLocal { local: reg } => self.clear_local(reg)?,
             I::Assign { local, src } => return self.execute_assign(local, src),
             // A temporary read once: assigned, then empty.

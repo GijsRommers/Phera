@@ -529,6 +529,9 @@ impl Machine<'_> {
             | Instruction::New { .. }
             | Instruction::InitDynamicCall { .. }
             | Instruction::GuardBuiltin { .. } => self.cold_step::<GUARDED>(*instruction, position),
+            Instruction::CallDirectLocal { local, area } => {
+                self.enter_direct_local(position, local, area)
+            }
             Instruction::CallDirect {
                 function,
                 args,

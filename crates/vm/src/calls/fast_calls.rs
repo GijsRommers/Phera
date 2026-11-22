@@ -69,13 +69,73 @@ impl Machine<'_> {
         for index in 0..count {
             self.registers.move_slot(from + index, base + index);
         }
-        self.publish(caller.ip);
         let mut frame = Frame::new(function, base, Some(destination));
         if count < facts.parameters as usize {
             frame = frame.with_passed(count);
         }
-        self.stack.push(frame);
+        self.start_direct_frame(caller.ip, frame)
+    }
 
+    /// Enter the following direct call without moving its single argument
+    /// through the caller's scratch area. A missing local must warn at this
+    /// instruction, and a live scratch value must be released before entry.
+    /// On a miss the VM performs that original read, then runs the call.
+    #[inline(never)]
+    pub(super) fn enter_direct_local(&mut self, caller: Position, local: Reg, area: Reg) -> Step {
+        let owner = self.code.facts(caller.frame.function);
+        let Some(&Instruction::CallDirect {
+            function: declared,
+            args,
+            count: 1,
+            dst,
+            ..
+        }) = owner.instructions.get(caller.ip)
+        else {
+            return Step::Slow;
+        };
+        let Some((function, facts)) = self.code.declared_facts(owner.unit_first, declared.index())
+        else {
+            return Step::Slow;
+        };
+        if args != area
+            || facts.shape != FunctionShape::Plain
+            || facts.required > 1
+            || !facts.takes_value(0)
+            || facts.is_typed(0)
+            || facts.registers == 0
+            || self.stack.depth() >= self.frame_limit
+            || !matches!(
+                self.registers.window(caller.frame.base() + area.index(), 1),
+                [None]
+            )
+        {
+            return Step::Slow;
+        }
+        let [Some(value)] = self
+            .registers
+            .window(caller.frame.base() + local.index(), 1)
+        else {
+            return Step::Slow;
+        };
+        if value.is_reference() {
+            return Step::Slow;
+        }
+        let argument = crate::fast::duplicate(value);
+        let base = self.registers.len();
+        self.registers.grow_to(base + facts.registers as usize);
+        self.registers.put(base, argument);
+        let mut frame = Frame::new(function, base, Some(dst));
+        if facts.parameters > 1 {
+            frame = frame.with_passed(1);
+        }
+        self.start_direct_frame(caller.ip + 1, frame)
+    }
+
+    /// Publish the caller's continuation and enter a bound direct-call frame.
+    #[inline(always)]
+    fn start_direct_frame(&mut self, next_ip: usize, frame: Frame) -> Step {
+        self.publish(next_ip);
+        self.stack.push(frame);
         if self.spend_work() {
             return Step::Yield;
         }

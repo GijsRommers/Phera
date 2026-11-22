@@ -112,6 +112,8 @@ pub(super) fn visit(
         I::UnsetPath { .. } | I::AssignPath { .. } | I::SendPath { .. } => ops!(w []; r []),
         I::MakeReference { dst, .. } => ops!(w [dst]; r []),
         I::BindReference { src, .. } => ops!(w [src]; r [src]),
+        // On a miss this reads the local and writes the following call's area.
+        I::CallDirectLocal { local, area } => ops!(w [area]; r [local]),
         I::SendLocal { local } => ops!(w [local]; r [local]),
         I::BindDynamicGlobal { name } => ops!(w []; r [name]),
         I::Include { dst, path, .. } => ops!(w [dst]; r [path]),

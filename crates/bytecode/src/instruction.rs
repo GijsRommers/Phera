@@ -728,6 +728,14 @@ pub enum Instruction {
         src: Reg,
         arguments: crate::CallbackArguments,
     },
+    /// A direct call's single local by-value argument, at its evaluation point.
+    /// When the machine enters the following `CallDirect` here, it copies
+    /// the local straight into the new frame. Otherwise this instruction
+    /// reads the local into the argument area and that call runs normally.
+    CallDirectLocal {
+        local: Reg,
+        area: Reg,
+    },
 }
 
 // The interpreter copies one instruction per step. Keep them register-sized;

@@ -327,6 +327,10 @@ fn direct_callees(source: &ir::CompiledUnit) -> crate::passes::direct_calls::Dir
             let callee = crate::passes::direct_calls::DirectCallee {
                 function: FunctionId(index as u32),
                 parameters: function.parameters.len(),
+                first_untyped: function
+                    .parameters
+                    .first()
+                    .is_some_and(|p| p.declaration_type.is_none()),
                 needs_general_call: function
                     .parameters
                     .iter()

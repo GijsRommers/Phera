@@ -1359,7 +1359,10 @@ Done on the branch `engine/calls` (pull request #9):
   constructors), `InitMethodCall`, `InitStaticCall`, by-value `Send`s and
   `Call` when the case is the plain one.
 - `CallDirect` replaces `InitCall`/`Send`/`Call` for calls to a file's own
-  top-level functions (compiler pass `passes/direct_calls.rs`).
+  top-level functions (compiler pass `passes/direct_calls.rs`). For a single
+  untyped by-value parameter, `CallDirectLocal` can read the local at its
+  send position and enter the following direct call in one step. A miss
+  copies into the original argument area and the direct call follows.
 - Each class has a method table keyed by interned name. The per-site
   method cache and the static-site caches are deleted.
 
