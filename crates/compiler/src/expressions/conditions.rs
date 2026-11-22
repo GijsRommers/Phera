@@ -116,6 +116,9 @@ impl Compiler<'_> {
         when: bool,
         line: usize,
     ) -> Result<Vec<usize>, CompileError> {
+        if let Some(patches) = self.compile_builtin_condition(expression, when, line)? {
+            return Ok(patches);
+        }
         let value = if let Some(local) = self.compiled_variable(expression)? {
             // The warning for an undefined local belongs to the variable's
             // own line, where the read that used to precede the branch was.

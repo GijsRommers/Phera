@@ -289,7 +289,10 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
         }
         Instruction::LoadNull { dst } => store::<GUARDED>(slots, dst, Value::Null),
         Instruction::LoadBool { dst, value } => store::<GUARDED>(slots, dst, Value::Bool(value)),
-        Instruction::BuiltinUnary { op, dst, src } => builtin_step::<GUARDED>(op, dst, src, slots),
+        Instruction::BuiltinUnary { op, dst, src }
+        | Instruction::NamespacedBuiltin { op, dst, src } => {
+            builtin_step::<GUARDED>(op, dst, src, slots)
+        }
         Instruction::Unary {
             op: phera_bytecode::UnaryOp::Negate,
             dst,
