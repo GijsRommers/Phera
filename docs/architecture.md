@@ -1837,9 +1837,25 @@ The loop knows from the entry: `CallNativeDirect` (and the function form of the 
 | Codegen under fat LTO | A release build and the four shapes plus the benchmarks at every step, recorded in the draft pull request's description daily |
 | An undefined register read as a value | As today: a register is `Option<Value>`, and an undefined one is `None`, not a value. Plus a fixture of undefined-variable warnings in every operand position |
 
+#### What measurement showed (2026-11-22)
+
+The one-loop design above assumed the trip between `run_simple` and the second dispatch could go. Five ways of removing it were built and measured on the routes at twelve pairs; all raised them, and all were reverted (`~/.phera-review/floor/LOOP-PLAN.md` has the tables, the patches and the disassembly):
+
+| Try | Function / method shape | `/api/hello` | `/api/posts` |
+|---|---|---|---|
+| Calls and returns handled in a frame loop inside `run_simple` | 697 / 871 (main 754 / 922) | +2.07% | +1.81% |
+| The same, the switch out of line | 816 / 975 | +2.47% | +2.15% |
+| `run_simple` out of line, calls dispatched in `run` | 776 / 941 | +3.33% | +3.07% |
+| The whole second dispatch called from inside the loop | 800 / 971 (control 748 / 926) | +2.75% | +2.44% |
+| Two small handlers (`FetchThis`, `SendLocal`) called from the loop | 784 / 955 (control 730 / 911) | +1.35% | +1.07% |
+
+The last row is the deciding one. The handlers themselves are cheap (`FetchThis` saves about 4 per execution, its function saves two registers), but any call inside the scalar loop makes the loop compile worse for every scalar instruction: a loop that runs none of the handled kinds pays 16 more per iteration. About half of a request's instructions leave the scalar loop, so the trip is expensive; but in safe Rust under fat LTO, with this loop, putting anything in its place costs the scalar instructions more than the trip.
+
+So the structure stays: the scalar loop, the trip out, `step` inlined into `run`. The work goes into the handlers the trip reaches (the return's release and checks, the call's record lookup, push and argument writes), measured on the routes each time. The targets below are rewritten from the measured pieces of a method call (924 per iteration on main `c4750d18`: return 163, call 263, the trip about 230, the loop body and dispatch the rest).
+
 #### Definition of done
 
-- Loop at most 90, function call at most 290, method call at most 360, all measured on the honest floor's script. The property read is the property engineer's arm.
+- Loop at most 165 (as today: the floor's 90 needs the one-loop structure), function call at most 620, method call at most 750, measured on the honest floor's script. The property read is the property engineer's arm. These come from the handler plan: about 70 off the return (checks settled at entry, the release and pop), about 40 off the call's site record and decision, about 30 off the push and argument writes, about 20 off the work budget and the published position. They are revised as each piece lands.
 - The four shapes in the guarded copy as well: measured with an object that has a destructor alive in the request, within the same limits. The Symfony route is the number that counts.
 - Every fixture, `make test`, both php-src trees on both machines, the 34 destructor timing cases, the three gates at twelve pairs, and all benchmarks pass, with no route rising.
 - At every daily push: the four shapes, and the three routes at twelve pairs each.
