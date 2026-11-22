@@ -68,9 +68,16 @@ impl Machine<'_> {
                     dst,
                     (path, FetchMode::Read),
                 ) {
-                    Step::Slow => {
-                        self.fetch_local_element::<GUARDED>(position, dst, (path, FetchMode::Read))
-                    }
+                    Step::Slow => match self.fetch_local_element::<GUARDED>(
+                        position,
+                        dst,
+                        (path, FetchMode::Read),
+                    ) {
+                        Step::Slow => {
+                            self.fetch_static::<GUARDED>(position, dst, (path, FetchMode::Read))
+                        }
+                        done => done,
+                    },
                     done => done,
                 },
                 done => done,
@@ -89,9 +96,16 @@ impl Machine<'_> {
                 None => match self.fetch_property_quietly::<GUARDED>(position, dst, path) {
                     Step::Slow => {
                         match self.fetch_property_element::<GUARDED>(position, dst, (path, mode)) {
-                            Step::Slow => {
-                                self.fetch_local_element::<GUARDED>(position, dst, (path, mode))
-                            }
+                            Step::Slow => match self.fetch_local_element::<GUARDED>(
+                                position,
+                                dst,
+                                (path, mode),
+                            ) {
+                                Step::Slow => {
+                                    self.fetch_static::<GUARDED>(position, dst, (path, mode))
+                                }
+                                done => done,
+                            },
                             done => done,
                         }
                     }

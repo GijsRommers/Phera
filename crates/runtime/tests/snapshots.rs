@@ -841,7 +841,8 @@ async fn forty_shared_enums_keep_their_cases_per_request() {
 /// and copies a table only when its request changes it. Each request below
 /// changes one of them (declares a class of its own under a name another
 /// request uses differently, loads a file, composes a trait method, links a
-/// function symbol the boot left unlinked, fills a property site and a
+/// function symbol the boot left unlinked, writes a static property that a
+/// site of the boot read, fills a property site and a
 /// method site with a class the boot never saw); every
 /// other request, at the same time or after it, and the snapshot see none
 /// of it.
@@ -865,9 +866,10 @@ async fn a_forks_code_table_and_caches_are_its_own_when_it_changes_them() {
         r#"<?php
         trait Greets { public function hi(): string { return 'hi ' . $this->name(); } }
         class Base { public function name(): string { return 'base'; } }
-        class Boot extends Base { use Greets; public int $n = 1; public function name(): string { return 'boot'; } }
+        class Boot extends Base { use Greets; public static int $count = 0; public int $n = 1; public function name(): string { return 'boot'; } }
         function call_name(Base $o): string { return $o->name(); }
         function read_n(object $o): int { return $o->n; }
+        function read_static(): int { return Boot::$count; }
         function slow(): void { usleep(3000); }
         function doubled(): int { return array_sum(array_map(fn(int $x) => $x * 2, [1, 2])) + strlen('ab'); }
         function bound_n(object $o): int { return (fn() => $this->n)->call($o); }
@@ -875,11 +877,12 @@ async fn a_forks_code_table_and_caches_are_its_own_when_it_changes_them() {
             return (function_exists('loaded_a') ? loaded_a() : 0) . '/' . (function_exists('loaded_b') ? loaded_b() : 0);
         }
         via_symbol();
-        call_name(new Boot); read_n(new Boot); (new Boot)->hi(); doubled(); bound_n(new Boot);
+        call_name(new Boot); read_n(new Boot); (new Boot)->hi(); doubled(); bound_n(new Boot); read_static();
         Phera\snapshot();
         $mode = $_GET['mode'] ?? 'plain';
         $out = [];
         if ($mode === 'a' || $mode === 'b') {
+            Boot::$count = $mode === 'a' ? 5 : 7;
             if ($mode === 'a') {
                 class Other extends Base { public int $n = 10; public function name(): string { return 'other-a'; } }
             } else {
@@ -898,6 +901,7 @@ async fn a_forks_code_table_and_caches_are_its_own_when_it_changes_them() {
         $out[] = read_n(new Boot) + bound_n(new Boot) + doubled();
         $out[] = (new Boot)->hi();
         $out[] = via_symbol();
+        $out[] = read_static();
         $out[] = (class_exists('Other', false) ? 'O' : 'o')
             . (function_exists('loaded_a') ? 'A' : 'a')
             . (function_exists('loaded_b') ? 'B' : 'b');
@@ -906,9 +910,9 @@ async fn a_forks_code_table_and_caches_are_its_own_when_it_changes_them() {
     )
     .expect("index.php");
     let expected = |mode: &str| match mode {
-        "a" => "other-a,20,hi base,boot,10,hi boot,1/0,OAb",
-        "b" => "other-b,40,hi base,boot,10,hi boot,0/2,OaB",
-        _ => "boot,10,hi boot,0/0,oab",
+        "a" => "other-a,20,hi base,boot,10,hi boot,1/0,5,OAb",
+        "b" => "other-b,40,hi base,boot,10,hi boot,0/2,7,OaB",
+        _ => "boot,10,hi boot,0/0,0,oab",
     };
     let local = tokio::task::LocalSet::new();
     local
