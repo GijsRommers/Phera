@@ -78,9 +78,15 @@ impl Vm {
         index: ClassId,
         key: String,
     ) -> Result<(), NativeError> {
-        if let Some(entry) = self.reusable_entry(unit, index) {
-            self.declare_linked(&entry, unit, unit_first, index);
-            return Ok(());
+        match self.reusable_entry(unit, index) {
+            Reuse::Entry(entry) => {
+                self.declare_linked(&entry, unit, unit_first, index);
+                return Ok(());
+            }
+            Reuse::Missing(error) => {
+                return Err(super::declaration_errors::link_failure(unit, index, error));
+            }
+            Reuse::Link => {}
         }
         self.classes.begin_link();
         self.code.begin_imports();
@@ -136,20 +142,38 @@ impl Vm {
     /// A class another request of the worker linked from this declaration,
     /// usable here: every class name its linking looked up is the same class
     /// (or no class) in this request.
-    fn reusable_entry(
-        &self,
-        unit: &Arc<CompiledUnit>,
-        index: ClassId,
-    ) -> Option<Rc<super::worker_classes::EntryFacts>> {
-        self.classes
+    ///
+    /// An entry whose lookups match up to a parent, interface or trait of the
+    /// declaration that is not declared yet in this request is the common
+    /// case of a class the request declares before what it extends (an
+    /// autoloader loads `Manager` before its trait). Linking it again would
+    /// make the same lookups and miss at that name, so the miss is raised
+    /// here, as linking raises it: the autoloader declares the name, and the
+    /// declaration then finds the entry usable.
+    fn reusable_entry(&self, unit: &Arc<CompiledUnit>, index: ClassId) -> Reuse {
+        let declaration = &unit.classes[index.index()];
+        let missing = std::cell::Cell::new(None);
+        let found = self
+            .classes
             .worker()
             .find_entry(unit, index.index() as u32, |entry| {
-                entry
-                    .dependencies
-                    .iter()
-                    .all(|(name, number)| self.classes.resolve_number(name) == *number)
-                    && !self.inherits_from_pending_type(&entry.dependencies)
-            })
+                for (name, number) in &entry.dependencies {
+                    let now = self.classes.resolve_number(name);
+                    if now == *number {
+                        continue;
+                    }
+                    if now.is_none() && number.is_some() && missing.get().is_none() {
+                        missing.set(inherited_dependency(unit, declaration, name));
+                    }
+                    return false;
+                }
+                !self.inherits_from_pending_type(&entry.dependencies)
+            });
+        match (found, missing.take()) {
+            (Some(entry), _) => Reuse::Entry(entry),
+            (None, Some((written, kind))) => Reuse::Missing(Self::class_miss(written, kind)),
+            (None, None) => Reuse::Link,
+        }
     }
 
     /// Declares a class another request linked: what linking records in the
@@ -642,4 +666,47 @@ fn abstract_constructor(mut parent: Option<&Class>) -> Option<&Rc<Method>> {
         parent = class.parent.as_deref();
     }
     None
+}
+
+/// What [`Vm::reusable_entry`] found for a declaration.
+enum Reuse {
+    /// A class another request linked, usable as it is.
+    Entry(Rc<super::worker_classes::EntryFacts>),
+    /// Linking would miss this parent, interface or trait.
+    Missing(NativeError),
+    /// The class must be linked.
+    Link,
+}
+
+/// The name as written and the kind linking reports a miss of it as, when
+/// `lowercase` is the declaration's parent, one of its interfaces or one of
+/// its traits.
+fn inherited_dependency<'a>(
+    unit: &'a CompiledUnit,
+    declaration: &'a phera_bytecode::ClassDeclaration,
+    lowercase: &str,
+) -> Option<(&'a str, &'static str)> {
+    let written = |symbol: &phera_bytecode::SymbolId| unit.symbols[symbol.index()].written.as_str();
+    let matches = |name: &str| {
+        name.trim_start_matches('\\')
+            .eq_ignore_ascii_case(lowercase)
+    };
+    if let Some(parent) = &declaration.parent
+        && matches(written(parent))
+    {
+        return Some((written(parent), "Class"));
+    }
+    if let Some(interface) = declaration
+        .interfaces
+        .iter()
+        .find(|interface| matches(written(interface)))
+    {
+        return Some((written(interface), "Interface"));
+    }
+    declaration
+        .traits
+        .iter()
+        .flat_map(|usage| &usage.names)
+        .find(|name| matches(name))
+        .map(|name| (name.as_str(), "Trait"))
 }
