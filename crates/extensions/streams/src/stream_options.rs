@@ -34,6 +34,7 @@ pub fn register(registry: &mut Registry) {
         FunctionEntry::asynchronous("stream_set_timeout", TIMEOUT, set_timeout),
         FunctionEntry::asynchronous("stream_set_read_buffer", BUFFER, set_read_buffer),
         FunctionEntry::asynchronous("stream_set_write_buffer", BUFFER, set_write_buffer),
+        FunctionEntry::asynchronous("set_file_buffer", BUFFER, set_file_buffer),
     ] {
         registry.function(entry);
     }
@@ -376,14 +377,36 @@ fn set_write_buffer(
     context: &mut dyn Context,
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    Box::pin(set_buffer(context, arguments, Buffer::Write))
+    Box::pin(set_buffer(
+        context,
+        arguments,
+        Buffer::Write,
+        "stream_set_write_buffer",
+    ))
+}
+
+fn set_file_buffer(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
+    Box::pin(set_buffer(
+        context,
+        arguments,
+        Buffer::Write,
+        "set_file_buffer",
+    ))
 }
 
 fn set_read_buffer(
     context: &mut dyn Context,
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    Box::pin(set_buffer(context, arguments, Buffer::Read))
+    Box::pin(set_buffer(
+        context,
+        arguments,
+        Buffer::Read,
+        "stream_set_read_buffer",
+    ))
 }
 
 enum Buffer {
@@ -395,10 +418,11 @@ async fn set_buffer(
     context: &mut dyn Context,
     arguments: Vec<Value>,
     kind: Buffer,
+    function: &str,
 ) -> NativeResult {
-    let (function, option) = match kind {
-        Buffer::Read => ("stream_set_read_buffer", 2),
-        Buffer::Write => ("stream_set_write_buffer", 3),
+    let option = match kind {
+        Buffer::Read => 2,
+        Buffer::Write => 3,
     };
     let resource = stream_arg(&arguments, function)?;
     let size = args::int(&arguments, 1).unwrap_or(0);

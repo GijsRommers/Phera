@@ -25,7 +25,7 @@ fn omitted_items_have_one_level_zero_diagnostic_each() {
         "{text}"
     );
     assert!(text.contains(
-        "strftime() is not supported by Phera: deprecated since PHP 8.1, use IntlDateFormatter::format() instead"
+        "date_sunset() is not supported by Phera: deprecated since PHP 8.1, use date_sun_info() instead"
     ));
 }
 

@@ -1,10 +1,10 @@
 //! `stream_socket_accept($server)` waits for the next client without blocking the worker.
 
 use phera_extension_api::{Context, LocalFuture, NativeResult, PhpArray, Value, args};
-use socket2::{Domain, Protocol, Socket as Descriptor, Type};
+use socket2::{Domain, Protocol, SockRef, Socket as Descriptor, Type};
 
 use super::address::{Address, Transport, name};
-use super::client::{open_failure, set_error, timeout, transport_error};
+use super::client::{open_failure, set_error, tcp_nodelay, timeout, transport_error};
 use super::{Connection, Io, Socket, functions::socket_arg, tls, transport, wrap};
 use crate::{context_options, errors::reason};
 
@@ -37,7 +37,7 @@ pub(super) fn accept(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture
             return Ok(Value::Bool(false));
         };
         io.timeout = timeout(context, &args, function, 1)?;
-        if !io.socket.listener {
+        if !io.socket.listening() {
             context.warning(format!("{function}(): Accept failed: Unknown error"));
             return Ok(Value::Bool(false));
         }
@@ -59,6 +59,9 @@ pub(super) fn accept(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture
             .stream_contexts
             .get(&listener.id)
             .map_or(Value::Null, |context| Value::Resource(context.clone()));
+        if tcp_nodelay(&attached, socket.transport) {
+            let _ = SockRef::from(socket.as_ref()).set_tcp_nodelay(true);
+        }
         if let Transport::Tls(method) = socket.transport {
             let connection = Io {
                 socket: socket.clone(),
