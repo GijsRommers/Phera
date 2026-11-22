@@ -290,36 +290,32 @@ impl Vm {
 
 /// By-value, unkeyed iteration retains the current
 /// register window and local IP. Live reference iteration uses iter_next instead.
+///
+/// The destination may be the loop's own variable (see the compiler's
+/// foreach bindings). A variable that holds a PHP reference is written
+/// through by the general handler, so the step leaves before the iterator
+/// advances; any other old value is replaced, as `Assign` replaces it.
 #[inline(always)]
 pub(crate) fn snapshot_step(
     iterator: IterId,
     destination: Reg,
     end: Target,
-    locals: usize,
     iterators: &mut crate::iterators::Iterators,
     slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> bool {
-    if !destinations_fast(None, destination, locals, slots) {
+    if holds_reference(slots, destination) {
         return false;
-    }
-    let native = {
-        let Some(state) = iterators.get_mut(iterator.0) else {
-            return false;
-        };
-        if state.source.is_some() {
-            return false;
-        }
-        state.snapshot.is_none() && state.traversal_mode == frame::TraversalMode::Value
-    };
-    if native {
-        return native_step(iterator, None, destination, iterators, slots);
     }
     let Some(state) = iterators.get_mut(iterator.0) else {
         return false;
     };
-    let Some(array) = &state.snapshot else {
+    if state.source.is_some() {
         return false;
+    }
+    let Some(array) = &state.snapshot else {
+        return state.traversal_mode == frame::TraversalMode::Value
+            && native_step(state, None, destination, slots);
     };
     // Plain matches rather than `Option` combinators: this runs on every
     // round of a `foreach`, and a closure is a separate function that the
@@ -345,65 +341,32 @@ pub(crate) fn snapshot_step(
     true
 }
 
-/// Store one iteration entry. [`destinations_fast`] has checked, before the
-/// iterator advanced, that no destination is a named variable holding a PHP
-/// reference, so the old value is simply replaced.
-#[inline(always)]
-fn put(slots: &mut [Option<Value>], register: Reg, value: Value) {
-    if let Some(slot) = slots.get_mut(register.index()) {
-        *slot = Some(value);
-    }
-}
-
-/// Whether every destination register can take a fast write: a named local
-/// holding a PHP reference cannot, and the general handler must run before
-/// the iterator advances.
-#[inline(always)]
-fn destinations_fast(
-    key: Option<Reg>,
-    destination: Reg,
-    locals: usize,
-    slots: &[Option<Value>],
-) -> bool {
-    [key, Some(destination)].into_iter().flatten().all(|reg| {
-        reg.index() >= locals || !matches!(slots.get(reg.index()), Some(Some(Value::Reference(_))))
-    })
-}
-
 /// `IterNextKeyed` of a by-value loop, as `Vm::iter_next` makes it: the
-/// next entry of the array the loop iterates over (its key, then its
-/// value), or the next of an object's own cursor; `false` with nothing
-/// changed for a by-reference loop or any other state.
+/// next entry of the array the loop iterates over (its value, then its
+/// key, as PHP writes them), or the next of an object's own cursor; `false`
+/// with nothing changed when the general handler must run, as for
+/// [`snapshot_step`].
 #[inline(never)]
 pub(crate) fn keyed_step(
     iterator: IterId,
     (key, destination): (Reg, Reg),
     end: Target,
-    locals: usize,
     iterators: &mut crate::iterators::Iterators,
     slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> bool {
-    if !destinations_fast(Some(key), destination, locals, slots) {
+    if holds_reference(slots, destination) || holds_reference(slots, key) {
         return false;
-    }
-    let native = {
-        let Some(state) = iterators.get_mut(iterator.0) else {
-            return false;
-        };
-        if state.source.is_some() {
-            return false;
-        }
-        state.snapshot.is_none() && state.traversal_mode == frame::TraversalMode::Value
-    };
-    if native {
-        return native_step(iterator, Some(key), destination, iterators, slots);
     }
     let Some(state) = iterators.get_mut(iterator.0) else {
         return false;
     };
-    let Some(array) = &state.snapshot else {
+    if state.source.is_some() {
         return false;
+    }
+    let Some(array) = &state.snapshot else {
+        return state.traversal_mode == frame::TraversalMode::Value
+            && native_step(state, Some(key), destination, slots);
     };
     let position = match (state.started, state.position) {
         (true, Some(position)) => array.next_position(position),
@@ -423,7 +386,6 @@ pub(crate) fn keyed_step(
                 ArrayKey::String(string) => Value::String(string.clone()),
             };
             let value = crate::fast::duplicate(&value.deref());
-            // The value, then the key, as PHP writes them.
             put(slots, destination, value);
             put(slots, key, element_key);
         }
@@ -432,17 +394,14 @@ pub(crate) fn keyed_step(
     true
 }
 
-/// Consume a combined entry from a by-value cursor on the ordinary path.
+/// Consume a combined entry from a by-value cursor on the ordinary path:
+/// the value, then the key.
 pub(crate) fn native_step(
-    iterator: IterId,
+    state: &mut frame::IteratorState,
     key: Option<Reg>,
     destination: Reg,
-    iterators: &mut crate::iterators::Iterators,
     slots: &mut [Option<Value>],
 ) -> bool {
-    let Some(state) = iterators.get_mut(iterator.0) else {
-        return false;
-    };
     let Some((value, index)) = state
         .traversal
         .as_mut()
@@ -451,12 +410,26 @@ pub(crate) fn native_step(
         return false;
     };
     state.started = true;
-    // The value, then the key, as PHP writes them.
     put(slots, destination, owned_value(value));
     if let Some((key, index)) = key.zip(index) {
         put(slots, key, owned_value(index));
     }
     true
+}
+
+/// Whether `register` holds a PHP reference, which an iteration entry is
+/// written through rather than replacing it.
+#[inline(always)]
+fn holds_reference(slots: &[Option<Value>], register: Reg) -> bool {
+    matches!(slots.get(register.index()), Some(Some(Value::Reference(_))))
+}
+
+/// Store one iteration entry over whatever the register held.
+#[inline(always)]
+fn put(slots: &mut [Option<Value>], register: Reg, value: Value) {
+    if let Some(slot) = slots.get_mut(register.index()) {
+        *slot = Some(value);
+    }
 }
 
 fn owned_value(value: Value) -> Value {
