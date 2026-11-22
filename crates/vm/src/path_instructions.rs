@@ -53,6 +53,9 @@ impl Vm {
             {
                 return Ok(None);
             }
+            if self.fetch_plain_property(&place, destination, mode)? {
+                return Ok(None);
+            }
             return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
                 dst: destination,
                 path,
@@ -84,6 +87,13 @@ impl Vm {
             },
         )?;
         self.set(destination, value);
+        if matches!(
+            place.base()?,
+            phera_bytecode::PathBase::NamedStaticProperty { .. }
+        ) {
+            // The loop reads the next one itself (see `crate::static_sites`).
+            self.prepare_static_site(&place)?;
+        }
         Ok(None)
     }
 
@@ -198,7 +208,6 @@ impl Vm {
         place: &AccessPath,
     ) -> Result<(Option<Reg>, InlineStack<PathKey>, Value), NativeError> {
         let register = self.base_register(place, Creation::Existing, Missing::Warn)?;
-        self.check_static_read(place, Missing::Warn)?;
         if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
             self.validate_static_mutation(
                 class,
@@ -257,6 +266,12 @@ impl Vm {
             && let phera_bytecode::PathBase::Register(register) = place.base()?
         {
             self.restart_subject_iterators(register);
+        }
+        if place.has_properties()?
+            && !(self.classes.has_dimensions && self.prepare_dimension(&place)?)
+            && self.assign_plain_property(&place, &value)?.is_some()
+        {
+            return Ok(None);
         }
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?

@@ -232,7 +232,17 @@ impl Vm {
             }
             I::AssignPathFromLocal { path, src, dst } => {
                 let handled = if let Some(value) = self.read_defined_local(src) {
-                    self.assign_property_site(&self.path(path)?, &value, Some((src, dst)))?
+                    let place = self.path(path)?;
+                    if self.assign_property_site(&place, &value, Some((src, dst)))? {
+                        true
+                    } else if place.has_properties()?
+                        && let Some(stored) = self.assign_plain_property(&place, &value)?
+                    {
+                        self.set(dst, stored);
+                        true
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 };
@@ -256,6 +266,9 @@ impl Vm {
             I::UnsetPath { path } => {
                 let place = self.path(path)?;
                 if place.has_properties()? {
+                    if self.unset_plain_property(&place)? {
+                        return Ok(None);
+                    }
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
                 self.unset_place(&place)?;
