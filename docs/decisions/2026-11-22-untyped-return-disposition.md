@@ -14,6 +14,19 @@ At return, the active position supplies the register base. The frame on the stac
 
 The instruction ledger on Apple silicon attributed 59 instructions per ordinary return to finding the frame, verifying the return contract, and checking the source. It counted another 20 to take the value from a slot already addressed. The predicted net saving was 35–55 instructions per function or method iteration.
 
+## Measurement
+
+The entries give retired instructions and elapsed cycles per iteration, each the minimum of five shuffled rounds of the ledger's 1M-to-51M differential. All checksums matched. Each column uses a separate private release executable in `review/call-path-astra-item2/`. The main control was built from a clean detached `3ba1578a` checkout. The parent control includes the borrowed instruction from #200. Comparing the candidate with that parent isolates the effect of this change.
+
+| Shape | `main-3ba1578a` instructions / cycles | `parent-c970da78` instructions / cycles | `phera-item2` at `69f11ae7` instructions / cycles | Instructions saved over parent |
+| --- | ---: | ---: | ---: | ---: |
+| Loop | 146.27 / 21.30 | 145.28 / 21.90 | 143.28 / 22.04 | 2.00 |
+| Function | 713.62 / 101.75 | 679.59 / 94.74 | 644.60 / 86.16 | 34.99 |
+| Method | 892.60 / 140.96 | 857.59 / 128.18 | 826.59 / 130.75 | 31.00 |
+| Property | 581.30 / 92.08 | 565.31 / 73.83 | 564.29 / 73.79 | 1.02 |
+
+At whole-instruction precision the function reached the lower estimate. The method fell four instructions short. All four shapes retired fewer instructions, so the reviewer advanced this candidate to the three request routes. The focused fixture matched PHP 8.5.12 and both controls.
+
 ## Structure: was, is
 
 | Structure | Was | Is |
