@@ -287,6 +287,11 @@ impl Instruction {
                 *right = map(*right)
             }
             Instruction::BranchCompareInt { left, .. } => *left = map(*left),
+            Instruction::BranchInstanceOf { source, .. } => *source = map(*source),
+            Instruction::BranchDynamicInstanceOf { source, class, .. } => {
+                *source = map(*source);
+                *class = map(*class)
+            }
             Instruction::Call {
                 destination: dst,
                 name,

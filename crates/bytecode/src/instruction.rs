@@ -111,6 +111,19 @@ pub enum Instruction {
         src: Reg,
         class: SymbolId,
     },
+    /// `src instanceof class`, branching on the answer instead of storing it:
+    /// jump to `target` when the answer is false. `InstanceOfBranchIf` jumps
+    /// when it is true.
+    InstanceOfBranch {
+        src: Reg,
+        class: SymbolId,
+        target: Target,
+    },
+    InstanceOfBranchIf {
+        src: Reg,
+        class: SymbolId,
+        target: Target,
+    },
 
     // ----- Loading values -------------------------------------------------
     /// `dst = constants[constant]`.
@@ -604,6 +617,17 @@ pub enum Instruction {
         dst: Reg,
         source: Reg,
         class: Reg,
+    },
+    /// The evaluated-target form of `InstanceOfBranch` / `InstanceOfBranchIf`.
+    DynamicInstanceOfBranch {
+        src: Reg,
+        class: Reg,
+        target: Target,
+    },
+    DynamicInstanceOfBranchIf {
+        src: Reg,
+        class: Reg,
+        target: Target,
     },
     /// Resolve literal static syntax before arguments. Both operands index immutable
     /// symbol data; method lookup spelling is already lowercase in the symbol table.

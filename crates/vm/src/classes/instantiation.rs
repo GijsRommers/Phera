@@ -1,6 +1,6 @@
 //! Allocation prepares constructors before sends and shallow clones preserve nested handles.
 
-use phera_bytecode::{ClassKind, Reg, SymbolId};
+use phera_bytecode::{ClassKind, Reg, SymbolId, Target};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
@@ -190,6 +190,60 @@ impl Vm {
             _ => false,
         };
         self.set(destination, Value::Bool(matches));
+        Ok(())
+    }
+
+    /// The four `instanceof` branches, out of line: one arm of `execute`
+    /// leads here, so that its other arms keep their shape.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn instance_of_branches(
+        &mut self,
+        instruction: phera_bytecode::Instruction,
+        work: &mut usize,
+    ) -> Result<(), NativeError> {
+        use phera_bytecode::Instruction as I;
+        match instruction {
+            I::InstanceOfBranch { src, class, target } => {
+                self.instance_of_branch(src, class, target, false, work)
+            }
+            I::InstanceOfBranchIf { src, class, target } => {
+                self.instance_of_branch(src, class, target, true, work)
+            }
+            I::DynamicInstanceOfBranch { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, false, work)
+            }
+            I::DynamicInstanceOfBranchIf { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, true, work)
+            }
+            _ => Err(internal_error!("instanceof branch")),
+        }
+    }
+
+    /// `instanceof` whose answer only decides a jump: compute it exactly as
+    /// `instance_of` does, then jump when it equals `when`.
+    fn instance_of_branch(
+        &mut self,
+        source: Reg,
+        symbol: SymbolId,
+        target: Target,
+        when: bool,
+        work: &mut usize,
+    ) -> Result<(), NativeError> {
+        let name = self.class_symbol(symbol)?;
+        let matches = match self.read_local(source) {
+            Value::Object(object) => self
+                .classes
+                .get(object.class.name())
+                .is_some_and(|class| self.class_matches(&class, &name)),
+            _ => false,
+        };
+        if matches == when {
+            if self.backward(target) {
+                *work += 1;
+            }
+            self.jump(target)?;
+        }
         Ok(())
     }
 

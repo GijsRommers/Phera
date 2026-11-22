@@ -600,6 +600,8 @@ impl Machine<'_> {
             | Instruction::InitCall { .. }
             | Instruction::FetchClassName { .. }
             | Instruction::InstanceOf { .. }
+            | Instruction::InstanceOfBranch { .. }
+            | Instruction::InstanceOfBranchIf { .. }
             | Instruction::SendPath { .. }
             | Instruction::IterStart { .. }
             | Instruction::IterEnd { .. }
