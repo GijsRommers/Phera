@@ -11,6 +11,7 @@ use std::{
 
 use phera_extension_api::{Context, Value, value::Resource};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
+use socket2::SockRef;
 use tokio::{
     runtime::{Handle, Id},
     time::Instant,
@@ -46,6 +47,7 @@ pub(super) struct Dial {
     pub kind: Transport,
     pub deadline: Option<Duration>,
     pub asynchronous: bool,
+    pub tcp_nodelay: bool,
 }
 
 impl Dial {
@@ -85,6 +87,9 @@ impl Dial {
                 .map_err(|_| io::Error::from_raw_os_error(nix::libc::ETIMEDOUT))??,
             None => open.await?,
         };
+        if self.tcp_nodelay {
+            SockRef::from(socket.as_ref()).set_tcp_nodelay(true)?;
+        }
         let _ = socket.peer.set(address.host.to_owned());
         if let (Transport::Tls(method), Some(options)) = (self.kind, &self.key.tls) {
             let io = Io {
