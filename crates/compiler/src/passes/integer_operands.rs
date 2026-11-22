@@ -163,7 +163,7 @@ fn dead_after_from(
                     }
                 }
                 Instruction::Echo { src }
-                | Instruction::SendValue { src }
+                | Instruction::SendValue { src, .. }
                 | Instruction::SendLocal { local: src } => {
                     if src == register {
                         return false;

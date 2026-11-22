@@ -97,6 +97,10 @@ pub struct Argument {
     pub source: ArgumentSource,
     pub name: Option<String>,
     pub spread: bool,
+    /// The argument was written as a call or as `new` (`f(g())`, `f(new A)`):
+    /// a by-reference parameter takes such a value with a notice, and
+    /// rejects any other computed value.
+    pub of_call: bool,
 }
 /// A function parameter and the metadata needed by the runtime call protocol.
 #[derive(Debug, Clone)]
