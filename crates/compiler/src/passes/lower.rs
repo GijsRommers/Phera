@@ -224,6 +224,7 @@ impl Tables<'_> {
                 | Instruction::JumpIfNot { target, .. }
                 | Instruction::JumpIfNull { target, .. }
                 | Instruction::JumpIfNotNull { target, .. }
+                | Instruction::GuardBuiltin { call: target, .. }
                 | Instruction::BinaryIntBranch { target, .. }
                 | Instruction::BinaryIntBranchIf { target, .. }
                 | Instruction::BinaryBranch { target, .. }
