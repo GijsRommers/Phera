@@ -40,12 +40,9 @@ impl Compiler<'_> {
             }
         };
         let (resolved, fallback) = self.resolve(name, NameKind::Function);
-        if let Some(result) = self.compile_builtin_call(
-            &resolved,
-            fallback.as_deref(),
-            arguments,
-            line,
-        )? {
+        if let Some(result) =
+            self.compile_builtin_call(&resolved, fallback.as_deref(), arguments, line)?
+        {
             return Ok(result);
         }
         let assertion = fallback

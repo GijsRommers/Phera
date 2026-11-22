@@ -9,11 +9,11 @@ use phera_bytecode::{BuiltinFrame, BuiltinUnary, ConstId, Reg};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Value};
 
+use crate::Vm;
 use crate::calls::call_execution::CallEntry;
+use crate::calls::execution_loop::BatchExit;
 use crate::calls::pending::LinkedFunction;
 use crate::calls::sends::SentArgument;
-use crate::calls::execution_loop::BatchExit;
-use crate::Vm;
 
 impl Vm {
     #[inline(never)]

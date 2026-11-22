@@ -167,36 +167,20 @@ fn namespaced_unary_builtin_calls_use_the_guarded_unary_form() {
 /// resolves straight to the global builtin and keeps the unguarded cheap form.
 #[test]
 fn unqualified_and_fully_qualified_builtin_calls_stay_cheap() {
-    let unit = compile("<?php var_dump(is_null($value));", "test.php")
-        .expect("valid PHP");
+    let unit = compile("<?php var_dump(is_null($value));", "test.php").expect("valid PHP");
     assert!(
-        unit.main
-            .instructions
-            .iter()
-            .any(|instruction| matches!(
-                instruction,
-                phera_bytecode::Instruction::BuiltinUnary { .. }
-            )),
+        unit.main.instructions.iter().any(|instruction| matches!(
+            instruction,
+            phera_bytecode::Instruction::BuiltinUnary { .. }
+        )),
         "the global call must take the unguarded cheap form"
     );
-    let unit = compile("<?php var_dump(\\is_null($value));", "test.php")
-        .expect("valid PHP");
+    let unit = compile("<?php var_dump(\\is_null($value));", "test.php").expect("valid PHP");
     assert!(
-        unit.main
-            .instructions
-            .iter()
-            .any(|instruction| matches!(
-                instruction,
-                phera_bytecode::Instruction::BuiltinUnary { .. }
-            )),
+        unit.main.instructions.iter().any(|instruction| matches!(
+            instruction,
+            phera_bytecode::Instruction::BuiltinUnary { .. }
+        )),
         "the fully qualified call must take the unguarded cheap form"
     );
-}
-
-#[test]
-fn debug_print_builtin_instructions() {
-    let unit = compile("<?php var_dump(is_null($value));", "test.php").expect("valid PHP");
-    for (index, instruction) in unit.main.instructions.iter().enumerate() {
-        eprintln!("{index}: {instruction:?}");
-    }
 }
