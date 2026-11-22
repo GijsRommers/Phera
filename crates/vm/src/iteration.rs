@@ -194,8 +194,6 @@ impl Vm {
 }
 
 impl Vm {
-    /// Snapshot iteration borrows its owner directly, avoiding a new array owner on every element.
-    #[inline]
     /// Write one iteration entry into its destination. A destination inside
     /// the locals prefix is a named variable, so it is assigned exactly as
     /// `Assign` does: iterators over the old value restart, and a PHP
@@ -217,6 +215,8 @@ impl Vm {
         self.assign_local(register, value)
     }
 
+    /// Snapshot iteration borrows its owner directly, avoiding a new array owner on every element.
+    #[inline]
     fn next_snapshot(
         &mut self,
         state: &mut frame::IteratorState,
@@ -242,19 +242,19 @@ impl Vm {
         else {
             return self.jump(end);
         };
-        if let Some(key) = key {
-            self.set_iteration_target(
-                key,
-                match element_key {
-                    ArrayKey::Int(integer) => Value::Int(integer),
-                    ArrayKey::String(string) => Value::String(string.clone()),
-                },
-            )?;
-        }
         // Bind first: the entry's borrow must end before a local destination
         // is assigned through a PHP reference.
+        let element_key = match element_key {
+            ArrayKey::Int(integer) => Value::Int(integer),
+            ArrayKey::String(string) => Value::String(string.clone()),
+        };
         let element = element.deref().clone();
+        // PHP writes the value, then the key: an old value the loop variable
+        // held is released first.
         self.set_iteration_target(destination, element)?;
+        if let Some(key) = key {
+            self.set_iteration_target(key, element_key)?;
+        }
         Ok(())
     }
 
@@ -267,22 +267,22 @@ impl Vm {
         key: Option<Reg>,
         destination: Reg,
     ) -> Result<(), NativeError> {
-        if source.is_none() && key.is_none() {
+        let element_key = match element_key {
+            ArrayKey::Int(i) => Value::Int(i),
+            ArrayKey::String(string) => Value::String(string),
+        };
+        let Some(position) = source else {
+            // By value, PHP writes the value, then the key.
             self.set_iteration_target(destination, element)?;
+            if let Some(key) = key {
+                self.set_iteration_target(key, element_key)?;
+            }
             return Ok(());
-        }
+        };
         let key_register = key.unwrap_or(destination);
-        self.set_iteration_target(
-            key_register,
-            match element_key {
-                ArrayKey::Int(i) => Value::Int(i),
-                ArrayKey::String(string) => Value::String(string),
-            },
-        )?;
-        if let Some(position) = source {
-            let position = position.clone().with_key(key_register);
-            element = self.reference(&position)?;
-        }
+        self.set_iteration_target(key_register, element_key)?;
+        let position = position.clone().with_key(key_register);
+        element = self.reference(&position)?;
         self.set_iteration_target(destination, element)?;
         Ok(())
     }
@@ -313,7 +313,7 @@ pub(crate) fn snapshot_step(
         state.snapshot.is_none() && state.traversal_mode == frame::TraversalMode::Value
     };
     if native {
-        return native_step(iterator, None, destination, locals, iterators, slots);
+        return native_step(iterator, None, destination, iterators, slots);
     }
     let Some(state) = iterators.get_mut(iterator.0) else {
         return false;
@@ -338,31 +338,21 @@ pub(crate) fn snapshot_step(
     match entry {
         Some((_, value)) => {
             let value = crate::fast::duplicate(&value.deref());
-            if !store_entry(destination, value, locals, slots) {
-                return false;
-            }
+            put(slots, destination, value);
         }
         None => *ip = end.index(),
     }
     true
 }
 
-/// Write one iteration entry into its destination register. A destination in
-/// the locals prefix is a named variable: a PHP reference in its slot needs
-/// the general handler (checked before the iterator advances). Any other old
-/// value needs no iterator restart — `restart_for` only acts on reference
-/// cells — so the store stays as cheap as a temporary's.
+/// Store one iteration entry. [`destinations_fast`] has checked, before the
+/// iterator advanced, that no destination is a named variable holding a PHP
+/// reference, so the old value is simply replaced.
 #[inline(always)]
-fn store_entry(register: Reg, value: Value, locals: usize, slots: &mut [Option<Value>]) -> bool {
-    if register.index() >= locals
-        || !matches!(slots.get(register.index()), Some(Some(Value::Reference(_))))
-    {
-        if let Some(slot) = slots.get_mut(register.index()) {
-            *slot = Some(value);
-        }
-        return true;
+fn put(slots: &mut [Option<Value>], register: Reg, value: Value) {
+    if let Some(slot) = slots.get_mut(register.index()) {
+        *slot = Some(value);
     }
-    false
 }
 
 /// Whether every destination register can take a fast write: a named local
@@ -407,7 +397,7 @@ pub(crate) fn keyed_step(
         state.snapshot.is_none() && state.traversal_mode == frame::TraversalMode::Value
     };
     if native {
-        return native_step(iterator, Some(key), destination, locals, iterators, slots);
+        return native_step(iterator, Some(key), destination, iterators, slots);
     }
     let Some(state) = iterators.get_mut(iterator.0) else {
         return false;
@@ -433,12 +423,9 @@ pub(crate) fn keyed_step(
                 ArrayKey::String(string) => Value::String(string.clone()),
             };
             let value = crate::fast::duplicate(&value.deref());
-            if !store_entry(key, element_key, locals, slots) {
-                return false;
-            }
-            if !store_entry(destination, value, locals, slots) {
-                return false;
-            }
+            // The value, then the key, as PHP writes them.
+            put(slots, destination, value);
+            put(slots, key, element_key);
         }
         None => *ip = end.index(),
     }
@@ -450,7 +437,6 @@ pub(crate) fn native_step(
     iterator: IterId,
     key: Option<Reg>,
     destination: Reg,
-    locals: usize,
     iterators: &mut crate::iterators::Iterators,
     slots: &mut [Option<Value>],
 ) -> bool {
@@ -465,13 +451,10 @@ pub(crate) fn native_step(
         return false;
     };
     state.started = true;
-    if let Some((key, index)) = key.zip(index)
-        && !store_entry(key, owned_value(index), locals, slots)
-    {
-        return false;
-    }
-    if !store_entry(destination, owned_value(value), locals, slots) {
-        return false;
+    // The value, then the key, as PHP writes them.
+    put(slots, destination, owned_value(value));
+    if let Some((key, index)) = key.zip(index) {
+        put(slots, key, owned_value(index));
     }
     true
 }

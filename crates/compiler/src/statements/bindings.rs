@@ -53,8 +53,8 @@ impl Compiler<'_> {
         // The subject, and the registers the loop writes entries into. A
         // plain local is written straight into its own register, skipping the
         // copy the temporary needed; references, list destructuring and
-        // properties keep the copy. Key and value on the same variable keep
-        // both copies: PHP publishes the value first, then the key.
+        // properties keep the copy. PHP publishes the value first, then the
+        // key, so key and value on the same variable keep both copies.
         let by_value =
             binding != crate::policies::IterationBinding::Reference && !reference_subject;
         let mut value_local = if by_value {
@@ -71,6 +71,12 @@ impl Compiler<'_> {
         {
             key_local = None;
             value_local = None;
+        }
+        // The key is written straight only when the value is: a value that
+        // is assigned afterwards (`[$a[$k], $b]`, `$box->value`) must still
+        // see the key's old value, as PHP writes the value first.
+        if value_local.is_none() {
+            key_local = None;
         }
         let id = self.allocate_register()?;
         let key_register = match key_local {
