@@ -423,6 +423,18 @@ pub enum Instruction {
         dst: Reg,
         result: CallResult,
     },
+    /// `Assign` of a temporary read nowhere else: the value moves into the
+    /// local and `src` is left empty, where `Assign` would copy it and a
+    /// `Clear` release it afterwards.
+    AssignTake {
+        local: Reg,
+        src: Reg,
+    },
+    /// `SendValue` of a temporary read nowhere else: `src` is left empty
+    /// after the send, so no `Clear` follows.
+    SendTake {
+        src: Reg,
+    },
     /// The method call that [`crate::MethodSite`] `site` of the running
     /// function describes, made at once when it is plain; otherwise the
     /// `InitMethodCall`, `Send`s and `Call` that follow make it. `dst`

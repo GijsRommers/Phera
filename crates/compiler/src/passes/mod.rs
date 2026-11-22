@@ -10,5 +10,6 @@ pub(crate) mod lowering_tables;
 pub(crate) mod method_calls;
 pub(crate) mod optimize;
 pub(crate) mod register_mapping;
+pub(crate) mod takes;
 
 mod object_liveness;

@@ -299,6 +299,8 @@ impl Tables<'_> {
         // Last: the passes above never see `CallMethod`, whose site table
         // reads the argument registers.
         crate::passes::method_calls::rewrite(&mut function);
+        // Then the temporaries read once and cleared are taken.
+        crate::passes::takes::rewrite(&mut function);
         function
     }
 }

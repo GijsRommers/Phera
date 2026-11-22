@@ -122,6 +122,13 @@ impl Vm {
             I::SendValue { src } if TRACK_GENERATORS && self.send_window_argument(src)? => {}
             I::SendLocal { local } if TRACK_GENERATORS && self.send_window_argument(local)? => {}
             I::SendValue { src } => self.send(SentArgument::Value(src))?,
+            // A temporary read once: sent, then empty.
+            I::SendTake { src } => {
+                if !(TRACK_GENERATORS && self.send_window_argument(src)?) {
+                    self.send(SentArgument::Value(src))?;
+                }
+                self.clear_local(src)?;
+            }
             I::SendLocal { local } => self.send(SentArgument::Local(local))?,
             I::SendPath { path } => {
                 if !self.send_path(self.path(path)?)? {
@@ -146,6 +153,12 @@ impl Vm {
             I::Move { dst, src } => self.move_local(dst, src)?,
             I::Clear { reg } | I::UnsetLocal { local: reg } => self.clear_local(reg)?,
             I::Assign { local, src } => return self.execute_assign(local, src),
+            // A temporary read once: assigned, then empty.
+            I::AssignTake { local, src } => {
+                let exit = self.execute_assign(local, src)?;
+                self.clear_local(src)?;
+                return Ok(exit);
+            }
             I::AssignOp { op, local, src } => return self.execute_assign_op(op, local, src),
             I::CheckType { local, ty } => self.check_local_type(local, ty)?,
             I::IncDecLocal { mode, dst, local } => self.execute_inc_dec(mode, dst, local)?,

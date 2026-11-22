@@ -342,6 +342,21 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             let value = duplicate(&value.deref());
             store::<GUARDED, _>(slots, local, value)
         }
+        // A temporary read once moves into the local: no copy now, and no
+        // release by a `Clear` later. A reference in either takes the
+        // general path, as `Assign` does.
+        Instruction::AssignTake { local, src } => {
+            match (slots.slot(local), slots.slot(src)) {
+                (Some(Some(Value::Reference(_))), _)
+                | (_, Some(Some(Value::Reference(_)) | None))
+                | (None, _) => return ScalarStep::Fallback,
+                _ => {}
+            }
+            let Some(value) = slots.slot_mut(src).and_then(Option::take) else {
+                return ScalarStep::Fallback;
+            };
+            store::<GUARDED, _>(slots, local, value)
+        }
         Instruction::AppendLocal { local, src } => {
             let Some(Some(value)) = slots.slot(src) else {
                 return ScalarStep::Fallback;

@@ -451,6 +451,14 @@ impl Machine<'_> {
                 binding,
             } => self.prepare_static(position, (class, method), binding),
             Instruction::SendValue { src } => self.send(position, src),
+            // A temporary read once: sent, then empty.
+            Instruction::SendTake { src } => match self.send(position, src) {
+                Step::Done(ip) => {
+                    drop(self.registers.take(position.frame.base() + src.index()));
+                    Step::Done(ip)
+                }
+                other => other,
+            },
             Instruction::SendLocal { local } => match self.send(position, local) {
                 Step::Slow => self.send_reference(position, local),
                 done => done,
