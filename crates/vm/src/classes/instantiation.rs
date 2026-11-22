@@ -193,9 +193,36 @@ impl Vm {
         Ok(())
     }
 
+    /// The four `instanceof` branches, out of line: one arm of `execute`
+    /// leads here, so that its other arms keep their shape.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn instance_of_branches(
+        &mut self,
+        instruction: phera_bytecode::Instruction,
+        work: &mut usize,
+    ) -> Result<(), NativeError> {
+        use phera_bytecode::Instruction as I;
+        match instruction {
+            I::InstanceOfBranch { src, class, target } => {
+                self.instance_of_branch(src, class, target, false, work)
+            }
+            I::InstanceOfBranchIf { src, class, target } => {
+                self.instance_of_branch(src, class, target, true, work)
+            }
+            I::DynamicInstanceOfBranch { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, false, work)
+            }
+            I::DynamicInstanceOfBranchIf { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, true, work)
+            }
+            _ => Err(internal_error!("instanceof branch")),
+        }
+    }
+
     /// `instanceof` whose answer only decides a jump: compute it exactly as
     /// `instance_of` does, then jump when it equals `when`.
-    pub(crate) fn instance_of_branch(
+    fn instance_of_branch(
         &mut self,
         source: Reg,
         symbol: SymbolId,
