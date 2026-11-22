@@ -74,6 +74,10 @@ pub struct MethodSite {
     pub first_argument: u32,
     pub arguments: u16,
     pub after: Target,
+    /// The receiver is a temporary read nowhere after the call: a call the
+    /// quick entry makes moves it into `$this`, and the general sequence
+    /// clears it just before its `Call`, once the prepared call holds it.
+    pub receiver_taken: bool,
 }
 
 impl MethodSite {

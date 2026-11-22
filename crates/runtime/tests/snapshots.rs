@@ -14,6 +14,7 @@ use std::process::Command;
 use phera_runtime::{BootReport, HttpRequest, Runtime, WebWorker};
 
 mod snapshots {
+    mod inherited_autoload;
     mod streams;
 }
 

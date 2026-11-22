@@ -1,6 +1,6 @@
 //! Static-style calls distinguish method lookup from PHP's forwarded called class.
 
-use phera_bytecode::{ClassBinding, Reg};
+use phera_bytecode::{ClassBinding, Reg, Target};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
@@ -99,6 +99,34 @@ impl Vm {
             _ => false,
         };
         self.set(destination, Value::Bool(matches));
+        Ok(())
+    }
+
+    /// The evaluated-target form of `Vm::instance_of_branch`.
+    pub(crate) fn dynamic_instance_of_branch(
+        &mut self,
+        source: Reg,
+        class: Reg,
+        target: Target,
+        when: bool,
+        work: &mut usize,
+    ) -> Result<(), NativeError> {
+        let name = self
+            .class_target(class)
+            .map_err(|_| NativeError::error("Class name must be a valid object or a string"))?;
+        let matches = match self.read_local(source) {
+            Value::Object(object) => self
+                .classes
+                .for_object(&object)
+                .is_some_and(|class| self.class_matches(&class, &name)),
+            _ => false,
+        };
+        if matches == when {
+            if self.backward(target) {
+                *work += 1;
+            }
+            self.jump(target)?;
+        }
         Ok(())
     }
 }

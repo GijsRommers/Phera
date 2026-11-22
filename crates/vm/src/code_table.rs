@@ -54,6 +54,8 @@ pub(crate) struct LoadedUnit {
     /// The key of each of the file's symbols (functions, classes, methods
     /// referred to by name), lowercased.
     symbol_keys: Arc<[NameKey]>,
+    /// The key of each class the file declares, lowercased.
+    class_keys: Arc<[NameKey]>,
 }
 
 /// The code of one request: every loaded file and every function in them.
@@ -196,7 +198,7 @@ impl CodeTable {
         let count = 1 + unit.functions.len() as u32;
         let first = FunctionIndex(self.worker.number(unit, count, self.own_leases()));
         let mut facts = Vec::with_capacity(count as usize);
-        let (name_keys, symbol_keys) = if let Some(metadata) = &unit.metadata {
+        let (name_keys, symbol_keys, class_keys) = if let Some(metadata) = &unit.metadata {
             facts.extend(metadata.functions.iter().cloned().enumerate().map(
                 |(offset, signature)| {
                     let local = offset.checked_sub(1).map(|local| local as u32);
@@ -206,7 +208,11 @@ impl CodeTable {
                     FunctionFacts::bind((index, first, local), signature, instructions)
                 },
             ));
-            (metadata.name_keys.clone(), metadata.symbol_keys.clone())
+            (
+                metadata.name_keys.clone(),
+                metadata.symbol_keys.clone(),
+                metadata.class_keys.clone(),
+            )
         } else {
             let bodies = std::iter::once(&unit.main).chain(&unit.functions);
             facts.extend(bodies.enumerate().map(|(offset, body)| {
@@ -230,6 +236,7 @@ impl CodeTable {
             (
                 phera_bytecode::name_keys::keys(names.iter().map(String::as_str)),
                 phera_bytecode::name_keys::keys(symbols.iter().map(String::as_str)),
+                phera_bytecode::class_keys(unit),
             )
         };
         let start = first.index();
@@ -243,6 +250,7 @@ impl CodeTable {
             first,
             name_keys,
             symbol_keys,
+            class_keys,
         });
         first
     }
@@ -265,6 +273,16 @@ impl CodeTable {
         symbol: phera_bytecode::SymbolId,
     ) -> NameKey {
         self.loaded(function).symbol_keys[symbol.index()]
+    }
+
+    /// The key of the name of class `class` of the file `function` belongs to.
+    #[inline]
+    pub(crate) fn unit_class_key(
+        &self,
+        function: FunctionIndex,
+        class: phera_bytecode::ClassId,
+    ) -> NameKey {
+        self.loaded(function).class_keys[class.index()]
     }
 
     /// The key of name `name` of the file `function` belongs to.
@@ -540,6 +558,7 @@ impl crate::snapshot::ForkCopy for CodeTable {
                     first: loaded.first,
                     name_keys: loaded.name_keys.clone(),
                     symbol_keys: loaded.symbol_keys.clone(),
+                    class_keys: loaded.class_keys.clone(),
                 })
                 .collect(),
             functions: self.functions.clone(),

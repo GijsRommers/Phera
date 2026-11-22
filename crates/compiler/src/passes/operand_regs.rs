@@ -61,7 +61,7 @@ pub(super) fn visit(
         | I::ReturnReference { src }
         | I::Echo { src }
         | I::Exit { src }
-        | I::SendValue { src }
+        | I::SendValue { src, .. }
         | I::SendSpread { src }
         | I::SendUserCallback { src, .. }
         | I::DeclareConstant { src, .. }
@@ -136,7 +136,12 @@ pub(super) fn visit(
         }
         | I::JumpIfNotNull {
             value: condition, ..
-        } => ops!(w []; r [condition]),
+        }
+        | I::InstanceOfBranch { src: condition, .. }
+        | I::InstanceOfBranchIf { src: condition, .. } => ops!(w []; r [condition]),
+        I::DynamicInstanceOfBranch { src, class, .. }
+        | I::DynamicInstanceOfBranchIf { src, class, .. } => ops!(w []; r [src, class]),
+        I::GuardBuiltin { .. } => ops!(w []; r []),
         I::IterStart { src, .. } => ops!(w [src]; r [src]),
         I::IterStartReference { subject, .. } => ops!(w [subject]; r []),
         I::IterNext { value, .. } => ops!(w [value]; r []),

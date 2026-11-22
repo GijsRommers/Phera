@@ -60,8 +60,15 @@ impl CompiledUnit {
                 .unwrap_or_default();
             writeln!(
                 f,
-                "  site#{index} = {:?}->{:?}({arguments:?}), after {:?}",
-                site.receiver, site.method, site.after
+                "  site#{index} = {:?}->{:?}({arguments:?}), after {:?}{}",
+                site.receiver,
+                site.method,
+                site.after,
+                if site.receiver_taken {
+                    ", takes the receiver"
+                } else {
+                    ""
+                }
             )?;
         }
         for (index, handler) in function.handlers.iter().enumerate() {

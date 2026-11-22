@@ -352,6 +352,21 @@ pub enum Instruction {
         target: Target,
         when: bool,
     },
+    /// `source instanceof class`, branching on the answer; emits
+    /// InstanceOfBranch / InstanceOfBranchIf.
+    BranchInstanceOf {
+        source: Reg,
+        class: String,
+        target: Target,
+        when: bool,
+    },
+    /// The evaluated-class form; emits DynamicInstanceOfBranch(If).
+    BranchDynamicInstanceOf {
+        source: Reg,
+        class: Reg,
+        target: Target,
+        when: bool,
+    },
     /// Prepare and invoke an evaluated callee; emits InitDynamicCall, argument sends, and Call.
     Call {
         result: phera_bytecode::CallResult,

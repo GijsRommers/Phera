@@ -62,6 +62,8 @@ impl Vm {
         if !matches!(
             instruction,
             Instruction::SendValue { .. }
+                | Instruction::SendTake { .. }
+                | Instruction::SendConst { .. }
                 | Instruction::SendLocal { .. }
                 | Instruction::SendPath { .. }
                 | Instruction::SendSpread { .. }

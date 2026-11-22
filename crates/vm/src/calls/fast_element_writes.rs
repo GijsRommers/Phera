@@ -115,7 +115,7 @@ impl Machine<'_> {
         if let Some(result) = result {
             // Outside the guarded loop, into a register checked above, a
             // store completes.
-            let _ = store::<false>(self.registers.tail_mut(base), result, value);
+            let _ = store::<false, _>(self.registers.tail_mut(base), result, value);
         }
         Step::Done(position.ip)
     }

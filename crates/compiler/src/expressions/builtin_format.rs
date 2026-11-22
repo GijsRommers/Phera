@@ -88,6 +88,12 @@ impl Compiler<'_> {
     }
 }
 
+/// Whether `sprintf` with this literal format and `supplied` values is
+/// compiled into a concatenation (see [`format_parts`]).
+pub(super) fn is_compiled_format(bytes: &[u8], supplied: usize) -> bool {
+    format_parts(bytes, supplied).is_some()
+}
+
 /// Zend accepts only simple %s and %d placeholders and literal %% escapes.
 fn format_parts(bytes: &[u8], supplied: usize) -> Option<Vec<Part>> {
     if bytes.len() >= 256 {

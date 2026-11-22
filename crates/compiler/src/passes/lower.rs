@@ -229,6 +229,10 @@ impl Tables<'_> {
                 | Instruction::BinaryIntBranchIf { target, .. }
                 | Instruction::BinaryBranch { target, .. }
                 | Instruction::BinaryBranchIf { target, .. }
+                | Instruction::InstanceOfBranch { target, .. }
+                | Instruction::InstanceOfBranchIf { target, .. }
+                | Instruction::DynamicInstanceOfBranch { target, .. }
+                | Instruction::DynamicInstanceOfBranchIf { target, .. }
                 | Instruction::IterNext { end: target, .. }
                 | Instruction::IterNextKeyed { end: target, .. } => Some(target),
                 _ => None,
@@ -306,6 +310,8 @@ impl Tables<'_> {
         // Last: the passes above never see `CallMethod`, whose site table
         // reads the argument registers.
         crate::passes::method_calls::rewrite(&mut function);
+        // Then the temporaries read once and cleared are taken.
+        crate::passes::takes::rewrite(&mut function);
         function
     }
 }

@@ -30,8 +30,8 @@ pub(crate) enum ScalarStep {
 /// The integer in a register, if that is what it holds. A PHP reference, a
 /// float or an unset variable gives `None` and the caller falls back.
 #[inline(always)]
-fn integer_at(slots: &[Option<Value>], register: Reg) -> Option<i64> {
-    match slots.get(register.index()) {
+fn integer_at<S: crate::calls::registers::Slots + ?Sized>(slots: &S, register: Reg) -> Option<i64> {
+    match slots.slot(register) {
         Some(Some(Value::Int(integer))) => Some(*integer),
         _ => None,
     }
@@ -66,12 +66,12 @@ pub(crate) fn duplicate(value: &Value) -> Value {
 /// `GUARDED` (see [`scalar_step`]): a register that holds an array, object
 /// or reference is written out of line, where its release is looked at.
 #[inline(always)]
-fn store_integer<const GUARDED: bool>(
-    slots: &mut [Option<Value>],
+fn store_integer<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
+    slots: &mut S,
     register: Reg,
     integer: i64,
 ) -> ScalarStep {
-    match slots.get_mut(register.index()) {
+    match slots.slot_mut(register) {
         Some(Some(Value::Int(target))) => *target = integer,
         Some(slot) if GUARDED && owns_heap_values(slot) => {
             return replace(slot, Value::Int(integer));
@@ -96,8 +96,12 @@ fn unlikely() {}
 
 /// Stores an integer result whatever the register held.
 #[inline(always)]
-fn overwrite_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -> ScalarStep {
-    match slots.get_mut(register.index()) {
+fn overwrite_integer<S: crate::calls::registers::Slots + ?Sized>(
+    slots: &mut S,
+    register: Reg,
+    integer: i64,
+) -> ScalarStep {
+    match slots.slot_mut(register) {
         Some(Some(Value::Int(target))) => *target = integer,
         Some(slot) => *slot = Some(Value::Int(integer)),
         None => return ScalarStep::Fallback,
@@ -107,12 +111,12 @@ fn overwrite_integer(slots: &mut [Option<Value>], register: Reg, integer: i64) -
 
 /// Stores any result, dropping what the register held before.
 #[inline(always)]
-pub(crate) fn store<const GUARDED: bool>(
-    slots: &mut [Option<Value>],
+pub(crate) fn store<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
+    slots: &mut S,
     register: Reg,
     value: Value,
 ) -> ScalarStep {
-    match slots.get_mut(register.index()) {
+    match slots.slot_mut(register) {
         Some(slot) if GUARDED && owns_heap_values(slot) => replace(slot, value),
         Some(slot) => {
             *slot = Some(value);
@@ -181,18 +185,18 @@ fn frees_on_drop(slot: &Option<Value>) -> bool {
 
 /// Builtins with no coercion can read the local directly.
 #[inline(never)]
-fn builtin_step<const GUARDED: bool>(
+fn builtin_step<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
     operation: phera_bytecode::BuiltinUnary,
     destination: Reg,
     source: Reg,
-    slots: &mut [Option<Value>],
+    slots: &mut S,
 ) -> ScalarStep {
-    let Some(Some(value)) = slots.get(source.index()) else {
+    let Some(Some(value)) = slots.slot(source) else {
         return ScalarStep::Fallback;
     };
     match crate::builtin_calls::builtin_value(operation, value) {
-        Some(Value::Int(value)) => store_integer::<GUARDED>(slots, destination, value),
-        Some(value) => store::<GUARDED>(slots, destination, value),
+        Some(Value::Int(value)) => store_integer::<GUARDED, _>(slots, destination, value),
+        Some(value) => store::<GUARDED, _>(slots, destination, value),
         None => ScalarStep::Fallback,
     }
 }
@@ -252,18 +256,18 @@ fn integer_bits(operator: BinaryOp, left: i64, right: i64) -> Option<i64> {
 /// A binary operator on two integers: arithmetic gives an integer, a
 /// comparison gives a boolean. Anything else falls back.
 #[inline(always)]
-fn integer_binary<const GUARDED: bool>(
-    slots: &mut [Option<Value>],
+fn integer_binary<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
+    slots: &mut S,
     operator: BinaryOp,
     destination: Reg,
     left: i64,
     right: i64,
 ) -> ScalarStep {
     if let Some(result) = integer_arithmetic(operator, left, right) {
-        return store_integer::<GUARDED>(slots, destination, result);
+        return store_integer::<GUARDED, _>(slots, destination, result);
     }
     match integer_condition(operator, left, right) {
-        Some(condition) => store::<GUARDED>(slots, destination, Value::Bool(condition)),
+        Some(condition) => store::<GUARDED, _>(slots, destination, Value::Bool(condition)),
         None => ScalarStep::Fallback,
     }
 }
@@ -277,21 +281,21 @@ fn integer_binary<const GUARDED: bool>(
 /// reference, an unset variable, an overflow) returns `Fallback`, and the
 /// general handler for that instruction does it with full PHP semantics.
 #[inline(always)]
-pub(crate) fn scalar_step<const GUARDED: bool>(
+pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
     instruction: &Instruction,
-    slots: &mut [Option<Value>],
+    slots: &mut S,
     ip: &mut usize,
 ) -> ScalarStep {
     match *instruction {
         Instruction::Nop => ScalarStep::Complete,
         Instruction::LoadInt { dst, value } => {
-            store_integer::<GUARDED>(slots, dst, i64::from(value))
+            store_integer::<GUARDED, _>(slots, dst, i64::from(value))
         }
-        Instruction::LoadNull { dst } => store::<GUARDED>(slots, dst, Value::Null),
-        Instruction::LoadBool { dst, value } => store::<GUARDED>(slots, dst, Value::Bool(value)),
+        Instruction::LoadNull { dst } => store::<GUARDED, _>(slots, dst, Value::Null),
+        Instruction::LoadBool { dst, value } => store::<GUARDED, _>(slots, dst, Value::Bool(value)),
         Instruction::BuiltinUnary { op, dst, src }
         | Instruction::NamespacedBuiltin { op, dst, src } => {
-            builtin_step::<GUARDED>(op, dst, src, slots)
+            builtin_step::<GUARDED, _>(op, dst, src, slots)
         }
         Instruction::Unary {
             op: phera_bytecode::UnaryOp::Negate,
@@ -301,7 +305,7 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             let Some(negative) = integer_at(slots, src).and_then(i64::checked_neg) else {
                 return ScalarStep::Fallback;
             };
-            store_integer::<GUARDED>(slots, dst, negative)
+            store_integer::<GUARDED, _>(slots, dst, negative)
         }
         Instruction::Cast {
             to: phera_bytecode::CastKind::Bool,
@@ -309,42 +313,57 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             src,
         } => {
             // Only a value that is a boolean already; a real conversion may warn.
-            let Some(Some(Value::Bool(value))) = slots.get(src.index()) else {
+            let Some(Some(Value::Bool(value))) = slots.slot(src) else {
                 return ScalarStep::Fallback;
             };
             let value = *value;
-            store::<GUARDED>(slots, dst, Value::Bool(value))
+            store::<GUARDED, _>(slots, dst, Value::Bool(value))
         }
         Instruction::Move { dst, src } => {
             if let Some(integer) = integer_at(slots, src) {
-                return store_integer::<GUARDED>(slots, dst, integer);
+                return store_integer::<GUARDED, _>(slots, dst, integer);
             }
-            let Some(Some(value)) = slots.get(src.index()) else {
+            let Some(Some(value)) = slots.slot(src) else {
                 return ScalarStep::Fallback;
             };
             let value = duplicate(&value.deref());
-            store::<GUARDED>(slots, dst, value)
+            store::<GUARDED, _>(slots, dst, value)
         }
         Instruction::Assign { local, src } => {
             // Assigning to a PHP reference writes through it: general handler.
-            if matches!(slots.get(local.index()), Some(Some(Value::Reference(_)))) {
+            if matches!(slots.slot(local), Some(Some(Value::Reference(_)))) {
                 return ScalarStep::Fallback;
             }
             if let Some(integer) = integer_at(slots, src) {
-                return store_integer::<GUARDED>(slots, local, integer);
+                return store_integer::<GUARDED, _>(slots, local, integer);
             }
-            let Some(Some(value)) = slots.get(src.index()) else {
+            let Some(Some(value)) = slots.slot(src) else {
                 return ScalarStep::Fallback;
             };
             let value = duplicate(&value.deref());
-            store::<GUARDED>(slots, local, value)
+            store::<GUARDED, _>(slots, local, value)
+        }
+        // A temporary read once moves into the local: no copy now, and no
+        // release by a `Clear` later. A reference in either takes the
+        // general path, as `Assign` does.
+        Instruction::AssignTake { local, src } => {
+            match (slots.slot(local), slots.slot(src)) {
+                (Some(Some(Value::Reference(_))), _)
+                | (_, Some(Some(Value::Reference(_)) | None))
+                | (None, _) => return ScalarStep::Fallback,
+                _ => {}
+            }
+            let Some(value) = slots.slot_mut(src).and_then(Option::take) else {
+                return ScalarStep::Fallback;
+            };
+            store::<GUARDED, _>(slots, local, value)
         }
         Instruction::AppendLocal { local, src } => {
-            let Some(Some(value)) = slots.get(src.index()) else {
+            let Some(Some(value)) = slots.slot(src) else {
                 return ScalarStep::Fallback;
             };
             let value = duplicate(&value.deref());
-            let Some(Some(Value::Array(array))) = slots.get_mut(local.index()) else {
+            let Some(Some(Value::Array(array))) = slots.slot_mut(local) else {
                 return ScalarStep::Fallback;
             };
             match std::rc::Rc::make_mut(array).push(value) {
@@ -357,23 +376,23 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             lhs,
             rhs,
             target,
-        } => binary_int_branch_step::<GUARDED, false>(slots, op, lhs, rhs, target, ip),
+        } => binary_int_branch_step::<GUARDED, false, _>(slots, op, lhs, rhs, target, ip),
         Instruction::BinaryIntBranchIf {
             op,
             lhs,
             rhs,
             target,
-        } => binary_int_branch_step::<GUARDED, true>(slots, op, lhs, rhs, target, ip),
+        } => binary_int_branch_step::<GUARDED, true, _>(slots, op, lhs, rhs, target, ip),
         Instruction::BinaryInt { op, dst, lhs, rhs } => {
             let right = i64::from(rhs);
             if let Some(left) = integer_at(slots, lhs) {
-                return integer_binary::<GUARDED>(slots, op, dst, left, right);
+                return integer_binary::<GUARDED, _>(slots, op, dst, left, right);
             }
-            let Some(Some(left)) = slots.get(lhs.index()) else {
+            let Some(Some(left)) = slots.slot(lhs) else {
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, &Value::Int(right)) {
-                Some(value) => store::<GUARDED>(slots, dst, value),
+                Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -381,15 +400,13 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             if let Some(left) = integer_at(slots, lhs)
                 && let Some(right) = integer_at(slots, rhs)
             {
-                return integer_binary::<GUARDED>(slots, op, dst, left, right);
+                return integer_binary::<GUARDED, _>(slots, op, dst, left, right);
             }
-            let (Some(Some(left)), Some(Some(right))) =
-                (slots.get(lhs.index()), slots.get(rhs.index()))
-            else {
+            let (Some(Some(left)), Some(Some(right))) = (slots.slot(lhs), slots.slot(rhs)) else {
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, right) {
-                Some(value) => store::<GUARDED>(slots, dst, value),
+                Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -398,29 +415,27 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             lhs,
             rhs,
             target,
-        } => binary_branch_step::<GUARDED, false>(slots, op, lhs, rhs, target, ip),
+        } => binary_branch_step::<GUARDED, false, _>(slots, op, lhs, rhs, target, ip),
         Instruction::BinaryBranchIf {
             op,
             lhs,
             rhs,
             target,
-        } => binary_branch_step::<GUARDED, true>(slots, op, lhs, rhs, target, ip),
+        } => binary_branch_step::<GUARDED, true, _>(slots, op, lhs, rhs, target, ip),
         Instruction::AssignOp { op, local, src } => {
             if let Some(left) = integer_at(slots, local)
                 && let Some(right) = integer_at(slots, src)
             {
                 return match integer_arithmetic(op, left, right) {
-                    Some(result) => store_integer::<GUARDED>(slots, local, result),
+                    Some(result) => store_integer::<GUARDED, _>(slots, local, result),
                     None => ScalarStep::Fallback,
                 };
             }
-            let (Some(Some(left)), Some(Some(right))) =
-                (slots.get(local.index()), slots.get(src.index()))
-            else {
+            let (Some(Some(left)), Some(Some(right))) = (slots.slot(local), slots.slot(src)) else {
                 return ScalarStep::Fallback;
             };
             match fast_binary(op, left, right) {
-                Some(value) => store::<GUARDED>(slots, local, value),
+                Some(value) => store::<GUARDED, _>(slots, local, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -440,7 +455,7 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
                 IncDec::PostIncrement | IncDec::PostDecrement => old,
                 IncDec::PreIncrement | IncDec::PreDecrement => new,
             };
-            if store_integer::<GUARDED>(slots, local, new) == ScalarStep::Fallback {
+            if store_integer::<GUARDED, _>(slots, local, new) == ScalarStep::Fallback {
                 return ScalarStep::Fallback;
             }
             // The variable has changed, so this store must not fall back.
@@ -454,7 +469,7 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
         }
         Instruction::JumpIf { condition, target }
         | Instruction::JumpIfNot { condition, target } => {
-            let Some(Some(value)) = slots.get(condition.index()) else {
+            let Some(Some(value)) = slots.slot(condition) else {
                 return ScalarStep::Fallback;
             };
             let truthy = match value {
@@ -469,7 +484,7 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
         // Unsetting a variable that holds an array, object or reference
         // goes to the general handler: it forgets a global bound to it, and
         // a generator released there closes at once.
-        Instruction::UnsetLocal { local } => match slots.get_mut(local.index()) {
+        Instruction::UnsetLocal { local } => match slots.slot_mut(local) {
             Some(slot)
                 if slot.as_ref().is_none_or(|value| {
                     !matches!(
@@ -483,7 +498,7 @@ pub(crate) fn scalar_step<const GUARDED: bool>(
             }
             _ => ScalarStep::Fallback,
         },
-        Instruction::Clear { reg: register } => match slots.get_mut(register.index()) {
+        Instruction::Clear { reg: register } => match slots.slot_mut(register) {
             Some(slot) if GUARDED && owns_heap_values(slot) => clear(slot),
             Some(slot) => {
                 *slot = None;
@@ -514,8 +529,12 @@ fn integer_condition(operator: BinaryOp, left: i64, right: i64) -> Option<bool> 
 /// `BinaryIntBranch`/`BinaryIntBranchIf` pair, so each arm compiles like the
 /// plain false case.
 #[inline(always)]
-fn binary_int_branch_step<const GUARDED: bool, const WHEN: bool>(
-    slots: &[Option<Value>],
+fn binary_int_branch_step<
+    const GUARDED: bool,
+    const WHEN: bool,
+    S: crate::calls::registers::Slots + ?Sized,
+>(
+    slots: &S,
     op: BinaryOp,
     lhs: Reg,
     rhs: i32,
@@ -531,7 +550,7 @@ fn binary_int_branch_step<const GUARDED: bool, const WHEN: bool>(
         }
         return ScalarStep::Complete;
     }
-    let Some(Some(left)) = slots.get(lhs.index()) else {
+    let Some(Some(left)) = slots.slot(lhs) else {
         return ScalarStep::Fallback;
     };
     let Some(value) = fast_binary(op, left, &Value::Int(right)) else {
@@ -545,8 +564,12 @@ fn binary_int_branch_step<const GUARDED: bool, const WHEN: bool>(
 
 /// Compare two registers and branch on the result.
 #[inline(always)]
-fn binary_branch_step<const GUARDED: bool, const WHEN: bool>(
-    slots: &[Option<Value>],
+fn binary_branch_step<
+    const GUARDED: bool,
+    const WHEN: bool,
+    S: crate::calls::registers::Slots + ?Sized,
+>(
+    slots: &S,
     op: BinaryOp,
     lhs: Reg,
     rhs: Reg,
@@ -562,8 +585,7 @@ fn binary_branch_step<const GUARDED: bool, const WHEN: bool>(
         }
         return ScalarStep::Complete;
     }
-    let (Some(Some(left)), Some(Some(right))) = (slots.get(lhs.index()), slots.get(rhs.index()))
-    else {
+    let (Some(Some(left)), Some(Some(right))) = (slots.slot(lhs), slots.slot(rhs)) else {
         return ScalarStep::Fallback;
     };
     let left = left.deref();
@@ -624,26 +646,40 @@ fn identity_condition(left: &Value, right: &Value) -> Option<bool> {
 }
 
 /// Existing integer keys need no conversion or diagnostic work.
+/// `AssignConst`: a copy of the file's literal into `local`. A reference
+/// in the local takes the general path, as `Assign` does.
+#[inline(always)]
+pub(crate) fn assign_literal<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
+    slots: &mut S,
+    local: Reg,
+    literal: &Value,
+) -> ScalarStep {
+    match slots.slot(local) {
+        Some(Some(Value::Reference(_))) | None => ScalarStep::Fallback,
+        _ => store::<GUARDED, _>(slots, local, literal.clone()),
+    }
+}
+
 /// Keep this out of scalar_step's arithmetic dispatch; every failed guard uses
 /// the normal PHP offset/reference/diagnostic handler.
 #[inline]
-pub(crate) fn array_index_step<const GUARDED: bool>(
+pub(crate) fn array_index_step<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
     destination: Reg,
     base: Reg,
     index: Reg,
-    slots: &mut [Option<Value>],
+    slots: &mut S,
 ) -> ScalarStep {
-    let Some(Some(Value::Array(array))) = slots.get(base.index()) else {
+    let Some(Some(Value::Array(array))) = slots.slot(base) else {
         return ScalarStep::Fallback;
     };
-    let Some(Some(Value::Int(index))) = slots.get(index.index()) else {
+    let Some(Some(Value::Int(index))) = slots.slot(index) else {
         return ScalarStep::Fallback;
     };
     let Some(value) = crate::array_slots::read_integer(array, *index) else {
         return ScalarStep::Fallback;
     };
     let value = duplicate(&value.deref());
-    let Some(target) = slots.get_mut(destination.index()) else {
+    let Some(target) = slots.slot_mut(destination) else {
         return ScalarStep::Fallback;
     };
     let released = GUARDED && frees_on_drop(target);
@@ -661,9 +697,9 @@ pub(crate) fn array_index_step<const GUARDED: bool>(
 /// nothing changed) for any other instruction or case; the general handler
 /// then runs it. It does its few writes itself rather than through
 /// [`scalar_step`], whose code is best left with a single caller.
-pub(crate) fn releasing_step(
+pub(crate) fn releasing_step<S: crate::calls::registers::Slots + ?Sized>(
     instruction: Instruction,
-    slots: &mut [Option<Value>],
+    slots: &mut S,
 ) -> Option<Value> {
     let (register, value) = match instruction {
         Instruction::LoadInt { dst, value } => (dst, Some(Value::Int(i64::from(value)))),
@@ -673,7 +709,7 @@ pub(crate) fn releasing_step(
         Instruction::UnsetLocal { local } => (local, None),
         Instruction::Move { dst, src } | Instruction::Assign { local: dst, src } => {
             // A PHP reference or a missing value needs the general handler.
-            let value = match slots.get(src.index()) {
+            let value = match slots.slot(src) {
                 Some(Some(Value::Reference(_))) | Some(None) | None => return None,
                 Some(Some(value)) => value.clone(),
             };
@@ -681,7 +717,7 @@ pub(crate) fn releasing_step(
         }
         _ => return None,
     };
-    let slot = slots.get_mut(register.index())?;
+    let slot = slots.slot_mut(register)?;
     if !matches!(
         slot,
         Some(Value::Array(_) | Value::Object(_) | Value::Resource(_))

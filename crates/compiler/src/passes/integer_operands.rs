@@ -163,7 +163,7 @@ fn dead_after_from(
                     }
                 }
                 Instruction::Echo { src }
-                | Instruction::SendValue { src }
+                | Instruction::SendValue { src, .. }
                 | Instruction::SendLocal { local: src } => {
                     if src == register {
                         return false;
@@ -190,6 +190,24 @@ fn dead_after_from(
                     lhs, rhs, target, ..
                 } => {
                     if lhs == register || rhs == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::InstanceOfBranch { src, target, .. }
+                | Instruction::InstanceOfBranchIf { src, target, .. } => {
+                    if src == register {
+                        return false;
+                    }
+                    pending.push(target.index());
+                }
+                Instruction::DynamicInstanceOfBranch {
+                    src, class, target, ..
+                }
+                | Instruction::DynamicInstanceOfBranchIf {
+                    src, class, target, ..
+                } => {
+                    if src == register || class == register {
                         return false;
                     }
                     pending.push(target.index());

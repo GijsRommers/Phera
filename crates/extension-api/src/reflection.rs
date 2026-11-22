@@ -31,6 +31,7 @@ pub enum ReflectedClassKind {
 pub struct ClassInfo {
     pub id: u32,
     pub name: String,
+    pub name_value: Value,
     pub kind: ReflectedClassKind,
     pub source: Option<SourceInfo>,
     pub extension: Option<String>,
@@ -263,11 +264,17 @@ pub trait ReflectionContext {
         value: Value,
     ) -> NativeResult;
 
+    /// Finds a loaded class, as in `new ReflectionClass(Service::class)`.
+    fn reflect_loaded_class(&mut self, name: &str) -> Option<Rc<ClassInfo>>;
+
+    /// Finds the class carried by an object, as in `new ReflectionClass($object)`.
+    fn reflect_object_class(&mut self, object: &Object) -> Option<Rc<ClassInfo>>;
+
     /// Loads a class by name, with PHP autoloading.
-    fn reflect_class(
-        &mut self,
-        name: &str,
-    ) -> LocalFuture<'_, Result<Rc<ClassInfo>, crate::NativeError>>;
+    fn reflect_class<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<'a, Result<Rc<ClassInfo>, crate::NativeError>>;
 
     /// Lists visible reflection members in declaration order, including non-public members.
     fn reflect_members(&mut self, class: ClassSelector<'_>, kind: MemberKind) -> Members;
@@ -408,6 +415,11 @@ pub enum FunctionTarget {
     Named(String),
     Method {
         class: String,
+        name: String,
+    },
+    /// A method selected by a constructor after the class was linked.
+    LinkedMethod {
+        class: u32,
         name: String,
     },
     /// A method of a class's member list, by its place (`getMethods()`).
