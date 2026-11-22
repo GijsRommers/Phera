@@ -97,6 +97,12 @@ impl ClassTypes {
         }
     }
 
+    /// Whether the cells exist: always for a file the request loaded, and
+    /// for a fork's file once a check of it went through the slow path.
+    pub(crate) fn is_made(&self) -> bool {
+        !self.cells.is_empty() || self.count == 0
+    }
+
     /// The check of declared type `index`, if the cells are made.
     #[inline(always)]
     pub(crate) fn get(&self, index: usize) -> Option<&RefCell<Option<ClassTypeEntry>>> {
