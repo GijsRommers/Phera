@@ -10,10 +10,10 @@ file golden.php
 function {main} (10 registers, dynamic scope)
   r0 = $error
   site#0 = r0->name#1([]), after @30
-  handler#0 = Handler { start: @0, end: @6, catch: Some(@7), finally: None, exception: r4, cleanup: [r5, r6, r7] }
-  handler#1 = Handler { start: @0, end: @16, catch: None, finally: Some(@18), exception: r3, cleanup: [r5, r6, r7] }
-  handler#2 = Handler { start: @0, end: @22, catch: Some(@23), finally: None, exception: r2, cleanup: [r3, r4, r5, r6, r7, r8] }
-  handler#3 = Handler { start: @0, end: @34, catch: None, finally: Some(@36), exception: r1, cleanup: [r3, r4, r5, r6, r7, r8] }
+  handler#0 = Handler { start: @0, end: @5, catch: Some(@6), finally: None, exception: r4, cleanup: [r5] }
+  handler#1 = Handler { start: @0, end: @14, catch: None, finally: Some(@16), exception: r3, cleanup: [r5, r7] }
+  handler#2 = Handler { start: @0, end: @20, catch: Some(@21), finally: None, exception: r2, cleanup: [r3, r4, r5, r7] }
+  handler#3 = Handler { start: @0, end: @31, catch: None, finally: Some(@33), exception: r1, cleanup: [r3, r4, r5, r7, r8] }
   0000  line 1    New { class: symbol#0 }
   0001  line 1    SendConst { constant: const#0 }
   0002  line 1    Call { dst: r5, result: Used }

@@ -12,4 +12,6 @@ pub(crate) mod optimize;
 pub(crate) mod register_mapping;
 pub(crate) mod takes;
 
+mod clear_flow;
 mod object_liveness;
+mod operand_regs;
