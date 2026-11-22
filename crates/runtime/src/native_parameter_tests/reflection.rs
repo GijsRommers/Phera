@@ -34,7 +34,10 @@ function inspectDefaults(array $symbols): void {
         foreach ($reflection->getParameters() as $parameter) {
             $available = $parameter->isDefaultValueAvailable();
             $value = $available ? $parameter->getDefaultValue() : null;
+            $constant = $available ? $parameter->getDefaultValueConstantName() : null;
             if ($value instanceof UnitEnum) $value = $value::class . '::' . $value->name;
+            // libc builds can use different numbers for the same backlog default.
+            if ($constant === 'SOMAXCONN' && $value === SOMAXCONN) $value = $constant;
             $record[] = [
                 $parameter->getName(),
                 $parameter->isOptional(),
@@ -42,7 +45,7 @@ function inspectDefaults(array $symbols): void {
                 $parameter->isVariadic(),
                 $available,
                 $value,
-                $available ? $parameter->getDefaultValueConstantName() : null,
+                $constant,
             ];
         }
         echo $symbol, "\t", json_encode($record, JSON_PRESERVE_ZERO_FRACTION), "\n";

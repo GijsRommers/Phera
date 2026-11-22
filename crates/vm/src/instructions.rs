@@ -13,6 +13,7 @@ use phera_value::{PhpArray, Value};
 
 use crate::Vm;
 use crate::arrays::ArrayWrite;
+use crate::calls::callback_binding::ArgumentBinding;
 use crate::calls::execution_loop::BatchExit;
 use crate::calls::sends::SentArgument;
 
@@ -155,11 +156,35 @@ impl Vm {
                 lhs,
                 rhs,
                 target,
-            } => self.binary_int_branch(op, lhs, rhs, target)?,
+            } => self.binary_int_branch(op, lhs, rhs, target, false, work)?,
+            I::BinaryIntBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            } => self.binary_int_branch(op, lhs, rhs, target, true, work)?,
             I::BinaryInt { op, dst, lhs, rhs } => self.execute_binary_int(op, dst, lhs, rhs)?,
             I::Binary { dst, op, lhs, rhs } => return self.execute_binary(op, dst, lhs, rhs),
+            I::BinaryBranch {
+                op,
+                lhs,
+                rhs,
+                target,
+            } => return self.binary_branch(op, lhs, rhs, target, false, work),
+            I::BinaryBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            } => return self.binary_branch(op, lhs, rhs, target, true, work),
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
-            I::BuiltinUnary { op, dst, src } => return self.execute_builtin_unary(op, src, dst),
+            I::BuiltinUnary { op, dst, src } => {
+                return self.execute_builtin_unary(op, src, dst, ArgumentBinding::Frameless);
+            }
+            I::NamespacedBuiltin { op, dst, src } => {
+                return self.execute_builtin_unary(op, src, dst, ArgumentBinding::Caller);
+            }
+            I::GuardBuiltin { function, call } => self.execute_guard_builtin(function, call)?,
             I::BuiltinFrame { op, dst } => self.execute_builtin_frame(op, dst)?,
             I::ArrayKeyExists { dst, key, array } => {
                 return self.execute_array_key_exists(key, array, dst);
@@ -197,7 +222,17 @@ impl Vm {
             }
             I::AssignPathFromLocal { path, src, dst } => {
                 let handled = if let Some(value) = self.read_defined_local(src) {
-                    self.assign_property_site(&self.path(path)?, &value, Some((src, dst)))?
+                    let place = self.path(path)?;
+                    if self.assign_property_site(&place, &value, Some((src, dst)))? {
+                        true
+                    } else if place.has_properties()?
+                        && let Some(stored) = self.assign_plain_property(&place, &value)?
+                    {
+                        self.set(dst, stored);
+                        true
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 };
@@ -221,6 +256,9 @@ impl Vm {
             I::UnsetPath { path } => {
                 let place = self.path(path)?;
                 if place.has_properties()? {
+                    if self.unset_plain_property(&place)? {
+                        return Ok(None);
+                    }
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
                 self.unset_place(&place)?;

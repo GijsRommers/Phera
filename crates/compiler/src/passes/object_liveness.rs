@@ -61,9 +61,9 @@ pub(crate) fn effect(
                 read_write(src, dst, register)
             }
         }
-        Instruction::InstanceOf { dst, src, .. } | Instruction::BuiltinUnary { dst, src, .. } => {
-            read_write(src, dst, register)
-        }
+        Instruction::InstanceOf { dst, src, .. }
+        | Instruction::BuiltinUnary { dst, src, .. }
+        | Instruction::NamespacedBuiltin { dst, src, .. } => read_write(src, dst, register),
         Instruction::Fetch { dst, path, .. }
         | Instruction::FetchIndex { dst, path, .. }
         | Instruction::MakeReference { dst, path } => {

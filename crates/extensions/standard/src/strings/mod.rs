@@ -6,6 +6,7 @@
 
 use phera_extension_api::{NativeError, Registry};
 
+mod alphanumeric;
 pub(crate) mod base64;
 mod case;
 mod compare;
@@ -13,6 +14,7 @@ mod decimal;
 mod encode;
 mod escaping;
 pub(crate) mod format;
+mod hebrew;
 mod html;
 mod join;
 mod metaphone;
@@ -30,14 +32,19 @@ mod text;
 pub(crate) mod tokens;
 mod trim;
 pub(crate) mod url;
+mod uuencode;
 
 /// The longest string a function here builds before failing as PHP fails
 /// for a string past its memory limit.
 pub(crate) const MAX_STRING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.function(hebrew::ENTRY);
     registry.function(quoted_printable::ENCODE);
+    registry.function(quoted_printable::DECODE);
+    registry.function(encode::UTF8_DECODE);
     for entry in [
+        alphanumeric::FUNCTIONS,
         base64::FUNCTIONS,
         case::FUNCTIONS,
         compare::FUNCTIONS,
@@ -67,11 +74,13 @@ pub(crate) fn register(registry: &mut Registry) {
         tokens::FUNCTIONS,
         trim::FUNCTIONS,
         url::FUNCTIONS,
+        uuencode::FUNCTIONS,
     ];
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
     registry.describe_function("utf8_encode", "string", None);
+    registry.describe_function("utf8_decode", "string", None);
     replace::register_sync_selectors(registry);
 }
 

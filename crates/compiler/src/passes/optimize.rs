@@ -83,11 +83,15 @@ pub(crate) fn target(instruction: &Instruction) -> Option<Target> {
 pub(crate) fn target_mut(instruction: &mut Instruction) -> Option<&mut Target> {
     match instruction {
         Instruction::BinaryIntBranch { target, .. }
+        | Instruction::BinaryIntBranchIf { target, .. }
+        | Instruction::BinaryBranch { target, .. }
+        | Instruction::BinaryBranchIf { target, .. }
         | Instruction::Jump { target }
         | Instruction::JumpIf { target, .. }
         | Instruction::JumpIfNot { target, .. }
         | Instruction::JumpIfNull { target, .. }
-        | Instruction::JumpIfNotNull { target, .. } => Some(target),
+        | Instruction::JumpIfNotNull { target, .. }
+        | Instruction::GuardBuiltin { call: target, .. } => Some(target),
         Instruction::ReceiveDefault { passed, .. } => Some(passed),
         Instruction::BindStatic { initialized, .. } => Some(initialized),
         Instruction::FinallyCall { target, .. } => Some(target),
@@ -107,6 +111,19 @@ pub(crate) fn compact_nops(function: &mut Function) {
         }
     }
     offsets.push(count);
+    if count as usize == function.instructions.len() {
+        return;
+    }
+    for handler in &mut function.handlers {
+        handler.start.0 = offsets[handler.start.index()];
+        handler.end.0 = offsets[handler.end.index()];
+        for target in [&mut handler.catch, &mut handler.finally]
+            .into_iter()
+            .flatten()
+        {
+            target.0 = offsets[target.index()];
+        }
+    }
     let mut lines = Vec::new();
     let mut instructions = Vec::new();
     for (index, mut instruction) in function.instructions.iter().copied().enumerate() {
@@ -146,7 +163,8 @@ fn update_facts(function: &Function, facts: &mut [Fact], instruction: Instructio
         | Instruction::LoadBool { dst, .. }
         | Instruction::LoadNull { dst } => set_fact(facts, dst, Scalar),
         Instruction::LoadConst { dst, .. } => set_fact(facts, dst, Shared),
-        Instruction::BuiltinUnary { op, dst, .. } => {
+        Instruction::BuiltinUnary { op, dst, .. }
+        | Instruction::NamespacedBuiltin { op, dst, .. } => {
             facts.fill(Unknown);
             let scalar = !matches!(
                 op,

@@ -15,6 +15,8 @@ Usage:
                                           0.0.0.0:$PORT when PORT is set
     --workers N                           default: one per CPU core
     --preload                             compile Composer files before listening
+    --no-class-warmup                     do not declare in the snapshot the
+                                          classes requests autoload
     --no-process                          forbid starting external programs
     --request-timeout SECONDS             stop a request after this long
                                           (default 60; 0: never)
@@ -92,6 +94,9 @@ pub(crate) struct ServeOptions {
     /// `None` means one worker per CPU core.
     pub workers: Option<usize>,
     pub preload: bool,
+    /// Declare in the snapshot the classes requests autoload; on unless
+    /// `--no-class-warmup` is given.
+    pub class_warmup: bool,
     /// `--compress`: gzip or brotli for clients that accept it. Off unless
     /// given, since the proxy in front usually compresses.
     pub compress: bool,
@@ -285,6 +290,7 @@ fn parse_serve(
         listen: None,
         workers: None,
         preload: false,
+        class_warmup: true,
         compress: false,
         no_process: false,
         request_timeout: None,
@@ -317,6 +323,7 @@ fn parse_serve(
             }
             "--compress" => options.compress = true,
             "--preload" => options.preload = true,
+            "--no-class-warmup" => options.class_warmup = false,
             "--dev" => options.dev = true,
             "--no-process" => options.no_process = true,
             "--trusted-proxies" => {

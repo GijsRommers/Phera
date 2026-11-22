@@ -258,9 +258,22 @@ pub enum Instruction {
     },
 
     // ----- Operators ------------------------------------------------------
-    /// Compare a register to an integer and branch when the result is false.
-    /// The literal and target fit inline; no temporary boolean register is needed.
+    /// Compare a register to an integer literal and branch on the result,
+    /// jumping to `target` when the comparison is false. The literal and
+    /// target fit inline; no temporary boolean register is needed. Only
+    /// comparison operators appear here. The true case is `BinaryIntBranchIf`:
+    /// `when` cannot be decided by inverting `op`, because PHP's orderings are
+    /// not exact negations of each other (NAN compares false to everything,
+    /// including itself).
     BinaryIntBranch {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: i32,
+        target: Target,
+    },
+    /// Compare a register to an integer literal and branch on the result,
+    /// jumping to `target` when the comparison is true.
+    BinaryIntBranchIf {
         op: BinaryOp,
         lhs: Reg,
         rhs: i32,
@@ -279,6 +292,26 @@ pub enum Instruction {
         dst: Reg,
         lhs: Reg,
         rhs: Reg,
+    },
+    /// Compare two registers and branch on the result, jumping to `target`
+    /// when the comparison is false: the condition of an `if`, `while`, `for`,
+    /// `do-while`, ternary, `&&`, `||` or `!` written as one instruction,
+    /// without a temporary boolean. Only comparison operators appear here.
+    /// The comparison itself is `Binary`'s, so the two stay in step. The true
+    /// case is `BinaryBranchIf`.
+    BinaryBranch {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: Reg,
+        target: Target,
+    },
+    /// Compare two registers and branch on the result, jumping to `target`
+    /// when the comparison is true.
+    BinaryBranchIf {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: Reg,
+        target: Target,
     },
     Unary {
         op: UnaryOp,
@@ -589,6 +622,25 @@ pub enum Instruction {
         op: crate::BuiltinUnary,
         dst: Reg,
         src: Reg,
+    },
+    /// The built-in an unqualified call in a namespace means, behind its
+    /// `GuardBuiltin`: as `BuiltinUnary`, except that a failure (a
+    /// `TypeError` for `strlen([])`) is raised as from a call of the
+    /// function, with its frame in the trace, as PHP calls it there.
+    NamespacedBuiltin {
+        op: crate::BuiltinUnary,
+        dst: Reg,
+        src: Reg,
+    },
+    /// Before an unqualified built-in call in a namespace (`is_null($x)` in
+    /// `namespace App;`): falls through to the built-in's own instruction
+    /// when the call means the global function, and jumps to `call`, the
+    /// general call, when a function of the namespace (`App\is_null`) was
+    /// declared when the site first ran. As in PHP, a site keeps what it
+    /// found then.
+    GuardBuiltin {
+        function: SymbolId,
+        call: Target,
     },
     /// Calls a statically known builtin with positional by-value arguments.
     CallNativeDirect {

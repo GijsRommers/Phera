@@ -1,7 +1,7 @@
 <?php
 // Rule: phera.notSupported
 namespace App;
-strftime('%Y');
+date_sunset(0);
 \lcg_value(...);
 echo MT_RAND_PHP;
 echo \ZipArchive::FL_RECOMPRESS;

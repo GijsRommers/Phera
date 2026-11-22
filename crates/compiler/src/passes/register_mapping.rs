@@ -205,6 +205,11 @@ impl Instruction {
                 source: src,
                 ..
             }
+            | Instruction::NamespacedBuiltin {
+                destination: dst,
+                source: src,
+                ..
+            }
             | Instruction::InLiteralArray {
                 destination: dst,
                 needle: src,
@@ -274,8 +279,14 @@ impl Instruction {
             }
             Instruction::Branch { value, .. }
             | Instruction::BranchNull { value, .. }
+            | Instruction::BranchNotNull { value, .. }
             | Instruction::Define { source: value, .. }
             | Instruction::Global { local: value, .. } => *value = map(*value),
+            Instruction::BranchCompare { left, right, .. } => {
+                *left = map(*left);
+                *right = map(*right)
+            }
+            Instruction::BranchCompareInt { left, .. } => *left = map(*left),
             Instruction::Call {
                 destination: dst,
                 name,
@@ -327,6 +338,7 @@ impl Instruction {
             Instruction::MatchError { subject } => *subject = map(*subject),
             Instruction::Nop
             | Instruction::Jump(_)
+            | Instruction::GuardBuiltin { .. }
             | Instruction::Suppress(_)
             | Instruction::Declare(_)
             | Instruction::ReturnMissing => {}

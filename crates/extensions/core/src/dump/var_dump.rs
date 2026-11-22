@@ -1,5 +1,7 @@
 //! `var_dump(1.2345)` uses the same decimal precision setting as `serialize(1.2345)`.
 
+use std::rc::Rc;
+
 use phera_extension_api::value::{PropertyScope, float_repr_with_precision, split_property_key};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
@@ -12,23 +14,36 @@ pub(crate) fn register(registry: &mut Registry) {
         Param::new("value", ParamType::Mixed),
         Param::new("values", ParamType::Mixed).variadic(),
     ];
-    registry.function(FunctionEntry::asynchronous("var_dump", PARAMS, var_dump));
+    registry.function(FunctionEntry::asynchronous(
+        "var_dump",
+        PARAMS,
+        dump::<false>,
+    ));
+    registry.function(FunctionEntry::asynchronous(
+        "debug_zval_dump",
+        PARAMS,
+        dump::<true>,
+    ));
+    registry.describe_function("debug_zval_dump", "void", Some("standard"));
 }
 
-fn var_dump(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+fn dump<const COUNTS: bool>(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         for value in &arguments {
             let mut out = Vec::new();
-            walk(&mut VarDump(&arguments), &mut out, value, context).await?;
+            walk(&mut VarDump::<COUNTS>(&arguments), &mut out, value, context).await?;
             context.write(&out);
         }
         Ok(Value::Null)
     })
 }
 
-struct VarDump<'a>(&'a [Value]);
+struct VarDump<'a, const COUNTS: bool>(&'a [Value]);
 
-impl VarDump<'_> {
+impl<const COUNTS: bool> VarDump<'_, COUNTS> {
     /// Two spaces per level, then `&` for a shared reference.
     fn lead(out: &mut Vec<u8>, place: Place) {
         spaces(out, 2 * place.depth);
@@ -38,9 +53,14 @@ impl VarDump<'_> {
     }
 }
 
-impl Style for VarDump<'_> {
+impl<const COUNTS: bool> Style for VarDump<'_, COUNTS> {
     fn call_site(&self) -> (&'static str, &[Value]) {
-        ("var_dump", self.0)
+        let function = if COUNTS {
+            "debug_zval_dump"
+        } else {
+            "var_dump"
+        };
+        (function, self.0)
     }
 
     fn before_debug(&mut self, out: &mut Vec<u8>, place: Place, context: &mut dyn Context) {
@@ -92,6 +112,11 @@ impl Style for VarDump<'_> {
                 out.extend_from_slice(format!("string({}) \"", string.len()).as_bytes());
                 out.extend_from_slice(string.as_bytes());
                 out.push(b'"');
+                if COUNTS {
+                    out.extend_from_slice(
+                        format!(" refcount({})", string.storage_owners()).as_bytes(),
+                    );
+                }
             }
             Value::Resource(resource) => {
                 let kind = if resource.is_closed() {
@@ -116,6 +141,10 @@ impl Style for VarDump<'_> {
             Self::lead(out, place);
         }
         let head = match container {
+            Container::Array(array) if COUNTS => {
+                let count = Rc::strong_count(array).saturating_sub(1);
+                format!("array({len}) refcount({count}){{\n")
+            }
             Container::Array(_) => format!("array({len}) {{\n"),
             Container::Object(object) => {
                 let class = object.class.name();
@@ -131,7 +160,15 @@ impl Style for VarDump<'_> {
                     ) => "lazy proxy ",
                     _ => "",
                 };
-                format!("{prefix}object({display})#{} ({len}) {{\n", object.id)
+                if COUNTS {
+                    let count = Rc::strong_count(object).saturating_sub(1);
+                    format!(
+                        "{prefix}object({display})#{} ({len}) refcount({count}){{\n",
+                        object.id
+                    )
+                } else {
+                    format!("{prefix}object({display})#{} ({len}) {{\n", object.id)
+                }
             }
         };
         out.extend_from_slice(head.as_bytes());

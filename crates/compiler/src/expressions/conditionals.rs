@@ -59,8 +59,35 @@ impl Compiler<'_> {
         otherwise: &ast::Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let condition = self.compile_expression(condition)?;
         let dst = self.allocate_register()?;
+        if let Some(then_expression) = then {
+            // Both branches write `dst`, so the condition branches directly.
+            let jumps = self.compile_condition(condition, false, line)?;
+            let src = self.compile_expression(then_expression)?;
+            self.emit(
+                Instruction::Move {
+                    destination: dst,
+                    source: src,
+                },
+                line,
+            );
+            let end = self.emit(Instruction::Jump(Target(0)), line);
+            for jump in &jumps {
+                self.patch(*jump, self.position());
+            }
+            let src = self.compile_expression(otherwise)?;
+            self.emit(
+                Instruction::Move {
+                    destination: dst,
+                    source: src,
+                },
+                line,
+            );
+            self.patch(end, self.position());
+            return Ok(dst);
+        }
+        // `$condition ?: $otherwise` keeps the condition's own value.
+        let condition = self.compile_expression(condition)?;
         self.emit(
             Instruction::Move {
                 destination: dst,
@@ -76,16 +103,6 @@ impl Compiler<'_> {
             },
             line,
         );
-        if let Some(then_expression) = then {
-            let src = self.compile_expression(then_expression)?;
-            self.emit(
-                Instruction::Move {
-                    destination: dst,
-                    source: src,
-                },
-                line,
-            );
-        }
         let end = self.emit(Instruction::Jump(Target(0)), line);
         self.patch(jump, self.position());
         let src = self.compile_expression(otherwise)?;

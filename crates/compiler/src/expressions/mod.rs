@@ -1,9 +1,11 @@
 //! Bytecode lowering for expressions.
 
 mod builtin_calls;
+mod builtin_conditions;
 mod builtin_format;
 mod builtin_literals;
 mod builtin_search;
+mod namespaced_builtins;
 mod operand_order;
 
 use phera_ast as ast;
@@ -235,6 +237,7 @@ pub(crate) mod assignments;
 pub(crate) mod calls;
 pub(crate) mod chains;
 pub(crate) mod conditionals;
+pub(crate) mod conditions;
 mod generators;
 mod match_constants;
 pub(crate) mod matching;
