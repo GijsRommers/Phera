@@ -539,10 +539,10 @@ impl Machine<'_> {
                 self.prepare_method(position, receiver, method)
             }
             Instruction::CallMethod { site, dst, .. } => self.call_method(position, site, dst),
-            Instruction::SendValue { src } => self.send(position, src),
+            Instruction::SendValue { src, .. } => self.send(position, src),
             // A temporary read once: moved into the callee's window. A
             // reference, or a call on the general path, gets it back.
-            Instruction::SendTake { src } => {
+            Instruction::SendTake { src, .. } => {
                 let slot = base + src.index();
                 match self.registers.take_defined(slot) {
                     Some(value) if !matches!(value, Value::Reference(_)) => {

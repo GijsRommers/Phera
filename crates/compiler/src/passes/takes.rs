@@ -55,8 +55,8 @@ pub(crate) fn rewrite(function: &mut Function) {
             Instruction::Assign { local, src } if src.index() >= locals => {
                 (Instruction::AssignTake { local, src }, src)
             }
-            Instruction::SendValue { src } if src.index() >= locals => {
-                (Instruction::SendTake { src }, src)
+            Instruction::SendValue { src, of_call } if src.index() >= locals => {
+                (Instruction::SendTake { src, of_call }, src)
             }
             _ => continue,
         };
@@ -72,7 +72,11 @@ pub(crate) fn rewrite(function: &mut Function) {
         }
         let (local, temporary) = match function.instructions[index] {
             Instruction::AssignTake { local, src } => (Some(local), src),
-            Instruction::SendTake { src } => (None, src),
+            // A call's result stays a send of a register: only that form
+            // says `of_call`, which a by-reference parameter asks for.
+            Instruction::SendTake { of_call: true, .. }
+            | Instruction::SendValue { of_call: true, .. } => continue,
+            Instruction::SendTake { src, .. } => (None, src),
             // A literal's `Clear` frees nothing, so the optimizer drops it:
             // the temporary must be proved unread instead.
             Instruction::Assign { local, src }
@@ -80,7 +84,7 @@ pub(crate) fn rewrite(function: &mut Function) {
             {
                 (Some(local), src)
             }
-            Instruction::SendValue { src }
+            Instruction::SendValue { src, .. }
                 if src.index() >= locals && dead_after(function, index, src) =>
             {
                 (None, src)
@@ -176,8 +180,8 @@ fn load_before(
             I::LoadConst { dst, constant } if dst == register => return Some((previous, constant)),
             I::Nop | I::SendConst { .. } => {}
             I::Clear { reg: other }
-            | I::SendValue { src: other }
-            | I::SendTake { src: other }
+            | I::SendValue { src: other, .. }
+            | I::SendTake { src: other, .. }
             | I::SendLocal { local: other }
             | I::LoadInt { dst: other, .. }
             | I::LoadConst { dst: other, .. }
@@ -219,7 +223,7 @@ fn untouched(instruction: Instruction, register: Reg) -> bool {
     match instruction {
         I::Nop => true,
         I::Clear { reg } => reg != register,
-        I::SendValue { src } | I::SendTake { src } => src != register,
+        I::SendValue { src, .. } | I::SendTake { src, .. } => src != register,
         I::SendConst { .. } => true,
         I::SendLocal { local } => local != register,
         I::LoadInt { dst, .. }
