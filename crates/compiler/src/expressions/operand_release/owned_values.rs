@@ -148,6 +148,10 @@ fn jump_target(instruction: &Instruction) -> Option<usize> {
             target: Target(target),
             ..
         }
+        | Instruction::GuardBuiltin {
+            call: Target(target),
+            ..
+        }
         | Instruction::BranchCompare {
             target: Target(target),
             ..
