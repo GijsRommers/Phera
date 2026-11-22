@@ -17,12 +17,14 @@ use phera_extension_api::{
     Registry, Value, args,
 };
 
+mod langinfo;
 pub(crate) mod state;
 
 pub(crate) use state::ctype_name;
 use state::{ALL_ID, Category, c_string, select};
 
 pub(crate) fn register(registry: &mut Registry) {
+    langinfo::register(registry);
     registry.constant("LC_ALL", ALL_ID);
     for category in Category::ALL {
         registry.constant(category.name(), category.id());

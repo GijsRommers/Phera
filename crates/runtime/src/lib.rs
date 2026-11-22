@@ -61,6 +61,9 @@ pub struct Runtime {
     startup_ini: Arc<[(String, String)]>,
     web_development: bool,
     no_process: bool,
+    /// Whether a worker declares in its snapshot the classes its requests
+    /// autoloaded (`--no-class-warmup` turns this off).
+    class_warmup: bool,
     /// When included files, and the files of a snapshot, are checked for
     /// changes: opcache's settings from the start-up INI.
     include_policy: phera_vm::IncludeCachePolicy,
@@ -98,6 +101,17 @@ impl WebWorker {
     /// The worker's number.
     pub fn index(&self) -> usize {
         self.index
+    }
+
+    /// The classes this worker's requests of `script` autoloaded so far.
+    pub fn warmup_classes(&self, script: &Path) -> Vec<String> {
+        self.snapshots.warmup_classes(script)
+    }
+
+    /// How many warm-up boots this worker ran for `script` (a boot a
+    /// changed file started does not count).
+    pub fn warmup_boots(&self, script: &Path) -> u32 {
+        self.snapshots.warmup_boots(script)
     }
 
     pub async fn handle_request(
@@ -165,6 +179,7 @@ impl Runtime {
         registry.load(&phera_ext_standard::Standard);
         registry.load(&phera_ext_tokenizer::Tokenizer);
         registry.load(&phera_ext_streams::Streams);
+        registry.load(&phera_ext_sockets::Sockets);
         registry.load(&phera_ext_process::Process);
         registry.load(&phera_ext_process::Posix);
         registry.load(&phera_ext_zlib::Zlib);
@@ -226,6 +241,7 @@ impl Runtime {
             startup_ini: Arc::new([]),
             web_development: false,
             no_process: false,
+            class_warmup: true,
             include_policy: phera_vm::IncludeCachePolicy::default(),
             entry_scripts: Arc::default(),
         }
@@ -286,6 +302,12 @@ impl Runtime {
         self
     }
 
+    /// Turn off declaring in the snapshot the classes requests autoload.
+    pub fn without_class_warmup(mut self, disabled: bool) -> Self {
+        self.class_warmup = !disabled;
+        self
+    }
+
     /// Compiles a file, or returns it from the cache.
     pub async fn compile_file(
         &self,
@@ -320,9 +342,14 @@ impl Runtime {
             Err(error) => return Err(error),
         };
         vm.set_args(arguments);
-        let server =
-            environment::cli_server(php_array(self.environment.iter()), path.as_ref(), arguments);
-        vm.set_global("_SERVER", Value::from(server));
+        phera_ext_standard::set_cli_arguments(vm.state_mut(), arguments);
+        let server = Rc::new(environment::cli_server(
+            php_array(self.environment.iter()),
+            path.as_ref(),
+            arguments,
+        ));
+        phera_ext_filter::capture_server(vm.state_mut(), &server);
+        vm.set_global("_SERVER", Value::Array(server));
         for name in ["_GET", "_POST", "_COOKIE", "_FILES"] {
             vm.set_global(name, Value::from(PhpArray::new()));
         }
@@ -402,10 +429,16 @@ impl Runtime {
             worker.boot_in_background(script, document_root);
         }
         let mut carried = None;
+        let mut warmup_before = None;
         let mut vm = match (plan, &compiled) {
             (snapshots::Plan::Fork(snapshot, changes), Ok(_)) => match snapshot.fork() {
-                Ok(vm) => {
+                Ok(mut vm) => {
                     carried = Some(changes.carry(&vm));
+                    if self.class_warmup {
+                        let sink = worker.snapshots.warmup_sink(script);
+                        warmup_before = Some(sink.borrow().len());
+                        vm.set_warmup_sink(sink);
+                    }
                     vm
                 }
                 Err(error) => {
@@ -474,6 +507,15 @@ impl Runtime {
             Err(error) => {
                 vm.report_entry_compile_failure(error);
                 ResponseHead::prepare(vm.state_mut());
+            }
+        }
+        // A forked request that autoloaded new classes grows the warm-up
+        // list; once the list settles, the worker boots again in the
+        // background and the new snapshot declares the classes.
+        if let Some(before) = warmup_before {
+            let grew = worker.snapshots.warmup_sink(script).borrow().len() > before;
+            if worker.snapshots.note_forked_request(script, grew) {
+                worker.boot_in_background(script, document_root);
             }
         }
         let head = vm.state_mut().take::<ResponseHead>().unwrap_or_default();
@@ -546,6 +588,7 @@ impl Runtime {
             vm.set_startup_ini("opcache.revalidate_freq", "0");
         }
         // A script's writes copy the inherited array before changing it.
+        phera_ext_filter::capture_environment(vm.state_mut(), &environment);
         vm.set_global("_ENV", Value::Array(environment));
         *vm.state_mut().get_or_default::<RequestEnvironment>() =
             RequestEnvironment::new(self.environment.clone());

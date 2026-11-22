@@ -51,6 +51,21 @@ impl Reactor {
         match self {
             Self::TcpListener(listener) => Ok(Self::Tcp(listener.accept().await?.0)),
             Self::UnixListener(listener) => Ok(Self::Unix(listener.accept().await?.0)),
+            Self::Tcp(_) | Self::Unix(_) => {
+                let socket = self
+                    .async_io(Interest::READABLE, |fd| {
+                        socket2::SockRef::from(fd)
+                            .accept()
+                            .map(|(socket, _)| socket)
+                    })
+                    .await?;
+                let transport = if matches!(self, Self::Unix(_)) {
+                    Transport::Unix
+                } else {
+                    Transport::Tcp
+                };
+                Self::new(socket, transport, false)
+            }
             _ => Err(io::ErrorKind::Unsupported.into()),
         }
     }

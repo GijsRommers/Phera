@@ -20,6 +20,7 @@ mod methods;
 mod native;
 pub(crate) mod operations;
 pub(crate) mod parent_property_hooks;
+pub(crate) mod property_facts;
 mod property_hook_contracts;
 mod property_hook_inheritance;
 pub(crate) mod property_hooks;

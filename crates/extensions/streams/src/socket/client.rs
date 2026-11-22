@@ -2,7 +2,9 @@
 
 use std::{io, sync::Arc, time::Duration};
 
-use phera_extension_api::{Context, LocalFuture, NativeError, NativeResult, Value, args};
+use phera_extension_api::{
+    Context, LocalFuture, NativeError, NativeResult, Value, args, value::to_bool,
+};
 
 use super::address::{self, Address, Source, Transport};
 use super::{
@@ -98,6 +100,7 @@ async fn open(
             deadline,
             kind,
             asynchronous: flags & 2 != 0,
+            tcp_nodelay: tcp_nodelay(&attached, kind),
         };
         if !is_persistent {
             let socket = dial
@@ -128,6 +131,12 @@ async fn open(
             context, &arguments, function, &uri, error_at, error,
         )),
     }
+}
+
+pub(super) fn tcp_nodelay(attached: &Value, kind: Transport) -> bool {
+    matches!(kind, Transport::Tcp | Transport::Tls(_))
+        && context_options::option(attached, "socket", "tcp_nodelay")
+            .is_some_and(|value| to_bool(&value))
 }
 
 fn binding(
