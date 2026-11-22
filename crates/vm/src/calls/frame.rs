@@ -83,6 +83,8 @@ impl FrameFlags {
     /// A callback of a built-in that runs on the frame stack (`array_map`):
     /// its result goes to that built-in's next step (`calls::native_loops`).
     const NATIVE_LOOP: u16 = 1 << 5;
+    /// An ordinary PHP call with an untyped by-value result.
+    const UNTYPED_RETURN: u16 = 1 << 6;
     /// The top eight bits hold how many arguments the call passed, when it
     /// passed fewer than the function's parameters (at most 64, see
     /// `FunctionShape::Plain`), so that a call with defaults needs no
@@ -125,6 +127,24 @@ impl Frame {
             destination: destination.unwrap_or(Reg(0)),
             flags,
         }
+    }
+
+    /// Record the callee's immutable return contract when entering from PHP.
+    #[inline]
+    pub(super) fn with_untyped_return(mut self, eligible: bool) -> Self {
+        self.flags.0 |= u16::from(eligible) * FrameFlags::UNTYPED_RETURN;
+        self
+    }
+
+    /// The result register for a simple return, provided the live frame still
+    /// has no extras, native continuation or discarded result.
+    #[inline]
+    pub(super) fn untyped_destination(self) -> Option<Reg> {
+        let flags = FrameFlags::UNTYPED_RETURN
+            | FrameFlags::EXTRAS
+            | FrameFlags::CALLBACK
+            | FrameFlags::DISCARD_RESULT;
+        (self.flags.0 & flags == FrameFlags::UNTYPED_RETURN).then_some(self.destination)
     }
 
     /// Where this frame's registers start in the request's register stack.

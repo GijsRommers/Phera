@@ -235,6 +235,15 @@ impl Registers {
         self.slots.get_mut(index).and_then(Option::take)
     }
 
+    /// Take a defined by-value return operand. Leave a PHP reference in its
+    /// slot so the ordinary return handler can follow it.
+    #[inline]
+    pub(super) fn take_non_reference(&mut self, index: usize) -> Option<Value> {
+        self.slots
+            .get_mut(index)?
+            .take_if(|value| !value.is_reference())
+    }
+
     /// Store a value in a slot, dropping what it held.
     #[inline(always)]
     pub(crate) fn put(&mut self, index: usize, value: Value) {

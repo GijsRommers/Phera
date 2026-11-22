@@ -70,7 +70,8 @@ impl Machine<'_> {
             self.registers.move_slot(from + index, base + index);
         }
         self.publish(caller.ip);
-        let mut frame = Frame::new(function, base, Some(destination));
+        let mut frame = Frame::new(function, base, Some(destination))
+            .with_untyped_return(facts.untyped_value_return);
         if count < facts.parameters as usize {
             frame = frame.with_passed(count);
         }
@@ -82,12 +83,44 @@ impl Machine<'_> {
         Step::Switched(Position { frame, ip: 0 })
     }
 
+    /// Return an untyped value from the active position. The frame on the
+    /// stack carries any extras acquired since that position was copied.
+    /// A pending send or a callback boundary needs the full return checks.
+    #[inline(always)]
+    pub(super) fn leave_plain<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        source: Option<Reg>,
+    ) -> Step {
+        if let [.., caller, live] = self.stack.frames()
+            && let Some(destination) = live.untyped_destination()
+            && self.stack.depth() - 1 > self.stop
+            && self.stack.call_depth() == 0
+        {
+            let frame = position.frame;
+            let value = match source {
+                Some(source) => {
+                    let Some(value) = self
+                        .registers
+                        .take_non_reference(frame.base() + source.index())
+                    else {
+                        return Step::Slow;
+                    };
+                    value
+                }
+                None => Value::Null,
+            };
+            return self.finish_plain_return::<GUARDED>(frame, *caller, source, destination, value);
+        }
+        self.leave_checked::<GUARDED>(source)
+    }
+
     /// `Return` from a function or method frame that keeps nothing else in
     /// the side table, returns to PHP code, and whose value passes its
     /// return type's bit test: write the value (for a constructor, the new
     /// object) into the caller's register and empty the callee's.
-    #[inline(always)]
-    pub(super) fn leave_plain<const GUARDED: bool>(&mut self, source: Option<Reg>) -> Step {
+    #[inline(never)]
+    fn leave_checked<const GUARDED: bool>(&mut self, source: Option<Reg>) -> Step {
         let Some(frame) = self.stack.current().copied() else {
             return Step::Slow;
         };
@@ -138,6 +171,21 @@ impl Machine<'_> {
             (_, Some(source)) => self.registers.take(frame.base() + source.index()),
             (_, None) => Value::Null,
         };
+        self.finish_plain_return::<GUARDED>(frame, caller, source, destination, value)
+    }
+
+    /// Finish both ordinary return paths with the same PHP release order.
+    #[inline(always)]
+    fn finish_plain_return<const GUARDED: bool>(
+        &mut self,
+        frame: Frame,
+        caller: Frame,
+        source: Option<Reg>,
+        destination: Reg,
+        value: Value,
+    ) -> Step {
+        let kind = frame.kind();
+        let start = frame.start();
         // Where the order of releases can be seen, the slower way out.
         if GUARDED
             && ((kind != CallKind::Constructor && frees_on_drop(&value))
@@ -626,7 +674,11 @@ impl Machine<'_> {
             return Step::Slow;
         };
         self.publish(position.ip);
-        let mut frame = Frame::of_kind(function, call.kind, call.base(), Some(destination));
+        let mut frame = Frame::of_kind(function, call.kind, call.base(), Some(destination))
+            .with_untyped_return(
+                facts.untyped_value_return
+                    && matches!(call.kind, CallKind::Function | CallKind::Method),
+            );
         if sent < facts.parameters as usize {
             frame = frame.with_passed(sent);
         }

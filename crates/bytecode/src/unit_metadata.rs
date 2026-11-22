@@ -74,6 +74,8 @@ pub struct FunctionSignature {
     pub by_reference: u64,
     pub parameter_masks: Arc<[TypeMask]>,
     pub return_mask: Option<TypeMask>,
+    /// A return from this body needs neither type checking nor alias binding.
+    pub untyped_value_return: bool,
     pub shape: FunctionShape,
 }
 
@@ -116,6 +118,9 @@ impl FunctionSignature {
                 .map(|parameter| parameter.ty.map_or(TypeMask::MIXED, mask_of))
                 .collect(),
             return_mask: body.return_type.map(mask_of),
+            untyped_value_return: body.return_type.is_none()
+                && !body.returns_reference
+                && !body.is_generator,
             shape: if general {
                 FunctionShape::General
             } else {

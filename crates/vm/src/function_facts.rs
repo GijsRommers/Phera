@@ -45,6 +45,8 @@ pub(crate) struct FunctionFacts {
     pub(crate) parameter_masks: Arc<[TypeMask]>,
     /// The declared return type's built-in types, when there is a return type.
     pub(crate) return_mask: Option<TypeMask>,
+    /// A PHP function or method with no declared type or return alias.
+    pub(crate) untyped_value_return: bool,
     pub(crate) shape: FunctionShape,
     /// The class that declares this function as a method: a method frame's
     /// class scope.
@@ -94,6 +96,7 @@ impl FunctionFacts {
                 by_reference: 0,
                 parameter_masks: std::sync::Arc::from([]),
                 return_mask: None,
+                untyped_value_return: false,
                 shape: phera_bytecode::FunctionShape::Plain,
             },
             Default::default(),
@@ -118,6 +121,7 @@ impl FunctionFacts {
             by_reference: signature.by_reference,
             parameter_masks: signature.parameter_masks,
             return_mask: signature.return_mask,
+            untyped_value_return: local.is_some() && signature.untyped_value_return,
             shape: signature.shape,
             class: None,
         }

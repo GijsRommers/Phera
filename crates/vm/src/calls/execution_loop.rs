@@ -578,8 +578,8 @@ impl Machine<'_> {
             Instruction::FetchThis { dst } | Instruction::ThisOrNull { dst } => {
                 self.fetch_this(position, dst)
             }
-            Instruction::Return { src } => self.leave_plain::<GUARDED>(Some(src)),
-            Instruction::ReturnNull => self.leave_plain::<GUARDED>(None),
+            Instruction::Return { src } => self.leave_plain::<GUARDED>(position, Some(src)),
+            Instruction::ReturnNull => self.leave_plain::<GUARDED>(position, None),
             // Listed, so that the instructions further_step never takes do
             // not pay for a call to it on their way to the VM.
             Instruction::Binary { .. }

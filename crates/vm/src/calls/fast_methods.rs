@@ -410,7 +410,8 @@ impl Machine<'_> {
         }
         // The caller goes on after the call's `Call`.
         self.publish(site.after.index());
-        let mut frame = Frame::of_kind(function, CallKind::Method, first, Some(destination));
+        let mut frame = Frame::of_kind(function, CallKind::Method, first, Some(destination))
+            .with_untyped_return(facts.untyped_value_return);
         if count < facts.parameters as usize {
             frame = frame.with_passed(count);
         }

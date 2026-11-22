@@ -1858,6 +1858,11 @@ frame's immutable code slice to `step`. The register-window borrow ends
 before dispatch, so a call can still grow the register file. The VM exit
 copies the instruction when it needs to carry it out of the loop.
 
+A direct or prepared PHP call can carry the callee's untyped by-value
+return contract in the frame. The return handler reads its source through
+the active position, checks the live frame for extras and checks the native
+stop and prepared-call stack. Other frames use the checked return handler.
+
 #### Definition of done
 
 - Loop at most 165 (as today: the floor's 90 needs the one-loop structure), function call at most 620, method call at most 750, measured on the honest floor's script. The property read is the property engineer's arm. These come from the handler plan: about 70 off the return (checks settled at entry, the release and pop), about 40 off the call's site record and decision, about 30 off the push and argument writes, about 20 off the work budget and the published position. They are revised as each piece lands.
