@@ -398,6 +398,68 @@ impl Machine<'_> {
         result
     }
 
+    /// The arms of [`Machine::step`] that the routes rarely run: kept out of
+    /// its line, so that `step`, which `run` inlines, stays small (see the
+    /// rule for `step`'s arms in `LOOP-PLAN.md`).
+    #[inline(never)]
+    fn cold_step<const GUARDED: bool>(
+        &mut self,
+        instruction: Instruction,
+        position: Position,
+    ) -> Step {
+        let base = position.frame.base();
+        let mut ip = position.ip;
+        match instruction {
+            Instruction::IterNext { iter, value, end } if position.frame.has_extras() => {
+                let Some(extras) = self.stack.current_extras_present() else {
+                    return Step::Slow;
+                };
+                let iterators = &mut extras.iterators;
+                let slots = self.registers.tail_mut(base);
+                match crate::iteration::snapshot_step(iter, value, end, iterators, slots, &mut ip) {
+                    true => Step::Done(ip),
+                    false => Step::Slow,
+                }
+            }
+            Instruction::IterNextKeyed {
+                iter,
+                key,
+                value,
+                end,
+            } if position.frame.has_extras() => {
+                let Some(extras) = self.stack.current_extras_present() else {
+                    return Step::Slow;
+                };
+                let iterators = &mut extras.iterators;
+                let slots = self.registers.tail_mut(base);
+                match crate::iteration::keyed_step(
+                    iter,
+                    (key, value),
+                    end,
+                    iterators,
+                    slots,
+                    &mut ip,
+                ) {
+                    true => Step::Done(ip),
+                    false => Step::Slow,
+                }
+            }
+            Instruction::AppendLocal { local, src } => {
+                self.write_native_dimension(position, local, None, src)
+            }
+            Instruction::InitStaticCall {
+                class,
+                method,
+                binding,
+            } => self.prepare_static(position, (class, method), binding),
+            Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
+            Instruction::New { class } => self.new_object::<GUARDED>(position, class),
+            Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
+            Instruction::GuardBuiltin { .. } => self.builtin_guard(position),
+            _ => Step::Slow,
+        }
+    }
+
     /// `AssignConst` and `SendConst`: a literal of the file assigned or sent
     /// where it is read. Out of line: inlined, these two arms grew `step`
     /// enough to raise the routes (`LOOP-PLAN.md`, the bisect of
@@ -456,45 +518,16 @@ impl Machine<'_> {
     #[inline(always)]
     fn step<const GUARDED: bool>(&mut self, instruction: Instruction, position: Position) -> Step {
         let base = position.frame.base();
-        let mut ip = position.ip;
         match instruction {
-            Instruction::IterNext { iter, value, end } if position.frame.has_extras() => {
-                let Some(extras) = self.stack.current_extras_present() else {
-                    return Step::Slow;
-                };
-                let iterators = &mut extras.iterators;
-                let slots = self.registers.tail_mut(base);
-                match crate::iteration::snapshot_step(iter, value, end, iterators, slots, &mut ip) {
-                    true => Step::Done(ip),
-                    false => Step::Slow,
-                }
-            }
-            Instruction::IterNextKeyed {
-                iter,
-                key,
-                value,
-                end,
-            } if position.frame.has_extras() => {
-                let Some(extras) = self.stack.current_extras_present() else {
-                    return Step::Slow;
-                };
-                let iterators = &mut extras.iterators;
-                let slots = self.registers.tail_mut(base);
-                match crate::iteration::keyed_step(
-                    iter,
-                    (key, value),
-                    end,
-                    iterators,
-                    slots,
-                    &mut ip,
-                ) {
-                    true => Step::Done(ip),
-                    false => Step::Slow,
-                }
-            }
-            Instruction::AppendLocal { local, src } => {
-                self.write_native_dimension(position, local, None, src)
-            }
+            // Rare on the routes: out of `step`'s line (see `cold_step`).
+            Instruction::IterNext { .. }
+            | Instruction::IterNextKeyed { .. }
+            | Instruction::AppendLocal { .. }
+            | Instruction::InitStaticCall { .. }
+            | Instruction::CheckType { .. }
+            | Instruction::New { .. }
+            | Instruction::InitDynamicCall { .. }
+            | Instruction::GuardBuiltin { .. } => self.cold_step::<GUARDED>(instruction, position),
             Instruction::CallDirect {
                 function,
                 args,
@@ -506,13 +539,7 @@ impl Machine<'_> {
                 self.prepare_method(position, receiver, method)
             }
             Instruction::CallMethod { site, dst, .. } => self.call_method(position, site, dst),
-            Instruction::InitStaticCall {
-                class,
-                method,
-                binding,
-            } => self.prepare_static(position, (class, method), binding),
             Instruction::SendValue { src } => self.send(position, src),
-            // A temporary read once: sent, then empty.
             // A temporary read once: moved into the callee's window. A
             // reference, or a call on the general path, gets it back.
             Instruction::SendTake { src } => {
@@ -546,14 +573,10 @@ impl Machine<'_> {
                 self.receive_default(position, param, passed)
             }
             Instruction::LoadConst { dst, constant } => self.load_constant(position, dst, constant),
-            Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
             Instruction::Call { dst, .. } => self.enter_prepared(position, dst),
-            Instruction::New { class } => self.new_object::<GUARDED>(position, class),
-            Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
             Instruction::FetchThis { dst } | Instruction::ThisOrNull { dst } => {
                 self.fetch_this(position, dst)
             }
-            Instruction::GuardBuiltin { .. } => self.builtin_guard(position),
             Instruction::Return { src } => self.leave_plain::<GUARDED>(Some(src)),
             Instruction::ReturnNull => self.leave_plain::<GUARDED>(None),
             // Listed, so that the instructions further_step never takes do
