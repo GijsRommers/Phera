@@ -53,6 +53,9 @@ impl Vm {
             {
                 return Ok(None);
             }
+            if self.fetch_plain_property(&place, destination, mode)? {
+                return Ok(None);
+            }
             return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
                 dst: destination,
                 path,
@@ -263,6 +266,12 @@ impl Vm {
             && let phera_bytecode::PathBase::Register(register) = place.base()?
         {
             self.restart_subject_iterators(register);
+        }
+        if place.has_properties()?
+            && !(self.classes.has_dimensions && self.prepare_dimension(&place)?)
+            && self.assign_plain_property(&place, &value)?.is_some()
+        {
+            return Ok(None);
         }
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?

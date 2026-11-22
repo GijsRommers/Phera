@@ -157,6 +157,7 @@ mod properties;
 mod property_hook_continuation;
 mod property_hook_sites;
 mod property_mutation;
+mod property_plans;
 mod property_set_visibility;
 mod property_sites;
 mod property_storage;
