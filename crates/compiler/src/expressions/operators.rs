@@ -47,6 +47,7 @@ impl Compiler<'_> {
                     source: crate::ir::ArgumentSource::Value(value),
                     name: None,
                     spread: false,
+                    of_call: false,
                 }],
             },
             line,

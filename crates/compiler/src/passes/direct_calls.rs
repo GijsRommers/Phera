@@ -308,7 +308,7 @@ fn rewrite_call(function: &mut Function, call: &DirectCall, area: usize) {
     for (position, &send) in call.sends.iter().enumerate() {
         let dst = Reg((area + position) as u16);
         function.instructions[send] = match function.instructions[send] {
-            Instruction::SendValue { src } => Instruction::Move { dst, src },
+            Instruction::SendValue { src, .. } => Instruction::Move { dst, src },
             Instruction::SendLocal { local } => Instruction::Move { dst, src: local },
             Instruction::SendPath { path } => Instruction::Fetch {
                 dst,
