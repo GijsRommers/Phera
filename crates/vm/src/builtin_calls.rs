@@ -9,7 +9,11 @@ use phera_bytecode::{BuiltinFrame, BuiltinUnary, ConstId, Reg};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Value};
 
-use crate::{Vm, calls::execution_loop::BatchExit};
+use crate::calls::call_execution::CallEntry;
+use crate::calls::pending::LinkedFunction;
+use crate::calls::sends::SentArgument;
+use crate::calls::execution_loop::BatchExit;
+use crate::Vm;
 
 impl Vm {
     #[inline(never)]
@@ -79,6 +83,30 @@ impl Vm {
             }
         };
         self.call_builtin_fallback(name, [value], destination)
+    }
+
+    /// Run the unary builtin a namespaced call resolved through its global
+    /// fallback, unless a function of that namespace is declared: then the
+    /// general call takes over.
+    pub(crate) fn execute_builtin_guarded(
+        &mut self,
+        destination: Reg,
+        source: Reg,
+        operator: BuiltinUnary,
+        function: phera_bytecode::SymbolId,
+        work: &mut usize,
+    ) -> Result<Option<BatchExit>, NativeError> {
+        if let LinkedFunction::Php(function) = self.linked_for(function)? {
+            self.prepare_php_call(function);
+            self.send(SentArgument::Value(source))?;
+            *work += 1;
+            return Ok(match self.enter_prepared_call(Some(destination))? {
+                CallEntry::Php => None,
+                CallEntry::Native => return Err(internal_error!("builtin namespace call")),
+                CallEntry::ConvertStrings => Some(BatchExit::BindCall(destination)),
+            });
+        }
+        self.execute_builtin_unary(operator, source, destination)
     }
 
     /// Numeric string keys go through the same normalization as array lookups.

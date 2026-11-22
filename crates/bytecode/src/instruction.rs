@@ -590,6 +590,14 @@ pub enum Instruction {
         dst: Reg,
         src: Reg,
     },
+    /// The unary builtin a namespaced call resolves through its global
+    /// fallback, guarded by whether a function of that namespace is declared.
+    BuiltinGuarded {
+        destination: Reg,
+        source: Reg,
+        operator: crate::BuiltinUnary,
+        function: SymbolId,
+    },
     /// Calls a statically known builtin with positional by-value arguments.
     CallNativeDirect {
         function: SymbolId,

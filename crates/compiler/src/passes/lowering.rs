@@ -331,6 +331,18 @@ impl Tables<'_> {
                 operator: op,
                 source: src,
             } => Instruction::BuiltinUnary { op, dst, src },
+            Old::BuiltinGuarded {
+                destination: dst,
+                source: src,
+                operator: op,
+                name,
+                fallback,
+            } => Instruction::BuiltinGuarded {
+                destination: dst,
+                source: src,
+                operator: op,
+                function: self.symbol(&name, fallback, crate::policies::NameKind::Function),
+            },
             Old::BuiltinFrame {
                 destination: dst,
                 operator: op,

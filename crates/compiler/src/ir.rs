@@ -277,6 +277,15 @@ pub enum Instruction {
         operator: phera_bytecode::BuiltinUnary,
         source: Reg,
     },
+    /// The unary builtin a namespaced call resolves through its global
+    /// fallback, guarded by whether a function of that namespace is declared.
+    BuiltinGuarded {
+        destination: Reg,
+        source: Reg,
+        operator: phera_bytecode::BuiltinUnary,
+        name: String,
+        fallback: Option<String>,
+    },
     BuiltinFrame {
         destination: Reg,
         operator: phera_bytecode::BuiltinFrame,

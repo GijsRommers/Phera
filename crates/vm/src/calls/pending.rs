@@ -76,6 +76,19 @@ impl Vm {
         }
     }
 
+    /// The linked function of a symbol, following a namespace fallback first:
+    /// an unqualified name in a namespace links separately at each site.
+    pub(crate) fn linked_for(
+        &mut self,
+        symbol: SymbolId,
+    ) -> Result<LinkedFunction, NativeError> {
+        let linked = self.linked_function(symbol)?;
+        Ok(match linked {
+            LinkedFunction::NamespaceFallback => self.link_namespace_call_site(symbol)?,
+            linked => linked,
+        })
+    }
+
     /// Find what a function symbol names, with PHP's namespace fallback, and
     /// remember it for the file: a declared function cannot go away.
     fn link_function_symbol(&mut self, symbol: SymbolId) -> Result<LinkedFunction, NativeError> {

@@ -205,6 +205,11 @@ impl Instruction {
                 source: src,
                 ..
             }
+            | Instruction::BuiltinGuarded {
+                destination: dst,
+                source: src,
+                ..
+            }
             | Instruction::InLiteralArray {
                 destination: dst,
                 needle: src,

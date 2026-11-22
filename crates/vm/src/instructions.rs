@@ -160,6 +160,14 @@ impl Vm {
             I::Binary { dst, op, lhs, rhs } => return self.execute_binary(op, dst, lhs, rhs),
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
             I::BuiltinUnary { op, dst, src } => return self.execute_builtin_unary(op, src, dst),
+            I::BuiltinGuarded {
+                destination,
+                source,
+                operator,
+                function,
+            } => {
+                return self.execute_builtin_guarded(destination, source, operator, function, work);
+            }
             I::BuiltinFrame { op, dst } => self.execute_builtin_frame(op, dst)?,
             I::ArrayKeyExists { dst, key, array } => {
                 return self.execute_array_key_exists(key, array, dst);

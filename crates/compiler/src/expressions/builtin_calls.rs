@@ -15,9 +15,16 @@ use crate::policies::NameKind;
 
 impl Compiler<'_> {
     /// Use special forms only for a positional call to an enabled, resolved builtin.
+    ///
+    /// `resolved` is the name the call was written for (`App\strlen`) and
+    /// `fallback` the global name an unqualified call in a namespace falls back
+    /// to (`strlen`). The special forms run only when no namespace can shadow
+    /// them; a namespaced call that can be shadowed takes the guarded unary
+    /// form instead, so that the general call stays the fallback.
     pub(super) fn compile_builtin_call(
         &mut self,
-        name: &str,
+        resolved: &str,
+        fallback: Option<&str>,
         arguments: &Arguments,
         line: usize,
     ) -> Result<Option<Reg>, CompileError> {
@@ -33,11 +40,13 @@ impl Compiler<'_> {
         let Some(enabled) = self.native_functions else {
             return Ok(None);
         };
-        let name = name.to_ascii_lowercase();
+        let name = fallback
+            .map(str::to_ascii_lowercase)
+            .unwrap_or_else(|| resolved.to_ascii_lowercase());
         if (enabled.lookup)(&name).is_none() {
             return Ok(None);
         }
-        if name == "sprintf" {
+        if fallback.is_none() && name == "sprintf" {
             return self.compile_literal_sprintf(arguments, line);
         }
         let callback_arguments = match (name.as_str(), arguments.len()) {
@@ -45,7 +54,8 @@ impl Compiler<'_> {
             ("call_user_func_array", 2) => Some(CallbackArguments::Array),
             _ => None,
         };
-        if let Some(kind) = callback_arguments
+        if fallback.is_none()
+            && let Some(kind) = callback_arguments
             && let [callback, arguments @ ..] = arguments.as_slice()
         {
             let callback_value = self.builtin_operand(&callback.value, line)?;
@@ -75,7 +85,9 @@ impl Compiler<'_> {
             }
             return self.finish_call(temporary_objects, line).map(Some);
         }
-        if let Some(operator) = self.frame_builtin(&name, arguments, enabled) {
+        if fallback.is_none()
+            && let Some(operator) = self.frame_builtin(&name, arguments, enabled)
+        {
             let destination = self.allocate_register()?;
             self.emit(
                 Instruction::BuiltinFrame {
@@ -86,7 +98,9 @@ impl Compiler<'_> {
             );
             return Ok(Some(destination));
         }
-        if let ("array_key_exists", [key, array]) = (name.as_str(), arguments.as_slice()) {
+        if fallback.is_none()
+            && let ("array_key_exists", [key, array]) = (name.as_str(), arguments.as_slice())
+        {
             let key = self.builtin_operand(&key.value, line)?;
             let array = self.builtin_operand(&array.value, line)?;
             let destination = self.allocate_register()?;
@@ -100,7 +114,8 @@ impl Compiler<'_> {
             );
             return Ok(Some(destination));
         }
-        if name == "in_array"
+        if fallback.is_none()
+            && name == "in_array"
             && let Some(search) = literal_search(arguments)
         {
             if let Some(found) = search.folded() {
@@ -123,6 +138,34 @@ impl Compiler<'_> {
             return Ok(None);
         };
         let argument = &argument.value;
+        if fallback.is_some() {
+            // A namespaced call may be shadowed by a function of that namespace,
+            // so only a unary builtin runs here, guarded by that possibility; the
+            // general call stays the fallback when the guard fails.
+            let Some(operator) = builtin_unary(&name) else {
+                return Ok(None);
+            };
+            let source = if operator == BuiltinUnary::Defined {
+                let Some(name) = defined_literal(argument) else {
+                    return Ok(None);
+                };
+                self.literal(name, line)?
+            } else {
+                self.builtin_operand(argument, line)?
+            };
+            let destination = self.allocate_register()?;
+            self.emit(
+                Instruction::BuiltinGuarded {
+                    destination,
+                    source,
+                    operator,
+                    name: resolved.to_owned(),
+                    fallback: fallback.map(str::to_owned),
+                },
+                line,
+            );
+            return Ok(Some(destination));
+        }
         if let ExpressionKind::Literal(Literal::String(bytes)) = &argument.kind
             && let Some(value) = (enabled.fold_string_call)(&name, bytes)
             && let Some(value) = folded_scalar(value)
