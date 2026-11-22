@@ -28,6 +28,7 @@ mod arrays;
 mod attribute_diagnostics;
 mod autoload;
 mod builtin_calls;
+mod builtin_guards;
 mod bundled_classes;
 mod callable_classes;
 mod callable_introspection;

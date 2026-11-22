@@ -304,6 +304,14 @@ pub enum Instruction {
     Echo(Reg),
     /// Transfer control to an IR target; emits Jump with a relocated target.
     Jump(Target),
+    /// Before an unqualified built-in call in a namespace: fall through to
+    /// the built-in when the call means the global function, else jump to
+    /// `call`, the general call; emits GuardBuiltin.
+    GuardBuiltin {
+        name: String,
+        fallback: Option<String>,
+        call: Target,
+    },
     /// Branch on PHP truthiness; emits JumpIf or JumpIfNot.
     Branch {
         value: Reg,

@@ -178,6 +178,7 @@ impl Vm {
             } => return self.binary_branch(op, lhs, rhs, target, true, work),
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
             I::BuiltinUnary { op, dst, src } => return self.execute_builtin_unary(op, src, dst),
+            I::GuardBuiltin { function, call } => self.execute_guard_builtin(function, call)?,
             I::BuiltinFrame { op, dst } => self.execute_builtin_frame(op, dst)?,
             I::ArrayKeyExists { dst, key, array } => {
                 return self.execute_array_key_exists(key, array, dst);

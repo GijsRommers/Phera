@@ -391,6 +391,14 @@ impl Tables<'_> {
                 value,
                 target: Target(target.0 as u32),
             },
+            Old::GuardBuiltin {
+                name,
+                fallback,
+                call,
+            } => Instruction::GuardBuiltin {
+                function: self.symbol(&name, fallback, crate::policies::NameKind::Function),
+                call: Target(call.0 as u32),
+            },
             Old::BranchCompare {
                 operator,
                 left,
