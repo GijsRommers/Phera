@@ -514,3 +514,30 @@ fn guarded_continue_is_one_branch() {
     // One jump per round: the loop's back edge. No extra jump for the continue.
     assert_eq!(count(&code, |i| matches!(i, Instruction::Jump { .. })), 1);
 }
+
+/// A key that is a plain local is written straight only when the value is:
+/// with `[$x, $y]` or `$o->p` as the value, the key keeps its temporary and
+/// is assigned after the value, as PHP writes the value first.
+#[test]
+fn foreach_key_waits_for_a_value_that_is_assigned_afterwards() {
+    for source in [
+        "<?php function f($a) { foreach ($a as $k => [$x, $y]) { echo $k; } }",
+        "<?php function f($a, $o) { foreach ($a as $k => $o->p) { echo $k; } }",
+    ] {
+        let unit = compile(source, "conditions.php").expect("valid PHP");
+        let function = unit
+            .functions
+            .iter()
+            .find(|function| function.name == "f")
+            .expect("function f");
+        let (code, locals) = (&function.instructions, function.locals.len());
+        assert_eq!(
+            count(code, |i| matches!(
+                i,
+                Instruction::IterNextKeyed { key, .. } if key.index() < locals
+            )),
+            0,
+            "{source}"
+        );
+    }
+}
