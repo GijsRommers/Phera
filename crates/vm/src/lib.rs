@@ -7,6 +7,7 @@ use phera_extension_api::{Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
 pub use native_tables::NativeTables;
+pub use snapshot::WarmupSink;
 pub use snapshot::{BootOutcome, Snapshot, SnapshotMode};
 
 use crate::calls::frame::{Frame, FrameView};
