@@ -29,6 +29,7 @@ fn kinds(code: &[Instruction]) -> Vec<&'static str> {
         .map(|instruction| match instruction {
             Instruction::GuardBuiltin { .. } => "GuardBuiltin",
             Instruction::BuiltinUnary { .. } => "BuiltinUnary",
+            Instruction::NamespacedBuiltin { .. } => "NamespacedBuiltin",
             Instruction::Jump { .. } => "Jump",
             Instruction::JumpIfNull { .. } => "JumpIfNull",
             Instruction::JumpIfNotNull { .. } => "JumpIfNotNull",
@@ -47,8 +48,8 @@ fn kinds(code: &[Instruction]) -> Vec<&'static str> {
         .collect()
 }
 
-/// `is_null($x)` in a namespace: the guard, the built-in, and the general
-/// call after them.
+/// `is_null($x)` in a namespace: the guard, the built-in (whose failure is
+/// raised as from a call), and the general call after them.
 #[test]
 fn a_namespaced_builtin_call_is_guarded_with_the_general_call_after_it() {
     let code = function_instructions("<?php namespace App; function f($x) { return is_null($x); }");
@@ -56,7 +57,7 @@ fn a_namespaced_builtin_call_is_guarded_with_the_general_call_after_it() {
         kinds(&code)[..8],
         [
             "GuardBuiltin",
-            "BuiltinUnary",
+            "NamespacedBuiltin",
             "Jump",
             "InitCall",
             "SendLocal",
@@ -67,7 +68,7 @@ fn a_namespaced_builtin_call_is_guarded_with_the_general_call_after_it() {
     );
     assert!(code.iter().any(|instruction| matches!(
         instruction,
-        Instruction::BuiltinUnary {
+        Instruction::NamespacedBuiltin {
             op: BuiltinUnary::TypeCheck(TypeMask::NULL),
             ..
         }

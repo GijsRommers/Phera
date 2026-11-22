@@ -331,6 +331,11 @@ impl Tables<'_> {
                 operator: op,
                 source: src,
             } => Instruction::BuiltinUnary { op, dst, src },
+            Old::NamespacedBuiltin {
+                destination: dst,
+                operator: op,
+                source: src,
+            } => Instruction::NamespacedBuiltin { op, dst, src },
             Old::BuiltinFrame {
                 destination: dst,
                 operator: op,

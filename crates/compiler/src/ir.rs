@@ -277,6 +277,12 @@ pub enum Instruction {
         operator: phera_bytecode::BuiltinUnary,
         source: Reg,
     },
+    /// The built-in behind a `GuardBuiltin`; emits NamespacedBuiltin.
+    NamespacedBuiltin {
+        destination: Reg,
+        operator: phera_bytecode::BuiltinUnary,
+        source: Reg,
+    },
     BuiltinFrame {
         destination: Reg,
         operator: phera_bytecode::BuiltinFrame,

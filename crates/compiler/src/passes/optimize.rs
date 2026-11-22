@@ -150,7 +150,8 @@ fn update_facts(function: &Function, facts: &mut [Fact], instruction: Instructio
         | Instruction::LoadBool { dst, .. }
         | Instruction::LoadNull { dst } => set_fact(facts, dst, Scalar),
         Instruction::LoadConst { dst, .. } => set_fact(facts, dst, Shared),
-        Instruction::BuiltinUnary { op, dst, .. } => {
+        Instruction::BuiltinUnary { op, dst, .. }
+        | Instruction::NamespacedBuiltin { op, dst, .. } => {
             facts.fill(Unknown);
             let scalar = !matches!(
                 op,

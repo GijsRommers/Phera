@@ -69,7 +69,7 @@ impl Compiler<'_> {
             self.builtin_operand(&argument.value, line)?
         };
         self.emit(
-            Instruction::BuiltinUnary {
+            Instruction::NamespacedBuiltin {
                 destination,
                 operator,
                 source,

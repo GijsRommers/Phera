@@ -623,6 +623,15 @@ pub enum Instruction {
         dst: Reg,
         src: Reg,
     },
+    /// The built-in an unqualified call in a namespace means, behind its
+    /// `GuardBuiltin`: as `BuiltinUnary`, except that a failure (a
+    /// `TypeError` for `strlen([])`) is raised as from a call of the
+    /// function, with its frame in the trace, as PHP calls it there.
+    NamespacedBuiltin {
+        op: crate::BuiltinUnary,
+        dst: Reg,
+        src: Reg,
+    },
     /// Before an unqualified built-in call in a namespace (`is_null($x)` in
     /// `namespace App;`): falls through to the built-in's own instruction
     /// when the call means the global function, and jumps to `call`, the

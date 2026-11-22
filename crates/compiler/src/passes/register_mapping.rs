@@ -205,6 +205,11 @@ impl Instruction {
                 source: src,
                 ..
             }
+            | Instruction::NamespacedBuiltin {
+                destination: dst,
+                source: src,
+                ..
+            }
             | Instruction::InLiteralArray {
                 destination: dst,
                 needle: src,
