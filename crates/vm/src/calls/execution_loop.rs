@@ -353,17 +353,6 @@ impl Machine<'_> {
                     Instruction::FetchIndex {
                         dst, base, index, ..
                     } => array_index_step::<GUARDED, _>(dst, base, index, slots),
-                    Instruction::AssignConst { local, constant } => {
-                        match self
-                            .code
-                            .cache(position.frame.function)
-                            .constants
-                            .get(constant.index())
-                        {
-                            Some(literal) => assign_literal::<GUARDED, _>(slots, local, literal),
-                            None => ScalarStep::Fallback,
-                        }
-                    }
                     _ => ScalarStep::Fallback,
                 },
                 complete => complete,
@@ -483,6 +472,23 @@ impl Machine<'_> {
                         }
                         Step::Slow
                     }
+                }
+            }
+            Instruction::AssignConst { local, constant } => {
+                let literal = self
+                    .code
+                    .cache(position.frame.function)
+                    .constants
+                    .get(constant.index());
+                match literal {
+                    Some(literal) => {
+                        let slots = self.registers.tail_mut(base);
+                        match assign_literal::<GUARDED, _>(slots, local, literal) {
+                            ScalarStep::Fallback => Step::Slow,
+                            _ => Step::Done(ip),
+                        }
+                    }
+                    None => Step::Slow,
                 }
             }
             Instruction::SendConst { constant } => {
