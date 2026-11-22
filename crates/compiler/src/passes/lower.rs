@@ -305,6 +305,9 @@ impl Tables<'_> {
             // Removes the moves that became `Nop`.
             crate::passes::optimize::optimize(&mut function);
         }
+        // Last: the passes above never see `CallMethod`, whose site table
+        // reads the argument registers.
+        crate::passes::method_calls::rewrite(&mut function);
         function
     }
 }

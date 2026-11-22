@@ -38,8 +38,12 @@ Phera validates union and intersection declarations during compilation and
 checks inherited property types when linking classes. Ordinary typed
 parameters with a literal `null` default accept `null` and emit PHP's
 implicit-nullability deprecation.
+Typed property references require the same conversion for every property
+holding the reference.
 During cycle collection, a WeakMap entry keeps its value reachable only
 while the map and key are reachable.
+Closure captures, static values and bound receivers participate in
+cycle collection.
 The compiler diagnoses ambiguous ternary chains, invalid loop operands
 and misplaced namespace declarations. Syntax-only tokenization accepts
 those constructs.
@@ -144,6 +148,19 @@ Composer's generated class map and files autoload list. The start line gives
 the count and elapsed time. PHP still runs each file when the application
 includes it. The Zend-specific `opcache.preload` directive is unsupported.
 
+After a worker has served enough requests that its requests stop autoloading
+new classes, `phera serve` boots the application once more in the background
+and loads those classes through the application's own autoloaders just before
+`Phera\snapshot()`, so later requests find them declared and run no autoloader
+for them (64 requests without a new class, at most 3 warm-up boots per
+worker; see
+[the decision](docs/decisions/2026-11-21-request-autoloads-are-declared-in-the-snapshot.md)).
+Like `opcache.preload`, a warmed class exists before the request starts:
+`class_exists($name, false)` is true for it. An autoloader with a side
+effect (logging, counting) is called once per warmed class in the warm-up
+boot and then no longer in requests. `phera serve --no-class-warmup` turns
+this off.
+
 ## 🧩 Extensions
 
 Built in, each checked call by call against real PHP: core, standard, ctype,
@@ -180,8 +197,17 @@ A live socket held by the boot prevents `Phera\snapshot()` from creating
 a snapshot. Persistent sockets created during boot connect on first use
 in each fork. `pfsockopen()` and `STREAM_CLIENT_PERSISTENT` can reuse a
 clean idle connection on the same worker.
-`fopen()` supports buffered HTTP and HTTPS responses, including for
-Guzzle's stream handler.
+`fopen()` and `file_get_contents()` support buffered HTTP and HTTPS
+responses. `get_headers()` fetches the response headers, and
+`http_get_last_response_headers()` returns the latest headers in the
+current request. HTTP calls also populate the caller's legacy `$http_response_header` variable.
+URL credentials use Basic authentication and stay on their origin. Stream contexts can store
+default options for these calls.
+
+PHP host, DNS and MX lookups leave the worker available while waiting.
+Service and protocol lookups use the system tables, and
+`net_get_interfaces()` exposes local interface addresses, including the system's IPv6 scope
+bits on Apple. `getmxrr()` and `dns_get_mx()` return false when the answer contains no mail exchanger.
 
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 Legacy `DOMDocument` supports local XSD validation for common content models,
@@ -220,7 +246,15 @@ functions. Backticks emit PHP 8.5's compile-time deprecation. On Unix, `mail()`
 and `mb_send_mail()` pipe the message to the command in `sendmail_path`.
 `phera serve --no-process public` disables program launches for web requests,
 including `mail()` and `mb_send_mail()`.
-The standard library retains PHP’s deprecated `utf8_encode()` Latin-1 conversion.
+The standard library retains PHP’s deprecated Latin-1 conversions
+`utf8_encode()` and `utf8_decode()`, plus C-locale `strftime()` and
+`gmstrftime()`. The input filters read the original request values even
+after the script changes its superglobals. The `phpinfo()` text report
+redacts process environment and request variable values.
+
+`get_browser()`, `register_tick_function()`, `dl()`,
+`output_add_rewrite_var()`, `assert_options()` and `strptime()` throw
+`Phera\NotSupportedException`.
 
 BCMath provides arbitrary-precision decimal functions and the immutable
 `BcMath\Number` class. Set the default procedural scale with `bcmath.scale`
@@ -255,7 +289,12 @@ thumbnail operations, filters, and the five built-in fonts. The same build
 includes `getimagesize()` and `exif_imagetype()`. Compatibility limits are
 listed in the [GD coverage notes](crates/extensions/gd/README.md).
 
-Not started: zip, sockets.
+The sockets extension supports TCP, UDP and Unix sockets, including
+descriptor passing with Unix socket messages. A `Socket` and an exported
+stream share the same connection. Some platform-specific options, resolver
+hints and out-of-band operations remain incomplete.
+
+Not started: zip.
 
 ### Database connection pool
 

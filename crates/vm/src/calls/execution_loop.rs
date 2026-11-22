@@ -430,6 +430,7 @@ impl Machine<'_> {
             Instruction::InitMethodCall { receiver, method } => {
                 self.prepare_method(position, receiver, method)
             }
+            Instruction::CallMethod { site, dst, .. } => self.call_method(position, site, dst),
             Instruction::InitStaticCall {
                 class,
                 method,

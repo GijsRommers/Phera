@@ -51,11 +51,9 @@ impl Compiler<'_> {
             (DefaultKind::Constant, _) => {
                 format!("Cannot use {actual} as value for class constant {name} of type {declared}")
             }
-            (DefaultKind::Property, "null") => {
+            (DefaultKind::Property, "null") if !declared.contains('&') => {
                 let nullable = if declared.contains('|') {
                     format!("{declared}|null")
-                } else if declared.contains('&') {
-                    format!("({declared})|null")
                 } else {
                     format!("?{declared}")
                 };
@@ -64,6 +62,7 @@ impl Compiler<'_> {
                 )
             }
             (DefaultKind::Property, _) => {
+                let declared = phera_bytecode::union_in_php_order(&declared);
                 format!(
                     "Cannot use {actual} as default value for property {name} of type {declared}"
                 )

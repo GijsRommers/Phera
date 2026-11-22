@@ -63,10 +63,10 @@ impl Vm {
                 && let Some(expected) = &inherited.ty
             {
                 let declared = constant.ty.map(|index| &unit.types[index.index()]);
-                let compatible = self.type_subset(
+                let compatible = self.constant_type_subset(
                     declared.map(|declared| declared.display.as_str()),
                     name,
-                    Some(&expected.display),
+                    &expected.display,
                     &inherited.declaring,
                     unit,
                 );

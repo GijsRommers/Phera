@@ -7,6 +7,7 @@ use phera_extension_api::{Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
 pub use native_tables::NativeTables;
+pub use snapshot::WarmupSink;
 pub use snapshot::{BootOutcome, Snapshot, SnapshotMode};
 
 use crate::calls::frame::{Frame, FrameView};
@@ -41,6 +42,7 @@ mod class_listings;
 mod class_types;
 mod classes;
 mod closure_binding;
+mod closure_cycles;
 mod closure_drop;
 mod closure_equality;
 mod closure_initializers;
@@ -179,6 +181,7 @@ mod traversable_foreach;
 mod traversable_unpack;
 mod traversal;
 mod trigger_errors;
+mod typed_increment;
 mod typed_references;
 mod types;
 mod unit_caches;

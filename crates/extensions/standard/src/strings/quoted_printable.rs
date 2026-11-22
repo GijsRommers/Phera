@@ -8,6 +8,12 @@ pub(super) const ENCODE: FunctionEntry = FunctionEntry::sync(
     encode,
 );
 
+pub(super) const DECODE: FunctionEntry = FunctionEntry::sync(
+    "quoted_printable_decode",
+    &[Param::new("string", ParamType::String)],
+    decode,
+);
+
 fn encode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let input = args::bytes(arguments, 0);
     let mut output = Vec::with_capacity(input.len());
@@ -44,4 +50,43 @@ fn encode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         bytes = rest;
     }
     Ok(Value::from(output))
+}
+
+fn decode(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let input = args::bytes(arguments, 0);
+    let mut output = super::buffer(input.len())?;
+    let mut remaining = input;
+    while let Some((&byte, rest)) = remaining.split_first() {
+        if byte == b'=' {
+            if let [high, low, after @ ..] = rest
+                && let (Some(high), Some(low)) = (hex(*high), hex(*low))
+            {
+                output.push(high << 4 | low);
+                remaining = after;
+                continue;
+            }
+            let mut end = rest;
+            while let Some((b' ' | b'\t', after)) = end.split_first() {
+                end = after;
+            }
+            if let Some(after) = end
+                .strip_prefix(b"\r\n")
+                .or_else(|| end.strip_prefix(b"\r"))
+                .or_else(|| end.strip_prefix(b"\n"))
+            {
+                remaining = after;
+                continue;
+            }
+            if end.is_empty() {
+                break;
+            }
+        }
+        output.push(byte);
+        remaining = rest;
+    }
+    Ok(Value::from(output))
+}
+
+fn hex(byte: u8) -> Option<u8> {
+    (byte as char).to_digit(16).map(|value| value as u8)
 }

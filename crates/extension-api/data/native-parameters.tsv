@@ -3353,9 +3353,49 @@ sin	ext/standard/basic_functions.stub.php:3124	num	r--		-
 sinh	ext/standard/basic_functions.stub.php:3148	num	r--		-
 sizeof	ext/standard/basic_functions.stub.php:1562	value	r--		-	mode	o--	COUNT_NORMAL	i0
 sleep	ext/standard/basic_functions.stub.php:1942	seconds	r--		-
+socket_accept	ext/sockets/sockets.stub.php:2072	socket	r--		-
+socket_addrinfo_bind	ext/sockets/sockets.stub.php:2178	address	r--		-
+socket_addrinfo_connect	ext/sockets/sockets.stub.php:2176	address	r--		-
+socket_addrinfo_explain	ext/sockets/sockets.stub.php:2184	address	r--		-
+socket_addrinfo_lookup	ext/sockets/sockets.stub.php:2174	host	r--		-	service	o--	null	n	hints	o--	[]	a
+socket_atmark	ext/sockets/sockets.stub.php:2151	socket	r--		-
+socket_bind	ext/sockets/sockets.stub.php:2104	socket	r--		-	address	r--		-	port	o--	0	i0
+socket_clear_error	ext/sockets/sockets.stub.php:2156	socket	o--	null	n
+socket_close	ext/sockets/sockets.stub.php:2080	socket	r--		-
+socket_cmsg_space	ext/sockets/sockets.stub.php:2168	level	r--		-	type	r--		-	num	o--	0	i0
+socket_connect	ext/sockets/sockets.stub.php:2100	socket	r--		-	address	r--		-	port	o--	null	n
+socket_create	ext/sockets/sockets.stub.php:2098	domain	r--		-	type	r--		-	protocol	r--		-
+socket_create_listen	ext/sockets/sockets.stub.php:2070	port	r--		-	backlog	o--	SOMAXCONN	i128
+socket_create_pair	ext/sockets/sockets.stub.php:2143	domain	r--		-	type	r--		-	protocol	r--		-	pair	r-&		-
+socket_export_stream	ext/sockets/sockets.stub.php:2162	socket	r--		-
+socket_get_option	ext/sockets/sockets.stub.php:2124	socket	r--		-	level	r--		-	option	r--		-
 socket_get_status	ext/standard/basic_functions.stub.php:3521	stream	r--		-
+socket_getopt	ext/sockets/sockets.stub.php:2130	socket	r--		-	level	r--		-	option	r--		-
+socket_getpeername	ext/sockets/sockets.stub.php:2096	socket	r--		-	address	r-&		-	port	o-&	null	n
+socket_getsockname	ext/sockets/sockets.stub.php:2090	socket	r--		-	address	r-&		-	port	o-&	null	n
+socket_import_stream	ext/sockets/sockets.stub.php:2159	stream	r--		-
+socket_last_error	ext/sockets/sockets.stub.php:2154	socket	o--	null	n
+socket_listen	ext/sockets/sockets.stub.php:2078	socket	r--		-	backlog	o--	0	i0
+socket_read	ext/sockets/sockets.stub.php:2084	socket	r--		-	length	r--		-	mode	o--	PHP_BINARY_READ	i2
+socket_recv	ext/sockets/sockets.stub.php:2107	socket	r--		-	data	r-&		-	length	r--		-	flags	r--		-
+socket_recvfrom	ext/sockets/sockets.stub.php:2116	socket	r--		-	data	r-&		-	length	r--		-	flags	r--		-	address	r-&		-	port	o-&	null	n
+socket_recvmsg	ext/sockets/sockets.stub.php:2166	socket	r--		-	message	r-&		-	flags	o--	0	i0
+socket_select	ext/sockets/sockets.stub.php:2068	read	r-&		-	write	r-&		-	except	r-&		-	seconds	r--		-	microseconds	o--	0	i0
+socket_send	ext/sockets/sockets.stub.php:2109	socket	r--		-	data	r--		-	length	r--		-	flags	r--		-
+socket_sendmsg	ext/sockets/sockets.stub.php:2164	socket	r--		-	message	r--		-	flags	o--	0	i0
+socket_sendto	ext/sockets/sockets.stub.php:2118	socket	r--		-	data	r--		-	length	r--		-	flags	r--		-	address	r--		-	port	o--	null	n
+socket_set_block	ext/sockets/sockets.stub.php:2076	socket	r--		-
 socket_set_blocking	ext/standard/basic_functions.stub.php:3508	stream	r--		-	enable	r--		-
+socket_set_nonblock	ext/sockets/sockets.stub.php:2074	socket	r--		-
+socket_set_option	ext/sockets/sockets.stub.php:2133	socket	r--		-	level	r--		-	option	r--		-	value	r--		-
 socket_set_timeout	ext/standard/basic_functions.stub.php:3567	stream	r--		-	seconds	r--		-	microseconds	o--	0	i0
+socket_setopt	ext/sockets/sockets.stub.php:2139	socket	r--		-	level	r--		-	option	r--		-	value	r--		-
+socket_shutdown	ext/sockets/sockets.stub.php:2147	socket	r--		-	mode	o--	2	i2
+socket_strerror	ext/sockets/sockets.stub.php:2102	error_code	r--		-
+socket_write	ext/sockets/sockets.stub.php:2082	socket	r--		-	data	r--		-	length	o--	null	n
+socket_wsaprotocol_info_export	ext/sockets/sockets.stub.php:2187	socket	r--		-	process_id	r--		-
+socket_wsaprotocol_info_import	ext/sockets/sockets.stub.php:2189	info_id	r--		-
+socket_wsaprotocol_info_release	ext/sockets/sockets.stub.php:2191	info_id	r--		-
 sodium_add	ext/sodium/libsodium.stub.php:775	string1	r-&		-	string2	r--		-
 sodium_base642bin	ext/sodium/libsodium.stub.php:796	string	r--		-	id	r--		-	ignore	o--	""	s
 sodium_bin2base64	ext/sodium/libsodium.stub.php:794	string	r--		-	id	r--		-

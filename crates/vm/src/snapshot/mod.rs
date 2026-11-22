@@ -32,6 +32,8 @@ mod paths;
 
 use phera_value::Fork;
 
+use crate::Vm;
+
 pub use boot::{BootOutcome, Snapshot};
 pub(crate) use copy::SnapshotRefusal;
 
@@ -50,6 +52,11 @@ pub enum SnapshotMode {
     Forked,
 }
 
+/// The classes a worker's requests autoloaded, shared with every fork, so
+/// that a re-boot can declare them in the snapshot (see
+/// `crate::snapshot::intrinsic`). Names without a leading backslash.
+pub type WarmupSink = std::rc::Rc<std::cell::RefCell<Vec<String>>>;
+
 /// The VM's part in snapshots: its mode, and in a boot run the state kept
 /// at the call.
 #[derive(Default)]
@@ -64,6 +71,27 @@ pub(crate) struct SnapshotState {
     /// Why the call could not keep the state, in a boot run. The script
     /// may catch the exception, or its own handler may hide it.
     pub(crate) refused: Option<String>,
+    /// A fork adds here every class a request's autoloader call produced.
+    pub(crate) warmup_sink: Option<WarmupSink>,
+    /// A boot run declares the classes in this list through the autoloaders
+    /// before the call keeps the state; a class whose load fails is
+    /// removed from the list.
+    pub(crate) boot_warmup: Option<WarmupSink>,
+}
+
+impl Vm {
+    /// A fork adds to `sink` every class that a request's autoloader call
+    /// produced (see [`SnapshotState::warmup_sink`]).
+    pub fn set_warmup_sink(&mut self, sink: WarmupSink) {
+        self.snapshot.warmup_sink = Some(sink);
+    }
+
+    /// A boot run declares the classes in `sink` through the registered
+    /// autoloaders just before `Phera\snapshot()` keeps the state; a class
+    /// whose load fails or throws is removed from `sink`.
+    pub fn set_boot_warmup(&mut self, sink: WarmupSink) {
+        self.snapshot.boot_warmup = Some(sink);
+    }
 }
 
 impl SnapshotState {
@@ -74,6 +102,8 @@ impl SnapshotState {
             taken: None,
             called: false,
             refused: None,
+            warmup_sink: None,
+            boot_warmup: None,
         }
     }
 }
