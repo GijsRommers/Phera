@@ -1,5 +1,8 @@
 //! Sends place values in the callee's reserved window, in source evaluation order.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use phera_bytecode::Reg;
 use phera_extension_api::NativeError;
 use phera_value::{PhpString, Value};
@@ -12,10 +15,25 @@ use crate::{AccessPath, Vm};
 /// Computed values cannot bind aliases; locals and paths preserve their writable origin.
 pub(crate) enum SentArgument {
     Value(Reg),
+    /// A computed value that was written as a call or as `new`
+    /// (`end(explode(',', $list))`): a by-reference parameter takes it
+    /// with a notice, where it rejects any other computed value.
+    Result(Reg),
     /// A literal of the file (`SendConst`), sent as a value.
     Literal(Value),
     Local(Reg),
     Path(AccessPath),
+}
+
+impl SentArgument {
+    /// The argument of a `SendValue`: a computed value, and whether it was
+    /// written as a call or as `new`.
+    pub(crate) fn computed(source: Reg, of_call: bool) -> Self {
+        match of_call {
+            true => SentArgument::Result(source),
+            false => SentArgument::Value(source),
+        }
+    }
 }
 
 impl Vm {
@@ -27,7 +45,10 @@ impl Vm {
         let receiving = parameters.receiving(index);
         let reference = receiving.is_some_and(|parameter| parameters.by_reference(parameter))
             || (index == 0
-                && !matches!(argument, SentArgument::Value(_) | SentArgument::Literal(_))
+                && !matches!(
+                    argument,
+                    SentArgument::Value(_) | SentArgument::Result(_) | SentArgument::Literal(_)
+                )
                 && view.is_extract());
         let value = match (reference, argument) {
             (true, SentArgument::Value(_) | SentArgument::Literal(_))
@@ -46,7 +67,30 @@ impl Vm {
             (false, SentArgument::Path(place)) => {
                 self.read_place(&place, crate::access_mode::Missing::Warn)?
             }
-            (_, SentArgument::Value(source)) => self.get(source),
+            // What a call returned, for a parameter that must be a
+            // reference: the reference itself when the function returned
+            // one (`function &f()`), else the value with PHP's notice.
+            (true, SentArgument::Result(source))
+                if receiving.is_some_and(|parameter| parameters.requires_reference(parameter)) =>
+            {
+                // Not `get`, which reads through a reference.
+                let held = self
+                    .current()
+                    .and_then(|frame| frame.slots(&self.registers).get(source.index()).cloned())
+                    .flatten()
+                    .unwrap_or_default();
+                match held {
+                    reference @ Value::Reference(_) => reference,
+                    value => {
+                        phera_extension_api::Context::notice(
+                            self,
+                            "Only variables should be passed by reference".into(),
+                        );
+                        Value::Reference(Rc::new(RefCell::new(value)))
+                    }
+                }
+            }
+            (_, SentArgument::Value(source) | SentArgument::Result(source)) => self.get(source),
             (_, SentArgument::Literal(value)) => value,
         };
         self.store_sent_value(index, value)

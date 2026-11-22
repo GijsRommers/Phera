@@ -120,13 +120,13 @@ impl Vm {
             } => self.static_style_call(class, method, binding)?,
             I::New { class } => self.new_object(class)?,
             I::NewDynamic { class } => self.new_dynamic_object(class)?,
-            I::SendValue { src } if TRACK_GENERATORS && self.send_window_argument(src)? => {}
+            I::SendValue { src, .. } if TRACK_GENERATORS && self.send_window_argument(src)? => {}
             I::SendLocal { local } if TRACK_GENERATORS && self.send_window_argument(local)? => {}
-            I::SendValue { src } => self.send(SentArgument::Value(src))?,
+            I::SendValue { src, of_call } => self.send(SentArgument::computed(src, of_call))?,
             // A temporary read once: sent, then empty.
-            I::SendTake { src } => {
+            I::SendTake { src, of_call } => {
                 if !(TRACK_GENERATORS && self.send_window_argument(src)?) {
-                    self.send(SentArgument::Value(src))?;
+                    self.send(SentArgument::computed(src, of_call))?;
                 }
                 self.clear_local(src)?;
             }

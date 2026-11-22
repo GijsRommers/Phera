@@ -442,10 +442,16 @@ pub enum Instruction {
     InitDynamicCall {
         callee: Reg,
     },
-    /// Passes a computed value. If the parameter is by reference, PHP
-    /// rejects this, except for function results, which pass with a notice.
+    /// Passes a computed value. A by-reference parameter rejects it, unless
+    /// the argument was written as a call or as `new` (`of_call`):
+    ///
+    /// ```php
+    /// end(explode(',', $list));   // Notice: Only variables should be passed by reference
+    /// end($a . $b);               // Error: could not be passed by reference
+    /// ```
     SendValue {
         src: Reg,
+        of_call: bool,
     },
     /// Passes a local variable: by reference if the parameter wants one,
     /// otherwise its value.
@@ -480,6 +486,8 @@ pub enum Instruction {
     /// after the send, so no `Clear` follows.
     SendTake {
         src: Reg,
+        /// As in [`Instruction::SendValue`].
+        of_call: bool,
     },
     /// `local = constants[constant]`: a literal assigned where it is read,
     /// in place of a `LoadConst` into a temporary and an `AssignTake` of it.

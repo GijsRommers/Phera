@@ -61,7 +61,7 @@ pub(super) fn visit(
         | I::ReturnReference { src }
         | I::Echo { src }
         | I::Exit { src }
-        | I::SendValue { src }
+        | I::SendValue { src, .. }
         | I::SendSpread { src }
         | I::SendUserCallback { src, .. }
         | I::DeclareConstant { src, .. }
