@@ -387,9 +387,12 @@ impl Machine<'_> {
                 let Some(extras) = self.stack.current_extras_present() else {
                     return Step::Slow;
                 };
+                let locals = self.code.function(position.frame.function).locals.len();
                 let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
-                match crate::iteration::snapshot_step(iter, value, end, iterators, slots, &mut ip) {
+                match crate::iteration::snapshot_step(
+                    iter, value, end, locals, iterators, slots, &mut ip,
+                ) {
                     true => Step::Done(ip),
                     false => Step::Slow,
                 }
@@ -403,12 +406,14 @@ impl Machine<'_> {
                 let Some(extras) = self.stack.current_extras_present() else {
                     return Step::Slow;
                 };
+                let locals = self.code.function(position.frame.function).locals.len();
                 let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
                 match crate::iteration::keyed_step(
                     iter,
                     (key, value),
                     end,
+                    locals,
                     iterators,
                     slots,
                     &mut ip,

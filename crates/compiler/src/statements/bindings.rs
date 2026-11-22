@@ -50,10 +50,37 @@ impl Compiler<'_> {
         } else {
             self.compile_expression(subject)?
         };
-        // The subject, and the registers the loop itself copies values into.
+        // The subject, and the registers the loop writes entries into. A
+        // plain local is written straight into its own register, skipping the
+        // copy the temporary needed; references, list destructuring and
+        // properties keep the copy. Key and value on the same variable keep
+        // both copies: PHP publishes the value first, then the key.
+        let by_value =
+            binding != crate::policies::IterationBinding::Reference && !reference_subject;
+        let mut value_local = if by_value {
+            self.compiled_variable(value)?
+        } else {
+            None
+        };
+        let mut key_local = match key {
+            Some(key) if by_value => self.compiled_variable(key)?,
+            _ => None,
+        };
+        if let (Some(key), Some(value)) = (key_local, value_local)
+            && key == value
+        {
+            key_local = None;
+            value_local = None;
+        }
         let id = self.allocate_register()?;
-        let key_register = key.as_ref().map(|_| self.allocate_register()).transpose()?;
-        let value_register = self.allocate_register()?;
+        let key_register = match key_local {
+            Some(local) => Some(local),
+            None => key.as_ref().map(|_| self.allocate_register()).transpose()?,
+        };
+        let value_register = match value_local {
+            Some(local) => local,
+            None => self.allocate_register()?,
+        };
         let owned = self.temporaries_since(mark);
         let subject_temporary = (!self.locals.values().any(|&local| local == src)).then_some(src);
         let place = if reference_subject {
@@ -102,7 +129,7 @@ impl Compiler<'_> {
                 },
                 line,
             );
-        } else {
+        } else if value_local.is_none() {
             self.assign(value, value_register, line)?;
             if reference_subject {
                 self.emit(
@@ -114,7 +141,9 @@ impl Compiler<'_> {
             }
         }
         // PHP publishes the value first, even when both targets are the same variable.
-        if let (Some(key), Some(key_register)) = (key, key_register) {
+        if let (Some(key), Some(key_register)) = (key, key_register)
+            && key_local.is_none()
+        {
             let place = self.place(key)?;
             self.emit(
                 Instruction::Write {

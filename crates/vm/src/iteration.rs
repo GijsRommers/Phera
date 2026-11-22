@@ -196,6 +196,27 @@ impl Vm {
 impl Vm {
     /// Snapshot iteration borrows its owner directly, avoiding a new array owner on every element.
     #[inline]
+    /// Write one iteration entry into its destination. A destination inside
+    /// the locals prefix is a named variable, so it is assigned exactly as
+    /// `Assign` does: iterators over the old value restart, and a PHP
+    /// reference in the slot is written through.
+    pub(crate) fn set_iteration_target(
+        &mut self,
+        register: Reg,
+        value: Value,
+    ) -> Result<(), NativeError> {
+        let locals = self
+            .current()
+            .map(|frame| frame.function().locals.len())
+            .unwrap_or(usize::MAX);
+        if register.index() >= locals {
+            self.set(register, value);
+            return Ok(());
+        }
+        self.restart_subject_iterators(register);
+        self.assign_local(register, value)
+    }
+
     fn next_snapshot(
         &mut self,
         state: &mut frame::IteratorState,
@@ -222,15 +243,18 @@ impl Vm {
             return self.jump(end);
         };
         if let Some(key) = key {
-            self.set(
+            self.set_iteration_target(
                 key,
                 match element_key {
                     ArrayKey::Int(integer) => Value::Int(integer),
                     ArrayKey::String(string) => Value::String(string.clone()),
                 },
-            );
+            )?;
         }
-        self.set(destination, element.deref().clone());
+        // Bind first: the entry's borrow must end before a local destination
+        // is assigned through a PHP reference.
+        let element = element.deref().clone();
+        self.set_iteration_target(destination, element)?;
         Ok(())
     }
 
@@ -244,22 +268,22 @@ impl Vm {
         destination: Reg,
     ) -> Result<(), NativeError> {
         if source.is_none() && key.is_none() {
-            self.set(destination, element);
+            self.set_iteration_target(destination, element)?;
             return Ok(());
         }
         let key_register = key.unwrap_or(destination);
-        self.set(
+        self.set_iteration_target(
             key_register,
             match element_key {
                 ArrayKey::Int(i) => Value::Int(i),
                 ArrayKey::String(string) => Value::String(string),
             },
-        );
+        )?;
         if let Some(position) = source {
             let position = position.clone().with_key(key_register);
             element = self.reference(&position)?;
         }
-        self.set(destination, element);
+        self.set_iteration_target(destination, element)?;
         Ok(())
     }
 }
@@ -271,19 +295,31 @@ pub(crate) fn snapshot_step(
     iterator: IterId,
     destination: Reg,
     end: Target,
+    locals: usize,
     iterators: &mut crate::iterators::Iterators,
     slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> bool {
+    if !destinations_fast(None, destination, locals, slots) {
+        return false;
+    }
+    let native = {
+        let Some(state) = iterators.get_mut(iterator.0) else {
+            return false;
+        };
+        if state.source.is_some() {
+            return false;
+        }
+        state.snapshot.is_none() && state.traversal_mode == frame::TraversalMode::Value
+    };
+    if native {
+        return native_step(iterator, None, destination, locals, iterators, slots);
+    }
     let Some(state) = iterators.get_mut(iterator.0) else {
         return false;
     };
-    if state.source.is_some() {
-        return false;
-    }
     let Some(array) = &state.snapshot else {
-        return state.traversal_mode == frame::TraversalMode::Value
-            && native_step(state, None, destination, slots);
+        return false;
     };
     // Plain matches rather than `Option` combinators: this runs on every
     // round of a `foreach`, and a closure is a separate function that the
@@ -302,13 +338,46 @@ pub(crate) fn snapshot_step(
     match entry {
         Some((_, value)) => {
             let value = crate::fast::duplicate(&value.deref());
-            if let Some(slot) = slots.get_mut(destination.index()) {
-                *slot = Some(value);
+            if !store_entry(destination, value, locals, slots) {
+                return false;
             }
         }
         None => *ip = end.index(),
     }
     true
+}
+
+/// Write one iteration entry into its destination register. A destination in
+/// the locals prefix is a named variable: a PHP reference in its slot needs
+/// the general handler (checked before the iterator advances). Any other old
+/// value needs no iterator restart — `restart_for` only acts on reference
+/// cells — so the store stays as cheap as a temporary's.
+#[inline(always)]
+fn store_entry(register: Reg, value: Value, locals: usize, slots: &mut [Option<Value>]) -> bool {
+    if register.index() >= locals
+        || !matches!(slots.get(register.index()), Some(Some(Value::Reference(_))))
+    {
+        if let Some(slot) = slots.get_mut(register.index()) {
+            *slot = Some(value);
+        }
+        return true;
+    }
+    false
+}
+
+/// Whether every destination register can take a fast write: a named local
+/// holding a PHP reference cannot, and the general handler must run before
+/// the iterator advances.
+#[inline(always)]
+fn destinations_fast(
+    key: Option<Reg>,
+    destination: Reg,
+    locals: usize,
+    slots: &[Option<Value>],
+) -> bool {
+    [key, Some(destination)].into_iter().flatten().all(|reg| {
+        reg.index() >= locals || !matches!(slots.get(reg.index()), Some(Some(Value::Reference(_))))
+    })
 }
 
 /// `IterNextKeyed` of a by-value loop, as `Vm::iter_next` makes it: the
@@ -320,19 +389,31 @@ pub(crate) fn keyed_step(
     iterator: IterId,
     (key, destination): (Reg, Reg),
     end: Target,
+    locals: usize,
     iterators: &mut crate::iterators::Iterators,
     slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> bool {
+    if !destinations_fast(Some(key), destination, locals, slots) {
+        return false;
+    }
+    let native = {
+        let Some(state) = iterators.get_mut(iterator.0) else {
+            return false;
+        };
+        if state.source.is_some() {
+            return false;
+        }
+        state.snapshot.is_none() && state.traversal_mode == frame::TraversalMode::Value
+    };
+    if native {
+        return native_step(iterator, Some(key), destination, locals, iterators, slots);
+    }
     let Some(state) = iterators.get_mut(iterator.0) else {
         return false;
     };
-    if state.source.is_some() {
-        return false;
-    }
     let Some(array) = &state.snapshot else {
-        return state.traversal_mode == frame::TraversalMode::Value
-            && native_step(state, Some(key), destination, slots);
+        return false;
     };
     let position = match (state.started, state.position) {
         (true, Some(position)) => array.next_position(position),
@@ -352,11 +433,11 @@ pub(crate) fn keyed_step(
                 ArrayKey::String(string) => Value::String(string.clone()),
             };
             let value = crate::fast::duplicate(&value.deref());
-            if let Some(slot) = slots.get_mut(key.index()) {
-                *slot = Some(element_key);
+            if !store_entry(key, element_key, locals, slots) {
+                return false;
             }
-            if let Some(slot) = slots.get_mut(destination.index()) {
-                *slot = Some(value);
+            if !store_entry(destination, value, locals, slots) {
+                return false;
             }
         }
         None => *ip = end.index(),
@@ -366,11 +447,16 @@ pub(crate) fn keyed_step(
 
 /// Consume a combined entry from a by-value cursor on the ordinary path.
 pub(crate) fn native_step(
-    state: &mut frame::IteratorState,
+    iterator: IterId,
     key: Option<Reg>,
     destination: Reg,
+    locals: usize,
+    iterators: &mut crate::iterators::Iterators,
     slots: &mut [Option<Value>],
 ) -> bool {
+    let Some(state) = iterators.get_mut(iterator.0) else {
+        return false;
+    };
     let Some((value, index)) = state
         .traversal
         .as_mut()
@@ -380,12 +466,12 @@ pub(crate) fn native_step(
     };
     state.started = true;
     if let Some((key, index)) = key.zip(index)
-        && let Some(slot) = slots.get_mut(key.index())
+        && !store_entry(key, owned_value(index), locals, slots)
     {
-        *slot = Some(owned_value(index));
+        return false;
     }
-    if let Some(slot) = slots.get_mut(destination.index()) {
-        *slot = Some(owned_value(value));
+    if !store_entry(destination, owned_value(value), locals, slots) {
+        return false;
     }
     true
 }
