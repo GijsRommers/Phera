@@ -31,7 +31,7 @@ pub use arguments::{args, prepare_arguments, prepare_call, prepare_single_argume
 pub use class::{
     AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeStringProperty,
-    PrepareMethod, PropertyEntry, PropertyType, SyncMethod, Visibility, WindowMethod,
+    PrepareMethod, PropertyEntry, PropertyType, ReadyMethod, SyncMethod, Visibility, WindowMethod,
 };
 pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;
@@ -42,8 +42,8 @@ pub use function::{
 };
 pub use object_handlers::{
     ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeBinary,
-    NativeClone, NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeForkHook,
-    NativeIterator, NativeRelease, PropertyProjection, PropertyPurpose, fork_clone,
+    NativeClone, NativeCompare, NativeComparison, NativeCount, NativeCycleTrace, NativeDimensions,
+    NativeForkHook, NativeIterator, NativeRelease, PropertyProjection, PropertyPurpose, fork_clone,
     fork_refused_handle,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};

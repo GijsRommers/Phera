@@ -52,7 +52,10 @@ pub(crate) fn register(registry: &mut Registry) {
                     "__construct",
                     const { &[CLASS_ARGUMENT, Param::new("property", ParamType::String)] },
                     |c, o, a| construct(c, o, a, MemberKind::Property),
-                ),
+                )
+                .with_ready(|c, o, a| {
+                    crate::member::construct_loaded(c, o, a, MemberKind::Property)
+                }),
                 MethodEntry::public("getName", &[], |_, o, _| {
                     data(o, |m| Value::from(m.name.as_str()))
                 }),

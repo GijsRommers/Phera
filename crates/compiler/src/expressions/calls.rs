@@ -45,6 +45,12 @@ impl Compiler<'_> {
         {
             return Ok(result);
         }
+        if let Some(fallback) = &fallback
+            && let Some(result) =
+                self.compile_namespaced_builtin(&resolved, fallback, arguments, line)?
+        {
+            return Ok(result);
+        }
         let assertion = fallback
             .as_deref()
             .unwrap_or(&resolved)

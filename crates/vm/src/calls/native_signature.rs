@@ -11,6 +11,16 @@ pub(super) fn accepts(parameters: &[Param], slots: &[Option<Value>]) -> bool {
     accepts_with(parameters, slots, exact_types)
 }
 
+/// For `new ReflectionFunction($closure)`, check the Closure arm without coercion.
+pub(super) fn accepts_ready(parameters: &[Param], slots: &[Option<Value>]) -> bool {
+    if let ([parameter], [Some(Value::Object(object))]) = (parameters, slots)
+        && matches!(parameter.ty, ParamType::ClosureOrString)
+    {
+        return !parameter.by_ref && !parameter.variadic && object.class.name() == "Closure";
+    }
+    accepts(parameters, slots)
+}
+
 /// [`accepts`] for a direct method, which checks a reflected object's
 /// class itself (and declines one of another class): a `ReflectedObject`
 /// parameter takes any object here.

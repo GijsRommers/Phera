@@ -689,9 +689,9 @@ purpose must fail loudly and name the reason, never behave differently in
 silence:
 
 - **A function or class PHP 8.5 has and Phera leaves out** (for example
-  `strftime()`, deprecated since PHP 8.1): calling it throws
+  `date_sunset()`, deprecated since PHP 8.1): calling it throws
   `Phera\NotSupportedException` (a `LogicException`) with the message
-  "strftime() is not supported by Phera: deprecated since PHP 8.1".
+  "date_sunset() is not supported by Phera: deprecated since PHP 8.1".
   `function_exists()` and `class_exists()` answer false for these, so code
   that checks first takes its fallback. The list comes from the
   `#[\Deprecated]` attributes in PHP 8.5's own stub files, not from memory.
@@ -712,7 +712,7 @@ functions, methods and constants with `#[\Deprecated]` in its stub files.
 Each falls in one of three groups:
 
 1. *Named items nothing uses*: they go, as described above. Examples:
-   `strftime()`, `lcg_value()`, `utf8_decode()`, `mhash()`, `MT_RAND_PHP`,
+   `date_sunset()`, `lcg_value()`, `mhash()`, `MT_RAND_PHP`,
    `FILTER_SANITIZE_STRING`, `assert_options()`.
 2. *Named items the scan of 6.1 finds in use*, mostly calls that became
    no-ops and that current releases of widely used libraries still make:

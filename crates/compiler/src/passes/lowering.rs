@@ -331,6 +331,11 @@ impl Tables<'_> {
                 operator: op,
                 source: src,
             } => Instruction::BuiltinUnary { op, dst, src },
+            Old::NamespacedBuiltin {
+                destination: dst,
+                operator: op,
+                source: src,
+            } => Instruction::NamespacedBuiltin { op, dst, src },
             Old::BuiltinFrame {
                 destination: dst,
                 operator: op,
@@ -390,6 +395,14 @@ impl Tables<'_> {
             Old::BranchNotNull { value, target } => Instruction::JumpIfNotNull {
                 value,
                 target: Target(target.0 as u32),
+            },
+            Old::GuardBuiltin {
+                name,
+                fallback,
+                call,
+            } => Instruction::GuardBuiltin {
+                function: self.symbol(&name, fallback, crate::policies::NameKind::Function),
+                call: Target(call.0 as u32),
             },
             Old::BranchCompare {
                 operator,

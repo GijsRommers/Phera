@@ -193,9 +193,36 @@ impl Vm {
         Ok(())
     }
 
+    /// The four `instanceof` branches, out of line: one arm of `execute`
+    /// leads here, so that its other arms keep their shape.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn instance_of_branches(
+        &mut self,
+        instruction: phera_bytecode::Instruction,
+        work: &mut usize,
+    ) -> Result<(), NativeError> {
+        use phera_bytecode::Instruction as I;
+        match instruction {
+            I::InstanceOfBranch { src, class, target } => {
+                self.instance_of_branch(src, class, target, false, work)
+            }
+            I::InstanceOfBranchIf { src, class, target } => {
+                self.instance_of_branch(src, class, target, true, work)
+            }
+            I::DynamicInstanceOfBranch { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, false, work)
+            }
+            I::DynamicInstanceOfBranchIf { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, true, work)
+            }
+            _ => Err(internal_error!("instanceof branch")),
+        }
+    }
+
     /// `instanceof` whose answer only decides a jump: compute it exactly as
     /// `instance_of` does, then jump when it equals `when`.
-    pub(crate) fn instance_of_branch(
+    fn instance_of_branch(
         &mut self,
         source: Reg,
         symbol: SymbolId,
@@ -232,43 +259,38 @@ impl Vm {
 }
 
 impl Vm {
-    /// Mirrors class_symbol's binding rules while sharing immutable PHP name strings.
-    pub(crate) fn class_symbol_value(&self, symbol: SymbolId) -> Result<Value, NativeError> {
-        let frame = self
-            .current()
-            .ok_or_else(|| internal_error!("class name frame"))?;
-        let name = &frame
-            .unit()
-            .symbols
-            .get(symbol.index())
-            .ok_or_else(|| internal_error!("class name symbol"))?
-            .written;
-        let class = match name.as_str() {
-            phera_bytecode::TRAIT_CLASS_NAME => {
-                let function = frame.frame.function;
-                self.code
-                    .facts(function)
-                    .class
-                    .map(|class| self.classes.class(class))
-                    .or_else(|| frame.scope())
-                    .cloned()
-            }
+    /// The class a relative symbol names in the running frame: `self`,
+    /// `static`, `parent`, or a trait method's own class. `Some(None)` when
+    /// the frame has no such class; `None` for a symbol that names a class
+    /// by its name.
+    pub(crate) fn relative_class(&self, symbol: SymbolId) -> Option<Option<Rc<super::Class>>> {
+        let frame = self.current()?;
+        let name = &frame.unit().symbols.get(symbol.index())?.written;
+        Some(match name.as_str() {
+            phera_bytecode::TRAIT_CLASS_NAME => self
+                .code
+                .facts(frame.frame.function)
+                .class
+                .map(|class| self.classes.class(class))
+                .or_else(|| frame.scope())
+                .cloned(),
             "self" => frame.scope().cloned(),
             "static" => frame.called(),
             "parent" => frame.scope().and_then(|scope| scope.parent.clone()),
-            _ => {
-                return frame
-                    .cache()
-                    .class_names
-                    .get(symbol.index())
-                    .cloned()
-                    .ok_or_else(|| internal_error!("class name cache"));
-            }
-        };
-        if let Some(class) = class {
-            return Ok(class.name_value.clone());
+            _ => return None,
+        })
+    }
+
+    /// Mirrors class_symbol's binding rules while sharing immutable PHP name strings.
+    pub(crate) fn class_symbol_value(&self, symbol: SymbolId) -> Result<Value, NativeError> {
+        match self.relative_class(symbol) {
+            Some(Some(class)) => Ok(class.name_value.clone()),
+            // Preserve exact diagnostics for missing relative scopes in the resolver.
+            Some(None) => self.class_symbol(symbol).map(Value::from),
+            None => self
+                .current()
+                .and_then(|frame| frame.cache().class_names.get(symbol.index()).cloned())
+                .ok_or_else(|| internal_error!("class name cache")),
         }
-        // Preserve exact diagnostics for missing relative scopes in the resolver.
-        self.class_symbol(symbol).map(Value::from)
     }
 }

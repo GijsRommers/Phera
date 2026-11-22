@@ -13,6 +13,7 @@ use phera_value::{PhpArray, Value};
 
 use crate::Vm;
 use crate::arrays::ArrayWrite;
+use crate::calls::callback_binding::ArgumentBinding;
 use crate::calls::execution_loop::BatchExit;
 use crate::calls::sends::SentArgument;
 
@@ -45,6 +46,15 @@ impl Vm {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
             I::Call { dst, .. } => return self.call::<TRACK_GENERATORS>(dst, work),
+            // The loop makes a method site's call at once where it can;
+            // the `InitMethodCall`, sends and `Call` that follow make it
+            // otherwise.
+            // The loop hands a method site here when the VM must prepare
+            // the call (`__call`, a closure, a generator): the following
+            // `InitMethodCall` runs here, by its handler, not through
+            // `execute` again (a recursive `execute` would no longer be
+            // inlined into the batch loop).
+            I::CallMethod { .. } => self.start_written_out_call::<TRACK_GENERATORS>()?,
             I::CallDirect {
                 function,
                 args,
@@ -168,7 +178,13 @@ impl Vm {
                 target,
             } => return self.binary_branch(op, lhs, rhs, target, true, work),
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
-            I::BuiltinUnary { op, dst, src } => return self.execute_builtin_unary(op, src, dst),
+            I::BuiltinUnary { op, dst, src } => {
+                return self.execute_builtin_unary(op, src, dst, ArgumentBinding::Frameless);
+            }
+            I::NamespacedBuiltin { op, dst, src } => {
+                return self.execute_builtin_unary(op, src, dst, ArgumentBinding::Caller);
+            }
+            I::GuardBuiltin { function, call } => self.execute_guard_builtin(function, call)?,
             I::BuiltinFrame { op, dst } => self.execute_builtin_frame(op, dst)?,
             I::ArrayKeyExists { dst, key, array } => {
                 return self.execute_array_key_exists(key, array, dst);
@@ -206,7 +222,17 @@ impl Vm {
             }
             I::AssignPathFromLocal { path, src, dst } => {
                 let handled = if let Some(value) = self.read_defined_local(src) {
-                    self.assign_property_site(&self.path(path)?, &value, Some((src, dst)))?
+                    let place = self.path(path)?;
+                    if self.assign_property_site(&place, &value, Some((src, dst)))? {
+                        true
+                    } else if place.has_properties()?
+                        && let Some(stored) = self.assign_plain_property(&place, &value)?
+                    {
+                        self.set(dst, stored);
+                        true
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 };
@@ -230,6 +256,9 @@ impl Vm {
             I::UnsetPath { path } => {
                 let place = self.path(path)?;
                 if place.has_properties()? {
+                    if self.unset_plain_property(&place)? {
+                        return Ok(None);
+                    }
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
                 self.unset_place(&place)?;
@@ -253,17 +282,11 @@ impl Vm {
             I::ThisOrNull { dst } => self.this_or_null(dst),
             I::Clone { .. } => return Ok(Some(BatchExit::Instruction(instruction))),
             I::InstanceOf { dst, src, class } => self.instance_of(dst, src, class)?,
-            I::InstanceOfBranch { src, class, target } => {
-                self.instance_of_branch(src, class, target, false, work)?
-            }
-            I::InstanceOfBranchIf { src, class, target } => {
-                self.instance_of_branch(src, class, target, true, work)?
-            }
-            I::DynamicInstanceOfBranch { src, class, target } => {
-                self.dynamic_instance_of_branch(src, class, target, false, work)?
-            }
-            I::DynamicInstanceOfBranchIf { src, class, target } => {
-                self.dynamic_instance_of_branch(src, class, target, true, work)?
+            I::InstanceOfBranch { .. }
+            | I::InstanceOfBranchIf { .. }
+            | I::DynamicInstanceOfBranch { .. }
+            | I::DynamicInstanceOfBranchIf { .. } => {
+                self.instance_of_branches(instruction, work)?
             }
 
             I::CheckReturn { source } => {

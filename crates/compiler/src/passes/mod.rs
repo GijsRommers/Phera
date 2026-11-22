@@ -7,7 +7,10 @@ pub(crate) mod integer_operands;
 pub(crate) mod lower;
 pub(crate) mod lowering;
 pub(crate) mod lowering_tables;
+pub(crate) mod method_calls;
 pub(crate) mod optimize;
 pub(crate) mod register_mapping;
 
+mod clear_flow;
 mod object_liveness;
+mod operand_regs;

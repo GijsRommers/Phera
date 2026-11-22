@@ -34,7 +34,7 @@ struct ReflectedClass {
 #[derive(PartialEq, Eq, Hash)]
 enum FunctionKey {
     Named(String),
-    Method(String, String),
+    Method(u32, String),
     PropertyHook(PropertyHandle, PropertyHookKind),
 }
 
@@ -87,7 +87,14 @@ impl Vm {
         let key = match target {
             FunctionTarget::Named(name) => FunctionKey::Named(name.to_ascii_lowercase()),
             FunctionTarget::Method { class, name } => {
-                FunctionKey::Method(class.to_ascii_lowercase(), name.to_ascii_lowercase())
+                let class = self
+                    .classes
+                    .get(class)
+                    .ok_or_else(|| super::exception(format!("Class \"{class}\" does not exist")))?;
+                FunctionKey::Method(class.index.number(), name.to_ascii_lowercase())
+            }
+            FunctionTarget::LinkedMethod { class, name } => {
+                FunctionKey::Method(*class, name.to_ascii_lowercase())
             }
             FunctionTarget::PropertyHook { property, kind } => {
                 FunctionKey::PropertyHook(*property, *kind)

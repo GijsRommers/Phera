@@ -147,6 +147,8 @@ pub struct Param {
     pub default: Option<ConstantValue>,
     /// The constant spelling PHP uses in a declaration, when the value is symbolic.
     pub default_name: Option<&'static str>,
+    /// The reflected value comes from this build's registration.
+    pub platform_default: bool,
     pub by_ref: bool,
     reference_mode: ReferenceMode,
     pub(crate) raw_reference: bool,
@@ -185,6 +187,7 @@ impl Param {
             optional: false,
             default: None,
             default_name: None,
+            platform_default: false,
             by_ref: false,
             reference_mode: ReferenceMode::Required,
             raw_reference: false,
@@ -240,6 +243,7 @@ impl Param {
         self.optional = true;
         self.default = Some(default);
         self.default_name = None;
+        self.platform_default = false;
         self
     }
 
@@ -250,6 +254,17 @@ impl Param {
     ) -> Self {
         self = self.with_default(default);
         self.default_name = Some(name);
+        self
+    }
+
+    /// Register a named default whose value depends on the target platform.
+    pub const fn with_platform_constant_default(
+        mut self,
+        name: &'static str,
+        default: ConstantValue,
+    ) -> Self {
+        self = self.with_constant_default(name, default);
+        self.platform_default = true;
         self
     }
 

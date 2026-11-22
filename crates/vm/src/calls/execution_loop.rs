@@ -430,6 +430,7 @@ impl Machine<'_> {
             Instruction::InitMethodCall { receiver, method } => {
                 self.prepare_method(position, receiver, method)
             }
+            Instruction::CallMethod { site, dst, .. } => self.call_method(position, site, dst),
             Instruction::InitStaticCall {
                 class,
                 method,
@@ -451,6 +452,7 @@ impl Machine<'_> {
             Instruction::FetchThis { dst } | Instruction::ThisOrNull { dst } => {
                 self.fetch_this(position, dst)
             }
+            Instruction::GuardBuiltin { .. } => self.builtin_guard(position),
             Instruction::Return { src } => self.leave_plain::<GUARDED>(Some(src)),
             Instruction::ReturnNull => self.leave_plain::<GUARDED>(None),
             // Listed, so that the instructions further_step never takes do

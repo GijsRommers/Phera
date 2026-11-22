@@ -233,6 +233,7 @@ fn dead_after_from(
                     break;
                 }
                 Instruction::InitCall { .. } | Instruction::Nop => {}
+                Instruction::GuardBuiltin { call, .. } => pending.push(call.index()),
                 Instruction::Call { dst, .. } => {
                     if dst == register {
                         break;

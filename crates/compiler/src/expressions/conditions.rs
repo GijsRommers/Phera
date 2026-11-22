@@ -15,9 +15,7 @@
 //! the warning on.
 
 use phera_ast as ast;
-use phera_bytecode::Reg;
-
-use phera_bytecode::FetchMode;
+use phera_bytecode::{FetchMode, Reg};
 
 use crate::ir::{Constant, Instruction, Target};
 use crate::{CompileError, Compiler, binary, constant};
@@ -126,6 +124,9 @@ impl Compiler<'_> {
         when: bool,
         line: usize,
     ) -> Result<Vec<usize>, CompileError> {
+        if let Some(patches) = self.compile_builtin_condition(expression, when, line)? {
+            return Ok(patches);
+        }
         let value = if let Some(local) = self.compiled_variable(expression)? {
             // The warning for an undefined local belongs to the variable's
             // own line, where the read that used to precede the branch was.
@@ -328,14 +329,17 @@ impl Compiler<'_> {
             return Ok(patches);
         }
         if let [value] = values {
+            let mark = self.mark_temporaries();
             let register = self.quiet_access(value, FetchMode::Isset)?;
-            return Ok(vec![self.emit(
+            let branch = self.emit(
                 Instruction::BranchNotNull {
                     value: register,
                     target: Target(0),
                 },
                 line,
-            )]);
+            );
+            self.release_temporaries(mark);
+            return Ok(vec![branch]);
         }
         let mut ends = Vec::with_capacity(values.len());
         for value in values {
@@ -378,7 +382,8 @@ impl Compiler<'_> {
     }
 
     /// `??` as a condition: when the left is set and not null, its truthiness
-    /// decides; otherwise the right side is the condition.
+    /// decides and the right side is not evaluated; otherwise the right side
+    /// is the condition.
     fn compile_coalesce_condition(
         &mut self,
         left: &ast::Expression,
@@ -402,8 +407,12 @@ impl Compiler<'_> {
             },
             line,
         )];
+        // A set left side that did not branch decides the condition too:
+        // the right side is not evaluated.
+        let decided = self.emit(Instruction::Jump(Target(0)), line);
         self.patch(to_right, self.position());
         patches.extend(self.compile_condition(right, when, line)?);
+        self.patch(decided, self.position());
         Ok(patches)
     }
 

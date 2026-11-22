@@ -205,6 +205,11 @@ impl Instruction {
                 source: src,
                 ..
             }
+            | Instruction::NamespacedBuiltin {
+                destination: dst,
+                source: src,
+                ..
+            }
             | Instruction::InLiteralArray {
                 destination: dst,
                 needle: src,
@@ -338,6 +343,7 @@ impl Instruction {
             Instruction::MatchError { subject } => *subject = map(*subject),
             Instruction::Nop
             | Instruction::Jump(_)
+            | Instruction::GuardBuiltin { .. }
             | Instruction::Suppress(_)
             | Instruction::Declare(_)
             | Instruction::ReturnMissing => {}
