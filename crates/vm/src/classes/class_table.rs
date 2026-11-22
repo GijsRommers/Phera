@@ -199,10 +199,10 @@ impl ClassTable {
         }
     }
 
-    /// The number of the class `lowercase` names in this request, without
+    /// The number of the class `key` names in this request, without
     /// recording the lookup.
-    pub(crate) fn resolve_number(&self, lowercase: &str) -> Option<u32> {
-        self.find(lowercase).map(|class| class.index.0)
+    pub(crate) fn resolve_number(&self, key: phera_bytecode::NameKey) -> Option<u32> {
+        self.by_key(key).map(|class| class.index.0)
     }
 
     /// Names a class linked for this request alone: found through its own
@@ -409,7 +409,9 @@ impl ClassTable {
         if let Ok(mut recording) = self.recording.try_borrow_mut()
             && let Some(recorded) = recording.as_mut()
         {
-            recorded.push((name.to_owned(), found.map(|class| class.index.0)));
+            // Recording runs while a class is linked, not on a reuse.
+            let key = phera_bytecode::name_keys::key(name);
+            recorded.push((key, found.map(|class| class.index.0)));
         }
         found
     }

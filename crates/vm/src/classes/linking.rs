@@ -78,7 +78,7 @@ impl Vm {
         index: ClassId,
         key: String,
     ) -> Result<(), NativeError> {
-        match self.reusable_entry(unit, index) {
+        match self.reusable_entry(unit, unit_first, index) {
             Reuse::Entry(entry) => {
                 self.declare_linked(&entry, unit, unit_first, index);
                 return Ok(());
@@ -150,20 +150,25 @@ impl Vm {
     /// make the same lookups and miss at that name, so the miss is raised
     /// here, as linking raises it: the autoloader declares the name, and the
     /// declaration then finds the entry usable.
-    fn reusable_entry(&self, unit: &Arc<CompiledUnit>, index: ClassId) -> Reuse {
+    fn reusable_entry(
+        &self,
+        unit: &Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
+        index: ClassId,
+    ) -> Reuse {
         let declaration = &unit.classes[index.index()];
         let missing = std::cell::Cell::new(None);
         let found = self
             .classes
             .worker()
             .find_entry(unit, index.index() as u32, |entry| {
-                for (name, number) in &entry.dependencies {
-                    let now = self.classes.resolve_number(name);
+                for (key, number) in &entry.dependencies {
+                    let now = self.classes.resolve_number(*key);
                     if now == *number {
                         continue;
                     }
                     if now.is_none() && number.is_some() && missing.get().is_none() {
-                        missing.set(inherited_dependency(unit, declaration, name));
+                        missing.set(self.inherited_dependency(unit, unit_first, declaration, *key));
                     }
                     return false;
                 }
@@ -678,35 +683,42 @@ enum Reuse {
     Link,
 }
 
-/// The name as written and the kind linking reports a miss of it as, when
-/// `lowercase` is the declaration's parent, one of its interfaces or one of
-/// its traits.
-fn inherited_dependency<'a>(
-    unit: &'a CompiledUnit,
-    declaration: &'a phera_bytecode::ClassDeclaration,
-    lowercase: &str,
-) -> Option<(&'a str, &'static str)> {
-    let written = |symbol: &phera_bytecode::SymbolId| unit.symbols[symbol.index()].written.as_str();
-    let matches = |name: &str| {
-        name.trim_start_matches('\\')
-            .eq_ignore_ascii_case(lowercase)
-    };
-    if let Some(parent) = &declaration.parent
-        && matches(written(parent))
-    {
-        return Some((written(parent), "Class"));
+impl Vm {
+    /// The name as written and the kind linking reports a miss of it as,
+    /// when `key` is the declaration's parent, one of its interfaces or one
+    /// of its traits.
+    fn inherited_dependency<'a>(
+        &self,
+        unit: &'a CompiledUnit,
+        unit_first: FunctionIndex,
+        declaration: &'a phera_bytecode::ClassDeclaration,
+        key: phera_bytecode::NameKey,
+    ) -> Option<(&'a str, &'static str)> {
+        let written =
+            |symbol: &phera_bytecode::SymbolId| unit.symbols[symbol.index()].written.as_str();
+        let is_key = |symbol: &phera_bytecode::SymbolId| {
+            self.code.unit_symbol_key(unit_first, *symbol) == key
+        };
+        if let Some(parent) = declaration.parent.as_ref().filter(|parent| is_key(parent)) {
+            return Some((written(parent), "Class"));
+        }
+        if let Some(interface) = declaration
+            .interfaces
+            .iter()
+            .find(|interface| is_key(interface))
+        {
+            return Some((written(interface), "Interface"));
+        }
+        // A trait is named by its written name: its key is made here, on the
+        // way to a miss.
+        declaration
+            .traits
+            .iter()
+            .flat_map(|usage| &usage.names)
+            .find(|name| {
+                let lowercase = name.trim_start_matches('\\').to_ascii_lowercase();
+                phera_bytecode::name_keys::key(&lowercase) == key
+            })
+            .map(|name| (name.as_str(), "Trait"))
     }
-    if let Some(interface) = declaration
-        .interfaces
-        .iter()
-        .find(|interface| matches(written(interface)))
-    {
-        return Some((written(interface), "Interface"));
-    }
-    declaration
-        .traits
-        .iter()
-        .flat_map(|usage| &usage.names)
-        .find(|name| matches(name))
-        .map(|name| (name.as_str(), "Trait"))
 }
