@@ -107,7 +107,7 @@ fn discarded_direct_native_result_has_no_register_when_its_slot_is_empty() {
     assert!(function.instructions.iter().any(|instruction| matches!(
         instruction,
         Instruction::CallNativeDirect {
-            dst: Reg::DISCARD_NATIVE_RESULT,
+            dst: Reg::DISCARD_RESULT,
             result: CallResult::Discarded,
             ..
         }

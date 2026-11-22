@@ -22,6 +22,15 @@ struct ReturnTypeSite {
 }
 
 impl Vm {
+    /// A native call used as a statement, such as `strtoupper($text);`,
+    /// can complete without a caller register.
+    #[inline]
+    pub(crate) fn set_call_result(&mut self, destination: Reg, value: Value) {
+        if destination != Reg::DISCARD_RESULT {
+            self.set(destination, value);
+        }
+    }
+
     /// Check the declared result before releasing registers and recycling the callee.
     #[inline]
     pub(crate) fn return_value(
@@ -224,6 +233,9 @@ impl Vm {
         } else {
             None
         };
+        if frame.discards_call_result() && self.call_stack.depth() > stop + 1 {
+            self.release_discarded_temporary(frame, &mut value);
+        }
         self.call_stack.pop();
         self.call_stack.abandon_calls_from(frame.start());
         self.registers.release_frame(frame.start(), frame.base());
@@ -244,6 +256,25 @@ impl Vm {
             self.pending_callbacks = true;
         }
         Ok(None)
+    }
+
+    /// An unused `return new D;` releases its temporary before the locals.
+    #[cold]
+    #[inline(never)]
+    fn release_discarded_temporary(&mut self, frame: super::frame::Frame, value: &mut Value) {
+        use phera_bytecode::Instruction as I;
+        if frame.kind() == super::prepared_call::CallKind::Constructor {
+            return;
+        }
+        let instructions = self.code.instructions(frame.function);
+        if let Some(
+            I::Return { src } | I::ReturnChecked { source: src } | I::ReturnReference { src },
+        ) = instructions.get(frame.ip().saturating_sub(1))
+            && src.index() >= self.code.function(frame.function).locals.len()
+        {
+            drop(self.registers.take(frame.base() + src.index()));
+            drop(std::mem::take(value));
+        }
     }
     /// Only these cold returns allocate an erased future; ordinary PHP returns stay synchronous.
     pub(crate) fn dispatched_return(

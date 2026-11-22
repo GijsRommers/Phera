@@ -242,7 +242,7 @@ impl Vm {
             return Some(BatchExit::NativeCall(destination));
         }
         self.registers.truncate(call.start());
-        self.set(destination, Value::Int(id.into()));
+        self.set_call_result(destination, Value::Int(id.into()));
         None
     }
 
@@ -356,7 +356,7 @@ impl Vm {
                 if self.output_writer.buffers.pending.is_some() {
                     self.output_writer.chunk_caller = Some(name);
                 }
-                if destination != Reg::DISCARD_NATIVE_RESULT
+                if destination != Reg::DISCARD_RESULT
                     && let Some(frame) = self.call_stack.current()
                     && let [slot] = self
                         .registers

@@ -82,6 +82,17 @@ try {
 } catch (LogicException $exception) {
     echo $exception->getMessage(), "\n";
 }
+
+function finallyResult(): ResultOwner {
+    $local = new ResultOwner('finally callee local');
+    try {
+        return new ResultOwner('finally result');
+    } finally {
+        echo "return finally\n";
+    }
+}
+finallyResult();
+echo "after finally result\n";
 --EXPECT--
 drop native result
 after native result
@@ -122,3 +133,9 @@ new throwing callee local
 throw from destructor
 drop throwing callee local
 destructor error
+new finally callee local
+new finally result
+return finally
+drop finally result
+drop finally callee local
+after finally result

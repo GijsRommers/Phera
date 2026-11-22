@@ -96,7 +96,7 @@ impl Vm {
             self.suspend_lazy_initialization(object, continuation)
                 .await?;
         } else {
-            self.set(destination, Value::Bool(exists));
+            self.set_call_result(destination, Value::Bool(exists));
         }
         Ok(())
     }
@@ -160,7 +160,7 @@ impl Vm {
             return self.suspend_object_vars(object, class, destination).await;
         }
         let properties = self.visible_properties(&object, PropertyPurpose::ObjectVars)?;
-        self.set(destination, Value::from(properties));
+        self.set_call_result(destination, Value::from(properties));
         Ok(())
     }
 

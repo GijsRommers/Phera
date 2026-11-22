@@ -57,8 +57,10 @@ pub(super) fn elide(function: &mut Function, constants: &[Constant], types: &[Ty
             .retain(|register| !removed.contains(register));
     }
     for offset in discarded_calls {
-        if let I::CallNativeDirect { dst, .. } = &mut function.instructions[offset] {
-            *dst = Reg::DISCARD_NATIVE_RESULT;
+        if let I::Call { dst, .. } | I::CallDirect { dst, .. } | I::CallNativeDirect { dst, .. } =
+            &mut function.instructions[offset]
+        {
+            *dst = Reg::DISCARD_RESULT;
         }
     }
     if compact {
@@ -98,7 +100,7 @@ fn candidates(
         };
         let mut releases = vec![Fact::Unknown; block.instructions.len()];
         for ip in block.instructions.clone() {
-            if empty_discarded_native_destination(function.instructions[ip], &facts).is_some() {
+            if discarded_destination(function.instructions[ip], &facts).is_some() {
                 discarded_calls.push(ip);
             }
             if let I::Clear { reg } = function.instructions[ip]
@@ -148,19 +150,21 @@ fn candidates(
     (clears, cleanup, discarded_calls)
 }
 
-/// `strtoupper($text);` needs no destination when the unused result would
-/// have overwritten an empty slot. If there is an earlier value, the
-/// ordinary call still releases it when it writes its result.
-fn empty_discarded_native_destination(instruction: I, facts: &[Fact]) -> Option<Reg> {
-    let I::CallNativeDirect {
-        dst,
-        result: CallResult::Discarded,
-        ..
-    } = instruction
+/// A statement such as `advance();` needs no destination if the unused
+/// result would have overwritten an empty slot or a scalar. Keep ordinary publication
+/// when the previous value might need releasing at the call.
+fn discarded_destination(instruction: I, facts: &[Fact]) -> Option<(Reg, Fact)> {
+    let (I::Call { dst, result }
+    | I::CallDirect { dst, result, .. }
+    | I::CallNativeDirect { dst, result, .. }) = instruction
     else {
         return None;
     };
-    (facts[dst.index()] == Fact::Empty).then_some(dst)
+    if result != CallResult::Discarded {
+        return None;
+    }
+    let previous = facts[dst.index()];
+    previous.owns_nothing().then_some((dst, previous))
 }
 
 // An empty slot can remain empty even when it has a reader. A scalar can
@@ -528,8 +532,8 @@ fn transfer(function: &Function, constants: &[Constant], facts: &mut [Fact], ins
         }
     };
     let result = match instruction {
-        I::CallNativeDirect { .. } => {
-            empty_discarded_native_destination(instruction, facts).map(|dst| (dst, Empty))
+        I::Call { .. } | I::CallDirect { .. } | I::CallNativeDirect { .. } => {
+            discarded_destination(instruction, facts)
         }
         I::Clear { reg } | I::UnsetLocal { local: reg } => Some((reg, Empty)),
         I::LoadConst { dst, constant } => Some((

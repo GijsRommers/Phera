@@ -54,7 +54,7 @@ async fn checkpoint(vm: &mut Vm) -> (usize, usize, usize) {
                     .and_then(|details| details.callee.as_ref())
                     .is_some_and(|callee| callee.name.as_ref() == "checkpoint");
                 let value = vm.finish_native_window().await.unwrap();
-                vm.set(destination, value);
+                vm.set_call_result(destination, value);
                 if checkpoint {
                     return (
                         vm.registers.len(),

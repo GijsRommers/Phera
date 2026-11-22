@@ -146,12 +146,12 @@ impl Vm {
                     ) && let Some(value) =
                         self.finish_native_window_at(Some(destination)).await?
                     {
-                        self.set(destination, value);
+                        self.set_call_result(destination, value);
                     }
                 }
                 BatchExit::NativeCall(destination) => {
                     if let Some(value) = self.finish_native_window_at(Some(destination)).await? {
-                        self.set(destination, value);
+                        self.set_call_result(destination, value);
                     }
                 }
                 BatchExit::NativeView(destination, error) => {
@@ -159,7 +159,7 @@ impl Vm {
                         .complete_native_view_result(destination, Err(*error))
                         .await?
                     {
-                        self.set(destination, value);
+                        self.set_call_result(destination, value);
                     }
                 }
                 BatchExit::NativeMethodHook(destination, hook) => {
@@ -168,7 +168,7 @@ impl Vm {
                         .finish_native_method_continuation(error, &method, Some(destination))
                         .await?
                     {
-                        self.set(destination, value);
+                        self.set_call_result(destination, value);
                     }
                 }
                 BatchExit::Instruction(instruction) => {

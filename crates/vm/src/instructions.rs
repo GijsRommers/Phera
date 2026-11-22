@@ -412,7 +412,7 @@ impl Vm {
             CallEntry::Php => None,
             CallEntry::Native if TRACK_GENERATORS => {
                 if let Some(value) = self.finish_ready_native_window()? {
-                    self.set(destination, value);
+                    self.set_call_result(destination, value);
                     None
                 } else {
                     return self.call_native(destination);

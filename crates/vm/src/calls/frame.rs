@@ -122,7 +122,7 @@ impl Frame {
             function,
             base: base as u32,
             ip: 0,
-            destination: destination.unwrap_or(Reg(0)),
+            destination: destination.unwrap_or(Reg::DISCARD_RESULT),
             flags,
         }
     }
@@ -189,6 +189,7 @@ impl Frame {
 
     /// Marks a callback frame as returning to a built-in's next step.
     pub(crate) fn mark_native_loop(&mut self) {
+        self.destination = Reg::DISCARD_RESULT;
         self.flags.0 |= FrameFlags::CALLBACK | FrameFlags::NATIVE_LOOP;
     }
 
@@ -200,14 +201,15 @@ impl Frame {
 
     /// A resumed frame returns to the generator driver.
     pub(crate) fn as_callback(mut self) -> Self {
+        self.destination = Reg::DISCARD_RESULT;
         self.flags.0 |= FrameFlags::CALLBACK;
         self
     }
 
-    /// The caller's register for the result; `None` when native code called.
+    /// The caller's register for the result, when the return has a slot.
     #[inline]
     pub(crate) fn destination(&self) -> Option<Reg> {
-        (self.flags.0 & FrameFlags::CALLBACK == 0).then_some(self.destination)
+        (self.destination != Reg::DISCARD_RESULT).then_some(self.destination)
     }
 
     /// Whether the side table holds state for this frame.
@@ -226,5 +228,10 @@ impl Frame {
 
     pub(super) fn discards_result(&self) -> bool {
         self.flags.0 & FrameFlags::DISCARD_RESULT != 0
+    }
+
+    /// A statement call such as `advance();` has no caller slot.
+    pub(super) fn discards_call_result(&self) -> bool {
+        self.destination == Reg::DISCARD_RESULT && self.flags.0 & FrameFlags::CALLBACK == 0
     }
 }

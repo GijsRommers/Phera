@@ -52,7 +52,7 @@ impl Vm {
         loop {
             match view.cursor.next(self, PropertyPurpose::ObjectVars)? {
                 IterationStep::End => {
-                    self.set(view.destination, Value::from(view.properties));
+                    self.set_call_result(view.destination, Value::from(view.properties));
                     return Ok(());
                 }
                 IterationStep::Entry(key, value) => {

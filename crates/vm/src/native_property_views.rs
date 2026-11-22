@@ -57,7 +57,7 @@ impl Vm {
             .drive_native_views(destination, ViewWork::Enumerate(*view))
             .await?
         {
-            self.set(destination, value);
+            self.set_call_result(destination, value);
         }
         Ok(())
     }

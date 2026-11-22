@@ -92,8 +92,8 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let Some(destination) = frame.destination() else {
-            return if frame.discards_result() {
-                self.leave_discarded(frame, source)
+            return if frame.discards_result() || frame.discards_call_result() {
+                self.leave_discarded::<GUARDED>(frame, source)
             } else if !GUARDED && frame.returns_to_native_loop() {
                 self.leave_to_native_loop(frame, source)
             } else if !GUARDED && self.stack.depth() == self.stop + 1 {
@@ -276,9 +276,10 @@ impl Machine<'_> {
         Step::Yield
     }
 
-    /// A setter with no suspended caller action returns without publishing a result.
+    /// `advance();` and a setter without a continuation return without a result slot.
+    #[cold]
     #[inline(never)]
-    fn leave_discarded(&mut self, frame: Frame, source: Option<Reg>) -> Step {
+    fn leave_discarded<const GUARDED: bool>(&mut self, frame: Frame, source: Option<Reg>) -> Step {
         if self.stack.depth() <= self.stop + 1
             || frame.has_extras()
             || self.stack.has_calls_from(frame.start())
@@ -303,8 +304,20 @@ impl Machine<'_> {
         let Some(caller) = self.stack.caller().copied() else {
             return Step::Slow;
         };
+        if GUARDED
+            && frame.discards_call_result()
+            && frame.kind() != CallKind::Constructor
+            && let Some(source) = source
+            && source.index() >= self.code.function(frame.function).locals.len()
+        {
+            drop(self.registers.take(frame.base() + source.index()));
+        }
         self.stack.pop();
-        self.registers.truncate(frame.start());
+        if GUARDED && frame.discards_call_result() {
+            self.registers.release_frame(frame.start(), frame.base());
+        } else {
+            self.registers.truncate(frame.start());
+        }
         Step::Switched(Position {
             frame: caller,
             ip: caller.ip(),
@@ -641,7 +654,7 @@ impl Machine<'_> {
         let object = self.registers.take(call.base() - 1);
         self.registers.truncate(call.start());
         self.registers
-            .put(position.frame.base() + destination.index(), object);
+            .put_call_result(position.frame.base(), destination, object);
         Step::Done(position.ip)
     }
 }

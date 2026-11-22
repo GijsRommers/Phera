@@ -235,6 +235,14 @@ impl Registers {
         self.slots[index] = Some(value);
     }
 
+    /// A call such as `$reflection->getName();` can produce a value for no slot.
+    #[inline(always)]
+    pub(crate) fn put_call_result(&mut self, base: usize, destination: Reg, value: Value) {
+        if destination != Reg::DISCARD_RESULT {
+            self.put(base + destination.index(), value);
+        }
+    }
+
     /// Bounded slices keep callers separate from unfinished callees.
     #[inline(always)]
     pub(crate) fn window(&self, base: usize, count: usize) -> &[Option<Value>] {

@@ -92,7 +92,7 @@ impl Vm {
     /// its end, as [`Vm::run`] does; returns the exit status.
     pub async fn resume(&mut self) -> i32 {
         if let Some(destination) = self.snapshot.resume {
-            self.set(destination, Value::Bool(true));
+            self.set_call_result(destination, Value::Bool(true));
         }
         self.execution_time
             .clone()

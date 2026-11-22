@@ -204,6 +204,7 @@ impl Compiler<'_> {
                 return Err(self.error(message, line));
             }
         }
+        let first_temporary = self.next;
         let source = if let Some(expression) = expression {
             if !returns_reference
                 && self.finalies.is_empty()
@@ -228,6 +229,7 @@ impl Compiler<'_> {
         } else {
             self.literal(Constant::Null, line)?
         };
+        let evaluated = source;
         let source = if !self.finalies.is_empty() && !returns_reference {
             let destination = self.allocate_register()?;
             self.emit(
@@ -243,6 +245,19 @@ impl Compiler<'_> {
         };
         if !self.finalies.is_empty() {
             self.emit(Instruction::CheckReturn { source }, line);
+            if source != evaluated
+                && evaluated.index() >= first_temporary
+                && !self.locals.values().any(|&local| local == evaluated)
+            {
+                // The saved value is the only return temporary that should
+                // survive into finally in `try { return new Result; } finally { log(); }`.
+                self.emit(
+                    Instruction::Clear {
+                        register: evaluated,
+                    },
+                    line,
+                );
+            }
         }
         self.emit_control_exits(
             super::exits::ExitDepth {

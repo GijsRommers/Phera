@@ -285,7 +285,7 @@ impl Vm {
                     .await;
             }
         }
-        self.set(destination, Value::Object(updates.object));
+        self.set_call_result(destination, Value::Object(updates.object));
         Ok(())
     }
 }

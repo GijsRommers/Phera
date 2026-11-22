@@ -31,9 +31,9 @@ index!(
 );
 
 impl Reg {
-    /// No destination for a discarded direct native result, as in
-    /// `strtoupper($text);`. This index is outside every register window.
-    pub const DISCARD_NATIVE_RESULT: Self = Self(u16::MAX);
+    /// No destination for a discarded call result, as in `advance();`.
+    /// This index is reserved in call destination operands.
+    pub const DISCARD_RESULT: Self = Self(u16::MAX);
 }
 
 index!(

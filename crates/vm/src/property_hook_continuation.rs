@@ -189,7 +189,7 @@ impl Vm {
                     }
                     LazyContinuation::NativeView(destination, request, _) => {
                         if let Some(value) = self.drive_view_request(destination, *request).await? {
-                            self.set(destination, value);
+                            self.set_call_result(destination, value);
                         }
                         Ok(())
                     }
@@ -198,7 +198,7 @@ impl Vm {
                     }
                     LazyContinuation::Reflection(destination, operation, _) => {
                         let value = self.resume_reflected_lazy(*operation, value)?;
-                        self.set(destination, value);
+                        self.set_call_result(destination, value);
                         Ok(())
                     }
                 }

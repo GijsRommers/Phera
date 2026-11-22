@@ -117,7 +117,7 @@ impl Machine<'_> {
         self.stack.pop_plain();
         self.registers.truncate(call.start());
         self.registers
-            .put(position.frame.base() + destination.index(), value);
+            .put_call_result(position.frame.base(), destination, value);
         if self.spend_work() {
             self.publish(position.ip);
             return Step::Yield;

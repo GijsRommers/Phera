@@ -207,7 +207,7 @@ impl Vm {
                 Kind::Sort => Value::Bool(true),
             };
             self.call_stack.recycle_native_arguments(arguments);
-            self.set(destination, result);
+            self.set_call_result(destination, result);
             return Ok(Some(None));
         };
         let site = match entry {

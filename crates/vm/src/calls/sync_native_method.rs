@@ -104,7 +104,7 @@ impl Vm {
         }
         match result {
             Ok(value) => {
-                self.set(destination, value);
+                self.set_call_result(destination, value);
                 Ok(None)
             }
             Err(error)

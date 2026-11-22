@@ -82,7 +82,7 @@ impl Machine<'_> {
                         self.run_direct_getter(position, object, (&found, key)) =>
             {
                 self.registers
-                    .put(position.frame.base() + destination.index(), value);
+                    .put_call_result(position.frame.base(), destination, value);
                 Step::Done(position.ip + 1)
             }
             MethodBody::Native(entry) => {
@@ -175,7 +175,7 @@ impl Machine<'_> {
                     return Step::Done(position.ip);
                 };
                 self.registers
-                    .put(position.frame.base() + destination.index(), value);
+                    .put_call_result(position.frame.base(), destination, value);
                 Step::Done(site.after.index())
             }
             SiteOutcome::Native => {
@@ -448,7 +448,7 @@ impl Machine<'_> {
                 self.run_direct_getter(position, object, (found, key))
         {
             self.registers
-                .put(position.frame.base() + destination.index(), value);
+                .put_call_result(position.frame.base(), destination, value);
             return Step::Done(position.ip + 1);
         }
         let Some((context, method)) = self.native_class_method((object, class), found, key) else {
