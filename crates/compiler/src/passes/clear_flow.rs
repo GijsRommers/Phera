@@ -325,6 +325,7 @@ fn read_before_write(function: &Function, instruction: I, reads: &mut [bool]) {
         | I::LoadBool { dst, .. }
         | I::LoadNull { dst }
         | I::Move { dst, .. }
+        | I::CallDirectLocal { area: dst, .. }
         | I::Unary { dst, .. }
         | I::Cast { dst, .. }
         | I::Binary { dst, .. }
@@ -540,7 +541,11 @@ fn transfer(function: &Function, constants: &[Constant], facts: &mut [Fact], ins
             },
         )),
         I::NewArray { dst, .. } | I::FetchClassName { dst, .. } => Some((dst, NonObject)),
-        I::Move { dst, src } => Some((dst, get(src).clamp(Scalar, Value))),
+        I::Move { dst, src }
+        | I::CallDirectLocal {
+            area: dst,
+            local: src,
+        } => Some((dst, get(src).clamp(Scalar, Value))),
         I::Assign { local, src } if get(local) != Unknown => Some((local, get(src).max(Scalar))),
         I::Binary { dst, op, lhs, rhs } => Some((dst, binary(op, get(lhs), get(rhs)))),
         I::BinaryInt { dst, op, lhs, .. } => Some((dst, binary(op, get(lhs), Scalar))),

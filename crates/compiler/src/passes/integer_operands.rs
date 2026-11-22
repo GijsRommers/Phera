@@ -138,7 +138,11 @@ fn dead_after_from(
                         break;
                     }
                 }
-                Instruction::Move { dst, src } => {
+                Instruction::Move { dst, src }
+                | Instruction::CallDirectLocal {
+                    local: src,
+                    area: dst,
+                } => {
                     if src == register {
                         return false;
                     }
