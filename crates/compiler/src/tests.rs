@@ -5,6 +5,32 @@ use phera_bytecode::Reg;
 use super::compile;
 
 #[test]
+fn scalar_loads_use_immediates_after_folding_literal_readers() {
+    use phera_bytecode::{Constant, Instruction as I};
+
+    let unit = compile(
+        "<?php function probe() { echo true, false; return null; } $value = false;",
+        "test.php",
+    )
+    .expect("valid PHP");
+    let code = &unit.functions[0].instructions;
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, I::LoadBool { value: true, .. }))
+    );
+    assert!(
+        code.iter()
+            .any(|i| matches!(i, I::LoadBool { value: false, .. }))
+    );
+    assert!(code.iter().any(|i| matches!(i, I::LoadNull { .. })));
+    assert!(code.iter().all(|i| !matches!(i, I::LoadConst { .. })));
+    assert!(unit.main.instructions.iter().any(|i| {
+        matches!(i, I::AssignConst { constant, .. }
+            if unit.constants[constant.index()] == Constant::Bool(false))
+    }));
+}
+
+#[test]
 fn tiny_caller_stack() {
     std::thread::Builder::new()
         .stack_size(64 * 1024)
@@ -202,9 +228,10 @@ fn null_conditions_reuse_the_null_jumps() {
         count(&code, |i| matches!(i, Instruction::JumpIfNotNull { .. })),
         1
     );
+    // The implicit return still loads null. The two conditions do not.
     assert_eq!(
         count(&code, |i| matches!(i, Instruction::LoadNull { .. })),
-        0
+        1
     );
     assert_eq!(count(&code, |i| matches!(i, Instruction::Binary { .. })), 0);
 }
