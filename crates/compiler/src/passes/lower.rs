@@ -224,6 +224,7 @@ impl Tables<'_> {
                 | Instruction::JumpIfNot { target, .. }
                 | Instruction::JumpIfNull { target, .. }
                 | Instruction::JumpIfNotNull { target, .. }
+                | Instruction::GuardBuiltin { call: target, .. }
                 | Instruction::BinaryIntBranch { target, .. }
                 | Instruction::BinaryIntBranchIf { target, .. }
                 | Instruction::BinaryBranch { target, .. }
@@ -301,6 +302,7 @@ impl Tables<'_> {
             // Removes the moves that became `Nop`.
             crate::passes::optimize::optimize(&mut function);
         }
+        crate::passes::clear_flow::elide(&mut function, &self.unit.constants, &self.unit.types);
         // Last: the passes above never see `CallMethod`, whose site table
         // reads the argument registers.
         crate::passes::method_calls::rewrite(&mut function);

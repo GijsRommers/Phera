@@ -623,6 +623,25 @@ pub enum Instruction {
         dst: Reg,
         src: Reg,
     },
+    /// The built-in an unqualified call in a namespace means, behind its
+    /// `GuardBuiltin`: as `BuiltinUnary`, except that a failure (a
+    /// `TypeError` for `strlen([])`) is raised as from a call of the
+    /// function, with its frame in the trace, as PHP calls it there.
+    NamespacedBuiltin {
+        op: crate::BuiltinUnary,
+        dst: Reg,
+        src: Reg,
+    },
+    /// Before an unqualified built-in call in a namespace (`is_null($x)` in
+    /// `namespace App;`): falls through to the built-in's own instruction
+    /// when the call means the global function, and jumps to `call`, the
+    /// general call, when a function of the namespace (`App\is_null`) was
+    /// declared when the site first ran. As in PHP, a site keeps what it
+    /// found then.
+    GuardBuiltin {
+        function: SymbolId,
+        call: Target,
+    },
     /// Calls a statically known builtin with positional by-value arguments.
     CallNativeDirect {
         function: SymbolId,
