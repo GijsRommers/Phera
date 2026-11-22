@@ -527,6 +527,20 @@ fn integer_condition(operator: BinaryOp, left: i64, right: i64) -> Option<bool> 
 }
 
 /// Existing integer keys need no conversion or diagnostic work.
+/// `AssignConst`: a copy of the file's literal into `local`. A reference
+/// in the local takes the general path, as `Assign` does.
+#[inline(always)]
+pub(crate) fn assign_literal<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
+    slots: &mut S,
+    local: Reg,
+    literal: &Value,
+) -> ScalarStep {
+    match slots.slot(local) {
+        Some(Some(Value::Reference(_))) | None => ScalarStep::Fallback,
+        _ => store::<GUARDED, _>(slots, local, literal.clone()),
+    }
+}
+
 /// Keep this out of scalar_step's arithmetic dispatch; every failed guard uses
 /// the normal PHP offset/reference/diagnostic handler.
 #[inline]

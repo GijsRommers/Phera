@@ -24,7 +24,7 @@ use crate::calls::frame::Frame;
 use crate::calls::registers::{Registers, WINDOW};
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
-use crate::fast::{ScalarStep, array_index_step, scalar_step};
+use crate::fast::{ScalarStep, array_index_step, assign_literal, scalar_step};
 
 /// How many loop rounds or calls a script may run before it lets other tasks
 /// on the same thread have a turn.
@@ -353,6 +353,17 @@ impl Machine<'_> {
                     Instruction::FetchIndex {
                         dst, base, index, ..
                     } => array_index_step::<GUARDED, _>(dst, base, index, slots),
+                    Instruction::AssignConst { local, constant } => {
+                        match self
+                            .code
+                            .cache(position.frame.function)
+                            .constants
+                            .get(constant.index())
+                        {
+                            Some(literal) => assign_literal::<GUARDED, _>(slots, local, literal),
+                            None => ScalarStep::Fallback,
+                        }
+                    }
                     _ => ScalarStep::Fallback,
                 },
                 complete => complete,
@@ -452,13 +463,42 @@ impl Machine<'_> {
             } => self.prepare_static(position, (class, method), binding),
             Instruction::SendValue { src } => self.send(position, src),
             // A temporary read once: sent, then empty.
-            Instruction::SendTake { src } => match self.send(position, src) {
-                Step::Done(ip) => {
-                    drop(self.registers.take(position.frame.base() + src.index()));
-                    Step::Done(ip)
+            // A temporary read once: moved into the callee's window. A
+            // reference, or a call on the general path, gets it back.
+            Instruction::SendTake { src } => {
+                let slot = base + src.index();
+                match self.registers.take_defined(slot) {
+                    Some(value) if !matches!(value, Value::Reference(_)) => {
+                        match self.send_owned(position, value) {
+                            Ok(step) => step,
+                            Err(value) => {
+                                self.registers.put(slot, value);
+                                Step::Slow
+                            }
+                        }
+                    }
+                    other => {
+                        if let Some(value) = other {
+                            self.registers.put(slot, value);
+                        }
+                        Step::Slow
+                    }
                 }
-                other => other,
-            },
+            }
+            Instruction::SendConst { constant } => {
+                match self
+                    .code
+                    .cache(position.frame.function)
+                    .constants
+                    .get(constant.index())
+                {
+                    Some(literal) => match self.send_owned(position, literal.clone()) {
+                        Ok(step) => step,
+                        Err(_) => Step::Slow,
+                    },
+                    None => Step::Slow,
+                }
+            }
             Instruction::SendLocal { local } => match self.send(position, local) {
                 Step::Slow => self.send_reference(position, local),
                 done => done,

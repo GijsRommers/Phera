@@ -229,6 +229,12 @@ impl Registers {
         self.slots[index].take().unwrap_or_default()
     }
 
+    /// Empty a slot, giving back what it held, if anything.
+    #[inline(always)]
+    pub(crate) fn take_defined(&mut self, index: usize) -> Option<Value> {
+        self.slots.get_mut(index).and_then(Option::take)
+    }
+
     /// Store a value in a slot, dropping what it held.
     #[inline(always)]
     pub(crate) fn put(&mut self, index: usize, value: Value) {

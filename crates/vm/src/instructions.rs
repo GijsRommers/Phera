@@ -129,6 +129,9 @@ impl Vm {
                 }
                 self.clear_local(src)?;
             }
+            I::SendConst { constant } => {
+                self.send(SentArgument::Literal(self.literal(constant)?))?
+            }
             I::SendLocal { local } => self.send(SentArgument::Local(local))?,
             I::SendPath { path } => {
                 if !self.send_path(self.path(path)?)? {
@@ -159,6 +162,7 @@ impl Vm {
                 self.clear_local(src)?;
                 return Ok(exit);
             }
+            I::AssignConst { local, constant } => self.assign_literal(local, constant)?,
             I::AssignOp { op, local, src } => return self.execute_assign_op(op, local, src),
             I::CheckType { local, ty } => self.check_local_type(local, ty)?,
             I::IncDecLocal { mode, dst, local } => self.execute_inc_dec(mode, dst, local)?,

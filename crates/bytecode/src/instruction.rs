@@ -435,6 +435,17 @@ pub enum Instruction {
     SendTake {
         src: Reg,
     },
+    /// `local = constants[constant]`: a literal assigned where it is read,
+    /// in place of a `LoadConst` into a temporary and an `AssignTake` of it.
+    AssignConst {
+        local: Reg,
+        constant: ConstId,
+    },
+    /// Sends `constants[constant]`: a literal sent where it is read, in
+    /// place of a `LoadConst` into a temporary and a `SendTake` of it.
+    SendConst {
+        constant: ConstId,
+    },
     /// The method call that [`crate::MethodSite`] `site` of the running
     /// function describes, made at once when it is plain; otherwise the
     /// `InitMethodCall`, `Send`s and `Call` that follow make it. `dst`

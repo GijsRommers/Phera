@@ -118,10 +118,8 @@ impl Machine<'_> {
         let Some(site) = body.method_sites.get(site_id.index()) else {
             return Step::Slow;
         };
-        let object = match self
-            .registers
-            .window(position.frame.base() + site.receiver.index(), 1)
-        {
+        let receiver = position.frame.base() + site.receiver.index();
+        let object = match self.registers.window(receiver, 1) {
             [Some(Value::Object(object))] => object,
             _ => return Step::Done(position.ip),
         };
@@ -161,7 +159,22 @@ impl Machine<'_> {
             // The VM runs the following `InitMethodCall` itself.
             SiteOutcome::Vm => Step::Slow,
             SiteOutcome::Enter(function) => {
-                let object = object.clone();
+                // A taken receiver moves into `$this`, where the general
+                // sequence would copy it and clear it.
+                let take =
+                    site.receiver_taken && body.site_arguments.get(site.argument_range()).is_some();
+                let object = match take {
+                    true => match self.registers.take_defined(receiver) {
+                        Some(Value::Object(object)) => object,
+                        other => {
+                            if let Some(value) = other {
+                                self.registers.put(receiver, value);
+                            }
+                            return Step::Done(position.ip);
+                        }
+                    },
+                    false => object.clone(),
+                };
                 self.enter_site_method(position, (body, site), function, object, destination)
             }
             // A native getter's value goes where the call's result goes; a
@@ -174,13 +187,36 @@ impl Machine<'_> {
                 let Some(value) = getter(object, &[]) else {
                     return Step::Done(position.ip);
                 };
+                if site.receiver_taken {
+                    drop(self.registers.take_defined(receiver));
+                }
                 self.registers
                     .put(position.frame.base() + destination.index(), value);
                 Step::Done(site.after.index())
             }
-            SiteOutcome::Native => {
+            SiteOutcome::Native if !site.receiver_taken => {
                 let object = object.clone();
                 self.call_site_native(position, (body, site), &object, destination)
+            }
+            // A taken receiver goes back for the `InitMethodCall` only; the
+            // sends and the call after it find the register empty, as the
+            // `Clear` before the `Call` leaves it.
+            SiteOutcome::Native => {
+                let object = match self.registers.take_defined(receiver) {
+                    Some(Value::Object(object)) => object,
+                    other => {
+                        if let Some(value) = other {
+                            self.registers.put(receiver, value);
+                        }
+                        return Step::Done(position.ip);
+                    }
+                };
+                let step = self.call_site_native(position, (body, site), &object, destination);
+                if matches!(step, Step::Slow) || matches!(step, Step::Done(ip) if ip == position.ip)
+                {
+                    self.registers.put(receiver, Value::Object(object));
+                }
+                step
             }
         }
     }

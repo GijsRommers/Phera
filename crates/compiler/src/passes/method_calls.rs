@@ -123,6 +123,8 @@ pub(crate) fn rewrite(function: &mut Function) {
             first_argument,
             arguments: call.sends.len() as u16,
             after: Target(instructions.len() as u32),
+            // Settled by the takes pass, once the code no longer moves.
+            receiver_taken: false,
         });
         index = call.call + 1;
     }
