@@ -29,9 +29,10 @@ pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value}
 
 pub use arguments::{args, prepare_arguments, prepare_call, prepare_single_argument};
 pub use class::{
-    AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
-    NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeStringProperty,
-    PrepareMethod, PropertyEntry, PropertyType, ReadyMethod, SyncMethod, Visibility, WindowMethod,
+    AsyncMethod, ClassEntry, ClassKind, DirectMethod, MethodEntry, MethodPreparation, MethodReturn,
+    NativeMethod, NativePropertyAccess, NativePropertyMutation, NativePropertyRead,
+    NativeStringProperty, PrepareMethod, PropertyEntry, PropertyType, ReadyMethod, SyncMethod,
+    Visibility, WindowMethod,
 };
 pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;

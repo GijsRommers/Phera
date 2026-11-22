@@ -59,7 +59,7 @@ mod native_loops;
 mod native_method;
 mod native_ready;
 mod native_retries;
-mod native_signature;
+pub(crate) mod native_signature;
 mod native_sorts;
 pub(crate) mod parameter_binding;
 pub(crate) mod pending;

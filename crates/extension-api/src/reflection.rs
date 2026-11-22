@@ -118,15 +118,37 @@ pub struct MemberInfo {
 pub struct SlotAccess {
     pub key: crate::ArrayKey,
     pub slot: usize,
+    /// The layout of the class the reflector was made for. An object with
+    /// this layout is of that class, which has the property; an object of
+    /// another layout is of the property's class only if it is an instance
+    /// of it, which a layout holding the key in the slot does not show (a
+    /// parent of a class that redeclares the property, or an unrelated
+    /// class with a property of the same name).
+    pub layout: Rc<phera_value::PropertyLayout>,
     /// `None` when a write must take the general path: a readonly
     /// property, or a type that names a class.
     pub writes: Option<phera_bytecode::TypeMask>,
 }
 
 impl SlotAccess {
+    /// Whether an object with these `properties` is of the class the
+    /// reflector was made for.
+    #[inline]
+    pub fn is_own_layout(&self, properties: &crate::value::Properties) -> bool {
+        properties
+            .layout()
+            .is_some_and(|layout| Rc::ptr_eq(layout, &self.layout))
+    }
+
     /// The property's value in `properties`, or `None` when it has none:
-    /// `None` outside when the properties do not keep it in this slot.
+    /// `None` outside when the properties do not keep it in this slot. An
+    /// object of the reflector's own layout keeps it there by construction;
+    /// for any other the key in the slot is compared.
+    #[inline]
     pub fn read<'a>(&self, properties: &'a crate::value::Properties) -> Option<Option<&'a Value>> {
+        if self.is_own_layout(properties) {
+            return Some(properties.slot(self.slot));
+        }
         (properties.slot_for(&self.key, Some(self.slot)) == Some(self.slot))
             .then(|| properties.slot(self.slot))
     }

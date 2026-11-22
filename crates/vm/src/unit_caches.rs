@@ -102,12 +102,21 @@ pub(crate) enum SiteOutcome {
     /// A public native getter with no parameters and a direct handler
     /// (`$method->getName()`): the site runs it and stores its value.
     Getter(Getter),
+    /// A public native method with a direct handler and a few arguments
+    /// (`$property->getValue($object)`): the site runs the handler on the
+    /// arguments it finds in their registers and stores its value.
+    Direct(Getter, crate::calls::native_signature::DirectMasks),
     /// Any other native method: the general sequence that follows prepares
     /// and calls it.
     Native,
     /// The VM prepares it (`__call`, an error, a closure, a generator).
     Vm,
 }
+
+// A record is copied out of its cell at every call of a method site: the
+// outcome's variants, the direct one with the masks of its arguments
+// included, stay in 16 bytes.
+const _: () = assert!(std::mem::size_of::<SiteOutcome>() == 16);
 
 impl SiteRecord {
     const EMPTY: SiteRecord = SiteRecord {
