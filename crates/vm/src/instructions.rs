@@ -299,6 +299,12 @@ impl Vm {
             I::ThisOrNull { dst } => self.this_or_null(dst),
             I::Clone { .. } => return Ok(Some(BatchExit::Instruction(instruction))),
             I::InstanceOf { dst, src, class } => self.instance_of(dst, src, class)?,
+            I::InstanceOfBranch { .. }
+            | I::InstanceOfBranchIf { .. }
+            | I::DynamicInstanceOfBranch { .. }
+            | I::DynamicInstanceOfBranchIf { .. } => {
+                self.instance_of_branches(instruction, work)?
+            }
 
             I::CheckReturn { source } => {
                 if self.return_string_coercion_needed(&self.raw_local(source)) {

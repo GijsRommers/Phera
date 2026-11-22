@@ -21,7 +21,7 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::{Reg, SymbolId};
+use phera_bytecode::{Reg, SymbolId, Target};
 use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
@@ -37,40 +37,70 @@ impl Machine<'_> {
         source: Reg,
         symbol: SymbolId,
     ) -> Step {
-        // A `catch` clause is an `instanceof` of the thrown object, reached
-        // while the unwinding may have left a destructor waiting; the VM's
-        // exit runs it before the clause's code, as PHP does.
-        if GUARDED && self.ids.has_doomed() {
+        let Some(answer) = self.instance_of_answer::<GUARDED>(position, source, symbol) else {
             return Step::Slow;
-        }
-        let slot = position.frame.base() + source.index();
-        let answer = match self.registers.window(slot, 1) {
-            [Some(Value::Object(object))] => {
-                let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
-                    return Step::Slow;
-                };
-                match self.instance_target(position, symbol) {
-                    Some(target) => match class.derives_from(&target) {
-                        Some(answer) => answer,
-                        None => return Step::Slow,
-                    },
-                    // A name no class of this request has: nothing is an
-                    // instance of it, and `instanceof` never autoloads.
-                    None if !self.relative_symbol(position, symbol) => false,
-                    None => return Step::Slow,
-                }
-            }
-            // Only an object is an instance; `self` outside a class is an
-            // error the VM raises.
-            [Some(Value::Reference(_))] | [None] | [] => return Step::Slow,
-            [Some(_)] if self.relative_symbol(position, symbol) => return Step::Slow,
-            [Some(_)] => false,
-            _ => return Step::Slow,
         };
         let slots = self.registers.tail_mut(position.frame.base());
         match store::<GUARDED, _>(slots, destination, Value::Bool(answer)) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
+        }
+    }
+
+    /// `InstanceOfBranch` / `InstanceOfBranchIf`: the same answer, jumping to
+    /// `target` when it equals `when` instead of storing it.
+    pub(super) fn instance_of_branch<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        source: Reg,
+        symbol: SymbolId,
+        target: Target,
+        when: bool,
+    ) -> Step {
+        let Some(answer) = self.instance_of_answer::<GUARDED>(position, source, symbol) else {
+            return Step::Slow;
+        };
+        if answer == when {
+            if target.index() < position.ip && self.spend_work() {
+                return Step::Yield;
+            }
+            return Step::Done(target.index());
+        }
+        Step::Done(position.ip)
+    }
+
+    /// The `instanceof` answer for a resolved class name, or `None` when the
+    /// VM must answer it.
+    fn instance_of_answer<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        source: Reg,
+        symbol: SymbolId,
+    ) -> Option<bool> {
+        // A `catch` clause is an `instanceof` of the thrown object, reached
+        // while the unwinding may have left a destructor waiting; the VM's
+        // exit runs it before the clause's code, as PHP does.
+        if GUARDED && self.ids.has_doomed() {
+            return None;
+        }
+        let slot = position.frame.base() + source.index();
+        match self.registers.window(slot, 1) {
+            [Some(Value::Object(object))] => {
+                let class = object.class.as_any().downcast_ref::<Class>()?;
+                match self.instance_target(position, symbol) {
+                    Some(target) => class.derives_from(&target),
+                    // A name no class of this request has: nothing is an
+                    // instance of it, and `instanceof` never autoloads.
+                    None if !self.relative_symbol(position, symbol) => Some(false),
+                    None => None,
+                }
+            }
+            // Only an object is an instance; `self` outside a class is an
+            // error the VM raises.
+            [Some(Value::Reference(_))] | [None] | [] => None,
+            [Some(_)] if self.relative_symbol(position, symbol) => None,
+            [Some(_)] => Some(false),
+            _ => None,
         }
     }
 
