@@ -90,7 +90,8 @@ pub(crate) fn target_mut(instruction: &mut Instruction) -> Option<&mut Target> {
         | Instruction::JumpIf { target, .. }
         | Instruction::JumpIfNot { target, .. }
         | Instruction::JumpIfNull { target, .. }
-        | Instruction::JumpIfNotNull { target, .. } => Some(target),
+        | Instruction::JumpIfNotNull { target, .. }
+        | Instruction::GuardBuiltin { call: target, .. } => Some(target),
         Instruction::ReceiveDefault { passed, .. } => Some(passed),
         Instruction::BindStatic { initialized, .. } => Some(initialized),
         Instruction::FinallyCall { target, .. } => Some(target),
@@ -149,7 +150,8 @@ fn update_facts(function: &Function, facts: &mut [Fact], instruction: Instructio
         | Instruction::LoadBool { dst, .. }
         | Instruction::LoadNull { dst } => set_fact(facts, dst, Scalar),
         Instruction::LoadConst { dst, .. } => set_fact(facts, dst, Shared),
-        Instruction::BuiltinUnary { op, dst, .. } => {
+        Instruction::BuiltinUnary { op, dst, .. }
+        | Instruction::NamespacedBuiltin { op, dst, .. } => {
             facts.fill(Unknown);
             let scalar = !matches!(
                 op,

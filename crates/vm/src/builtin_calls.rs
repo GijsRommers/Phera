@@ -9,6 +9,7 @@ use phera_bytecode::{BuiltinFrame, BuiltinUnary, ConstId, Reg};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Value};
 
+use crate::calls::callback_binding::ArgumentBinding;
 use crate::{Vm, calls::execution_loop::BatchExit};
 
 impl Vm {
@@ -36,12 +37,17 @@ impl Vm {
         Ok(())
     }
 
+    /// A built-in's own instruction. An operand it cannot take as it is goes
+    /// to the native function, bound as `binding`: `Frameless` for
+    /// `\strlen($x)`, which PHP runs as an operator with no frame, `Caller`
+    /// for a namespaced `strlen($x)`, which PHP calls.
     #[cold]
     pub(crate) fn execute_builtin_unary(
         &mut self,
         operation: BuiltinUnary,
         source: Reg,
         destination: Reg,
+        binding: ArgumentBinding,
     ) -> Result<Option<BatchExit>, NativeError> {
         let value = self.read_local(source);
         let name = match operation {
@@ -78,7 +84,7 @@ impl Vm {
                 return Ok(None);
             }
         };
-        self.call_builtin_fallback(name, [value], destination)
+        self.call_builtin_fallback(name, [value], destination, binding)
     }
 
     /// Numeric string keys go through the same normalization as array lookups.
@@ -103,7 +109,12 @@ impl Vm {
                 return Ok(None);
             }
         }
-        self.call_builtin_fallback("array_key_exists", [key, array], destination)
+        self.call_builtin_fallback(
+            "array_key_exists",
+            [key, array],
+            destination,
+            ArgumentBinding::Frameless,
+        )
     }
 
     /// String and integer literals compare without allocating a new haystack.
@@ -135,6 +146,7 @@ impl Vm {
                     "in_array",
                     [needle, Value::Array(values.clone()), Value::Bool(false)],
                     destination,
+                    ArgumentBinding::Frameless,
                 );
             }
         };
@@ -148,9 +160,10 @@ impl Vm {
         name: &str,
         arguments: [Value; N],
         destination: Reg,
+        binding: ArgumentBinding,
     ) -> Result<Option<BatchExit>, NativeError> {
         let mut callee = self.resolve_callee(name)?;
-        callee.argument_binding = crate::calls::callback_binding::ArgumentBinding::Frameless;
+        callee.argument_binding = binding;
         self.prepare_call(callee)?;
         for (index, value) in arguments.into_iter().enumerate() {
             self.store_sent_value(index, value)?;

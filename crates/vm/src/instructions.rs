@@ -13,6 +13,7 @@ use phera_value::{PhpArray, Value};
 
 use crate::Vm;
 use crate::arrays::ArrayWrite;
+use crate::calls::callback_binding::ArgumentBinding;
 use crate::calls::execution_loop::BatchExit;
 use crate::calls::sends::SentArgument;
 
@@ -194,7 +195,13 @@ impl Vm {
                 target,
             } => return self.binary_branch(op, lhs, rhs, target, true, work),
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
-            I::BuiltinUnary { op, dst, src } => return self.execute_builtin_unary(op, src, dst),
+            I::BuiltinUnary { op, dst, src } => {
+                return self.execute_builtin_unary(op, src, dst, ArgumentBinding::Frameless);
+            }
+            I::NamespacedBuiltin { op, dst, src } => {
+                return self.execute_builtin_unary(op, src, dst, ArgumentBinding::Caller);
+            }
+            I::GuardBuiltin { function, call } => self.execute_guard_builtin(function, call)?,
             I::BuiltinFrame { op, dst } => self.execute_builtin_frame(op, dst)?,
             I::ArrayKeyExists { dst, key, array } => {
                 return self.execute_array_key_exists(key, array, dst);

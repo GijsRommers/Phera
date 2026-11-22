@@ -293,7 +293,8 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
         }
         Instruction::LoadNull { dst } => store::<GUARDED, _>(slots, dst, Value::Null),
         Instruction::LoadBool { dst, value } => store::<GUARDED, _>(slots, dst, Value::Bool(value)),
-        Instruction::BuiltinUnary { op, dst, src } => {
+        Instruction::BuiltinUnary { op, dst, src }
+        | Instruction::NamespacedBuiltin { op, dst, src } => {
             builtin_step::<GUARDED, _>(op, dst, src, slots)
         }
         Instruction::Unary {
