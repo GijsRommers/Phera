@@ -398,6 +398,53 @@ impl Machine<'_> {
         result
     }
 
+    /// `AssignConst` and `SendConst`: a literal of the file assigned or sent
+    /// where it is read. Out of line: inlined, these two arms grew `step`
+    /// enough to raise the routes (`LOOP-PLAN.md`, the bisect of
+    /// 2026-11-22).
+    #[inline(never)]
+    fn literal_step<const GUARDED: bool>(
+        &mut self,
+        instruction: Instruction,
+        position: Position,
+    ) -> Step {
+        let base = position.frame.base();
+        match instruction {
+            Instruction::AssignConst { local, constant } => {
+                let literal = self
+                    .code
+                    .cache(position.frame.function)
+                    .constants
+                    .get(constant.index());
+                match literal {
+                    Some(literal) => {
+                        let slots = self.registers.tail_mut(base);
+                        match assign_literal::<GUARDED, _>(slots, local, literal) {
+                            ScalarStep::Fallback => Step::Slow,
+                            _ => Step::Done(position.ip),
+                        }
+                    }
+                    None => Step::Slow,
+                }
+            }
+            Instruction::SendConst { constant } => {
+                match self
+                    .code
+                    .cache(position.frame.function)
+                    .constants
+                    .get(constant.index())
+                {
+                    Some(literal) => match self.send_owned(position, literal.clone()) {
+                        Ok(step) => step,
+                        Err(_) => Step::Slow,
+                    },
+                    None => Step::Slow,
+                }
+            }
+            _ => Step::Slow,
+        }
+    }
+
     /// Whether `frame`'s code fits a register window.
     #[inline(always)]
     fn windowed(&self, frame: Frame) -> bool {
@@ -488,36 +535,8 @@ impl Machine<'_> {
                     }
                 }
             }
-            Instruction::AssignConst { local, constant } => {
-                let literal = self
-                    .code
-                    .cache(position.frame.function)
-                    .constants
-                    .get(constant.index());
-                match literal {
-                    Some(literal) => {
-                        let slots = self.registers.tail_mut(base);
-                        match assign_literal::<GUARDED, _>(slots, local, literal) {
-                            ScalarStep::Fallback => Step::Slow,
-                            _ => Step::Done(ip),
-                        }
-                    }
-                    None => Step::Slow,
-                }
-            }
-            Instruction::SendConst { constant } => {
-                match self
-                    .code
-                    .cache(position.frame.function)
-                    .constants
-                    .get(constant.index())
-                {
-                    Some(literal) => match self.send_owned(position, literal.clone()) {
-                        Ok(step) => step,
-                        Err(_) => Step::Slow,
-                    },
-                    None => Step::Slow,
-                }
+            Instruction::AssignConst { .. } | Instruction::SendConst { .. } => {
+                self.literal_step::<GUARDED>(instruction, position)
             }
             Instruction::SendLocal { local } => match self.send(position, local) {
                 Step::Slow => self.send_reference(position, local),
