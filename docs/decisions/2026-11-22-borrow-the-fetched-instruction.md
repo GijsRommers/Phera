@@ -45,6 +45,38 @@ and 0.38 in the repeat, using the gate's rounded counters. Every pair
 favoured borrowing. Symfony warmed 300 requests and returned identical
 response bytes in both pairs.
 
+## After merging main at `7c91bedb`
+
+The same five-round shape measurement against that main gave:
+
+| Shape | Main instructions | Borrowed instructions | Main cycles | Borrowed cycles |
+| --- | ---: | ---: | ---: | ---: |
+| Loop | 146.289 | 145.291 | 21.162 | 21.993 |
+| Function call | 713.598 | 679.569 | 101.867 | 95.157 |
+| Method call | 892.584 | 857.594 | 137.951 | 130.046 |
+| Property read | 581.282 | 565.291 | 94.274 | 73.436 |
+
+| Route | Pairs | Main M instructions/request | Borrowed M instructions/request | Change |
+| --- | ---: | ---: | ---: | ---: |
+| Laravel `/api/hello` | 6 | 25.70 | 25.30 | −1.56% |
+| Laravel `/api/posts?page=2` | 6 | 108.58 | 107.05 | −1.41% |
+| Symfony `/api/db-yardstick` | 2 | 452.47 | 448.03 | −0.98% |
+
+Each benchmark ran five times per binary. Counts are millions of retired instructions.
+
+| Benchmark | Main low | Borrowed low | Change | Main median | Borrowed median | Change |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| fib | 1,795.5 | 1,707.8 | -4.88% | 1,795.6 | 1,708.0 | -4.88% |
+| calls | 6,066.9 | 5,833.7 | -3.84% | 6,067.1 | 5,833.9 | -3.84% |
+| methods | 19,759.5 | 18,804.7 | -4.83% | 19,919.5 | 18,884.7 | -5.20% |
+| properties | 2,281.1 | 2,218.4 | -2.75% | 2,281.2 | 2,218.8 | -2.74% |
+| hierarchy | 2,251.6 | 2,184.4 | -2.99% | 2,252.0 | 2,184.5 | -3.00% |
+| typed-objects | 5,928.4 | 5,764.9 | -2.76% | 5,929.9 | 5,766.2 | -2.76% |
+| objects | 4,048.9 | 3,904.7 | -3.56% | 4,053.2 | 3,916.1 | -3.38% |
+| function-objects | 4,039.0 | 3,906.6 | -3.28% | 4,042.5 | 3,913.7 | -3.19% |
+| closures | 4,636.2 | 4,509.0 | -2.74% | 4,638.3 | 4,511.3 | -2.74% |
+| framework-patterns | 8,686.8 | 8,351.1 | -3.86% | 8,689.7 | 8,351.5 | -3.89% |
+
 ## Structure: was, is
 
 | Structure | Was | Is |
