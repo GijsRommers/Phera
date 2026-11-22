@@ -78,9 +78,10 @@ impl Vm {
     /// A cached link may have depended on a name remaining unavailable.
     pub(crate) fn inherits_from_pending_type(&self, dependencies: &[Dependency]) -> bool {
         let differs = |name: &str| {
+            let name = phera_bytecode::name_keys::key(&name.to_ascii_lowercase());
             dependencies
                 .iter()
-                .any(|(key, number)| number.is_none() && key.eq_ignore_ascii_case(name))
+                .any(|(key, number)| number.is_none() && *key == name)
         };
         self.autoload
             .pending
@@ -183,7 +184,7 @@ impl Vm {
             {
                 let key = pending.class.name.to_ascii_lowercase();
                 if self.classes.get_lowercase(&key).is_none() {
-                    self.link_new_class(&pending.unit, unit_first, declaration, key)?;
+                    self.link_new_class(&pending.unit, unit_first, declaration)?;
                     work.pop();
                     continue;
                 }
