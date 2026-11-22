@@ -8,6 +8,8 @@
 //! target/release/examples/fork_cost request 2000 'touch=4'      # a request that runs 4 files
 //! target/release/examples/fork_cost request 2000 'touch=4&late=70'
 //! # a request that also loads and declares 70 classes the boot never loaded
+//! target/release/examples/fork_cost --settle request 2000 'touch=4&late=70'
+//! # the same after the worker booted again with those classes declared
 //! # options before the mode: --files 40 --classes 8 --dir <where to write the site>
 //! ```
 //!
@@ -46,6 +48,10 @@ fn main() -> std::process::ExitCode {
 /// The whole program, with the allocation counts of whoever runs it.
 pub fn run(counts: Counts) -> std::process::ExitCode {
     let mut arguments: Vec<String> = std::env::args().skip(1).collect();
+    // `--settle`: let the worker boot again with the classes its requests
+    // autoloaded declared in the snapshot, before anything is measured.
+    let settle = arguments.iter().any(|argument| argument == "--settle");
+    arguments.retain(|argument| argument != "--settle");
     let mut shape = Shape {
         files: 40,
         classes: 8,
@@ -98,7 +104,10 @@ pub fn run(counts: Counts) -> std::process::ExitCode {
         .expect("the async runtime starts");
     let local = tokio::task::LocalSet::new();
     let result = local.block_on(&threads, async {
-        let worker = runtime.web_worker(0);
+        let worker = match settle {
+            true => runtime.web_worker(0).with_background_boots(),
+            false => runtime.web_worker(0),
+        };
         let started = Instant::now();
         match worker.boot(&script, &root).await {
             BootReport::Snapshot { files, .. } => {
@@ -127,6 +136,31 @@ pub fn run(counts: Counts) -> std::process::ExitCode {
                 for _ in 0..3 {
                     let request = request(query);
                     body = worker.handle_request(&script, &root, request).await.body;
+                }
+                if settle {
+                    // Requests until the worker starts its warm-up boot, then
+                    // time for the boot to finish and a request on the new snapshot.
+                    for _ in 0..1000 {
+                        if worker.warmup_boots(&script) > 0 {
+                            break;
+                        }
+                        body = worker
+                            .handle_request(&script, &root, request(query))
+                            .await
+                            .body;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+                    for _ in 0..3 {
+                        body = worker
+                            .handle_request(&script, &root, request(query))
+                            .await
+                            .body;
+                    }
+                    eprintln!(
+                        "settled: {} warm-up boot(s), {} classes declared in the snapshot",
+                        worker.warmup_boots(&script),
+                        worker.warmup_classes(&script).len()
+                    );
                 }
                 let (allocations, bytes, started) = counters(counts);
                 for _ in 0..count {
