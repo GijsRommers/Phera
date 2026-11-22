@@ -11,6 +11,8 @@ indexmap.workspace = true
 phera-extension-api.workspace = true
 # Only for timers: `sleep` and `usleep` wait without blocking the thread.
 tokio.workspace = true
+# The system's monotonic clock for `hrtime()`.
+rustix.workspace = true
 
 [lints]
 workspace = true

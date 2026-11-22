@@ -94,6 +94,9 @@ socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = [
     "rt", "rt-multi-thread", "net", "time", "sync", "signal", "macros",
 ] }
+# The system's monotonic clock reading for `hrtime()`, which PHP takes from
+# `clock_gettime(CLOCK_MONOTONIC)`.
+rustix = { version = "1", features = ["time"] }
 fluent-uri = "0.4.1"
 url = "2.5"
 foldhash = "0.2"

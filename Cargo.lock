@@ -1726,6 +1726,7 @@ dependencies = [
  "indexmap",
  "phera-dotenv",
  "phera-extension-api",
+ "rustix",
  "tokio",
 ]
 
