@@ -31,7 +31,7 @@ pub use arguments::{args, prepare_arguments, prepare_call, prepare_single_argume
 pub use class::{
     AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
     NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeStringProperty,
-    PrepareMethod, PropertyEntry, PropertyType, SyncMethod, Visibility, WindowMethod,
+    PrepareMethod, PropertyEntry, PropertyType, ReadyMethod, SyncMethod, Visibility, WindowMethod,
 };
 pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;

@@ -33,7 +33,8 @@ pub(crate) fn register(registry: &mut Registry) {
                     "__construct",
                     const { &[Param::new("function", ParamType::ClosureOrString)] },
                     construct,
-                ),
+                )
+                .with_ready(|c, o, a| Some(construct(c, Some(o), a))),
                 MethodEntry::public("isAnonymous", &[], |_, o, _| {
                     data(o, |f| Value::Bool(f.anonymous))
                 }),
@@ -244,7 +245,7 @@ fn construct(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value
     let function = engine(context)?.reflect_function(&target)?;
     let object = receiver(this)?;
     keep_closure(object, &function.target);
-    bind(object, Some(&function.name.clone()), function)
+    bind(object, Some(&function.name), function.clone())
 }
 
 pub(crate) fn keep_closure(object: &Object, target: &FunctionTarget) {

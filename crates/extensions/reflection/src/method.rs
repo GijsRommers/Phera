@@ -8,7 +8,7 @@ use phera_extension_api::{
     ParamType, PhpString, Registry, Value, args,
 };
 
-use crate::class::{reflect_class, target_class};
+use crate::class::{load_target_class, loaded_target_class, reflect_class};
 use crate::function::{
     ARGS, ARRAY, argument_array, data, forwarded_arguments, make, method, reflected, set_class,
 };
@@ -49,7 +49,8 @@ pub(crate) fn register(registry: &mut Registry) {
                         context.deprecated("Calling ReflectionMethod::__construct() with 1 argument is deprecated, use ReflectionMethod::createFromMethodName() instead".into());
                     }
                     Ok(phera_extension_api::MethodPreparation::Default)
-                }),
+                })
+                .with_ready(construct_loaded),
                 MethodEntry::public_async(
                     "createFromMethodName",
                     const { &[Param::new("method", ParamType::String)] },
@@ -143,9 +144,13 @@ fn construct(
         let first = arguments
             .first()
             .ok_or_else(|| exception("Expected a class or method name"))?;
-        let (class, name) = match args::string(&arguments, 1) {
-            Some(name) => (target_class(first)?, name.to_string_lossy()),
-            None => match first {
+        let (class, name) = if let Some(name) = args::string(&arguments, 1) {
+            (
+                load_target_class(context, first).await?,
+                name.to_string_lossy(),
+            )
+        } else {
+            let (class, name) = match first {
                 Value::String(name) => split_method(
                     &name.to_string_lossy(),
                     "ReflectionMethod::__construct()",
@@ -157,25 +162,60 @@ fn construct(
                         "ReflectionMethod::__construct() expects exactly 2 arguments, 1 given",
                     ));
                 }
-            },
+            };
+            (engine(context)?.reflect_class(&class).await?, name)
         };
-        engine(context)?.reflect_class(&class).await?;
-        let target = method_target(first, class, name);
-        let function = engine(context)?.reflect_function(&target)?;
-        crate::function::keep_closure(this, &target);
-        set_class(this, method(&function)?);
-        bind(this, Some(&function.name.clone()), function)
+        bind_method(context, this, first, class.id, name)
     })
 }
 
+/// Resolve `new ReflectionMethod($object, 'run')` without running PHP.
+/// The one-argument form keeps its deprecation and parsing in the binder.
+fn construct_loaded(
+    context: &mut dyn Context,
+    this: &Rc<Object>,
+    args: &[Value],
+) -> Option<NativeResult> {
+    let [first, Value::String(name)] = args else {
+        return None;
+    };
+    let class = loaded_target_class(context, first)?;
+    Some(bind_method(
+        context,
+        this,
+        first,
+        class.id,
+        name.to_string_lossy(),
+    ))
+}
+
+fn bind_method(
+    context: &mut dyn Context,
+    this: &Object,
+    first: &Value,
+    class: u32,
+    name: String,
+) -> NativeResult {
+    let target =
+        closure_invoke_target(first, &name).unwrap_or(FunctionTarget::LinkedMethod { class, name });
+    let function = engine(context)?.reflect_function(&target)?;
+    crate::function::keep_closure(this, &target);
+    set_class(this, method(&function)?);
+    bind(this, Some(&function.name), function.clone())
+}
+
 pub(crate) fn method_target(receiver: &Value, class: String, name: String) -> FunctionTarget {
+    closure_invoke_target(receiver, &name).unwrap_or(FunctionTarget::Method { class, name })
+}
+
+fn closure_invoke_target(receiver: &Value, name: &str) -> Option<FunctionTarget> {
     if name.eq_ignore_ascii_case("__invoke")
         && let Value::Object(closure) = receiver
         && closure.class.is_instance_of("Closure")
     {
-        FunctionTarget::ClosureInvoke(Rc::downgrade(closure))
+        Some(FunctionTarget::ClosureInvoke(Rc::downgrade(closure)))
     } else {
-        FunctionTarget::Method { class, name }
+        None
     }
 }
 
