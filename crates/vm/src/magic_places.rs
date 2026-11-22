@@ -79,9 +79,6 @@ impl Vm {
     ) -> Result<PathRead, NativeError> {
         let missing = fetch_missing(mode);
         let register = self.base_register(&place, Creation::Existing, missing)?;
-        if register.is_some() && crate::static_places::static_base(place.base()?).is_some() {
-            self.check_static_read(&place, missing)?;
-        }
         let value = register.map_or(Value::Null, |register| self.read_root(register, missing));
         Ok(PathRead {
             place,

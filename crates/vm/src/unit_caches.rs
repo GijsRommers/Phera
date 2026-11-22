@@ -124,6 +124,8 @@ impl SiteRecord {
 pub(crate) enum CachedSite {
     Empty,
     Property(Rc<crate::property_sites::PropertyEntry>),
+    /// A static property read (see `crate::static_sites`).
+    Static(Rc<crate::static_sites::StaticEntry>),
     Function(Box<crate::calls::pending::LinkedFunction>),
 }
 
@@ -332,6 +334,7 @@ impl crate::snapshot::ForkCopy for CachedSite {
         match self {
             CachedSite::Empty => CachedSite::Empty,
             CachedSite::Property(entry) => CachedSite::Property(entry.clone()),
+            CachedSite::Static(entry) => CachedSite::Static(entry.clone()),
             CachedSite::Function(linked) => CachedSite::Function(Box::new(linked.fork_copy(fork))),
         }
     }

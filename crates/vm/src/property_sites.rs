@@ -58,19 +58,20 @@ impl PropertyEntry {
     /// the object's class and that scope and the value fits the declared
     /// type as it is, as [`Vm::write_property_site`] does; `false`, with
     /// nothing changed, otherwise (a setter, a coercion, a reference, a
-    /// readonly property: the general path).
+    /// readonly property: the general path). An integer written to a
+    /// `float` property is stored as a float, which is also the
+    /// assignment's result: the VM's site write gives that, so the loop
+    /// leaves it to the VM.
     pub(crate) fn write_matching(
         &self,
         object: &Object,
         scope: Option<&Rc<crate::classes::Class>>,
         value: &Value,
     ) -> bool {
-        if !self.matches(object, scope) {
-            return false;
-        }
-        let widened = self.write_rule.widened(value);
-        let value = widened.as_ref().unwrap_or(value);
-        if matches!(value, Value::Reference(_)) || !self.write_rule.accepts(value) {
+        if !self.matches(object, scope)
+            || matches!(value, Value::Reference(_))
+            || !self.write_rule.accepts(value)
+        {
             return false;
         }
         crate::property_storage::write_direct_known(object, self.known(), value, || {
@@ -566,7 +567,6 @@ impl Vm {
             return Ok(false);
         };
         // `public float $x` assigned an int stores the float, as PHP does.
-        let original = value;
         let widened = entry.write_rule.widened(value);
         let value = widened.as_ref().unwrap_or(value);
         let accepted = !matches!(value, Value::Reference(_)) && entry.write_rule.accepts(value);
@@ -586,8 +586,10 @@ impl Vm {
         ) {
             return Ok(false);
         }
+        // The assignment's result is the value stored (`1.0` for a `float`
+        // property assigned `1`).
         if let Some((_, result)) = assignment {
-            self.set(result, original.clone());
+            self.set(result, value.clone());
         }
         Ok(true)
     }
