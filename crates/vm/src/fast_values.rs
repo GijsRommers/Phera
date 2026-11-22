@@ -57,6 +57,54 @@ pub(crate) fn value_step<const GUARDED: bool>(
                 None => ScalarStep::Fallback,
             }
         }
+        Instruction::BinaryBranch {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => {
+            let (Some(Some(left)), Some(Some(right))) =
+                (slots.get(lhs.index()), slots.get(rhs.index()))
+            else {
+                return ScalarStep::Fallback;
+            };
+            branch_on_binary::<false>(op, &left.deref(), &right.deref(), target, ip)
+        }
+        Instruction::BinaryBranchIf {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => {
+            let (Some(Some(left)), Some(Some(right))) =
+                (slots.get(lhs.index()), slots.get(rhs.index()))
+            else {
+                return ScalarStep::Fallback;
+            };
+            branch_on_binary::<true>(op, &left.deref(), &right.deref(), target, ip)
+        }
+        Instruction::BinaryIntBranch {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => {
+            let Some(Some(left)) = slots.get(lhs.index()) else {
+                return ScalarStep::Fallback;
+            };
+            branch_on_binary::<false>(op, &left.deref(), &Value::Int(i64::from(rhs)), target, ip)
+        }
+        Instruction::BinaryIntBranchIf {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => {
+            let Some(Some(left)) = slots.get(lhs.index()) else {
+                return ScalarStep::Fallback;
+            };
+            branch_on_binary::<true>(op, &left.deref(), &Value::Int(i64::from(rhs)), target, ip)
+        }
         Instruction::Unary { op, dst, src } => {
             let Some(Some(value)) = slots.get(src.index()) else {
                 return ScalarStep::Fallback;
@@ -91,9 +139,10 @@ pub(crate) fn value_step<const GUARDED: bool>(
     }
 }
 
-/// `JumpIfNull` (`when_null`) or `JumpIfNotNull`. An unset register reads
-/// as null without a warning, as in the general handler: these follow a
-/// quiet read (`??`, `?->`).
+/// `JumpIfNull` (`when_null`) or `JumpIfNotNull`. An unset register falls
+/// back: the general handler reads it as null, warning when it is a named
+/// local, as in PHP for `$undef === null` (a `??` always tests a register a
+/// quiet read filled).
 #[inline(always)]
 fn jump_on_null(
     slots: &[Option<Value>],
@@ -102,10 +151,10 @@ fn jump_on_null(
     when_null: bool,
     ip: &mut usize,
 ) -> ScalarStep {
-    let Some(slot) = slots.get(register.index()) else {
+    let Some(Some(value)) = slots.get(register.index()) else {
         return ScalarStep::Fallback;
     };
-    let is_null = slot.as_ref().is_none_or(|value| value.deref().is_null());
+    let is_null = value.deref().is_null();
     if is_null == when_null {
         *ip = target.index();
     }
@@ -206,5 +255,25 @@ impl Diagnostics for Silent {
 
     fn deprecated(&mut self, _message: String) {
         self.raised.set(true);
+    }
+}
+
+/// Run a comparison in the value tier and jump when its truthiness equals WHEN.
+#[inline(always)]
+fn branch_on_binary<const WHEN: bool>(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    target: Target,
+    ip: &mut usize,
+) -> ScalarStep {
+    match quiet_binary(op, left, right) {
+        Some(value) => {
+            if to_bool(&value) == WHEN {
+                *ip = target.index();
+            }
+            ScalarStep::Complete
+        }
+        None => ScalarStep::Fallback,
     }
 }

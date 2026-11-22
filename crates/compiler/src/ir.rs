@@ -315,6 +315,29 @@ pub enum Instruction {
         value: Reg,
         target: Target,
     },
+    /// Branch when the value is not null; emits JumpIfNotNull. A condition
+    /// `$x === null` / `$x !== null` lowers to `BranchNull`/`BranchNotNull`.
+    BranchNotNull {
+        value: Reg,
+        target: Target,
+    },
+    /// Compare two registers and branch on the result; emits BinaryBranch.
+    /// Used where the comparison's value is only a condition's decision.
+    BranchCompare {
+        operator: Binary,
+        left: Reg,
+        right: Reg,
+        target: Target,
+        when: bool,
+    },
+    /// Compare a register with an integer literal and branch; emits BinaryIntBranch.
+    BranchCompareInt {
+        operator: Binary,
+        left: Reg,
+        rhs: i32,
+        target: Target,
+        when: bool,
+    },
     /// Prepare and invoke an evaluated callee; emits InitDynamicCall, argument sends, and Call.
     Call {
         result: phera_bytecode::CallResult,

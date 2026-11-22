@@ -142,3 +142,230 @@ fn relative_class_constants_in_methods_use_the_named_form() {
         }
     }
 }
+
+/// The instructions of one compiled `f`, for the condition shapes below.
+fn function_instructions(source: &str) -> Vec<phera_bytecode::Instruction> {
+    let unit = compile(source, "conditions.php").expect("valid PHP");
+    unit.functions
+        .iter()
+        .find(|function| function.name == "f")
+        .expect("function f")
+        .instructions
+        .to_vec()
+}
+
+/// How many instructions of `code` match `kind`.
+fn count(
+    code: &[phera_bytecode::Instruction],
+    kind: impl Fn(&phera_bytecode::Instruction) -> bool,
+) -> usize {
+    code.iter().filter(|instruction| kind(instruction)).count()
+}
+
+use phera_bytecode::{BinaryOp, Instruction};
+
+/// `if ($a === $b)` is one compare-and-branch, with no temporary boolean.
+#[test]
+fn identical_condition_is_one_binary_branch() {
+    let code = function_instructions(
+        "<?php function f($a, $b) { if ($a === $b) { return 1; } return 0; }",
+    );
+    assert_eq!(
+        count(&code, |i| matches!(
+            i,
+            Instruction::BinaryBranch {
+                op: BinaryOp::Identical,
+                ..
+            }
+        )),
+        1
+    );
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Binary { .. })), 0);
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNot { .. })),
+        0
+    );
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Move { .. })), 0);
+}
+
+/// `if ($a !== null)` and `if (null === $a)` reuse the null test itself.
+#[test]
+fn null_conditions_reuse_the_null_jumps() {
+    let code = function_instructions(
+        "<?php function f($a) { if ($a !== null) { return 1; } if (null === $a) { return 2; } return 0; }",
+    );
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNull { .. })),
+        1
+    );
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNotNull { .. })),
+        1
+    );
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::LoadNull { .. })),
+        0
+    );
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Binary { .. })), 0);
+}
+
+/// A small integer literal rides inside the branch instruction, on either side.
+#[test]
+fn integer_literal_conditions_carry_the_literal() {
+    let code = function_instructions(
+        "<?php function f($a) { if ($a < 10) { return 1; } if (10 > $a) { return 2; } return 0; }",
+    );
+    let branches: Vec<_> = code
+        .iter()
+        .filter_map(|i| match i {
+            Instruction::BinaryIntBranch { op, lhs, rhs, .. } => Some((*op, *lhs, *rhs)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        branches,
+        [
+            (BinaryOp::Less, phera_bytecode::Reg(0), 10),
+            (BinaryOp::Less, phera_bytecode::Reg(0), 10)
+        ],
+        "`10 > $a` compares as `$a < 10`"
+    );
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Binary { .. })), 0);
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNot { .. })),
+        0
+    );
+}
+
+/// `if ($a)` and `if (!$a)` branch on the local itself: no Move, no Unary Not.
+#[test]
+fn plain_local_conditions_jump_on_the_local() {
+    let code = function_instructions(
+        "<?php function f($a) { if ($a) { return 1; } if (!$a) { return 2; } return 0; }",
+    );
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNot { .. })),
+        1
+    );
+    assert_eq!(count(&code, |i| matches!(i, Instruction::JumpIf { .. })), 1);
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Move { .. })), 0);
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Unary { .. })), 0);
+}
+
+/// Loops compile their condition as one branch per round.
+#[test]
+fn loop_conditions_are_one_branch_per_round() {
+    let while_code =
+        function_instructions("<?php function f($k, $n) { while ($k < $n) { $k++; } return $k; }");
+    assert_eq!(
+        count(&while_code, |i| matches!(
+            i,
+            Instruction::BinaryBranch {
+                op: BinaryOp::Less,
+                ..
+            }
+        )),
+        1
+    );
+    assert_eq!(
+        count(&while_code, |i| matches!(i, Instruction::Binary { .. })),
+        0
+    );
+    let do_code = function_instructions(
+        "<?php function f($k, $n) { do { $k++; } while ($k < $n); return $k; }",
+    );
+    assert_eq!(
+        count(&do_code, |i| matches!(
+            i,
+            Instruction::BinaryBranchIf {
+                op: BinaryOp::Less,
+                ..
+            }
+        )),
+        1
+    );
+    let for_code = function_instructions(
+        "<?php function f($k, $n) { for ($k = 0; $k < $n; $k++) { } return $k; }",
+    );
+    assert_eq!(
+        count(&for_code, |i| matches!(
+            i,
+            Instruction::BinaryBranch {
+                op: BinaryOp::Less,
+                ..
+            }
+        )),
+        1
+    );
+    let literal_for = function_instructions(
+        "<?php function f($k) { for ($k = 0; $k < 10; $k++) { } return $k; }",
+    );
+    assert_eq!(
+        count(&literal_for, |i| matches!(
+            i,
+            Instruction::BinaryIntBranch {
+                op: BinaryOp::Less,
+                rhs: 10,
+                ..
+            }
+        )),
+        1
+    );
+}
+
+/// A ternary's condition branches directly into its two arms.
+#[test]
+fn ternary_condition_branches_directly() {
+    let code = function_instructions("<?php function f($a, $b) { return $a === $b ? 1 : 2; }");
+    assert_eq!(
+        count(&code, |i| matches!(
+            i,
+            Instruction::BinaryBranch {
+                op: BinaryOp::Identical,
+                ..
+            }
+        )),
+        1
+    );
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Binary { .. })), 0);
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNot { .. })),
+        0
+    );
+}
+
+/// `&&` and `||` in a condition are jumps per operand, with no boolean value.
+#[test]
+fn short_circuit_conditions_are_plain_jumps() {
+    let code = function_instructions(
+        "<?php function f($a, $b, $c) { if ($a && $b || $c) { return 1; } return 0; }",
+    );
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::JumpIfNot { .. })),
+        2
+    );
+    assert_eq!(count(&code, |i| matches!(i, Instruction::JumpIf { .. })), 1);
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Unary { .. })), 0);
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Move { .. })), 0);
+    assert_eq!(count(&code, |i| matches!(i, Instruction::Binary { .. })), 0);
+}
+
+/// A comparison whose value is used still compiles to `Binary`.
+#[test]
+fn comparison_as_a_value_keeps_binary() {
+    let code = function_instructions("<?php function f($a, $b) { return $a === $b; }");
+    assert_eq!(
+        count(&code, |i| matches!(
+            i,
+            Instruction::Binary {
+                op: BinaryOp::Identical,
+                ..
+            }
+        )),
+        1
+    );
+    assert_eq!(
+        count(&code, |i| matches!(i, Instruction::BinaryBranch { .. })),
+        0
+    );
+}

@@ -83,6 +83,9 @@ pub(crate) fn target(instruction: &Instruction) -> Option<Target> {
 pub(crate) fn target_mut(instruction: &mut Instruction) -> Option<&mut Target> {
     match instruction {
         Instruction::BinaryIntBranch { target, .. }
+        | Instruction::BinaryIntBranchIf { target, .. }
+        | Instruction::BinaryBranch { target, .. }
+        | Instruction::BinaryBranchIf { target, .. }
         | Instruction::Jump { target }
         | Instruction::JumpIf { target, .. }
         | Instruction::JumpIfNot { target, .. }

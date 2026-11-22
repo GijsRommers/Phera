@@ -27,6 +27,16 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn replace_caller_variable(&mut self, name: &str, value: Value) -> Result<(), NativeError> {
+        if self.current().is_none() {
+            self.set_global(name, value);
+            return Ok(());
+        }
+        let local = self.named_slot(name)?;
+        self.set(local, value);
+        Ok(())
+    }
+
     fn is_snapshot_boot(&self) -> bool {
         self.snapshot.mode == crate::SnapshotMode::Boot
     }
@@ -549,6 +559,46 @@ impl Context for Vm {
         arguments: &phera_value::PhpArray,
     ) -> LocalFuture<'_, NativeResult> {
         match self.resolve_callable(callable) {
+            Ok(callee) => self.invoke_array_callback(callee, arguments),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
+    fn forward_static_callback(
+        &mut self,
+        function: &str,
+        callable: &Value,
+        arguments: &phera_value::PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        use crate::calls::call_state::CallTarget;
+
+        let call = self
+            .current()
+            .and_then(|frame| frame.called())
+            .ok_or_else(|| {
+                NativeError::error(format!(
+                    "Cannot call {function}() when no class scope is active"
+                ))
+            });
+        let resolved = call.and_then(|called| {
+            let mut callee = self.resolve_callable(callable)?;
+            match &mut callee.target {
+                CallTarget::Method { context, .. }
+                    if context.receiver.is_none() && called.is_a(&context.called.name) =>
+                {
+                    context.called = called;
+                }
+                CallTarget::Magic(magic)
+                    if magic.context.receiver.is_none()
+                        && called.is_a(&magic.context.called.name) =>
+                {
+                    std::rc::Rc::make_mut(magic).context.called = called;
+                }
+                _ => {}
+            }
+            Ok(callee)
+        });
+        match resolved {
             Ok(callee) => self.invoke_array_callback(callee, arguments),
             Err(error) => Box::pin(std::future::ready(Err(error))),
         }

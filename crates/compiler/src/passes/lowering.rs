@@ -387,6 +387,58 @@ impl Tables<'_> {
                 value,
                 target: Target(target.0 as u32),
             },
+            Old::BranchNotNull { value, target } => Instruction::JumpIfNotNull {
+                value,
+                target: Target(target.0 as u32),
+            },
+            Old::BranchCompare {
+                operator,
+                left,
+                right,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                if when {
+                    Instruction::BinaryBranchIf {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs: right,
+                        target,
+                    }
+                } else {
+                    Instruction::BinaryBranch {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs: right,
+                        target,
+                    }
+                }
+            }
+            Old::BranchCompareInt {
+                operator,
+                left,
+                rhs,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                if when {
+                    Instruction::BinaryIntBranchIf {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs,
+                        target,
+                    }
+                } else {
+                    Instruction::BinaryIntBranch {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs,
+                        target,
+                    }
+                }
+            }
             Old::Suppress(true) => Instruction::BeginSilence,
             Old::Suppress(false) => Instruction::EndSilence,
             Old::ReturnReference(src) => Instruction::ReturnReference { src },

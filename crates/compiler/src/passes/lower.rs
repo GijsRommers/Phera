@@ -223,6 +223,11 @@ impl Tables<'_> {
                 | Instruction::JumpIf { target, .. }
                 | Instruction::JumpIfNot { target, .. }
                 | Instruction::JumpIfNull { target, .. }
+                | Instruction::JumpIfNotNull { target, .. }
+                | Instruction::BinaryIntBranch { target, .. }
+                | Instruction::BinaryIntBranchIf { target, .. }
+                | Instruction::BinaryBranch { target, .. }
+                | Instruction::BinaryBranchIf { target, .. }
                 | Instruction::IterNext { end: target, .. }
                 | Instruction::IterNextKeyed { end: target, .. } => Some(target),
                 _ => None,

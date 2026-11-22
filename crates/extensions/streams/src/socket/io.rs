@@ -16,7 +16,7 @@ impl Io {
         let limit = length
             .and_then(|length| usize::try_from(length).ok())
             .unwrap_or(usize::MAX);
-        if self.socket.listener || limit == 0 {
+        if self.socket.listening() || limit == 0 {
             return Ok(Vec::new());
         }
         let mut buffer = self.socket.input.lock().await;

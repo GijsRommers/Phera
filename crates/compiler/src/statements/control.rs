@@ -104,22 +104,16 @@ impl Compiler<'_> {
         for (condition, body, line) in branches {
             let mark = self.mark_temporaries();
             let start = self.temporaries_start();
-            let register = self.compile_expression(condition)?;
+            let skips = self.compile_condition(condition, false, line)?;
             let temporaries = self.temporaries_since(start);
-            let skip = self.emit(
-                Instruction::Branch {
-                    value: register,
-                    target: Target(0),
-                    when: false,
-                },
-                line,
-            );
             // The condition's values are freed on both ways out, as in PHP.
             self.clear_condition_temporaries(&temporaries, line);
             self.release_temporaries(mark);
             self.block(body, DeclarationTiming::AtExecution)?;
             ends.push(self.emit(Instruction::Jump(Target(0)), line));
-            self.patch(skip, self.position());
+            for skip in &skips {
+                self.patch(*skip, self.position());
+            }
             self.clear_condition_temporaries(&temporaries, line);
         }
         if let Some(body) = otherwise {
@@ -142,16 +136,8 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         let start = self.position();
         let mark = self.temporaries_start();
-        let register = self.compile_expression(condition)?;
+        let ends = self.compile_condition(condition, false, line)?;
         let condition = self.temporaries_since(mark);
-        let end = self.emit(
-            Instruction::Branch {
-                value: register,
-                target: Target(0),
-                when: false,
-            },
-            line,
-        );
         self.clear_condition_temporaries(&condition, line);
         self.loops.push(Loop {
             start: self.position(),
@@ -161,7 +147,9 @@ impl Compiler<'_> {
         });
         self.block(body, DeclarationTiming::AtExecution)?;
         self.emit(Instruction::Jump(Target(start)), line);
-        self.patch(end, self.position());
+        for end in &ends {
+            self.patch(*end, self.position());
+        }
         self.clear_condition_temporaries(&condition, line);
         self.loop_end(start);
 

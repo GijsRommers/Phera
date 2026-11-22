@@ -14,7 +14,7 @@
 //! [`LoopExit::Slow`]; the VM runs that one instruction through
 //! `Vm::execute` and starts the loop again where the frame now is.
 
-use phera_bytecode::{BinaryOp, Instruction, Reg};
+use phera_bytecode::{BinaryOp, Instruction, Reg, Target};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
@@ -56,6 +56,20 @@ pub(crate) enum BatchExit {
         dst: Reg,
         lhs: Reg,
         rhs: Reg,
+    },
+    /// A compare-and-branch with an undefined operand: warn, then decide.
+    UndefinedBinaryBranch {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: Reg,
+        target: Target,
+        when: bool,
+    },
+    /// A pending string comparison whose result decides a branch.
+    CompareBranch {
+        pending: crate::string_comparison::PendingComparison,
+        target: Target,
+        when: bool,
     },
     /// The frame that native code called has returned this value.
     Returned(Value),
@@ -525,6 +539,10 @@ impl Machine<'_> {
             // Listed, so that the instructions further_step never takes do
             // not pay for a call to it on their way to the VM.
             Instruction::Binary { .. }
+            | Instruction::BinaryBranch { .. }
+            | Instruction::BinaryBranchIf { .. }
+            | Instruction::BinaryIntBranch { .. }
+            | Instruction::BinaryIntBranchIf { .. }
             | Instruction::Unary { .. }
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }

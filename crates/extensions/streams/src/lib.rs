@@ -27,6 +27,7 @@ mod handles;
 mod include_path;
 mod include_stream;
 pub use include_stream::{IncludeSource, include_source, wraps_include};
+mod file_details;
 mod ini;
 mod input;
 mod io_policy;
@@ -69,6 +70,11 @@ pub use input::RequestInput;
 pub use path_text::parent as dirname_parent;
 pub use request::{creation_mask, new_resource};
 pub use request::{request_input, set_request, track_standard};
+pub use socket::descriptor::{
+    close_socket_stream, export_socket_stream, import_socket_stream, received_file_stream,
+    set_socket_stream_blocking, socket_stream_blocking,
+};
+pub use socket::{Connection as SocketConnection, Socket as StreamSocket};
 pub use terminal::{stream_kind, with_descriptor};
 pub use whole_write::append_log;
 pub use wrapper::standard_constants;
@@ -112,6 +118,7 @@ impl Extension for Streams {
         ini::register(registry);
         locking::register(registry);
         metadata::register(registry);
+        file_details::register(registry);
         mutations::register(registry);
         path_text::register(registry);
         pattern::register(registry);
