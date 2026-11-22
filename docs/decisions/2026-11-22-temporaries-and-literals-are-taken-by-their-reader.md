@@ -27,10 +27,10 @@ other pass, marks the places where a temporary has exactly one reader:
 
 The owner asked for the value shuffle bytecode to go. On the Symfony route
 a request executes about 106,500 `Clear`s, 38,000 `LoadConst`s and 38,000
-`Move`s of 430,700 instructions; the receiver's `Clear` alone is about a
-fifth of the `Clear`s, an `Assign` or send of a temporary another sixth, and
-a literal loaded only to be assigned or sent another fifth. Each is a
-dispatch, and each copy is a reference-count increment that a `Clear`
+`Move`s of 430,700 instructions. Of the shares Fable counted, the
+method receiver's `Clear` is 22.7%, an `Assign` of a temporary 10.6% and a
+send of one 4.9%; a `LoadConst` feeding a `SendValue` is 9.6% and one
+feeding an `Assign` 9.1%. Each is a dispatch, and each copy is a reference-count increment that a `Clear`
 undoes.
 
 Destructor order follows PHP's: a temporary receiver is released when the
