@@ -183,34 +183,6 @@ fn frees_on_drop(slot: &Option<Value>) -> bool {
     }
 }
 
-/// `(bool) $value` of a boolean and `(string) $value` of an integer or a
-/// string: nothing to report. Any other operand (a float follows the
-/// precision setting, an array warns, an object may run `__toString`) and
-/// any other cast convert in the general handler.
-#[inline(never)]
-fn cast_step<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
-    to: phera_bytecode::CastKind,
-    destination: Reg,
-    source: Reg,
-    slots: &mut S,
-) -> ScalarStep {
-    let value = match (to, slots.slot(source)) {
-        (phera_bytecode::CastKind::Bool, Some(Some(Value::Bool(value)))) => Value::Bool(*value),
-        (phera_bytecode::CastKind::String, Some(Some(Value::String(text)))) => {
-            Value::String(text.clone())
-        }
-        (phera_bytecode::CastKind::String, Some(Some(Value::Int(integer)))) => {
-            match phera_value::to_php_string(&Value::Int(*integer), &mut phera_value::NoDiagnostics)
-            {
-                Ok(text) => Value::String(text),
-                Err(_) => return ScalarStep::Fallback,
-            }
-        }
-        _ => return ScalarStep::Fallback,
-    };
-    store::<GUARDED, _>(slots, destination, value)
-}
-
 /// Builtins with no coercion can read the local directly.
 #[inline(never)]
 fn builtin_step<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
@@ -335,7 +307,18 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             };
             store_integer::<GUARDED, _>(slots, dst, negative)
         }
-        Instruction::Cast { to, dst, src } => cast_step::<GUARDED, _>(to, dst, src, slots),
+        Instruction::Cast {
+            to: phera_bytecode::CastKind::Bool,
+            dst,
+            src,
+        } => {
+            // Only a value that is a boolean already; a real conversion may warn.
+            let Some(Some(Value::Bool(value))) = slots.slot(src) else {
+                return ScalarStep::Fallback;
+            };
+            let value = *value;
+            store::<GUARDED, _>(slots, dst, Value::Bool(value))
+        }
         Instruction::Move { dst, src } => {
             if let Some(integer) = integer_at(slots, src) {
                 return store_integer::<GUARDED, _>(slots, dst, integer);

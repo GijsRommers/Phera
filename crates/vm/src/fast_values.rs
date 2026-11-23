@@ -7,6 +7,7 @@
 //! $timeout = $options['timeout'] ?? 30;  // FetchIndex with a string key, JumpIfNull
 //! if (!$done) { ... }                 // Unary Not
 //! $items = [];                        // NewArray
+//! $key = (string) $id;                // Cast to string, of an integer or a string
 //! ```
 //!
 //! `crate::fast` does integer instructions inline in the loop. These are
@@ -31,10 +32,24 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use phera_bytecode::{BinaryOp, FetchMode, Instruction, Reg, Target, UnaryOp};
+use phera_bytecode::{BinaryOp, CastKind, FetchMode, Instruction, Reg, Target, UnaryOp};
 use phera_value::{ArrayKey, Diagnostics, PhpArray, Value, to_bool};
 
 use crate::fast::{ScalarStep, store};
+
+/// `(string) $value` for an integer or a string: the digits as PHP writes
+/// them, or the string itself. Any other operand (a float follows the
+/// precision setting, an array warns, an object may run `__toString`)
+/// converts in the general handler.
+fn cast_to_string(operand: Option<&Option<Value>>) -> Option<phera_value::PhpString> {
+    match operand? {
+        Some(Value::Int(integer)) => {
+            phera_value::to_php_string(&Value::Int(*integer), &mut phera_value::NoDiagnostics).ok()
+        }
+        Some(Value::String(text)) => Some(text.clone()),
+        _ => None,
+    }
+}
 
 /// Runs `instruction` if it is one of the cases above; `Fallback`, with
 /// nothing changed, for anything else.
@@ -115,6 +130,14 @@ pub(crate) fn value_step<const GUARDED: bool>(
                 None => ScalarStep::Fallback,
             }
         }
+        Instruction::Cast {
+            to: CastKind::String,
+            dst,
+            src,
+        } => match cast_to_string(slots.get(src.index())) {
+            Some(text) => store::<GUARDED, _>(slots, dst, Value::String(text)),
+            None => ScalarStep::Fallback,
+        },
         Instruction::JumpIfNull { value, target } => jump_on_null(slots, value, target, true, ip),
         Instruction::JumpIfNotNull { value, target } => {
             jump_on_null(slots, value, target, false, ip)
