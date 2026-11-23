@@ -462,7 +462,9 @@ fn push_class_type_rule(
         return;
     }
     let start = keys_out.len() as u16;
-    let interned = phera_bytecode::name_keys::keys(names);
+    // Class keys number lowercased names (`ClassTable::by_key`).
+    let lowercase: Vec<String> = names.iter().map(|name| name.to_ascii_lowercase()).collect();
+    let interned = phera_bytecode::name_keys::keys(lowercase.iter().map(String::as_str));
     let len = interned.len() as u16;
     keys_out.extend(interned.iter().copied());
     rules.push(ClassTypeRule {
