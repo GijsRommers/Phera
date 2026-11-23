@@ -23,7 +23,6 @@ impl ClassDefinitions {
                 operations: super::operations::ClassOperations::default(),
                 origin: super::class::ClassOrigin::Native,
                 identity: identity.clone(),
-                declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: std::collections::HashSet::new(),
                 name_value: phera_value::Value::interned(b"stdClass"),
                 name: "stdClass".into(),
@@ -260,7 +259,6 @@ impl ClassDefinitions {
                         super::class::ClassOrigin::Native
                     },
                     identity: identity.clone(),
-                    declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                     ancestors: super::class::ancestor_names(&parent, &interfaces),
                     name_value: phera_value::Value::interned(entry.name.as_bytes()),
                     name: entry.name.into(),

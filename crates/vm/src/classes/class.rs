@@ -19,10 +19,6 @@ pub(crate) struct Class {
     pub(crate) origin: ClassOrigin,
     /// The owning Rc can be recovered from an object's borrowed ClassHandle without a name lookup.
     pub(crate) identity: std::rc::Weak<Class>,
-    /// Only compiled declaration names enter this cache, not arbitrary is_a inputs.
-    /// Keyed by this class and resolved declaration name; immutable ancestry means
-    /// results cannot change during the request, including cached negative results.
-    pub(crate) declaration_matches: std::cell::RefCell<HashMap<String, bool>>,
     pub(crate) name: String,
     /// Class names are immutable PHP strings, shared by self/static/parent::class.
     pub(crate) name_value: Value,
@@ -370,21 +366,8 @@ pub(crate) fn ancestor_names(
 }
 
 impl Class {
-    /// Avoid repeated lowercase allocation for names from compiled type declarations.
     pub(crate) fn matches_declaration(&self, name: &str) -> bool {
-        if self.name.eq_ignore_ascii_case(name) {
-            return true;
-        }
-        if let Some(result) = self.declaration_matches.borrow().get(name) {
-            return *result;
-        }
-        let result = self.is_a(name);
-        let mut declarations = self.declaration_matches.borrow_mut();
-        // Native definitions outlive requests. Cache only bounded, canonical ancestry matches.
-        if self.declaration.is_some() || (result && declarations.len() < 64) {
-            declarations.insert(name.to_owned(), result);
-        }
-        result
+        self.is_a(name)
     }
 }
 
@@ -419,18 +402,6 @@ impl Method {
                 parameters,
             }
         })
-    }
-}
-
-impl Class {
-    /// A complete simple declaration can reuse the same membership result that
-    /// matches_declaration made after resolution. Relative keywords are excluded
-    /// by the caller; compound spellings never enter this name-keyed cache.
-    pub(crate) fn cached_declaration_result(&self, name: &str) -> Option<bool> {
-        if self.name.eq_ignore_ascii_case(name) {
-            return Some(true);
-        }
-        self.declaration_matches.borrow().get(name).copied()
     }
 }
 

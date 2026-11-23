@@ -597,7 +597,6 @@ impl Vm {
             operations,
             origin: super::class::ClassOrigin::User,
             identity: identity.clone(),
-            declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
             ancestors: super::class::ancestor_names(&parent, &interfaces),
             name_value: phera_value::Value::interned(name.as_bytes()),
             name: name.clone(),
