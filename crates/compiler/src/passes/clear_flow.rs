@@ -43,15 +43,19 @@ struct Block {
     handlers: Vec<usize>,
 }
 
-/// Remove only redundant releases. The existing operand folds run before this
-/// pass, and method-site formation runs after it.
+/// Drop redundant releases and fold `return null;` when the temporary's
+/// previous value need not be released. Method sites form after this pass.
 pub(super) fn elide(function: &mut Function, constants: &[Constant], types: &[Type]) {
-    let (clears, cleanups) = candidates(function, constants, types);
-    let compact = !clears.is_empty();
-    for offset in clears {
+    let rewrites = candidates(function, constants, types);
+    let compact = !rewrites.clears.is_empty() || !rewrites.null_returns.is_empty();
+    for offset in rewrites.clears {
         function.instructions[offset] = I::Nop;
     }
-    for (handler, removed) in function.handlers.iter_mut().zip(cleanups) {
+    for offset in rewrites.null_returns {
+        function.instructions[offset - 1] = I::Nop;
+        function.instructions[offset] = I::ReturnNull;
+    }
+    for (handler, removed) in function.handlers.iter_mut().zip(rewrites.cleanups) {
         handler
             .cleanup
             .retain(|register| !removed.contains(register));
@@ -61,12 +65,14 @@ pub(super) fn elide(function: &mut Function, constants: &[Constant], types: &[Ty
     }
 }
 
-fn candidates(
-    function: &Function,
-    constants: &[Constant],
-    types: &[Type],
-) -> (Vec<usize>, Vec<Vec<Reg>>) {
-    let cleanup = vec![Vec::new(); function.handlers.len()];
+#[derive(Default)]
+struct Rewrites {
+    clears: Vec<usize>,
+    cleanups: Vec<Vec<Reg>>,
+    null_returns: Vec<usize>,
+}
+
+fn candidates(function: &Function, constants: &[Constant], types: &[Type]) -> Rewrites {
     if !function
         .instructions
         .iter()
@@ -75,23 +81,39 @@ fn candidates(
             .handlers
             .iter()
             .all(|handler| handler.cleanup.is_empty())
+        && !function
+            .instructions
+            .windows(2)
+            .any(|pair| null_return_source(pair, constants).is_some())
     {
-        return (Vec::new(), cleanup);
+        return Rewrites::default();
     }
     let (blocks, at) = blocks(function);
     if blocks.is_empty() {
-        return (Vec::new(), cleanup);
+        return Rewrites::default();
     }
     let live = live_at_entries(function, &blocks, &at);
     let (incoming, unwound) = ownership(function, constants, types, &blocks, &at);
     let locals = function.locals.len();
-    let mut clears = Vec::new();
+    let mut rewrites = Rewrites::default();
     for (index, block) in blocks.iter().enumerate() {
         let Some(mut facts) = incoming[index].clone() else {
             continue;
         };
+        let mut live_after = successor_reads(function, block, &at, &live);
         let mut releases = vec![Fact::Unknown; block.instructions.len()];
+        let tail = block.instructions.end;
+        let null_return = (block.instructions.len() >= 2)
+            .then(|| null_return_source(&function.instructions[tail - 2..tail], constants))
+            .flatten()
+            .filter(|reg| reg.index() >= locals && !live_after[reg.index()]);
         for ip in block.instructions.clone() {
+            if ip + 2 == tail
+                && let Some(reg) = null_return
+                && facts[reg.index()].owns_nothing()
+            {
+                rewrites.null_returns.push(ip + 1);
+            }
             if let I::Clear { reg } = function.instructions[ip]
                 && reg.index() >= locals
             {
@@ -99,7 +121,6 @@ fn candidates(
             }
             transfer(function, constants, &mut facts, function.instructions[ip]);
         }
-        let mut live_after = successor_reads(function, block, &at, &live);
         for ip in block.instructions.clone().rev() {
             let instruction = function.instructions[ip];
             if let I::Clear { reg } = instruction
@@ -108,13 +129,13 @@ fn candidates(
                     live_after[reg.index()],
                 )
             {
-                clears.push(ip);
+                rewrites.clears.push(ip);
             }
             read_before_write(function, instruction, &mut live_after);
             add_handler_reads(function, block, &at, &live, &mut live_after);
         }
     }
-    let cleanup = function
+    rewrites.cleanups = function
         .handlers
         .iter()
         .zip(unwound)
@@ -136,7 +157,21 @@ fn candidates(
                 .collect()
         })
         .collect();
-    (clears, cleanup)
+    rewrites
+}
+
+/// The adjacent load and its sole normal reader, as emitted for `return null;`.
+/// Finding them within one block rules out a jump to the return alone.
+fn null_return_source(pair: &[I], constants: &[Constant]) -> Option<Reg> {
+    match *pair {
+        [I::LoadNull { dst }, I::Return { src }] if dst == src => Some(src),
+        [I::LoadConst { dst, constant }, I::Return { src }]
+            if dst == src && matches!(constants.get(constant.index()), Some(Constant::Null)) =>
+        {
+            Some(src)
+        }
+        _ => None,
+    }
 }
 
 // An empty slot can remain empty even when it has a reader. A scalar can
@@ -606,6 +641,58 @@ mod tests {
             registers,
             ..Function::default()
         }
+    }
+
+    #[test]
+    fn a_null_return_keeps_the_return_line() {
+        let register = Reg(0);
+        let mut code = function(
+            vec![I::LoadNull { dst: register }, I::Return { src: register }],
+            1,
+        );
+        elide(&mut code, &[], &[]);
+        assert_eq!(&code.instructions[..], &[I::ReturnNull]);
+        assert_eq!(code.lines, [2]);
+    }
+
+    #[test]
+    fn a_null_return_cannot_delay_releasing_the_old_register() {
+        let register = Reg(0);
+        let mut code = function(
+            vec![
+                I::LoadConst {
+                    dst: register,
+                    constant: ConstId(0),
+                },
+                I::LoadNull { dst: register },
+                I::Return { src: register },
+            ],
+            1,
+        );
+        elide(&mut code, &[Constant::String(b"held".to_vec())], &[]);
+        assert_eq!(code.instructions.len(), 3);
+    }
+
+    #[test]
+    fn a_targeted_return_may_skip_the_null_load() {
+        let register = Reg(0);
+        let mut code = function(
+            vec![
+                I::LoadInt {
+                    dst: register,
+                    value: 1,
+                },
+                I::JumpIf {
+                    condition: register,
+                    target: Target(3),
+                },
+                I::LoadNull { dst: register },
+                I::Return { src: register },
+            ],
+            1,
+        );
+        elide(&mut code, &[], &[]);
+        assert_eq!(code.instructions.len(), 4);
     }
 
     #[test]
