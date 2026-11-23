@@ -183,28 +183,32 @@ fn frees_on_drop(slot: &Option<Value>) -> bool {
     }
 }
 
-/// `(string) $value` for a value that is an integer or a string already:
-/// nothing to report. Any other operand (an array warns, an object may run
-/// `__toString`, a float follows the precision setting) converts in the
-/// general handler.
+/// `(bool) $value` of a boolean and `(string) $value` of an integer or a
+/// string: nothing to report. Any other operand (a float follows the
+/// precision setting, an array warns, an object may run `__toString`) and
+/// any other cast convert in the general handler.
 #[inline(never)]
-fn cast_string_step<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
-    slots: &mut S,
+fn cast_step<const GUARDED: bool, S: crate::calls::registers::Slots + ?Sized>(
+    to: phera_bytecode::CastKind,
     destination: Reg,
     source: Reg,
+    slots: &mut S,
 ) -> ScalarStep {
-    let text = match slots.slot(source) {
-        Some(Some(Value::Int(integer))) => {
+    let value = match (to, slots.slot(source)) {
+        (phera_bytecode::CastKind::Bool, Some(Some(Value::Bool(value)))) => Value::Bool(*value),
+        (phera_bytecode::CastKind::String, Some(Some(Value::String(text)))) => {
+            Value::String(text.clone())
+        }
+        (phera_bytecode::CastKind::String, Some(Some(Value::Int(integer)))) => {
             match phera_value::to_php_string(&Value::Int(*integer), &mut phera_value::NoDiagnostics)
             {
-                Ok(text) => text,
+                Ok(text) => Value::String(text),
                 Err(_) => return ScalarStep::Fallback,
             }
         }
-        Some(Some(Value::String(text))) => text.clone(),
         _ => return ScalarStep::Fallback,
     };
-    store::<GUARDED, _>(slots, destination, Value::String(text))
+    store::<GUARDED, _>(slots, destination, value)
 }
 
 /// Builtins with no coercion can read the local directly.
@@ -331,23 +335,7 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             };
             store_integer::<GUARDED, _>(slots, dst, negative)
         }
-        Instruction::Cast {
-            to: phera_bytecode::CastKind::Bool,
-            dst,
-            src,
-        } => {
-            // Only a value that is a boolean already; a real conversion may warn.
-            let Some(Some(Value::Bool(value))) = slots.slot(src) else {
-                return ScalarStep::Fallback;
-            };
-            let value = *value;
-            store::<GUARDED, _>(slots, dst, Value::Bool(value))
-        }
-        Instruction::Cast {
-            to: phera_bytecode::CastKind::String,
-            dst,
-            src,
-        } => cast_string_step::<GUARDED, _>(slots, dst, src),
+        Instruction::Cast { to, dst, src } => cast_step::<GUARDED, _>(to, dst, src, slots),
         Instruction::Move { dst, src } => {
             if let Some(integer) = integer_at(slots, src) {
                 return store_integer::<GUARDED, _>(slots, dst, integer);
