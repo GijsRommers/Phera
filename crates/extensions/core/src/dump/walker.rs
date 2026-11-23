@@ -200,7 +200,10 @@ async fn enter(
         Container::Object(object) => {
             let purpose = style.property_purpose();
             if context.property_view_runs_code(object, purpose) {
-                style.before_debug(out, place, context);
+                if style.before_debug(out, place) {
+                    phera_extension_api::write_after_diagnostics(context, out).await?;
+                    out.clear();
+                }
                 place.leading_written = true;
             }
             if context.property_view_can_suspend(object, purpose) {

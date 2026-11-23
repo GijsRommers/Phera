@@ -36,7 +36,10 @@ pub use class::{
     NativeStringProperty, PrepareMethod, PropertyEntry, PropertyType, ReadyMethod, SyncMethod,
     Visibility, WindowMethod,
 };
-pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
+pub use context::{
+    Context, GeneratorOperation, LocalFuture, OutputDiagnostics, PropertyView, RequestCallback,
+    before_output, write_after_diagnostics,
+};
 mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{

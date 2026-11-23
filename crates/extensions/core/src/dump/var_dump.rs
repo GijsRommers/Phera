@@ -5,6 +5,7 @@ use std::rc::Rc;
 use phera_extension_api::value::{PropertyScope, float_repr_with_precision, split_property_key};
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, Registry, Value,
+    write_after_diagnostics,
 };
 
 use super::{Container, Place, Style, spaces, walk};
@@ -35,7 +36,7 @@ fn dump<const COUNTS: bool>(
         for value in &arguments {
             let mut out = Vec::new();
             walk(&mut VarDump::<COUNTS>(&arguments), &mut out, value, context).await?;
-            context.write(&out);
+            write_after_diagnostics(context, &out).await?;
         }
         Ok(Value::Null)
     })
@@ -63,10 +64,9 @@ impl<const COUNTS: bool> Style for VarDump<'_, COUNTS> {
         (function, self.0)
     }
 
-    fn before_debug(&mut self, out: &mut Vec<u8>, place: Place, context: &mut dyn Context) {
+    fn before_debug(&mut self, out: &mut Vec<u8>, place: Place) -> bool {
         Self::lead(out, place);
-        context.write(out);
-        out.clear();
+        true
     }
 
     fn enum_case(
