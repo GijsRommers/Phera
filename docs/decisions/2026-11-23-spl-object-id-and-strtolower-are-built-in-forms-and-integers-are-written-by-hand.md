@@ -18,20 +18,24 @@ Both are PHP functions that run with a frame, not operators, so for any other op
 
 ## Why
 
-Instructions per operation above an empty loop (`m4.php`, Linux, main `1fcc6383`):
+Instructions per operation above an empty loop (`m4.php`, Linux, `perf stat -e instructions:u`, two iteration counts). Before: main `0c63b85f`. PHP 8.5.13 with OPcache on and JIT off (`php -n -d opcache.enable_cli=1 -d opcache.jit=disable`):
 
 | operation | PHP 8.5 | before | after |
 | --- | ---: | ---: | ---: |
-| `spl_object_id($e)` | 123 | 1,222 | 150 |
+| `spl_object_id($e)` | 123 | 1,220 | 150 |
 | `strtolower('MixedCase')` | 365 | 799 | 416 |
-| `implode(' ', [1, 2, 3])` | 538 | 2,476 | 1,741 |
-| `'a' . $int` | 495 | 1,102 | 838 |
-| `(string) $int` | 294 | 953 | 945 |
+| `implode(' ', [1, 2, 3])` | 531 | 2,475 | 1,741 |
+| `'a' . $int` | 494 | 838 | 838 |
+| `(string) $int` | 293 | 945 | 945 |
 | `$e instanceof Proxy`, false, as a value | 66 | 583 | 583 |
-| `if ($e instanceof Proxy)` | 47 | 369 | 369 |
-| `ltrim($s, '\\')` | 309 | 1,116 | 1,114 |
-| `array_key_exists('name', $a)` | 129 | 847 | 847 |
-| `count($a)` | 51 | 144 | 150 |
+| `if ($e instanceof Proxy)` | 47 | 368 | 368 |
+| `ltrim($s, '\\')` | 307 | 1,115 | 1,114 |
+| `array_key_exists('name', $a)` | 92 | 847 | 847 |
+| `count($a)` | 50 | 144 | 150 |
+
+The integer writer does not move `(string) $int` or `.` here: their cost is the exit from the loop (below), and `.` takes another path in the VM than the one changed. It does move `implode`.
+
+On the request gate (Linux, 8 pairs, main `0c63b85f`) `/api/hello` is -0.07% and `/api/posts` -0.04%: Laravel's requests call these functions too rarely to show.
 
 ## What is left, and why
 
