@@ -21,3 +21,17 @@ Keeping two value variants would keep teaching each extension about storage.
 Adding a separate borrow wrapper would make each caller unpack the same
 representation again. Both choices are unnecessary when `PhpString` owns the
 distinction.
+
+Trusted entry files, application preloads, and shipped code collect canonical
+pointers when compiled. Native registrations and native class linking can
+intern their fixed declarations. VM materialization reads prepared pointers.
+Request-selected includes, stream code, eval, and dynamic property spelling
+use shared storage. The bounded table may decline a trusted literal. A short
+literal of request-selected code retains its debug spelling with a flag on
+the shared handle.
+
+An integer key still goes through process-seeded `RandomState::hash_one(i64)`.
+For the supported x86-64 and AArch64 targets, foldhash multiplies two seeded
+64-bit words into a 128-bit product and XORs its halves. The distribution test
+covers 65,536 keys with only their top 16 bits changing. Flood resistance
+rests on a process-wide seed. PHP uses no secret array-key seed.

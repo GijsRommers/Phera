@@ -1,9 +1,14 @@
 //! `function f(int $n, &$result): bool {}` has the same call facts in
 //! every request, even though each request gives the function its own index.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::{ArgumentLayout, CompiledUnit, Function, Parameter, Type, TypeMask};
+use phera_value::{ArrayKey, InternedStr, Object};
+
+use crate::{
+    ArgumentLayout, CompiledUnit, Constant, ConstantKey, Function, Parameter, Type, TypeMask,
+    Visibility,
+};
 
 /// Unit-local lookup facts with no request-dependent indexes or PHP values.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +27,9 @@ pub struct UnitMetadata {
     /// declaration looks itself up by it.
     pub class_keys: Arc<[crate::NameKey]>,
     pub type_scopes: Arc<[DeclarationScope]>,
+    /// Only trusted source prepares canonical string bytes. A request can
+    /// materialize its values from this table without taking the interner lock.
+    literal_strings: Option<HashMap<&'static [u8], &'static InternedStr>>,
 }
 
 impl UnitMetadata {
@@ -50,6 +58,72 @@ impl UnitMetadata {
             names,
             symbols,
             type_scopes: unit.types.iter().map(DeclarationScope::of).collect(),
+            literal_strings: None,
+        }
+    }
+    /// The prepared pointer for one spelling from a trusted unit.
+    pub fn interned_string(&self, bytes: &[u8]) -> Option<&'static InternedStr> {
+        self.literal_strings.as_ref()?.get(bytes).copied()
+    }
+
+    /// Whether the host approved this source for process-wide interning.
+    pub fn has_trusted_literals(&self) -> bool {
+        self.literal_strings.is_some()
+    }
+
+    /// Canonicalize the literals and declared names of a trusted file once.
+    /// The request loader never invokes this for dynamic source.
+    pub fn intern_literals(&mut self, unit: &CompiledUnit) {
+        fn remember(table: &mut HashMap<&'static [u8], &'static InternedStr>, bytes: &[u8]) {
+            if !table.contains_key(bytes)
+                && let Some(value) = InternedStr::try_intern(bytes)
+            {
+                table.insert(value.as_bytes(), value);
+            }
+        }
+
+        fn remember_constant(
+            table: &mut HashMap<&'static [u8], &'static InternedStr>,
+            constant: &Constant,
+        ) {
+            match constant {
+                Constant::String(bytes) => remember(table, bytes),
+                Constant::Array(entries) => {
+                    for (key, value) in entries {
+                        if let ConstantKey::String(bytes) = key {
+                            remember(table, bytes);
+                        }
+                        remember_constant(table, value);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let table = self.literal_strings.get_or_insert_with(HashMap::new);
+        remember(table, unit.file.as_bytes());
+        for constant in &unit.constants {
+            remember_constant(table, constant);
+        }
+        for name in &unit.names {
+            remember(table, name.as_bytes());
+        }
+        for symbol in &unit.symbols {
+            remember(table, symbol.written.as_bytes());
+        }
+        for class in &unit.classes {
+            remember(table, class.name.as_bytes());
+            for property in &class.properties {
+                let name = &unit.names[property.name.index()];
+                let key = match property.visibility {
+                    Visibility::Public => continue,
+                    Visibility::Protected => Object::protected_key(name),
+                    Visibility::Private => Object::private_key(&class.name, name),
+                };
+                if let ArrayKey::String(bytes) = key {
+                    remember(table, &bytes);
+                }
+            }
         }
     }
 }

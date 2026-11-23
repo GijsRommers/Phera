@@ -30,7 +30,9 @@ pub(super) fn reflected_value(
         SourceValue::Bool(value) => Value::Bool(*value),
         SourceValue::Int(value) => Value::Int(*value),
         SourceValue::Float(value) => Value::Float(f64::from_bits(*value)),
-        SourceValue::String(value) => Value::interned(value),
+        SourceValue::String(value) => {
+            Value::String(phera_value::PhpString::from_request_literal(value))
+        }
         SourceValue::EmptyArray => Value::from(phera_value::PhpArray::new()),
         SourceValue::Expression(id) => {
             return AttributeValue::Expression(Initializer {

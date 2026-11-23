@@ -10,6 +10,8 @@ use crate::Vm;
 use crate::classes::class::PropertyDefault;
 
 impl Vm {
+    // PhpString's cached hash cell does not change Eq or Hash.
+    #[allow(clippy::mutable_key_type)]
     pub(crate) fn restore_lazy_defaults(
         &mut self,
         object: &Object,

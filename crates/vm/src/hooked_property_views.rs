@@ -136,6 +136,8 @@ impl Vm {
         class: &Class,
     ) -> phera_extension_api::PropertyView {
         let mut slots = PhpArray::new();
+        // PhpString's cached hash cell does not change Eq or Hash.
+        #[allow(clippy::mutable_key_type)]
         let mut uninitialized = std::collections::HashMap::new();
         for property in &class.defaults {
             if property

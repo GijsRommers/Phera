@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use phera_value::Value;
+use phera_value::{InternedStr, PhpString, Value};
 
 use crate::{ClassEntry, FunctionEntry};
 
@@ -26,7 +26,7 @@ impl ConstantValue {
             ConstantValue::Bool(value) => Value::Bool(*value),
             ConstantValue::Int(value) => Value::Int(*value),
             ConstantValue::Float(value) => Value::Float(*value),
-            ConstantValue::String(value) => Value::interned(value.as_bytes()),
+            ConstantValue::String(value) => Value::from(*value),
             ConstantValue::EmptyArray => Value::from(phera_value::PhpArray::new()),
         }
     }
@@ -118,6 +118,7 @@ pub type ResourceReleaseFn = for<'a> fn(
 #[derive(Clone)]
 struct NativeConstant {
     value: ConstantValue,
+    interned: Option<&'static InternedStr>,
     module: &'static str,
     deprecated: Option<&'static str>,
 }
@@ -293,6 +294,10 @@ impl Registry {
             name.to_owned(),
             NativeConstant {
                 value,
+                interned: match value {
+                    ConstantValue::String(bytes) => InternedStr::try_intern(bytes.as_bytes()),
+                    _ => None,
+                },
                 module: self.registering_module.unwrap_or("Core"),
                 deprecated,
             },
@@ -480,12 +485,17 @@ impl Registry {
         })
     }
 
-    pub fn constant_entries(
-        &self,
-    ) -> impl Iterator<Item = (&str, &ConstantValue, Option<&'static str>)> {
-        self.constants
-            .iter()
-            .map(|(name, constant)| (name.as_str(), &constant.value, constant.deprecated))
+    pub fn constant_entries(&self) -> impl Iterator<Item = (&str, Value, Option<&'static str>)> {
+        self.constants.iter().map(|(name, constant)| {
+            let value = match constant.value {
+                ConstantValue::String(bytes) => Value::String(PhpString::from_interned_or_bytes(
+                    constant.interned,
+                    bytes.as_bytes(),
+                )),
+                value => value.to_value(),
+            };
+            (name.as_str(), value, constant.deprecated)
+        })
     }
 }
 

@@ -236,20 +236,12 @@ impl Object {
     /// The key under which PHP stores the private property `name` declared
     /// by `class`.
     pub fn private_key(class: &str, name: &str) -> ArrayKey {
-        let mut bytes = Vec::with_capacity(class.len() + name.len() + 2);
-        bytes.push(0);
-        bytes.extend_from_slice(class.as_bytes());
-        bytes.push(0);
-        bytes.extend_from_slice(name.as_bytes());
-        ArrayKey::interned_str(&bytes)
+        ArrayKey::str(format!("\0{class}\0{name}").into_bytes())
     }
 
     /// The key under which PHP stores the protected property `name`.
     pub fn protected_key(name: &str) -> ArrayKey {
-        let mut bytes = Vec::with_capacity(name.len() + 3);
-        bytes.extend_from_slice(b"\0*\0");
-        bytes.extend_from_slice(name.as_bytes());
-        ArrayKey::interned_str(&bytes)
+        ArrayKey::str(format!("\0*\0{name}").into_bytes())
     }
 }
 

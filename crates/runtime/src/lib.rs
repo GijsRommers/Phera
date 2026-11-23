@@ -259,12 +259,13 @@ impl Runtime {
         &self,
         code: &RequestCodeCache,
         script: &Path,
+        trusted: bool,
     ) -> Result<Arc<CompiledUnit>, RuntimeError> {
         match self.entry_scripts.get(script) {
             Some(source) => self
                 .web_cache
                 .compile_shipped(source, &script.to_string_lossy()),
-            None => code.entry(script, self.include_policy).await,
+            None => code.entry(script, self.include_policy, trusted).await,
         }
     }
 
@@ -324,7 +325,10 @@ impl Runtime {
         arguments: &[String],
         sink: Option<Box<dyn OutputSink>>,
     ) -> Result<RunResult, RuntimeError> {
-        let compiled = self.cache.compile(path.as_ref().to_path_buf()).await;
+        let compiled = self
+            .cache
+            .compile_entry(path.as_ref().to_path_buf(), cache::Validation::Frozen)
+            .await;
         let mut vm = self.new_cli_vm();
         if let Some(sink) = sink {
             vm.set_sink(sink);
@@ -400,7 +404,7 @@ impl Runtime {
         request: HttpRequest,
     ) -> HttpResponse {
         let code = Rc::new(RequestCodeCache::new(worker.code.clone()));
-        let compiled = match self.entry_unit(&code, script).await {
+        let compiled = match self.entry_unit(&code, script, false).await {
             Ok(unit) => Ok(unit),
             Err(RuntimeError::Compile(error)) => Err(error),
             Err(RuntimeError::Read { .. }) => return HttpResponse::plain(404, "File not found.\n"),
@@ -542,8 +546,10 @@ impl Runtime {
 
     /// The bytecode listing of a file, for `phera --dump`.
     pub fn dump_file_blocking(&self, path: impl AsRef<Path>) -> Result<String, RuntimeError> {
-        let unit = single_threaded_executor()?
-            .block_on(self.cache.compile(path.as_ref().to_path_buf()))?;
+        let unit = single_threaded_executor()?.block_on(
+            self.cache
+                .compile_entry(path.as_ref().to_path_buf(), cache::Validation::Frozen),
+        )?;
         Ok(unit.to_string())
     }
 

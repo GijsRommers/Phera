@@ -104,7 +104,7 @@ impl Vm {
             let (destination, value) = match instruction {
                 Instruction::LoadConst { dst, constant } => (
                     dst,
-                    crate::unit_caches::value(&unit.constants[constant.index()]),
+                    crate::unit_caches::value(&unit, &unit.constants[constant.index()]),
                 ),
                 Instruction::FetchClassName { dst, class } => {
                     let symbol = class;

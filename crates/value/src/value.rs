@@ -46,11 +46,6 @@ impl std::ops::Deref for ValueRef<'_> {
 }
 
 impl Value {
-    /// Materialize a linked literal or name, such as `'status'`.
-    pub fn interned(bytes: &[u8]) -> Self {
-        Self::String(PhpString::intern_literal(bytes))
-    }
-
     /// Arrays and objects implementing Traversable satisfy PHP's iterable type.
     pub fn is_iterable(&self) -> bool {
         match self {

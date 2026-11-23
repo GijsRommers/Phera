@@ -2935,6 +2935,7 @@ name = "phera-bytecode"
 version = "0.1.0"
 dependencies = [
  "phera-source",
+ "phera-value",
 ]
 
 [[package]]

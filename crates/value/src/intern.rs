@@ -1,10 +1,14 @@
 //! Immortal deduplicated PHP strings with pre-computed array hash and
 //! numeric-key classification.
 //!
-//! Compile-time literals, file names, class/method/property/constant names,
-//! and constant array keys are interned once per process (up to a fixed memory
-//! cap, matching Zend's `opcache.interned_strings_buffer`). Because every
-//! `&'static InternedStr` comes from the single deduplicating table, pointer
+//! Host-selected source, preloaded and shipped PHP, and extension declarations
+//! may intern literals or declared names. A value supplied by a request, a
+//! request-selected source revision, a stream include or eval must not enter
+//! this table. Only fixed implementation spellings may be initialized on their
+//! first runtime use, and their pointers are retained afterwards.
+//!
+//! The entry, payload and per-string limits bound lifetime storage. Every
+//! `&'static InternedStr` comes from the single deduplicating table or is the canonical empty string. Pointer
 //! equality (`std::ptr::eq`) is exact byte equality. Cloning and dropping an
 //! interned `PhpString` does no reference counting, and
 //! array lookups reuse the pre-computed hash and numeric-key classification.
@@ -24,7 +28,7 @@ const MAX_INTERNED_STRINGS: usize = 131_072;
 /// Maximum total byte payload held in the process-wide interner (16 MiB).
 const MAX_INTERNED_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum length of a single string eligible for interning.
-const MAX_SINGLE_INTERN_LEN: usize = 4_096;
+pub(crate) const MAX_SINGLE_INTERN_LEN: usize = 4_096;
 
 /// An immutable, deduplicated PHP byte string with pre-computed metadata.
 pub struct InternedStr {
@@ -53,10 +57,13 @@ impl InternedStr {
     /// The canonical empty interned string, available without locking.
     #[inline]
     pub fn empty() -> &'static InternedStr {
-        static EMPTY: OnceLock<&'static InternedStr> = OnceLock::new();
-        EMPTY.get_or_init(|| {
-            let mut table = interner().lock().expect("interner poisoned");
-            table.intern_unchecked(b"")
+        static EMPTY: OnceLock<InternedStr> = OnceLock::new();
+        EMPTY.get_or_init(|| Self {
+            hash: hash_str_bytes(b""),
+            numeric: 0,
+            bytes: b"",
+            is_numeric: false,
+            truthy: false,
         })
     }
 
@@ -169,16 +176,16 @@ impl InternTable {
         }
     }
 
-    fn intern_unchecked(&mut self, bytes: &[u8]) -> &'static InternedStr {
-        let hash = hash_str_bytes(bytes);
+    fn intern(&mut self, bytes: &[u8], hash: u64) -> Option<&'static InternedStr> {
         if let Some(&existing) = self.entries.find(hash, |entry| entry.bytes == bytes) {
-            return existing;
+            return Some(existing);
         }
-        let leaked_bytes: &'static [u8] = if bytes.is_empty() {
-            b""
-        } else {
-            Box::leak(bytes.to_vec().into_boxed_slice())
-        };
+        if self.entries.len() >= MAX_INTERNED_STRINGS
+            || self.total_bytes.saturating_add(bytes.len()) > MAX_INTERNED_BYTES
+        {
+            return None;
+        }
+        let leaked_bytes = Box::leak(Box::<[u8]>::from(bytes));
         let numeric = numeric_string_key(leaked_bytes);
         let truthy = !(leaked_bytes.is_empty() || leaked_bytes == b"0");
         let entry: &'static InternedStr = Box::leak(Box::new(InternedStr {
@@ -190,7 +197,7 @@ impl InternTable {
         }));
         self.total_bytes += leaked_bytes.len();
         self.entries.insert_unique(hash, entry, |other| other.hash);
-        entry
+        Some(entry)
     }
 }
 
@@ -201,21 +208,31 @@ fn interner() -> &'static Mutex<InternTable> {
 
 fn intern_non_empty(bytes: &[u8]) -> Option<&'static InternedStr> {
     let hash = hash_str_bytes(bytes);
-    let mut table = interner().lock().expect("interner poisoned");
-    if let Some(&existing) = table.entries.find(hash, |entry| entry.bytes == bytes) {
-        return Some(existing);
-    }
-    if table.entries.len() >= MAX_INTERNED_STRINGS
-        || table.total_bytes.saturating_add(bytes.len()) > MAX_INTERNED_BYTES
-    {
-        return None;
-    }
-    Some(table.intern_unchecked(bytes))
+    interner()
+        .lock()
+        .expect("interner poisoned")
+        .intern(bytes, hash)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_full_table_retains_old_entries_and_declines_new_ones() {
+        let mut table = InternTable::new();
+        for index in 0..MAX_INTERNED_STRINGS as u64 {
+            let bytes = index.to_le_bytes();
+            assert!(table.intern(&bytes, hash_str_bytes(&bytes)).is_some());
+        }
+        let first = 0u64.to_le_bytes();
+        assert!(table.intern(&first, hash_str_bytes(&first)).is_some());
+        let extra = b"literal after the entry limit";
+        let entry = table.intern(extra, hash_str_bytes(extra));
+        assert!(entry.is_none());
+        let fallback = crate::PhpString::from_interned_or_bytes(entry, extra);
+        assert_eq!(fallback.as_bytes(), extra);
+    }
 
     #[test]
     fn interning_deduplicates_and_classifies_numeric_keys() {

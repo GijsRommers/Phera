@@ -6,7 +6,7 @@ use crate::intern::InternedStr;
 #[derive(Clone)]
 enum Repr {
     Interned(&'static InternedStr),
-    Shared(Rc<Vec<u8>>),
+    Shared { bytes: Rc<Vec<u8>>, literal: bool },
 }
 
 /// A PHP byte string. Literal copies need no reference-count traffic.
@@ -42,6 +42,23 @@ impl PhpString {
         }
     }
 
+    /// Materialize a prepared literal, or keep its bytes in a shared buffer.
+    pub fn from_interned_or_bytes(value: Option<&'static InternedStr>, bytes: &[u8]) -> Self {
+        match value {
+            Some(value) => Self::from_interned(value),
+            None => Self::from(bytes),
+        }
+    }
+
+    /// A literal in request-selected code keeps its diagnostic without entering
+    /// the process-wide interner.
+    pub fn from_request_literal(bytes: &[u8]) -> Self {
+        Self(Repr::Shared {
+            bytes: Rc::new(bytes.to_vec()),
+            literal: bytes.len() <= crate::intern::MAX_SINGLE_INTERN_LEN,
+        })
+    }
+
     /// The process's canonical empty PHP string.
     pub fn empty() -> Self {
         Self::from_interned(InternedStr::empty())
@@ -56,25 +73,35 @@ impl PhpString {
         if bytes.is_empty() {
             return;
         }
-        Rc::make_mut(self.shared_mut()).extend_from_slice(bytes);
+        let (storage, literal) = self.shared_mut();
+        *literal = false;
+        Rc::make_mut(storage).extend_from_slice(bytes);
     }
 
     /// Borrow mutable bytes if the buffer has no other handle.
     pub fn as_unique_bytes_mut(&mut self) -> Option<&mut [u8]> {
-        Rc::get_mut(self.shared_mut()).map(Vec::as_mut_slice)
+        let (storage, literal) = self.shared_mut();
+        let storage = Rc::get_mut(storage)?;
+        *literal = false;
+        Some(storage.as_mut_slice())
     }
 
     /// Mutate bytes without changing other PHP values.
     pub fn make_mut_bytes(&mut self) -> &mut [u8] {
-        Rc::make_mut(self.shared_mut()).as_mut_slice()
+        let (storage, literal) = self.shared_mut();
+        *literal = false;
+        Rc::make_mut(storage).as_mut_slice()
     }
 
-    fn shared_mut(&mut self) -> &mut Rc<Vec<u8>> {
+    fn shared_mut(&mut self) -> (&mut Rc<Vec<u8>>, &mut bool) {
         if let Repr::Interned(value) = self.0 {
-            self.0 = Repr::Shared(Rc::new(value.as_bytes().to_vec()));
+            self.0 = Repr::Shared {
+                bytes: Rc::new(value.as_bytes().to_vec()),
+                literal: false,
+            };
         }
         match &mut self.0 {
-            Repr::Shared(storage) => storage,
+            Repr::Shared { bytes, literal } => (bytes, literal),
             Repr::Interned(_) => unreachable!("an immutable string was materialized above"),
         }
     }
@@ -83,7 +110,7 @@ impl PhpString {
     pub fn as_bytes(&self) -> &[u8] {
         match &self.0 {
             Repr::Interned(value) => value.as_bytes(),
-            Repr::Shared(storage) => storage.as_slice(),
+            Repr::Shared { bytes, .. } => bytes.as_slice(),
         }
     }
 
@@ -94,7 +121,10 @@ impl PhpString {
 
     /// Whether `debug_zval_dump()` should describe this value as a literal.
     pub fn is_literal(&self) -> bool {
-        matches!(self.0, Repr::Interned(_))
+        matches!(
+            self.0,
+            Repr::Interned(_) | Repr::Shared { literal: true, .. }
+        )
     }
 
     /// Whether a PHP string is truthy, including the special case `'0'`.
@@ -102,7 +132,7 @@ impl PhpString {
     pub(crate) fn is_truthy(&self) -> bool {
         match &self.0 {
             Repr::Interned(value) => value.is_truthy(),
-            Repr::Shared(bytes) => !(bytes.is_empty() || bytes.as_slice() == b"0"),
+            Repr::Shared { bytes, .. } => !(bytes.is_empty() || bytes.as_slice() == b"0"),
         }
     }
 
@@ -110,7 +140,7 @@ impl PhpString {
     pub fn storage_owners(&self) -> usize {
         match &self.0 {
             Repr::Interned(_) => 1,
-            Repr::Shared(storage) => Rc::strong_count(storage),
+            Repr::Shared { bytes, .. } => Rc::strong_count(bytes),
         }
     }
 
@@ -124,7 +154,9 @@ impl PhpString {
     pub fn ptr_eq(&self, other: &Self) -> bool {
         match (&self.0, &other.0) {
             (Repr::Interned(left), Repr::Interned(right)) => std::ptr::eq(*left, *right),
-            (Repr::Shared(left), Repr::Shared(right)) => Rc::ptr_eq(left, right),
+            (Repr::Shared { bytes: left, .. }, Repr::Shared { bytes: right, .. }) => {
+                Rc::ptr_eq(left, right)
+            }
             _ => false,
         }
     }
@@ -134,7 +166,7 @@ impl PhpString {
     pub(crate) fn array_hash(&self) -> u64 {
         match &self.0 {
             Repr::Interned(value) => value.array_hash(),
-            Repr::Shared(bytes) => crate::array::hash_str_bytes(bytes),
+            Repr::Shared { bytes, .. } => crate::array::hash_str_bytes(bytes),
         }
     }
 
@@ -143,7 +175,7 @@ impl PhpString {
     pub(crate) fn numeric_key(&self) -> Option<i64> {
         match &self.0 {
             Repr::Interned(value) => value.numeric_key(),
-            Repr::Shared(bytes) => crate::array::numeric_string_key(bytes),
+            Repr::Shared { bytes, .. } => crate::array::numeric_string_key(bytes),
         }
     }
 
@@ -169,7 +201,10 @@ impl From<String> for PhpString {
 impl From<Vec<u8>> for PhpString {
     #[inline]
     fn from(bytes: Vec<u8>) -> Self {
-        Self(Repr::Shared(Rc::new(bytes)))
+        Self(Repr::Shared {
+            bytes: Rc::new(bytes),
+            literal: false,
+        })
     }
 }
 
@@ -185,7 +220,11 @@ impl PartialEq for PhpString {
     fn eq(&self, other: &Self) -> bool {
         match (&self.0, &other.0) {
             (Repr::Interned(left), Repr::Interned(right)) => std::ptr::eq(*left, *right),
-            (Repr::Shared(left), Repr::Shared(right)) if Rc::ptr_eq(left, right) => true,
+            (Repr::Shared { bytes: left, .. }, Repr::Shared { bytes: right, .. })
+                if Rc::ptr_eq(left, right) =>
+            {
+                true
+            }
             _ => self.as_bytes() == other.as_bytes(),
         }
     }

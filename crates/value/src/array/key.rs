@@ -31,7 +31,6 @@ impl Hash for ArrayKey {
 }
 
 impl ArrayKey {
-    /// Prepare a declaration's string key without numeric normalization.
     pub fn interned_str(bytes: &[u8]) -> Self {
         Self::String(PhpString::intern_literal(bytes))
     }
