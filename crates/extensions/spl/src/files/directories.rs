@@ -230,10 +230,7 @@ fn open<'a>(
                 {
                     Value::Array(rows) => rows
                         .values()
-                        .filter_map(|entry| match entry {
-                            Value::String(entry) => Some(entry.clone()),
-                            _ => None,
-                        })
+                        .filter_map(|entry| entry.to_php_string())
                         .collect(),
                     _ => Vec::new(),
                 },

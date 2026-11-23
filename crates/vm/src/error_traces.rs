@@ -59,6 +59,9 @@ fn frame_arguments(vm: &Vm, frame: FrameView<'_>) -> String {
                 for (key, value) in values.iter() {
                     let text = describe(value);
                     arguments.push(match key {
+                        phera_value::ArrayKey::Interned(name) => {
+                            format!("{}: {text}", name.to_string_lossy())
+                        }
                         phera_value::ArrayKey::String(name) => {
                             format!("{}: {text}", name.to_string_lossy())
                         }

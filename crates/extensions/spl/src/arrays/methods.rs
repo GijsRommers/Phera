@@ -8,8 +8,7 @@
 use std::rc::Rc;
 
 use phera_extension_api::{
-    Context, LocalFuture, MethodPreparation, NativeError, NativeResult, Object, Param, PhpString,
-    Value, args,
+    Context, LocalFuture, MethodPreparation, NativeError, NativeResult, Object, Param, Value, args,
 };
 
 use super::{
@@ -223,7 +222,7 @@ pub(super) fn set_iterator_class(
 
 async fn resolve_iterator(
     context: &mut dyn Context,
-    name: &PhpString,
+    name: phera_extension_api::StrRef<'_>,
     method: &str,
     position: usize,
 ) -> Result<Option<String>, NativeError> {

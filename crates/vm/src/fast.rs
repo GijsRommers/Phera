@@ -48,6 +48,7 @@ pub(crate) fn duplicate(value: &Value) -> Value {
         Value::Bool(boolean) => Value::Bool(*boolean),
         Value::Int(integer) => Value::Int(*integer),
         Value::Float(float) => Value::Float(*float),
+        Value::InternedStr(string) => Value::InternedStr(string),
         Value::String(string) => Value::String(string.clone()),
         Value::Array(array) => Value::Array(array.clone()),
         Value::Object(object) => Value::Object(object.clone()),

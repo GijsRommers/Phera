@@ -507,6 +507,7 @@ impl Vm {
         let target = self.read_local(class);
         let class = match &target {
             Value::Object(object) => std::borrow::Cow::Borrowed(object.class.name()),
+            Value::InternedStr(name) => String::from_utf8_lossy(name.as_bytes()),
             Value::String(name) => String::from_utf8_lossy(name.as_bytes()),
             _ => {
                 return Err(NativeError::error(

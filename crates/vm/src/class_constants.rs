@@ -23,6 +23,7 @@ impl Vm {
     pub(crate) fn class_target(&mut self, register: Reg) -> Result<String, NativeError> {
         match self.read_local(register) {
             Value::Object(object) => Ok(object.class.name().to_owned()),
+            Value::InternedStr(name) => Ok(name.to_string_lossy()),
             Value::String(name) => Ok(name.to_string_lossy()),
             _ => Err(NativeError::error(
                 "Class name must be a valid object or a string",
@@ -38,7 +39,7 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let class = self.class_target(class)?;
         let linked = self.classes.get(&class).ok_or_else(|| {
-            if let Value::String(name) = self.read_local(name) {
+            if let Some(name) = self.read_local(name).str_ref() {
                 Self::class_member_miss(&class, ItemKind::ClassConstant, &name.to_string_lossy())
             } else {
                 Self::class_miss(&class, "Class")
@@ -332,6 +333,7 @@ impl Vm {
 
 pub(crate) fn constant_name(name: Value) -> Result<String, NativeError> {
     match name {
+        Value::InternedStr(name) => Ok(name.to_string_lossy()),
         Value::String(name) => Ok(name.to_string_lossy()),
         value => Err(NativeError::type_error(format!(
             "Cannot use value of type {} as class constant name",
