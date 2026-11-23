@@ -150,13 +150,13 @@ fn construct(
                 name.to_string_lossy(),
             )
         } else {
-            let (class, name) = match first {
-                Value::String(name) => split_method(
+            let (class, name) = match first.str_ref() {
+                Some(name) => split_method(
                     &name.to_string_lossy(),
                     "ReflectionMethod::__construct()",
                     "objectOrMethod",
                 )?,
-                _ => {
+                None => {
                     return Err(phera_extension_api::NativeError::throw(
                         "ArgumentCountError",
                         "ReflectionMethod::__construct() expects exactly 2 arguments, 1 given",
@@ -176,9 +176,10 @@ fn construct_loaded(
     this: &Rc<Object>,
     args: &[Value],
 ) -> Option<NativeResult> {
-    let [first, Value::String(name)] = args else {
+    let [first, name] = args else {
         return None;
     };
+    let name = name.str_ref()?;
     let class = loaded_target_class(context, first)?;
     Some(bind_method(
         context,

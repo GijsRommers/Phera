@@ -31,7 +31,7 @@ fn order(left: &Decimal, right: &Decimal) -> Ordering {
 
 fn supported(value: &Value) -> bool {
     match value {
-        Value::Int(_) | Value::String(_) | Value::Bool(_) => true,
+        Value::Int(_) | Value::InternedStr(_) | Value::String(_) | Value::Bool(_) => true,
         Value::Object(object) => object.class.name() == NAME,
         Value::Float(float) => (*float >= i64::MIN as f64) && (*float < -(i64::MIN as f64)),
         _ => false,
@@ -41,6 +41,7 @@ fn supported(value: &Value) -> bool {
 fn numeric(context: &mut dyn Context, raw: &Value) -> Option<Decimal> {
     match raw {
         Value::Int(number) => Some(Decimal::integer(*number)),
+        Value::InternedStr(number) => Decimal::parse(number.as_bytes()),
         Value::String(number) => Decimal::parse(number.as_bytes()),
         Value::Object(object) => value(object),
         Value::Bool(flag) => Some(Decimal::integer(i32::from(*flag))),

@@ -64,7 +64,7 @@ pub async fn include_source(
             && context
                 .included_files()
                 .iter()
-                .any(|(_, value)| matches!(value, Value::String(file) if file.as_bytes() == name))
+                .any(|(_, value)| value.as_str_bytes() == Some(name))
         {
             return Ok(IncludeSource::AlreadyIncluded);
         }

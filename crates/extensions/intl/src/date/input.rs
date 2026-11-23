@@ -24,6 +24,26 @@ pub fn timezone(
 ) -> Result<ZoneKind, NativeError> {
     match &*value.deref() {
         Value::Null => Ok(current_zone(context)),
+        Value::InternedStr(value) if value.as_bytes().is_empty() => Ok(current_zone(context)),
+        Value::InternedStr(value) => {
+            let bytes = value.as_bytes();
+            let name = std::str::from_utf8(bytes).map_err(|_| {
+                NativeError::throw(
+                    "IntlException",
+                    format!("{site}(): Time zone identifier given is not a valid UTF-8 string"),
+                )
+            })?;
+            let wrapped = [b"GMT+".as_slice(), b"GMT-"]
+                .iter()
+                .any(|prefix| bytes.starts_with(prefix));
+            parse_timezone(if wrapped { &bytes[3..] } else { bytes }).ok_or_else(|| {
+                let name = name.split('\0').next().unwrap_or_default();
+                NativeError::throw(
+                    "IntlException",
+                    format!("{site}(): No such time zone: \"{name}\""),
+                )
+            })
+        }
         Value::String(value) if value.as_bytes().is_empty() => Ok(current_zone(context)),
         Value::String(value) => {
             let bytes = value.as_bytes();
@@ -94,6 +114,21 @@ pub(super) fn format(
     let (timestamp, micros) = match &*value.deref() {
         Value::Int(value) => (*value, 0),
         Value::Float(value) => numeric(*value),
+        Value::InternedStr(value) => {
+            let text = String::from_utf8_lossy(value.as_bytes());
+            let Ok(value) = text.trim().parse::<f64>() else {
+                return fail(
+                    context,
+                    state,
+                    site,
+                    1,
+                    &format!(
+                        "string '{text}' is not numeric, which would be required for it to be a valid date"
+                    ),
+                );
+            };
+            numeric(value)
+        }
         Value::String(value) => {
             let text = String::from_utf8_lossy(value.as_bytes());
             let Ok(value) = text.trim().parse::<f64>() else {
@@ -235,6 +270,9 @@ pub fn format_object(context: &mut dyn Context, arguments: &[Value], site: &str)
     let text = match &*args::value(arguments, 1).deref() {
         Value::Null => style(2, 2),
         Value::Int(value) => style(*value, *value),
+        Value::InternedStr(text) => std::str::from_utf8(text.as_bytes())
+            .ok()
+            .map(|text| (text.to_owned(), None)),
         Value::String(text) => std::str::from_utf8(text.as_bytes())
             .ok()
             .map(|text| (text.to_owned(), None)),

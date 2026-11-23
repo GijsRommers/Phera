@@ -234,6 +234,7 @@ impl BackingBuilder {
             .ok_or_else(|| internal_error!("backed enum value"))?;
         let key = match (self.backing, backing) {
             (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(number),
+            (EnumBacking::String, Value::InternedStr(string)) => ArrayKey::Interned(string),
             (EnumBacking::String, Value::String(string)) => ArrayKey::String(string),
             (backing, value) => {
                 let expected = match backing {
@@ -260,8 +261,11 @@ impl BackingBuilder {
 }
 
 fn name_of(object: &Object) -> Result<String, NativeError> {
-    if let Some(Value::String(name)) = object.get(&ArrayKey::str("name")) {
-        Ok(name.to_string_lossy())
+    if let Some(name) = object
+        .get(&ArrayKey::interned_str(b"name"))
+        .and_then(|value| value.str_ref().map(|s| s.to_string_lossy()))
+    {
+        Ok(name)
     } else {
         Err(internal_error!("enum case name"))
     }

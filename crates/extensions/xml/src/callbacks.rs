@@ -42,7 +42,10 @@ fn handler(
     if value.is_null() {
         return Ok(None);
     }
-    if !matches!(value, Value::String(_) | Value::Array(_) | Value::Object(_)) {
+    if !matches!(
+        value,
+        Value::InternedStr(_) | Value::String(_) | Value::Array(_) | Value::Object(_)
+    ) {
         return Err(NativeError::type_error(format!(
             "{function}(): Argument #{} (${parameter}) must be of type callable|string|null",
             index + 1,
@@ -52,7 +55,7 @@ fn handler(
         .validate_callback(function, index + 1, parameter, value)
         .is_err()
     {
-        if let Value::String(text) = value {
+        if let Some(text) = value.as_str_bytes() {
             context.deprecated(format!(
                 "{function}(): Passing non-callable strings is deprecated since 8.4"
             ));

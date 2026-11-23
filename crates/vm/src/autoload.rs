@@ -353,7 +353,10 @@ impl Vm {
             return Ok(());
         }
         let name = match &*callable.deref() {
-            Value::String(text) => text
+            Value::InternedStr(_) | Value::String(_) => callable
+                .deref()
+                .str_ref()
+                .expect("checked string")
                 .to_string_lossy()
                 .split_once("::")
                 .map(|(class, _)| class.to_owned()),
@@ -362,11 +365,8 @@ impl Vm {
                     values.get(&phera_value::ArrayKey::Int(0)),
                     values.get(&phera_value::ArrayKey::Int(1)),
                 ) {
-                    (Some(class), Some(method)) if matches!(&*method.deref(), Value::String(_)) => {
-                        match &*class.deref() {
-                            Value::String(name) => Some(name.to_string_lossy()),
-                            _ => None,
-                        }
+                    (Some(class), Some(method)) if method.deref().is_string() => {
+                        class.deref().str_ref().map(|name| name.to_string_lossy())
                     }
                     _ => None,
                 }

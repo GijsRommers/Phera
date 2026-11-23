@@ -7,7 +7,7 @@
 
 use phera_bytecode::{BuiltinFrame, BuiltinUnary, ConstId, Reg};
 use phera_extension_api::NativeError;
-use phera_value::{ArrayKey, Value};
+use phera_value::Value;
 
 use crate::calls::callback_binding::ArgumentBinding;
 use crate::{Vm, calls::execution_loop::BatchExit};
@@ -62,14 +62,15 @@ impl Vm {
                 "get_class"
             }
             BuiltinUnary::Defined => {
-                let name = match value {
-                    Value::String(name) => name,
+                let name = match &value {
+                    Value::InternedStr(name) => name.to_string_lossy(),
+                    Value::String(name) => name.to_string_lossy(),
                     Value::Float(_) => {
                         phera_value::to_php_string(&value, &mut phera_value::NoDiagnostics)?
+                            .to_string_lossy()
                     }
                     _ => return Err(internal_error!("defined builtin literal")),
                 };
-                let name = name.to_string_lossy();
                 let exists = ["true", "false", "null"]
                     .iter()
                     .any(|special| special.eq_ignore_ascii_case(&name))
@@ -98,14 +99,15 @@ impl Vm {
         let key = self.read_local(key);
         let array = self.read_local(array);
         if let Value::Array(array) = &array {
-            let normalized = match &key {
-                Value::Int(key) => Some(ArrayKey::Int(*key)),
-                Value::Bool(key) => Some(ArrayKey::Int(i64::from(*key))),
-                Value::String(key) => Some(ArrayKey::from_string(key.clone())),
+            let found = match &key {
+                Value::Int(key) => Some(array.contains_int(*key)),
+                Value::Bool(key) => Some(array.contains_int(i64::from(*key))),
+                Value::InternedStr(key) => Some(array.contains_interned(key)),
+                Value::String(key) => Some(array.contains_str(key)),
                 _ => None,
             };
-            if let Some(key) = normalized {
-                self.set(destination, Value::Bool(array.contains_key(&key)));
+            if let Some(found) = found {
+                self.set(destination, Value::Bool(found));
                 return Ok(None);
             }
         }
@@ -134,12 +136,19 @@ impl Vm {
             return Err(internal_error!("literal search haystack"));
         };
         let found = match &needle {
+            Value::InternedStr(needle) => values.values().any(|value| match value {
+                Value::InternedStr(other) => std::ptr::eq(*other, *needle),
+                Value::String(other) => other.as_bytes() == needle.as_bytes(),
+                _ => false,
+            }),
             Value::String(needle) => values.values().any(|value| {
-                matches!(value, Value::String(value) if value.as_bytes() == needle.as_bytes())
+                value
+                    .as_str_bytes()
+                    .is_some_and(|bytes| bytes == needle.as_bytes())
             }),
-            Value::Int(needle) if strict => values.values().any(|value| {
-                matches!(value, Value::Int(value) if value == needle)
-            }),
+            Value::Int(needle) if strict => values
+                .values()
+                .any(|value| matches!(value, Value::Int(value) if value == needle)),
             _ if strict => false,
             _ => {
                 return self.call_builtin_fallback(
@@ -178,6 +187,7 @@ pub(crate) fn builtin_value(operation: BuiltinUnary, value: &Value) -> Option<Va
     use BuiltinUnary as B;
     match (operation, value) {
         (_, Value::Reference(_)) => None,
+        (B::Strlen, Value::InternedStr(string)) => Some(Value::Int(string.len() as i64)),
         (B::Strlen, Value::String(string)) => Some(Value::Int(string.len() as i64)),
         (B::Count | B::Sizeof, Value::Array(array)) => Some(Value::Int(array.len() as i64)),
         (B::TypeCheck(mask), value) => {
