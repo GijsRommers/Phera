@@ -220,6 +220,16 @@ impl Vm {
                     *work += 1;
                     self.call_lean_native(dst)
                 }
+                Instruction::CallNativeDirect {
+                    function,
+                    args,
+                    count,
+                    dst,
+                    ..
+                } if !TRACK_GENERATORS => {
+                    *work += 1;
+                    self.call_native_direct(function, args, count, dst)
+                }
                 _ => {
                     // The VM's handlers need the description of a lean
                     // native record (see `calls::native_calls`).
@@ -605,6 +615,7 @@ impl Machine<'_> {
             | Instruction::ArrayPush { .. }
             | Instruction::ArrayKeyExists { .. }
             | Instruction::InLiteralArray { .. }
+            | Instruction::CallNativeDirect { .. }
             | Instruction::FetchIndex { .. }
             | Instruction::Fetch { .. }
             | Instruction::AssignPath { .. }

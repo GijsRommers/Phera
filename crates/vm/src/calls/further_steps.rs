@@ -67,6 +67,13 @@ impl Machine<'_> {
                 haystack,
                 strict,
             } => self.in_literal_array::<GUARDED>(position, dst, (needle, haystack, strict)),
+            Instruction::CallNativeDirect {
+                function,
+                args,
+                count,
+                dst,
+                ..
+            } => self.call_native_direct::<GUARDED>(position, function, (args, count), dst),
             Instruction::Fetch {
                 dst,
                 path,
