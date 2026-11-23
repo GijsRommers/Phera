@@ -531,10 +531,13 @@ fn transfer(function: &Function, constants: &[Constant], facts: &mut [Fact], ins
         I::BuiltinUnary { dst, op, .. } => Some((
             dst,
             match op {
-                BuiltinUnary::GetType | BuiltinUnary::GetClass => NonObject,
+                BuiltinUnary::GetType | BuiltinUnary::GetClass | BuiltinUnary::StrToLower => {
+                    NonObject
+                }
                 BuiltinUnary::TypeCheck(_)
                 | BuiltinUnary::IsResource
                 | BuiltinUnary::Defined
+                | BuiltinUnary::ObjectId
                 | BuiltinUnary::Strlen => Scalar,
                 BuiltinUnary::Count | BuiltinUnary::Sizeof => Scalar,
             },

@@ -9,6 +9,7 @@ mod destruction;
 mod error;
 mod float_format;
 mod fork;
+mod integer_text;
 mod intern;
 mod lazy_object;
 mod object;
@@ -32,6 +33,7 @@ pub use float_format::{
     float_repr, float_repr_with_precision, float_to_string_precision14, with_float_repr,
 };
 pub use fork::{Fork, NativeFork, Refusal};
+pub use integer_text::{integer_string, push_integer};
 pub use intern::{InternedStr, StrRef};
 pub use lazy_object::{LazyObject, LazyStrategy};
 pub use object::{
