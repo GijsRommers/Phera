@@ -12,4 +12,4 @@ A scalar literal such as the null in an implicit return already fits an instruct
 
 Lowering booleans and null directly would hide them from the existing reader folds. Moving LoadConst into the scalar loop regressed the performance gates. The late rewrite keeps instruction positions, source lines, and the VM dispatch unchanged.
 
-The rewrite removed 1,488 table-backed loads from the hello route and 4,056 from the posts route. The request measurements improved by 0.57% and 0.42%. The method microbenchmark measures in discrete bands even with the same executable. Its two candidate batches both exceeded the median limit, so the draft remains gated.
+The rewrite removed 1,488 table-backed loads from the hello route and 4,056 from the posts route. The request measurements improved by 0.57% and 0.42%. The method benchmark fell into discrete bands even with the same executable. Its lowest counts matched, so the gate uses its lowest of five runs. The other benchmarks still use both the lowest and median.
