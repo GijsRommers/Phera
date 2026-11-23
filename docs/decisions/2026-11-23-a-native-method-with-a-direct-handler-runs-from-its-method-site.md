@@ -29,15 +29,15 @@ A reflector now keeps the layout of the class it was made for (`SlotAccess::layo
 
 ## Why
 
-Instructions per operation above an empty loop, `m.php` of this pull request (Linux, `perf stat -e instructions:u`, two iteration counts):
+Instructions per operation above an empty loop, `m.php` of this pull request (Linux, `perf stat -e instructions:u`, two iteration counts; before: main `0c63b85f`; PHP 8.5.13 with OPcache on and JIT off, `php -n -d opcache.enable_cli=1 -d opcache.jit=disable`, which counts the same as without OPcache for these loops):
 
 | operation | PHP 8.5 | before | after |
 | --- | ---: | ---: | ---: |
-| `ReflectionProperty::getValue($e)` | 206 | 1,555 | 522 |
-| `ReflectionProperty::setValue($e, 'n')` | 308 | 1,920 | 788 |
-| `ReflectionProperty::setRawValueWithoutLazyInitialization($e, 'n')` | 378 | 1,913 | 788 |
-| accessor `setValue` (a method that tests `instanceof` and calls the line above) | 724 | 3,938 | 2,758 |
-| hydrate one row of five fields | 7,561 | 43,648 | 37,762 |
+| `ReflectionProperty::getValue($e)` | 206 | 1,554 | 522 |
+| `ReflectionProperty::setValue($e, 'n')` | 306 | 1,919 | 788 |
+| `ReflectionProperty::setRawValueWithoutLazyInitialization($e, 'n')` | 376 | 1,912 | 788 |
+| accessor `setValue` (a method that tests `instanceof` and calls the line above) | 670 | 3,923 | 2,744 |
+| hydrate one row of five fields | 6,626 | 42,823 | 36,935 |
 
 The calls are still two and a half times PHP's. What is left is the cost of any native method call from a site, not of reflection: a method with no argument and nothing to do (`$method->isStatic()`) costs 377 here against 132 in PHP. That cost is in `call_method` and the loop that dispatches it (about 300 of the 522), which this change leaves to the work on method calls.
 
