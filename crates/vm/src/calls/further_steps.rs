@@ -54,6 +54,10 @@ impl Machine<'_> {
             | Instruction::BinaryIntBranch { .. }
             | Instruction::BinaryIntBranchIf { .. }
             | Instruction::Unary { .. }
+            | Instruction::Cast {
+                to: phera_bytecode::CastKind::String,
+                ..
+            }
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
             | Instruction::NewArray { .. }
