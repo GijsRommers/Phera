@@ -322,9 +322,75 @@ impl Vm {
                         None => Ok(Some(BatchExit::NativeCall(destination))),
                     }
                 }
-                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
-                    crate::class_intrinsics::ClassFunction::ObjectId,
-                )) => Ok(self.object_id_call(call, destination)),
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::FunctionExists) => {
+                    Ok(self.function_exists_call(call, destination))
+                }
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(function)) => {
+                    Ok(match function {
+                        crate::class_intrinsics::ClassFunction::ObjectId => {
+                            self.object_id_call(call, destination)
+                        }
+                        crate::class_intrinsics::ClassFunction::ClassExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Class,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::InterfaceExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Interface,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::TraitExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Trait,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::EnumExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Enum,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::IsA => self.relation_query_call(
+                            crate::class_relation_queries::RelationQuery::IsA,
+                            call,
+                            destination,
+                        ),
+                        crate::class_intrinsics::ClassFunction::IsSubclassOf => self
+                            .relation_query_call(
+                                crate::class_relation_queries::RelationQuery::IsSubclassOf,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::MethodExists => self
+                            .member_query_call(
+                                crate::class_member_queries::MemberQuery::Method,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::PropertyExists => self
+                            .member_query_call(
+                                crate::class_member_queries::MemberQuery::Property,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::GetClass => self.class_name_call(
+                            crate::class_queries::ClassNameQuery::GetClass,
+                            call,
+                            destination,
+                        ),
+                        crate::class_intrinsics::ClassFunction::GetParentClass => self
+                            .class_name_call(
+                                crate::class_queries::ClassNameQuery::GetParentClass,
+                                call,
+                                destination,
+                            ),
+                        _ => Some(BatchExit::NativeCall(destination)),
+                    })
+                }
                 _ => Ok(Some(BatchExit::NativeCall(destination))),
             };
         };
