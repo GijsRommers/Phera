@@ -80,11 +80,12 @@ impl Machine<'_> {
         }
         // The VM keys the site by the position after the instruction,
         // which is where the loop stands now.
-        let site = self.code.site(function, position.ip)?.try_borrow().ok()?;
-        match &*site {
-            CachedSite::Function(linked) => Some(decide(linked)),
-            _ => None,
-        }
+        self.code
+            .read_site(function, position.ip, |site| match site {
+                CachedSite::Function(linked) => Some(decide(linked)),
+                _ => None,
+            })
+            .flatten()
     }
 }
 

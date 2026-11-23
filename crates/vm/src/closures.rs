@@ -1,8 +1,9 @@
 //! Native closure objects retain lexical bindings: `$f = function () use (&$x) { ++$x; };`.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
+
+use foldhash::{HashMap, HashMapExt};
 
 use phera_bytecode::{CaptureKind, ClosureBinding, FunctionId, Reg};
 use phera_extension_api::NativeError;

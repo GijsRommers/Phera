@@ -438,7 +438,7 @@ impl Machine<'_> {
             };
             let plain = !facts.is_typed(index)
                 || facts.parameter_masks[index].intersects(crate::types::own_type(value));
-            let mut value = value.clone();
+            let mut value = crate::fast::duplicate(value);
             if !plain
                 && !self.accepts_argument(function, index, &value)
                 && !self.accepts_on_second_look(function, index, &mut value)

@@ -70,16 +70,27 @@ impl Vm {
             .current()
             .ok_or_else(|| internal_error!("property site"))?;
         let scope = frame.scope();
-        if let Some(slot) = frame.site_cache()
-            && let crate::unit_caches::CachedSite::Property(entry) = &*slot.borrow()
-            && Rc::ptr_eq(&entry.class, &object.class)
-            && match (&entry.scope, &scope) {
-                (None, None) => true,
-                (Some(left), Some(right)) => Rc::ptr_eq(left, right),
-                _ => false,
-            }
+        if let Some(entry) = self
+            .code
+            .read_site(frame.frame.function, frame.ip(), |site| {
+                let crate::unit_caches::CachedSite::Property(entry) = site else {
+                    return None;
+                };
+                if Rc::ptr_eq(&entry.class, &object.class)
+                    && match (&entry.scope, &scope) {
+                        (None, None) => true,
+                        (Some(left), Some(right)) => Rc::ptr_eq(left, right),
+                        _ => false,
+                    }
+                {
+                    Some(entry.clone())
+                } else {
+                    None
+                }
+            })
+            .flatten()
         {
-            return Ok(Some(entry.clone()));
+            return Ok(Some(entry));
         }
         self.fill_property_entry(object, name)
     }
@@ -197,8 +208,12 @@ impl Vm {
                         .all(|property| property.name != *name)
                 }),
         });
-        if let Some(slot) = self.current().and_then(|frame| frame.site_cache()) {
-            *slot.borrow_mut() = crate::unit_caches::CachedSite::Property(entry.clone());
+        if let Some(frame) = self.current() {
+            self.code.write_site(
+                frame.frame.function,
+                frame.ip(),
+                crate::unit_caches::CachedSite::Property(entry.clone()),
+            );
         }
         Ok(Some(entry))
     }
