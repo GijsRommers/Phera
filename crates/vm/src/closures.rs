@@ -122,7 +122,11 @@ impl Vm {
             signatures.resize_with(index + 1, || None);
         }
         signatures[index]
-            .get_or_insert_with(|| closure_callee(&self.code, function))
+            .get_or_insert_with(|| {
+                cache
+                    .base_closure_signature(index)
+                    .unwrap_or_else(|| closure_callee(&self.code, function))
+            })
             .clone()
     }
 

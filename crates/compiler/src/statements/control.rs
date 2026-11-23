@@ -92,6 +92,32 @@ impl Compiler<'_> {
         otherwise: &Option<Vec<ast::Statement>>,
         line: usize,
     ) -> Result<(), CompileError> {
+        // `if (cond) continue;` as the only branch: the condition branches
+        // straight to the loop's continue edge, one instruction per round
+        // instead of a branch plus two jumps. Only when a bare `continue`
+        // would compile to a bare jump: no running finally between the `if`
+        // and the loop, and the innermost context is a loop, not a switch.
+        if elseifs.is_empty()
+            && otherwise.is_none()
+            && let [only] = then
+            && let ast::StatementKind::Continue(depth) = &only.kind
+            && (*depth == 0 || *depth == 1)
+            && let Some(loop_state) = self.loops.last()
+            && !matches!(
+                loop_state.cleanup,
+                Some(crate::statements::exits::LoopCleanup::Switch(_))
+            )
+            && self
+                .finalies
+                .iter()
+                .all(|scope| scope.loop_depth < self.loops.len())
+        {
+            let patches = self.compile_condition(condition, true, line)?;
+            if let Some(loop_state) = self.loops.last_mut() {
+                loop_state.continues.extend(patches);
+            }
+            return Ok(());
+        }
         let branches =
             std::iter::once((condition, then, line)).chain(elseifs.iter().map(|elseif| {
                 (

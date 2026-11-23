@@ -60,12 +60,7 @@ impl Machine<'_> {
         }
         // The VM keys the site by the position after the instruction,
         // which is where the loop stands now.
-        let site = self
-            .code
-            .cache(function)
-            .site(self.code.facts(function), position.ip)?
-            .try_borrow()
-            .ok()?;
+        let site = self.code.site(function, position.ip)?.try_borrow().ok()?;
         let CachedSite::Static(entry) = &*site else {
             return None;
         };
