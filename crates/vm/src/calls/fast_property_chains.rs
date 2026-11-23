@@ -59,12 +59,7 @@ impl Machine<'_> {
         let body = self.code.function(function).paths.get(path.index())?;
         // The VM keys the site by the position after the instruction,
         // which is where the loop stands now.
-        let site = self
-            .code
-            .cache(function)
-            .site(self.code.facts(function), position.ip)?
-            .try_borrow()
-            .ok()?;
+        let site = self.code.site(function, position.ip)?.try_borrow().ok()?;
         let CachedSite::PropertyChain(entries) = &*site else {
             return None;
         };
