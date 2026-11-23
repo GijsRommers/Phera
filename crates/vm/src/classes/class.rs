@@ -457,9 +457,35 @@ impl Class {
     /// ancestry as `Class::ancestors`, its parent and interfaces and theirs.
     /// `None` when the walk outgrows its stack or its visits.
     pub(crate) fn derives_from(&self, target: &Class) -> Option<bool> {
+        if std::ptr::eq(self, target) {
+            return Some(true);
+        }
+        if self.parent.is_none() && self.interfaces.is_empty() {
+            return Some(false);
+        }
+        if let Some(parent) = &self.parent
+            && std::ptr::eq(&**parent, target)
+        {
+            return Some(true);
+        }
+        if self
+            .interfaces
+            .iter()
+            .any(|interface| std::ptr::eq(&**interface, target))
+        {
+            return Some(true);
+        }
         let mut waiting: [Option<&Class>; WALK_DEPTH] = [None; WALK_DEPTH];
-        waiting[0] = Some(self);
-        let mut count: usize = 1;
+        let mut count: usize = 0;
+        for ancestor in self.parent.iter().chain(&self.interfaces) {
+            for grand in ancestor.parent.iter().chain(&ancestor.interfaces) {
+                *waiting.get_mut(count)? = Some(&**grand);
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return Some(false);
+        }
         for _ in 0..WALK_VISITS {
             let Some(last) = count.checked_sub(1) else {
                 return Some(false);

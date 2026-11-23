@@ -500,7 +500,7 @@ impl Machine<'_> {
     /// that declares it, read from the function's facts; a closure's takes
     /// the general way.
     #[inline(always)]
-    fn caller_scope(&self, position: Position) -> Option<&Rc<Class>> {
+    pub(super) fn caller_scope(&self, position: Position) -> Option<&Rc<Class>> {
         match position.frame.kind() {
             CallKind::Function => None,
             CallKind::Method | CallKind::Constructor => self
