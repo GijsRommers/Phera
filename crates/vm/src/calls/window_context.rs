@@ -41,6 +41,7 @@ pub(crate) struct WindowContext<'a> {
 
 impl<'a> WindowContext<'a> {
     /// `$this`, for a method or closure that has one.
+    #[inline]
     pub(crate) fn this(&self) -> Option<&'a Rc<Object>> {
         match self.kind {
             CallKind::Function => None,
@@ -49,6 +50,7 @@ impl<'a> WindowContext<'a> {
     }
 
     /// The closure object, for a closure.
+    #[inline]
     pub(crate) fn closure(&self) -> Option<&'a Rc<Object>> {
         match self.kind {
             CallKind::Closure => object_in(self.registers, self.base - 2),
@@ -57,6 +59,7 @@ impl<'a> WindowContext<'a> {
     }
 
     /// The number of the class scope.
+    #[inline]
     pub(crate) fn scope_index(&self) -> Option<ClassIndex> {
         match self.kind {
             CallKind::Method | CallKind::Constructor => self.code.facts(self.function).class,
@@ -66,12 +69,14 @@ impl<'a> WindowContext<'a> {
     }
 
     /// The class scope (`self::`).
+    #[inline]
     pub(crate) fn scope(&self) -> Option<&'a Rc<Class>> {
         Some(self.classes.class(self.scope_index()?))
     }
 
     /// The called class (`static::`): the class of `$this`, else the class a
     /// static method was called on, else the class scope.
+    #[inline]
     pub(crate) fn called(&self) -> Option<Rc<Class>> {
         if let Some(this) = self.this()
             && this.class.as_any().downcast_ref::<Class>().is_none()
@@ -82,6 +87,7 @@ impl<'a> WindowContext<'a> {
     }
 
     /// The number of the called class.
+    #[inline]
     pub(crate) fn called_index(&self) -> Option<ClassIndex> {
         if let Some(this) = self.this() {
             return this

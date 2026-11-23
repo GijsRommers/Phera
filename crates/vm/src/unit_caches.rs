@@ -35,7 +35,6 @@ pub(crate) struct UnitCache {
     /// Keyed by immutable unit TypeId and made at first unit use; spelling cannot
     /// change, so scope classification needs no invalidation. Relative types resolve per call.
     pub(crate) type_scopes: Arc<[crate::types::DeclarationScope]>,
-    pub(crate) class_types: ClassTypes,
     /// What each method site (`CallMethod`) of the file found the last time
     /// it ran: one flat array for the whole file, one fixed entry per site,
     /// made when the first of the file's sites runs, so a file whose sites
@@ -53,86 +52,6 @@ pub(crate) struct UnitCache {
     /// first needed, never copied before. `None` in the snapshot's own
     /// cache and in a cache that was never forked.
     base: Option<Rc<UnitCache>>,
-}
-
-/// The per-type class checks of one file, one cell per declared type.
-///
-/// A file loaded by a request has them from the start. A fork's start as an
-/// empty array, which costs nothing to make and which the loop reads exactly
-/// as it reads a full one (one bounds check, no test for "not made yet");
-/// the first time the file checks a class type in slow path, with the code
-/// table borrowed mutably, [`ClassTypes::make`] fills it with the snapshot's
-/// answers (or empty ones).
-pub(crate) struct ClassTypes {
-    cells: Box<[RefCell<Option<ClassTypeEntry>>]>,
-    /// How many types the file declares.
-    count: usize,
-    /// The snapshot's cache of the file, whose answers the cells start with.
-    base: Option<Rc<UnitCache>>,
-}
-
-impl ClassTypes {
-    /// The cells of a file made now, with no answers.
-    fn made(count: usize) -> Self {
-        ClassTypes {
-            cells: (0..count).map(|_| RefCell::new(None)).collect(),
-            count,
-            base: None,
-        }
-    }
-
-    /// The cells of a fork's file: not made yet.
-    fn not_made(count: usize) -> Self {
-        ClassTypes {
-            cells: Box::default(),
-            count,
-            base: None,
-        }
-    }
-
-    /// Whether the cells exist: always for a file the request loaded, and
-    /// for a fork's file once a check of it went through the slow path.
-    pub(crate) fn is_made(&self) -> bool {
-        !self.cells.is_empty() || self.count == 0
-    }
-
-    /// The check of declared type `index`, if the cells are made.
-    #[inline(always)]
-    pub(crate) fn get(&self, index: usize) -> Option<&RefCell<Option<ClassTypeEntry>>> {
-        self.cells.get(index)
-    }
-
-    /// Makes the cells if they are not, with the answers the snapshot found
-    /// out: they hold in a fork, which shares the snapshot's classes (an
-    /// answer says "objects of this class satisfy this type", and is used
-    /// only for an object of that class).
-    pub(crate) fn make(&mut self) {
-        if !self.cells.is_empty() || self.count == 0 {
-            return;
-        }
-        let known = self
-            .base
-            .as_ref()
-            .map(|base| &base.class_types.cells)
-            .filter(|cells| cells.len() == self.count);
-        self.cells = match known {
-            Some(cells) => cells
-                .iter()
-                .map(|cell| RefCell::new(cell.borrow().clone()))
-                .collect(),
-            None => (0..self.count).map(|_| RefCell::new(None)).collect(),
-        };
-    }
-}
-
-/// Keyed by unit TypeId and guarded by receiver class identity. Entries are made
-/// after a successful or failed absolute declaration check. Relative types bypass
-/// this cache. Retained immutable classes cannot change ancestry or reuse an
-/// identity; request-owned UnitCaches prevent declarations leaking across requests.
-#[derive(Clone)]
-pub(crate) struct ClassTypeEntry {
-    pub(crate) class: Rc<dyn phera_value::ClassHandle>,
-    pub(crate) matches: bool,
 }
 
 /// A native getter's direct handler (`MethodEntry::direct`).
@@ -211,8 +130,6 @@ impl SiteRecord {
 pub(crate) enum CachedSite {
     Empty,
     Property(Rc<crate::property_sites::PropertyEntry>),
-    /// A static property read (see `crate::static_sites`).
-    Static(Rc<crate::static_sites::StaticEntry>),
     /// What an unqualified built-in call in a namespace found when it first
     /// ran (see `crate::builtin_guards`).
     BuiltinGuard(crate::builtin_guards::Resolution),
@@ -221,16 +138,15 @@ pub(crate) enum CachedSite {
 
 impl UnitCache {
     /// What a fork's copy of this cache holds on the heap, in bytes: the
-    /// per-symbol and per-type resolution slots. The shared literal tables
+    /// per-symbol and closure resolution slots. The shared literal tables
     /// cost a fork nothing. See `crate::snapshot::footprint`.
-    pub(crate) fn fork_bytes(&self) -> [usize; 3] {
+    pub(crate) fn fork_bytes(&self) -> [usize; 2] {
         use std::mem::size_of;
-        let types = self.class_types.cells.len() * size_of::<RefCell<Option<ClassTypeEntry>>>();
         let functions = self.symbols.borrow().len()
             * size_of::<Option<crate::calls::pending::LinkedFunction>>();
         let closures = self.closure_signatures.borrow().len()
             * size_of::<Option<crate::calls::call_state::Callee>>();
-        [types, functions, closures]
+        [functions, closures]
     }
 
     pub(crate) fn trace_file(&self, unit: &CompiledUnit) -> Value {
@@ -313,7 +229,6 @@ impl UnitCache {
                     .map(crate::types::DeclarationScope::of)
                     .collect(),
             },
-            class_types: ClassTypes::made(unit.types.len()),
             records: Records::new(),
             record_starts: {
                 let mut next = unit.main.method_sites.len() as u32;
@@ -381,7 +296,6 @@ impl UnitCache {
             constants: self.constants.clone(),
             class_names: self.class_names.clone(),
             type_scopes: self.type_scopes.clone(),
-            class_types: ClassTypes::not_made(self.class_types.count),
             records: Records::new(),
             record_starts: self.record_starts.clone(),
             closure_signatures: RefCell::new(Vec::new()),
@@ -410,12 +324,6 @@ impl UnitCache {
                 .direct_natives
                 .set(cells.iter().map(|cell| Cell::new(cell.get())).collect());
         }
-        frozen.class_types.cells = self
-            .class_types
-            .cells
-            .iter()
-            .map(|cell| RefCell::new(cell.borrow().clone()))
-            .collect();
         *frozen.closure_signatures.get_mut() = self
             .closure_signatures
             .borrow()
@@ -501,9 +409,6 @@ impl crate::snapshot::ForkCopy for UnitCache {
             Some(base) => Some(base.clone()),
             None => Some(Rc::new(self.frozen())),
         };
-        if copy.base.is_some() {
-            copy.class_types.base = copy.base.clone();
-        }
         copy
     }
 }
@@ -531,7 +436,6 @@ impl CachedSite {
         match self {
             CachedSite::Empty => CachedSite::Empty,
             CachedSite::Property(entry) => CachedSite::Property(entry.clone()),
-            CachedSite::Static(entry) => CachedSite::Static(entry.clone()),
             CachedSite::BuiltinGuard(resolution) => CachedSite::BuiltinGuard(*resolution),
             CachedSite::Function(linked) => match linked.shared() {
                 Some(linked) => CachedSite::Function(Box::new(linked)),

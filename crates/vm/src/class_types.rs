@@ -4,41 +4,75 @@ use phera_bytecode::Type;
 use phera_value::Value;
 
 use crate::Vm;
+use crate::classes::ClassTable;
+use crate::code_table::{CodeTable, FunctionIndex};
+
+/// Direct zero-cache check for absolute class, union (`A|B`), and intersection
+/// (`A&B`) declarations by pre-interned `NameKey` and pointer-walk ancestry
+/// (`Class::derives_from`). DNF declarations (`(A&B)|C`), relative keywords
+/// (`self`/`parent`/`static`), class aliases, and deep hierarchies return `false`
+/// so callers can fall back to [`Vm::matches_class_type`].
+#[inline]
+pub(crate) fn fast_class_type_matches(
+    code: &CodeTable,
+    classes: &ClassTable,
+    function: FunctionIndex,
+    declaration: phera_bytecode::TypeId,
+    value: &Value,
+) -> bool {
+    let Value::Object(object) = value else {
+        return false;
+    };
+    let Some(class) = object
+        .class
+        .as_any()
+        .downcast_ref::<crate::classes::Class>()
+    else {
+        return false;
+    };
+    let cache = code.cache(function);
+    if cache.type_scopes.get(declaration.index()) != Some(&crate::types::DeclarationScope::Absolute)
+    {
+        return false;
+    }
+    let unit = code.unit(function);
+    let Some(ty) = unit.types.get(declaration.index()) else {
+        return false;
+    };
+    if ty.classes.is_empty() || ty.display.contains('(') {
+        return false;
+    }
+    let check = |name: &phera_bytecode::NameId| {
+        classes
+            .by_key(code.unit_name_key(function, *name))
+            .is_some_and(|target| class.derives_from(target) == Some(true))
+    };
+    if ty.intersection {
+        ty.classes.iter().all(check)
+    } else {
+        ty.classes.iter().any(check)
+    }
+}
 
 impl Vm {
-    /// Mirrors matches_class_type for absolute declarations, avoiding name hashing
-    /// after the first check for a unit TypeId and receiver class. Relative types
-    /// retain the scope-dependent resolver on every call.
-    pub(crate) fn matches_cached_class_type(
+    /// Checks an object against a compiled declaration directly via `NameKey`
+    /// and `Class::derives_from`, falling back to [`Self::matches_class_type`]
+    /// for relative keywords, DNF types, class aliases, and deep hierarchies.
+    #[inline]
+    pub(crate) fn matches_declared_class_type(
         &self,
-        value: &Value,
+        function: FunctionIndex,
         declaration: phera_bytecode::TypeId,
-        unit: &phera_bytecode::CompiledUnit,
-        cache: &crate::unit_caches::UnitCache,
+        value: &Value,
     ) -> bool {
-        let Some(ty) = unit.types.get(declaration.index()) else {
-            return false;
-        };
-        let Some(slot) = cache.class_types.get(declaration.index()).filter(|_| {
-            cache.type_scopes.get(declaration.index())
-                == Some(&crate::types::DeclarationScope::Absolute)
-        }) else {
-            return self.matches_class_type(value, ty);
-        };
-        let Value::Object(object) = value else {
-            return self.matches_class_type(value, ty);
-        };
-        if let Some(entry) = &*slot.borrow()
-            && std::rc::Rc::ptr_eq(&entry.class, &object.class)
-        {
-            return entry.matches;
+        if fast_class_type_matches(&self.code, &self.classes, function, declaration, value) {
+            return true;
         }
-        let matches = self.matches_class_type(value, ty);
-        *slot.borrow_mut() = Some(crate::unit_caches::ClassTypeEntry {
-            class: object.class.clone(),
-            matches,
-        });
-        matches
+        self.code
+            .unit(function)
+            .types
+            .get(declaration.index())
+            .is_some_and(|ty| self.matches_class_type(value, ty))
     }
 
     /// Resolve declaration keywords in lexical scope and static against the called class.
@@ -53,13 +87,6 @@ impl Vm {
         else {
             return false;
         };
-        // Mirrors the resolved-name membership path below without reparsing an
-        // already seen absolute declaration on every parameter and return check.
-        if !matches!(declaration.display.as_str(), "self" | "parent" | "static")
-            && class.cached_declaration_result(&declaration.display) == Some(true)
-        {
-            return true;
-        }
         let context = self.current().and_then(|frame| frame.method());
         let context = context.as_ref();
         let matches = |name: &str| {
@@ -80,25 +107,4 @@ impl Vm {
             .into_iter()
             .any(|alternative| alternative.split('&').all(matches))
     }
-}
-
-/// Whether the unit's cache already remembers that the class of `value`
-/// satisfies the class type `declaration`, by identity of the class. Only a
-/// remembered "yes" counts: anything else is left to the general check, which
-/// also fills the cache.
-pub(crate) fn known_class_match(
-    cache: &crate::unit_caches::UnitCache,
-    declaration: phera_bytecode::TypeId,
-    value: &Value,
-) -> bool {
-    let Value::Object(object) = value else {
-        return false;
-    };
-    let index = declaration.index();
-    cache.type_scopes.get(index) == Some(&crate::types::DeclarationScope::Absolute)
-        && cache.class_types.get(index).is_some_and(|slot| {
-            slot.borrow().as_ref().is_some_and(|entry| {
-                entry.matches && std::rc::Rc::ptr_eq(&entry.class, &object.class)
-            })
-        })
 }

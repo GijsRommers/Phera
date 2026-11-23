@@ -178,7 +178,6 @@ mod serialization;
 mod snapshot;
 mod spl_autoload;
 mod static_places;
-mod static_sites;
 mod static_variables;
 mod string_comparison;
 mod string_offsets;
