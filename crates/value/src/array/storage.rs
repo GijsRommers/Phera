@@ -13,19 +13,31 @@ use super::ArrayKey;
 use crate::string::PhpString;
 use crate::value::Value;
 
-/// One randomized seed for every array in the process.
-fn array_hasher() -> &'static RandomState {
-    static HASHER: OnceLock<RandomState> = OnceLock::new();
-    HASHER.get_or_init(RandomState::default)
+/// The process seed shared by the integer and string keys of every array.
+struct ArrayHashSeed {
+    strings: RandomState,
+    integers: u64,
+}
+
+#[inline]
+fn array_hash_seed() -> &'static ArrayHashSeed {
+    static SEED: OnceLock<ArrayHashSeed> = OnceLock::new();
+    SEED.get_or_init(|| {
+        let strings = RandomState::default();
+        let integers = strings.hash_one(0x243f_6a88_85a3_08d3u64);
+        ArrayHashSeed { strings, integers }
+    })
 }
 
 pub(crate) fn hash_str_bytes(bytes: &[u8]) -> u64 {
-    array_hasher().hash_one(bytes)
+    array_hash_seed().strings.hash_one(bytes)
 }
 
 #[inline]
 fn hash_int_key(key: i64) -> u64 {
-    array_hasher().hash_one(key)
+    let keyed = key as u64 ^ array_hash_seed().integers;
+    let product = u128::from(keyed) * 0x9e37_79b9_7f4a_7c15;
+    (product as u64) ^ ((product >> 64) as u64)
 }
 
 #[inline]

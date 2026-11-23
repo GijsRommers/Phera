@@ -30,8 +30,13 @@ use shared storage. The bounded table may decline a trusted literal. A short
 literal of request-selected code retains its debug spelling with a flag on
 the shared handle.
 
-An integer key still goes through process-seeded `RandomState::hash_one(i64)`.
-For the supported x86-64 and AArch64 targets, foldhash multiplies two seeded
-64-bit words into a 128-bit product and XORs its halves. The distribution test
-covers 65,536 keys with only their top 16 bits changing. Flood resistance
+Main used process-seeded `RandomState::hash_one(i64)`, which also folds
+a widening product. A histogram of 65,536 keys differing in their top 16
+bits fell below the distribution threshold for some random multipliers.
+The integer index now XORs its key with a seed-derived word, multiplies by
+`0x9e3779b97f4a7c15` into 128 bits, and XORs the halves. Flood resistance
 rests on a process-wide seed. PHP uses no secret array-key seed.
+
+| Structure | Was | Is |
+| --- | --- | --- |
+| Integer-key hash | `foldhash::hash_one(i64)` with a seeded multiplier | Seeded key and fixed multiplier, with high and low halves XORed |
