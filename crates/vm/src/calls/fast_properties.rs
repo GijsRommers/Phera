@@ -433,14 +433,14 @@ impl Machine<'_> {
         scope: Option<ClassIndex>,
         value: &Value,
     ) -> bool {
-        let Some((_, packed)) = self.resolve_prop(position, object, name, scope) else {
+        let Some((table, packed)) = self.resolve_prop(position, object, name, scope) else {
             return false;
         };
         if !packed.is_plain_writable() {
             return false;
         }
         if packed.allows_type(crate::types::own_type(value)) {
-            return write_slot_direct(object, packed.slot(), value);
+            return write_slot_direct(object, packed.slot(), value, table.fills_missing_directly());
         }
         // Class-typed property receiving an object: check cached `WriteRule::TypedClasses`.
         if packed.has_class_type() && value.is_object() {
@@ -463,13 +463,13 @@ impl Machine<'_> {
         scope: Option<ClassIndex>,
         value: &Value,
     ) -> bool {
-        let Some((_, packed)) = self.resolve_prop(position, object, name, scope) else {
+        let Some((table, packed)) = self.resolve_prop(position, object, name, scope) else {
             return false;
         };
         if !packed.is_plain_writable() || !packed.allows_type(crate::types::own_type(value)) {
             return false;
         }
-        write_slot_direct(object, packed.slot(), value)
+        write_slot_direct(object, packed.slot(), value, table.fills_missing_directly())
     }
 
     /// Write an element of an array held in a declared property (single or chained:
@@ -657,8 +657,11 @@ impl Machine<'_> {
     }
 }
 
+/// Writes `value` into a declared property's slot, or says `false` so that
+/// the general path does it: for a reference in the slot, and for an empty
+/// slot unless `fill_missing` (see `PropertyTable::fills_missing_directly`).
 #[inline(always)]
-fn write_slot_direct(object: &Object, slot: usize, value: &Value) -> bool {
+fn write_slot_direct(object: &Object, slot: usize, value: &Value, fill_missing: bool) -> bool {
     object
         .update(|properties| {
             properties.layout()?;
@@ -668,10 +671,11 @@ fn write_slot_direct(object: &Object, slot: usize, value: &Value) -> bool {
                     *destination = value.clone();
                     Some(true)
                 }
-                None => {
+                None if fill_missing => {
                     properties.set_slot(slot, value.clone());
                     Some(true)
                 }
+                None => Some(false),
             }
         })
         .flatten()
