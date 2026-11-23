@@ -68,6 +68,8 @@ pub struct Function {
 /// `Call`, where a call the quick entry made returns.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MethodSite {
+    /// Index of this site's receiver and scope record in the compiled file.
+    pub record: usize,
     pub receiver: Reg,
     pub method: NameId,
     /// The first of the site's entries in [`Function::site_arguments`].

@@ -123,8 +123,10 @@ impl Machine<'_> {
             [Some(Value::Object(object))] => object,
             _ => return Step::Done(position.ip),
         };
-        let address = SiteRecord::address(&object.class);
-        let record = cache.site_record(facts, body.method_sites.len(), site_id);
+        let Some(receiver_class) = object.class.as_any().downcast_ref::<Class>() else {
+            return Step::Done(position.ip);
+        };
+        let record = cache.site_record(site.record);
         // The scope the site's code runs in (see `caller_scope`): a method's
         // declaring class, from its facts; a closure's bound scope, which two
         // closure objects of one function may have differently; none for a
@@ -139,15 +141,12 @@ impl Machine<'_> {
                 class,
                 scope: recorded,
                 outcome,
-            }) if class == address && recorded == scope => outcome,
+            }) if class == Some(receiver_class.index) && recorded == scope => outcome,
             _ => {
-                let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
-                    return Step::Done(position.ip);
-                };
-                let outcome = self.resolve_site(position, site, class);
+                let outcome = self.resolve_site(position, body, site, receiver_class);
                 if let Some(record) = record {
                     record.set(SiteRecord {
-                        class: address,
+                        class: Some(receiver_class.index),
                         scope,
                         outcome,
                     });
@@ -158,6 +157,35 @@ impl Machine<'_> {
         match outcome {
             // The VM runs the following `InitMethodCall` itself.
             SiteOutcome::Vm => Step::Slow,
+            SiteOutcome::OneLocal {
+                function,
+                local,
+                registers,
+            } => {
+                let [Some(value)] = self
+                    .registers
+                    .window(position.frame.base() + local.index(), 1)
+                else {
+                    return Step::Done(position.ip);
+                };
+                if value.is_reference() || self.stack.depth() >= self.frame_limit {
+                    return Step::Done(position.ip);
+                }
+                let value = crate::fast::duplicate(value);
+                let receiver = object.clone();
+                let start = self.registers.len();
+                let base = start + 1;
+                self.registers.grow_to(base + usize::from(registers));
+                self.registers.put(start, Value::Object(receiver));
+                self.registers.put(base, value);
+                self.publish(site.after.index());
+                let frame = Frame::of_kind(function, CallKind::Method, base, Some(destination));
+                self.stack.push(frame);
+                if self.spend_work() {
+                    return Step::Yield;
+                }
+                Step::Switched(Position { frame, ip: 0 })
+            }
             SiteOutcome::Enter(function) => {
                 // A taken receiver moves into `$this`, where the general
                 // sequence would copy it and clear it.
@@ -226,7 +254,13 @@ impl Machine<'_> {
     /// depends on nothing else, so the site records it.
     #[cold]
     #[inline(never)]
-    fn resolve_site(&self, position: Position, site: &MethodSite, class: &Class) -> SiteOutcome {
+    fn resolve_site(
+        &self,
+        position: Position,
+        body: &phera_bytecode::Function,
+        site: &MethodSite,
+        class: &Class,
+    ) -> SiteOutcome {
         let key = self
             .code
             .unit_name_key(position.frame.function, site.method);
@@ -241,7 +275,23 @@ impl Machine<'_> {
             MethodBody::User(function) => {
                 let scope = self.caller_scope(position);
                 if may_call(&found, scope) && !self.shadowed_by_private(scope, key, method) {
-                    SiteOutcome::Enter(function)
+                    let facts = self.code.facts(function);
+                    if !site.receiver_taken
+                        && facts.shape == FunctionShape::Plain
+                        && facts.parameters == 1
+                        && facts.takes_value(0)
+                        && !facts.is_typed(0)
+                        && let Some([phera_bytecode::SiteArgument::Local(local)]) =
+                            body.site_arguments.get(site.argument_range())
+                    {
+                        SiteOutcome::OneLocal {
+                            function,
+                            local: *local,
+                            registers: facts.registers.max(1),
+                        }
+                    } else {
+                        SiteOutcome::Enter(function)
+                    }
                 } else {
                     SiteOutcome::Vm
                 }

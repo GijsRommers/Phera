@@ -56,7 +56,7 @@ struct FoundCall {
 
 /// Give the eligible method calls of one function a `CallMethod`, after
 /// its other passes have run.
-pub(crate) fn rewrite(function: &mut Function) {
+pub(crate) fn rewrite(function: &mut Function, first_record: usize) {
     let mut calls = find_calls(function);
     calls.retain_mut(|call| give_own_registers(function, call));
     if calls.is_empty() {
@@ -118,6 +118,7 @@ pub(crate) fn rewrite(function: &mut Function) {
             lines.push(line(written_out));
         }
         function.method_sites.push(MethodSite {
+            record: first_record + site.index(),
             receiver,
             method,
             first_argument,

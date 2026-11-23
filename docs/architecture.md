@@ -1360,6 +1360,10 @@ Done on the branch `engine/calls` (pull request #9):
   `Call` when the case is the plain one.
 - `CallDirect` replaces `InitCall`/`Send`/`Call` for calls to a file's own
   top-level functions (compiler pass `passes/direct_calls.rs`).
+- Each compiled method site indexes one record in the file. If its receiver
+  class and effective calling scope match, the record can describe a plain
+  PHP method accepting one local by value. This entry copies the local into
+  the callee's window and retains the receiver there as `$this`.
 - Each class has a method table keyed by interned name. The per-site
   method cache and the static-site caches are deleted.
 

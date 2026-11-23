@@ -37,13 +37,10 @@ pub(crate) struct UnitCache {
     /// What each method site (`CallMethod`) of the file found the last time
     /// it ran: one flat array for the whole file, one fixed entry per site,
     /// made when the first of the file's sites runs, so a file whose sites
-    /// never run in a request costs nothing. A function's sites start at
-    /// its entry in `record_starts`.
+    /// never run in a request costs nothing.
     records: Records,
-    /// Where each function's sites start in `records`: the top-level code's
-    /// at 0, function `i`'s at `record_starts[i]`, and the total last. Made
-    /// with the file, shared by every fork.
-    record_starts: Rc<[u32]>,
+    /// Number of record indexes assigned by the compiler in this file.
+    record_count: usize,
     pub(crate) closure_signatures: RefCell<Vec<Option<crate::calls::call_state::Callee>>>,
 }
 
@@ -69,28 +66,15 @@ pub(crate) type Records = OnceCell<Box<[Cell<SiteRecord>]>>;
 /// the next call with a receiver of the same class needs no lookup. A
 /// receiver of another class looks the method up and replaces the record.
 ///
-/// The class is held as the address of the receiver's class handle, so
-/// that a hit is one comparison. The record also holds the class scope it
-/// was made in: the composed copies of a trait method share their records
-/// but run in different scopes, and what a scope may call differs. A VM frees no class while it runs (the
-/// class tables hold every class it linked until the VM ends, and the
-/// records die with the VM), so an address cannot come to mean another
-/// class.
+/// Trait copies and rebound closures can use the same record in different
+/// scopes. Both class indexes must match before the recorded target is used.
 #[derive(Clone, Copy)]
 pub(crate) struct SiteRecord {
-    /// 0 for a record not made yet.
-    pub(crate) class: usize,
+    /// None until a receiver has populated the record.
+    pub(crate) class: Option<crate::classes::ClassIndex>,
     /// The class scope of the code the record was made for.
     pub(crate) scope: Option<crate::classes::ClassIndex>,
     pub(crate) outcome: SiteOutcome,
-}
-
-impl SiteRecord {
-    /// The address that identifies `class` in a record.
-    #[inline(always)]
-    pub(crate) fn address(class: &std::rc::Rc<dyn phera_value::ClassHandle>) -> usize {
-        std::rc::Rc::as_ptr(class).cast::<()>() as usize
-    }
 }
 
 /// How a method site calls the method it found.
@@ -99,6 +83,12 @@ pub(crate) enum SiteOutcome {
     /// A method written in PHP the site's scope may call: entered from the
     /// site.
     Enter(crate::code_table::FunctionIndex),
+    /// A plain PHP method taking one untyped value from a named caller local.
+    OneLocal {
+        function: crate::code_table::FunctionIndex,
+        local: phera_bytecode::Reg,
+        registers: u16,
+    },
     /// A public native getter with no parameters and a direct handler
     /// (`$method->getName()`): the site runs it and stores its value.
     Getter(Getter),
@@ -111,7 +101,7 @@ pub(crate) enum SiteOutcome {
 
 impl SiteRecord {
     const EMPTY: SiteRecord = SiteRecord {
-        class: 0,
+        class: None,
         scope: None,
         outcome: SiteOutcome::Vm,
     };
@@ -177,25 +167,15 @@ impl UnitCache {
             .get(ip)
     }
 
-    /// The record of method site `site` of the function `facts` describes,
-    /// which has `sites` method sites.
-    pub(crate) fn site_record(
-        &self,
-        facts: &crate::function_facts::FunctionFacts,
-        sites: usize,
-        site: phera_bytecode::MethodSiteId,
-    ) -> Option<&Cell<SiteRecord>> {
-        let start = match facts.local {
-            Some(function) => *self.record_starts.get(function as usize)? as usize,
-            None => 0,
-        };
-        if site.index() >= sites {
-            return None;
-        }
-        let total = self.record_starts.last().copied().unwrap_or(0) as usize;
+    /// The request-local cell at the site's immutable file-wide index.
+    pub(crate) fn site_record(&self, index: usize) -> Option<&Cell<SiteRecord>> {
         self.records
-            .get_or_init(|| (0..total).map(|_| Cell::new(SiteRecord::EMPTY)).collect())
-            .get(start + site.index())
+            .get_or_init(|| {
+                (0..self.record_count)
+                    .map(|_| Cell::new(SiteRecord::EMPTY))
+                    .collect()
+            })
+            .get(index)
     }
 }
 
@@ -239,16 +219,10 @@ impl UnitCache {
             main_sites: Sites::new(),
             function_sites: unit.functions.iter().map(|_| Sites::new()).collect(),
             records: Records::new(),
-            record_starts: {
-                let mut next = unit.main.method_sites.len() as u32;
-                let mut starts = Vec::with_capacity(unit.functions.len() + 1);
-                for function in &unit.functions {
-                    starts.push(next);
-                    next += function.method_sites.len() as u32;
-                }
-                starts.push(next);
-                starts.into()
-            },
+            record_count: std::iter::once(&unit.main)
+                .chain(&unit.functions)
+                .map(|function| function.method_sites.len())
+                .sum(),
             closure_signatures: RefCell::new(Vec::new()),
             class_names: unit
                 .symbols
@@ -326,7 +300,7 @@ impl crate::snapshot::ForkCopy for UnitCache {
                 .map(|function| sites(function, fork))
                 .collect(),
             records,
-            record_starts: self.record_starts.clone(),
+            record_count: self.record_count,
             closure_signatures: RefCell::new(self.closure_signatures.borrow().fork_copy(fork)),
         }
     }

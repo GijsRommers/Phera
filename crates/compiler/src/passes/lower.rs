@@ -18,6 +18,8 @@ use crate::ir;
 #[derive(Default)]
 pub(crate) struct Tables<'a> {
     unit: CompiledUnit,
+    /// Next free method record across the top-level code and its functions.
+    method_records: usize,
     /// The file's top-level functions, which calls reach with `CallDirect`.
     callees: crate::passes::direct_calls::DirectCallees,
     native_functions: Option<&'a crate::NativeFunctions<'a>>,
@@ -309,7 +311,8 @@ impl Tables<'_> {
         crate::passes::clear_flow::elide(&mut function, &self.unit.constants, &self.unit.types);
         // Last: the passes above never see `CallMethod`, whose site table
         // reads the argument registers.
-        crate::passes::method_calls::rewrite(&mut function);
+        crate::passes::method_calls::rewrite(&mut function, self.method_records);
+        self.method_records += function.method_sites.len();
         // Then the temporaries read once and cleared are taken.
         crate::passes::takes::rewrite(&mut function);
         function
