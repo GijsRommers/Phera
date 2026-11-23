@@ -195,7 +195,13 @@ fn compare_non_resource(
         | (Value::Bool(true), Value::Bool(true)) => Ok(0),
         (Value::Null, Value::Bool(true)) => Ok(-1),
         (Value::Bool(true), Value::Null) => Ok(1),
-        (Value::String(x), Value::String(y)) => Ok(smart_strcmp(x.as_bytes(), y.as_bytes())),
+        (Value::String(x), Value::String(y)) => {
+            if x.ptr_eq(y) {
+                Ok(0)
+            } else {
+                Ok(smart_strcmp(x.as_bytes(), y.as_bytes()))
+            }
+        }
         (Value::Null, Value::String(y)) => Ok(if y.is_empty() { 0 } else { -1 }),
         (Value::String(x), Value::Null) => Ok(if x.is_empty() { 0 } else { 1 }),
         (Value::Int(x), Value::String(y)) => Ok(long_to_string_cmp(*x, y.as_bytes())),

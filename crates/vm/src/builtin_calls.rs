@@ -7,7 +7,7 @@
 
 use phera_bytecode::{BuiltinFrame, BuiltinUnary, ConstId, Reg};
 use phera_extension_api::NativeError;
-use phera_value::{ArrayKey, Value};
+use phera_value::Value;
 
 use crate::calls::callback_binding::ArgumentBinding;
 use crate::{Vm, calls::execution_loop::BatchExit};
@@ -98,14 +98,14 @@ impl Vm {
         let key = self.read_local(key);
         let array = self.read_local(array);
         if let Value::Array(array) = &array {
-            let normalized = match &key {
-                Value::Int(key) => Some(ArrayKey::Int(*key)),
-                Value::Bool(key) => Some(ArrayKey::Int(i64::from(*key))),
-                Value::String(key) => Some(ArrayKey::from_string(key.clone())),
+            let exists = match &key {
+                Value::Int(key) => Some(array.contains_int(*key)),
+                Value::Bool(key) => Some(array.contains_int(i64::from(*key))),
+                Value::String(key) => Some(array.contains_str(key)),
                 _ => None,
             };
-            if let Some(key) = normalized {
-                self.set(destination, Value::Bool(array.contains_key(&key)));
+            if let Some(exists) = exists {
+                self.set(destination, Value::Bool(exists));
                 return Ok(None);
             }
         }
@@ -134,12 +134,12 @@ impl Vm {
             return Err(internal_error!("literal search haystack"));
         };
         let found = match &needle {
-            Value::String(needle) => values.values().any(|value| {
-                matches!(value, Value::String(value) if value.as_bytes() == needle.as_bytes())
-            }),
-            Value::Int(needle) if strict => values.values().any(|value| {
-                matches!(value, Value::Int(value) if value == needle)
-            }),
+            Value::String(needle) => values
+                .values()
+                .any(|value| matches!(value, Value::String(value) if value == needle)),
+            Value::Int(needle) if strict => values
+                .values()
+                .any(|value| matches!(value, Value::Int(value) if value == needle)),
             _ if strict => false,
             _ => {
                 return self.call_builtin_fallback(

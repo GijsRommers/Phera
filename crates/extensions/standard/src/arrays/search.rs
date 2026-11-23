@@ -101,7 +101,7 @@ impl Equality {
                 || plainly_non_numeric(left)
                 || plainly_non_numeric(right))
         {
-            return Ok(left.as_bytes() == right.as_bytes());
+            return Ok(left == right);
         }
         let compare = match self {
             Self::Strict => strict_equals,

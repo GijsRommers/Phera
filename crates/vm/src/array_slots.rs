@@ -10,5 +10,5 @@ pub(crate) fn read_integer(array: &PhpArray, index: i64) -> Option<&Value> {
         .and_then(|position| array.entry_at(position))
         .filter(|(key, _)| matches!(key, ArrayKey::Int(stored) if *stored == index))
         .map(|(_, value)| value)
-        .or_else(|| array.get(&ArrayKey::Int(index)))
+        .or_else(|| array.get_int(index))
 }

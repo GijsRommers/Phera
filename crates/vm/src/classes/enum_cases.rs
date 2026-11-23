@@ -170,6 +170,8 @@ impl Vm {
         let backing = info
             .backing
             .ok_or_else(|| internal_error!("enum backing type"))?;
+        // PhpString's cached hash cell does not change Eq or Hash.
+        #[allow(clippy::mutable_key_type)]
         let table = HashMap::with_capacity(info.names.len());
         self.enum_cases.validating.insert(class.index);
         self.next_enum_backing(BackingBuilder {

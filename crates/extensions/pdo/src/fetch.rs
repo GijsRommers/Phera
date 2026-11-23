@@ -135,6 +135,8 @@ pub fn convert(
             values.push(stringify(context, value, attributes)?)?;
         }
     } else if matches!(mode, FetchMode::Named) {
+        // PhpString's cached hash cell does not change Eq or Hash.
+        #[allow(clippy::mutable_key_type)]
         let mut duplicates = std::collections::HashSet::new();
         for (value, key) in row.zip(keys) {
             let value = stringify(context, value, attributes)?;

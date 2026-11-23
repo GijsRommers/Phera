@@ -190,17 +190,20 @@ const KEY_EXISTS: FunctionEntry = FunctionEntry::sync(
 );
 
 fn array_key_exists(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let key = &arguments[0];
-    let key = if key.is_null() {
-        context.deprecated(
-            "Using null as the key parameter for array_key_exists() is deprecated, use an empty string instead"
-                .into(),
-        );
-        ArrayKey::String(PhpString::new())
-    } else {
-        ArrayKey::from_value_diag(key, context.diagnostics())?
+    let array = required_array(arguments, 1);
+    let exists = match &*arguments[0].deref() {
+        Value::Int(key) => array.contains_int(*key),
+        Value::String(key) => array.contains_str(key),
+        Value::Null => {
+            context.deprecated(
+                "Using null as the key parameter for array_key_exists() is deprecated, use an empty string instead"
+                    .into(),
+            );
+            array.contains_key(&ArrayKey::String(PhpString::new()))
+        }
+        other => array.contains_key(&ArrayKey::from_value_diag(other, context.diagnostics())?),
     };
-    Ok(Value::Bool(required_array(arguments, 1).contains_key(&key)))
+    Ok(Value::Bool(exists))
 }
 
 /// `array_change_key_case(array $array, int $case = CASE_LOWER): array`,

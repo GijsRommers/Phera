@@ -34,6 +34,7 @@ const MOST_KEYS: usize = 3;
 
 impl Machine<'_> {
     /// `Fetch` of `$this->property[$key]...` or `$object->property[$key]...`.
+    #[inline(never)]
     pub(super) fn fetch_property_element<const GUARDED: bool>(
         &mut self,
         position: Position,
@@ -61,40 +62,48 @@ impl Machine<'_> {
         path: PathId,
         quiet: bool,
     ) -> Option<Value> {
-        let property =
-            self.with_site(position, (path, Shape::Element), |entry, object, scope| {
-                if entry.hooks.is_some() {
-                    return None;
-                }
-                entry.read_matching(object, scope)
-            })?;
-        let keys = &self
+        let [PathStep::Property(_), keys @ ..] = self
             .code
             .function(position.frame.function)
             .paths
             .get(path.index())?
-            .steps[1..];
-        if keys.len() > MOST_KEYS {
+            .steps
+            .as_slice()
+        else {
+            return None;
+        };
+        if keys.is_empty() || keys.len() > MOST_KEYS {
             return None;
         }
-        let mut current = property;
-        for step in keys {
-            let PathStep::Index(register) = step else {
-                return None;
-            };
-            let key = self.array_key(position, *register)?;
-            current = match &current {
-                Value::Array(array) => match array.get(&key) {
-                    Some(Value::Reference(_)) => return None,
-                    Some(element) => element.clone(),
-                    None if quiet => return Some(Value::Null),
-                    None => return None,
-                },
-                Value::Null if quiet => return Some(Value::Null),
-                _ => return None,
-            };
-        }
-        Some(current)
+        let base = position.frame.base();
+        self.with_site(position, (path, Shape::Element), |entry, object, scope| {
+            entry.with_matching_value(object, scope, |property| {
+                let mut current = property;
+                for step in keys {
+                    let PathStep::Index(register) = step else {
+                        return None;
+                    };
+                    let [Some(key)] = self.registers.window(base + register.index(), 1) else {
+                        return None;
+                    };
+                    let next = match (current, key) {
+                        (Value::Array(array), Value::Int(integer)) => array.get_int(*integer),
+                        (Value::Array(array), Value::String(string)) => array.get_str(string),
+                        (Value::Null, Value::Int(_) | Value::String(_)) if quiet => {
+                            return Some(Value::Null);
+                        }
+                        _ => return None,
+                    };
+                    match next {
+                        Some(Value::Reference(_)) => return None,
+                        Some(element) => current = element,
+                        None if quiet => return Some(Value::Null),
+                        None => return None,
+                    }
+                }
+                Some(current.clone())
+            })
+        })
     }
 
     /// An integer or string key in a register, as PHP converts it.

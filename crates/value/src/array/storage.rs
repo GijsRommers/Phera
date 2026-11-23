@@ -7,9 +7,48 @@
 use foldhash::fast::RandomState;
 use hashbrown::HashTable;
 use std::hash::BuildHasher;
+use std::sync::OnceLock;
 
 use super::ArrayKey;
+use crate::string::PhpString;
 use crate::value::Value;
+
+/// One randomized hash seed for the process, so every `PhpString` can cache
+/// its hash once and reuse it across every `PhpArray` without losing hash-flood
+/// resistance.
+struct ArrayHashSeed {
+    state: RandomState,
+    int_seed: u64,
+}
+
+static ARRAY_HASH_SEED: OnceLock<ArrayHashSeed> = OnceLock::new();
+
+#[inline]
+fn array_hash_seed() -> &'static ArrayHashSeed {
+    ARRAY_HASH_SEED.get_or_init(|| {
+        let state = RandomState::default();
+        let int_seed = state.hash_one(0x243f_6a88_85a3_08d3u64);
+        ArrayHashSeed { state, int_seed }
+    })
+}
+
+pub(crate) fn hash_str_bytes(bytes: &[u8]) -> u64 {
+    array_hash_seed().state.hash_one(bytes)
+}
+
+#[inline]
+fn hash_int_key(key: i64) -> u64 {
+    let mixed = (key as u64 ^ array_hash_seed().int_seed).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    mixed ^ (mixed >> 32)
+}
+
+#[inline]
+fn hash_key(key: &ArrayKey) -> u64 {
+    match key {
+        ArrayKey::Int(index) => hash_int_key(*index),
+        ArrayKey::String(string) => string.array_hash(),
+    }
+}
 
 /// A map with at most this many slots finds a key by comparing it with each
 /// stored key in turn, and has no index. Measured when the two shapes were
@@ -47,12 +86,11 @@ pub(super) struct OrderedMap {
 
 /// A hash table of entry positions. It stores no keys: hashing and
 /// comparing go through the key in the entry, which is the only copy.
-/// Each array has its own random seed, so crafted keys cannot make one
-/// array slow (hash flooding).
+/// Hashing uses the process-wide randomized seed so string hashes are
+/// cached on `PhpString` and reused across every array.
 #[derive(Clone)]
 pub(super) struct Index {
     pub positions: HashTable<u32>,
-    pub hasher: RandomState,
 }
 
 impl Storage {
@@ -146,6 +184,76 @@ impl OrderedMap {
         }
     }
 
+    /// Position of the live entry with this integer key.
+    #[inline]
+    pub fn find_int(&self, key: i64) -> Option<usize> {
+        match &self.index {
+            None => self.entries.iter().position(|entry| {
+                entry.value.is_some() && matches!(entry.key, ArrayKey::Int(k) if k == key)
+            }),
+            Some(index) => index.find_int(&self.entries, key),
+        }
+    }
+
+    /// Position of the live entry with this non-numeric string key.
+    #[inline]
+    pub fn find_str(&self, key: &PhpString) -> Option<usize> {
+        match &self.index {
+            None => self.entries.iter().position(|entry| {
+                entry.value.is_some() && matches!(&entry.key, ArrayKey::String(k) if k == key)
+            }),
+            Some(index) => index.find_str(&self.entries, key),
+        }
+    }
+
+    /// Replaces the value of an existing key in place, or appends a new entry
+    /// in one hash-table probe.
+    pub fn insert(&mut self, key: ArrayKey, value: Value) -> Option<Value> {
+        match &mut self.index {
+            None => {
+                if let Some(entry) = self
+                    .entries
+                    .iter_mut()
+                    .find(|entry| entry.value.is_some() && entry.key == key)
+                {
+                    return entry.value.replace(value);
+                }
+                self.entries.push(Entry {
+                    key,
+                    value: Some(value),
+                });
+                if self.entries.len() > SCAN_LIMIT {
+                    self.index = Index::build(&self.entries);
+                }
+                None
+            }
+            Some(index) => {
+                let hash = hash_key(&key);
+                let entries = &mut self.entries;
+                match index.positions.entry(
+                    hash,
+                    |&position| entries[position as usize].key == key,
+                    |&other| hash_key(&entries[other as usize].key),
+                ) {
+                    hashbrown::hash_table::Entry::Occupied(occupied) => {
+                        let position = *occupied.get() as usize;
+                        entries[position].value.replace(value)
+                    }
+                    hashbrown::hash_table::Entry::Vacant(vacant) => {
+                        let position =
+                            u32::try_from(entries.len()).expect("array position fits u32");
+                        entries.push(Entry {
+                            key,
+                            value: Some(value),
+                        });
+                        vacant.insert(position);
+                        None
+                    }
+                }
+            }
+        }
+    }
+
     /// Appends an entry whose key is not in the map yet. The entry is pushed
     /// before it is indexed, so that a growing table can rehash through it.
     pub fn append(&mut self, key: ArrayKey, value: Value) {
@@ -197,7 +305,6 @@ impl Index {
         }
         let mut index = Self {
             positions: HashTable::with_capacity(entries.len()),
-            hasher: RandomState::default(),
         };
         for (position, entry) in entries.iter().enumerate() {
             if entry.value.is_some() {
@@ -207,26 +314,47 @@ impl Index {
         Some(Box::new(index))
     }
 
+    #[inline]
     fn find(&self, entries: &[Entry], key: &ArrayKey) -> Option<usize> {
-        let hash = self.hasher.hash_one(key);
+        let hash = hash_key(key);
         self.positions
             .find(hash, |&position| entries[position as usize].key == *key)
             .map(|&position| position as usize)
     }
 
+    #[inline]
+    fn find_int(&self, entries: &[Entry], key: i64) -> Option<usize> {
+        let hash = hash_int_key(key);
+        self.positions
+            .find(
+                hash,
+                |&position| matches!(entries[position as usize].key, ArrayKey::Int(k) if k == key),
+            )
+            .map(|&position| position as usize)
+    }
+
+    #[inline]
+    fn find_str(&self, entries: &[Entry], key: &PhpString) -> Option<usize> {
+        let hash = key.array_hash();
+        self.positions
+            .find(hash, |&position| {
+                matches!(&entries[position as usize].key, ArrayKey::String(k) if k == key)
+            })
+            .map(|&position| position as usize)
+    }
+
     fn insert(&mut self, entries: &[Entry], position: usize) {
-        let hasher = &self.hasher;
         let position = u32::try_from(position).expect("array position fits u32");
         self.positions.insert_unique(
-            hasher.hash_one(&entries[position as usize].key),
+            hash_key(&entries[position as usize].key),
             position,
-            |&other| hasher.hash_one(&entries[other as usize].key),
+            |&other| hash_key(&entries[other as usize].key),
         );
     }
 
     /// Drops the key from the index and returns where its entry is.
     fn remove(&mut self, entries: &[Entry], key: &ArrayKey) -> Option<usize> {
-        let hash = self.hasher.hash_one(key);
+        let hash = hash_key(key);
         let (position, _) = self
             .positions
             .find_entry(hash, |&position| entries[position as usize].key == *key)
@@ -238,7 +366,7 @@ impl Index {
     /// Drops the live entry at `position` from the index. It compares
     /// positions, not keys, which is cheaper.
     fn remove_position(&mut self, entries: &[Entry], position: usize) {
-        let hash = self.hasher.hash_one(&entries[position].key);
+        let hash = hash_key(&entries[position].key);
         self.positions
             .find_entry(hash, |&other| other as usize == position)
             .expect("every live entry is in the index")
