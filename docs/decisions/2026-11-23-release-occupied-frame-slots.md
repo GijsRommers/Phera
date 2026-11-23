@@ -1,9 +1,16 @@
 # Release register windows with empty trailing slots
 
-## Decision under test
+Decided by: Design
 
-When a PHP frame leaves the stack, shorten its window by groups of four
-consecutive trailing slots already known to be undefined. Release the
+## Decision
+
+Keep the existing forward release. Skipping groups of four empty trailing
+registers raised the cost of both Laravel routes on two sets of six pairs.
+
+## Trial
+
+On a PHP frame exit, the candidate shortens the window by groups of four
+consecutive trailing slots already known to be undefined. It releases the
 remaining slots from first to last. On ordered returns the receiver and
 closure are still held until after the locals. Native argument windows
 use their existing truncation.
@@ -62,9 +69,9 @@ over at least 169,000 slots per request, allowing for three unskipped
 tail slots in every frame. Route gates measure the net benefit of inspecting
 the tails first.
 
-## Structure
+## Structure under test
 
-| Structure | Was | Is |
+| Structure | Parent | Candidate |
 |---|---|---|
 | Frame release | Scan and overwrite every slot | Skip complete groups of four empty trailing slots, then release the remainder in order |
 | Register writes and compiled bytecode | Store optional PHP values in the frame | Same representation and writes |
@@ -77,3 +84,54 @@ exception handlers and dynamic locals can leave different slots occupied at
 the same return site. Elided clears can leave dead scalars in those slots.
 A per-write bitmap or high-water mark would add bookkeeping to every
 assignment. The trial tests the existing tags once per frame exit.
+
+## Measurements
+
+All performance comparisons used normal release binaries on Apple silicon.
+The parent was `phera-main-f9cf1e1f`, the candidate was `bb56bc36`, and both
+used the macOS 26.2 SDK and linker 1230.1. The parent and candidate ran
+alternately through the shared quiet gate. Shape costs are the lowest of
+five slopes from one million to 51 million iterations.
+
+| Shape | Parent instructions/iteration | Candidate | Difference | Cycles/iteration, parent → candidate |
+|---|---:|---:|---:|---:|
+| Loop | 146.192 | 146.190 | -0.002 | 20.23 → 20.43 |
+| Function | 654.387 | 680.402 | +26.015 | 80.34 → 83.42 |
+| Method | 830.411 | 855.411 | +25.000 | 116.64 → 121.28 |
+| Property | 593.197 | 593.203 | +0.006 | 79.28 → 79.40 |
+
+In the parent, the compiler inlines the forward release into the interpreter
+loop. The candidate's loop calls a separate helper. On arm64 that helper
+saves four pairs of registers, computes slice bounds and tests the window
+length before it can skip any slots. For each complete group it then
+checks four tags separately. Short windows pay the entry cost even when
+they have no group to skip. This accounts for a cost the empty-slot census
+could not measure.
+
+| Route | Parent M instructions/request | Candidate M | Change | Cycles/request, parent → candidate (M) |
+|---|---:|---:|---:|---:|
+| `/api/hello` | 20.887 | 20.943 | +0.271% | 11.96 → 12.20 |
+| `/api/posts?page=2` | 50.714 | 50.781 | +0.131% | 22.04 → 20.95 |
+| `/api/db-yardstick` | 265.580 | 265.460 | -0.045% | 83.99 → 75.30 |
+
+The first six Laravel pairs gave +0.297% for hello and +0.172% for posts.
+The pair spread exceeded 0.3 percentage points, so both routes were run
+again. The table gives the repeat using the unrounded instruction counters.
+Symfony used two alternating pairs with 300 warm-up requests and matched
+the response digest in every run. Its 0.12M saving per request was a 0.045% decrease. Both Laravel routes rose past the 0.1% limit.
+
+Each benchmark ran five times per binary. All ten exceeded the 0.1% limit
+at both the lowest and the median instruction count.
+
+| Benchmark | Parent low / median (M) | Candidate low / median (M) | Low change | Median change |
+|---|---:|---:|---:|---:|
+| fib | 1,654.8 / 1,655.1 | 1,727.7 / 1,728.0 | +4.401% | +4.399% |
+| calls | 5,195.1 / 5,195.2 | 5,295.6 / 5,295.9 | +1.934% | +1.939% |
+| methods | 16,522.9 / 16,523.1 | 17,023.3 / 17,023.4 | +3.028% | +3.028% |
+| properties | 2,105.8 / 2,105.9 | 2,122.3 / 2,122.4 | +0.786% | +0.785% |
+| hierarchy | 2,128.3 / 2,128.4 | 2,180.2 / 2,180.5 | +2.441% | +2.447% |
+| typed-objects | 5,418.9 / 5,419.1 | 5,455.9 / 5,456.2 | +0.682% | +0.685% |
+| objects | 3,526.6 / 3,595.7 | 3,606.9 / 3,676.0 | +2.278% | +2.233% |
+| function-objects | 3,602.4 / 3,602.8 | 3,632.6 / 3,674.1 | +0.837% | +1.978% |
+| closures | 4,206.1 / 4,206.2 | 4,257.5 / 4,257.7 | +1.222% | +1.226% |
+| framework-patterns | 7,398.8 / 7,400.7 | 7,439.7 / 7,443.2 | +0.552% | +0.575% |
