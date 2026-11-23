@@ -128,6 +128,9 @@ pub(super) struct Machine<'a> {
     /// The request's validated enum cases, read by class constants and
     /// `Enum::from`/`Enum::tryFrom`.
     pub(super) enum_cases: &'a crate::classes::enums::EnumCases,
+    /// The clones whose `clone with` updates are running, which a readonly
+    /// property's initialization in the loop leaves to the VM.
+    pub(super) clone_scopes: &'a crate::classes::cloning::CloneScopes,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -177,6 +180,7 @@ impl Vm {
                 registry: &self.registry,
                 class_states: &self.class_states,
                 enum_cases: &self.enum_cases,
+                clone_scopes: &self.clone_scopes,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see

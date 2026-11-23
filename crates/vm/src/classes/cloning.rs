@@ -15,6 +15,17 @@ use crate::property_hook_continuation::HookContinuation;
 #[derive(Default)]
 pub(crate) struct CloneScopes(Rc<RefCell<HashMap<u32, Vec<ArrayKey>>>>);
 
+impl CloneScopes {
+    /// Whether `object` is a clone whose `clone with` updates are running,
+    /// in which each readonly property may change once (see
+    /// [`Vm::clone_can_update`]).
+    pub(crate) fn covers(&self, object: &Object) -> bool {
+        self.0
+            .try_borrow()
+            .map_or(true, |scopes| scopes.contains_key(&object.id))
+    }
+}
+
 pub(crate) struct CloneScope {
     object: u32,
     registry: Rc<RefCell<HashMap<u32, Vec<ArrayKey>>>>,
