@@ -69,6 +69,19 @@ fn codepoint(value: &Value) -> Result<u32, &'static str> {
             .ok()
             .filter(|value| *value <= 0x10ffff)
             .ok_or(INVALID),
+        Value::InternedStr(value) => {
+            let text = std::str::from_utf8(value.as_bytes()).map_err(|_| INVALID)?;
+            let mut chars = text.chars();
+            if let Some(character) = chars.next()
+                && chars.next().is_none()
+            {
+                return Ok(u32::from(character));
+            }
+            Err(concat!(
+                "Passing a UTF-8 character for codepoint requires ",
+                "a string which is exactly one UTF-8 codepoint long."
+            ))
+        }
         Value::String(value) => {
             let text = std::str::from_utf8(value.as_bytes()).map_err(|_| INVALID)?;
             let mut chars = text.chars();

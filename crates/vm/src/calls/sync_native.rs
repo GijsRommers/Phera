@@ -18,15 +18,64 @@ use super::native_signature::{accepts, exact_types, native_type};
 use super::pending::LinkedFunction;
 use crate::Vm;
 
+/// Pure, side-effect-free built-ins that the interpreter loop can answer
+/// inline on exact-typed arguments without exiting to `Vm::execute`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PureNative {
+    StrStartsWith,
+    StrEndsWith,
+    StrContains,
+    Strpos,
+    Strrpos,
+    Substr,
+    Trim,
+    Ltrim,
+    Rtrim,
+    InArray,
+    ArrayKeyExists,
+    Implode,
+    Explode,
+    StrReplace,
+    Ord,
+    Chr,
+    Abs,
+}
+
+impl PureNative {
+    fn for_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "str_starts_with" => Self::StrStartsWith,
+            "str_ends_with" => Self::StrEndsWith,
+            "str_contains" => Self::StrContains,
+            "strpos" => Self::Strpos,
+            "strrpos" => Self::Strrpos,
+            "substr" => Self::Substr,
+            "trim" => Self::Trim,
+            "ltrim" => Self::Ltrim,
+            "rtrim" | "chop" => Self::Rtrim,
+            "in_array" => Self::InArray,
+            "array_key_exists" | "key_exists" => Self::ArrayKeyExists,
+            "implode" | "join" => Self::Implode,
+            "explode" => Self::Explode,
+            "str_replace" => Self::StrReplace,
+            "ord" => Self::Ord,
+            "chr" => Self::Chr,
+            "abs" => Self::Abs,
+            _ => return None,
+        })
+    }
+}
+
 /// The registry signature reduced to the checks needed by a positional call.
 #[derive(Clone, Copy)]
 pub(crate) struct NativeLink {
     handler: Handler,
     name: &'static str,
-    min: usize,
-    max: usize,
+    pub(crate) min: usize,
+    pub(crate) max: usize,
     masks: [TypeMask; 4],
     object_handler: bool,
+    pub(crate) pure: Option<PureNative>,
 }
 
 #[derive(Clone, Copy)]
@@ -69,6 +118,7 @@ impl NativeLink {
             },
             masks,
             object_handler: registry.object_handler(entry.name).is_some(),
+            pure: PureNative::for_name(entry.name),
         })
     }
 
@@ -103,13 +153,20 @@ impl Vm {
             .ok_or_else(|| internal_error!("native call frame"))?;
         let base = frame.base() + args.index();
         let count = usize::from(count);
-        let link = self
-            .code
-            .cache(frame.function)
+        let cache = self.code.cache(frame.function);
+        let mut link = cache
             .direct_natives
             .get()
             .and_then(|links| links.get(symbol.index()))
             .and_then(std::cell::Cell::get);
+        if link.is_none() && cache.direct_natives.get().is_none() {
+            // The first native call of this file in this request: take the
+            // links the snapshot made.
+            link = cache
+                .direct_native_cells()
+                .get(symbol.index())
+                .and_then(std::cell::Cell::get);
+        }
         let values = self.registers.window(base, count);
         if let Some(link) = link
             && count >= link.min
@@ -159,11 +216,7 @@ impl Vm {
             && let Some(frame) = self.call_stack.current()
         {
             let cache = self.code.cache(frame.function);
-            let links = cache.direct_natives.get_or_init(|| {
-                (0..cache.symbols.borrow().len())
-                    .map(|_| std::cell::Cell::new(None))
-                    .collect()
-            });
+            let links = cache.direct_native_cells();
             if let Some(slot) = links.get(symbol.index())
                 && slot.get().is_none()
             {

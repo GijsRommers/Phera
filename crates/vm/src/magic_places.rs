@@ -79,9 +79,6 @@ impl Vm {
     ) -> Result<PathRead, NativeError> {
         let missing = fetch_missing(mode);
         let register = self.base_register(&place, Creation::Existing, missing)?;
-        if register.is_some() && crate::static_places::static_base(place.base()?).is_some() {
-            self.check_static_read(&place, missing)?;
-        }
         let value = register.map_or(Value::Null, |register| self.read_root(register, missing));
         Ok(PathRead {
             place,
@@ -141,7 +138,10 @@ impl Vm {
             } else if let Step::Index(index) = step {
                 if update {
                     PathKey::Index(Some(self.write_index_key(&value, index)?))
-                } else if matches!(value, Value::Array(_) | Value::String(_)) {
+                } else if matches!(
+                    value,
+                    Value::Array(_) | Value::InternedStr(_) | Value::String(_)
+                ) {
                     PathKey::Index(Some(self.read_index_key(index, missing)?))
                 } else {
                     // No offset is converted if the container cannot be indexed.

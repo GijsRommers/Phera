@@ -181,6 +181,7 @@ impl Vm {
 
 fn handler_name(value: &Value, resolved: &str) -> String {
     match &*value.deref() {
+        Value::InternedStr(name) => name.to_string_lossy(),
         Value::String(name) => name.to_string_lossy(),
         Value::Object(object) if object.class.name() != "Closure" => {
             format!("{}::__invoke", object.class.name())

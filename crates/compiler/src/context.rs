@@ -69,6 +69,9 @@ pub(super) struct Compiler<'ast> {
     /// __CLASS__ is lexical and does not change when a closure is rebound.
     pub(super) class_scope: Option<String>,
     pub(super) trait_scope: Option<String>,
+    /// The resolved `extends` of the class being compiled, when it is a class
+    /// with a parent: the name `parent::` reads are compiled to in a method.
+    pub(super) parent_scope: Option<String>,
     pub(super) hooked_property: Option<String>,
     pub(super) uses_hook_backing: bool,
     pub(super) imports: Option<Imports>,
@@ -119,6 +122,7 @@ impl<'ast> Compiler<'ast> {
             namespace: namespace.into(),
             class_scope: None,
             trait_scope: None,
+            parent_scope: None,
             hooked_property: None,
             uses_hook_backing: false,
             imports: None,
@@ -248,6 +252,12 @@ impl<'ast> Compiler<'ast> {
             | Instruction::Jump(t)
             | Instruction::Branch { target: t, .. }
             | Instruction::BranchNull { target: t, .. }
+            | Instruction::BranchNotNull { target: t, .. }
+            | Instruction::GuardBuiltin { call: t, .. }
+            | Instruction::BranchCompare { target: t, .. }
+            | Instruction::BranchCompareInt { target: t, .. }
+            | Instruction::BranchInstanceOf { target: t, .. }
+            | Instruction::BranchDynamicInstanceOf { target: t, .. }
             | Instruction::IterNext { end: t, .. },
         ) = self.function.instructions.get_mut(i)
         {

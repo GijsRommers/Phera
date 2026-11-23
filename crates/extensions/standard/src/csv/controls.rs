@@ -34,7 +34,7 @@ impl Controls {
     ) -> Result<Self, NativeError> {
         let separator = byte(function, arguments, start, "separator", self.separator)?;
         let enclosure = byte(function, arguments, start + 1, "enclosure", self.enclosure)?;
-        let escape = match args::string(arguments, start + 2).map(PhpString::as_bytes) {
+        let escape = match args::string(arguments, start + 2) {
             None => {
                 if let Some(reason) = missing_escape {
                     context.deprecated(format!(
@@ -43,14 +43,16 @@ impl Controls {
                 }
                 self.escape
             }
-            Some([]) => None,
-            Some([byte]) => Some(*byte),
-            _ => {
-                return Err(NativeError::value_error(format!(
-                    "{function}(): Argument #{} ($escape) must be empty or a single character",
-                    start + 3
-                )));
-            }
+            Some(text) => match text.as_bytes() {
+                [] => None,
+                [byte] => Some(*byte),
+                _ => {
+                    return Err(NativeError::value_error(format!(
+                        "{function}(): Argument #{} ($escape) must be empty or a single character",
+                        start + 3
+                    )));
+                }
+            },
         };
         Ok(Self {
             separator,
@@ -93,9 +95,9 @@ fn byte(
     name: &str,
     default: u8,
 ) -> Result<u8, NativeError> {
-    match args::string(arguments, index).map(PhpString::as_bytes) {
+    match args::string(arguments, index) {
         None => Ok(default),
-        Some([byte]) => Ok(*byte),
+        Some(text) if text.as_bytes().len() == 1 => Ok(text.as_bytes()[0]),
         _ => Err(NativeError::value_error(format!(
             "{function}(): Argument #{} (${name}) must be a single character",
             index + 1

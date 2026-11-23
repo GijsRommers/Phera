@@ -40,6 +40,9 @@ pub(crate) struct Class {
     pub(crate) is_final: bool,
     pub(crate) is_readonly: bool,
     pub(crate) allows_dynamic_properties: bool,
+    /// What its property accesses may involve (see `property_facts`), made
+    /// once the rest of the class is linked.
+    pub(crate) property_facts: std::cell::OnceCell<super::property_facts::PropertyFacts>,
     pub(crate) magic: Option<Box<super::magic::MagicMethods>>,
     pub(crate) methods: HashMap<String, Rc<Method>>,
     /// The same methods by name key, built on first use by a fast call.
@@ -54,6 +57,7 @@ pub(crate) struct Class {
     pub(crate) constructor: Option<Rc<Method>>,
     /// Root-first property keys reproduce the layout used by native testing helpers.
     pub(crate) defaults: Vec<PropertyDefault>,
+    pub(crate) property_names: super::property_names::PropertyNames,
     /// Literal defaults are materialized once at linking; objects clone this
     /// (one box of slots).
     pub(crate) property_template: Option<phera_value::Properties>,
@@ -127,10 +131,15 @@ pub(crate) struct MethodContext {
 }
 
 impl ClassHandle for Class {
-    fn native_state_is_weak(&self) -> bool {
+    fn trace_native_values(
+        &self,
+        payload: &dyn std::any::Any,
+        visit: &mut dyn FnMut(&Value),
+    ) -> bool {
         self.hooks
             .as_ref()
-            .is_some_and(|hooks| hooks.native_state_is_weak)
+            .and_then(|hooks| hooks.trace_native)
+            .is_some_and(|trace| trace(payload, visit))
     }
 
     fn is_traversable(&self) -> bool {
@@ -436,13 +445,47 @@ const WALK_DEPTH: usize = 32;
 const WALK_VISITS: usize = 256;
 
 impl Class {
+    /// What this class's property accesses may involve.
+    #[inline]
+    pub(crate) fn property_facts(&self) -> super::property_facts::PropertyFacts {
+        *self
+            .property_facts
+            .get_or_init(|| super::property_facts::PropertyFacts::of(self))
+    }
+
     /// Whether this class is `target`, extends it or implements it: the same
     /// ancestry as `Class::ancestors`, its parent and interfaces and theirs.
     /// `None` when the walk outgrows its stack or its visits.
     pub(crate) fn derives_from(&self, target: &Class) -> Option<bool> {
+        if std::ptr::eq(self, target) {
+            return Some(true);
+        }
+        if self.parent.is_none() && self.interfaces.is_empty() {
+            return Some(false);
+        }
+        if let Some(parent) = &self.parent
+            && std::ptr::eq(&**parent, target)
+        {
+            return Some(true);
+        }
+        if self
+            .interfaces
+            .iter()
+            .any(|interface| std::ptr::eq(&**interface, target))
+        {
+            return Some(true);
+        }
         let mut waiting: [Option<&Class>; WALK_DEPTH] = [None; WALK_DEPTH];
-        waiting[0] = Some(self);
-        let mut count: usize = 1;
+        let mut count: usize = 0;
+        for ancestor in self.parent.iter().chain(&self.interfaces) {
+            for grand in ancestor.parent.iter().chain(&ancestor.interfaces) {
+                *waiting.get_mut(count)? = Some(&**grand);
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return Some(false);
+        }
         for _ in 0..WALK_VISITS {
             let Some(last) = count.checked_sub(1) else {
                 return Some(false);

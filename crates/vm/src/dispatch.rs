@@ -2,7 +2,7 @@
 
 use phera_bytecode::Instruction;
 use phera_extension_api::{LocalFuture, NativeError};
-use phera_value::Value;
+use phera_value::{Value, to_bool};
 
 use crate::Vm;
 
@@ -85,6 +85,34 @@ impl Vm {
                     .binary_with_strings(op, self.get(lhs), self.get(rhs))
                     .await?;
                 self.set(dst, value);
+            }
+            Instruction::BinaryBranch {
+                op,
+                lhs,
+                rhs,
+                target,
+            } => {
+                // Reached through the general handler, which found both
+                // operands set; read them the same way there.
+                let left = self.read_local(lhs);
+                let right = self.read_local(rhs);
+                let value = self.binary_with_strings(op, left, right).await?;
+                if !to_bool(&value) {
+                    self.jump(target)?;
+                }
+            }
+            Instruction::BinaryBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            } => {
+                let left = self.read_local(lhs);
+                let right = self.read_local(rhs);
+                let value = self.binary_with_strings(op, left, right).await?;
+                if to_bool(&value) {
+                    self.jump(target)?;
+                }
             }
             Instruction::ArraySet { array, key, src }
             | Instruction::ArraySetReference { array, key, src } => {

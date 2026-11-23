@@ -178,7 +178,9 @@ impl Compiler<'_> {
                 class,
                 name: ast::Variable::Named(name),
                 ..
-            } if super::objects::is_named_class(class) => {
+            } if matches!(class.kind, ast::ExpressionKind::Name(_)) => {
+                // `Post::$count`, and `self::`, `static::` and `parent::`,
+                // which the VM resolves from the running frame.
                 let class = self.object_class_name(class, line)?;
                 let scratch = self.allocate_register()?;
                 (

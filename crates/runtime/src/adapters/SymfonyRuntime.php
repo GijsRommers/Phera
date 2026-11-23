@@ -5,10 +5,10 @@
  *
  * `phera serve` sets APP_RUNTIME to this class when the application uses
  * symfony/runtime and nothing else chose a runtime. It is Symfony's own
- * runtime, except for HTTP: the kernel boots once per worker, before the
- * first request, and every request continues after Phera\snapshot() with
- * a copy of the booted kernel. What the runner does after the call is what
- * Symfony's HttpKernelRunner does.
+ * runtime, except for HTTP: the kernel boots and warms up once per worker,
+ * before the first request, and every request continues after
+ * Phera\snapshot() with a copy of that kernel. What the runner does after
+ * the call is what Symfony's HttpKernelRunner does.
  */
 
 namespace Phera\Symfony;
@@ -45,6 +45,7 @@ final class SnapshotRunner implements RunnerInterface
     {
         if ($this->kernel instanceof KernelInterface) {
             $this->kernel->boot();
+            $this->warmUp($this->kernel);
         }
 
         \Phera\snapshot();
@@ -68,5 +69,33 @@ final class SnapshotRunner implements RunnerInterface
         }
 
         return 0;
+    }
+
+    /**
+     * Builds, before the snapshot, what every request would build first and
+     * what is safe to build without one: the event dispatcher. Whatever
+     * exists at Phera\snapshot() is not built again by any request.
+     *
+     * Building the dispatcher registers its listeners without creating
+     * them: Symfony creates a listener when its event is first dispatched,
+     * inside a request, and that stays so. Nothing else is built here,
+     * because everything else creates services the application defines
+     * (the HTTP kernel and the router take the logger, with its processors
+     * and handlers), and a service created before the snapshot keeps for
+     * every request whatever its constructor read or drew.
+     * `phera serve --no-service-warmup` turns this off.
+     */
+    private function warmUp(KernelInterface $kernel): void
+    {
+        // A debug kernel wraps the dispatcher in one that records and logs.
+        if ('0' === ($_SERVER['PHERA_SERVICE_WARMUP'] ?? '') || $kernel->isDebug()) {
+            return;
+        }
+
+        try {
+            $kernel->getContainer()->get('event_dispatcher');
+        } catch (\Throwable) {
+            // The request that needs it reports it, as it always did.
+        }
     }
 }

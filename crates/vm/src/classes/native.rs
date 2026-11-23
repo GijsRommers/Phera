@@ -25,7 +25,7 @@ impl ClassDefinitions {
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: std::collections::HashSet::new(),
-                name_value: phera_value::Value::from("stdClass"),
+                name_value: phera_value::Value::interned(b"stdClass"),
                 name: "stdClass".into(),
                 parent: None,
                 interfaces: Vec::new(),
@@ -38,6 +38,7 @@ impl ClassDefinitions {
                 is_final: false,
                 is_readonly: false,
                 allows_dynamic_properties: true,
+                property_facts: std::cell::OnceCell::new(),
                 methods: HashMap::new(),
                 method_table: std::cell::OnceCell::new(),
                 serialized_fields: std::cell::OnceCell::new(),
@@ -45,6 +46,7 @@ impl ClassDefinitions {
                 magic: None,
                 property_template: Some(phera_value::Properties::default()),
                 layout: None,
+                property_names: Default::default(),
                 defaults: Vec::new(),
                 static_properties: Vec::new(),
                 constants: HashMap::new(),
@@ -53,6 +55,10 @@ impl ClassDefinitions {
         );
         let closure = phera_extension_api::ClassEntry {
             kind: NativeKind::FinalClass,
+            hooks: Some(&phera_extension_api::ClassHooks {
+                trace_native: Some(crate::closure_cycles::trace),
+                ..phera_extension_api::ClassHooks::EMPTY
+            }),
             ..phera_extension_api::ClassEntry::class("Closure")
         };
         let internal_iterator = registry
@@ -139,7 +145,7 @@ impl ClassDefinitions {
                 let key = match native_visibility(property.visibility) {
                     Visibility::Private => Object::private_key(entry.name, property.name),
                     Visibility::Protected => Object::protected_key(property.name),
-                    Visibility::Public => ArrayKey::str(property.name),
+                    Visibility::Public => ArrayKey::interned_str(property.name.as_bytes()),
                 };
                 let inherited = defaults.iter().position(|candidate| {
                     candidate.name == property.name
@@ -253,7 +259,7 @@ impl ClassDefinitions {
                     identity: identity.clone(),
                     declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                     ancestors: super::class::ancestor_names(&parent, &interfaces),
-                    name_value: phera_value::Value::from(entry.name),
+                    name_value: phera_value::Value::interned(entry.name.as_bytes()),
                     name: entry.name.into(),
                     parent,
                     interfaces,
@@ -275,6 +281,7 @@ impl ClassDefinitions {
                     ),
                     is_readonly: entry.kind == NativeKind::FinalReadonlyClass,
                     allows_dynamic_properties: false,
+                    property_facts: std::cell::OnceCell::new(),
                     constructor: methods.get("__construct").cloned(),
                     magic: super::magic::MagicMethods::link(&methods),
                     methods,
@@ -282,6 +289,7 @@ impl ClassDefinitions {
                     serialized_fields: std::cell::OnceCell::new(),
                     property_template,
                     layout,
+                    property_names: super::property_names::PropertyNames::new(&defaults),
                     defaults,
                     static_properties: Vec::new(),
                     constants,

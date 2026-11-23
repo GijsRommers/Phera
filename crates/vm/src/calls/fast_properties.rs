@@ -52,7 +52,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, value) {
+        match store::<GUARDED, _>(slots, destination, value) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
@@ -76,7 +76,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, value) {
+        match store::<GUARDED, _>(slots, destination, value) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
@@ -109,7 +109,7 @@ impl Machine<'_> {
         if let Some(result) = result {
             // Outside the guarded loop, into a register checked above, a
             // store completes.
-            let _ = store::<false>(self.registers.tail_mut(base), result, value);
+            let _ = store::<false, _>(self.registers.tail_mut(base), result, value);
         }
         Step::Done(position.ip)
     }
@@ -180,12 +180,7 @@ impl Machine<'_> {
         };
         // The VM keys the site by the position after the instruction,
         // which is where the loop stands now.
-        let site = self
-            .code
-            .cache(function)
-            .site(self.code.facts(function), position.ip)?
-            .try_borrow()
-            .ok()?;
+        let site = self.code.site(function, position.ip)?.try_borrow().ok()?;
         let CachedSite::Property(entry) = &*site else {
             return None;
         };

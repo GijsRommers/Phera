@@ -1,0 +1,5 @@
+{
+    "name": "phera/warm-up-test-symfony-application",
+    "description": "The Symfony application of crates/cli/tests/warmup_symfony.rs; its vendor directory comes from an installed application.",
+    "autoload": {"psr-4": {"App\\": "src/"}}
+}

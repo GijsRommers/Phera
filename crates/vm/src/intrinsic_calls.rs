@@ -40,7 +40,7 @@ impl Vm {
             Intrinsic::ArrayMap => Err(internal_error!("array map intrinsic routing")),
             Intrinsic::Snapshot => {
                 drop(diagnostics);
-                self.snapshot_intrinsic(None, arguments)
+                self.snapshot_intrinsic(None, arguments).await
             }
             Intrinsic::Handler(function) => {
                 diagnostics

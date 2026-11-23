@@ -146,7 +146,7 @@ impl Machine<'_> {
         {
             return self.leave_in_order(frame, caller, (source, destination), value);
         }
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.truncate(start);
         self.registers
             .put(caller.base() + destination.index(), value);
@@ -176,7 +176,7 @@ impl Machine<'_> {
         } else {
             Some(value)
         };
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.release_frame(frame.start(), frame.base());
         if let Some(value) = value {
             self.registers
@@ -231,7 +231,7 @@ impl Machine<'_> {
             return Step::Slow;
         }
         let value = value.clone();
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.release_frame(frame.start(), frame.base());
         self.stack.handed_back = Some(super::execution_loop::HandedBack::Native(value));
         Step::Yield
@@ -270,7 +270,7 @@ impl Machine<'_> {
             return Step::Slow;
         }
         let value = value.clone();
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.release_frame(frame.start(), frame.base());
         self.stack.handed_back = Some(super::execution_loop::HandedBack::NativeLoop(value));
         Step::Yield
@@ -303,7 +303,7 @@ impl Machine<'_> {
         let Some(caller) = self.stack.caller().copied() else {
             return Step::Slow;
         };
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.truncate(frame.start());
         Step::Switched(Position {
             frame: caller,
@@ -359,17 +359,28 @@ impl Machine<'_> {
     /// type accepts the value as it is: write it into the window.
     #[inline(always)]
     pub(super) fn send(&mut self, position: Position, source: Reg) -> Step {
-        let Some(call) = self.stack.last_call().copied() else {
-            return Step::Slow;
-        };
-        let index = call.sent as usize;
-        let mut value = match self
+        let value = match self
             .registers
             .window(position.frame.base() + source.index(), 1)
         {
             [Some(value)] => value.deref().clone(),
             _ => return Step::Slow,
         };
+        self.send_owned(position, value).unwrap_or(Step::Slow)
+    }
+
+    /// Sends `value` as [`Self::send`] does, or gives it back untouched
+    /// when the call takes the general path.
+    #[inline(always)]
+    pub(super) fn send_owned(
+        &mut self,
+        position: Position,
+        mut value: Value,
+    ) -> Result<Step, Value> {
+        let Some(call) = self.stack.last_call().copied() else {
+            return Err(value);
+        };
+        let index = call.sent as usize;
         let accepted = match call.callee {
             PreparedCallee::Php(function) => {
                 !call.flags.contains(CallFlags::DETAILS)
@@ -384,14 +395,14 @@ impl Machine<'_> {
             PreparedCallee::Constructed => false,
         };
         if !accepted {
-            return Step::Slow;
+            return Err(value);
         }
         let Some(call) = self.stack.last_call_mut() else {
-            return Step::Slow;
+            return Err(value);
         };
         self.registers.put(call.base() + index, value);
         call.mark_sent(index, true);
-        Step::Done(position.ip)
+        Ok(Step::Done(position.ip))
     }
 
     /// The second look at an argument the first test refused, out of line:

@@ -11,18 +11,19 @@
 //! formats would need locale data such as ICU's. PHP float-to-string conversion
 //! is locale independent, including after setting LC_NUMERIC.
 
-use phera_extension_api::value::PhpString;
 use phera_extension_api::{
     ArrayKey, Context, FunctionEntry, LocalFuture, NativeResult, Param, ParamType, PhpArray,
     Registry, Value, args,
 };
 
+mod langinfo;
 pub(crate) mod state;
 
 pub(crate) use state::ctype_name;
 use state::{ALL_ID, Category, c_string, select};
 
 pub(crate) fn register(registry: &mut Registry) {
+    langinfo::register(registry);
     registry.constant("LC_ALL", ALL_ID);
     for category in Category::ALL {
         registry.constant(category.name(), category.id());
@@ -117,7 +118,7 @@ fn localeconv(_: &mut dyn Context, _: &[Value]) -> NativeResult {
 }
 
 fn strcoll(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let string = |index| args::string(arguments, index).map_or(&[][..], PhpString::as_bytes);
+    let string = |index| args::bytes(arguments, index);
     let compare = |left, right| i64::from(left) - i64::from(right);
     let left = c_string(string(0));
     let right = c_string(string(1));

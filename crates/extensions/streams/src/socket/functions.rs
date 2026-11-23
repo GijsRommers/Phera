@@ -272,7 +272,7 @@ fn crypto(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
         }
         let io = socket_arg(&arguments, function, "stream", context).await?;
         let Some(io) = io.filter(|io| {
-            !io.socket.listener
+            !io.socket.listening()
                 && matches!(
                     io.socket.transport,
                     address::Transport::Tcp | address::Transport::Tls(_)

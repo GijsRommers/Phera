@@ -270,6 +270,7 @@ impl Compiler<'_> {
                     source: crate::ir::ArgumentSource::Value(lhs),
                     name: None,
                     spread: false,
+                    of_call: false,
                 }],
             },
             line,

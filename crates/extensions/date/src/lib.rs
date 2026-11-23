@@ -4,6 +4,7 @@ pub mod calendar;
 mod classes;
 mod format;
 mod functions;
+mod legacy_clock;
 mod normalize;
 mod parse;
 mod parse_format;
@@ -39,6 +40,7 @@ impl Extension for Date {
         });
         registry.deprecated_constant("DATE_RFC7231", classes::RFC7231_FORMAT);
         register::functions(registry);
+        legacy_clock::register(registry);
         classes::register(registry);
         registry.function(FunctionEntry::sync(
             "date_default_timezone_get",

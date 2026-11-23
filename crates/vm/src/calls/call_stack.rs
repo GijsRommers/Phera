@@ -105,11 +105,25 @@ impl CallStack {
     /// Leave a function, releasing what its side-table entry held.
     #[inline]
     pub(crate) fn pop(&mut self) -> Option<Frame> {
-        let frame = self.frames.pop()?;
-        if frame.has_extras() {
-            self.extras[self.frames.len()].clear();
-        }
+        let frame = self.current().copied()?;
+        self.pop_for_return();
         Some(frame)
+    }
+
+    /// A PHP return already has its frame. Release the current activation
+    /// and its optional side-table owners without handing the frame back.
+    #[inline]
+    pub(crate) fn pop_for_return(&mut self) {
+        if self.frames.pop().is_some_and(|frame| frame.has_extras()) {
+            self.clear_popped_extras();
+        }
+    }
+
+    /// Only frames that acquired side-table state have an entry to release.
+    #[cold]
+    #[inline(never)]
+    fn clear_popped_extras(&mut self) {
+        self.extras[self.frames.len()].clear();
     }
 
     /// Detach a generator without releasing the owners in its side table.
