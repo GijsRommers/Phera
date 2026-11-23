@@ -10,8 +10,8 @@ use crate::value::Value;
 pub fn concat(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<Value, OpError> {
     let sa = crate::convert::to_php_string(a, d)?;
     let sb = crate::convert::to_php_string(b, d)?;
-    let mut out = Vec::with_capacity(sa.len() + sb.len());
-    out.extend_from_slice(&sa);
-    out.extend_from_slice(&sb);
-    Ok(Value::String(PhpString::from(out)))
+    Ok(Value::String(PhpString::from_pair(
+        sa.as_bytes(),
+        sb.as_bytes(),
+    )))
 }

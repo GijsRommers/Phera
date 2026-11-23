@@ -10,6 +10,7 @@ aliases and canonical bytes intact.
 | Structure | Was | Is |
 |---|---|---|
 | PHP string handle | One `Rc<Vec<u8>>` | A canonical pointer or an `Rc` with a cached hash and bytes |
+| Short shared string | Separate buffer | Up to 38 bytes in a 64-byte allocation |
 | PHP value and array key | 16 bytes each | 16 bytes each, with a 16-byte string handle |
 | Array index | A seed per array | One secret seed per process |
 | Integer key hash | Per-array foldhash | XOR the key with a seed-derived word, multiply by `0x9e3779b97f4a7c15` as a 128-bit number, then XOR the high and low halves |
@@ -31,3 +32,9 @@ PHP debug output. Fixed enum lookup keys are retained after initialization.
 Separate string variants in values and array keys would make every extension
 dispatch on storage representation. The representation stays inside
 `PhpString`. The borrowed array operations come from #212.
+
+The fourth commit measures inline storage from #212 separately. It writes
+short results from borrowed byte slices and concatenation directly into
+the shared allocation. It retains owned vector buffers so an existing
+allocation can keep its spare capacity. The allocation for a large shared
+string still owns its separate buffer.

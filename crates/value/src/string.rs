@@ -3,12 +3,129 @@ use std::{cell::Cell, fmt};
 
 use crate::intern::InternedStr;
 
-struct SharedStr {
-    hash: Cell<u64>,
-    bytes: Vec<u8>,
+/// Maximum length of a string stored inline inside `SharedStr`.
+///
+/// `RcInner<SharedStr>` is `16 (strong + weak) + 8 (hash) + 40 (Bytes) = 64`
+/// bytes: one cache line and a power-of-two mimalloc size class (which avoids
+/// mimalloc's aligned-overalloc fallback on 48-byte allocations) while holding
+/// strings up to 38 bytes without a second heap allocation.
+const INLINE_CAP: usize = 38;
+
+enum Bytes {
+    Inline { len: u8, data: [u8; INLINE_CAP] },
+    Heap(Vec<u8>),
 }
 
-const _: () = assert!(std::mem::size_of::<SharedStr>() == 32);
+impl Bytes {
+    #[inline]
+    fn from_slice(bytes: &[u8]) -> Self {
+        if bytes.len() <= INLINE_CAP {
+            let mut data = [0u8; INLINE_CAP];
+            data[..bytes.len()].copy_from_slice(bytes);
+            Self::Inline {
+                len: bytes.len() as u8,
+                data,
+            }
+        } else {
+            Self::Heap(bytes.to_vec())
+        }
+    }
+
+    #[inline]
+    fn from_pair(left: &[u8], right: &[u8]) -> Self {
+        let total = left.len() + right.len();
+        if total <= INLINE_CAP {
+            let mut data = [0u8; INLINE_CAP];
+            data[..left.len()].copy_from_slice(left);
+            data[left.len()..total].copy_from_slice(right);
+            Self::Inline {
+                len: total as u8,
+                data,
+            }
+        } else {
+            let mut out = Vec::with_capacity(total);
+            out.extend_from_slice(left);
+            out.extend_from_slice(right);
+            Self::Heap(out)
+        }
+    }
+
+    #[inline]
+    fn from_vec(bytes: Vec<u8>) -> Self {
+        if bytes.capacity() == 0 {
+            Self::Inline {
+                len: 0,
+                data: [0u8; INLINE_CAP],
+            }
+        } else {
+            Self::Heap(bytes)
+        }
+    }
+
+    #[inline]
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Inline { len, data } => &data[..usize::from(*len)],
+            Self::Heap(bytes) => bytes.as_slice(),
+        }
+    }
+
+    #[inline]
+    fn as_mut_slice(&mut self) -> &mut [u8] {
+        match self {
+            Self::Inline { len, data } => &mut data[..usize::from(*len)],
+            Self::Heap(bytes) => bytes.as_mut_slice(),
+        }
+    }
+
+    #[inline]
+    fn len(&self) -> usize {
+        match self {
+            Self::Inline { len, .. } => usize::from(*len),
+            Self::Heap(bytes) => bytes.len(),
+        }
+    }
+
+    fn push_bytes(&mut self, extra: &[u8]) {
+        match self {
+            Self::Inline { len, data } => {
+                let current = usize::from(*len);
+                let total = current.checked_add(extra.len());
+                if let Some(total) = total
+                    && total <= INLINE_CAP
+                {
+                    data[current..total].copy_from_slice(extra);
+                    *len = total as u8;
+                } else {
+                    let mut out = Vec::with_capacity(current.saturating_add(extra.len()));
+                    out.extend_from_slice(&data[..current]);
+                    out.extend_from_slice(extra);
+                    *self = Self::Heap(out);
+                }
+            }
+            Self::Heap(bytes) => bytes.extend_from_slice(extra),
+        }
+    }
+}
+
+impl Clone for Bytes {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Inline { len, data } => Self::Inline {
+                len: *len,
+                data: *data,
+            },
+            Self::Heap(bytes) => Self::Heap(bytes.clone()),
+        }
+    }
+}
+
+struct SharedStr {
+    hash: Cell<u64>,
+    bytes: Bytes,
+}
+
+const _: () = assert!(std::mem::size_of::<SharedStr>() == 48);
 
 impl Clone for SharedStr {
     fn clone(&self) -> Self {
@@ -49,7 +166,7 @@ impl Default for PhpString {
 }
 
 impl PhpString {
-    fn from_shared_bytes(bytes: Vec<u8>, literal: bool) -> Self {
+    fn from_shared_bytes(bytes: Bytes, literal: bool) -> Self {
         Self(Repr::Shared {
             storage: Rc::new(SharedStr {
                 hash: Cell::new(0),
@@ -70,7 +187,7 @@ impl PhpString {
     pub fn from_interned_or_bytes(value: Option<&'static InternedStr>, bytes: &[u8]) -> Self {
         match value {
             Some(value) => Self::from_interned(value),
-            None => Self::from_shared_bytes(bytes.to_vec(), true),
+            None => Self::from_shared_bytes(Bytes::from_slice(bytes), true),
         }
     }
 
@@ -83,6 +200,11 @@ impl PhpString {
         Self::from(Vec::new())
     }
 
+    /// Copy two string operands into their final storage for `$left . $right`.
+    pub(crate) fn from_pair(left: &[u8], right: &[u8]) -> Self {
+        Self::from_shared_bytes(Bytes::from_pair(left, right), false)
+    }
+
     /// Append bytes, separating the shared buffer when necessary.
     pub fn push_bytes(&mut self, bytes: &[u8]) {
         if bytes.is_empty() {
@@ -92,7 +214,7 @@ impl PhpString {
         let storage = Rc::make_mut(storage);
         *literal = false;
         storage.hash.set(0);
-        storage.bytes.extend_from_slice(bytes);
+        storage.bytes.push_bytes(bytes);
     }
 
     /// Borrow mutable bytes only when the handle owns its buffer. The
@@ -134,7 +256,10 @@ impl PhpString {
 
     #[inline]
     pub fn len(&self) -> usize {
-        self.as_bytes().len()
+        match &self.0 {
+            Repr::Interned(value) => value.bytes.len(),
+            Repr::Shared { storage, .. } => storage.bytes.len(),
+        }
     }
 
     /// Whether `debug_zval_dump()` should describe this value as a literal.
@@ -187,7 +312,7 @@ impl PhpString {
     #[cold]
     #[inline(never)]
     fn compute_array_hash(shared: &SharedStr) -> u64 {
-        let hash = crate::array::hash_str_bytes(&shared.bytes);
+        let hash = crate::array::hash_str_bytes(shared.bytes.as_slice());
         shared.hash.set(hash);
         hash
     }
@@ -197,7 +322,9 @@ impl PhpString {
     pub(crate) fn numeric_key(&self) -> Option<i64> {
         match &self.0 {
             Repr::Interned(value) => value.numeric_key,
-            Repr::Shared { storage, .. } => crate::array::numeric_string_key(&storage.bytes),
+            Repr::Shared { storage, .. } => {
+                crate::array::numeric_string_key(storage.bytes.as_slice())
+            }
         }
     }
 
@@ -223,14 +350,14 @@ impl From<String> for PhpString {
 impl From<Vec<u8>> for PhpString {
     #[inline]
     fn from(bytes: Vec<u8>) -> Self {
-        Self::from_shared_bytes(bytes, false)
+        Self::from_shared_bytes(Bytes::from_vec(bytes), false)
     }
 }
 
 impl From<&[u8]> for PhpString {
     #[inline]
     fn from(bytes: &[u8]) -> Self {
-        Self::from(bytes.to_vec())
+        Self::from_shared_bytes(Bytes::from_slice(bytes), false)
     }
 }
 
@@ -360,5 +487,37 @@ mod tests {
         d.make_mut_bytes()[0] = b'G';
         assert_eq!(d, PhpString::from("Gamma"));
         assert_eq!(d.array_hash(), PhpString::from("Gamma").array_hash());
+    }
+    #[test]
+    fn inline_and_heap_promotion_boundary() {
+        let mut s = PhpString::from("a".repeat(INLINE_CAP).as_str());
+        assert_eq!(s.len(), INLINE_CAP);
+        assert!(
+            matches!(&s.0, Repr::Shared { storage, .. } if matches!(storage.bytes, Bytes::Inline { .. }))
+        );
+        let copy = s.clone();
+
+        s.push_bytes(b"!");
+        assert_eq!(s.len(), INLINE_CAP + 1);
+        assert!(
+            matches!(&s.0, Repr::Shared { storage, .. } if matches!(storage.bytes, Bytes::Heap(_)))
+        );
+        assert_eq!(copy.len(), INLINE_CAP);
+        assert!(
+            matches!(&copy.0, Repr::Shared { storage, .. } if matches!(storage.bytes, Bytes::Inline { .. }))
+        );
+        assert_eq!(&*s, format!("{}!", "a".repeat(INLINE_CAP)).as_bytes());
+
+        let pair_inline = PhpString::from_pair(b"route:", b"hello");
+        assert!(
+            matches!(&pair_inline.0, Repr::Shared { storage, .. } if matches!(storage.bytes, Bytes::Inline { .. }))
+        );
+        assert_eq!(&*pair_inline, b"route:hello");
+
+        let pair_heap = PhpString::from_pair(&[b'x'; 20], &[b'y'; 20]);
+        assert!(
+            matches!(&pair_heap.0, Repr::Shared { storage, .. } if matches!(storage.bytes, Bytes::Heap(_)))
+        );
+        assert_eq!(pair_heap.len(), 40);
     }
 }
