@@ -41,12 +41,15 @@ use crate::fast::{ScalarStep, store};
 /// them, or the string itself. Any other operand (a float follows the
 /// precision setting, an array warns, an object may run `__toString`)
 /// converts in the general handler.
-fn cast_to_string(operand: Option<&Option<Value>>) -> Option<phera_value::PhpString> {
+fn cast_to_string(operand: Option<&Option<Value>>) -> Option<Value> {
     match operand? {
         Some(Value::Int(integer)) => {
-            phera_value::to_php_string(&Value::Int(*integer), &mut phera_value::NoDiagnostics).ok()
+            phera_value::to_php_string(&Value::Int(*integer), &mut phera_value::NoDiagnostics)
+                .ok()
+                .map(Value::String)
         }
-        Some(Value::String(text)) => Some(text.clone()),
+        Some(Value::String(text)) => Some(Value::String(text.clone())),
+        Some(Value::InternedStr(text)) => Some(Value::InternedStr(text)),
         _ => None,
     }
 }
@@ -135,7 +138,7 @@ pub(crate) fn value_step<const GUARDED: bool>(
             dst,
             src,
         } => match cast_to_string(slots.get(src.index())) {
-            Some(text) => store::<GUARDED, _>(slots, dst, Value::String(text)),
+            Some(text) => store::<GUARDED, _>(slots, dst, text),
             None => ScalarStep::Fallback,
         },
         Instruction::JumpIfNull { value, target } => jump_on_null(slots, value, target, true, ip),
