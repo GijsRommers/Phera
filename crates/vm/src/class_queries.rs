@@ -29,7 +29,7 @@
 use std::rc::Rc;
 
 use phera_bytecode::{ClassKind, Reg};
-use phera_value::{PhpString, Value};
+use phera_value::Value;
 
 use crate::Vm;
 use crate::bundled_classes::is_bundled_class_name;
@@ -91,8 +91,8 @@ impl Vm {
         let answer = self
             .plain_window(call, &[1, 2])
             .and_then(|window| match window {
-                [Some(Value::String(name))] => self.exists_answer(kind, name, true),
-                [Some(Value::String(name)), Some(Value::Bool(autoload))] => {
+                [Some(name)] => self.exists_answer(kind, name, true),
+                [Some(name), Some(Value::Bool(autoload))] => {
                     self.exists_answer(kind, name, *autoload)
                 }
                 _ => None,
@@ -130,10 +130,10 @@ impl Vm {
         let answer = self
             .plain_window(call, &[1])
             .and_then(|window| match window {
-                [Some(Value::String(name))] => {
+                [Some(name)] => {
                     // Only a valid UTF-8 name takes this path; the general
                     // handler lossy-converts other bytes first.
-                    let name = std::str::from_utf8(name.as_bytes()).ok()?;
+                    let name = std::str::from_utf8(name.as_str_bytes()?).ok()?;
                     Some(self.exists(name.strip_prefix('\\').unwrap_or(name)))
                 }
                 _ => None,
@@ -183,10 +183,10 @@ impl Vm {
 
     /// The answer for a `*_exists` call whose first argument is `name`:
     /// `Some(answer)` when no PHP code can change it, `None` to fall back.
-    fn exists_answer(&self, kind: ExistsKind, name: &PhpString, autoload: bool) -> Option<bool> {
+    fn exists_answer(&self, kind: ExistsKind, name: &Value, autoload: bool) -> Option<bool> {
         // The general handler lossy-converts bytes that are not UTF-8 before
         // looking the name up; only a valid name takes this path.
-        let name = std::str::from_utf8(name.as_bytes()).ok()?;
+        let name = std::str::from_utf8(name.as_str_bytes()?).ok()?;
         match self.resolve_name(name, autoload) {
             ResolvedName::Found(class) => Some(kind.answers(class.kind)),
             ResolvedName::Absent => Some(false),
@@ -211,8 +211,8 @@ impl Vm {
             ClassNameQuery::GetParentClass => {
                 let class = match first {
                     Value::Object(object) => self.classes.for_object(object),
-                    Value::String(name) => {
-                        let name = std::str::from_utf8(name.as_bytes()).ok()?;
+                    name => {
+                        let name = std::str::from_utf8(name.as_str_bytes()?).ok()?;
                         match self.resolve_name(name, true) {
                             ResolvedName::Found(class) => Some(class),
                             // A name that resolves to no class makes the general
@@ -220,7 +220,6 @@ impl Vm {
                             ResolvedName::Absent | ResolvedName::Fallback => return None,
                         }
                     }
-                    _ => return None,
                 };
                 let class = class?;
                 Some(

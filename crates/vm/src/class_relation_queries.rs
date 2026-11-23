@@ -16,7 +16,7 @@
 //! `BatchExit::NativeCall` with the window intact, for the general handler.
 
 use phera_bytecode::Reg;
-use phera_value::{PhpString, Value};
+use phera_value::Value;
 
 use crate::Vm;
 use crate::calls::execution_loop::BatchExit;
@@ -54,14 +54,12 @@ impl Vm {
         let answer = self
             .plain_window(call, &[2, 3])
             .and_then(|window| match window {
-                [Some(first), Some(Value::String(target))] => {
+                [Some(first), Some(target)] => {
                     self.relation_answer(query, first, target, query.default_allow_string())
                 }
-                [
-                    Some(first),
-                    Some(Value::String(target)),
-                    Some(Value::Bool(allow_string)),
-                ] => self.relation_answer(query, first, target, *allow_string),
+                [Some(first), Some(target), Some(Value::Bool(allow_string))] => {
+                    self.relation_answer(query, first, target, *allow_string)
+                }
                 _ => None,
             });
         self.finish_query(answer.map(Value::Bool), call, destination)
@@ -74,17 +72,17 @@ impl Vm {
         &self,
         query: RelationQuery,
         first: &Value,
-        target: &PhpString,
+        target: &Value,
         allow_string: bool,
     ) -> Option<bool> {
         // Only a valid UTF-8 target takes this path, for the same reason as
         // in `exists_answer`.
-        let target = std::str::from_utf8(target.as_bytes()).ok()?;
+        let target = std::str::from_utf8(target.as_str_bytes()?).ok()?;
         let class = match first {
             // An object's class is known; PHP never autoloads it.
             Value::Object(object) => self.classes.for_object(object),
-            Value::String(name) => {
-                let name = std::str::from_utf8(name.as_bytes()).ok()?;
+            name => {
+                let name = std::str::from_utf8(name.as_str_bytes()?).ok()?;
                 if !allow_string {
                     // Without allow_string a string first argument names no
                     // class, even one that is loaded.
@@ -97,7 +95,6 @@ impl Vm {
                     }
                 }
             }
-            _ => return None,
         };
         // The second argument is only looked up in the table; PHP never
         // autoloads it.

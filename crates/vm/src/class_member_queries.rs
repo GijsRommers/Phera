@@ -16,7 +16,7 @@
 //! the window intact, for the general handler.
 
 use phera_bytecode::{Reg, Visibility};
-use phera_value::{PhpString, Value};
+use phera_value::Value;
 
 use crate::Vm;
 use crate::calls::execution_loop::BatchExit;
@@ -44,7 +44,7 @@ impl Vm {
         let answer = self
             .plain_window(call, &[2])
             .and_then(|window| match window {
-                [Some(first), Some(Value::String(name))] => self.member_answer(query, first, name),
+                [Some(first), Some(name)] => self.member_answer(query, first, name),
                 _ => None,
             });
         self.finish_query(answer.map(Value::Bool), call, destination)
@@ -52,10 +52,10 @@ impl Vm {
 
     /// The answer for a `method_exists` / `property_exists` call whose
     /// arguments are `first` (an object or a class name) and `name`.
-    fn member_answer(&self, query: MemberQuery, first: &Value, name: &PhpString) -> Option<bool> {
+    fn member_answer(&self, query: MemberQuery, first: &Value, name: &Value) -> Option<bool> {
         // Only a valid UTF-8 name takes this path, for the same reason as in
         // `class_queries`.
-        let name = std::str::from_utf8(name.as_bytes()).ok()?;
+        let name = std::str::from_utf8(name.as_str_bytes()?).ok()?;
         let class = match first {
             Value::Object(object) => {
                 // The general handler runs PHP code for these two shapes of
@@ -69,16 +69,14 @@ impl Vm {
                 }
                 self.classes.for_object(object)
             }
-            Value::String(class_name) => {
-                let class_name = std::str::from_utf8(class_name.as_bytes()).ok()?;
+            class_name => {
+                let class_name = std::str::from_utf8(class_name.as_str_bytes()?).ok()?;
                 match self.resolve_name(class_name, true) {
                     ResolvedName::Found(class) => Some(class),
                     ResolvedName::Absent => None,
                     ResolvedName::Fallback => return None,
                 }
             }
-            // The general handler raises its TypeError for other types.
-            _ => return None,
         };
         let Some(class) = class else {
             return Some(false);
