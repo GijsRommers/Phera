@@ -381,6 +381,18 @@ request can change it.
   cell (`&`). Object ids stay the same. Strings are shared. An array is shared
   (copy-on-write, as always) unless it holds an object or a reference somewhere
   inside; then it is rebuilt with the copies.
+- What a fork does not copy: the caches that a request fills as it runs
+  (site cells, method-site records, function links, class checks, closure
+  signatures, native links). The snapshot keeps what the boot filled as
+  `UnitCache::base` (and `CodeTable::base_sites` for the site cells), and a
+  fork's own cells start empty. The first time a request needs a function's
+  site cells, a file's records or class checks, or a function symbol's link,
+  it makes them from the snapshot's, keeping only what holds no object of the
+  boot (a link to a function or a native function, a property or static
+  entry). It fills from the snapshot only on the miss, so a hit reads one cell
+  as before. Nothing a request writes is ever in the snapshot's cells. The
+  site cells are one table in the code table indexed by function number. A fork
+  still copies the function facts (a vector, as the loop reads them).
 - Built-in classes with state of their own (`ArrayObject`, `SplObjectStorage`,
   `WeakMap`, `Closure`, `DateTime`, ...) get a fork hook in the extension API. It
   returns a copy of the state with the objects inside replaced by their copies,
@@ -506,7 +518,7 @@ cache in front of a slow structure):
 | Name keys | a SipHash map from every lowercased name to a number, built per request and copied per fork | numbered once per process when a file is compiled (`phera_bytecode::name_keys`); the file carries its key arrays; done |
 | Finding a loaded file | a linear scan over the request's files | a flat array indexed by the file revision's process number (`UnitMetadata::id`); done |
 | Function numbering | per request: files numbered in the order the request loads them | per file revision: a function is (file number, local number), so the same function has the same number in every request |
-| Function facts | a vector per request, copied per fork | one immutable array per file revision, shared; a request keeps only what it adds (trait imports, declaring class) |
+| Function facts | a vector per request, copied per fork | a vector per request, copied per fork (the copy is most of what a fork still costs); sharing it as an `Rc<[T]>` made every read dearer, see `docs/decisions/2026-11-22-a-fork-shares-the-code-table-and-fills-its-caches.md` |
 | Linked classes | an `Rc` graph per worker (methods in a `HashMap<String, Rc<Method>>`, ancestors in a `HashSet<String>`), linked again by each request that declares the class after the boot | one table of linked classes for the worker (later the process), each entry addressed by a stable index; methods in a flat array in the order PHP lists them, property declarations in a flat array |
 | A request's declared classes | a map from name to `Rc<Class>`, plus per-file resolution slots copied per fork | a bitset over the worker's table of which entries the request has declared, the name's slot, and the request's own statics |
 
