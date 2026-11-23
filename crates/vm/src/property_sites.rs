@@ -121,21 +121,6 @@ impl PropertyEntry {
         crate::property_storage::write_element_known(object, self.known(), keys, value)
     }
 
-    /// `++` or `--` of an integer property, for an increment from `scope`,
-    /// as [`Vm::increment_property_site`] does: the expression's value, or
-    /// `None` with nothing changed.
-    pub(crate) fn increment_matching(
-        &self,
-        object: &Object,
-        scope: Option<&Rc<crate::classes::Class>>,
-        mode: phera_bytecode::IncDec,
-    ) -> Option<Value> {
-        if !self.matches(object, scope) {
-            return None;
-        }
-        self.increment(object, mode)
-    }
-
     /// Whether this entry was made for the object's class and a read or
     /// write from class scope `scope`.
     fn matches(&self, object: &Object, scope: Option<&Rc<crate::classes::Class>>) -> bool {

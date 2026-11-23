@@ -51,6 +51,7 @@ pub(crate) struct Class {
     /// taken, from the numbers every fork shares, and never again (see
     /// `ClassTable::build_method_tables`).
     pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
+    pub(crate) property_table: std::cell::OnceCell<super::property_table::PropertyTable>,
     pub(crate) serialized_fields:
         std::cell::OnceCell<Option<Rc<[phera_extension_api::serialization::SerializedProperty]>>>,
     /// Constructor presence is immutable after linking, including inheritance.
@@ -451,6 +452,13 @@ impl Class {
         *self
             .property_facts
             .get_or_init(|| super::property_facts::PropertyFacts::of(self))
+    }
+
+    /// Flat data-oriented property lookup table, built once and shared across forks.
+    #[inline]
+    pub(crate) fn property_table(&self) -> &super::property_table::PropertyTable {
+        self.property_table
+            .get_or_init(|| super::property_table::PropertyTable::build(self))
     }
 
     /// Whether this class is `target`, extends it or implements it: the same

@@ -70,11 +70,14 @@ impl Machine<'_> {
             .function(position.frame.function)
             .paths
             .get(path.index())?;
+        if body
+            .steps
+            .iter()
+            .any(|step| matches!(step, PathStep::Property(_)))
+        {
+            return self.read_path_fast(position, path, false);
+        }
         match (body.base, body.steps.as_slice()) {
-            (_, [PathStep::Property(_)]) => self.cached_property(position, path),
-            (_, [PathStep::Property(_), PathStep::Index(_), ..]) => {
-                self.property_element(position, path, false)
-            }
             (PathBase::Register(_), [PathStep::Index(_), ..]) => {
                 match self.local_element(position, path)?? {
                     Value::Reference(_) => None,

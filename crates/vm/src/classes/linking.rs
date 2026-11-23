@@ -620,6 +620,7 @@ impl Vm {
             magic: super::magic::MagicMethods::link(&methods),
             methods,
             method_table: std::cell::OnceCell::new(),
+            property_table: std::cell::OnceCell::new(),
             serialized_fields: std::cell::OnceCell::new(),
             property_template,
             layout,

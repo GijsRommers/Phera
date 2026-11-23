@@ -886,7 +886,7 @@ impl Machine<'_> {
     }
 
     /// The class scope of the running frame (`self::`), if it has one.
-    fn running_scope(&self) -> Option<&Rc<Class>> {
+    pub(super) fn running_scope(&self) -> Option<&Rc<Class>> {
         self.current_context().and_then(|context| context.scope())
     }
 

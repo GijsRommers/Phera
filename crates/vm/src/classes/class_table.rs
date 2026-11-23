@@ -335,6 +335,7 @@ impl ClassTable {
             class
                 .method_table
                 .get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)));
+            let _ = class.property_table();
         }
     }
 
@@ -411,7 +412,7 @@ impl ClassTable {
         }
     }
 
-    fn by_number(&self, number: u32) -> Option<&Rc<Class>> {
+    pub(crate) fn by_number(&self, number: u32) -> Option<&Rc<Class>> {
         let number = number as usize;
         let base = self.native_count as usize;
         match number.checked_sub(base) {
