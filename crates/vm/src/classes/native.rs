@@ -6,7 +6,9 @@ use super::{Class, Method, MethodBody};
 use phera_bytecode::{ClassKind, Type, TypeMask, Visibility};
 use phera_extension_api::{ClassKind as NativeKind, ConstantValue, NativeMethod};
 use phera_value::{ArrayKey, Object};
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
+
+use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 
 impl ClassDefinitions {
     /// Registries guarantee parents-first order, allowing native classes to use ordinary inheritance.
@@ -23,7 +25,7 @@ impl ClassDefinitions {
                 operations: super::operations::ClassOperations::default(),
                 origin: super::class::ClassOrigin::Native,
                 identity: identity.clone(),
-                ancestors: std::collections::HashSet::new(),
+                ancestors: HashSet::new(),
                 name_value: phera_value::Value::interned(b"stdClass"),
                 name: "stdClass".into(),
                 parent: None,

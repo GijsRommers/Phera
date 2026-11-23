@@ -3302,6 +3302,7 @@ dependencies = [
 name = "phera-ext-pdo"
 version = "0.1.0"
 dependencies = [
+ "foldhash",
  "mysql_async",
  "phera-db-drivers",
  "phera-extension-api",
@@ -3731,6 +3732,7 @@ name = "phera-vm"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "foldhash",
  "indexmap",
  "phera-bytecode",
  "phera-compiler",
