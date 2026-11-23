@@ -82,14 +82,15 @@ pub(crate) struct CodeTable {
     /// (`UnitMetadata::id`): its position in `units` plus one, 0 if this
     /// request has not loaded it.
     slots: Vec<u32>,
-    /// The site cells of every function by its number (top-level code
-    /// included), made when the function first looks a site up: one cell
-    /// per instruction. A fork's start empty, with `base_sites` to make them
-    /// from. Grows with `functions`.
-    sites: Vec<Sites>,
-    /// What the snapshot's functions had filled: shared by its forks, never
-    /// changed.
-    base_sites: Option<std::rc::Rc<[Sites]>>,
+    /// Per-request site cells, allocated lazily only when a request writes a
+    /// site not already satisfied by `base_sites`. Empty on warmed forks.
+    sites: std::cell::RefCell<Vec<Option<Sites>>>,
+    /// Fast guard so reads on warmed forks skip `sites.borrow()` completely
+    /// and read directly from immutable `base_sites`.
+    has_local_sites: std::cell::Cell<bool>,
+    /// What the snapshot's functions had filled: immutable, shared by every
+    /// fork via `Rc::clone`, read directly with zero `RefCell` borrows.
+    base_sites: Option<std::rc::Rc<[Option<Sites>]>>,
     /// The name of each trait method composed into a class, which can differ
     /// from the name of the body it runs (`use T { foo as bar }`), by the
     /// method's number, sorted. Read only to name a function in an error or
@@ -116,7 +117,8 @@ impl CodeTable {
             worker: worker.clone(),
             leases: vec![crate::worker_code::Leases::new(worker)],
             slots: Vec::new(),
-            sites: Vec::new(),
+            sites: std::cell::RefCell::new(Vec::new()),
+            has_local_sites: std::cell::Cell::new(false),
             base_sites: None,
             trait_method_names: Default::default(),
             imports: None,
@@ -406,47 +408,92 @@ impl CodeTable {
         &self.functions[function.index()]
     }
 
-    /// Makes room for numbers up to `end`, with placeholders, and for their
-    /// site cells.
+    /// Makes room for numbers up to `end`, with placeholders.
     fn cover(&mut self, end: usize) {
         if self.functions.len() < end {
             self.functions.resize(end, FunctionFacts::placeholder());
-            self.sites.resize_with(end, Sites::new);
         }
     }
 
-    /// The site of the instruction of `function` that ends at `ip`: the VM
-    /// looks it up after the instruction pointer has advanced. The cells of
-    /// the function are made here, the first time any of its sites is
-    /// looked up.
-    #[inline]
-    pub(crate) fn site(
+    /// Reads the cached site for `function` at `ip`.
+    ///
+    /// On warmed forks (`!has_local_sites`), reads directly from immutable
+    /// `base_sites` with zero `RefCell` borrows and zero allocations.
+    #[inline(always)]
+    pub(crate) fn read_site<R>(
         &self,
         function: FunctionIndex,
         ip: usize,
-    ) -> Option<&std::cell::RefCell<CachedSite>> {
-        self.sites
-            .get(function.index())?
-            .get_or_init(|| self.make_sites(function))
-            .get(ip)
+        visit: impl FnOnce(&CachedSite) -> R,
+    ) -> Option<R> {
+        if !self.has_local_sites.get() {
+            let site = self
+                .base_sites
+                .as_ref()?
+                .get(function.index())?
+                .as_deref()?
+                .get(ip)?;
+            return Some(visit(site));
+        }
+        self.read_site_local(function, ip, visit)
     }
 
-    /// The cells of a function that first looks a site up: those the
+    #[inline]
+    fn read_site_local<R>(
+        &self,
+        function: FunctionIndex,
+        ip: usize,
+        visit: impl FnOnce(&CachedSite) -> R,
+    ) -> Option<R> {
+        if let Ok(sites) = self.sites.try_borrow()
+            && let Some(cells) = sites.get(function.index()).and_then(Option::as_deref)
+        {
+            return cells.get(ip).map(visit);
+        }
+        let site = self
+            .base_sites
+            .as_ref()?
+            .get(function.index())?
+            .as_deref()?
+            .get(ip)?;
+        Some(visit(site))
+    }
+
+    /// Stores `value` in the request-local site cell for `function` at `ip`,
+    /// initializing that function's site slice lazily on its first write.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn write_site(&self, function: FunctionIndex, ip: usize, value: CachedSite) {
+        let index = function.index();
+        if index >= self.functions.len() {
+            return;
+        }
+        let mut sites = self.sites.borrow_mut();
+        if sites.len() <= index {
+            sites.resize_with(index + 1, || None);
+        }
+        let cells = sites[index].get_or_insert_with(|| self.make_sites(function));
+        if let Some(cell) = cells.get_mut(ip) {
+            *cell = value;
+            self.has_local_sites.set(true);
+        }
+    }
+
+    /// The cells of a function on its first local site write: those the
     /// snapshot filled that a request may use, else empty ones.
     #[cold]
     #[inline(never)]
-    fn make_sites(&self, function: FunctionIndex) -> Box<[std::cell::RefCell<CachedSite>]> {
+    fn make_sites(&self, function: FunctionIndex) -> Sites {
         let instructions = self.facts(function).instructions.len();
         let known = self
             .base_sites
             .as_ref()
             .and_then(|base| base.get(function.index()))
-            .and_then(|sites| sites.get());
+            .and_then(Option::as_deref);
         match known {
-            Some(cells) if cells.len() == instructions + 1 => cells
-                .iter()
-                .map(|cell| std::cell::RefCell::new(cell.borrow().shared()))
-                .collect(),
+            Some(cells) if cells.len() == instructions + 1 => {
+                crate::unit_caches::frozen_sites(cells)
+            }
             _ => crate::unit_caches::empty_sites(instructions),
         }
     }
@@ -524,13 +571,13 @@ impl CodeTable {
             }
         }
         let [functions, closures] = sums;
-        let cells = self
-            .sites
+        let sites = self.sites.borrow();
+        let cells = sites
             .iter()
-            .map(|sites| sites.get().map_or(0, |cells| cells.len()))
+            .map(|entry| entry.as_deref().map_or(0, <[CachedSite]>::len))
             .sum::<usize>()
-            * size_of::<std::cell::RefCell<CachedSite>>();
-        let boxes = self.sites.capacity() * size_of::<Sites>();
+            * size_of::<CachedSite>();
+        let boxes = sites.capacity() * size_of::<Option<Sites>>();
         vec![
             ("site cells", cells),
             ("per-function site boxes", boxes),
@@ -577,15 +624,23 @@ impl crate::snapshot::ForkCopy for CodeTable {
                 .chain([crate::worker_code::Leases::new(&self.worker)])
                 .collect(),
             slots: self.slots.clone(),
-            sites: (0..self.sites.len()).map(|_| Sites::new()).collect(),
+            sites: std::cell::RefCell::new(Vec::new()),
+            has_local_sites: std::cell::Cell::new(false),
             base_sites: match &self.base_sites {
                 Some(base) => Some(base.clone()),
-                None => Some(
-                    self.sites
-                        .iter()
-                        .map(crate::unit_caches::frozen_sites)
-                        .collect(),
-                ),
+                None => {
+                    let local = self.sites.borrow();
+                    if local.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            local
+                                .iter()
+                                .map(|entry| entry.as_deref().map(crate::unit_caches::frozen_sites))
+                                .collect(),
+                        )
+                    }
+                }
             },
             trait_method_names: self.trait_method_names.clone(),
             imports: None,

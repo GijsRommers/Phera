@@ -111,15 +111,21 @@ impl Vm {
         let frame = self
             .current()
             .ok_or_else(|| internal_error!("namespace call frame"))?;
-        let site = frame
+        let function = frame.frame.function;
+        let ip = frame.ip();
+        if let Some(callee) = self
             .code
-            .site(frame.frame.function, frame.ip())
-            .ok_or_else(|| internal_error!("namespace call site"))?;
-        if let CachedSite::Function(callee) = &*site.borrow() {
-            return Ok((**callee).clone());
+            .read_site(function, ip, |site| match site {
+                CachedSite::Function(callee) => Some((**callee).clone()),
+                _ => None,
+            })
+            .flatten()
+        {
+            return Ok(callee);
         }
         let linked = self.resolve_function_symbol(&self.function_symbol(symbol)?)?;
-        *site.borrow_mut() = CachedSite::Function(Box::new(linked.clone()));
+        self.code
+            .write_site(function, ip, CachedSite::Function(Box::new(linked.clone())));
         Ok(linked)
     }
 

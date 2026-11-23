@@ -22,9 +22,10 @@ impl Machine<'_> {
         // which is where the loop stands now.
         let builtin = self
             .code
-            .site(function, position.ip)
-            .and_then(|site| site.try_borrow().ok())
-            .is_some_and(|site| matches!(*site, CachedSite::BuiltinGuard(Resolution::Builtin)));
+            .read_site(function, position.ip, |site| {
+                matches!(*site, CachedSite::BuiltinGuard(Resolution::Builtin))
+            })
+            .unwrap_or(false);
         if builtin {
             Step::Done(position.ip)
         } else {

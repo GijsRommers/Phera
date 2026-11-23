@@ -224,11 +224,4 @@ impl<'a> FrameView<'a> {
             .copied()
             .unwrap_or(1) as usize
     }
-
-    /// The unit-owned slot is keyed by this function and its published next IP.
-    pub(crate) fn site_cache(
-        &self,
-    ) -> Option<&'a std::cell::RefCell<crate::unit_caches::CachedSite>> {
-        self.code.site(self.frame.function, self.ip())
-    }
 }
