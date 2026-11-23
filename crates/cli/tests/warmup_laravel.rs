@@ -146,12 +146,12 @@ fn the_warm_up_boots_the_models_and_leaves_nothing_of_a_request() {
     let Some(laravel) = Laravel::start() else {
         return;
     };
-    // Post and User are booted before the snapshot. Note is not (its boot
+    // Post, Stamp and User are booted before the snapshot. Note is not (its boot
     // asks for the signed-in user): it was tried once and put back, with
     // its listener removed. No connection, session store or guard is left.
     assert_eq!(
         get(&laravel.warm, "/api/warmed", &[]).body,
-        r#"{"booted_models":["App\\Models\\Post","App\\Models\\User"],"note_boot_attempts":1,"note_listeners":0,"connections":{"sqlite":"not opened"},"session_stores":0,"guards":[],"paginator_declared":false}"#
+        r#"{"booted_models":["App\\Models\\Post","App\\Models\\Stamp","App\\Models\\User"],"note_boot_attempts":1,"note_listeners":0,"connections":{"sqlite":"not opened"},"session_stores":0,"guards":[],"paginator_declared":false}"#
     );
     assert_eq!(
         get(&laravel.plain, "/api/warmed", &[]).body,
@@ -165,6 +165,21 @@ fn the_warm_up_boots_the_models_and_leaves_nothing_of_a_request() {
         notes.body,
         r#"{"sql":"select * from \"notes\" where \"visible\" = ? and \"owner_id\" is null","creating_listeners":1}"#
     );
+}
+
+/// The stated difference from PHP: a model's `boot()` and `booted()` run
+/// once per worker, so what they keep of that moment (here the clock) is
+/// the same in every request. Without the warm-up, and under PHP, the model
+/// boots in each request that uses it.
+#[test]
+fn a_model_that_boots_without_the_request_boots_once_per_worker() {
+    let Some(laravel) = Laravel::start() else {
+        return;
+    };
+    let booted_at = |server: &Server| get(server, "/api/stamp", &[]).body;
+    assert_eq!(booted_at(&laravel.warm), booted_at(&laravel.warm));
+    assert_ne!(booted_at(&laravel.plain), booted_at(&laravel.plain));
+    assert_ne!(booted_at(&laravel.php), booted_at(&laravel.php));
 }
 
 #[test]

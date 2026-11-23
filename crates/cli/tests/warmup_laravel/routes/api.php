@@ -2,6 +2,7 @@
 
 use App\Models\Note;
 use App\Models\Post;
+use App\Models\Stamp;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -52,6 +53,13 @@ Route::get('/random', fn () => [
     bin2hex(random_bytes(8)),
     session()->getId(),
 ]);
+
+// When the Stamp model booted (see App\Models\Stamp).
+Route::get('/stamp', function () {
+    new Stamp;
+
+    return ['booted_at' => Stamp::$bootedAt];
+});
 
 // What the worker's boot left in the process, as this request found it.
 // Only Phera has such a boot: this answer is not compared with PHP's.

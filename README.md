@@ -443,13 +443,22 @@ with its listeners still created on first use. On the test applications a
 Laravel Eloquent route went from 106 to 55 million instructions per request
 and a Symfony route without a database from 14.0 to 13.2 million. Every
 worker boots a little longer (205 to 249 ms on that Laravel application)
-and holds what was built (9 MiB more). Two things to know:
+and holds what was built (9 MiB more).
 
-- A model's `boot()` and `booted()` run once per worker, not once per
-  request, and without a request. A model whose boot asks for the request or
-  the signed-in user is left alone and boots in the request, as before.
-- `phera serve --no-service-warmup public` (or `PHERA_SERVICE_WARMUP=0` in
-  the environment) turns the warm-up off.
+**Laravel: a model's `boot()` and `booted()` run once per worker.** Under
+PHP they run in every request that uses the model. Here they run when the
+worker boots, with no request and no signed-in user. If that code asks for
+the request or the user (`request()`, `auth()->user()`), it fails at that
+moment; Phera then leaves the model alone and it boots inside each request,
+exactly as before. If it reads something else that differs per request (the
+clock, a cache, `$_SERVER`, `$_COOKIE`), it gets the worker's answer once,
+and every request of that worker sees it: `static::$bootedAt = now()` is
+the worker's boot time, a global scope chosen from a cached setting stays
+chosen until the worker boots again. A closure passed to
+`addGlobalScope()` or `creating()` still runs per query or per save, with
+the request; only the code that registers it runs once.
+`phera serve --no-service-warmup public` (or `PHERA_SERVICE_WARMUP=0` in the
+environment) turns the warm-up off and models boot per request again.
 
 The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
 are empty and `$_SERVER` holds the environment and the script's paths. Each
