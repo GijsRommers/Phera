@@ -627,10 +627,8 @@ impl Machine<'_> {
             return false;
         }
         if packed.is_readonly() {
-            // A clone's `clone with` updates may change each readonly
-            // property once, which the VM records (`Vm::clone_can_update`).
             return table.fills_missing_directly()
-                && !self.clone_scopes.covers(object)
+                && !self.class_states.clone_scopes.covers(object)
                 && write_readonly_init_direct(object, packed.slot(), value);
         }
         write_slot_direct(object, packed.slot(), value, table.fills_missing_directly())

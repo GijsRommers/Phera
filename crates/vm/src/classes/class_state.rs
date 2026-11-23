@@ -61,6 +61,11 @@ pub(crate) struct ClassStates {
     statics: Vec<Option<Rc<StaticProperty>>>,
     constants: Vec<ConstantState>,
     numbers: Rc<SlotNumbers>,
+    /// The clones whose `clone with` updates are running, in which each
+    /// readonly property may change once. Kept here, where the interpreter
+    /// loop already looks, so that its readonly initialization can leave
+    /// such a clone to the VM.
+    pub(crate) clone_scopes: crate::classes::cloning::CloneScopes,
 }
 
 impl Default for ClassStates {
@@ -84,6 +89,7 @@ impl ClassStates {
             statics: Vec::new(),
             constants: Vec::new(),
             numbers: numbers.clone(),
+            clone_scopes: Default::default(),
         }
     }
 
@@ -187,10 +193,12 @@ impl crate::snapshot::ForkCopy for ClassStates {
                 }
             })
             .collect();
+        // No clone is being made while a snapshot is forked.
         ClassStates {
             statics,
             constants,
             numbers: self.numbers.clone(),
+            clone_scopes: Default::default(),
         }
     }
 }

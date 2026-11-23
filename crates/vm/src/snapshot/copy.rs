@@ -122,7 +122,6 @@ impl Vm {
             property_guards: Vec::new(),
             unset_typed_properties,
             extension_values,
-            clone_scopes: Default::default(),
             closure_captures: Vec::new(),
             initializer_scope: None,
             initializer_class: None,
