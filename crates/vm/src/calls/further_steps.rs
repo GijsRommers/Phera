@@ -57,7 +57,16 @@ impl Machine<'_> {
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
             | Instruction::NewArray { .. }
+            | Instruction::ArraySet { .. }
+            | Instruction::ArrayPush { .. }
+            | Instruction::ArrayKeyExists { .. }
             | Instruction::FetchIndex { .. } => self.value_step::<GUARDED>(&instruction, position),
+            Instruction::InLiteralArray {
+                dst,
+                needle,
+                haystack,
+                strict,
+            } => self.in_literal_array::<GUARDED>(position, dst, (needle, haystack, strict)),
             Instruction::Fetch {
                 dst,
                 path,

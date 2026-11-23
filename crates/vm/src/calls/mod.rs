@@ -39,6 +39,7 @@ mod fast_local_elements;
 mod fast_methods;
 mod fast_named_calls;
 mod fast_native_methods;
+mod fast_natives;
 mod fast_objects;
 mod fast_path_sends;
 mod fast_properties;

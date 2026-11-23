@@ -308,17 +308,35 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
             };
             store_integer::<GUARDED, _>(slots, dst, negative)
         }
-        Instruction::Cast {
-            to: phera_bytecode::CastKind::Bool,
-            dst,
-            src,
-        } => {
-            // Only a value that is a boolean already; a real conversion may warn.
-            let Some(Some(Value::Bool(value))) = slots.slot(src) else {
-                return ScalarStep::Fallback;
-            };
-            let value = *value;
-            store::<GUARDED, _>(slots, dst, Value::Bool(value))
+        Instruction::Cast { to, dst, src } => {
+            // Identity casts need no conversion and cannot warn.
+            use phera_bytecode::CastKind;
+            match (to, slots.slot(src)) {
+                (CastKind::Bool, Some(Some(Value::Bool(value)))) => {
+                    let value = *value;
+                    store::<GUARDED, _>(slots, dst, Value::Bool(value))
+                }
+                (CastKind::Int, Some(Some(Value::Int(value)))) => {
+                    let value = *value;
+                    store_integer::<GUARDED, _>(slots, dst, value)
+                }
+                (CastKind::Float, Some(Some(Value::Float(value)))) => {
+                    let value = *value;
+                    store::<GUARDED, _>(slots, dst, Value::Float(value))
+                }
+                (CastKind::String, Some(Some(Value::InternedStr(value)))) => {
+                    store::<GUARDED, _>(slots, dst, Value::InternedStr(*value))
+                }
+                (CastKind::String, Some(Some(Value::String(value)))) => {
+                    let value = Value::String(value.clone());
+                    store::<GUARDED, _>(slots, dst, value)
+                }
+                (CastKind::Array, Some(Some(Value::Array(value)))) => {
+                    let value = Value::Array(value.clone());
+                    store::<GUARDED, _>(slots, dst, value)
+                }
+                _ => ScalarStep::Fallback,
+            }
         }
         Instruction::Move { dst, src } => {
             if let Some(integer) = integer_at(slots, src) {

@@ -595,6 +595,10 @@ impl Machine<'_> {
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
             | Instruction::NewArray { .. }
+            | Instruction::ArraySet { .. }
+            | Instruction::ArrayPush { .. }
+            | Instruction::ArrayKeyExists { .. }
+            | Instruction::InLiteralArray { .. }
             | Instruction::FetchIndex { .. }
             | Instruction::Fetch { .. }
             | Instruction::AssignPath { .. }
