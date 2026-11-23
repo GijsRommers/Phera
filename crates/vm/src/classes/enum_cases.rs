@@ -52,6 +52,12 @@ impl EnumCases {
             && !self.backed.contains_key(&class.index)
             && !self.validating.contains(&class.index)
     }
+
+    #[inline]
+    pub(crate) fn backed_case(&self, class: ClassIndex, key: &ArrayKey) -> Option<Value> {
+        let object = self.backed.get(&class)?.get(key)?;
+        Some(Value::Object(object.clone()))
+    }
 }
 
 /// The request stores one object per case and indexes backing values separately.

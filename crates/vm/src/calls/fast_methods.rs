@@ -623,6 +623,24 @@ impl Machine<'_> {
         let Some(found) = self.classes.method_table(class_ref).get(key) else {
             return Step::Slow;
         };
+        if let MethodBody::Enum(
+            operation @ (crate::classes::enums::EnumMethod::From
+            | crate::classes::enums::EnumMethod::TryFrom),
+        ) = found.method.body
+        {
+            let ready = class_ref
+                .enum_info
+                .as_ref()
+                .and_then(|info| info.backing)
+                .filter(|_| !self.enum_cases.needs_backing(class_ref))
+                .map(|backing| (class_ref.index, backing));
+            return match ready {
+                Some((class_index, backing)) => self
+                    .try_inline_enum_from::<GUARDED>(position, class_index, backing, operation)
+                    .unwrap_or(Step::Slow),
+                None => Step::Slow,
+            };
+        }
         let receiver = match (found.method.is_static, relative) {
             (true, _) => None,
             (false, true) => context.as_ref().and_then(|context| context.this()).cloned(),
@@ -702,6 +720,24 @@ impl Machine<'_> {
         let Some(method) = class_ref.methods.get(method_lower) else {
             return Step::Slow;
         };
+        if let MethodBody::Enum(
+            operation @ (crate::classes::enums::EnumMethod::From
+            | crate::classes::enums::EnumMethod::TryFrom),
+        ) = method.body
+        {
+            let ready = class_ref
+                .enum_info
+                .as_ref()
+                .and_then(|info| info.backing)
+                .filter(|_| !self.enum_cases.needs_backing(class_ref))
+                .map(|backing| (class_ref.index, backing));
+            return match ready {
+                Some((class_index, backing)) => self
+                    .try_inline_enum_from::<GUARDED>(position, class_index, backing, operation)
+                    .unwrap_or(Step::Slow),
+                None => Step::Slow,
+            };
+        }
         if !method.is_static || method.is_abstract || method.visibility != Visibility::Public {
             return Step::Slow;
         }
@@ -724,6 +760,81 @@ impl Machine<'_> {
             _ => Some(class_ref.index),
         };
         self.prepare_php_method(callee, None, called, position.ip)
+    }
+
+    /// Execute `Enum::from($x)` / `Enum::tryFrom($x)` directly inside the loop
+    /// when the backed enum is already validated, the next instruction sends a
+    /// single plain backing argument, and the instruction after is `Call`.
+    fn try_inline_enum_from<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        class_index: ClassIndex,
+        backing: phera_bytecode::EnumBacking,
+        operation: crate::classes::enums::EnumMethod,
+    ) -> Option<Step> {
+        use phera_bytecode::EnumBacking;
+        use phera_value::ArrayKey;
+        let instructions = self.code.instructions(position.frame.function);
+        let send = *instructions.get(position.ip)?;
+        let Instruction::Call { dst, .. } = *instructions.get(position.ip + 1)? else {
+            return None;
+        };
+        let base = position.frame.base();
+        let (key, clear_src) = match send {
+            Instruction::SendValue { src, .. }
+            | Instruction::SendLocal { local: src }
+            | Instruction::SendTake { src, .. } => {
+                let take = matches!(send, Instruction::SendTake { .. });
+                let [Some(value)] = self.registers.window(base + src.index(), 1) else {
+                    return None;
+                };
+                if value.is_reference() {
+                    return None;
+                }
+                let key = match (backing, value) {
+                    (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(*number),
+                    (EnumBacking::String, Value::String(string)) => {
+                        ArrayKey::String(string.clone())
+                    }
+                    _ => return None,
+                };
+                (key, take.then_some(src))
+            }
+            Instruction::SendConst { constant } => {
+                let literal = self
+                    .code
+                    .cache(position.frame.function)
+                    .constants
+                    .get(constant.index())?;
+                let key = match (backing, literal) {
+                    (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(*number),
+                    (EnumBacking::String, Value::String(string)) => {
+                        ArrayKey::String(string.clone())
+                    }
+                    _ => return None,
+                };
+                (key, None)
+            }
+            _ => return None,
+        };
+        let result = match self.enum_cases.backed_case(class_index, &key) {
+            Some(case) => case,
+            None if matches!(operation, crate::classes::enums::EnumMethod::TryFrom) => Value::Null,
+            None => return None,
+        };
+        if self.registers.window(base + dst.index(), 1).is_empty() {
+            return None;
+        }
+        if let Some(src) = clear_src {
+            drop(self.registers.take_defined(base + src.index()));
+        }
+        let slots = self.registers.tail_mut(base);
+        match crate::fast::store::<GUARDED, _>(slots, dst, result) {
+            crate::fast::ScalarStep::Complete | crate::fast::ScalarStep::Released => {
+                Some(Step::Done(position.ip + 2))
+            }
+            crate::fast::ScalarStep::Fallback => None,
+        }
     }
 
     /// Record a PHP method call with `$this` in the window's first register.
