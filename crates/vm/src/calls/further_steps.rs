@@ -103,14 +103,12 @@ impl Machine<'_> {
             } => match self.quiet_variable(path, position) {
                 Some(found) => self.store_quiet::<GUARDED>(position, dst, found),
                 None => match self.fetch_property_quietly::<GUARDED>(position, dst, path) {
-                    Step::Slow => match self.fetch_local_element::<GUARDED>(
-                        position,
-                        dst,
-                        (path, mode),
-                    ) {
-                        Step::Slow => self.fetch_static::<GUARDED>(position, dst, (path, mode)),
-                        done => done,
-                    },
+                    Step::Slow => {
+                        match self.fetch_local_element::<GUARDED>(position, dst, (path, mode)) {
+                            Step::Slow => self.fetch_static::<GUARDED>(position, dst, (path, mode)),
+                            done => done,
+                        }
+                    }
                     done => done,
                 },
             },

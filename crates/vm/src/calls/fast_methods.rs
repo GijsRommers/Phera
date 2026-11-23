@@ -68,7 +68,7 @@ impl Machine<'_> {
                     return Step::Slow;
                 }
                 let receiver = Some(object.clone());
-                self.prepare_php_method(function, receiver, None, position.ip)
+                self.prepare_php_method(position, function, receiver, None)
             }
             // `Closure::__invoke` and the methods of a generator have their
             // own preparation in the VM.
@@ -681,7 +681,7 @@ impl Machine<'_> {
         if found.method.is_abstract {
             return Step::Slow;
         }
-        self.prepare_php_method(function, receiver, called, position.ip)
+        self.prepare_php_method(position, function, receiver, called)
     }
 
     /// `StaticCall` (`$class::$method(...)`): handles public static PHP methods
@@ -783,7 +783,7 @@ impl Machine<'_> {
                 .or_else(|| context.called().map(|called| called.index)),
             _ => Some(class_ref.index),
         };
-        self.prepare_php_method(callee, None, called, position.ip)
+        self.prepare_php_method(position, callee, None, called)
     }
 
     /// Execute `Enum::from($x)` / `Enum::tryFrom($x)` directly inside the loop
@@ -863,26 +863,58 @@ impl Machine<'_> {
         }
     }
 
-    /// Record a PHP method call with `$this` in the window's first register.
+    /// Record a PHP method call with `$this` in the window's first register,
+    /// or enter immediately when the next instruction is a 0-argument `Call`.
     /// Static calls supply `called` for late static binding.
     fn prepare_php_method(
         &mut self,
+        position: Position,
         function: FunctionIndex,
         receiver: Option<Rc<Object>>,
         called: Option<ClassIndex>,
-        ip: usize,
     ) -> Step {
         let this = receiver.map(Value::Object);
         let has_this = this.is_some();
+        let facts = self.code.facts(function);
+        if facts.shape == FunctionShape::Plain
+            && facts.required == 0
+            && self.stack.depth() < self.frame_limit
+            && let Some(Instruction::Call { dst, .. }) = self
+                .code
+                .instructions(position.frame.function)
+                .get(position.ip)
+        {
+            let destination = *dst;
+            let start = self.registers.len();
+            let first = start + CallKind::Method.prefix();
+            let window = (facts.registers.max(facts.parameters) as usize).max(1);
+            self.registers.grow_to(first + window);
+            if let Some(value) = this {
+                self.registers.put(start, value);
+            }
+            self.publish(position.ip + 1);
+            let mut frame = Frame::of_kind(function, CallKind::Method, first, Some(destination));
+            if facts.parameters > 0 {
+                frame = frame.with_passed(0);
+            }
+            self.stack.push(frame);
+            if !has_this && called.is_some() && called != facts.class {
+                self.stack.current_extras_mut().called = called;
+            }
+            if self.spend_work() {
+                return Step::Yield;
+            }
+            return Step::Switched(Position { frame, ip: 0 });
+        }
         let parts = (&mut *self.stack, &mut *self.registers);
         push_php_call(self.code, parts, function, CallKind::Method, [this]);
         if !has_this
             && let Some(call) = self.stack.last_call_mut()
-            && called != self.code.facts(function).class
+            && called != facts.class
         {
             call.called = called;
         }
-        Step::Done(ip)
+        Step::Done(position.ip)
     }
 
     /// The class scope of the running frame (`self::`), if it has one.

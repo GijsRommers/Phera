@@ -200,7 +200,8 @@ impl CodeTable {
         let count = 1 + unit.functions.len() as u32;
         let first = FunctionIndex(self.worker.number(unit, count, self.own_leases()));
         let mut facts = Vec::with_capacity(count as usize);
-        let (name_keys, prop_keys, symbol_keys, class_keys) = if let Some(metadata) = &unit.metadata {
+        let (name_keys, prop_keys, symbol_keys, class_keys) = if let Some(metadata) = &unit.metadata
+        {
             facts.extend(metadata.functions.iter().cloned().enumerate().map(
                 |(offset, signature)| {
                     let local = offset.checked_sub(1).map(|local| local as u32);

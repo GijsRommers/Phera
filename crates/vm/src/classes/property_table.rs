@@ -144,8 +144,7 @@ impl PropertyTable {
     pub(crate) fn build(class: &Class) -> Self {
         let facts = class.property_facts();
         let mut table_flags = 0u8;
-        if class.property_access.is_some()
-            || phera_value::ClassHandle::has_native_properties(class)
+        if class.property_access.is_some() || phera_value::ClassHandle::has_native_properties(class)
         {
             table_flags |= TABLE_HAS_NATIVE_PROPS;
         }
@@ -362,9 +361,7 @@ impl ConstantTable {
                 hashed: false,
             };
         }
-        let keys = phera_bytecode::name_keys::prop_keys(
-            class.constants.keys().map(String::as_str),
-        );
+        let keys = phera_bytecode::name_keys::prop_keys(class.constants.keys().map(String::as_str));
         if class.constants.len() <= 8 {
             let slots: Box<[Option<ConstantSlot>]> = class
                 .constants

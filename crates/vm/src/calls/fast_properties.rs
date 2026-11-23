@@ -47,7 +47,9 @@ impl Machine<'_> {
     pub(super) fn caller_scope_index(&self, position: Position) -> Option<ClassIndex> {
         match position.frame.kind() {
             CallKind::Function => None,
-            CallKind::Method | CallKind::Constructor => self.code.facts(position.frame.function).class,
+            CallKind::Method | CallKind::Constructor => {
+                self.code.facts(position.frame.function).class
+            }
             CallKind::Closure => self.running_scope().map(|scope| scope.index),
         }
     }
@@ -60,7 +62,10 @@ impl Machine<'_> {
         object: &'a Object,
         name: NameId,
         scope: Option<ClassIndex>,
-    ) -> Option<(&'a crate::classes::property_table::PropertyTable, PackedProp)> {
+    ) -> Option<(
+        &'a crate::classes::property_table::PropertyTable,
+        PackedProp,
+    )> {
         if self.classes.has_lazy_objects && object.lazy().is_some() {
             return None;
         }
@@ -197,7 +202,10 @@ impl Machine<'_> {
         }
         // General chain with at least one Property step (e.g. `$this->a->b[$k]`,
         // `$class->fieldMappings[$f]->enumType`, `$rows[$k]->prop`).
-        if !steps.iter().any(|step| matches!(step, PathStep::Property(_))) {
+        if !steps
+            .iter()
+            .any(|step| matches!(step, PathStep::Property(_)))
+        {
             return None;
         }
         let scope = self.caller_scope_index(position);
@@ -239,8 +247,7 @@ impl Machine<'_> {
                     if !rest.is_empty()
                         && rest.iter().all(|step| matches!(step, PathStep::Index(_)))
                     {
-                        return self
-                            .read_prop_indexed(position, object, name, rest, scope, quiet);
+                        return self.read_prop_indexed(position, object, name, rest, scope, quiet);
                     }
                     owned_current = self.read_prop_value(position, object, name, scope, quiet)?;
                     step_index += 1;
@@ -399,8 +406,7 @@ impl Machine<'_> {
             };
             self.write_declared_prop(position, path, object, *last_name, scope, &value)
         } else {
-            let Some(object) =
-                self.resolve_target_object(position, path_body.base, prefix, scope)
+            let Some(object) = self.resolve_target_object(position, path_body.base, prefix, scope)
             else {
                 return Step::Slow;
             };
@@ -543,8 +549,7 @@ impl Machine<'_> {
             };
             object
         } else {
-            let Some(object) =
-                self.resolve_target_object(position, path_body.base, prefix, scope)
+            let Some(object) = self.resolve_target_object(position, path_body.base, prefix, scope)
             else {
                 return Step::Slow;
             };
