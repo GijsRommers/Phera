@@ -254,7 +254,6 @@ impl Vm {
                     false
                 };
                 if !handled {
-                    self.prepare_element_site(&self.path(path)?)?;
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
             }

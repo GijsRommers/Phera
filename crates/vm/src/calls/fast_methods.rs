@@ -29,8 +29,8 @@ use crate::calls::native_signature::direct_site;
 use crate::calls::php_windows::push_php_call;
 use crate::calls::prepared_call::CallKind;
 use crate::calls::window_context::WindowContext;
-use crate::classes::method_table::FoundMethod;
-use crate::classes::{Class, ClassIndex, MethodBody};
+use crate::classes::method_table::{MethodExtra, MethodKind, PackedMethod};
+use crate::classes::{Class, ClassIndex, ClassTable, MethodBody};
 use crate::code_table::{FunctionIndex, FunctionShape, NameKey};
 use crate::unit_caches::{SiteOutcome, SiteRecord};
 
@@ -54,17 +54,22 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let key = self.code.unit_name_key(position.frame.function, name);
-        let Some(found) = self.classes.method_table(class).get(key) else {
+        let table = self.classes.method_table(class);
+        let Some(packed) = table.get(key) else {
             return Step::Slow;
         };
-        let method = found.method;
-        if method.is_abstract || method.is_static {
+        if packed.is_abstract() || packed.is_static() {
             return Step::Slow;
         }
-        match method.body {
-            MethodBody::User(function) => {
-                let scope = self.running_scope();
-                if !may_call(&found, scope) || self.shadowed_by_private(scope, key, method) {
+        match packed.kind() {
+            MethodKind::User => {
+                let Some(function) = packed.user_function() else {
+                    return Step::Slow;
+                };
+                let scope = self.caller_scope(position);
+                if !may_call(packed, scope, self.classes)
+                    || self.shadowed_by_private(scope, key, packed)
+                {
                     return Step::Slow;
                 }
                 let receiver = Some(object.clone());
@@ -72,23 +77,28 @@ impl Machine<'_> {
             }
             // `Closure::__invoke` and the methods of a generator have their
             // own preparation in the VM.
-            MethodBody::Native(_) if class.name == "Closure" || class.name == "Generator" => {
+            MethodKind::Native if class.name == "Closure" || class.name == "Generator" => {
                 Step::Slow
             }
-            // A getter with no parameters whose call comes next runs here.
-            MethodBody::Native(entry)
+            MethodKind::Native => {
+                let Some(extra) = table.extra(packed) else {
+                    return Step::Slow;
+                };
+                let MethodBody::Native(entry) = extra.method.body else {
+                    return Step::Slow;
+                };
+                // A getter with no parameters whose call comes next runs here.
                 if entry.direct.is_some()
                     && entry.params.is_empty()
                     && let Some((destination, value)) =
-                        self.run_direct_getter(position, object, (&found, key)) =>
-            {
-                self.registers
-                    .put(position.frame.base() + destination.index(), value);
-                Step::Done(position.ip + 1)
-            }
-            MethodBody::Native(entry) => {
+                        self.run_direct_getter(position, object, (packed, extra, key))
+                {
+                    self.registers
+                        .put(position.frame.base() + destination.index(), value);
+                    return Step::Done(position.ip + 1);
+                }
                 let Some((context, method)) =
-                    self.native_class_method((object, class), &found, key)
+                    self.native_class_method((object, class), (packed, extra), key)
                 else {
                     return Step::Slow;
                 };
@@ -236,17 +246,22 @@ impl Machine<'_> {
         let key = self
             .code
             .unit_name_key(position.frame.function, site.method);
-        let Some(found) = self.classes.method_table(class).get(key) else {
+        let table = self.classes.method_table(class);
+        let Some(packed) = table.get(key) else {
             return SiteOutcome::Vm;
         };
-        let method = found.method;
-        if method.is_abstract || method.is_static {
+        if packed.is_abstract() || packed.is_static() {
             return SiteOutcome::Vm;
         }
-        match method.body {
-            MethodBody::User(function) => {
+        match packed.kind() {
+            MethodKind::User => {
+                let Some(function) = packed.user_function() else {
+                    return SiteOutcome::Vm;
+                };
                 let scope = self.caller_scope(position);
-                if may_call(&found, scope) && !self.shadowed_by_private(scope, key, method) {
+                if may_call(packed, scope, self.classes)
+                    && !self.shadowed_by_private(scope, key, packed)
+                {
                     SiteOutcome::Enter(function)
                 } else {
                     SiteOutcome::Vm
@@ -254,28 +269,34 @@ impl Machine<'_> {
             }
             // `Closure::__invoke` and the methods of a generator have their
             // own preparation in the VM.
-            MethodBody::Native(_) if class.name == "Closure" || class.name == "Generator" => {
+            MethodKind::Native if class.name == "Closure" || class.name == "Generator" => {
                 SiteOutcome::Vm
             }
-            // A getter, as `run_direct_getter` takes it for `InitMethodCall`.
-            MethodBody::Native(entry)
+            MethodKind::Native => {
+                let Some(extra) = table.extra(packed) else {
+                    return SiteOutcome::Vm;
+                };
+                let MethodBody::Native(entry) = extra.method.body else {
+                    return SiteOutcome::Vm;
+                };
+                // A getter, as `run_direct_getter` takes it for `InitMethodCall`.
                 if site.arguments == 0
                     && entry.params.is_empty()
-                    && method.visibility == Visibility::Public
-                    && !self.shadowed_by_private(self.caller_scope(position), key, method)
-                    && let Some(getter) = entry.direct =>
-            {
-                SiteOutcome::Getter(getter)
+                    && packed.visibility() == Visibility::Public
+                    && !self.shadowed_by_private(self.caller_scope(position), key, packed)
+                    && let Some(getter) = entry.direct
+                {
+                    return SiteOutcome::Getter(getter);
+                }
+                // A direct handler with arguments, as `call_site_direct` runs it.
+                if packed.visibility() == Visibility::Public
+                    && !self.shadowed_by_private(self.caller_scope(position), key, packed)
+                    && let Some((handler, masks)) = direct_site(entry, site.arguments as usize)
+                {
+                    return SiteOutcome::Direct(handler, masks);
+                }
+                SiteOutcome::Native
             }
-            // A direct handler with arguments, as `call_site_direct` runs it.
-            MethodBody::Native(entry)
-                if method.visibility == Visibility::Public
-                    && !self.shadowed_by_private(self.caller_scope(position), key, method)
-                    && let Some((handler, masks)) = direct_site(entry, site.arguments as usize) =>
-            {
-                SiteOutcome::Direct(handler, masks)
-            }
-            MethodBody::Native(_) => SiteOutcome::Native,
             _ => SiteOutcome::Vm,
         }
     }
@@ -300,11 +321,15 @@ impl Machine<'_> {
         let key = self
             .code
             .unit_name_key(position.frame.function, site.method);
-        let Some(found) = self.classes.method_table(class).get(key) else {
+        let table = self.classes.method_table(class);
+        let Some(packed) = table.get(key) else {
+            return Step::Done(position.ip);
+        };
+        let Some(extra) = table.extra(packed) else {
             return Step::Done(position.ip);
         };
         // Owned, so that the preparation may change the machine.
-        let found = (found.method.clone(), found.scope.clone());
+        let found = (packed, extra.clone());
         let sends = Position {
             frame: position.frame,
             ip: position.ip + 1,
@@ -461,13 +486,9 @@ impl Machine<'_> {
         &mut self,
         sends: Position,
         object: &Rc<Object>,
-        (class, key, (method, scope)): (&Class, NameKey, FoundParts),
+        (class, key, (packed, extra)): (&Class, NameKey, FoundParts),
     ) -> Step {
-        let found = FoundMethod {
-            method: &method,
-            scope: &scope,
-        };
-        self.prepare_found_native(sends, object, (class, key), &found)
+        self.prepare_found_native(sends, object, (class, key), (packed, &extra))
     }
 
     /// `InitMethodCall` of a native method, as [`Machine::prepare_method`]
@@ -479,14 +500,13 @@ impl Machine<'_> {
         position: Position,
         object: &Rc<Object>,
         (class, key): (&Class, NameKey),
-        found: &FoundMethod<'_>,
+        (packed, extra): (PackedMethod, &MethodExtra),
     ) -> Step {
-        let method = found.method;
-        let MethodBody::Native(entry) = method.body else {
+        let MethodBody::Native(entry) = extra.method.body else {
             return Step::Slow;
         };
-        if method.is_abstract
-            || method.is_static
+        if packed.is_abstract()
+            || packed.is_static()
             || class.name == "Closure"
             || class.name == "Generator"
         {
@@ -495,13 +515,15 @@ impl Machine<'_> {
         if entry.direct.is_some()
             && entry.params.is_empty()
             && let Some((destination, value)) =
-                self.run_direct_getter(position, object, (found, key))
+                self.run_direct_getter(position, object, (packed, extra, key))
         {
             self.registers
                 .put(position.frame.base() + destination.index(), value);
             return Step::Done(position.ip + 1);
         }
-        let Some((context, method)) = self.native_class_method((object, class), found, key) else {
+        let Some((context, method)) =
+            self.native_class_method((object, class), (packed, extra), key)
+        else {
             return Step::Slow;
         };
         match entry.direct {
@@ -538,10 +560,9 @@ impl Machine<'_> {
         &self,
         position: Position,
         object: &Rc<Object>,
-        (found, key): (&FoundMethod<'_>, NameKey),
+        (packed, extra, key): (PackedMethod, &MethodExtra, NameKey),
     ) -> Option<(Reg, Value)> {
-        let method = found.method;
-        let MethodBody::Native(entry) = method.body else {
+        let MethodBody::Native(entry) = extra.method.body else {
             return None;
         };
         let direct = entry.direct?;
@@ -553,9 +574,9 @@ impl Machine<'_> {
             return None;
         };
         let destination = *dst;
-        if method.visibility != Visibility::Public
+        if packed.visibility() != Visibility::Public
             || (self.classes.has_lazy_objects && object.lazy().is_some())
-            || self.shadowed_by_private(self.running_scope(), key, method)
+            || self.shadowed_by_private(self.caller_scope(position), key, packed)
         {
             return None;
         }
@@ -572,25 +593,24 @@ impl Machine<'_> {
     fn native_class_method(
         &self,
         (object, class): (&Rc<Object>, &Class),
-        found: &FoundMethod<'_>,
+        (packed, extra): (PackedMethod, &MethodExtra),
         key: NameKey,
     ) -> Option<(crate::classes::MethodContext, Rc<crate::classes::Method>)> {
-        let method = found.method;
-        if method.visibility != Visibility::Public
+        if packed.visibility() != Visibility::Public
             || class.name == "Closure"
             || class.name == "Generator"
             || (self.classes.has_lazy_objects && object.lazy().is_some())
-            || self.shadowed_by_private(self.running_scope(), key, method)
+            || self.shadowed_by_private(self.running_scope(), key, packed)
         {
             return None;
         }
         let context = crate::classes::MethodContext {
             receiver: Some(object.clone()),
-            scope: found.scope.upgrade()?,
+            scope: extra.scope.upgrade()?,
             called: class.identity.upgrade()?,
             invocation: crate::classes::Invocation::Method,
         };
-        Some((context, method.clone()))
+        Some((context, extra.method.clone()))
     }
 
     /// `InitStaticCall` of `self::`, `parent::`, `static::` or a named class,
@@ -603,44 +623,48 @@ impl Machine<'_> {
         symbols: (SymbolId, SymbolId),
         binding: ClassBinding,
     ) -> Step {
+        use phera_bytecode::name_keys::{key_parent, key_self, key_static};
+
         let (class_symbol, method_symbol) = symbols;
         let function = position.frame.function;
-        let context = self.current_context();
-        let scope = context.as_ref().and_then(|context| context.scope());
         let class_key = self.code.unit_symbol_key(function, class_symbol);
         let owned_called: Option<Rc<Class>>;
-        let (class_ref, relative): (&Class, bool) = if let Some(named) =
-            self.classes.by_key(class_key)
-        {
-            (named.as_ref(), false)
-        } else {
-            let Some(symbol) = self.code.unit(function).symbols.get(class_symbol.index()) else {
+        let scope = self.caller_scope(position);
+        let (class_ref, relative): (&Class, bool) = if class_key == key_self() {
+            match scope {
+                Some(scope) => (scope.as_ref(), true),
+                None => return Step::Slow,
+            }
+        } else if class_key == key_static() {
+            let Some(context) = self.current_context() else {
                 return Step::Slow;
             };
-            match (symbol.written.as_str(), scope) {
-                ("self", Some(scope)) => (scope.as_ref(), true),
-                ("static", Some(_)) => {
-                    owned_called = context.as_ref().and_then(|context| context.called());
-                    let Some(called) = owned_called.as_deref() else {
-                        return Step::Slow;
-                    };
-                    (called, true)
-                }
-                ("parent", Some(scope)) => match &scope.parent {
-                    Some(parent) => (parent.as_ref(), true),
-                    None => return Step::Slow,
-                },
-                _ => return Step::Slow,
+            owned_called = context.called();
+            let Some(called) = owned_called.as_deref() else {
+                return Step::Slow;
+            };
+            (called, true)
+        } else if class_key == key_parent() {
+            match scope.and_then(|scope| scope.parent.as_ref()) {
+                Some(parent) => (parent.as_ref(), true),
+                None => return Step::Slow,
             }
-        };
-        let key = self.code.unit_symbol_key(function, method_symbol);
-        let Some(found) = self.classes.method_table(class_ref).get(key) else {
+        } else if let Some(named) = self.classes.by_key(class_key) {
+            (named.as_ref(), false)
+        } else {
             return Step::Slow;
         };
-        if let MethodBody::Enum(
-            operation @ (crate::classes::enums::EnumMethod::From
-            | crate::classes::enums::EnumMethod::TryFrom),
-        ) = found.method.body
+        let key = self.code.unit_symbol_key(function, method_symbol);
+        let table = self.classes.method_table(class_ref);
+        let Some(packed) = table.get(key) else {
+            return Step::Slow;
+        };
+        if packed.kind() == MethodKind::Enum
+            && let Some(extra) = table.extra(packed)
+            && let MethodBody::Enum(
+                operation @ (crate::classes::enums::EnumMethod::From
+                | crate::classes::enums::EnumMethod::TryFrom),
+            ) = extra.method.body
         {
             let ready = class_ref
                 .enum_info
@@ -655,33 +679,39 @@ impl Machine<'_> {
                 None => Step::Slow,
             };
         }
-        let receiver = match (found.method.is_static, relative) {
+        let Some(target_function) = packed.user_function() else {
+            return Step::Slow;
+        };
+        if packed.is_abstract() {
+            return Step::Slow;
+        }
+        let receiver = match (packed.is_static(), relative) {
             (true, _) => None,
-            (false, true) => context.as_ref().and_then(|context| context.this()).cloned(),
+            (false, true) => self
+                .current_context()
+                .and_then(|context| context.this())
+                .cloned(),
             (false, false) => return Step::Slow,
         };
-        if !may_call(&found, scope)
-            || (!found.method.is_static && receiver.is_none())
-            || self.shadowed_by_private(scope, key, found.method)
+        if !may_call(packed, scope, self.classes)
+            || (!packed.is_static() && receiver.is_none())
+            || self.shadowed_by_private(scope, key, packed)
         {
             return Step::Slow;
         }
         // A call with `$this` takes its called class from `$this`; only a
         // static call needs it worked out here.
-        let called = match (receiver.is_some(), binding, context) {
-            (true, _, _) => None,
-            (false, ClassBinding::Forward, Some(context)) => context
-                .called_index()
-                .or_else(|| context.called().map(|called| called.index)),
-            (false, _, _) => Some(class_ref.index),
+        let called = match (receiver.is_some(), binding) {
+            (true, _) => None,
+            (false, ClassBinding::Forward) => match self.current_context() {
+                Some(context) => context
+                    .called_index()
+                    .or_else(|| context.called().map(|called| called.index)),
+                None => Some(class_ref.index),
+            },
+            (false, _) => Some(class_ref.index),
         };
-        let MethodBody::User(function) = found.method.body else {
-            return Step::Slow;
-        };
-        if found.method.is_abstract {
-            return Step::Slow;
-        }
-        self.prepare_php_method(position, function, receiver, called)
+        self.prepare_php_method(position, target_function, receiver, called)
     }
 
     /// `StaticCall` (`$class::$method(...)`): handles public static PHP methods
@@ -941,17 +971,18 @@ impl Machine<'_> {
 
     /// Whether the class scope has a different, private method of this
     /// name, which a call from inside that class reaches instead.
+    #[inline(always)]
     fn shadowed_by_private(
         &self,
         scope: Option<&Rc<Class>>,
         key: NameKey,
-        method: &Rc<crate::classes::Method>,
+        packed: PackedMethod,
     ) -> bool {
         scope.is_some_and(|scope| {
             self.classes
                 .method_table(scope)
                 .private(key)
-                .is_some_and(|found| !Rc::ptr_eq(found.method, method))
+                .is_some_and(|private_method| private_method.declaring != packed.declaring)
         })
     }
 }
@@ -962,25 +993,26 @@ impl Machine<'_> {
 /// declaring class, one of its parents or one of its descendants. PHP
 /// allows a protected call in a few more cases (through the method's
 /// prototype); those take the general path, which applies every rule.
-fn may_call(found: &FoundMethod<'_>, scope: Option<&Rc<Class>>) -> bool {
-    match found.method.visibility {
+#[inline(always)]
+fn may_call(packed: PackedMethod, scope: Option<&Rc<Class>>, classes: &ClassTable) -> bool {
+    match packed.visibility() {
         Visibility::Public => true,
         Visibility::Private => {
-            let scope = scope.map(|scope| scope.index);
-            found
-                .scope
-                .upgrade()
-                .is_some_and(|declaring| Some(declaring.index) == scope)
+            packed.declaring.is_valid()
+                && scope.is_some_and(|scope| scope.index == packed.declaring)
         }
-        Visibility::Protected => scope.is_some_and(|scope| {
-            found.scope.upgrade().is_some_and(|declaring| {
-                descends_from(scope, &declaring) || descends_from(&declaring, scope)
-            })
-        }),
+        Visibility::Protected => {
+            packed.declaring.is_valid()
+                && scope.is_some_and(|scope| {
+                    let declaring = classes.class(packed.declaring);
+                    descends_from(scope, declaring) || descends_from(declaring, scope)
+                })
+        }
     }
 }
 
 /// Whether `class` is `ancestor` or extends it, following parent classes.
+#[inline]
 fn descends_from(class: &Rc<Class>, ancestor: &Class) -> bool {
     let mut current = Some(class);
     while let Some(candidate) = current {
@@ -992,5 +1024,5 @@ fn descends_from(class: &Rc<Class>, ancestor: &Class) -> bool {
     false
 }
 
-/// A found method held by value: the method and the class that declares it.
-type FoundParts = (Rc<crate::classes::Method>, std::rc::Weak<Class>);
+/// A found non-PHP method held by value: its packed descriptor and side metadata.
+type FoundParts = (PackedMethod, MethodExtra);

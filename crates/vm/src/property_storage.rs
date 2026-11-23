@@ -122,17 +122,6 @@ impl<'a> Known<'a> {
             None => properties.get_mut(self.key),
         }
     }
-
-    fn set(self, properties: &mut phera_value::Properties, value: Value) {
-        match self.slot_in(properties) {
-            Some(slot) => {
-                properties.set_slot(slot, value);
-            }
-            None => {
-                properties.insert(self.key.clone(), value);
-            }
-        }
-    }
 }
 
 /// [`read_at`] for a site.
@@ -169,51 +158,6 @@ pub(crate) fn increment_known(
                     new
                 },
             ))
-        })
-        .flatten()
-}
-
-/// [`write_direct_at`] for a site.
-pub(crate) fn write_direct_known(
-    object: &Object,
-    property: Known<'_>,
-    value: &Value,
-    may_initialize: impl FnOnce() -> bool,
-) -> bool {
-    object
-        .update(|properties| match property.get_mut(properties) {
-            Some(Value::Reference(_)) => false,
-            Some(destination) => {
-                *destination = value.clone();
-                true
-            }
-            None if may_initialize() => {
-                property.set(properties, value.clone());
-                true
-            }
-            None => false,
-        })
-        .unwrap_or(false)
-}
-
-/// A plain write of an element of the array a property holds, for a
-/// site (see `crate::element_writes`): what the element held, or `None`
-/// with nothing changed when the property is not such an array.
-pub(crate) fn write_element_known(
-    object: &Object,
-    property: Known<'_>,
-    (keys, place): (&[ArrayKey], crate::element_writes::Target),
-    value: Value,
-) -> Option<Option<Value>> {
-    object
-        .update(|properties| {
-            let Some(Value::Array(array)) = property.get_mut(properties) else {
-                return None;
-            };
-            if !crate::element_writes::writable(array, keys, place) {
-                return None;
-            }
-            crate::element_writes::write(array, keys, place, value)
         })
         .flatten()
 }
