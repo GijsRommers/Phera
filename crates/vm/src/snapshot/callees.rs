@@ -54,6 +54,19 @@ impl ForkCopy for CallTarget {
     }
 }
 
+impl Callee {
+    /// This callee as a request forked from a snapshot may use it, if it
+    /// may: one that holds no object (a function or an intrinsic).
+    pub(crate) fn shared(&self) -> Option<Self> {
+        match self.target {
+            CallTarget::User(_) | CallTarget::Native(_) | CallTarget::Intrinsic(_) => {
+                Some(self.clone())
+            }
+            CallTarget::Method { .. } | CallTarget::Closure(_) | CallTarget::Magic(_) => None,
+        }
+    }
+}
+
 impl ForkCopy for Callee {
     fn fork_copy(&self, fork: &mut Fork<'_>) -> Self {
         Callee {

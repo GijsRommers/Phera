@@ -31,11 +31,14 @@ pub(crate) enum LinkedFunction {
     NamespaceFallback,
 }
 
-impl crate::snapshot::ForkCopy for LinkedFunction {
-    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+impl LinkedFunction {
+    /// This link as a request forked from a snapshot may use it, if it may:
+    /// a function by number or a native one, which hold no object of the
+    /// VM they were made in.
+    pub(crate) fn shared(&self) -> Option<Self> {
         match self {
-            LinkedFunction::Other(callee) => LinkedFunction::Other(callee.fork_copy(fork)),
-            LinkedFunction::Php(_) | LinkedFunction::NamespaceFallback => self.clone(),
+            LinkedFunction::Other(callee) => callee.shared().map(LinkedFunction::Other),
+            LinkedFunction::Php(_) | LinkedFunction::NamespaceFallback => Some(self.clone()),
         }
     }
 }
@@ -62,13 +65,15 @@ impl Vm {
         symbol: SymbolId,
     ) -> Result<LinkedFunction, NativeError> {
         let linked = self.current().and_then(|frame| {
-            frame
-                .cache()
+            let cache = frame.cache();
+            let own = cache
                 .symbols
                 .borrow()
                 .get(symbol.index())
                 .cloned()
-                .flatten()
+                .flatten();
+            // What the snapshot linked, copied once into this request's cache.
+            own.or_else(|| cache.base_symbol(symbol.index()))
         });
         match linked {
             Some(linked) => Ok(linked),
@@ -85,10 +90,8 @@ impl Vm {
         } else {
             self.resolve_function_symbol(&definition)?
         };
-        if let Some(frame) = self.current()
-            && let Some(slot) = frame.cache().symbols.borrow_mut().get_mut(symbol.index())
-        {
-            *slot = Some(linked.clone());
+        if let Some(frame) = self.current() {
+            frame.cache().set_symbol(symbol.index(), linked.clone());
         }
         Ok(linked)
     }
@@ -109,8 +112,8 @@ impl Vm {
             .current()
             .ok_or_else(|| internal_error!("namespace call frame"))?;
         let site = frame
-            .cache()
-            .site(frame.code.facts(frame.frame.function), frame.ip())
+            .code
+            .site(frame.frame.function, frame.ip())
             .ok_or_else(|| internal_error!("namespace call site"))?;
         if let CachedSite::Function(callee) = &*site.borrow() {
             return Ok((**callee).clone());

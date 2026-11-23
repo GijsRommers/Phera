@@ -389,6 +389,16 @@ impl Vm {
         object: &phera_value::Object,
         name: &str,
     ) -> Result<ArrayKey, NativeError> {
+        self.resolve_property_key(object, name).map(|(key, _)| key)
+    }
+
+    /// The declaration position is a slot hint. Object storage validates the
+    /// key there because redeclarations can share a storage slot.
+    pub(crate) fn resolve_property_key(
+        &self,
+        object: &phera_value::Object,
+        name: &str,
+    ) -> Result<(ArrayKey, Option<usize>), NativeError> {
         if name.starts_with('\0') {
             return Err(NativeError::error(
                 "Cannot access property starting with \"\\0\"",
@@ -400,35 +410,21 @@ impl Vm {
             .downcast_ref::<crate::classes::Class>()
             .ok_or_else(|| internal_error!("property class"))?;
         let scope = self.current().and_then(|frame| frame.scope());
-        let property = scope
-            .and_then(|scope| {
-                class.defaults.iter().find(|property| {
-                    property.name == name
-                        && property.visibility == Visibility::Private
-                        && property.declaring == scope.name
-                })
-            })
-            .or_else(|| {
-                class
-                    .defaults
-                    .iter()
-                    .rev()
-                    .find(|property| property.name == name)
-            })
-            .or_else(|| {
-                class
-                    .static_properties
-                    .iter()
-                    .rev()
-                    .find(|property| property.name == name)
-            });
+        let instance = class.instance_property_named(name, scope.map(|scope| scope.name.as_str()));
+        let property = instance.map(|i| &class.defaults[i]).or_else(|| {
+            class
+                .static_properties
+                .iter()
+                .rev()
+                .find(|property| property.name == name)
+        });
         let property = property.filter(|property| {
             property.visibility != Visibility::Private
                 || property.declaring == class.name
                 || scope.is_some_and(|scope| scope.name == property.declaring)
         });
         let Some(property) = property else {
-            return Ok(ArrayKey::str(name));
+            return Ok((ArrayKey::str(name), None));
         };
         let allowed = match property.visibility {
             Visibility::Public => true,
@@ -456,14 +452,10 @@ impl Vm {
                 property.declaring
             )));
         }
-        if class
-            .defaults
-            .iter()
-            .any(|candidate| std::ptr::eq(candidate, property))
-        {
-            Ok(property.key.clone())
+        if instance.is_some() {
+            Ok((property.key.clone(), instance))
         } else {
-            Ok(ArrayKey::str(name))
+            Ok((ArrayKey::str(name), None))
         }
     }
 }

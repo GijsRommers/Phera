@@ -57,6 +57,7 @@ pub(crate) struct Class {
     pub(crate) constructor: Option<Rc<Method>>,
     /// Root-first property keys reproduce the layout used by native testing helpers.
     pub(crate) defaults: Vec<PropertyDefault>,
+    pub(crate) property_names: super::property_names::PropertyNames,
     /// Literal defaults are materialized once at linking; objects clone this
     /// (one box of slots).
     pub(crate) property_template: Option<phera_value::Properties>,

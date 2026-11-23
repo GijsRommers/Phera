@@ -837,3 +837,203 @@ async fn forty_shared_enums_keep_their_cases_per_request() {
         "same id serial const Off 3 off7 order countable declared"
     );
 }
+
+/// A fork shares the snapshot's code table and the cells the boot filled,
+/// and copies a table only when its request changes it. Each request below
+/// changes one of them (declares a class of its own under a name another
+/// request uses differently, loads a file, composes a trait method, links a
+/// function symbol the boot left unlinked, writes a static property that a
+/// site of the boot read, fills a property site and a
+/// method site with a class the boot never saw); every
+/// other request, at the same time or after it, and the snapshot see none
+/// of it.
+#[tokio::test(flavor = "current_thread")]
+async fn a_forks_code_table_and_caches_are_its_own_when_it_changes_them() {
+    let site = Site::new("code-sharing");
+    std::fs::create_dir_all(site.root.join("late")).expect("late directory");
+    std::fs::write(
+        site.root.join("late/LoadedA.php"),
+        "<?php class LoadedA extends Base { use Greets; } function loaded_a(): int { return 1; }",
+    )
+    .expect("LoadedA.php");
+    std::fs::write(
+        site.root.join("late/LoadedB.php"),
+        "<?php class LoadedB extends Base { use Greets; } function loaded_b(): int { return 2; }",
+    )
+    .expect("LoadedB.php");
+    let script = site.root.join("index.php");
+    std::fs::write(
+        &script,
+        r#"<?php
+        trait Greets { public function hi(): string { return 'hi ' . $this->name(); } }
+        class Base { public function name(): string { return 'base'; } }
+        class Boot extends Base { use Greets; public static int $count = 0; public int $n = 1; public function name(): string { return 'boot'; } }
+        function call_name(Base $o): string { return $o->name(); }
+        function read_n(object $o): int { return $o->n; }
+        function read_static(): int { return Boot::$count; }
+        function slow(): void { usleep(3000); }
+        function doubled(): int { return array_sum(array_map(fn(int $x) => $x * 2, [1, 2])) + strlen('ab'); }
+        function bound_n(object $o): int { return (fn() => $this->n)->call($o); }
+        function via_symbol(): string {
+            return (function_exists('loaded_a') ? loaded_a() : 0) . '/' . (function_exists('loaded_b') ? loaded_b() : 0);
+        }
+        via_symbol();
+        call_name(new Boot); read_n(new Boot); (new Boot)->hi(); doubled(); bound_n(new Boot); read_static();
+        Phera\snapshot();
+        $mode = $_GET['mode'] ?? 'plain';
+        $out = [];
+        if ($mode === 'a' || $mode === 'b') {
+            Boot::$count = $mode === 'a' ? 5 : 7;
+            if ($mode === 'a') {
+                class Other extends Base { public int $n = 10; public function name(): string { return 'other-a'; } }
+            } else {
+                class Other extends Base { public int $n = 20; public function name(): string { return 'other-b'; } }
+            }
+            slow();
+            $out[] = call_name(new Other);
+            $out[] = read_n(new Other) + bound_n(new Other);
+            $loaded = $mode === 'a' ? 'LoadedA' : 'LoadedB';
+            include __DIR__ . '/late/' . $loaded . '.php';
+            slow();
+            $out[] = (new $loaded)->hi();
+        }
+        slow();
+        $out[] = call_name(new Boot);
+        $out[] = read_n(new Boot) + bound_n(new Boot) + doubled();
+        $out[] = (new Boot)->hi();
+        $out[] = via_symbol();
+        $out[] = read_static();
+        $out[] = (class_exists('Other', false) ? 'O' : 'o')
+            . (function_exists('loaded_a') ? 'A' : 'a')
+            . (function_exists('loaded_b') ? 'B' : 'b');
+        echo implode(',', $out);
+        "#,
+    )
+    .expect("index.php");
+    let expected = |mode: &str| match mode {
+        "a" => "other-a,20,hi base,boot,10,hi boot,1/0,5,OAb",
+        "b" => "other-b,40,hi base,boot,10,hi boot,0/2,7,OaB",
+        _ => "boot,10,hi boot,0/0,0,oab",
+    };
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let worker = Runtime::new().web_worker(0);
+            assert!(matches!(
+                worker.boot(&script, &site.root).await,
+                BootReport::Snapshot { .. }
+            ));
+            let ask = |worker: WebWorker, mode: &'static str| {
+                let (root, script) = (site.root.clone(), script.clone());
+                async move {
+                    let target = format!("/index.php?mode={mode}");
+                    let response = worker
+                        .handle_request(&script, &root, request(&target))
+                        .await;
+                    (mode, String::from_utf8_lossy(&response.body).into_owned())
+                }
+            };
+            // One after the other.
+            for mode in ["plain", "a", "plain", "b", "a", "plain"] {
+                let (mode, answer) = ask(worker.clone(), mode).await;
+                assert_eq!(answer, expected(mode), "mode {mode}, one at a time");
+            }
+            // At the same time: each request sleeps between its changes.
+            let tasks: Vec<_> = ["a", "plain", "b", "plain", "a", "b", "plain"]
+                .into_iter()
+                .map(|mode| tokio::task::spawn_local(ask(worker.clone(), mode)))
+                .collect();
+            for task in tasks {
+                let (mode, answer) = task.await.expect("request task");
+                assert_eq!(answer, expected(mode), "mode {mode}, at the same time");
+            }
+            // And a fork taken after all of that still starts from the boot.
+            let (_, answer) = ask(worker.clone(), "plain").await;
+            assert_eq!(answer, expected("plain"));
+        })
+        .await;
+}
+
+/// A worker boots again (a changed file, or the warm-up boot after its
+/// requests settle) while forks of the old snapshot are alive. The old
+/// snapshot is dropped when the new one replaces it; its forks keep what
+/// they share with it (the code table, the cells the boot filled, the
+/// function numbers it leased) and run to the end, whatever the new
+/// snapshot's forks load and declare before, between and after.
+#[tokio::test(flavor = "current_thread")]
+async fn forks_of_a_replaced_snapshot_run_on_after_the_new_one_loads_and_declares() {
+    let site = Site::new("replaced");
+    std::fs::create_dir_all(site.root.join("late")).expect("late directory");
+    std::fs::write(
+        site.root.join("late/LoadedA.php"),
+        "<?php class LoadedA extends Base { use Greets; } function loaded_a(): int { return 1; }",
+    )
+    .expect("LoadedA.php");
+    let script = site.root.join("index.php");
+    std::fs::write(
+        &script,
+        r#"<?php
+        trait Greets { public function hi(): string { return 'hi ' . $this->name(); } }
+        class Base { public function name(): string { return 'base'; } }
+        class Boot extends Base { use Greets; public int $n = 1; public function name(): string { return 'boot'; } }
+        function call_name(Base $o): string { return $o->name(); }
+        function read_n(object $o): int { return $o->n; }
+        function via_symbol(): string { return function_exists('loaded_a') ? (string) loaded_a() : '0'; }
+        call_name(new Boot); read_n(new Boot); (new Boot)->hi(); via_symbol();
+        Phera\snapshot();
+        echo via_symbol(), ',', call_name(new Boot), ',', read_n(new Boot), ',';
+        include __DIR__ . '/late/LoadedA.php';
+        echo via_symbol(), ',', (new LoadedA)->hi(), ',', call_name(new LoadedA), ',', read_n(new Boot);
+        "#,
+    )
+    .expect("index.php");
+    let expected = "0,boot,1,1,hi base,base,1";
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let worker = Runtime::new().web_worker(0);
+            let boot = |worker: WebWorker| {
+                let (script, root) = (script.clone(), site.root.clone());
+                async move {
+                    assert!(matches!(
+                        worker.boot(&script, &root).await,
+                        BootReport::Snapshot { .. }
+                    ));
+                }
+            };
+            let run = |mut vm: phera_vm::Vm| async move {
+                vm.resume().await;
+                String::from_utf8_lossy(&vm.output).into_owned()
+            };
+            boot(worker.clone()).await;
+            let old = worker
+                .fork_snapshot(&script)
+                .expect("a snapshot")
+                .expect("a fork");
+            let old_unrun = worker
+                .fork_snapshot(&script)
+                .expect("a snapshot")
+                .expect("a fork");
+            // The new boot replaces the snapshot; the old one is dropped.
+            boot(worker.clone()).await;
+            let new = worker
+                .fork_snapshot(&script)
+                .expect("a snapshot")
+                .expect("a fork");
+            assert_eq!(run(new).await, expected, "a fork of the new snapshot");
+            assert_eq!(run(old).await, expected, "a fork of the old snapshot");
+            // A third boot, with the old forks still alive, and a fork of each.
+            boot(worker.clone()).await;
+            let newer = worker
+                .fork_snapshot(&script)
+                .expect("a snapshot")
+                .expect("a fork");
+            assert_eq!(
+                run(old_unrun).await,
+                expected,
+                "an old fork never run before"
+            );
+            assert_eq!(run(newer).await, expected, "a fork of the newest snapshot");
+        })
+        .await;
+}

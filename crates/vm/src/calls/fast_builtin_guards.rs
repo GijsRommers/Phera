@@ -22,8 +22,7 @@ impl Machine<'_> {
         // which is where the loop stands now.
         let builtin = self
             .code
-            .cache(function)
-            .site(self.code.facts(function), position.ip)
+            .site(function, position.ip)
             .and_then(|site| site.try_borrow().ok())
             .is_some_and(|site| matches!(*site, CachedSite::BuiltinGuard(Resolution::Builtin)));
         if builtin {
