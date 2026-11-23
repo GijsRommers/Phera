@@ -198,6 +198,25 @@ impl Machine<'_> {
             let scope = self.caller_scope_index(position);
             return self.read_prop_indexed(position, object, *name, rest, scope, quiet);
         }
+        // `[Index, Property]` directly on an array register (e.g. `$items[$left]->key`):
+        // borrow `&Object` straight out of the array with zero `Rc::clone` / `Rc::drop`.
+        if let [PathStep::Index(index_reg), PathStep::Property(name)] = steps
+            && let PathBase::Register(root) = path_body.base
+        {
+            let key = self.array_key_ref(position, *index_reg)?;
+            let base_slot = position.frame.base() + root.index();
+            let object = match self.registers.window(base_slot, 1) {
+                [Some(Value::Array(array))] => match key.get(array) {
+                    Some(Value::Object(object)) => object,
+                    Some(Value::Null) | None if quiet => return Some(Value::Null),
+                    _ => return None,
+                },
+                [Some(Value::Null)] if quiet => return Some(Value::Null),
+                _ => return None,
+            };
+            let scope = self.caller_scope_index(position);
+            return self.read_prop_value(position, object, *name, scope, quiet);
+        }
         // General chain with at least one Property step (e.g. `$this->a->b[$k]`,
         // `$class->fieldMappings[$f]->enumType`, `$rows[$k]->prop`).
         if !steps

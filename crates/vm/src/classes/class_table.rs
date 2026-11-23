@@ -1,7 +1,6 @@
 //! Request class lookup, leased object ids, and weak cycle-cleanup records.
 
 use std::{
-    cell::OnceCell,
     collections::HashMap,
     rc::{Rc, Weak},
 };
@@ -12,16 +11,21 @@ use super::Class;
 use super::method_table::MethodTable;
 use super::operations::ClassOperations;
 
-type NativeMethodTables = Box<[OnceCell<MethodTable>]>;
-
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct ClassIndex(u32);
 
 impl ClassIndex {
+    pub(crate) const INVALID: Self = Self(u32::MAX);
+
     pub(crate) fn number(self) -> u32 {
         self.0
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_valid(self) -> bool {
+        self.0 != u32::MAX
     }
 }
 
@@ -131,7 +135,6 @@ pub(crate) struct ClassTable {
     pub(crate) has_property_views: bool,
     pub(crate) has_lazy_objects: bool,
     native_count: u32,
-    native_methods: OnceCell<NativeMethodTables>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
     /// Allocations left before the cycle collector should run (see
@@ -161,7 +164,6 @@ impl ClassTable {
             has_property_views: native.has_property_views,
             has_lazy_objects: false,
             native_count: native.numbered.len() as u32,
-            native_methods: OnceCell::new(),
             native,
             local: Vec::new(),
             objects: Vec::new(),
@@ -295,43 +297,25 @@ impl ClassTable {
         self.declared.push(position);
     }
 
-    /// The class's methods by name key, built on first use. The keys are
-    /// the process's, so the table is valid in every request that shares
-    /// the class.
-    #[inline]
+    /// The class's methods by name key, built once on the class itself and
+    /// shared across every request and fork in the worker (native and PHP alike).
+    #[inline(always)]
     pub(crate) fn method_table<'c>(&'c self, class: &'c Class) -> &'c MethodTable {
-        let index = class.index.0 as usize;
-        let cell = if index < self.native_count as usize {
-            &self
-                .native_methods
-                .get()
-                .unwrap_or_else(|| self.allocate_native_method_tables())[index]
-        } else {
-            &class.method_table
-        };
-        cell.get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)))
+        class
+            .method_table
+            .get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)))
     }
 
-    #[cold]
-    fn allocate_native_method_tables(&self) -> &NativeMethodTables {
-        self.native_methods
-            .get_or_init(|| (0..self.native_count).map(|_| OnceCell::new()).collect())
-    }
-
+    #[inline(always)]
     pub(crate) fn cached_method_table<'c>(&'c self, class: &'c Class) -> Option<&'c MethodTable> {
-        let index = class.index.0 as usize;
-        if index < self.native_count as usize {
-            self.native_methods.get()?[index].get()
-        } else {
-            class.method_table.get()
-        }
+        class.method_table.get()
     }
 
-    /// Builds the method table of every class of this request that has
-    /// none yet. Taking a snapshot calls this, so that no fork builds a
-    /// table of a class they all share.
+    /// Builds the flat method, property, constant and static-property tables of
+    /// every native and user class of this request that has none yet. Taking a
+    /// snapshot calls this so that no fork ever pays to build them.
     pub(crate) fn build_method_tables(&self) {
-        for class in self.local_classes() {
+        for class in self.native.numbered.iter().chain(self.local_classes()) {
             class
                 .method_table
                 .get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)));
@@ -586,7 +570,6 @@ impl ClassTable {
             has_property_views: self.has_property_views,
             has_lazy_objects: self.has_lazy_objects,
             native_count: self.native_count,
-            native_methods: self.native_methods.clone(),
             objects,
             ids,
             allocations_before_collection: self.allocations_before_collection.clone(),

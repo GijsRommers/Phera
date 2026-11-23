@@ -31,8 +31,9 @@ mod objects;
 
 use std::any::{Any, TypeId};
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
+
+use foldhash::HashMap;
 
 use crate::object::{Object, ObjectIds, Resource};
 use crate::value::Value;
@@ -103,11 +104,11 @@ impl<'n> Fork<'n> {
         Fork {
             ids: ids.fork(),
             natives,
-            objects: HashMap::new(),
-            identities: HashMap::new(),
-            references: HashMap::new(),
-            resources: HashMap::new(),
-            arrays: HashMap::new(),
+            objects: HashMap::default(),
+            identities: HashMap::default(),
+            references: HashMap::default(),
+            resources: HashMap::default(),
+            arrays: HashMap::default(),
             native_copies: None,
             unfilled_objects: Vec::new(),
             unfilled_references: Vec::new(),
@@ -186,7 +187,7 @@ impl<'n> Fork<'n> {
             return value;
         }
         let value = Rc::new(copy(source, self));
-        let copies = self.native_copies.get_or_insert_with(HashMap::new);
+        let copies = self.native_copies.get_or_insert_with(HashMap::default);
         copies.insert(
             key,
             NativeCopy {

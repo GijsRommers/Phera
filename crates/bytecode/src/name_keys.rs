@@ -13,7 +13,7 @@
 //! request has a table that is valid in every other. Keys are never
 //! reused: a name keeps its number for the life of the process.
 
-use std::collections::HashMap;
+use foldhash::HashMap;
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 /// A lowercased name's number in the process.
@@ -28,6 +28,27 @@ pub struct PropKey(pub u32);
 /// table take the lock, never the interpreter.
 static KEYS: LazyLock<Mutex<HashMap<Box<str>, NameKey>>> = LazyLock::new(Mutex::default);
 static PROP_KEYS: LazyLock<Mutex<HashMap<Box<str>, PropKey>>> = LazyLock::new(Mutex::default);
+static KEY_SELF: LazyLock<NameKey> = LazyLock::new(|| key("self"));
+static KEY_STATIC: LazyLock<NameKey> = LazyLock::new(|| key("static"));
+static KEY_PARENT: LazyLock<NameKey> = LazyLock::new(|| key("parent"));
+
+/// Process-wide key for `"self"`.
+#[inline]
+pub fn key_self() -> NameKey {
+    *KEY_SELF
+}
+
+/// Process-wide key for `"static"`.
+#[inline]
+pub fn key_static() -> NameKey {
+    *KEY_STATIC
+}
+
+/// Process-wide key for `"parent"`.
+#[inline]
+pub fn key_parent() -> NameKey {
+    *KEY_PARENT
+}
 
 /// The key of `lowercase`, numbering it if no compiled file used it yet.
 pub fn key(lowercase: &str) -> NameKey {
@@ -57,8 +78,8 @@ fn number(keys: &mut HashMap<Box<str>, NameKey>, lowercase: &str) -> NameKey {
     if let Some(key) = keys.get(lowercase) {
         return *key;
     }
-    // Four billion distinct names would not fit in memory first.
-    let next = NameKey(u32::try_from(keys.len()).unwrap_or(u32::MAX));
+    // Reserve u32::MAX as empty sentinel in flat open-addressed method tables.
+    let next = NameKey(u32::try_from(keys.len()).unwrap_or(u32::MAX - 1));
     keys.insert(lowercase.into(), next);
     next
 }
