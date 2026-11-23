@@ -29,7 +29,7 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::{IncDec, PathBase, PathId, Reg, Step as PathStep};
+use phera_bytecode::{IncDec, Path, PathBase, PathId, Reg, Step as PathStep};
 use phera_value::{Object, Value};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
@@ -48,12 +48,27 @@ impl Machine<'_> {
         destination: Reg,
         path: PathId,
     ) -> Step {
-        let value = match self.this_slot_value(position, path) {
+        let Some(body) = self
+            .code
+            .function(position.frame.function)
+            .paths
+            .get(path.index())
+        else {
+            return Step::Slow;
+        };
+        // Only `$this->p` may have a slot its method knows; any other path
+        // goes straight to its site.
+        let known = match (body.base, body.steps.as_slice()) {
+            (PathBase::This { .. }, [PathStep::Property(_)]) => self.this_slot_value(position, path),
+            _ => None,
+        };
+        let value = match known.or_else(|| {
+            self.with_site_of(position, body, Shape::Read, |entry, object, scope| {
+                entry.read_matching(object, scope)
+            })
+        }) {
             Some(value) => value,
-            None => match self.cached_property(position, path) {
-                Some(value) => value,
-                None => return Step::Slow,
-            },
+            None => return Step::Slow,
         };
         let slots = self.registers.tail_mut(position.frame.base());
         match store::<GUARDED, _>(slots, destination, value) {
@@ -104,12 +119,20 @@ impl Machine<'_> {
             [Some(value)] => value.deref().clone(),
             _ => return Step::Slow,
         };
-        let written = self.write_this_slot(position, path, &value)
-            || self
-                .with_site(position, (path, Shape::Write), |entry, object, scope| {
-                    entry.write_matching(object, scope, &value).then_some(())
-                })
-                .is_some();
+        let Some(body) = self
+            .code
+            .function(position.frame.function)
+            .paths
+            .get(path.index())
+        else {
+            return Step::Slow;
+        };
+        let written = match (body.base, body.steps.as_slice()) {
+            (PathBase::This { .. }, [PathStep::Property(_)]) => {
+                self.write_this_property(position, (path, body), &value)
+            }
+            _ => self.write_site(position, body, &value),
+        };
         if !written {
             return Step::Slow;
         }
@@ -119,6 +142,23 @@ impl Machine<'_> {
             let _ = store::<false, _>(self.registers.tail_mut(base), result, value);
         }
         Step::Done(position.ip)
+    }
+
+    /// Writes `$this->p` by the slot its method knows, or else through the
+    /// instruction's site. Out of line, so that writes of other objects keep
+    /// their code.
+    #[inline(never)]
+    fn write_this_property(&self, position: Position, (path, body): (PathId, &Path), value: &Value) -> bool {
+        self.write_this_slot(position, path, value) || self.write_site(position, body, value)
+    }
+
+    /// Writes the property through the instruction's site.
+    #[inline(always)]
+    fn write_site(&self, position: Position, body: &Path, value: &Value) -> bool {
+        self.with_site_of(position, body, Shape::Write, |entry, object, scope| {
+            entry.write_matching(object, scope, value).then_some(())
+        })
+        .is_some()
     }
 
     /// `IncDecPath` of one declared integer property.
@@ -164,9 +204,23 @@ impl Machine<'_> {
         (path, shape): (PathId, Shape),
         access: impl FnOnce(&PropertyEntry, &Object, Option<&Rc<Class>>) -> Option<R>,
     ) -> Option<R> {
+        let path = self
+            .code
+            .function(position.frame.function)
+            .paths
+            .get(path.index())?;
+        self.with_site_of(position, path, shape, access)
+    }
+
+    /// [`Machine::with_site`] for the path itself, once found.
+    pub(super) fn with_site_of<R>(
+        &self,
+        position: Position,
+        path: &Path,
+        shape: Shape,
+        access: impl FnOnce(&PropertyEntry, &Object, Option<&Rc<Class>>) -> Option<R>,
+    ) -> Option<R> {
         let function = position.frame.function;
-        let body = self.code.function(function);
-        let path = body.paths.get(path.index())?;
         let object = match (path.steps.as_slice(), path.base, shape) {
             ([PathStep::Property(_)], base, _) => self.property_object(position, base)?,
             (

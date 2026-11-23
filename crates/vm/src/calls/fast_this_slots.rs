@@ -23,8 +23,9 @@ use crate::calls::prepared_call::CallKind;
 use crate::this_slots::{SlotWrite, ThisSlot};
 
 impl Machine<'_> {
-    /// The value of `$this->p` when the method knows its slot.
-    #[inline]
+    /// The value of `$this->p` when the method knows its slot. Out of line,
+    /// so that the property reads that never take it keep their code.
+    #[inline(never)]
     pub(super) fn this_slot_value(&self, position: Position, path: PathId) -> Option<Value> {
         let (object, slot, _) = self.this_slot(position, path)?;
         object
@@ -35,7 +36,7 @@ impl Machine<'_> {
     /// Stores `value` in `$this->p` when the method knows its slot and the
     /// slot holds a value that is not a PHP reference; `false`, with nothing
     /// changed, otherwise.
-    #[inline]
+    #[inline(never)]
     pub(super) fn write_this_slot(&self, position: Position, path: PathId, value: &Value) -> bool {
         let Some((object, slot, write)) = self.this_slot(position, path) else {
             return false;
