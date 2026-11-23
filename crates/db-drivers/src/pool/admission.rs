@@ -123,6 +123,30 @@ impl Admission {
         Some(Reclaim(self.clone()))
     }
 
+    /// Reclaim a freshly-returned socket immediately only when another key is
+    /// at the head, the pool limit is smaller than the active worker count, or
+    /// this worker holds more than its fair share. Otherwise keep it warm on
+    /// this worker briefly so rapid sequential requests do not ping-pong live
+    /// connections between workers.
+    pub(super) fn reclaim_on_return(
+        self: &Arc<Self>,
+        worker: WorkerId,
+        key: &Key,
+    ) -> Option<Reclaim> {
+        let mut state = self.state();
+        if !state.should_reclaim_immediately(worker, key, self.limit) || state.reclaiming {
+            return None;
+        }
+        state.reclaiming = true;
+        Some(Reclaim(self.clone()))
+    }
+
+    pub(super) fn has_waiters(&self) -> bool {
+        let mut state = self.state();
+        state.remove_cancelled();
+        !state.waiters.is_empty()
+    }
+
     pub(super) fn is_closed(&self) -> bool {
         self.state().closed
     }
@@ -233,6 +257,22 @@ impl State {
         self.waiters.iter().position(|waiter| {
             !waiter.grant.is_closed() && waiter.worker == worker && *waiter.key == *key
         })
+    }
+
+    fn should_reclaim_immediately(&mut self, worker: WorkerId, key: &Key, limit: usize) -> bool {
+        self.remove_cancelled();
+        let Some(front) = self.waiters.front() else {
+            return false;
+        };
+        if *front.key != *key {
+            return true;
+        }
+        let active = self.active_worker_count(worker);
+        if limit < active {
+            return true;
+        }
+        let fair_share = limit / active.max(1);
+        self.open_of(worker) > fair_share
     }
 
     fn remove_cancelled(&mut self) {
@@ -420,5 +460,29 @@ mod tests {
         });
 
         assert_eq!(state.select_offer_waiter(w0, &key_a, 4), None);
+    }
+
+    #[test]
+    fn balanced_worker_holds_returned_socket_instead_of_ping_pong_reclaim() {
+        let (w0, w1) = two_worker_ids();
+        let key = test_key("app");
+        let mut state = State::default();
+        state.inc_open(w0);
+        state.inc_open(w0);
+        state.inc_open(w1);
+        state.inc_open(w1);
+
+        // w1 has a waiter while w0 momentarily has none, both at fair_share (2).
+        let (tx1, _rx1) = oneshot::channel();
+        state.waiters.push_back(Waiter {
+            worker: w1,
+            key: key.clone(),
+            grant: tx1,
+        });
+        assert!(!state.should_reclaim_immediately(w0, &key, 4));
+
+        // If w0 holds more than fair_share (3 > 2), it yields immediately.
+        state.inc_open(w0);
+        assert!(state.should_reclaim_immediately(w0, &key, 4));
     }
 }
