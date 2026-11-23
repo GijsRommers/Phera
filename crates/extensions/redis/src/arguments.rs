@@ -107,7 +107,10 @@ pub fn three_or_five(name: &str, context: &mut dyn Context, arguments: &[Value])
 }
 
 pub fn raw_command(name: &str, context: &mut dyn Context, arguments: &[Value]) -> Preparation {
-    if arguments.first().is_some_and(|value| !value.is_string()) {
+    if arguments
+        .first()
+        .is_some_and(|value| !matches!(value, Value::String(_)))
+    {
         context.warning(format!(
             "{name}(): When sending a 'raw' command, the first argument must be a string!"
         ));
@@ -118,19 +121,20 @@ pub fn raw_command(name: &str, context: &mut dyn Context, arguments: &[Value]) -
 
 /// `script()` returns false, without a warning, unless the subcommand is a string.
 pub fn script(arguments: &[Value]) -> Preparation {
-    if arguments.first().is_some_and(|value| !value.is_string()) {
+    if arguments
+        .first()
+        .is_some_and(|value| !matches!(value, Value::String(_)))
+    {
         return Ok(MethodPreparation::Return(Value::Bool(false)));
     }
     Ok(MethodPreparation::Default)
 }
 
 pub fn pfcount(name: &str, context: &mut dyn Context, arguments: &[Value]) -> Preparation {
-    if arguments.first().is_some_and(|value| {
-        !matches!(
-            value,
-            Value::InternedStr(_) | Value::String(_) | Value::Array(_)
-        )
-    }) {
+    if arguments
+        .first()
+        .is_some_and(|value| !matches!(value, Value::String(_) | Value::Array(_)))
+    {
         context.warning(format!(
             "{name}(): Argument must be either an array or a string"
         ));

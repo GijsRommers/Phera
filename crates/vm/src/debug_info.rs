@@ -77,8 +77,8 @@ impl Vm {
                     let text = crate::exception_rendering::describe_chain(&thrown.object, 15);
                     let file = thrown.object.get(&Object::protected_key("file"));
                     let line = thrown.object.get(&Object::protected_key("line"));
-                    let location = match (file.as_ref().and_then(Value::str_ref), line) {
-                        (Some(file), Some(Value::Int(line))) => {
+                    let location = match (file, line) {
+                        (Some(Value::String(file)), Some(Value::Int(line))) => {
                             Some(crate::diagnostics::SourceLocation {
                                 file: file.to_string_lossy(),
                                 line: line.max(0) as usize,

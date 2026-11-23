@@ -70,11 +70,7 @@ impl PhpArray {
         let mut work = Vec::new();
         for value in values {
             match value {
-                Value::Null
-                | Value::Bool(_)
-                | Value::Int(_)
-                | Value::Float(_)
-                | Value::InternedStr(_) => {}
+                Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) => {}
                 Value::String(string) => drop(string),
                 Value::Resource(resource) => drop(resource),
                 nested => {

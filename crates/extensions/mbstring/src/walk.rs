@@ -46,7 +46,6 @@ pub fn strings(value: Value) -> Result<Strings, Recursive> {
             Step::Visit(value) => value,
         };
         match value {
-            Value::InternedStr(string) => strings.values.push(string.to_php_string()),
             Value::String(string) => strings.values.push(string),
             Value::Reference(cell) => {
                 let address = Rc::as_ptr(&cell) as usize;
@@ -63,10 +62,8 @@ pub fn strings(value: Value) -> Result<Strings, Recursive> {
                 }
                 pending.push(Step::Leave(address));
                 for (key, value) in array.iter() {
-                    match key {
-                        ArrayKey::Interned(key) => strings.keys.push(key.to_php_string()),
-                        ArrayKey::String(key) => strings.keys.push(key.clone()),
-                        ArrayKey::Int(_) => {}
+                    if let ArrayKey::String(key) = key {
+                        strings.keys.push(key.clone());
                     }
                     pending.push(Step::Visit(value.clone()));
                 }

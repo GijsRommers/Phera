@@ -408,11 +408,7 @@ impl Properties {
     /// stays a string.
     fn with_integer_names(array: PhpArray) -> PhpArray {
         let numeric = array.keys().any(|key| match &key {
-            crate::array::ArrayKey::String(name) => !matches!(
-                crate::array::ArrayKey::from_string(name.clone()),
-                crate::array::ArrayKey::String(_)
-            ),
-            crate::array::ArrayKey::Interned(name) => name.numeric_key().is_some(),
+            crate::array::ArrayKey::String(name) => name.numeric_key().is_some(),
             crate::array::ArrayKey::Int(_) => false,
         });
         if !numeric {
@@ -421,10 +417,6 @@ impl Properties {
         let entries = array.iter().map(|(key, value)| {
             let key = match key {
                 crate::array::ArrayKey::String(name) => crate::array::ArrayKey::from_string(name),
-                crate::array::ArrayKey::Interned(name) => match name.numeric_key() {
-                    Some(integer) => crate::array::ArrayKey::Int(integer),
-                    None => crate::array::ArrayKey::Interned(name),
-                },
                 key => key,
             };
             Ok::<_, std::convert::Infallible>((key, value.clone()))

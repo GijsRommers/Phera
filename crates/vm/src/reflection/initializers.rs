@@ -98,7 +98,6 @@ impl Vm {
                         | Value::Bool(_)
                         | Value::Int(_)
                         | Value::Float(_)
-                        | Value::InternedStr(_)
                         | Value::String(_)
                 )
             {

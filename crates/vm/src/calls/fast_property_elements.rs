@@ -1,7 +1,7 @@
 //! Array key helpers for the interpreter loop's fast element reads and writes.
 
 use phera_bytecode::Reg;
-use phera_value::{ArrayKey, InternedStr, PhpArray, PhpString, Value};
+use phera_value::{ArrayKey, PhpArray, PhpString, Value};
 
 use crate::calls::execution_loop::{Machine, Position};
 
@@ -10,7 +10,6 @@ use crate::calls::execution_loop::{Machine, Position};
 #[derive(Clone, Copy)]
 pub(super) enum FastKey<'a> {
     Int(i64),
-    Interned(&'static InternedStr),
     Str(&'a PhpString),
 }
 
@@ -21,7 +20,6 @@ impl FastKey<'_> {
     pub(super) fn get(self, array: &PhpArray) -> Option<&Value> {
         match self {
             Self::Int(integer) => array.get_int(integer),
-            Self::Interned(string) => array.get_interned(string),
             Self::Str(string) => array.get_str(string),
         }
     }
@@ -36,7 +34,6 @@ impl Machine<'_> {
             .window(position.frame.base() + register.index(), 1)
         {
             [Some(Value::Int(integer))] => Some(FastKey::Int(*integer)),
-            [Some(Value::InternedStr(string))] => Some(FastKey::Interned(string)),
             [Some(Value::String(string))] => Some(FastKey::Str(string)),
             _ => None,
         }
@@ -49,7 +46,6 @@ impl Machine<'_> {
             .window(position.frame.base() + register.index(), 1)
         {
             [Some(Value::Int(integer))] => Some(ArrayKey::Int(*integer)),
-            [Some(Value::InternedStr(string))] => Some(string.to_array_key()),
             [Some(Value::String(string))] => Some(ArrayKey::from_string(string.clone())),
             _ => None,
         }

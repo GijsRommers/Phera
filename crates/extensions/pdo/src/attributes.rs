@@ -93,14 +93,6 @@ pub(crate) fn integer(value: &Value) -> Result<i64, NativeError> {
     match &*value.deref() {
         Value::Int(value) => return Ok(*value),
         Value::Bool(value) => return Ok(i64::from(*value)),
-        Value::InternedStr(value) => {
-            let parsed = parse_numeric(value.as_bytes());
-            if parsed.exact
-                && let Some(NumVal::Int(value)) = parsed.value
-            {
-                return Ok(value);
-            }
-        }
         Value::String(value) => {
             let parsed = parse_numeric(value.as_bytes());
             if parsed.exact

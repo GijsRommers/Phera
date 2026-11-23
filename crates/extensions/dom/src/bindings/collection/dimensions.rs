@@ -38,17 +38,6 @@ pub(super) fn exists(
 fn read(context: &mut dyn Context, object: &Object, offset: Value, quiet: bool) -> NativeResult {
     let offset = offset.deref();
     let index = match &*offset {
-        Value::InternedStr(text) => {
-            let number = value::parse_numeric(text.as_bytes());
-            match number.value.filter(|_| number.exact) {
-                Some(value::NumVal::Int(index)) => index,
-                Some(value::NumVal::Float(index)) => index as i64,
-                None if is_map(object) => {
-                    return named_item(context, object, &String::from_utf8_lossy(text.as_bytes()));
-                }
-                None => return Ok(Value::Null),
-            }
-        }
         Value::String(text) => {
             let number = value::parse_numeric(text.as_bytes());
             match number.value.filter(|_| number.exact) {

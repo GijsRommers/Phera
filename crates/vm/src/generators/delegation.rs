@@ -84,7 +84,6 @@ impl Vm {
                 Ok(values.entry_at(index).map(|(key, value)| Item {
                     key: match key {
                         ArrayKey::Int(key) => Value::Int(key),
-                        ArrayKey::Interned(key) => Value::InternedStr(key),
                         ArrayKey::String(key) => Value::String(key),
                     },
                     value: value.clone(),

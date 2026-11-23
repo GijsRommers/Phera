@@ -43,7 +43,6 @@ pub(super) fn register(
             let callable = callable.deref();
             validate_registration(context, &callable, true)?;
             let name = match key {
-                ArrayKey::Interned(name) => String::from_utf8_lossy(name.as_bytes()).into_owned(),
                 ArrayKey::String(name) => String::from_utf8_lossy(name.as_bytes()).into_owned(),
                 _ => {
                     let name = phera_extension_api::value::to_php_string(

@@ -669,15 +669,11 @@ fn is_infallible_sync_callback(name: &str) -> bool {
 fn callable_ready_for_loop(callback: &Value) -> bool {
     match callback {
         Value::Object(_) => true,
-        Value::InternedStr(string) => !string.as_bytes().windows(2).any(|pair| pair == b"::"),
         Value::String(string) => !string.as_bytes().windows(2).any(|pair| pair == b"::"),
         Value::Array(array) => {
             array.len() == 2
                 && matches!(array.get(&ArrayKey::Int(0)), Some(Value::Object(_)))
                 && match array.get(&ArrayKey::Int(1)) {
-                    Some(Value::InternedStr(method)) => {
-                        !method.as_bytes().windows(2).any(|pair| pair == b"::")
-                    }
                     Some(Value::String(method)) => {
                         !method.as_bytes().windows(2).any(|pair| pair == b"::")
                     }

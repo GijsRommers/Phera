@@ -243,7 +243,7 @@ fn bind(
                 None
             } else {
                 let detail = match args::value(arguments, 0) {
-                    Value::InternedStr(_) | Value::String(_) => format!(":{key}"),
+                    Value::String(_) => format!(":{key}"),
                     _ => "parameter was not defined".into(),
                 };
                 Some(DbError::parameter(&detail))

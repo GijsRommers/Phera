@@ -54,18 +54,20 @@ impl Options {
                 .map(|value| value.deref().clone())
         };
         let boolean = |key, default| get(key).map_or(default, |value| to_bool(&value));
-        let string = |key| get(key).and_then(|v| v.str_ref().map(|s| s.to_string_lossy()));
+        let string = |key| match get(key) {
+            Some(Value::String(value)) => Some(value.to_string_lossy()),
+            _ => None,
+        };
         let fingerprints = match get("peer_fingerprint") {
-            Some(Value::InternedStr(value)) => vec![(None, value.as_bytes().to_vec())],
             Some(Value::String(value)) => vec![(None, value.as_bytes().to_vec())],
             Some(Value::Array(values)) => values
                 .iter()
-                .map(
-                    |(key, value)| match (key.as_str_bytes(), value.deref().as_str_bytes()) {
-                        (Some(key), Some(value)) => Ok((Some(key.to_vec()), value.to_vec())),
-                        _ => Err(super::invalid("Invalid SSL peer fingerprint")),
-                    },
-                )
+                .map(|(key, value)| match (key, &*value.deref()) {
+                    (ArrayKey::String(key), Value::String(value)) => {
+                        Ok((Some(key.as_bytes().to_vec()), value.as_bytes().to_vec()))
+                    }
+                    _ => Err(super::invalid("Invalid SSL peer fingerprint")),
+                })
                 .collect::<io::Result<_>>()?,
             Some(Value::Null) | None => Vec::new(),
             _ => return Err(super::invalid("Invalid SSL peer fingerprint")),

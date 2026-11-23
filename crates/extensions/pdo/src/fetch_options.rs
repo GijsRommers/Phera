@@ -107,12 +107,6 @@ pub fn validate(
         let value = args::value(arguments, offset + 1);
         let column = match value {
             Value::Int(column) => *column,
-            Value::InternedStr(text) => text.to_string_lossy().parse::<i64>().map_err(|_| {
-                NativeError::type_error(format!(
-                    "{name}(): Argument #{} must be of type int, string given",
-                    offset + 2
-                ))
-            })?,
             Value::String(text) => text.to_string_lossy().parse::<i64>().map_err(|_| {
                 NativeError::type_error(format!(
                     "{name}(): Argument #{} must be of type int, string given",
@@ -148,7 +142,7 @@ pub fn validate(
 fn type_name(value: &Value) -> &'static str {
     match value {
         Value::Int(_) => "int",
-        Value::InternedStr(_) | Value::String(_) => "string",
+        Value::String(_) => "string",
         Value::Float(_) => "float",
         Value::Bool(_) => "bool",
         Value::Null => "null",

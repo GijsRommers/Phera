@@ -184,13 +184,6 @@ fn construct(
         }
         let function = engine(context)?.reflect_function(&target)?;
         let position = match args.get(1) {
-            Some(Value::InternedStr(name)) => function
-                .parameters
-                .iter()
-                .position(|p| name.as_bytes() == p.name.as_bytes())
-                .ok_or_else(|| {
-                    exception("The parameter specified by its name could not be found")
-                })?,
             Some(Value::String(name)) => function
                 .parameters
                 .iter()
@@ -220,7 +213,6 @@ fn construct(
 
 fn function_target(value: &Value) -> Result<FunctionTarget, phera_extension_api::NativeError> {
     match value {
-        Value::InternedStr(name) => Ok(FunctionTarget::Named(name.to_string_lossy())),
         Value::String(name) => Ok(FunctionTarget::Named(name.to_string_lossy())),
         Value::Object(object) if object.class.name() == "Closure" => {
             Ok(FunctionTarget::Closure(Rc::downgrade(object)))
@@ -230,10 +222,9 @@ fn function_target(value: &Value) -> Result<FunctionTarget, phera_extension_api:
             name: "__invoke".into(),
         }),
         Value::Array(array) => {
-            let (Some(class), Some(method)) = (
-                array.get(&ArrayKey::Int(0)),
-                array.get(&ArrayKey::Int(1)).and_then(Value::str_ref),
-            ) else {
+            let (Some(class), Some(Value::String(method))) =
+                (array.get(&ArrayKey::Int(0)), array.get(&ArrayKey::Int(1)))
+            else {
                 return Err(exception(
                     "Expected array($object, $method) or array($classname, $method)",
                 ));

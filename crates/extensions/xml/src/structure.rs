@@ -44,10 +44,7 @@ impl Structure {
     }
 
     fn start(&mut self, event: &Emission) {
-        let [name, attributes, ..] = event.data.as_slice() else {
-            return;
-        };
-        let Some(name) = name.to_php_string() else {
+        let [Value::String(name), attributes, ..] = event.data.as_slice() else {
             return;
         };
         let level = self.parents.len() + 1;
@@ -68,9 +65,9 @@ impl Structure {
         };
         if start + 1 == self.values.len() {
             self.values[start].kind = "complete";
-        } else if let Some(name) = event.data.first().and_then(Value::to_php_string) {
+        } else if let Some(Value::String(name)) = event.data.first() {
             self.values.push(Row {
-                name,
+                name: name.clone(),
                 kind: "close",
                 level: self.parents.len() + 1,
                 attributes: None,
@@ -80,7 +77,7 @@ impl Structure {
     }
 
     fn text(&mut self, event: &Emission) {
-        let Some(text) = event.data.first().and_then(Value::to_php_string) else {
+        let Some(Value::String(text)) = event.data.first() else {
             return;
         };
         let Some(&start) = self.parents.last() else {

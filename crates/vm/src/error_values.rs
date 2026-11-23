@@ -10,7 +10,10 @@ pub(crate) fn trace_argument(value: &Value, limit: usize) -> String {
             if object.class.is_enum()
                 && let Some(name) = object
                     .get(&phera_value::ArrayKey::interned_str(b"name"))
-                    .and_then(|value| value.str_ref().map(|s| s.to_string_lossy())) =>
+                    .and_then(|value| match value {
+                        Value::String(name) => Some(name.to_string_lossy()),
+                        _ => None,
+                    }) =>
         {
             format!("{}::{name}", object.class.name())
         }
@@ -38,7 +41,6 @@ pub(crate) fn describe_with_limit(value: &Value, limit: usize) -> String {
             }
             text
         }
-        Value::InternedStr(value) => quoted_string(value.as_bytes(), limit),
         Value::String(value) => quoted_string(value.as_bytes(), limit),
         value => format!("of type {}", value.type_name()),
     }

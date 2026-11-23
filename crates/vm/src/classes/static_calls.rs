@@ -10,8 +10,7 @@ use crate::Vm;
 impl Vm {
     /// PHP permits computed method names only when their value is a string.
     pub(crate) fn method_name(&mut self, register: Reg) -> Result<String, NativeError> {
-        let value = self.read_local(register);
-        let Some(name) = value.str_ref() else {
+        let Value::String(name) = self.read_local(register) else {
             return Err(NativeError::error("Method name must be a string"));
         };
         Ok(name.to_string_lossy())
@@ -51,7 +50,6 @@ impl Vm {
         let class_value = self.read_local(class);
         let class_name: std::borrow::Cow<'_, str> = match &class_value {
             Value::Object(object) => std::borrow::Cow::Borrowed(object.class.name()),
-            Value::InternedStr(name) => String::from_utf8_lossy(name.as_bytes()),
             Value::String(name) => String::from_utf8_lossy(name.as_bytes()),
             _ => {
                 return Err(NativeError::error(
@@ -60,10 +58,10 @@ impl Vm {
             }
         };
         let method_value = self.read_local(method);
-        let Some(method_bytes) = method_value.as_str_bytes() else {
+        let Some(method) = method_value.as_string() else {
             return Err(NativeError::error("Method name must be a string"));
         };
-        let method_name = String::from_utf8_lossy(method_bytes);
+        let method_name = String::from_utf8_lossy(method.as_bytes());
         self.prepare_static_style(&class_name, &method_name, binding)
     }
 

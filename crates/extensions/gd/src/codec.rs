@@ -185,7 +185,6 @@ async fn output(context: &mut dyn Context, arguments: Vec<Value>, format: Format
             context.write(&data);
             Ok(Value::Bool(true))
         }
-        Value::InternedStr(path) => write_path(context, function, path.as_bytes(), data).await,
         Value::String(path) => write_path(context, function, path.as_bytes(), data).await,
         Value::Resource(resource) => {
             let result = write_resource(context, resource, &data, function).await?;
@@ -199,19 +198,13 @@ async fn output(context: &mut dyn Context, arguments: Vec<Value>, format: Format
 
 fn validate_destination(destination: &Value, function: &str) -> Result<(), NativeError> {
     let message = match destination {
-        Value::InternedStr(path) if path.as_bytes().contains(&0) => {
-            "Argument #2 ($file) must not contain null bytes".into()
-        }
-        Value::InternedStr(path) if path.is_empty() => {
-            return Err(NativeError::value_error("Path must not be empty"));
-        }
         Value::String(path) if path.as_bytes().contains(&0) => {
             "Argument #2 ($file) must not contain null bytes".into()
         }
         Value::String(path) if path.is_empty() => {
             return Err(NativeError::value_error("Path must not be empty"));
         }
-        Value::InternedStr(_) | Value::String(_) | Value::Null => return Ok(()),
+        Value::String(_) | Value::Null => return Ok(()),
         Value::Resource(resource) if resource.kind == "stream" && !resource.is_closed() => {
             return Ok(());
         }

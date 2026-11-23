@@ -120,7 +120,6 @@ fn construct_string_file(
     if let Some(object) = object {
         for (index, name) in ["data", "postname", "mime"].into_iter().enumerate() {
             let value = match args::value(values, index) {
-                Value::InternedStr(value) => Value::InternedStr(value),
                 Value::String(value) => Value::String(value.clone()),
                 _ => Value::from("application/octet-stream"),
             };

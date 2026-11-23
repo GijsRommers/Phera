@@ -82,9 +82,13 @@ fn mb_convert_encoding(ctx: &mut dyn Context, a: &[Value]) -> NativeResult {
     if matches!(
         to.transfer(),
         Some(Transfer::Base64 | Transfer::QuotedPrintable)
-    ) && let Some(string) = subject.as_str_bytes()
+    ) && let Value::String(string) = subject
     {
-        let bytes: Vec<u32> = string.iter().map(|&byte| u32::from(byte)).collect();
+        let bytes: Vec<u32> = string
+            .as_bytes()
+            .iter()
+            .map(|&byte| u32::from(byte))
+            .collect();
         return Ok(Value::from(codec::encode(&bytes, to, &Substitute::None)));
     }
     // Decoding Base64, uuencode or Quoted-Printable gives bytes, not text.
@@ -127,20 +131,6 @@ fn convert_value(
                 // Reversed, so that they come off the stack in order.
                 let values: Vec<Value> = array.iter().map(|(_, value)| value.clone()).collect();
                 pending.extend(values.into_iter().rev().map(Work::Convert));
-            }
-            Work::Convert(Value::InternedStr(string)) => {
-                let source = match from {
-                    [only] => Some(*only),
-                    _ => guess(string.as_bytes(), from, true),
-                };
-                let Some(source) = source else {
-                    ctx.warning(
-                        "mb_convert_encoding(): Unable to detect character encoding".into(),
-                    );
-                    return Ok(Value::Bool(false));
-                };
-                let points = decode(string.as_bytes(), source);
-                converted.push(Value::from(encode_result(ctx, &points, to)));
             }
             Work::Convert(Value::String(string)) => {
                 let source = match from {
@@ -332,11 +322,6 @@ fn encoding_list(
         Value::Array(array) => array
             .iter()
             .map(|(_, name)| crate::string_of(name))
-            .collect(),
-        Value::InternedStr(names) => names
-            .to_string_lossy()
-            .split(',')
-            .map(str::to_owned)
             .collect(),
         Value::String(names) => names
             .to_string_lossy()

@@ -37,12 +37,6 @@ impl Algorithm {
             Value::Null | Value::Int(0 | 1) => Some(Self::Bcrypt),
             Value::Int(2) => Some(Self::Argon2i),
             Value::Int(3) => Some(Self::Argon2id),
-            Value::InternedStr(name) => match name.as_bytes() {
-                b"2y" => Some(Self::Bcrypt),
-                b"argon2i" => Some(Self::Argon2i),
-                b"argon2id" => Some(Self::Argon2id),
-                _ => None,
-            },
             Value::String(name) => match name.as_bytes() {
                 b"2y" => Some(Self::Bcrypt),
                 b"argon2i" => Some(Self::Argon2i),

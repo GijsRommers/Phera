@@ -164,15 +164,11 @@ pub(crate) fn replace_array(
         let mut count = 0;
         if let Some(patterns) = args::array(&arguments, 0) {
             for (key, callback) in patterns.iter() {
-                let pattern = match key {
-                    ArrayKey::Interned(pattern) => Value::InternedStr(pattern),
-                    ArrayKey::String(pattern) => Value::String(pattern),
-                    ArrayKey::Int(_) => {
-                        return Err(NativeError::type_error(
-                            "preg_replace_callback_array(): Argument #1 ($pattern) \
-                             must contain only string patterns as keys",
-                        ));
-                    }
+                let ArrayKey::String(pattern) = key else {
+                    return Err(NativeError::type_error(
+                        "preg_replace_callback_array(): Argument #1 ($pattern) \
+                         must contain only string patterns as keys",
+                    ));
                 };
                 if callable::invalid_reason(callback).is_some() {
                     return Err(NativeError::type_error(
@@ -182,7 +178,7 @@ pub(crate) fn replace_array(
                 }
                 let mut operation = Operation {
                     name: "preg_replace_callback_array",
-                    patterns: vec![pattern],
+                    patterns: vec![Value::String(pattern.clone())],
                     callback,
                     limit: replace::match_limit(args::int(&arguments, 2).unwrap_or(-1)),
                     flags: CaptureFlags::parse(args::int(&arguments, 4).unwrap_or(0)),

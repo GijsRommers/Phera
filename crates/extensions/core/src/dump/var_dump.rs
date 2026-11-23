@@ -108,14 +108,6 @@ impl<const COUNTS: bool> Style for VarDump<'_, COUNTS> {
                     .as_bytes(),
                 );
             }
-            Value::InternedStr(string) => {
-                out.extend_from_slice(format!("string({}) \"", string.len()).as_bytes());
-                out.extend_from_slice(string.as_bytes());
-                out.push(b'"');
-                if COUNTS {
-                    out.extend_from_slice(b" refcount(1)");
-                }
-            }
             Value::String(string) => {
                 out.extend_from_slice(format!("string({}) \"", string.len()).as_bytes());
                 out.extend_from_slice(string.as_bytes());
@@ -186,17 +178,15 @@ impl<const COUNTS: bool> Style for VarDump<'_, COUNTS> {
         spaces(out, 2 * depth);
         match (key, container) {
             (ArrayKey::Int(int), _) => out.extend_from_slice(format!("[{int}]").as_bytes()),
-            (ArrayKey::Interned(_) | ArrayKey::String(_), Container::Array(_)) => {
-                let bytes = key.as_str_bytes().expect("checked string key");
+            (ArrayKey::String(string), Container::Array(_)) => {
                 out.extend_from_slice(b"[\"");
-                out.extend_from_slice(bytes);
+                out.extend_from_slice(string.as_bytes());
                 out.extend_from_slice(b"\"]");
             }
             // A property shows who may see it: ["name":protected] or
             // ["name":"Class":private].
-            (ArrayKey::Interned(_) | ArrayKey::String(_), Container::Object(_)) => {
-                let (name, scope) =
-                    split_property_key(key.as_str_bytes().expect("checked string key"));
+            (ArrayKey::String(string), Container::Object(_)) => {
+                let (name, scope) = split_property_key(string.as_bytes());
                 out.extend_from_slice(b"[\"");
                 out.extend_from_slice(name);
                 out.push(b'"');

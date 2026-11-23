@@ -207,8 +207,7 @@ impl<'a> Target<'a> {
 }
 
 pub(super) fn public(key: &ArrayKey) -> bool {
-    !key.as_str_bytes()
-        .is_some_and(|key| key.first() == Some(&0))
+    !matches!(key, ArrayKey::String(key) if key.as_bytes().first() == Some(&0))
 }
 
 pub(super) fn value_at(array: &PhpArray, position: usize) -> Value {

@@ -38,9 +38,10 @@ enum ServerMode {
 
 impl ServerMode {
     fn exposes(self, key: &ArrayKey) -> bool {
-        let Some(name) = key.as_str_bytes() else {
+        let ArrayKey::String(name) = key else {
             return false;
         };
+        let name = name.as_bytes();
         match self {
             Self::Cli => matches!(name, b"SCRIPT_FILENAME" | b"SCRIPT_NAME" | b"PHP_SELF"),
             Self::Http => {

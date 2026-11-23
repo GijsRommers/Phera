@@ -113,7 +113,6 @@ impl Vm {
             },
             StaticClass::Register(class) => match self.read_local(class) {
                 Value::Object(object) => object.class.name().to_owned(),
-                Value::InternedStr(name) => name.to_string_lossy(),
                 Value::String(name) => name.to_string_lossy(),
                 _ => {
                     return Err(NativeError::error(

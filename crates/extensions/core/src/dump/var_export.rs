@@ -161,7 +161,6 @@ impl Style for VarExport {
                 )
                 .as_bytes(),
             ),
-            Value::InternedStr(string) => quote(out, string.as_bytes()),
             Value::String(string) => quote(out, string.as_bytes()),
             // A resource has no source form.
             Value::Null
@@ -199,10 +198,6 @@ impl Style for VarExport {
             ArrayKey::Int(int) => out.extend_from_slice(int.to_string().as_bytes()),
             // Exported code names a property plainly, whatever its
             // visibility.
-            ArrayKey::Interned(string) if extra == 1 => {
-                quote(out, split_property_key(string.as_bytes()).0);
-            }
-            ArrayKey::Interned(string) => quote(out, string.as_bytes()),
             ArrayKey::String(string) if extra == 1 => {
                 quote(out, split_property_key(string.as_bytes()).0);
             }

@@ -77,12 +77,12 @@ impl Vm {
     ) -> Option<bool> {
         // Only a valid UTF-8 target takes this path, for the same reason as
         // in `exists_answer`.
-        let target = std::str::from_utf8(target.as_str_bytes()?).ok()?;
+        let target = std::str::from_utf8(target.as_string()?.as_bytes()).ok()?;
         let class = match first {
             // An object's class is known; PHP never autoloads it.
             Value::Object(object) => self.classes.for_object(object),
             name => {
-                let name = std::str::from_utf8(name.as_str_bytes()?).ok()?;
+                let name = std::str::from_utf8(name.as_string()?.as_bytes()).ok()?;
                 if !allow_string {
                     // Without allow_string a string first argument names no
                     // class, even one that is loaded.

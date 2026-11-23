@@ -111,7 +111,7 @@ async fn iteration_line(
             let result = context
                 .call_method(object.clone(), "getCurrentLine", Vec::new())
                 .await?;
-            let Some(text) = result.deref().to_php_string() else {
+            let Value::String(text) = &*result.deref() else {
                 return Err(NativeError::type_error(format!(
                     "{}::getCurrentLine(): Return value must be of type string, {} returned",
                     object.class.name(),
@@ -122,7 +122,7 @@ async fn iteration_line(
                 file.text = Some(text.clone());
                 file.current = Some(Value::String(text.clone()));
             })?;
-            Value::String(text)
+            Value::String(text.clone())
         } else {
             raw_line(
                 context,
@@ -132,7 +132,9 @@ async fn iteration_line(
             )
             .await?
         };
-        if flags & SKIP_EMPTY == 0 || !line.as_str_bytes().is_some_and(<[u8]>::is_empty) {
+        if flags & SKIP_EMPTY == 0
+            || !matches!(&line, Value::String(text) if text.as_bytes().is_empty())
+        {
             return Ok(line);
         }
         change(object, clear)?;

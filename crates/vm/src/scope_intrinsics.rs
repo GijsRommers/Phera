@@ -40,10 +40,9 @@ impl Vm {
                         .into_iter()
                         .rev(),
                 ),
-                Value::InternedStr(_) | Value::String(_) => {
-                    let s = value.str_ref().expect("checked string");
-                    let name = s.to_string_lossy();
-                    let found = if self.in_global_scope() {
+                Value::String(string) => {
+                    let name = string.to_string_lossy();
+                    let value = if self.in_global_scope() {
                         self.request_global_value(&name)
                             .map(|value| value.deref().clone())
                     } else {
@@ -51,13 +50,8 @@ impl Vm {
                             .and_then(|frame| frame.named_register(&name))
                             .and_then(|register| self.read_defined_local(register))
                     };
-                    if let Some(found) = found {
-                        let key = match value {
-                            Value::InternedStr(s) => ArrayKey::Interned(s),
-                            Value::String(s) => ArrayKey::String(s),
-                            _ => unreachable!(),
-                        };
-                        array.insert(key, found);
+                    if let Some(value) = value {
+                        array.insert(ArrayKey::String(string), value);
                     } else {
                         self.warn(format!("compact(): Undefined variable ${name}"));
                     }

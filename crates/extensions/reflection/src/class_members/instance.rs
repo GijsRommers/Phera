@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use phera_extension_api::reflection::{ClassSelector, MemberInfo, MemberKind, Members};
-use phera_extension_api::{Context, NativeResult, Object, PhpArray, Value, args};
+use phera_extension_api::{ArrayKey, Context, NativeResult, Object, PhpArray, Value, args};
 
 use super::{matches_filter, member_object};
 use crate::class::reflected_class;
@@ -57,11 +57,13 @@ fn instance_members<'a>(
     slots: &'a PhpArray,
 ) -> impl Iterator<Item = Rc<MemberInfo>> + use<'a> {
     slots.iter().filter_map(move |(key, _)| {
-        let key_bytes = key.as_str_bytes()?;
-        if key_bytes.starts_with(b"\0") {
+        let ArrayKey::String(key) = key else {
+            return None;
+        };
+        if key.as_bytes().starts_with(b"\0") {
             return None;
         }
-        let name = String::from_utf8_lossy(key_bytes).into_owned();
+        let name = key.to_string_lossy();
         (!declared.iter().any(|property| property.name == name))
             .then(|| dynamic_property(class, name))
     })

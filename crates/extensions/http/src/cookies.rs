@@ -6,7 +6,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use phera_extension_api::{
-    ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
+    ArrayKey, ConstantValue, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param,
     ParamType, Registry, Value, args,
     value::{to_bool, to_int},
 };
@@ -89,12 +89,12 @@ impl Options {
         }
         let mut options = Self::default();
         for (key, value) in array.iter() {
-            let Some(key) = key.as_str_bytes() else {
+            let ArrayKey::String(key) = key else {
                 return Err(NativeError::value_error(format!(
                     "{function}(): option array cannot have numeric keys"
                 )));
             };
-            let key_bytes = key.to_ascii_lowercase();
+            let key_bytes = key.as_bytes().to_ascii_lowercase();
             match key_bytes.as_slice() {
                 b"expires" => options.expires = to_int(value, context.diagnostics())?,
                 b"path" => options.path = option_string(context, value, exception).await?,
@@ -106,7 +106,7 @@ impl Options {
                 _ => {
                     return Err(NativeError::value_error(format!(
                         "{function}(): option \"{}\" is invalid",
-                        String::from_utf8_lossy(c_string(key))
+                        String::from_utf8_lossy(c_string(key.as_bytes()))
                     )));
                 }
             }

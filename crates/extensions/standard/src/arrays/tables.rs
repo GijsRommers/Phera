@@ -25,10 +25,7 @@ const ARRAY_COUNT_VALUES: FunctionEntry = FunctionEntry::sync(
 fn array_count_values(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let mut result = PhpArray::new();
     for value in required_array(arguments, 0).values() {
-        if !matches!(
-            &*value.deref(),
-            Value::Int(_) | Value::InternedStr(_) | Value::String(_)
-        ) {
+        if !matches!(&*value.deref(), Value::Int(_) | Value::String(_)) {
             context.warning(
                 "array_count_values(): Can only count string and integer values, entry skipped"
                     .into(),

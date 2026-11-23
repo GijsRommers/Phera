@@ -104,7 +104,7 @@ fn read_secret(
     secret: &Value,
     function: &str,
 ) -> Result<Vec<u8>, NativeError> {
-    if !secret.is_string() {
+    if !matches!(secret, Value::String(_)) {
         context.deprecated(format!(
             "{function}(): Passing a secret of a type other than string is deprecated because it \
              implicitly converts to a string, potentially hiding bugs"

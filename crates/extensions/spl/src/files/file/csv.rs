@@ -129,7 +129,8 @@ pub(super) fn put_csv(
         let (stream, stored) = get(object, |file| (file.stream.clone(), file.csv))?;
         let controls = stored.arguments(context, &arguments, 1, "SplFileObject::fputcsv")?;
         let [separator, enclosure, escape] = controls.arguments();
-        let eol = args::string(&arguments, 4).map_or(Value::from("\n"), |string| string.to_value());
+        let eol = args::string(&arguments, 4)
+            .map_or(Value::from("\n"), |string| Value::String(string.clone()));
         stream_call(
             context,
             &stream,

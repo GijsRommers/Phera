@@ -55,7 +55,7 @@ impl Vm {
     fn member_answer(&self, query: MemberQuery, first: &Value, name: &Value) -> Option<bool> {
         // Only a valid UTF-8 name takes this path, for the same reason as in
         // `class_queries`.
-        let name = std::str::from_utf8(name.as_str_bytes()?).ok()?;
+        let name = std::str::from_utf8(name.as_string()?.as_bytes()).ok()?;
         let class = match first {
             Value::Object(object) => {
                 // The general handler runs PHP code for these two shapes of
@@ -70,7 +70,7 @@ impl Vm {
                 self.classes.for_object(object)
             }
             class_name => {
-                let class_name = std::str::from_utf8(class_name.as_str_bytes()?).ok()?;
+                let class_name = std::str::from_utf8(class_name.as_string()?.as_bytes()).ok()?;
                 match self.resolve_name(class_name, true) {
                     ResolvedName::Found(class) => Some(class),
                     ResolvedName::Absent => None,

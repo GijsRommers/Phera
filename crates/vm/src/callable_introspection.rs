@@ -49,7 +49,6 @@ impl Vm {
 /// Callable names describe objects by class rather than running conversion hooks.
 fn callable_shape(value: &Value) -> Option<String> {
     match &*value.deref() {
-        Value::InternedStr(name) => Some(name.to_string_lossy()),
         Value::String(name) => Some(name.to_string_lossy()),
         Value::Object(object) if object.class.name() == "Closure" => {
             let native = object.native.borrow();
@@ -62,14 +61,15 @@ fn callable_shape(value: &Value) -> Option<String> {
         Value::Array(array) if array.len() == 2 => {
             let target = array.get(&ArrayKey::Int(0))?;
             let method = array.get(&ArrayKey::Int(1))?;
-            let method = method.deref().str_ref()?.to_string_lossy();
+            let Value::String(method) = &*method.deref() else {
+                return None;
+            };
             let class = match &*target.deref() {
-                Value::InternedStr(name) => name.to_string_lossy(),
                 Value::String(name) => name.to_string_lossy(),
                 Value::Object(object) => object.class.name().to_owned(),
                 _ => return None,
             };
-            Some(format!("{class}::{method}"))
+            Some(format!("{class}::{}", method.to_string_lossy()))
         }
         _ => None,
     }

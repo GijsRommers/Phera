@@ -147,7 +147,6 @@ impl Vm {
     ) -> Result<bool, NativeError> {
         let ExtractEntry { key, value } = entry;
         let original = match &key {
-            ArrayKey::Interned(name) => name.to_string_lossy(),
             ArrayKey::String(name) => name.to_string_lossy(),
             ArrayKey::Int(number) => number.to_string(),
         };
@@ -194,10 +193,10 @@ impl ExtractSettings {
             })
             .unwrap_or(0);
         let mode = ExtractMode::parse(flags)?;
-        let prefix = arguments
-            .get(2)
-            .and_then(Value::str_ref)
-            .map_or_else(String::new, |prefix| prefix.to_string_lossy());
+        let prefix = match arguments.get(2) {
+            Some(Value::String(prefix)) => prefix.to_string_lossy(),
+            _ => String::new(),
+        };
         if matches!(
             mode,
             ExtractMode::PrefixSame

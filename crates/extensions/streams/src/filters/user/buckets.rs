@@ -178,7 +178,7 @@ fn insert(arguments: &[Value], function: &str, prepend: bool) -> NativeResult {
             "Typed property StreamBucket::$data must not be accessed before initialization",
         )
     })?;
-    let Some(data) = value.deref().to_php_string() else {
+    let Value::String(data) = &*value.deref() else {
         return Err(NativeError::error("Stream bucket data must be a string"));
     };
     let handle = bucket.get(&ArrayKey::str("bucket")).unwrap_or(Value::Null);

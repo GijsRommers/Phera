@@ -26,10 +26,10 @@ fn version_compare(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         left.map_or(b"".as_slice(), |value| value.as_bytes()),
         right.map_or(b"".as_slice(), |value| value.as_bytes()),
     );
-    let Some(operator) = arguments.get(2).and_then(Value::as_str_bytes) else {
+    let Some(Value::String(operator)) = arguments.get(2) else {
         return Ok(Value::Int(i64::from(comparison as i8)));
     };
-    Ok(Value::Bool(match operator {
+    Ok(Value::Bool(match operator.as_bytes() {
         b"<" | b"lt" => comparison.is_lt(),
         b"<=" | b"le" => comparison.is_le(),
         b">" | b"gt" => comparison.is_gt(),

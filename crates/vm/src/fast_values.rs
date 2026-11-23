@@ -49,7 +49,6 @@ fn cast_to_string(operand: Option<&Option<Value>>) -> Option<Value> {
                 .map(Value::String)
         }
         Some(Value::String(text)) => Some(Value::String(text.clone())),
-        Some(Value::InternedStr(text)) => Some(Value::InternedStr(text)),
         _ => None,
     }
 }
@@ -176,10 +175,6 @@ pub(crate) fn value_step<const GUARDED: bool>(
 fn array_set(slots: &mut [Option<Value>], array: Reg, key: Reg, src: Reg) -> ScalarStep {
     let array_key = match slots.get(key.index()) {
         Some(Some(Value::Int(integer))) => ArrayKey::Int(*integer),
-        Some(Some(Value::InternedStr(string))) => match string.numeric_key() {
-            Some(integer) => ArrayKey::Int(integer),
-            None => ArrayKey::Interned(string),
-        },
         Some(Some(Value::String(string))) => ArrayKey::from_string(string.clone()),
         _ => return ScalarStep::Fallback,
     };
@@ -233,7 +228,6 @@ fn array_key_exists<const GUARDED: bool>(
         match &*key_ref {
             Value::Int(integer) => array.get_int(*integer).is_some(),
             Value::Bool(boolean) => array.get_int(i64::from(*boolean)).is_some(),
-            Value::InternedStr(string) => array.contains_interned(string),
             Value::String(string) => array.get_str(string).is_some(),
             _ => return ScalarStep::Fallback,
         }
@@ -276,28 +270,17 @@ fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode
         FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty => true,
     };
     let key = slots.get(index.index())?.as_ref()?;
-    if !matches!(
-        key,
-        Value::Int(_) | Value::InternedStr(_) | Value::String(_)
-    ) {
+    if !matches!(key, Value::Int(_) | Value::String(_)) {
         return None;
     }
     match slots.get(base.index())? {
         Some(Value::Array(array)) => {
-            let found = match key {
-                Value::Int(integer) => array.get_int(*integer),
-                Value::InternedStr(string) => array.get_interned(string),
-                Value::String(string) => array.get_str(string),
-                _ => unreachable!("checked above"),
-            };
+            let found = array.get_value_key(key)?;
             match found {
                 Some(value) => Some(value.deref().clone()),
                 None if quiet => Some(Value::Null),
                 None => None,
             }
-        }
-        Some(Value::InternedStr(string)) if mode != FetchMode::Destructure => {
-            string_offset_element(string.as_bytes(), key, quiet)
         }
         Some(Value::String(string)) if mode != FetchMode::Destructure => {
             string_offset_element(string.as_bytes(), key, quiet)
@@ -335,12 +318,7 @@ fn string_offset_element(bytes: &[u8], key: &Value, quiet: bool) -> Option<Value
 fn is_plain(value: &Value) -> bool {
     matches!(
         value,
-        Value::Null
-            | Value::Bool(_)
-            | Value::Int(_)
-            | Value::Float(_)
-            | Value::InternedStr(_)
-            | Value::String(_)
+        Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_)
     )
 }
 

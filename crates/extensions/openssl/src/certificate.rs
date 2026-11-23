@@ -90,14 +90,6 @@ pub(crate) fn public_key(certificate: &Certificate) -> Option<Public> {
 async fn load(context: &mut dyn Context, value: &Value) -> Option<Rc<Certificate>> {
     match value {
         Value::Object(object) => stored(object),
-        Value::InternedStr(string) => {
-            let bytes = key_input::read_key_file(context, string.as_bytes()).await?;
-            let certificate = parse(&bytes);
-            if certificate.is_none() {
-                errors::push(context, "error:0480006C:PEM routines::no start line");
-            }
-            certificate.map(Rc::new)
-        }
         Value::String(string) => {
             let bytes = key_input::read_key_file(context, string.as_bytes()).await?;
             let certificate = parse(&bytes);

@@ -5,8 +5,8 @@
 //! and constant array keys are interned once per process (up to a fixed memory
 //! cap, matching Zend's `opcache.interned_strings_buffer`). Because every
 //! `&'static InternedStr` comes from the single deduplicating table, pointer
-//! equality (`std::ptr::eq`) is exact byte equality, cloning and dropping
-//! `Value::InternedStr` and `ArrayKey::Interned` do no reference counting, and
+//! equality (`std::ptr::eq`) is exact byte equality. Cloning and dropping an
+//! interned `PhpString` does no reference counting, and
 //! array lookups reuse the pre-computed hash and numeric-key classification.
 
 use std::cmp::Ordering;
@@ -17,9 +17,7 @@ use std::sync::{Mutex, OnceLock};
 
 use hashbrown::HashTable;
 
-use crate::array::{ArrayKey, hash_str_bytes, numeric_string_key};
-use crate::string::PhpString;
-use crate::value::Value;
+use crate::array::{hash_str_bytes, numeric_string_key};
 
 /// Maximum number of unique strings held in the process-wide interner.
 const MAX_INTERNED_STRINGS: usize = 131_072;
@@ -94,27 +92,6 @@ impl InternedStr {
     pub fn is_truthy(&self) -> bool {
         self.truthy
     }
-
-    /// Normalises this string into a PHP array key with no digit scan or
-    /// allocation.
-    #[inline(always)]
-    pub fn to_array_key(&'static self) -> ArrayKey {
-        if self.is_numeric {
-            ArrayKey::Int(self.numeric)
-        } else {
-            ArrayKey::Interned(self)
-        }
-    }
-
-    /// Materialises an owned `PhpString` with the same bytes (only for callers
-    /// that require a mutable/owned `PhpString`).
-    pub fn to_php_string(&self) -> PhpString {
-        PhpString::from(self.bytes)
-    }
-
-    pub fn to_string_lossy(&self) -> String {
-        String::from_utf8_lossy(self.bytes).into_owned()
-    }
 }
 
 impl PartialEq for InternedStr {
@@ -176,138 +153,6 @@ impl fmt::Debug for InternedStr {
 impl fmt::Display for InternedStr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&String::from_utf8_lossy(self.bytes))
-    }
-}
-
-/// Borrowed view of either an interned or dynamic PHP string.
-#[derive(Clone, Copy)]
-pub enum StrRef<'a> {
-    Interned(&'static InternedStr),
-    Dynamic(&'a PhpString),
-}
-
-impl<'a> StrRef<'a> {
-    #[inline(always)]
-    pub fn as_bytes(self) -> &'a [u8] {
-        match self {
-            Self::Interned(s) => s.as_bytes(),
-            Self::Dynamic(s) => s.as_bytes(),
-        }
-    }
-
-    #[inline(always)]
-    pub fn len(self) -> usize {
-        self.as_bytes().len()
-    }
-
-    #[inline(always)]
-    pub fn is_empty(self) -> bool {
-        self.as_bytes().is_empty()
-    }
-
-    pub fn to_string_lossy(self) -> String {
-        String::from_utf8_lossy(self.as_bytes()).into_owned()
-    }
-
-    pub fn to_php_string(self) -> PhpString {
-        match self {
-            Self::Interned(s) => s.to_php_string(),
-            Self::Dynamic(s) => s.clone(),
-        }
-    }
-
-    #[inline]
-    pub fn to_value(self) -> Value {
-        match self {
-            Self::Interned(s) => Value::InternedStr(s),
-            Self::Dynamic(s) => Value::String(s.clone()),
-        }
-    }
-
-    #[inline]
-    pub fn to_array_key(self) -> ArrayKey {
-        match self {
-            Self::Interned(s) => s.to_array_key(),
-            Self::Dynamic(s) => ArrayKey::from_string(s.clone()),
-        }
-    }
-}
-
-impl Deref for StrRef<'_> {
-    type Target = [u8];
-
-    #[inline(always)]
-    fn deref(&self) -> &[u8] {
-        self.as_bytes()
-    }
-}
-
-impl AsRef<[u8]> for StrRef<'_> {
-    #[inline(always)]
-    fn as_ref(&self) -> &[u8] {
-        self.as_bytes()
-    }
-}
-
-impl PartialEq for StrRef<'_> {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        match (*self, *other) {
-            (Self::Interned(a), Self::Interned(b)) => std::ptr::eq(a, b),
-            (a, b) => a.as_bytes() == b.as_bytes(),
-        }
-    }
-}
-
-impl Eq for StrRef<'_> {}
-
-impl PartialEq<&[u8]> for StrRef<'_> {
-    #[inline]
-    fn eq(&self, other: &&[u8]) -> bool {
-        self.as_bytes() == *other
-    }
-}
-
-impl PartialEq<[u8]> for StrRef<'_> {
-    #[inline]
-    fn eq(&self, other: &[u8]) -> bool {
-        self.as_bytes() == other
-    }
-}
-
-impl PartialEq<&str> for StrRef<'_> {
-    #[inline]
-    fn eq(&self, other: &&str) -> bool {
-        self.as_bytes() == other.as_bytes()
-    }
-}
-
-impl PartialOrd for StrRef<'_> {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for StrRef<'_> {
-    #[inline]
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (*self, *other) {
-            (Self::Interned(a), Self::Interned(b)) if std::ptr::eq(a, b) => Ordering::Equal,
-            (a, b) => a.as_bytes().cmp(b.as_bytes()),
-        }
-    }
-}
-
-impl fmt::Debug for StrRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", String::from_utf8_lossy(self.as_bytes()))
-    }
-}
-
-impl fmt::Display for StrRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&String::from_utf8_lossy(self.as_bytes()))
     }
 }
 
@@ -384,12 +229,10 @@ mod tests {
         let zero = InternedStr::try_intern(b"0").unwrap();
         assert_eq!(zero.numeric_key(), Some(0));
         assert!(!zero.is_truthy());
-        assert_eq!(zero.to_array_key(), ArrayKey::Int(0));
 
         let leading = InternedStr::try_intern(b"05").unwrap();
         assert_eq!(leading.numeric_key(), None);
         assert!(leading.is_truthy());
-        assert_eq!(leading.to_array_key(), ArrayKey::Interned(leading));
 
         let empty = InternedStr::try_intern(b"").unwrap();
         assert!(std::ptr::eq(empty, InternedStr::empty()));

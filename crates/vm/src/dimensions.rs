@@ -67,7 +67,6 @@ impl Vm {
                     let name = match step {
                         Step::Property(name) => self.name(name)?.to_owned(),
                         Step::DynamicProperty(register) => match self.get(register) {
-                            Value::InternedStr(name) => name.to_string_lossy(),
                             Value::String(name) => name.to_string_lossy(),
                             Value::Int(number) => number.to_string(),
                             _ => return Ok(None),
@@ -237,10 +236,7 @@ impl Vm {
     ) -> NativeResult {
         match step {
             Step::Index(register) => {
-                if matches!(
-                    value,
-                    Value::Array(_) | Value::InternedStr(_) | Value::String(_)
-                ) {
+                if matches!(value, Value::Array(_) | Value::String(_)) {
                     let key = self.read_index_key(register, missing)?;
                     self.read_path_index(value, &key, missing)
                 } else {

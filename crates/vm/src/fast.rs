@@ -48,7 +48,6 @@ pub(crate) fn duplicate(value: &Value) -> Value {
         Value::Bool(boolean) => Value::Bool(*boolean),
         Value::Int(integer) => Value::Int(*integer),
         Value::Float(float) => Value::Float(*float),
-        Value::InternedStr(string) => Value::InternedStr(string),
         Value::String(string) => Value::String(string.clone()),
         Value::Array(array) => Value::Array(array.clone()),
         Value::Object(object) => Value::Object(object.clone()),
@@ -323,9 +322,6 @@ pub(crate) fn scalar_step<const GUARDED: bool, S: crate::calls::registers::Slots
                 (CastKind::Float, Some(Some(Value::Float(value)))) => {
                     let value = *value;
                     store::<GUARDED, _>(slots, dst, Value::Float(value))
-                }
-                (CastKind::String, Some(Some(Value::InternedStr(value)))) => {
-                    store::<GUARDED, _>(slots, dst, Value::InternedStr(value))
                 }
                 (CastKind::String, Some(Some(Value::String(value)))) => {
                     let value = Value::String(value.clone());

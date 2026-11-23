@@ -199,10 +199,6 @@ impl Machine<'_> {
     fn dynamic_prop_name(&self, position: Position, name_reg: Reg) -> Option<(&str, ArrayKey)> {
         let slot = position.frame.base() + name_reg.index();
         match self.registers.window(slot, 1) {
-            [Some(Value::InternedStr(s))] => {
-                let name = std::str::from_utf8(s.as_bytes()).ok()?;
-                (!name.starts_with('\0')).then_some((name, ArrayKey::Interned(s)))
-            }
             [Some(Value::String(s))] => {
                 let name = std::str::from_utf8(s.as_bytes()).ok()?;
                 (!name.starts_with('\0')).then(|| (name, ArrayKey::String(s.clone())))

@@ -133,7 +133,7 @@ impl Vm {
                 [Some(name)] => {
                     // Only a valid UTF-8 name takes this path; the general
                     // handler lossy-converts other bytes first.
-                    let name = std::str::from_utf8(name.as_str_bytes()?).ok()?;
+                    let name = std::str::from_utf8(name.as_string()?.as_bytes()).ok()?;
                     Some(self.exists(name.strip_prefix('\\').unwrap_or(name)))
                 }
                 _ => None,
@@ -186,7 +186,7 @@ impl Vm {
     fn exists_answer(&self, kind: ExistsKind, name: &Value, autoload: bool) -> Option<bool> {
         // The general handler lossy-converts bytes that are not UTF-8 before
         // looking the name up; only a valid name takes this path.
-        let name = std::str::from_utf8(name.as_str_bytes()?).ok()?;
+        let name = std::str::from_utf8(name.as_string()?.as_bytes()).ok()?;
         match self.resolve_name(name, autoload) {
             ResolvedName::Found(class) => Some(kind.answers(class.kind)),
             ResolvedName::Absent => Some(false),
@@ -212,7 +212,7 @@ impl Vm {
                 let class = match first {
                     Value::Object(object) => self.classes.for_object(object),
                     name => {
-                        let name = std::str::from_utf8(name.as_str_bytes()?).ok()?;
+                        let name = std::str::from_utf8(name.as_string()?.as_bytes()).ok()?;
                         match self.resolve_name(name, true) {
                             ResolvedName::Found(class) => Some(class),
                             // A name that resolves to no class makes the general

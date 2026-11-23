@@ -55,7 +55,6 @@ async fn read_class_list(
     for value in values.values() {
         let value = value.try_deref()?.clone();
         let name = match value {
-            Value::InternedStr(name) => name.to_php_string(),
             Value::String(name) => name,
             Value::Object(_) => context.stringify(&value).await?,
             _ => {

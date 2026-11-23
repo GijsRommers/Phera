@@ -266,9 +266,6 @@ fn option_number(value: &Value) -> i64 {
         Value::Int(number) => *number,
         Value::Bool(flag) => i64::from(*flag),
         Value::Float(float) => *float as i64,
-        Value::InternedStr(string) => String::from_utf8_lossy(string.as_bytes())
-            .parse()
-            .unwrap_or(0),
         Value::String(string) => String::from_utf8_lossy(string.as_bytes())
             .parse()
             .unwrap_or(0),

@@ -44,7 +44,6 @@ impl Interface {
             Value::Int(index) => u32::try_from(*index)
                 .map(Self::Index)
                 .map_err(|_| invalid_interface()),
-            Value::InternedStr(name) => Ok(Self::Name(name.as_bytes().to_vec())),
             Value::String(name) => Ok(Self::Name(name.as_bytes().to_vec())),
             _ => Err(invalid_interface()),
         }
@@ -129,8 +128,7 @@ pub(super) async fn membership(
             "{function}(): Argument #4 ($value) must have key \"group\""
         ))
     })?;
-    let group = group.deref();
-    let Some(group) = group.str_ref() else {
+    let Value::String(group) = &*group.deref() else {
         return Err(NativeError::type_error("Multicast group must be a string"));
     };
     let Ok(address) = group.to_string_lossy().parse::<IpAddr>() else {

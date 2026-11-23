@@ -100,18 +100,9 @@ impl Machine<'_> {
             };
             let needle_val = needle_slot.deref();
             match &*needle_val {
-                Value::InternedStr(needle) => values.values().any(|value| match value {
-                    Value::InternedStr(other) => {
-                        std::ptr::eq(*other, *needle) || other.as_bytes() == needle.as_bytes()
-                    }
-                    Value::String(other) => other.as_bytes() == needle.as_bytes(),
-                    _ => false,
-                }),
-                Value::String(needle) => values.values().any(|value| {
-                    value
-                        .as_str_bytes()
-                        .is_some_and(|other| other == needle.as_bytes())
-                }),
+                Value::String(needle) => values
+                    .values()
+                    .any(|value| matches!(value, Value::String(other) if other == needle)),
                 Value::Int(needle) if strict => values
                     .values()
                     .any(|value| matches!(value, Value::Int(value) if value == needle)),
@@ -130,7 +121,6 @@ impl Machine<'_> {
 #[inline(always)]
 fn as_str_bytes(slot: &Option<Value>) -> Option<&[u8]> {
     match slot.as_ref()? {
-        Value::InternedStr(s) => Some(s.as_bytes()),
         Value::String(s) => Some(s.as_bytes()),
         _ => None,
     }
@@ -228,14 +218,9 @@ fn eval_pure_native(pure: PureNative, values: &[Option<Value>]) -> Option<Value>
                 return None;
             }
             let found = match needle {
-                Value::InternedStr(n) => haystack.values().any(|v| match &*v.deref() {
-                    Value::InternedStr(o) => std::ptr::eq(*o, *n) || o.as_bytes() == n.as_bytes(),
-                    Value::String(o) => o.as_bytes() == n.as_bytes(),
-                    _ => false,
-                }),
                 Value::String(n) => haystack
                     .values()
-                    .any(|v| v.deref().as_str_bytes() == Some(n.as_bytes())),
+                    .any(|v| matches!(&*v.deref(), Value::String(other) if other == n)),
                 Value::Int(n) => haystack
                     .values()
                     .any(|v| matches!(&*v.deref(), Value::Int(o) if o == n)),
@@ -255,7 +240,6 @@ fn eval_pure_native(pure: PureNative, values: &[Option<Value>]) -> Option<Value>
             let found = match key {
                 Value::Int(k) => array.get_int(*k).is_some(),
                 Value::Bool(k) => array.get_int(i64::from(*k)).is_some(),
-                Value::InternedStr(k) => array.contains_interned(k),
                 Value::String(k) => array.get_str(k).is_some(),
                 _ => return None,
             };
@@ -275,7 +259,6 @@ fn eval_pure_native(pure: PureNative, values: &[Option<Value>]) -> Option<Value>
                     out.extend_from_slice(glue);
                 }
                 match &*value.deref() {
-                    Value::InternedStr(s) => out.extend_from_slice(s.as_bytes()),
                     Value::String(s) => out.extend_from_slice(s.as_bytes()),
                     Value::Int(n) => {
                         use std::io::Write;
@@ -377,7 +360,6 @@ fn eval_trim(values: &[Option<Value>], left: bool, right: bool) -> Option<Value>
         _ => return None,
     };
     let original = match original_val {
-        Value::InternedStr(s) => s.as_bytes(),
         Value::String(s) => s.as_bytes(),
         _ => return None,
     };

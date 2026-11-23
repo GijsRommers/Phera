@@ -238,7 +238,6 @@ fn construct(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value
         Some(Value::Object(object)) if object.class.name() == "Closure" => {
             FunctionTarget::Closure(Rc::downgrade(object))
         }
-        Some(Value::InternedStr(name)) => FunctionTarget::Named(name.to_string_lossy()),
         Some(Value::String(name)) => FunctionTarget::Named(name.to_string_lossy()),
         other => {
             return Err(phera_extension_api::NativeError::type_error(format!(
@@ -419,11 +418,8 @@ fn direct_has_return_type(object: &Object, arguments: &[Option<Value>]) -> Optio
 fn direct_no_attributes(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
     let plain = matches!(
         arguments,
-        [] | [Some(Value::InternedStr(_) | Value::String(_) | Value::Null)]
-            | [
-                Some(Value::InternedStr(_) | Value::String(_) | Value::Null),
-                Some(Value::Int(0))
-            ]
+        [] | [Some(Value::String(_) | Value::Null)]
+            | [Some(Value::String(_) | Value::Null), Some(Value::Int(0))]
     );
     if !plain {
         return None;

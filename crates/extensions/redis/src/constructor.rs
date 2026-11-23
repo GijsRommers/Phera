@@ -1,7 +1,7 @@
 //! phpredis 6 constructors configure a lazy socket; getters or commands open it later.
 use crate::connection::{Session, number, string};
 use crate::pool::Endpoint;
-use phera_extension_api::{Context, NativeError, NativeResult, Value};
+use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, Value};
 
 pub fn construct(c: &mut dyn Context, s: &Session, args: &[Value]) -> NativeResult {
     let mut endpoint = Endpoint {
@@ -12,13 +12,13 @@ pub fn construct(c: &mut dyn Context, s: &Session, args: &[Value]) -> NativeResu
     };
     if let Some(options) = crate::commands::array(args.first()) {
         for (key, value) in options.iter() {
-            let Some(key) = key.as_str_bytes() else {
+            let ArrayKey::String(key) = key else {
                 continue;
             };
-            let name = String::from_utf8_lossy(key);
+            let name = key.to_string_lossy();
             match name.to_lowercase().as_str() {
                 "host" => {
-                    if !value.is_string() {
+                    if !matches!(value, Value::String(_)) {
                         return Err(invalid("host"));
                     }
                     endpoint.host = string(value);
@@ -45,7 +45,7 @@ pub fn construct(c: &mut dyn Context, s: &Session, args: &[Value]) -> NativeResu
                     }
                 }
                 "persistent" => {
-                    if let Some(id) = value.str_ref() {
+                    if let Value::String(id) = value {
                         endpoint.persistent_id = Some(id.to_string_lossy());
                     }
                 }
@@ -59,10 +59,7 @@ pub fn construct(c: &mut dyn Context, s: &Session, args: &[Value]) -> NativeResu
                     s.database.set(*db);
                 }
                 "auth" => {
-                    if !matches!(
-                        value,
-                        Value::Array(_) | Value::InternedStr(_) | Value::String(_)
-                    ) {
+                    if !matches!(value, Value::Array(_) | Value::String(_)) {
                         return Err(invalid("auth credentials"));
                     }
                     *s.auth.borrow_mut() = crate::auth::credentials(c, value, "__construct")?

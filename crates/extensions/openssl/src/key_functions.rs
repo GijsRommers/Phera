@@ -133,7 +133,7 @@ impl GenerateKey {
                 return None;
             }
             3 => {
-                let Some(curve) = value("curve_name").and_then(|v| v.to_php_string()) else {
+                let Some(Value::String(curve)) = value("curve_name") else {
                     context.warning(
                         concat!(
                             "openssl_pkey_new(): Missing configuration value: ",

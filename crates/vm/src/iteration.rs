@@ -246,7 +246,6 @@ impl Vm {
         // is assigned through a PHP reference.
         let element_key = match element_key {
             ArrayKey::Int(integer) => Value::Int(integer),
-            ArrayKey::Interned(string) => Value::InternedStr(string),
             ArrayKey::String(string) => Value::String(string.clone()),
         };
         let element = element.deref().clone();
@@ -270,7 +269,6 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let element_key = match element_key {
             ArrayKey::Int(i) => Value::Int(i),
-            ArrayKey::Interned(string) => Value::InternedStr(string),
             ArrayKey::String(string) => Value::String(string),
         };
         let Some(position) = source else {
@@ -385,7 +383,6 @@ pub(crate) fn keyed_step(
         Some((element_key, value)) => {
             let element_key = match element_key {
                 ArrayKey::Int(integer) => Value::Int(integer),
-                ArrayKey::Interned(string) => Value::InternedStr(string),
                 ArrayKey::String(string) => Value::String(string.clone()),
             };
             let value = crate::fast::duplicate(&value.deref());

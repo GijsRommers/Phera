@@ -62,9 +62,6 @@ impl<'a> Formatter<'a> {
             };
             if specifier.conversion == b's' {
                 match value {
-                    Value::InternedStr(string) => {
-                        specifier.append_string(result, string.as_bytes())?
-                    }
                     Value::String(string) => specifier.append_string(result, string.as_bytes())?,
                     _ if value.is_object() => return Ok(Some((specifier, value))),
                     _ => {

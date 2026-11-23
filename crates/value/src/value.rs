@@ -6,7 +6,6 @@ use std::rc::Rc;
 
 use crate::array::{ArrayKey, PhpArray};
 use crate::error::OpError;
-use crate::intern::{InternedStr, StrRef};
 use crate::object::{Object, Resource};
 use crate::string::PhpString;
 
@@ -17,9 +16,6 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Float(f64),
-    /// Immortal deduplicated string: `Copy`, zero `Rc`, zero `Drop`, and
-    /// pointer equality (`std::ptr::eq`) for exact byte equality.
-    InternedStr(&'static InternedStr),
     String(PhpString),
     /// Copy-on-write through `Rc::make_mut`.
     Array(Rc<PhpArray>),
@@ -31,9 +27,6 @@ pub enum Value {
     /// `Reference` (enforced where references are created).
     Reference(Rc<RefCell<Value>>),
 }
-
-const _: () = assert!(std::mem::size_of::<Value>() == 16);
-const _: () = assert!(std::mem::size_of::<Option<Value>>() == 16);
 
 /// What [`Value::deref`] hands out: either the value itself, or the guarded
 /// contents of a `Reference` cell.
@@ -53,42 +46,16 @@ impl std::ops::Deref for ValueRef<'_> {
 }
 
 impl Value {
-    /// Constructs an interned string value when `bytes` fits within the
-    /// process-wide interner cap, falling back to an owned `PhpString`.
-    #[inline]
+    /// Materialize a linked literal or name, such as `'status'`.
     pub fn interned(bytes: &[u8]) -> Self {
-        match InternedStr::try_intern(bytes) {
-            Some(interned) => Self::InternedStr(interned),
-            None => Self::String(PhpString::from(bytes)),
-        }
+        Self::String(PhpString::intern_literal(bytes))
     }
 
-    /// Borrows either an interned or dynamic PHP string without cloning.
-    #[inline(always)]
-    pub fn str_ref(&self) -> Option<StrRef<'_>> {
-        match self {
-            Self::InternedStr(s) => Some(StrRef::Interned(s)),
-            Self::String(s) => Some(StrRef::Dynamic(s)),
-            _ => None,
-        }
-    }
-
-    /// Borrows the byte slice of a string value without cloning.
-    #[inline(always)]
-    pub fn as_str_bytes(&self) -> Option<&[u8]> {
-        match self {
-            Self::InternedStr(s) => Some(s.as_bytes()),
-            Self::String(s) => Some(s.as_bytes()),
-            _ => None,
-        }
-    }
-
-    /// Converts a string value into an owned `PhpString`.
+    /// Borrow the string handle of a value such as `'name'`.
     #[inline]
-    pub fn to_php_string(&self) -> Option<PhpString> {
+    pub fn as_string(&self) -> Option<&PhpString> {
         match self {
-            Self::InternedStr(s) => Some(s.to_php_string()),
-            Self::String(s) => Some(s.clone()),
+            Self::String(string) => Some(string),
             _ => None,
         }
     }
@@ -134,7 +101,7 @@ impl Value {
             Value::Bool(_) => "bool".into(),
             Value::Int(_) => "int".into(),
             Value::Float(_) => "float".into(),
-            Value::InternedStr(_) | Value::String(_) => "string".into(),
+            Value::String(_) => "string".into(),
             Value::Array(_) => "array".into(),
             Value::Object(o) => o.class.name().to_string(),
             Value::Resource(_) => "resource".into(),
@@ -151,7 +118,7 @@ impl Value {
             Value::Bool(_) => "boolean",
             Value::Int(_) => "integer",
             Value::Float(_) => "double",
-            Value::InternedStr(_) | Value::String(_) => "string",
+            Value::String(_) => "string",
             Value::Array(_) => "array",
             Value::Object(_) => "object",
             Value::Resource(r) => {
@@ -178,7 +145,7 @@ impl Value {
         matches!(&*self.deref(), Value::Float(_))
     }
     pub fn is_string(&self) -> bool {
-        matches!(&*self.deref(), Value::InternedStr(_) | Value::String(_))
+        matches!(&*self.deref(), Value::String(_))
     }
     pub fn is_array(&self) -> bool {
         matches!(&*self.deref(), Value::Array(_))
@@ -208,7 +175,6 @@ impl fmt::Debug for Value {
             Value::Bool(b) => write!(f, "Bool({b})"),
             Value::Int(i) => write!(f, "Int({i})"),
             Value::Float(x) => write!(f, "Float({x:?})"),
-            Value::InternedStr(s) => write!(f, "String({s:?})"),
             Value::String(s) => write!(f, "String({s:?})"),
             Value::Array(a) => write!(f, "Array({a:?})"),
             Value::Object(o) => write!(f, "{o:?}"),
@@ -267,7 +233,6 @@ impl From<ArrayKey> for Value {
     fn from(k: ArrayKey) -> Self {
         match k {
             ArrayKey::Int(i) => Value::Int(i),
-            ArrayKey::Interned(s) => Value::InternedStr(s),
             ArrayKey::String(s) => Value::String(s),
         }
     }

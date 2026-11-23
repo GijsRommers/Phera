@@ -70,15 +70,14 @@ impl Vm {
                 "get_class"
             }
             BuiltinUnary::Defined => {
-                let name = match &value {
-                    Value::InternedStr(name) => name.to_string_lossy(),
-                    Value::String(name) => name.to_string_lossy(),
+                let name = match value {
+                    Value::String(name) => name,
                     Value::Float(_) => {
                         phera_value::to_php_string(&value, &mut phera_value::NoDiagnostics)?
-                            .to_string_lossy()
                     }
                     _ => return Err(internal_error!("defined builtin literal")),
                 };
+                let name = name.to_string_lossy();
                 let exists = ["true", "false", "null"]
                     .iter()
                     .any(|special| special.eq_ignore_ascii_case(&name))
@@ -107,15 +106,14 @@ impl Vm {
         let key = self.read_local(key);
         let array = self.read_local(array);
         if let Value::Array(array) = &array {
-            let found = match &key {
+            let exists = match &key {
                 Value::Int(key) => Some(array.contains_int(*key)),
                 Value::Bool(key) => Some(array.contains_int(i64::from(*key))),
-                Value::InternedStr(key) => Some(array.contains_interned(key)),
                 Value::String(key) => Some(array.contains_str(key)),
                 _ => None,
             };
-            if let Some(found) = found {
-                self.set(destination, Value::Bool(found));
+            if let Some(exists) = exists {
+                self.set(destination, Value::Bool(exists));
                 return Ok(None);
             }
         }
@@ -144,16 +142,9 @@ impl Vm {
             return Err(internal_error!("literal search haystack"));
         };
         let found = match &needle {
-            Value::InternedStr(needle) => values.values().any(|value| match value {
-                Value::InternedStr(other) => std::ptr::eq(*other, *needle),
-                Value::String(other) => other.as_bytes() == needle.as_bytes(),
-                _ => false,
-            }),
-            Value::String(needle) => values.values().any(|value| {
-                value
-                    .as_str_bytes()
-                    .is_some_and(|bytes| bytes == needle.as_bytes())
-            }),
+            Value::String(needle) => values
+                .values()
+                .any(|value| matches!(value, Value::String(value) if value == needle)),
             Value::Int(needle) if strict => values
                 .values()
                 .any(|value| matches!(value, Value::Int(value) if value == needle)),
@@ -195,7 +186,6 @@ pub(crate) fn builtin_value(operation: BuiltinUnary, value: &Value) -> Option<Va
     use BuiltinUnary as B;
     match (operation, value) {
         (_, Value::Reference(_)) => None,
-        (B::Strlen, Value::InternedStr(string)) => Some(Value::Int(string.len() as i64)),
         (B::Strlen, Value::String(string)) => Some(Value::Int(string.len() as i64)),
         (B::Count | B::Sizeof, Value::Array(array)) => Some(Value::Int(array.len() as i64)),
         (B::TypeCheck(mask), value) => {
@@ -215,13 +205,6 @@ pub(crate) fn builtin_value(operation: BuiltinUnary, value: &Value) -> Option<Va
                 string.clone()
             },
         )),
-        (B::StrToLower, Value::InternedStr(string)) => {
-            Some(if string.as_bytes().iter().any(u8::is_ascii_uppercase) {
-                Value::String(string.as_bytes().to_ascii_lowercase().into())
-            } else {
-                Value::InternedStr(string)
-            })
-        }
         _ => None,
     }
 }

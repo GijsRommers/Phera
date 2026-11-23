@@ -229,10 +229,6 @@ fn position(arguments: &[Value], index: usize) -> i64 {
             let offset = match &*value {
                 Value::Int(value) => *value,
                 Value::Float(value) => *value as i64,
-                Value::InternedStr(value) => std::str::from_utf8(value.as_bytes())
-                    .ok()
-                    .and_then(|value| value.parse::<i64>().ok())
-                    .unwrap_or(0),
                 Value::String(value) => std::str::from_utf8(value.as_bytes())
                     .ok()
                     .and_then(|value| value.parse::<i64>().ok())

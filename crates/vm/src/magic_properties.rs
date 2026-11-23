@@ -213,7 +213,6 @@ impl Vm {
         value: Option<Value>,
     ) -> NativeResult {
         let name = match &key {
-            ArrayKey::Interned(name) => Value::InternedStr(name),
             ArrayKey::String(name) => Value::String(name.clone()),
             ArrayKey::Int(index) => Value::from(index.to_string()),
         };

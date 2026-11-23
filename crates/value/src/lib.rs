@@ -34,7 +34,7 @@ pub use float_format::{
 };
 pub use fork::{Fork, NativeFork, Refusal};
 pub use integer_text::{integer_string, push_integer};
-pub use intern::{InternedStr, StrRef};
+pub use intern::InternedStr;
 pub use lazy_object::{LazyObject, LazyStrategy};
 pub use object::{
     ClassHandle, Object, ObjectCast, ObjectIds, PropertyScope, Resource, class_display_name,

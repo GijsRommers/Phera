@@ -71,8 +71,13 @@ pub fn dispatch<'a>(
             }
             "_unserialize" | "_unpack" => {
                 let options = session.options.borrow().clone();
-                if let Some(value) = a[0].as_str_bytes() {
-                    return crate::options::deserialize(context, &options, value.to_vec()).await;
+                if let Value::String(value) = &a[0] {
+                    return crate::options::deserialize(
+                        context,
+                        &options,
+                        value.as_bytes().to_vec(),
+                    )
+                    .await;
                 }
             }
             "auth" | "select" => {
@@ -211,8 +216,8 @@ fn local(
         )),
         "_prefix" => {
             let mut bytes = session.options.borrow().prefix.clone();
-            if let Some(value) = a[0].as_str_bytes() {
-                bytes.extend_from_slice(value);
+            if let Value::String(value) = &a[0] {
+                bytes.extend_from_slice(value.as_bytes());
             }
             Ok(Value::from(bytes))
         }

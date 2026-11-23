@@ -98,7 +98,7 @@ fn construct(
             )
         })?;
         let regex = Regex {
-            pattern: pattern.to_php_string(),
+            pattern: pattern.clone(),
             mode,
             flags: args::int(&arguments, 3).unwrap_or_default(),
             preg_flags: args::int(&arguments, 4).unwrap_or_default(),

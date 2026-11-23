@@ -8,8 +8,7 @@ use crate::Vm;
 impl Vm {
     /// The resolver's Error text and callback APIs' reason text differ in PHP itself.
     pub(crate) fn callback_reason(&self, callable: &Value, error: NativeError) -> String {
-        let deref = callable.deref();
-        let Some(name) = deref.str_ref() else {
+        let Value::String(name) = &*callable.deref() else {
             return callback_detail(error);
         };
         if !name.as_bytes().contains(&b':') {

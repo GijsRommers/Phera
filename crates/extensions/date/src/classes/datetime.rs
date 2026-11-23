@@ -13,11 +13,10 @@ pub(super) fn direct_format(
     object: &phera_extension_api::Object,
     arguments: &[Option<Value>],
 ) -> Option<Value> {
-    let [Some(format)] = arguments else {
+    let [Some(Value::String(format))] = arguments else {
         return None;
     };
-    let format = format.as_str_bytes()?;
-    format_object(object, format).ok()
+    format_object(object, format.as_bytes()).ok()
 }
 
 fn format_object(object: &phera_extension_api::Object, format: &[u8]) -> NativeResult {

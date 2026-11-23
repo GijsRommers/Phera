@@ -86,10 +86,6 @@ impl Machine<'_> {
         }
         let linked = match &*target {
             Value::Object(object) => object.class.as_any().downcast_ref::<Class>()?,
-            Value::InternedStr(class_name) => {
-                let class_name = std::str::from_utf8(class_name.as_bytes()).ok()?;
-                self.classes.get_ref(class_name)?.as_ref()
-            }
             Value::String(class_name) => {
                 let class_name = std::str::from_utf8(class_name.as_bytes()).ok()?;
                 self.classes.get_ref(class_name)?.as_ref()

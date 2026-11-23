@@ -51,7 +51,7 @@ impl Vm {
         key: ArrayKey,
     ) -> Option<ArrayKey> {
         let class = self.classes.for_object(object)?;
-        let Some(spelling) = key.as_str_bytes() else {
+        let ArrayKey::String(spelling) = &key else {
             return Some(key);
         };
         let declarations = DeclaredProperties::new(self, &class);
@@ -61,9 +61,11 @@ impl Vm {
         if let Some(property) = declarations.key(&key) {
             return self.unserialized_storage_key(property);
         }
-        let (name, scope) = split_property_key(spelling);
-        if spelling.first() == Some(&0) && (scope == PropertyScope::Public || name.is_empty()) {
-            let message = if spelling.get(1) == Some(&0) {
+        let (name, scope) = split_property_key(spelling.as_bytes());
+        if spelling.as_bytes().first() == Some(&0)
+            && (scope == PropertyScope::Public || name.is_empty())
+        {
+            let message = if spelling.as_bytes().get(1) == Some(&0) {
                 "Illegal member variable name"
             } else {
                 "Corrupt member variable name"
@@ -116,10 +118,10 @@ impl Vm {
         {
             return Ok(());
         }
-        let Some(key) = key.as_str_bytes() else {
+        let ArrayKey::String(key) = key else {
             return Ok(());
         };
-        let (name, _) = split_property_key(key);
+        let (name, _) = split_property_key(key.as_bytes());
         let name = String::from_utf8_lossy(name);
         if class.is_readonly {
             return Err(NativeError::error(format!(

@@ -71,8 +71,8 @@ fn set(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nati
         } else {
             [
                 args::int(&arguments, 0).map(|value| value.to_string().into()),
-                args::string(&arguments, 1).map(|s| s.to_php_string()),
-                args::string(&arguments, 2).map(|s| s.to_php_string()),
+                args::string(&arguments, 1).cloned(),
+                args::string(&arguments, 2).cloned(),
                 args::bool(&arguments, 3).map(bool_text),
                 None,
                 args::bool(&arguments, 4).map(bool_text),
@@ -108,10 +108,11 @@ async fn read_options(
     }
     let mut values = [const { None }; 7];
     for (key, value) in options.iter() {
-        let Some(bytes) = key.as_str_bytes() else {
+        let ArrayKey::String(key) = key else {
             context.warning(format!("{LABEL} cannot contain numeric keys"));
             continue;
         };
+        let bytes = key.as_bytes();
         let Some(index) = OPTIONS
             .iter()
             .position(|(name, _)| bytes.eq_ignore_ascii_case(name.as_bytes()))

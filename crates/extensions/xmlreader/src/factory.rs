@@ -149,7 +149,7 @@ pub fn from_stream(
         let encoding = encoding(&args, "fromStream")?;
         let uri = args::string(&args, 3).map_or_else(
             || default_uri(context),
-            phera_extension_api::StrRef::to_string_lossy,
+            phera_extension_api::PhpString::to_string_lossy,
         );
         install(
             context,
@@ -227,7 +227,7 @@ fn nonempty<'a>(
 }
 
 fn encoding(args: &[Value], method: &str) -> Result<Option<String>, NativeError> {
-    let name = args::string(args, 1).map(phera_extension_api::StrRef::to_string_lossy);
+    let name = args::string(args, 1).map(phera_extension_api::PhpString::to_string_lossy);
     if name.as_ref().is_some_and(|name| name.contains('\0')) {
         return Err(NativeError::value_error(format!(
             "XMLReader::{method}(): Argument #2 ($encoding) must not contain any null bytes"

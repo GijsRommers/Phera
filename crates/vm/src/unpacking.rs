@@ -75,9 +75,6 @@ impl Vm {
 
     pub(crate) fn unpack_index(&mut self, key: &ArrayKey) -> Result<usize, NativeError> {
         match key {
-            ArrayKey::Interned(name) => {
-                self.call_stack.top_details_mut()?.named = Some(name.to_php_string())
-            }
             ArrayKey::String(name) => self.call_stack.top_details_mut()?.named = Some(name.clone()),
             ArrayKey::Int(_) if self.call_stack.top_call()?.flags.contains(CallFlags::NAMED) => {
                 return Err(NativeError::error(

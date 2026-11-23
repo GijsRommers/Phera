@@ -15,13 +15,6 @@ pub(super) fn offset(context: &mut dyn Context, object: &Object, offset: Value) 
         Value::Int(_) | Value::Float(_) | Value::Bool(_) => {
             Some(to_int(&offset, context.diagnostics())?)
         }
-        Value::InternedStr(text) => {
-            let parsed = parse_numeric(text.as_bytes());
-            match parsed.value.filter(|_| parsed.exact) {
-                Some(NumVal::Int(index)) => Some(index),
-                _ => None,
-            }
-        }
         Value::String(text) => {
             let parsed = parse_numeric(text.as_bytes());
             match parsed.value.filter(|_| parsed.exact) {

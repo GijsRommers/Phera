@@ -55,8 +55,8 @@ pub(super) async fn write(
         .await?;
     let mut record = Vec::new();
     record.extend_from_slice(b"[");
-    if let Some(date) = date.as_str_bytes() {
-        record.extend_from_slice(date);
+    if let Value::String(date) = date {
+        record.extend_from_slice(date.as_bytes());
     }
     record.extend_from_slice(b"] ");
     record.extend_from_slice(&text);

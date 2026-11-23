@@ -15,10 +15,10 @@ pub(crate) fn with_state<const N: usize>(
     let mut variable = args::reference(args, 0)
         .ok_or_else(type_error)?
         .borrow_mut();
-    let Some(bytes) = variable.as_str_bytes() else {
+    let Value::String(bytes) = &*variable else {
         return Err(type_error());
     };
-    let bytes: &[u8; N] = bytes.try_into().map_err(|_| invalid_state())?;
+    let bytes: &[u8; N] = bytes.as_bytes().try_into().map_err(|_| invalid_state())?;
     let bytes = Zeroizing::new(*bytes);
     operation(&mut variable, &bytes)
 }

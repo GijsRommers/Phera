@@ -726,7 +726,6 @@ impl Machine<'_> {
     ) -> Step {
         let base = position.frame.base();
         let method_bytes = match self.registers.window(base + method_reg.index(), 1) {
-            [Some(Value::InternedStr(string))] => string.as_bytes(),
             [Some(Value::String(string))] => string.as_bytes(),
             _ => return Step::Slow,
         };
@@ -751,15 +750,6 @@ impl Machine<'_> {
                 Some(class) => class,
                 None => return Step::Slow,
             },
-            [Some(Value::InternedStr(name))] => {
-                let Ok(name) = std::str::from_utf8(name.as_bytes()) else {
-                    return Step::Slow;
-                };
-                match self.classes.get_ref(name) {
-                    Some(class) => class.as_ref(),
-                    None => return Step::Slow,
-                }
-            }
             [Some(Value::String(name))] => {
                 let Ok(name) = std::str::from_utf8(name.as_bytes()) else {
                     return Step::Slow;
@@ -847,7 +837,6 @@ impl Machine<'_> {
                 }
                 let key = match (backing, value) {
                     (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(*number),
-                    (EnumBacking::String, Value::InternedStr(string)) => ArrayKey::Interned(string),
                     (EnumBacking::String, Value::String(string)) => {
                         ArrayKey::String(string.clone())
                     }
@@ -863,7 +852,6 @@ impl Machine<'_> {
                     .get(constant.index())?;
                 let key = match (backing, literal) {
                     (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(*number),
-                    (EnumBacking::String, Value::InternedStr(string)) => ArrayKey::Interned(string),
                     (EnumBacking::String, Value::String(string)) => {
                         ArrayKey::String(string.clone())
                     }

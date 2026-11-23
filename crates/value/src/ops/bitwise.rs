@@ -35,8 +35,13 @@ fn bitwise(
     if let (Value::Int(x), Value::Int(y)) = (&a, &b) {
         return Ok(Value::Int(f(*x, *y)));
     }
-    if let (Some(x), Some(y)) = (a.as_str_bytes(), b.as_str_bytes()) {
-        return Ok(Value::String(strwise(x, y, g, copy_rest)));
+    if let (Value::String(x), Value::String(y)) = (&a, &b) {
+        return Ok(Value::String(strwise(
+            x.as_bytes(),
+            y.as_bytes(),
+            g,
+            copy_rest,
+        )));
     }
     let (x, y) = try_get_long2(&a, &b, sigil, d)?;
     Ok(Value::Int(f(x, y)))
@@ -65,12 +70,8 @@ pub fn bitwise_not(a: &Value, d: &mut dyn Diagnostics) -> Result<Value, OpError>
             let l = crate::convert::float_to_key_int(*f, d);
             Ok(Value::Int(!l))
         }
-        Value::InternedStr(_) | Value::String(_) => Ok(Value::String(PhpString::from(
-            a.as_str_bytes()
-                .expect("checked string")
-                .iter()
-                .map(|b| !b)
-                .collect::<Vec<u8>>(),
+        Value::String(s) => Ok(Value::String(PhpString::from(
+            s.as_bytes().iter().map(|b| !b).collect::<Vec<u8>>(),
         ))),
         _ => Err(OpError::type_error(format!(
             "Cannot perform bitwise not on {}",

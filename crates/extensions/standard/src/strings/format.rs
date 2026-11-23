@@ -99,7 +99,8 @@ fn quiet_format(slots: &[Option<Value>]) -> bool {
     slots
         .first()
         .and_then(Option::as_ref)
-        .and_then(Value::as_str_bytes)
+        .and_then(Value::as_string)
+        .map(|string| string.as_bytes())
         .is_some_and(|format| !format.contains(&b'.'))
 }
 
