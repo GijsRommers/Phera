@@ -35,8 +35,16 @@ pub(super) fn update(
     references: &Rc<RefCell<ReferenceHolders>>,
 ) -> Result<(), NativeError> {
     let mut parents = InlineStack::new();
-    let result = walk(current, &mut parents, keys, value, mutation, diagnostics)
-        .and_then(|()| rebuild(current, &mut parents, mutation, diagnostics, references));
+    let result = walk(
+        current,
+        &mut parents,
+        keys,
+        value,
+        mutation,
+        diagnostics,
+        references,
+    )
+    .and_then(|()| rebuild(current, &mut parents, mutation, diagnostics, references));
     if result.is_err() {
         restore(current, &mut parents);
     }
@@ -51,14 +59,21 @@ fn walk(
     value: Value,
     mutation: crate::access_mode::Mutation,
     diagnostics: &mut dyn Diagnostics,
+    references: &RefCell<ReferenceHolders>,
 ) -> Result<(), NativeError> {
     for key in keys.iter() {
         if let Value::Reference(reference) = current {
-            let child = std::mem::take(
-                &mut *reference
-                    .try_borrow_mut()
-                    .map_err(|_| internal_error!("borrowed reference"))?,
-            );
+            let mut slot = reference
+                .try_borrow_mut()
+                .map_err(|_| internal_error!("borrowed reference"))?;
+            if matches!(key, PathKey::Index(_))
+                && (slot.is_null() || matches!(*slot, Value::Bool(false)))
+                && mutation != crate::access_mode::Mutation::Unset
+            {
+                crate::typed_references::check_reference_array_promotion(reference, references)?;
+            }
+            let child = std::mem::take(&mut *slot);
+            drop(slot);
             let Value::Reference(reference) = std::mem::replace(current, child) else {
                 return Err(internal_error!("detached reference"));
             };
@@ -85,6 +100,9 @@ fn walk(
             PathKey::Index(key) => {
                 if current.is_null() || matches!(current, Value::Bool(false)) {
                     *current = Value::Array(Rc::new(PhpArray::new()));
+                }
+                if let Value::InternedStr(interned) = *current {
+                    *current = Value::String(interned.to_php_string());
                 }
                 if let Value::String(string) = current {
                     let Some(parent) = prepare_string(string, key, &value, mutation, diagnostics)?
@@ -151,6 +169,11 @@ fn prepare_string(
     }
     let index = match key {
         Some(ArrayKey::Int(index)) => *index,
+        Some(ArrayKey::Interned(string)) => {
+            string.to_string_lossy().parse::<i64>().map_err(|_| {
+                NativeError::type_error("Cannot access offset of type string on string")
+            })?
+        }
         Some(ArrayKey::String(string)) => {
             string.to_string_lossy().parse::<i64>().map_err(|_| {
                 NativeError::type_error("Cannot access offset of type string on string")
@@ -302,6 +325,9 @@ pub(crate) enum PathKey {
 /// Diagnostics display the source property name rather than its storage prefix.
 pub(crate) fn property_name(key: &ArrayKey) -> String {
     match key {
+        ArrayKey::Interned(name) => {
+            String::from_utf8_lossy(phera_value::split_property_key(name.as_bytes()).0).into_owned()
+        }
         ArrayKey::String(name) => {
             String::from_utf8_lossy(phera_value::split_property_key(name.as_bytes()).0).into_owned()
         }

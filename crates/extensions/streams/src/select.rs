@@ -51,13 +51,43 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                 let Value::Resource(resource) = value.deref().clone() else {
                     continue;
                 };
+                let user = crate::user_file::resource_file(&resource);
+                let descriptor_resource = if let Some(file) = &user {
+                    let Some(real) = file.cast_for_select(context, resource.id).await? else {
+                        continue;
+                    };
+                    real
+                } else {
+                    resource.clone()
+                };
+                let socket = with_stream(&descriptor_resource, |stream| match &stream.backing {
+                    crate::stream::Backing::Socket(socket) => Some(socket.clone()),
+                    _ => None,
+                })
+                .ok()
+                .flatten();
+                let connection = if let Some(socket) = socket {
+                    socket.connect().await.ok()
+                } else {
+                    None
+                };
                 let Ok((descriptor, buffered, is_child, wrapper)) =
-                    with_stream(&resource, |stream| {
+                    with_stream(&descriptor_resource, |stream| {
                         (
-                            stream.descriptor().and_then(|file| {
-                                file.try_clone().ok().map(|copy| (file.as_raw_fd(), copy))
-                            }),
-                            stream.unread() > 0,
+                            if let Some(connection) = &connection {
+                                let fd = connection.descriptor();
+                                rustix::io::dup(fd).ok().map(|copy| (fd.as_raw_fd(), copy))
+                            } else {
+                                stream.descriptor().and_then(|file| {
+                                    file.try_clone()
+                                        .ok()
+                                        .map(|copy| (file.as_raw_fd(), copy.into()))
+                                })
+                            },
+                            user.as_ref().map_or_else(
+                                || stream.unread() > 0,
+                                |file| !file.buffer.borrow().is_empty(),
+                            ),
                             stream.child_pipe.is_some(),
                             stream.wrapper,
                         )
@@ -71,7 +101,7 @@ fn select(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, N
                         direction,
                         key,
                         value: Value::Resource(resource),
-                        fd: fd.into(),
+                        fd,
                         original_fd,
                         buffered,
                     });

@@ -227,7 +227,7 @@ fn interval_view(
             for (key, value) in projected.iter() {
                 stored.insert(key, value.clone());
             }
-            stored.clone()
+            stored.to_array()
         })
         .ok_or_else(|| {
             NativeError::error(

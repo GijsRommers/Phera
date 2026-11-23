@@ -14,7 +14,7 @@
 //! defaults that run code, a native constructor, a closure made from a
 //! callable) answers [`Step::Slow`] without having changed anything.
 
-use phera_bytecode::{ClassKind, Reg, SymbolId, Visibility};
+use phera_bytecode::{ClassKind, Instruction, Reg, SymbolId, Visibility};
 use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
@@ -33,12 +33,8 @@ impl Machine<'_> {
         position: Position,
         symbol: SymbolId,
     ) -> Step {
-        let cache = self.code.cache(position.frame.function);
-        let Some(class) = cache
-            .classes
-            .get(symbol.index())
-            .and_then(|slot| slot.borrow().clone())
-        else {
+        let key = self.code.unit_symbol_key(position.frame.function, symbol);
+        let Some(class) = self.classes.by_key(key).cloned() else {
             return Step::Slow;
         };
         let Some(template) = class.property_template.as_ref() else {
@@ -71,6 +67,19 @@ impl Machine<'_> {
         };
         let template = template.clone();
         let object = self.classes.allocate_with_properties(class, template);
+        if constructor.is_none()
+            && !GUARDED
+            && let Some(Instruction::Call { dst, .. }) = self
+                .code
+                .instructions(position.frame.function)
+                .get(position.ip)
+        {
+            let slots = self.registers.tail_mut(position.frame.base());
+            if let Some(slot) = slots.get_mut(dst.index()) {
+                *slot = Some(Value::Object(object));
+                return Step::Done(position.ip + 1);
+            }
+        }
         let parts = (&mut *self.stack, &mut *self.registers);
         match constructor {
             Some(function) => {

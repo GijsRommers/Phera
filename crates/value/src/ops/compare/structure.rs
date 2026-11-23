@@ -5,7 +5,6 @@
 //! [1, 'x' => 2] === ['x' => 2, 1]; // false
 //! ```
 
-use std::cell::Ref;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -108,7 +107,8 @@ pub(super) enum Table {
 
 enum Entries<'a> {
     Array(&'a PhpArray),
-    Object(Ref<'a, PhpArray>),
+    /// An object's properties in PHP's order, taken when the step starts.
+    Object(PhpArray),
 }
 
 impl Deref for Entries<'_> {
@@ -135,17 +135,15 @@ impl Table {
         match self {
             Self::Array(array) => Ok(Entries::Array(array)),
             Self::Projected(_, properties) => Ok(Entries::Array(properties)),
-            Self::Object(object) => {
-                object
-                    .properties
-                    .try_borrow()
-                    .map(Entries::Object)
-                    .map_err(|_| {
-                        OpError::error(
-                            "Cannot compare an object while its properties are being modified",
-                        )
-                    })
-            }
+            Self::Object(object) => object
+                .properties
+                .try_borrow()
+                .map(|properties| Entries::Object(properties.to_array()))
+                .map_err(|_| {
+                    OpError::error(
+                        "Cannot compare an object while its properties are being modified",
+                    )
+                }),
         }
     }
 

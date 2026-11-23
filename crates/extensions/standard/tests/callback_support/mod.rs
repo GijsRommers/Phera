@@ -79,7 +79,9 @@ impl Harness {
                 NativeFn::Sync(handler) | NativeFn::DeprecatedSync(handler) => {
                     handler(self, &arguments)
                 }
-                NativeFn::Async(handler) => handler(self, arguments).await,
+                NativeFn::Async(handler) | NativeFn::DeprecatedAsync(handler) => {
+                    handler(self, arguments).await
+                }
             }
         })
     }

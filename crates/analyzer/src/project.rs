@@ -160,7 +160,8 @@ pub fn parse_file(path: &Path) -> Result<Result<ParsedFile, Diagnostic>, String>
     let source = String::from_utf8_lossy(&bytes).into_owned();
     let lines = LineTable::new(&source);
     let path = display_path(path);
-    Ok(match phera_parser::parse_on_current_stack(&source) {
+    let (parsed, _) = phera_parser::parse_file_on_current_stack(source.as_bytes(), true);
+    Ok(match parsed {
         Ok(program) => Ok(ParsedFile {
             path,
             source,

@@ -1,7 +1,6 @@
 //! Prepared statements retain their PDO connection: `$stmt = $pdo->prepare('SELECT :id')`.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -9,12 +8,13 @@ use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
 
+use crate::column_keys::ColumnKeys;
 use crate::connection::{Session, session};
 use crate::constants::PARAM_STR;
 use crate::drivers::{Prepared, Rows};
 use crate::errors::{DbError, ErrorState, unsupported};
 use crate::fetch::FetchMode;
-use crate::parameters::{self, Binding, ParameterType};
+use crate::parameters::{self, Binding, Bindings, ParameterType};
 use crate::placeholders::Sql;
 use crate::statement_execute::{execute_named, fail};
 
@@ -25,9 +25,10 @@ pub struct Statement {
     pub stream_owner: Option<Arc<()>>,
     pub postgres_lazy: bool,
     pub connection: Rc<Session>,
-    pub sql: Sql,
-    pub bindings: HashMap<String, Binding>,
+    pub sql: Rc<Sql>,
+    pub bindings: Bindings,
     pub rows: Rows,
+    pub keys: ColumnKeys,
     pub cursor: usize,
     pub fetch: FetchMode,
     pub column: usize,
@@ -37,6 +38,15 @@ pub struct Statement {
     /// SQLite: whether the statement ran since it was prepared or its
     /// cursor closed, which `getColumnMeta()` needs.
     pub sqlite_executed: bool,
+}
+
+impl Statement {
+    pub fn set_rows(&mut self, rows: Rows) {
+        self.keys
+            .describe(&rows.columns, &self.connection.attributes.borrow());
+        self.rows = rows;
+        self.cursor = 0;
+    }
 }
 
 pub fn state(this: Option<&Rc<Object>>) -> Result<Rc<RefCell<Statement>>, NativeError> {
@@ -132,11 +142,10 @@ async fn create(
             flags: attributes.fetch_flags,
         }
     };
-    // SQLite numbers its own `?`, `?2`, `:name` and `@name` placeholders.
-    let parsed = match connection.name {
-        crate::dsn::DriverName::Sqlite => Ok(Sql::sqlite(source.clone())),
-        _ => Sql::parse(source.clone()),
-    };
+    let parsed = connection
+        .driver
+        .parse_sql(source.clone(), connection.name)
+        .await;
     let sql = match parsed {
         Ok(sql) => sql,
         Err(error) => return connection.fail(context, error, method),
@@ -150,7 +159,7 @@ async fn create(
         connection.statement_sequence.set(number);
         Prepared::PostgresDeferred { number }
     } else {
-        let result = connection.driver.lock().await.prepare(&sql, 0).await;
+        let result = connection.driver.prepare(&sql, 0).await;
         match result {
             Ok(prepared) => prepared,
             Err(error) => return connection.fail(context, error, method),
@@ -178,11 +187,12 @@ async fn create(
         postgres_lazy: connection.name == crate::dsn::DriverName::Postgres
             && !attributes.pgsql_prefetch,
         connection,
-        sql,
+        sql: Rc::new(sql),
         prepared,
         stream_owner: None,
-        bindings: HashMap::new(),
+        bindings: Bindings::default(),
         rows: Rows::default(),
+        keys: ColumnKeys::default(),
         cursor: 0,
         fetch: configuration.mode,
         column: configuration.column,
@@ -233,7 +243,7 @@ fn bind(
                 None
             } else {
                 let detail = match args::value(arguments, 0) {
-                    Value::String(_) => format!(":{key}"),
+                    Value::InternedStr(_) | Value::String(_) => format!(":{key}"),
                     _ => "parameter was not defined".into(),
                 };
                 Some(DbError::parameter(&detail))

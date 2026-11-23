@@ -132,6 +132,7 @@ pub(in crate::bindings) fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
         hooks: Some(&ClassHooks {
             clone: Some(NativeClone::CopyWithHandle(clone_object)),
+            fork: Some(crate::bindings::fork_node),
             property_access: Some(&properties::ACCESS),
             properties: Some(properties::view::view),
             ..ClassHooks::EMPTY

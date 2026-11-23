@@ -32,16 +32,40 @@ impl Storage {
 
 impl PhpArray {
     pub fn iter(&self) -> impl Iterator<Item = (ArrayKey, &Value)> {
+        self.iter_from(0)
+    }
+
+    /// Walks live entries starting at a physical slot, in insertion order.
+    pub fn iter_from(&self, start: usize) -> impl Iterator<Item = (ArrayKey, &Value)> {
         let (list, entries) = self.storage.parts();
-        let list = list.iter().enumerate().filter_map(|(position, value)| {
+        let list = list.get(start..).unwrap_or_default();
+        let entries = entries.get(start..).unwrap_or_default();
+        let list = list.iter().enumerate().filter_map(move |(offset, value)| {
             value
                 .as_ref()
-                .map(|value| (ArrayKey::Int(position as i64), value))
+                .map(|value| (ArrayKey::Int((start + offset) as i64), value))
         });
         let map = entries
             .iter()
             .filter_map(|entry| entry.value.as_ref().map(|value| (entry.key.clone(), value)));
         list.chain(map)
+    }
+
+    /// Physical slot of the nth live entry, counting from zero.
+    pub fn position_at(&self, ordinal: usize) -> Option<usize> {
+        if ordinal >= self.len() {
+            return None;
+        }
+        if self.dead == 0 {
+            return Some(ordinal);
+        }
+        let (list, entries) = self.storage.parts();
+        list.iter()
+            .map(Option::is_some)
+            .chain(entries.iter().map(|entry| entry.value.is_some()))
+            .enumerate()
+            .filter_map(|(position, live)| live.then_some(position))
+            .nth(ordinal)
     }
 
     /// Values can change in place; keys and positions cannot.

@@ -22,7 +22,8 @@ PHP source ─▶ lexer ─▶ parser ─▶ AST ─▶ compiler ─▶ bytecode
 | `phera-vm` | Executes bytecode: frames, classes, exceptions, generators | bytecode, value |
 | `phera-extension-api` | What native functions and classes see | value |
 | `phera-extensions/*` | Native functions grouped like PHP extensions | extension-api |
-| `phera-io-pool` | Shared PDO and Redis connection pools and TLS policy | tokio, rustls |
+| `phera-io-pool` | Redis connection pool and shared client TLS policy | tokio, rustls |
+| `phera-db-drivers` | Worker-local SQL connections and process-wide admission | io-pool, tokio |
 | `phera-runtime` | Code cache, includes, autoload, superglobals, request lifecycle | compiler, vm, extensions |
 | `phera-server` | HTTP on Tokio, one worker thread per core | |
 | `phera-cli` | `phera run file.php`, `phera serve` | runtime, server |
@@ -48,8 +49,7 @@ to its input without a limit:
 Dependencies point one way. The VM never sees the AST, and the server never sees
 the VM: it talks to a `Handler` trait that the runtime implements.
 
-PDO and Redis share the client TLS policy in `phera-io-pool::tls`, where
-their pooled connections already share an I/O runtime abstraction. Rustls
+PDO and Redis share the client TLS policy in `phera-io-pool::tls`. Rustls
 uses ring's default cipher suites with TLS 1.2 and 1.3. Ring builds its C and
 assembly with the platform toolchain. Phera's crates use the safe Rust API.
 PDO uses platform trust roots with WebPKI fallback and supports driver-specific
@@ -157,8 +157,8 @@ container, routes), freezes that heap as a snapshot, and gives each request a
 fork of it. Arrays and strings are already copy-on-write, so a fork copies only
 objects and references, lazily where possible. Rules that make this safe:
 
-- A snapshot must hold no live resources. Database connections and open files
-  are created per request, or come from a pool the runtime owns.
+- A snapshot holds the state needed to recreate resources. Each fork opens
+  its own database session or file when it needs it.
 - The split between boot and handle must be explicit. Phera follows the same
   contract as the Symfony Runtime component and Laravel Octane.
 - Static properties and globals are part of the fork, so no request can see
@@ -336,7 +336,7 @@ changes afterwards. A request's class table points at the shared class. What a
 request can change moves out of the class into a table of the request, indexed
 by the class's number: static properties, static variables of functions and
 methods, and constant values that are objects (enum cases, `new` in
-initializers). This is what opcache's inheritance cache does for PHP. Include
+initializers). Include
 resolution (path to compiled unit) is cached per worker as well. Whether a
 changed file is noticed follows `opcache.validate_timestamps` and
 `opcache.revalidate_freq`; `phera serve --dev` checks on every request. Step 1
@@ -381,16 +381,28 @@ request can change it.
   cell (`&`). Object ids stay the same. Strings are shared. An array is shared
   (copy-on-write, as always) unless it holds an object or a reference somewhere
   inside; then it is rebuilt with the copies.
+- What a fork does not copy: the caches that a request fills as it runs
+  (site cells, method-site records, function links, class checks, closure
+  signatures, native links). The snapshot keeps what the boot filled as
+  `UnitCache::base` (and `CodeTable::base_sites` for the site cells), and a
+  fork's own cells start empty. The first time a request needs a function's
+  site cells, a file's records or class checks, or a function symbol's link,
+  it makes them from the snapshot's, keeping only what holds no object of the
+  boot (a link to a function or a native function, a property or static
+  entry). It fills from the snapshot only on the miss, so a hit reads one cell
+  as before. Nothing a request writes is ever in the snapshot's cells. The
+  site cells are one table in the code table indexed by function number. A fork
+  still copies the function facts (a vector, as the loop reads them).
 - Built-in classes with state of their own (`ArrayObject`, `SplObjectStorage`,
   `WeakMap`, `Closure`, `DateTime`, ...) get a fork hook in the extension API. It
   returns a copy of the state with the objects inside replaced by their copies,
   or says that the object cannot be forked.
-- What cannot be in a snapshot: an open file, socket or process, a database
-  connection in the middle of a transaction, a started session, a running
-  generator or fiber that holds one of these. `Phera\snapshot()` then throws
-  `Phera\SnapshotException`, which names the class and the path from a global or
-  static property to the object. A pooled database handle is fine: it holds the
-  pool's key, and takes a connection again on first use.
+- Live socket and process handles, locked files, and unreplayable database
+  state such as an open transaction refuse the snapshot. `Phera\snapshot()`
+  throws `Phera\SnapshotException` naming the class and path to the object.
+  A boot database handle keeps its connection settings and session changes.
+  Each fork borrows a worker-local socket on first use, then replays those
+  changes. Only the boot records session changes for replay.
 - What is reset in every fork: the superglobals, the request time, the time
   limit, the header list, the seeds of `rand()` and `mt_rand()`. Output written
   before the snapshot is not sent again.
@@ -418,6 +430,107 @@ that bootstraps the application and its providers before the snapshot; `phera
 new` writes it into new projects and `phera serve` uses it when it exists. Any
 other application calls `Phera\snapshot()` itself. Without an adapter or a call,
 step 1 still applies.
+
+**The adapters warm up before the snapshot.** A fork is a copy of the worker's
+state at the call, so what exists there is not built again by any request,
+and what does not exist is built by every request that needs it. Right after
+the framework has booted, little exists: each request would boot the models
+it uses, resolve the same services, load the same metadata. So both adapters
+build that once, between the boot and `Phera\snapshot()`:
+
+```php
+// Laravel: crates/runtime/src/adapters/laravel.php
+$app->make(Illuminate\Contracts\Http\Kernel::class)->bootstrap();
+Phera\Laravel\WarmUp::beforeSnapshot($app);   // LaravelWarmUp.php, shipped in the binary
+Phera\snapshot();
+$app->handleRequest(Request::capture());
+
+// Symfony: SnapshotRunner::run() in SymfonyRuntime.php
+$this->kernel->boot();
+$this->warmUp($this->kernel);
+\Phera\snapshot();
+$response = $this->kernel->handle(Request::createFromGlobals());
+```
+
+| | Built before the snapshot | How it is found |
+| --- | --- | --- |
+| Laravel | every Eloquent model booted, and one query built for it without its global scopes (no connection is opened) | the PHP files under `app/Models`, as `model:prune` finds them |
+| Laravel | the services Octane resolves in a new worker, without `session.store` | the application's `octane.warm`, else Octane's default list |
+| Symfony | the event dispatcher, with its listeners registered and none of them created | the container's `event_dispatcher`, in a kernel that is not in debug mode |
+
+The rule for what may be built: no request exists yet, and nothing built may
+be something a request could tell from what it would have built itself. That
+excludes anything that takes its value from a request, a user, the clock or a
+random source when it is built. Laravel's session store draws its id then,
+so it is not resolved. Symfony's event listeners are application services
+that may read the current request in their constructors, so the dispatcher
+is built but its listeners are not; its HTTP kernel and router take the
+logger, whose processors the application configures (Monolog's
+`UidProcessor` draws a request id when it is built), so they are not built
+either. A Laravel model's boot is application
+code too, and it is run, with this guard: no request is bound while the
+models boot, so boot code that asks for the request or the signed-in user
+fails, and a model that fails is put back exactly as it was (Eloquent's
+static state and the events that gained a listener) and boots in the
+request as before. Services are resolved after the models, with the request
+Laravel's own console binds (a `GET` of `APP_URL`) standing in, because the
+URL generator cannot be built without one; it stays bound, as in an Octane
+worker, and the HTTP kernel replaces it before any application code runs.
+A step that throws is skipped. `phera serve --no-service-warmup` (in the
+adapters: `PHERA_SERVICE_WARMUP=0`) takes the snapshot right after the boot.
+
+What a Laravel developer must know of this: a model's `boot()` and
+`booted()` now run once per worker instead of once per request, unless they
+ask for the request or the signed-in user, in which case the model boots in
+the request as it always did. Code there that reads the clock, a cache,
+`$_SERVER` or `$_COOKIE` directly keeps the worker's answer for every
+request (`static::$bootedAt = now()` is the worker's boot time; the test
+application's `Stamp` model pins this down). Closures registered there
+(`addGlobalScope()`, `creating()`) still run per query or per save. With
+`--no-service-warmup` models boot per request again.
+
+A fork copies what the snapshot holds, so the warm-up makes every fork
+dearer and the requests that use what it built much cheaper. That is also a
+limit on what is worth building for every application: Doctrine's metadata
+of all entities was measured and left out, because class metadata is a
+graph of objects that every fork of every route would copy. The numbers,
+per step, are in
+`docs/decisions/2026-11-23-the-adapters-warm-up-before-the-snapshot.md`.
+
+**Warm-up requests, declared by the application.** What is safe to build for
+every application is little. Most of a route's first-use work is the
+application's own, and only the application can say that one of its routes
+may run without a visitor. So it can name paths, in the place `phera serve`
+is already configured:
+
+```toml
+# phera.toml; or: phera serve --warmup /api/posts --warmup / public
+[server]
+warmup = ["/api/posts", "/"]
+```
+
+`phera serve` hands the list to both adapters in the environment variable
+`PHERA_WARMUP`, as it hands `APP_RUNTIME` to symfony/runtime. After the
+warm-up above, an adapter handles each path as an anonymous `GET` through
+the framework's kernel, terminates it like a real request and discards the
+response. A path that throws or is not answered with a 2xx status is logged
+and the boot goes on.
+
+What keeps a warm-up request from reaching the requests after it is the
+framework's own reset for long-running workers. Symfony needs nothing added:
+a booted kernel that has handled a request runs `services_resetter` when the
+next request arrives, and since every request is a copy of that kernel,
+every request starts with it. Laravel has no such reset of its own, so
+`Phera\Laravel\WarmUp` runs, after each warm-up request, what Octane runs
+between two requests (session, guards, queued cookies, locale,
+configuration, query log, log context, scoped instances, the route's
+controller, the bound request), written against the framework's services
+because Octane need not be installed; each step names its Octane listener.
+One thing differs from Octane and is the point: Octane handles a request in
+a copy of the container and throws the copy away, here what the request
+resolved stays. The contract an application signs by declaring a path is in
+the README ("Warm-up requests") and in
+`docs/decisions/2026-11-23-an-application-may-declare-warm-up-requests.md`.
 
 **Step 4, only if a profile asks for it: copy on first write.** Objects are
 reached through a table of the request, and a fork copies an object only when
@@ -481,6 +594,56 @@ classes yet (see `docs/decisions/`). Measured on a Laravel 13 API request:
 PHP with opcache. Built-in classes fork through `ClassHooks::fork` (SPL,
 dates, closures, reflection, WeakMap and WeakReference, OpenSSL keys);
 generators, fibers, PDO and Redis handles and DOM documents refuse for now.
+
+**Step 1 again, at the cause: linked code as data of the process.** A fork
+skips the boot; it does not make loading and linking a class cheap. That
+cost stays wherever code still loads a class: in every fork for the classes
+the boot never touched, in each boot (and again after every edit under
+`--dev`), on the command line, and in the first request. Measured on
+2026-11-20 with `crates/runtime/examples/engine_cost.rs` (one worker):
+
+| | boot, first worker | boot, later worker | from the top | forked |
+| --- | ---: | ---: | ---: | ---: |
+| Laravel production `/api/hello` | 2,628M | 296M | 325M | 76M |
+| Laravel production `/api/posts` | | | 492M | 246M |
+| Symfony prod `/api/products` | 646M | 73M | 208M | 153M |
+
+In the forked Symfony request about 37% of the time is spent under class
+autoloading: the autoloader's PHP code, path checks, `CodeTable::load` (about
+11%, half of it numbering every name of every file again) and linking (about
+8%). The design, by the rules of 10.1 (flat tables addressed by number, no
+cache in front of a slow structure):
+
+| Structure | Was | Becomes |
+| --- | --- | --- |
+| Name keys | a SipHash map from every lowercased name to a number, built per request and copied per fork | numbered once per process when a file is compiled (`phera_bytecode::name_keys`); the file carries its key arrays; done |
+| Finding a loaded file | a linear scan over the request's files | a flat array indexed by the file revision's process number (`UnitMetadata::id`); done |
+| Function numbering | per request: files numbered in the order the request loads them | per file revision: a function is (file number, local number), so the same function has the same number in every request |
+| Function facts | a vector per request, copied per fork | a vector per request, copied per fork (the copy is most of what a fork still costs); sharing it as an `Rc<[T]>` made every read dearer, see `docs/decisions/2026-11-22-a-fork-shares-the-code-table-and-fills-its-caches.md` |
+| Linked classes | an `Rc` graph per worker (methods in a `HashMap<String, Rc<Method>>`, ancestors in a `HashSet<String>`), linked again by each request that declares the class after the boot | one table of linked classes for the worker (later the process), each entry addressed by a stable index; methods in a flat array in the order PHP lists them, property declarations in a flat array |
+| A request's declared classes | a map from name to `Rc<Class>`, plus per-file resolution slots copied per fork | a bitset over the worker's table of which entries the request has declared, the name's slot, and the request's own statics |
+
+When two requests may use the same entry is a fact of the language, not
+a lookup: a class declaration yields the same linked class when it is the
+same declaration (the same revision of the same file, the same class in
+it) and its parent, its interfaces and its traits are the same linked
+classes, and every class its method signatures name in type checks that
+decide whether a signature is compatible resolves to the same linked
+class. An entry records those identities, as indexes of the same table,
+when it is made. A request that declares the class finds the entry made
+from its declaration whose recorded identities are the entries that
+request has declared under those names; a conditional declaration or a
+`class_alias` only changes which entries a request has declared, so it
+picks another entry or makes a new one, never a wrong one. Warnings that
+linking emits belong to the entry and are emitted again for each request
+that declares it, as a request from the top would see them.
+
+What is still in the way of the table being the process's rather than each
+worker's: a linked class holds PHP values (default property values,
+constant literals, the class name as a `Value`), and values are `Rc`, which
+cannot cross threads. A process table would hold the declaration's literal
+values in the compiled file's own form, and each worker would make its
+`Value`s from them once per entry. Native hooks are `&'static` already.
 
 **Code caches and snapshots: one design.** Three layers hold code, from the
 widest to the narrowest:
@@ -567,10 +730,12 @@ files, `sprintf`, `serialize`), spl, json, pcre (bound to PCRE2), ctype, mbstrin
 date, hash, filter, random, tokenizer, reflection, session, pdo with async
 drivers. **Later:** openssl, curl, dom and xml, intl, fileinfo, iconv.
 
-DOM string parsing never opens external entities, even when entity substitution
-or DTD loading is requested. It performs no file or network I/O and bounds
-internal entity expansion. The file methods read only the document named by
-the caller.
+DOM, SimpleXML, XMLReader, and XMLParser never open external entities, even
+when entity substitution or DTD loading is requested. Document strings require
+no file or network I/O and internal entity expansion is bounded. Explicit file
+methods read the document named by the caller. DOM schema validation can also
+follow local regular-file includes and imports from the supplied XSD. It bounds
+the number and total size of the schemas and leaves external entities inert.
 
 Locale names are remembered per request, C/POSIX behavior is implemented,
 and localized data is missing.
@@ -637,9 +802,9 @@ purpose must fail loudly and name the reason, never behave differently in
 silence:
 
 - **A function or class PHP 8.5 has and Phera leaves out** (for example
-  `strftime()`, deprecated since PHP 8.1): calling it throws
+  `date_sunset()`, deprecated since PHP 8.1): calling it throws
   `Phera\NotSupportedException` (a `LogicException`) with the message
-  "strftime() is not supported by Phera: deprecated since PHP 8.1".
+  "date_sunset() is not supported by Phera: deprecated since PHP 8.1".
   `function_exists()` and `class_exists()` answer false for these, so code
   that checks first takes its fallback. The list comes from the
   `#[\Deprecated]` attributes in PHP 8.5's own stub files, not from memory.
@@ -660,7 +825,7 @@ functions, methods and constants with `#[\Deprecated]` in its stub files.
 Each falls in one of three groups:
 
 1. *Named items nothing uses*: they go, as described above. Examples:
-   `strftime()`, `lcg_value()`, `utf8_decode()`, `mhash()`, `MT_RAND_PHP`,
+   `date_sunset()`, `lcg_value()`, `mhash()`, `MT_RAND_PHP`,
    `FILTER_SANITIZE_STRING`, `assert_options()`.
 2. *Named items the scan of 6.1 finds in use*, mostly calls that became
    no-ops and that current releases of widely used libraries still make:
@@ -1299,6 +1464,9 @@ Done on the branch `engine/calls` (pull request #9):
 - A frame is `{ function, base, ip, destination, flags }`, 16 bytes in a
   `Vec`. What only some frames need (dynamic names, `foreach` state,
   argument facts, a closure, a class context) is in a side table by depth.
+  Returns pop the frame and release that entry when present. The compiler
+  can omit the trailing scratch slot when binding, branch and call operands
+  all fit in the smaller window.
 - One flat code table per request; functions, methods, closures and
   class initializers refer to code by `FunctionIndex`.
 - One `match` executes an instruction. The interpreter loop borrows the
@@ -1398,6 +1566,421 @@ What remains, in order of expected gain: the destination-driven compiler
 (10.6 item 4) for fewer instructions per statement; objects as slots (item
 3) for `objects` and `calls`; native calls in the loop (item 2) for
 `closures`, whose `array_map` part calls back from native code.
+
+### 10.9 Fewer exits from the loop (`speed/interpreter-2`)
+
+```php
+if ($name === 'id') { ... }              // stayed in the loop: Binary on strings
+$value = $this->options['x'] ?? null;    // left it: [Property, Index] path
+```
+
+Measured on 20 November 2026 with a private per-opcode counter: one warm
+Laravel request ran 290,000 bytecodes inside the loop and 90,000 that left
+it for `Vm::execute`; Symfony 709,000 and 255,000. Leaving the loop costs
+250 machine instructions for an instruction that does nothing (`@`), and
+550 to 850 for an ordinary one (the general handler finds the frame, its
+registers and its code again, and both large `match`es mispredict). That
+was most of the "dispatch" cost of section 5's request profile. The
+counter was never committed.
+
+Done, each with every benchmark measured before and after (fat LTO, minimum
+of three runs) and `make phpt` on a release build:
+
+- **Plain values in the loop** (`vm/src/fast_values.rs`): operators on null,
+  booleans, integers, floats and strings through the value layer's own
+  operator with a sink that notes any diagnostic or use of `precision`
+  (then the VM runs the instruction); `JumpIfNull`, `!`, `[]`, array reads
+  with a string key, quiet reads (`??`, `isset`) of elements and variables.
+- **Property reads, writes and increments from their sites**
+  (`calls/fast_properties.rs`): `$this->x`, `$o->x`, `$items[$i]->x`, when
+  the instruction's property site matches the class and scope.
+- **Calls**: `InitCall` of an already linked function (`fast_named_calls`),
+  protected methods of related classes, the class scope computed once per
+  method call preparation, a per-table flag that skips the private-shadow
+  lookup, the called class computed only for static calls, `static::class`
+  and friends (`fast_class_names`).
+- **Fewer dependent loads**: a function's instructions are a shared `Code`
+  held by its facts (three loads instead of five on every call, return and
+  loop entry); the VM's general path reads a frame's register count there.
+- **Compiler**: an operator reads variables directly when they were copied
+  just before it (`$i < $n` is one instruction instead of three).
+- All new cases are reached through one out-of-line function
+  (`calls/further_steps.rs`): arms added to `Machine::step`, or a call from
+  the inner loop, changed the loop's layout and cost 2 to 12 percent on
+  benchmarks that never ran them.
+
+Exits per warm request after this: Laravel 54,500 (from 90,000), Symfony
+126,000 (from 255,000). Benchmarks in instructions, against the tip of
+`engine/destructors` (33e1c7b9) and against `php -n` (cycles were taken at
+a load average of 35 and are rough):
+
+| script | change | instructions vs PHP | cycles vs PHP | cycles vs PHP with JIT |
+| --- | ---: | ---: | ---: | ---: |
+| arithmetic | +0.7% | 1.04 | 1.14 | 1.28 |
+| fib | -1.5% | 1.37 | 1.49 | 1.84 |
+| natives | -2.7% | 2.06 | 2.46 | 2.90 |
+| objects | -16.9% | 2.52 | 3.19 | 4.09 |
+| calls | -12.4% | 3.70 | 4.85 | 6.01 |
+| methods | -8.8% | 3.84 | 6.56 | 18.1 |
+| properties | -26.8% | 2.42 | 2.44 | 2.62 |
+| typed-objects | -17.9% | 3.38 | 3.85 | 4.80 |
+| object-sort | -22.8% | 2.75 | 4.03 | 5.35 |
+| function-objects | -20.3% | 2.82 | 3.07 | 3.69 |
+| function-array | -12.5% | 1.28 | 1.40 | 1.58 |
+
+Every other script is between -5 and +0.9 percent. Requests: see the pull
+request (Laravel about -4 percent, Symfony about -6 percent of all
+instructions, a ninth of the interpreter's share).
+
+Not reached: `calls` and `methods` under 3 times PHP, `objects` under 2.5,
+`fib` under 1.5 (cycles noisy), and the interpreter's share of a request
+down by a third. What remains, in order of size:
+
+1. The round trip itself. About 55,000 (Laravel) and 126,000 (Symfony)
+   exits are left; the largest groups are calls to native functions
+   (`Call`, 36,000 per Symfony request), static property reads (statics
+   storage is being reworked on `speed/snapshot-and-fork`), `foreach`
+   start and end, `$this->items[$k]` paths, and returns into native code.
+   A native function needs the VM, so it cannot run inside the loop as it
+   is built; the loop borrowing the VM as a whole would allow it.
+2. A method call is still about 1,000 machine instructions in the loop,
+   spread over preparing the window, the frame push and pop, emptying the
+   callee's registers and checks; no single part is above 10 percent.
+3. Bytecodes per statement: `Clear`, `LoadConst`, `Move` are still half of
+   Symfony's bytecodes; a register-register compare-and-branch and the
+   optimiser for functions with `try` are the next compiler steps.
+
+### 10.10 Where a forked framework request goes
+
+Measured on 20 November 2026 with this branch merged privately with the
+snapshot-and-fork branch (#109), `phera serve --workers 1`, the Laravel 13
+production app of the load test (`/api/hello`) and the Symfony app in
+production mode (`/api/ping`), instructions per warm request (difference of
+two server runs):
+
+| | #109 | #109 with this branch | and the warm snapshot experiment |
+| --- | ---: | ---: | ---: |
+| Laravel `/api/hello` | 71 to 75M | 59 to 61M | 35M |
+| Symfony `/api/ping` | 48M | 41 to 44M | not measured |
+
+Where the instructions of a forked Laravel request went, from a private
+opcode counter and samply profiles of the steady state:
+
+1. **Classes the request needs but the boot never loaded.** Every fork
+   autoloads, reads (path canonicalisation, metadata) and links the same 70
+   framework files (`Response`, `JsonResponse`, `Pipeline`, `Route`, the
+   middleware); the fork then throws them away. Symfony: 76 files and 74
+   `file_exists` calls from Composer's loader. Loading those classes before
+   `Phera\snapshot()` (an experiment in a private build, the class list
+   taken from one request) brought the Laravel request from 61M to 35M.
+   That belongs to the snapshot work and is reported there.
+2. **The fork itself**: copying the booted application and freeing the copy
+   at the end, about 45 percent of what is left. Part of it was the request's
+   site cells, one per instruction of every loaded file: a request now makes
+   a function's cells only when that function first uses one (most loaded
+   functions never run in a request), and a fork copies only those.
+3. **Elements of array properties** (`isset($this->instances[$id])`,
+   `$this->items[$group][$key] ?? $default`): the general path found the
+   property by name on every read (`property_key` alone was 4 percent).
+   The VM now records the property's site for these reads too, and the loop
+   reads the property from it and walks up to three integer or string keys
+   (`calls/fast_property_elements.rs`): 10M of the Laravel request.
+4. What is left of the interpreter: about 8,300 exits from the loop (native
+   function calls, `foreach` start and end, by-reference sends, `instanceof`),
+   about 5M; the ordinary in-loop bytecodes (56,000) about 3M; the rest is
+   PHP code run through `ArrayAccess::offsetGet` and native callbacks.
+
+`benchmarks/bench-framework-patterns.php` keeps these patterns: 9.7 times
+PHP's instructions before this round, 4.4 times after it.
+
+
+**Object creation and release after the destructors work** (batch 14).
+Measured in isolation (`$o = new P` in a loop, minus the same loop without
+`new`): 779 machine instructions per object before the destructors work, 872
+with it, 839 on this branch (the pool hold gives the id back itself; tracking
+and the constructed-object call inlined again; `incarnated` kept in the pool
+hold only). What is left of the difference: the `Drop` impl on `Object`
+(which also makes the array drop take an object's properties out instead of
+moving them), the destruction and attachment fields, the allocation count of
+the cycle collector and the destructor check on each `new`. The Laravel
+requests measured then never ran on the guarded loop: no live object had a
+destructor due. That did not hold for Symfony. A Symfony and Doctrine
+request keeps objects with destructors alive for its whole life, so it ran
+entirely on the guarded loop, which left the loop for every `instanceof`,
+`foreach` start and end, element and property write, compound assignment,
+return and store over an array, object or string. Since 21 November 2026
+there is one loop (section 10.12). Requests with the owner's method (one worker,
+`opcache.validate_timestamps=0`, 100 requests, twice): Laravel `/api/hello`
+361.3 to 362.4M instructions on batch 14, 315.5 to 318.3M here; `/api/posts`
+489.3 to 490.1M, 440.1 to 440.4M.
+
+### 10.11 Round three: native calls, callbacks and Reflection in the loop (`speed/interpreter-3`)
+
+Measured on 21 November 2026, forked requests with one worker, instructions per warm request, against main 5387cbe3:
+
+| route | main | this branch | PHP 8.5 with opcache |
+| --- | ---: | ---: | ---: |
+| Laravel `/api/hello` | 35.9M | 34.5M | 16.6M |
+| Laravel `/api/posts?page=2` | 153.3M | 137.7M | 27.3M |
+| Symfony and Doctrine, 49 statements | 302.8M | 300.9M | 29.7M |
+
+What changed, in structures:
+- A synchronous native function is prepared as its number in a flat `Vec<FunctionEntry>`, with no cloned callee record. Its `Call` runs from the batch loop.
+- `instanceof` of a linked class walks the linked ancestry by pointer, with no name hash.
+- Element writes, appends, compound assignments, `++` of elements, keyed `foreach`, sends of paths by value and integer bitwise operators run in the loop.
+- `array_map`, `array_filter`, `array_reduce` and the user sorts keep their state on a stack in the `CallStack` and run their callbacks as ordinary frames (`calls/native_loops.rs`, `calls/native_sorts.rs`). The callback's return hands the value back through `CallStack::handed_back`.
+- A `ReflectionMethod` made from a class's member list holds `(class, index)` instead of a name. Flag and name getters are direct native methods that the loop runs at their `InitMethodCall`, with no call frame.
+
+Where the Symfony and Doctrine request goes now, from a private counter of loop exits: about 39,000 exits from the interpreter loop per request, at 1,000 to 1,300 machine instructions each (40 to 50M):
+- returns, calls and sends the loop does not take: about 9,900;
+- `foreach` start, end and next: 5,200;
+- class constants: 3,078;
+- array literal construction: 2,786;
+- `$this->prop` writes: 2,355;
+- `===` and `!==`: 2,200;
+- `instanceof` of a class that was never declared: 2,038;
+- `isset` and reads of local array elements: 2,800.
+
+Native Reflection property access goes through the general path: `setRawValueWithoutLazyInitialization` costs 5,082 machine instructions against PHP's 483. These are the next items, in that order: loop coverage of these shapes, property slots with Reflection property access on a slot, array literals.
+
+### 10.12 The guarded loop runs releases itself (`speed/guarded-loop`)
+
+The guarded copy of the interpreter loop runs while any live object of a class with `__destruct` exists. A Symfony request always has one. That copy used to send every instruction that could free an object to the VM:
+- `instanceof`;
+- `foreach` start, end and next;
+- element and property writes;
+- compound assignments;
+- returns;
+- every store over an array, object or string.
+
+Now the guarded copy runs these instructions itself.
+- A store that drops the last handle on something answers `ScalarStep::Released`, and only then does the loop read `ObjectIds::has_doomed()`.
+- Every other completed step reads that flag once.
+- When a destructor waits, the loop leaves at the next instruction boundary, where the VM runs the destructor, as before.
+
+The plain copy is unchanged. A single loop for both cases was measured and cost 2.0 to 3.6 percent on four benchmarks.
+
+Loop exits per request on the Symfony and Doctrine yardstick (49 statements), from a private counter:
+
+| shape | before | after |
+| --- | ---: | ---: |
+| `foreach` start / end / keyed next | 1,900 / 1,899 / 1,404 | 93 / 2 / 83 |
+| `instanceof` | 2,038 | 646 |
+| `$a[k] = v` (local array) | 1,105 | 0 |
+| `$this->p = v` (and from a local) | 1,852 + 503 | 852 + 206 |
+| total | 39,248 | 28,733 |
+
+Instructions per request: 294.7M before, 276.0M after; PHP is 29.5M. The Laravel routes never run guarded and do not move.
+
+What is left:
+- calls, returns and native calls: about 8,000, the call-protocol item;
+- class constants: 3,078; the named form is in `speed/loop-coverage`;
+- array literal construction: 2,786;
+- identity: 2,200; local element reads: 1,554; both are in `speed/loop-coverage`;
+- `(array)` casts and the property paths the sites do not take: the rest.
+
+### 10.13 Design: declared properties in slots (`speed/property-slots`)
+
+**What it is today.** An object's properties are one `RefCell<PhpArray>` keyed by PHP's mangled names (`name`, `\0*\0name`, `\0Class\0name`).
+- **`new`:** clones the class's default table (`Class::property_template`), with its keys, and drops it all again at release.
+- **A property site:** remembers the position of the property in that table, and compares the stored key on every read, because `unset` and re-adding move an entry to the end.
+- **Property order:** that move is also why the order is wrong. After `unset($o->a); $o->x = 9; $o->a = 1;` PHP lists `a b c x` and Phera lists `b c x a`.
+- **Reflection:** `ReflectionProperty` finds the property by name on every call, through the async native method path.
+
+Measured on main ded81397, machine instructions per operation, with PHP from the probe's baseline file (the empty loop subtracted in both):
+
+| operation | Phera | PHP |
+| --- | ---: | ---: |
+| `new P` with three properties, one read, release | 1,704 | 406 |
+| `clone` of it | 4,673 | |
+| array of four plus object, the array stored and read through the object | 7,327 | 1,276 |
+| `$rp->setRawValueWithoutLazyInitialization($o, $v)` | 5,082 | 483 |
+| `$rp->isLazy($o)` | 3,529 | 279 |
+| `$rp->isInitialized($o)` / `getValue` / `setValue` | 2,175 / 2,172 / 2,566 | 292 / 297 / 398 |
+
+On the Symfony and Doctrine yardstick, the hydrators and the UnitOfWork make per request:
+- 467 `setRawValueWithoutLazyInitialization` calls;
+- 325 `isLazy` calls;
+- 122 `isUninitializedLazyObject` calls;
+- several hundred `isInitialized` and `getValue` calls;
+- 544 `((array) $object)[$key]` reads;
+- 855 `$this->p = v` writes that the property sites do not take.
+
+**What it becomes.**
+- **The class owns the layout:** `PropertyLayout`, built once at linking, root first.
+  - the mangled keys of the declared instance properties, in declaration order, as a flat `Box<[ArrayKey]>`;
+  - for each property, its slot number.
+
+  A property site, a `ReflectionProperty` and the compiler's property names all resolve to that number when they are linked, so no name is looked up per access.
+- **The object holds:**
+  - `slots: RefCell<Box<[Option<Value>]>>`: one entry per declared property, in layout order; `None` is unset or not yet initialized, as an absent key is today;
+  - `dynamic: RefCell<Option<Box<PhpArray>>>`: properties that are not declared, in insertion order; most objects have none.
+- **`new`** copies the class's default values into the slot box: one allocation, no keys. **`clone`** copies the slots.
+- **A property site** reads and writes `slots[n]` with no key compare. `unset` sets the slot to `None`, and writing it again fills the same slot, so the declared order is PHP's (the `weakmap-and-property-order` fixture).
+- **Code that needs the whole table** goes through a `PropertyView`, which walks the declared slots in order and then the dynamic table. That covers `(array)`, `foreach` over an object, `get_object_vars`, `var_dump`, `serialize`, `json_encode` and `==`. `Object::get`, `set`, `has`, `remove` and `to_array` keep their signatures. `Object::update` and `with_properties`, which hand out a `&mut PhpArray`, become two calls on the view (read and write by key), so extensions do not see the change.
+- **Direct native methods on a slot** for `ReflectionProperty`, the pattern of #134's `MethodHandle` (they run where `Call` runs them, no frame): `isInitialized`, `getValue`, `setValue`, `setRawValue`, `setRawValueWithoutLazyInitialization`, `isLazy`, and `ReflectionClass::isUninitializedLazyObject`. The fast case is:
+  - an object that is not lazy;
+  - a public property with no hooks;
+  - and, for writes, a value whose type passes the property's bit test as it is.
+
+  Everything else (hooks, lazy objects, coercion, readonly, an error to raise) declines to the general path, as today.
+- **`(array) $object`** builds its result from the slots at its final size.
+- **The fork copies** the slot box and the dynamic table, as it copies the table today.
+
+**Expected.**
+- `new` and release from 1,704 towards 800 to 900.
+- A property read through a site about a third cheaper (no key compare, no table probe).
+- The Reflection property calls from 2,000 to 5,000 down to 300 to 500 each.
+- On the yardstick: the Reflection calls alone are about 3 to 4M per request, plus the hydration writes and `(array)` casts.
+
+**Size.** The value crate's object, destruction, cycles, fork and lazy-object code; the VM's property storage, sites, defaults, cloning and Reflection; and the whole-table users in the extensions (serialize, var_dump, json, spl `ArrayObject`): 30 to 40 files.
+
+The Reflection direct methods come in the same pull request, after the slots. That is the one pull request for item 2, as with the others.
+
+
+### 10.14 The loop core, built to the floor (`speed/loop-core`)
+
+#### Why
+
+The floor (`~/.phera-review/floor/src/bin/calls.rs`, safe Rust, fat LTO, with the six behaviours PHP needs that its first version lacked) runs the four plain shapes at PHP's cost:
+
+| Shape | Floor | PHP 8.5 | Phera main |
+|---|---|---|---|
+| Loop | 70 | 75 | 276 |
+| Function call | 231 | 260 | 808 |
+| Method call | 289 | 314 | 1,230 |
+| Property read | 141 | 118 | 679 |
+
+Half of what separates us from it is structural: the two-function loop, the base added and the bounds check on every register access, the second dispatch, and a trip out of the simple loop for every instruction it cannot finish. No step inside the present structure removes it (see `~/.phera-review/floor/ANSWER-call-protocol.md`). This section replaces the core of the loop and the frame layout in one change. Everything outside the plain shapes keeps going to today's general path, unchanged.
+
+#### The loop
+
+One function, `Machine::run`, holds the running frame's register window, the frame's instructions and the position, and dispatches every instruction with one `match`. A call it can make and the return from it switch the window and the instructions in place. The two-tier split (`run_simple` for scalar arms, `step` for the rest, with the trip between them) goes.
+
+An instruction the loop cannot finish leaves through one exit. The loop publishes the position, gives up the window and returns `LoopExit::Slow(instruction)` to the batch loop, which runs it in `Vm::execute` as today. That exit is the only place the window is given up, other than calls and returns.
+
+#### The window
+
+The register file stays one flat `Vec<Option<Value>>` for the worker. A register keeps `Option<Value>`: it is 16 bytes, the same as `Value`, with `None` in a spare tag, so `Some(Value::Int(a))` is one tag comparison. Fable measured that in the floor (design `f` against `c`: 67 against 65 instructions per loop). An undefined register stays what it is today: not a value at all. There is no `Value::Undef` and no new variant.
+
+The window is a reference to a fixed array, `&mut [Option<Value>; 256]`. It is indexed by the operand's low byte (`reg.0 as u8 as usize`), which cannot be out of bounds by type, so no register access in the loop has a bounds check. On entry to a frame, the register file is grown to `base + 256` and the array reference is taken from the slice at `base` (`try_into`, checked once per entry). A function with more than 256 registers is not run by this loop: the late pass marks it and it takes the general path. If 256 turns out too small, 512 with a 9-bit mask is the same idea. Counted on 2026-11-21 by compiling every file of both app copies with `--dump` (`yardstick-cost/tools/register_counts.py`):
+
+| App | Files | Functions | Over 128 registers | Over 256 registers |
+|---|---|---|---|---|
+| Symfony and Doctrine | 3,476 | 27,717 | 43 | 3 |
+| Laravel | 8,212 | 64,705 | 16 | 3 |
+
+The six functions over 256 are all configuration or debug code, none of it on a request's path: `DebugClassLoader::checkAnnotations` (416), `YamlFileLoader::parseDefinition` (290), `XmlDriver::loadMetadataForClass` (283), PHPUnit's `Merger::merge` (412) and `Builder::fromParameters` (308). So 256 holds.
+
+The window is held only between points where nothing can grow or move the register file. It is given up, and taken again from the frame's base after:
+- every `LoopExit` (the VM may run a native that calls back into PHP, which grows the file);
+- every call and return (the window moves to the callee's or the caller's range);
+- every yield of the work budget.
+
+The borrow checker enforces this: the array reference is a local borrow of `self.registers`, so nothing that takes `&mut Vm` can run while it lives.
+
+#### The frame
+
+A frame is four words: the function, the window's base, the position, and the caller's destination register with a few flag bits (`returns_to_native`, `discards_result`, `has_extras`). The side table (`extras`: iterators, captured `$this` scope, the called class) and the prepared-call stack stay, for the general path only. A plain call pushes one frame and nothing else. The callee's shape bit (`FunctionShape::Plain`: no variadic, no by-reference parameter, no generator, no coercion needed) decides the plain entry; that is php-rust's "simple callee" flag, which our facts already hold.
+
+#### The guarded loop is the main case
+
+A Symfony request runs entirely in the guarded copy: an object with `__destruct` stays alive for the whole request, so `object_ids.has_due()` holds from the first such object on. The new loop is one function generic over `GUARDED`, as today. In the guarded copy the work it adds is the destructor check: after each write that drops a reference-counted value (a store, a `Clear`, a return releasing the callee's registers), it tests `ids.has_doomed()`, one load and a branch. When that holds, it publishes the position and leaves through the one exit, to `Vm::run_destructors`. Writes that drop nothing (an integer over an integer) test nothing, in either copy.
+
+The definition of done holds in the guarded copy: the four shapes are measured with an object that has a destructor alive in the request, within the same limits, and the Symfony route is the number that counts.
+
+#### Calls and returns in the loop
+
+
+- **`CallDirect`:** as today, with the window switched in place.
+- **`CallMethod`:** the site table and per-site record of the call-site train. A hit enters a PHP method, calls a native getter, or prepares a native. A *VM* outcome leaves through the one exit.
+- **`Return`:** moves the value out of the callee's window, releases the callee's registers in PHP's order (locals, then `$this`), switches back to the caller and stores. The guarded loop's copy keeps the release order where a destructor can run. That case leaves through the exit, as today.
+
+#### Type tests on the plain entry and return
+
+**Made inline at the entry**, per parameter:
+- **A built-in type:** the value's own type tested against the callee's parameter mask (one bit test), as today.
+- **A class or interface type:** the receiver of the test is the argument. A one-entry check against the class that type last matched (`known_class_match`), else the declared class found by its name key, with the argument's class ancestry walked (`Class::derives_from`, from #169), as #167 does for property writes.
+- **`self`:** the callee's declaring class (its facts' `class`), then the same ancestry test.
+- **`static`:** the called class (the receiver's class for an instance call, the record's class for a static one), then the ancestry test.
+- **`iterable`:** an array (mask bit), or an object whose class derives from `Traversable`.
+- **The int-to-float widening of a `float` parameter:** made inline, as today's second look.
+
+**Declined to the general path:** `callable` (resolving a string or an array callable needs the VM; a `Closure` object passes by its class), intersection and DNF types beyond a union of classes, `mixed` with a by-reference parameter, any coercion in non-strict mode (`"5"` to `int`), and a failed test (the general path raises the `TypeError`).
+
+**Made inline at the return:** the same tests against the function's return type: mask bits, class, `self`, `static`, `iterable`, `void` (no value), `never` (a return is an error, declined). A failed test, or `callable`, declines.
+
+#### Fused instructions
+
+
+Fused instructions come from one late compiler pass, run after the bytecode engineer's passes, as the method sites do:
+- **`LessJump`:** compare two registers and branch;
+- **`AddLocal`:** `$local += register`;
+- **`IncJump`:** `$k++` and jump back.
+
+They are emitted only where the operands are locals or temporaries, the plain shape. Any other value takes their slow path, which is the general instruction's handler.
+
+#### Natives called from the loop
+
+A native that needs no VM declares a handler that takes only its arguments: `pure: fn(&[Value]) -> Option<Value>` on its `FunctionEntry`, beside the existing handler. `None` means "decline", and the general path then runs the ordinary handler, so every error, warning and coercion stays there.
+
+A native qualifies when it:
+- reads only its arguments;
+- writes no global state, runs no PHP code, takes no callback and no reference;
+- raises nothing on the arguments it accepts.
+
+Examples: the type tests (`is_null`, `is_array`, `is_int`, `is_string`), `strlen`, `str_starts_with`, `str_contains`, `array_key_exists`, `in_array` with scalars, `substr`, `strtolower`, `count` on an array.
+
+The loop knows from the entry: `CallNativeDirect` (and the function form of the site record) reads the arguments from the window, tests their types against the entry's parameter masks, calls `pure` and stores the value. A decline, or a native without `pure`, leaves through the one exit to the general path, as today. No prepared-call record is made, and nothing is allocated.
+
+#### What stays on the general path
+
+- Generators and fibers: their frames live outside the stack.
+- `__call`, `__get` and the other magic.
+- By-reference parameters, named and spread arguments, variadics.
+- Every native that needs the VM.
+- Exceptions: unwinding starts from the published position.
+- Includes.
+- Every instruction that has no arm in the loop.
+
+#### Failure modes, and what covers each
+
+| Risk | Covered by |
+|---|---|
+| The register file moving under a held window | Compile time: the window is a borrow of `self.registers`, alive only inside the loop between exits. Plus a test: a native that calls back into PHP and grows the register file deep, then returns into the loop |
+| Release order on an inline return | The 34 destructor timing cases (`review/g155`), plus a fixture with locals and `$this` that have destructors, in every return shape |
+| Generators and fibers | Stay on the general path. The fixtures of `tests/fixtures/generators` and the fibers set run unchanged |
+| Codegen under fat LTO | A release build and the four shapes plus the benchmarks at every step, recorded in the draft pull request's description daily |
+| An undefined register read as a value | As today: a register is `Option<Value>`, and an undefined one is `None`, not a value. Plus a fixture of undefined-variable warnings in every operand position |
+
+#### What measurement showed (2026-11-22)
+
+The one-loop design above assumed the trip between `run_simple` and the second dispatch could go. Five ways of removing it were built and measured on the routes at twelve pairs; all raised them, and all were reverted (`~/.phera-review/floor/LOOP-PLAN.md` has the tables, the patches and the disassembly):
+
+| Try | Function / method shape | `/api/hello` | `/api/posts` |
+|---|---|---|---|
+| Calls and returns handled in a frame loop inside `run_simple` | 697 / 871 (main 754 / 922) | +2.07% | +1.81% |
+| The same, the switch out of line | 816 / 975 | +2.47% | +2.15% |
+| `run_simple` out of line, calls dispatched in `run` | 776 / 941 | +3.33% | +3.07% |
+| The whole second dispatch called from inside the loop | 800 / 971 (control 748 / 926) | +2.75% | +2.44% |
+| Two small handlers (`FetchThis`, `SendLocal`) called from the loop | 784 / 955 (control 730 / 911) | +1.35% | +1.07% |
+
+The last row is the deciding one. The handlers themselves are cheap (`FetchThis` saves about 4 per execution, its function saves two registers), but any call inside the scalar loop makes the loop compile worse for every scalar instruction: a loop that runs none of the handled kinds pays 16 more per iteration. About half of a request's instructions leave the scalar loop, so the trip is expensive; but in safe Rust under fat LTO, with this loop, putting anything in its place costs the scalar instructions more than the trip.
+
+So the structure stays: the scalar loop, the trip out, `step` inlined into `run`. The work goes into the handlers the trip reaches (the return's release and checks, the call's record lookup, push and argument writes), measured on the routes each time. The targets below are rewritten from the measured pieces of a method call (924 per iteration on main `c4750d18`: return 163, call 263, the trip about 230, the loop body and dispatch the rest).
+
+On a scalar fallback, `run_simple` lends the fetched instruction from the
+frame's immutable code slice to `step`. The register-window borrow ends
+before dispatch, so a call can still grow the register file. The VM exit
+copies the instruction when it needs to carry it out of the loop.
+
+#### Definition of done
+
+- Loop at most 165 (as today: the floor's 90 needs the one-loop structure), function call at most 620, method call at most 750, measured on the honest floor's script. The property read is the property engineer's arm. These come from the handler plan: about 70 off the return (checks settled at entry, the release and pop), about 40 off the call's site record and decision, about 30 off the push and argument writes, about 20 off the work budget and the published position. They are revised as each piece lands.
+- The four shapes in the guarded copy as well: measured with an object that has a destructor alive in the request, within the same limits. The Symfony route is the number that counts.
+- Every fixture, `make test`, both php-src trees on both machines, the 34 destructor timing cases, the three gates at twelve pairs, and all benchmarks pass, with no route rising.
+- At every daily push: the four shapes, and the three routes at twelve pairs each.
+- The count of loop exits per request by instruction kind, before and after. It should fall sharply; what remains is the list of what to move in next.
 
 ## 11. Tools built into the runtime
 
@@ -1588,6 +2171,16 @@ crate against the extension API.
 
 ### 11.5 `phera install`: packages, as fast as the JavaScript and Python tools made it
 
+The initial implementation lives in `crates/packages`. The CLI passes platform
+versions from Phera's runtime registry. The package crate handles resolution,
+archive downloads, the global store and Composer-compatible autoloader files.
+Downloads use the runtime's rustls and ring configuration. Locked installs
+prepare every archive before materializing packages into `vendor/`.
+The installer then applies approved native recipe and scaffold hooks, writes
+the Composer loader maps, and runs the project's supported scripts.
+See [package compatibility](../crates/packages/README.md) for implementation
+status. The list below describes the intended scope.
+
 Composer is written in PHP, resolves dependencies on one core, downloads
 with limited parallelism and unpacks every package into every project. pnpm,
 Bun and uv showed what the same job looks like when it is done natively:
@@ -1611,17 +2204,17 @@ that a project can use either tool.
   plain sentences.
 - **A global store.** Every package version is downloaded and unpacked once
   per machine into a content-addressed store and placed into `vendor/` with
-  copy-on-write clones or hard links, so a second project with the same
-  dependency costs no download and almost no disk.
+  copy-on-write clones where supported. Other filesystems use private
+  copies to keep project writes out of the shared store.
 - **Parallel everywhere.** Metadata is fetched concurrently while the resolver
-  runs, archives are downloaded and unpacked concurrently, the autoloader's
-  class map is built by scanning files on all cores with Phera's own parser.
-- **Installing from a lock file needs no resolution** and, when the store is
-  warm, no network: it is linking files.
-- **Commands**: `phera install`, `phera update`, `phera add`, `phera remove`,
-  `phera why`, `phera outdated`, `phera audit` (security advisories from
-  Packagist), `phera dump-autoload`, and `phera x vendor/bin-tool` to run a
-  package's binary.
+  runs, archives are downloaded and unpacked concurrently, and the autoloader's
+  class map is built by scanning files on all cores with Phera's tokenizer.
+- **Installing from a lock file needs no resolution.** A warm store supports
+  `--offline`. Online installs also show a Packagist advisory summary.
+- **Commands.** Use `install`, `update`, `add` and `remove` to manage dependencies.
+  `why`, `why-not`, `outdated`, `show`, `licenses`, `audit` and `validate` inspect
+  them. `dump-autoload` rebuilds the loader, `run-script` runs project scripts,
+  and `exec` runs an installed package binary.
 - **What does not carry over**: Composer plugins (they are PHP code that
   hooks into Composer's internals). The few that matter are handled natively
   (the installers for framework-specific paths); `scripts` in `composer.json`
@@ -1633,13 +2226,13 @@ that a project can use either tool.
   reason for each difference. Timings are measured cold and warm against
   Composer.
 
-Legacy layouts are not installed (6.2): a package that declares PSR-0
-autoloading, `target-dir` or `include-path` stops the install with an error
-naming the package and the field.
-
-The runtime side: when a script runs under Phera, autoloading reads the same
-metadata natively instead of executing the generated PHP autoloader, which
-needs namespaces and autoloading in the engine (11.3, item 3).
+The current autoloader supports PSR-4, PSR-0, class maps, eager files and
+package include paths.
+Native package hooks can generate framework files from the selected packages.
+They use the project's `allow-plugins` configuration and run after resolution.
+The runtime executes the generated PHP autoloader. The server's `--preload`
+option reads the generated metadata to compile PHP files before serving
+requests.
 
 ### 11.6 Phera views: a native template renderer
 
@@ -1750,19 +2343,17 @@ phera new shop --template symfony           asks nothing
 | `symfony-webapp` | The skeleton plus the `webapp` pack: Twig, Doctrine, forms, security. |
 | `laravel` | The official Laravel application. |
 
-- **Frameworks come from their own starting projects**, fetched with
-  Composer, not from copies kept in Phera: a copy would be out of date with
-  the next release of the framework. `phera install` (11.5) takes over from
-  Composer when it exists; until then a framework template needs Composer on
-  the machine, and the plain template only uses it to write the class loader.
+- **Frameworks come from their official starting projects.** Phera fetches
+  and installs them through its package manager (11.5). Composer can take
+  over when Phera refuses the template or its dependency requirements.
 - **It never overwrites.** The directory must be missing or empty.
 - **The name** is the last part of the directory. It is put into PHP, JSON
   and Markdown, so only letters, digits, `-`, `_` and `.` are accepted.
 - **Without a terminal** (a script, a pipeline) an unanswered question is an
   error that names the options, not a wait.
-- **While Phera cannot run a framework**, the command says so after creating
-  the project and names the PHP command that serves it meanwhile. One
-  function, `Template::runs_on_phera`, holds that fact.
+- **Serve the project** with `phera serve public` for the plain, Symfony
+  skeleton and Laravel templates. The webapp template reports its pending
+  Phera runtime support.
 
 ### 11.9 `phera lint`: source checks and local edits
 

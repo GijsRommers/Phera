@@ -122,12 +122,16 @@ pub(super) fn seek(_: &mut dyn Context, this: This<'_>, args: &[Value]) -> Nativ
     if let Ok(offset) = usize::try_from(offset) {
         let target = Target::of(object)?;
         let (found, end) = target.read(|array| {
-            let properties = target.is_properties();
-            let mut position = visible_at(array, array.first_position(), properties);
-            for _ in 0..offset {
-                let Some(slot) = position else { break };
-                position = visible_at(array, array.next_position(slot), properties);
-            }
+            let position = if target.is_properties() {
+                let mut position = visible_at(array, array.first_position(), true);
+                for _ in 0..offset {
+                    let Some(slot) = position else { break };
+                    position = visible_at(array, array.next_position(slot), true);
+                }
+                position
+            } else {
+                array.position_at(offset)
+            };
             (position, array.end_position())
         })?;
         move_cursor(object, Position::Slot(found.unwrap_or(end)))?;

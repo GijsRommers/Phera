@@ -12,6 +12,8 @@ pub(crate) struct Autoloaders {
     pub(crate) callbacks: Vec<Option<RegisteredLoader>>,
     pub(crate) extensions: Option<String>,
     pub(crate) active: HashSet<String>,
+    pub(crate) declaring: Vec<DeclaringClass>,
+    pub(super) pending: Vec<PendingClass>,
 }
 
 #[derive(Clone)]
@@ -21,18 +23,27 @@ pub(crate) struct RegisteredLoader {
 }
 
 /// Synchronous class-fetch instructions can suspend before they have a class to act on.
+///
+/// The interpreter runs such an instruction again once the class is loaded
+/// (`Vm::resume_class_fetch`). A native call cannot be run again that way,
+/// because it has taken its prepared call and arguments by then: the native
+/// call boundaries load the class themselves and call the native again
+/// (`calls::native_retries`).
 pub(crate) struct ClassMiss {
     pub(crate) name: String,
     failure: MissFailure,
+    declaring: Option<DeclaringClass>,
 }
 
 mod method_variance;
-pub(crate) use method_variance::MethodVariance;
+pub(crate) use method_variance::{
+    DeclaringClass, MethodVariance, PendingClass, PendingPublication,
+};
 
 enum MissFailure {
     Lookup(&'static str),
     Member(phera_source::deprecations::ItemKind, String),
-    MethodSignatures(Vec<MethodVariance>),
+    MethodSignatures(PendingClass),
     PropertySignature {
         remaining: Vec<String>,
         failure: crate::error_traces::DeclarationFailure,
@@ -40,6 +51,15 @@ enum MissFailure {
 }
 
 impl ClassMiss {
+    pub(crate) fn keep_pending_shape(error: &mut NativeError) {
+        if let NativeError::Unwind(Unwind(payload)) = error
+            && let Some(miss) = payload.downcast_mut::<Self>()
+            && let MissFailure::MethodSignatures(pending) = &miss.failure
+        {
+            pending.publication.set(PendingPublication::KeepShape);
+        }
+    }
+
     pub(crate) fn take(error: NativeError) -> Result<Self, NativeError> {
         match error {
             NativeError::Unwind(Unwind(payload)) => payload
@@ -54,14 +74,31 @@ impl ClassMiss {
         matches!(error, NativeError::Unwind(Unwind(payload)) if payload.is::<Self>())
     }
 
-    pub(crate) fn method_signatures(methods: Vec<MethodVariance>) -> NativeError {
-        let Some(name) = methods.first().and_then(|method| method.names.first()) else {
-            return internal_error!("empty method variance obligation");
-        };
+    pub(crate) fn method_signatures(pending: PendingClass) -> NativeError {
+        let name = pending.class.name.clone();
         NativeError::Unwind(Unwind(Box::new(Self {
-            name: name.clone(),
-            failure: MissFailure::MethodSignatures(methods),
+            name,
+            failure: MissFailure::MethodSignatures(pending),
+            declaring: None,
         })))
+    }
+
+    pub(crate) fn during_declaration(
+        mut error: NativeError,
+        unit: &std::sync::Arc<phera_bytecode::CompiledUnit>,
+        index: phera_bytecode::ClassId,
+    ) -> NativeError {
+        if let NativeError::Unwind(Unwind(payload)) = &mut error
+            && let Some(miss) = payload.downcast_mut::<Self>()
+            && !matches!(miss.failure, MissFailure::MethodSignatures(_))
+        {
+            miss.declaring = Some(DeclaringClass {
+                unit: unit.clone(),
+                index,
+                required: Default::default(),
+            });
+        }
+        error
     }
 
     pub(crate) fn property_signature(
@@ -78,6 +115,7 @@ impl ClassMiss {
                 remaining: names.collect(),
                 failure,
             },
+            declaring: None,
         })))
     }
 
@@ -90,9 +128,9 @@ impl ClassMiss {
                 kind, &self.name, &member,
             )
             .unwrap_or_else(|| NativeError::error(format!("Class \"{}\" not found", self.name))),
-            MissFailure::MethodSignatures(methods) => methods.first().map_or_else(
+            MissFailure::MethodSignatures(pending) => pending.methods.first().map_or_else(
                 || internal_error!("empty method variance obligation"),
-                |method| method.error(&self.name),
+                |method| method.error(method.names.first().unwrap_or(&self.name)),
             ),
             MissFailure::PropertySignature { failure, .. } => {
                 NativeError::Unwind(Unwind(Box::new(failure)))
@@ -112,6 +150,7 @@ impl Vm {
         let miss = ClassMiss {
             name: name.into(),
             failure: MissFailure::Lookup(kind),
+            declaring: None,
         };
         NativeError::Unwind(Unwind(Box::new(miss)))
     }
@@ -126,6 +165,7 @@ impl Vm {
         NativeError::Unwind(Unwind(Box::new(ClassMiss {
             name: name.into(),
             failure: MissFailure::Member(kind, member.into()),
+            declaring: None,
         })))
     }
 
@@ -167,7 +207,22 @@ impl Vm {
         let result = self.call_autoloaders(callback_name, origin).await;
         self.autoload.active.remove(&key);
         result?;
-        Ok(self.classes.get(name))
+        let loaded = self.classes.get(name);
+        // A fork tells its worker which classes its requests autoload, so
+        // that a re-boot can declare them in the snapshot.
+        if loaded.is_some()
+            && self.snapshot.mode == super::SnapshotMode::Forked
+            && let Some(sink) = &self.snapshot.warmup_sink
+        {
+            let mut list = sink.borrow_mut();
+            if !list
+                .iter()
+                .any(|class| class.eq_ignore_ascii_case(callback_name))
+            {
+                list.push(callback_name.to_owned());
+            }
+        }
+        Ok(loaded)
     }
 
     /// Read the live list after each call so removing or appending loaders takes effect.
@@ -216,24 +271,10 @@ impl Vm {
     /// already evaluated into registers before the fetch instruction was entered.
     #[cold]
     pub(crate) async fn resume_class_fetch(&mut self, miss: ClassMiss) -> Result<(), NativeError> {
-        if !self.error_handlers.pending.is_empty() {
-            self.drain_error_handlers().await?;
-        }
-        if let MissFailure::MethodSignatures(methods) = &miss.failure {
-            self.load_method_signature_classes(methods).await?;
-        } else if let MissFailure::PropertySignature { remaining, .. } = &miss.failure {
-            let mut attempted = HashSet::new();
-            let names = std::iter::once(&miss.name).chain(remaining);
-            for name in names.clone() {
-                if attempted.insert(name.to_ascii_lowercase()) {
-                    self.lookup_class(name).await?;
-                }
-            }
-            if names.clone().any(|name| self.classes.get(name).is_none()) {
-                return Err(miss.error());
-            }
-        } else if self.lookup_class(&miss.name).await?.is_none() {
-            return Err(miss.error());
+        let completed_declaration = matches!(miss.failure, MissFailure::MethodSignatures(_));
+        self.resolve_class_miss(miss).await?;
+        if completed_declaration {
+            return Ok(());
         }
         let frame = self
             .call_stack
@@ -247,13 +288,75 @@ impl Vm {
         Ok(())
     }
 
+    /// Loads what a synchronous step that unwound with `miss` was missing:
+    /// the class, through the autoloaders, or the classes of a signature.
+    /// The error PHP raises when one stays missing.
+    pub(crate) async fn resolve_class_miss(
+        &mut self,
+        mut miss: ClassMiss,
+    ) -> Result<(), NativeError> {
+        if !self.error_handlers.pending.is_empty() {
+            self.drain_error_handlers().await?;
+        }
+        if let MissFailure::MethodSignatures(pending) = miss.failure {
+            return self.finish_pending_class(pending).await;
+        }
+        let Some(declaring) = miss.declaring.take() else {
+            return self.load_class_miss(miss).await;
+        };
+        let depth = self.autoload.declaring.len();
+        self.autoload.declaring.push(declaring);
+        let result = self.load_class_miss(miss).await;
+        let required = self
+            .autoload
+            .declaring
+            .get(depth)
+            .filter(|entry| entry.required.get())
+            .and_then(|entry| {
+                let declaration = entry.unit.classes.get(entry.index.index())?;
+                Some((
+                    declaration.name.clone(),
+                    entry.unit.file.clone(),
+                    declaration.line as usize,
+                ))
+            });
+        self.autoload.declaring.truncate(depth);
+        match (result, required) {
+            (Err(error), Some((class, file, line))) => {
+                Err(self.variance_autoload_failure(error, &class, None, file, line))
+            }
+            (result, _) => result,
+        }
+    }
+
+    async fn load_class_miss(&mut self, miss: ClassMiss) -> Result<(), NativeError> {
+        if let MissFailure::PropertySignature { remaining, .. } = &miss.failure {
+            let mut attempted = HashSet::new();
+            let names = std::iter::once(&miss.name).chain(remaining);
+            for name in names.clone() {
+                if attempted.insert(name.to_ascii_lowercase()) {
+                    self.lookup_class(name).await?;
+                }
+            }
+            if names.clone().any(|name| self.classes.get(name).is_none()) {
+                return Err(miss.error());
+            }
+        } else if self.lookup_class(&miss.name).await?.is_none() {
+            return Err(miss.error());
+        }
+        Ok(())
+    }
+
     /// Named static callbacks can trigger the same class lookup before their method is resolved.
     pub(crate) async fn autoload_callable(&mut self, callable: &Value) -> Result<(), NativeError> {
         if self.autoload.callbacks.is_empty() {
             return Ok(());
         }
         let name = match &*callable.deref() {
-            Value::String(text) => text
+            Value::InternedStr(_) | Value::String(_) => callable
+                .deref()
+                .str_ref()
+                .expect("checked string")
                 .to_string_lossy()
                 .split_once("::")
                 .map(|(class, _)| class.to_owned()),
@@ -262,11 +365,8 @@ impl Vm {
                     values.get(&phera_value::ArrayKey::Int(0)),
                     values.get(&phera_value::ArrayKey::Int(1)),
                 ) {
-                    (Some(class), Some(method)) if matches!(&*method.deref(), Value::String(_)) => {
-                        match &*class.deref() {
-                            Value::String(name) => Some(name.to_string_lossy()),
-                            _ => None,
-                        }
+                    (Some(class), Some(method)) if method.deref().is_string() => {
+                        class.deref().str_ref().map(|name| name.to_string_lossy())
                     }
                     _ => None,
                 }
@@ -319,6 +419,8 @@ impl crate::snapshot::ForkCopy for Autoloaders {
             callbacks: self.callbacks.fork_copy(fork),
             extensions: self.extensions.clone(),
             active: Default::default(),
+            declaring: Default::default(),
+            pending: Default::default(),
         }
     }
 }

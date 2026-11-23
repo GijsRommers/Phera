@@ -15,7 +15,7 @@ const EXPANSION_BYTES: usize = 8 * 1024 * 1024;
 const EXPANSION_STEPS: usize = 100_000;
 const EXPANSION_DEPTH: usize = 32;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Entities {
     definitions: HashMap<String, Option<String>>,
     bytes: usize,
@@ -61,6 +61,10 @@ impl AttributeValue {
 }
 
 impl Entities {
+    pub(super) fn define(&mut self, name: String, value: Option<String>) {
+        self.definitions.entry(name).or_insert(value);
+    }
+
     pub(super) fn declare(&mut self, declaration: &str) {
         let text = declaration.trim_start();
         let Some((name, data)) = text.split_once(char::is_whitespace) else {

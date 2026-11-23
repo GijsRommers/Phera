@@ -22,12 +22,7 @@ pub fn get<'a>(
         if connection.name != DriverName::Sqlite
             && matches!(attribute, ATTR_CONNECTION_STATUS | ATTR_SERVER_INFO)
         {
-            let result = connection
-                .driver
-                .lock()
-                .await
-                .server_attribute(attribute)
-                .await;
+            let result = connection.driver.server_attribute(attribute).await;
             return match result {
                 Ok(text) => Ok(Value::from(text)),
                 Err(error) => connection.fail(context, error, "PDO::getAttribute"),
@@ -44,7 +39,7 @@ pub fn get<'a>(
                 Value::from(connection.version.clone())
             }
             (DriverName::Mysql, ATTR_CLIENT_VERSION) => Value::from("mysql_async 0.37.1"),
-            (DriverName::Postgres, ATTR_CLIENT_VERSION) => Value::from("tokio-postgres 0.7.18"),
+            (DriverName::Postgres, ATTR_CLIENT_VERSION) => Value::from("phera-postgres 3.0"),
             (_, ATTR_CASE) => Value::Int(match attrs.case {
                 ColumnCase::Natural => CASE_NATURAL,
                 ColumnCase::Upper => CASE_UPPER,

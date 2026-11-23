@@ -13,6 +13,11 @@ use std::process::Command;
 
 use phera_runtime::{BootReport, HttpRequest, Runtime, WebWorker};
 
+mod snapshots {
+    mod inherited_autoload;
+    mod streams;
+}
+
 /// A directory of PHP files that is removed when the test ends.
 struct Site {
     root: PathBuf,
@@ -162,23 +167,85 @@ async fn boot_and_answer(
         .await
 }
 
+/// A file the boot opened is opened again in each fork, at the boot's
+/// position: one fork's reads and writes do not move another's.
 #[tokio::test(flavor = "current_thread")]
-async fn an_open_file_refuses_the_snapshot_and_names_where_it_is() {
+async fn an_open_file_of_the_boot_is_each_forks_own() {
+    let answers = boot_and_answer(
+        "file",
+        "<?php file_put_contents(__DIR__ . '/data.txt', 'abcdef');
+         $in = fopen(__DIR__ . '/data.txt', 'r'); fread($in, 2);
+         $log = fopen(__DIR__ . '/log.txt', 'a');
+         Phera\\snapshot();
+         echo fread($in, 2), ' ', ftell($in);
+         fwrite($log, 'x');
+         clearstatcache(); echo ' ', filesize(__DIR__ . '/log.txt');",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["cd 4 1", "cd 4 2"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_locked_file_refuses_the_snapshot_and_names_where_it_is() {
     let error = boot_and_answer(
         "refusal",
-        "<?php class Log { public static $file; } Log::$file = fopen(__FILE__, 'r'); Phera\\snapshot();",
+        "<?php class Log { public static $file; } Log::$file = fopen(__FILE__, 'r');
+         flock(Log::$file, LOCK_SH); Phera\\snapshot();",
         &[],
     )
     .await
-    .expect_err("an open file cannot be kept");
+    .expect_err("a locked file cannot be kept");
     assert!(
         error.contains("Phera\\snapshot(): cannot keep stream (Log::$file)"),
         "{error}"
     );
-    assert!(
-        error.contains("an open file belongs to one request"),
-        "{error}"
-    );
+    assert!(error.contains("flock()"), "{error}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn xml_snapshots_copy_memory_and_keep_simplexml_views_together() {
+    let plain = r#"["boot","boot","item","pending","<r><item>boot<\/item><\/r>",["R","ITEM"],"boot resolver",false,false,false]"#;
+    let changed = r#"["changed","changed","item","pending","<r><item>changed<\/item><\/r>",["R","ITEM"],"boot resolver",false,false,true]"#;
+    let responses = boot_and_answer(
+        "xml-family",
+        include_str!("snapshots/xml_family.php"),
+        &["/index.php", "/index.php?mutate=1", "/index.php"],
+    )
+    .await
+    .expect("an XML snapshot made of plain data");
+    assert_eq!(responses, [plain, changed, plain]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn xml_snapshots_refuse_open_io() {
+    for (name, script, class) in [
+        (
+            "xmlreader-stream",
+            r#"<?php
+                $stream = fopen('php://memory', 'r+');
+                $reader = XMLReader::fromStream($stream);
+                unset($stream);
+                Phera\snapshot();
+            "#,
+            "XMLReader",
+        ),
+        (
+            "xmlwriter-uri",
+            r#"<?php
+                $writer = XMLWriter::toUri(__DIR__ . '/output.xml');
+                Phera\snapshot();
+            "#,
+            "XMLWriter",
+        ),
+    ] {
+        let error = boot_and_answer(name, script, &[])
+            .await
+            .expect_err("an open XML handle");
+        assert!(error.contains(&format!("cannot keep {class}")), "{error}");
+        assert!(error.contains("belongs to one request"), "{error}");
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -248,6 +315,22 @@ async fn what_the_boot_wrote_into_server_is_there_in_every_request() {
     assert_eq!(answers, ["prod unset /index.php?x=1"]);
 }
 
+/// WordPress's `wp_fix_server_vars()` fills in `REQUEST_URI` when the
+/// boot request has none; each request keeps its own.
+#[tokio::test(flavor = "current_thread")]
+async fn a_key_the_boot_added_yields_to_the_requests_own_value() {
+    let answers = boot_and_answer(
+        "added",
+        "<?php if (empty($_SERVER['REQUEST_URI'])) { $_SERVER['REQUEST_URI'] = '/boot'; }
+         $_SERVER['PHERA_ADDED'] = 'boot'; Phera\\snapshot();
+         echo $_SERVER['REQUEST_URI'], ' ', $_SERVER['PHERA_ADDED'];",
+        &["/one?a=1", "/two"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["/one?a=1 boot", "/two boot"]);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn each_fork_destroys_its_own_copies_and_the_snapshot_keeps_its_objects() {
     let answers = boot_and_answer(
@@ -259,6 +342,29 @@ async fn each_fork_destroys_its_own_copies_and_the_snapshot_keeps_its_objects() 
     .await
     .expect("snapshot");
     assert_eq!(answers, ["request\nclosed\n", "request\nclosed\n"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_fork_keeps_independent_images_and_fileinfo_flags() {
+    let answers = boot_and_answer(
+        "gd-fileinfo",
+        include_str!("snapshots/extension_state.php"),
+        &[
+            "/index.php?fork_probe=1",
+            "/index.php?fork_probe=1&mutate=1",
+            "/index.php?fork_probe=1",
+        ],
+    )
+    .await
+    .expect("GD and fileinfo boot state supports a snapshot");
+    assert_eq!(
+        answers,
+        [
+            "40203040 0 text/plain\n",
+            "20224466 1 us-ascii\n",
+            "40203040 0 text/plain\n",
+        ]
+    );
 }
 
 #[test]
@@ -273,4 +379,661 @@ fn on_the_command_line_the_call_returns_false_and_keeps_nothing() {
         String::from_utf8_lossy(&result.output),
         "bool(false)\nafter"
     );
+}
+
+/// A PDO connection the boot made reconnects in each fork, with what the
+/// boot changed about its session, and a fork's own change stays its own.
+#[tokio::test(flavor = "current_thread")]
+async fn a_pdo_connection_of_the_boot_reconnects_in_each_fork() {
+    let answers = boot_and_answer(
+        "pdo-sqlite",
+        "<?php $pdo = new PDO('sqlite:' . __DIR__ . '/data.sqlite');
+         $pdo->exec('CREATE TABLE IF NOT EXISTS t (id INTEGER)');
+         $pdo->exec('PRAGMA cache_size = 1234');
+         Phera\\snapshot();
+         echo $pdo->query('PRAGMA cache_size')->fetchColumn();
+         if (isset($_GET['change'])) { $pdo->exec('PRAGMA cache_size = 99'); }
+         echo ' ', $pdo->query('SELECT COUNT(*) FROM t')->fetchColumn();",
+        &["/?change=1", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["1234 0", "1234 0"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_in_memory_sqlite_database_refuses_the_snapshot() {
+    let error = boot_and_answer(
+        "pdo-memory",
+        "<?php $pdo = new PDO('sqlite::memory:'); Phera\\snapshot();",
+        &[],
+    )
+    .await
+    .expect_err("refused");
+    assert!(error.contains("in-memory SQLite database"), "{error}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_open_transaction_refuses_the_snapshot() {
+    let error = boot_and_answer(
+        "pdo-transaction",
+        "<?php $pdo = new PDO('sqlite:' . __DIR__ . '/data.sqlite');
+         $pdo->beginTransaction(); Phera\\snapshot();",
+        &[],
+    )
+    .await
+    .expect_err("refused");
+    assert!(error.contains("a transaction is open"), "{error}");
+}
+
+/// Whether the test MySQL of `crates/extensions/pdo/README.md` answers.
+fn mysql_available() -> bool {
+    let available = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:33069".parse().expect("address"),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok();
+    if !available {
+        eprintln!("SKIP: the test MySQL on port 33069 is not running");
+    }
+    available
+}
+
+/// mysqli and PDO connections of the boot: each fork has its own session,
+/// with the boot's settings replayed, and what one fork sets is gone in
+/// the next.
+#[tokio::test(flavor = "current_thread")]
+async fn mysql_connections_of_the_boot_get_a_session_of_their_own_in_each_fork() {
+    if !mysql_available() {
+        return;
+    }
+    let answers = boot_and_answer(
+        "mysql",
+        "<?php $db = new mysqli('127.0.0.1', 'phera', 'phera', 'phera_test', 33069);
+         $db->set_charset('latin1');
+         $db->query(\"SET @boot = 'mysqli'\");
+         $pdo = new PDO('mysql:host=127.0.0.1;port=33069;dbname=phera_test', 'phera', 'phera');
+         $pdo->exec(\"SET @boot = 'pdo'\");
+         $stored = $db->query('SELECT 1 UNION SELECT 2');
+         $stored->fetch_row();
+         Phera\\snapshot();
+         $row = $db->query('SELECT @boot, @fork, @@character_set_client')->fetch_row();
+         echo implode(',', array_map('strval', $row)), ' ';
+         echo implode(',', array_map('strval', $pdo->query('SELECT @boot, @fork')->fetch(PDO::FETCH_NUM))), ' ';
+         echo $stored->fetch_row()[0];
+         $db->query(\"SET @fork = 'set'\");
+         $pdo->exec(\"SET @fork = 'set'\");",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["mysqli,,latin1 pdo, 2", "mysqli,,latin1 pdo, 2"]);
+}
+
+/// A pgsql connection of the boot: each fork borrows its own session with
+/// the boot's `SET` replayed; what one fork sets is gone in the next.
+#[tokio::test(flavor = "current_thread")]
+async fn a_pgsql_connection_of_the_boot_gets_a_session_of_its_own_in_each_fork() {
+    let available = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:54329".parse().expect("address"),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok();
+    if !available {
+        eprintln!("SKIP: the test PostgreSQL on port 54329 is not running");
+        return;
+    }
+    let answers = boot_and_answer(
+        "pgsql",
+        "<?php $db = pg_connect('host=127.0.0.1 port=54329 dbname=phera_test user=phera password=phera');
+         pg_query($db, \"SET application_name = 'boot'\");
+         Phera\\snapshot();
+         echo pg_fetch_result(pg_query($db, 'SHOW application_name'), 0, 0), ' ';
+         echo pg_fetch_result(pg_query($db, \"SELECT current_setting('phera.fork', true)\"), 0, 0) ?? 'unset';
+         pg_query($db, \"SET phera.fork = 'set'\");",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["boot unset", "boot unset"]);
+}
+
+/// A Redis connection of the boot: each fork borrows its own socket, in the
+/// database the boot selected.
+#[tokio::test(flavor = "current_thread")]
+async fn a_redis_connection_of_the_boot_gets_a_socket_of_its_own_in_each_fork() {
+    let available = std::net::TcpStream::connect_timeout(
+        &"127.0.0.1:16399".parse().expect("address"),
+        std::time::Duration::from_millis(300),
+    )
+    .is_ok();
+    if !available {
+        eprintln!("SKIP: the test Redis on port 16399 is not running");
+        return;
+    }
+    let answers = boot_and_answer(
+        "redis",
+        "<?php $redis = new Redis(); $redis->connect('127.0.0.1', 16399); $redis->select(14);
+         $redis->set('phera:snapshot', 'boot');
+         Phera\\snapshot();
+         echo $redis->get('phera:snapshot'), ' ', $redis->getDbNum();
+         $redis->select(15);",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(answers, ["boot 14", "boot 14"]);
+}
+
+/// A DOM document of the boot: each fork's nodes are its own, one copy of
+/// the document per fork shared by all of them, so a change through one
+/// node object is seen through another, in that fork only.
+#[tokio::test(flavor = "current_thread")]
+async fn a_dom_document_of_the_boot_is_each_forks_own() {
+    let answers = boot_and_answer(
+        "dom",
+        "<?php $d = new DOMDocument(); $d->loadXML('<a><b>x</b></a>');
+         $b = $d->getElementsByTagName('b')->item(0);
+         $hash = hash_init('sha256'); hash_update($hash, 'boot');
+         $curl = curl_init('http://127.0.0.1:1/'); curl_setopt($curl, CURLOPT_PRIVATE, 'boot');
+         Phera\\snapshot();
+         echo $d->saveXML($d->documentElement), ' ', $b === $d->documentElement->firstChild ? 'same' : 'other';
+         $b->nodeValue = 'changed'; $d->documentElement->setAttribute('fork', '1');
+         echo ' ', $d->saveXML($d->documentElement);
+         echo ' ', substr(hash_final($hash), 0, 8), ' ', curl_getinfo($curl, CURLINFO_PRIVATE);
+         curl_setopt($curl, CURLOPT_PRIVATE, 'fork');",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    let expected = "<a><b>x</b></a> same <a fork=\"1\"><b>changed</b></a> 4509beb0 boot";
+    assert_eq!(answers, [expected, expected]);
+}
+
+/// Generators and fibers of the boot: each fork resumes its own copy from
+/// where the boot left it, and a suspended generator's `finally` runs at
+/// the end of every request, as it would in a run from the top.
+#[tokio::test(flavor = "current_thread")]
+async fn generators_and_fibers_of_the_boot_are_each_forks_own() {
+    let answers = boot_and_answer(
+        "generators",
+        "<?php function count_up() { try { $i = 0; while (true) { $got = yield $i++; if ($got) echo \"[$got]\"; } } finally { echo '(closed)'; } }
+         $counter = count_up(); $counter->current(); $counter->next();
+         function done() { yield 1; } $done = done(); foreach ($done as $_) {}
+         $fiber = new Fiber(fn (int $n) => $n * 2);
+         $finished = new Fiber(fn () => 'ok'); $finished->start();
+         Phera\\snapshot();
+         echo $counter->current(), $counter->send('x'), ' ';
+         echo $done->valid() ? 'valid' : 'done', ' ';
+         $fiber->start(21); echo $fiber->getReturn(), ' ', $finished->getReturn(), ' ';",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    assert_eq!(
+        answers,
+        ["1[x]2 done 42 ok (closed)", "1[x]2 done 42 ok (closed)"]
+    );
+}
+
+/// Temporary files, unused compression contexts and curl's multi and share
+/// handles of the boot: each fork has its own.
+#[tokio::test(flavor = "current_thread")]
+async fn temporary_files_and_unused_contexts_of_the_boot_are_each_forks_own() {
+    let answers = boot_and_answer(
+        "temporary",
+        "<?php $temp = fopen('php://temp/maxmemory:4', 'w+'); fwrite($temp, 'boot-data');
+         $file = tmpfile(); fwrite($file, 'tmp');
+         $deflate = deflate_init(ZLIB_ENCODING_DEFLATE);
+         $multi = curl_multi_init(); $share = curl_share_init();
+         Phera\\snapshot();
+         fwrite($temp, '+fork'); rewind($temp); echo stream_get_contents($temp), ' ';
+         fwrite($file, '+fork'); rewind($file); echo stream_get_contents($file), ' ';
+         echo bin2hex(gzuncompress(deflate_add($deflate, 'abc', ZLIB_FINISH))), ' ';
+         echo get_class($multi), ' ', get_class($share);",
+        &["/", "/"],
+    )
+    .await
+    .expect("snapshot");
+    let expected = "boot-data+fork tmp+fork 616263 CurlMultiHandle CurlShareHandle";
+    assert_eq!(answers, [expected, expected]);
+}
+
+/// Two files that declare a function of the same name, run by different
+/// requests of one worker: each request calls its own, although the worker
+/// numbers both files' functions in one table.
+#[tokio::test(flavor = "current_thread")]
+async fn two_files_with_the_same_function_name_on_different_requests_of_a_worker() {
+    let site = Site::new("same-function");
+    std::fs::write(
+        site.root.join("a.php"),
+        "<?php function helper() { return 'a'; } echo helper();",
+    )
+    .expect("a.php");
+    std::fs::write(site.root.join("b.php"), "<?php function helper() { return 'b'; } echo helper(), ' ', function_exists('other') ? 'other' : 'none';").expect("b.php");
+    std::fs::write(
+        site.root.join("c.php"),
+        "<?php function other() {} echo function_exists('helper') ? 'helper' : 'none';",
+    )
+    .expect("c.php");
+    let local = tokio::task::LocalSet::new();
+    let answers = local
+        .run_until(async {
+            let worker = Runtime::new().web_worker(0);
+            let mut answers = Vec::new();
+            for script in ["a.php", "b.php", "c.php", "a.php", "b.php"] {
+                let path = site.root.join(script);
+                let response = worker
+                    .handle_request(&path, &site.root, request(&format!("/{script}")))
+                    .await;
+                answers.push(String::from_utf8_lossy(&response.body).into_owned());
+            }
+            answers
+        })
+        .await;
+    assert_eq!(answers, ["a", "b none", "none", "a", "b none"]);
+}
+
+/// Runs `targets` (script and query) as requests of one unbooted worker,
+/// whose requests share the worker's linked classes.
+async fn worker_answers(runtime: Runtime, site: &Site, targets: &[&str]) -> Vec<String> {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let worker = runtime.web_worker(0);
+            let mut answers = Vec::new();
+            for target in targets {
+                let script = site.root.join(target.split('?').next().unwrap_or(target));
+                let response = worker
+                    .handle_request(&script, &site.root, request(&format!("/{target}")))
+                    .await;
+                answers.push(String::from_utf8_lossy(&response.body).into_owned());
+            }
+            answers
+        })
+        .await
+}
+
+/// A class file edited between two requests of a worker: the second request
+/// links the new revision, as a fresh worker would; the old revision's
+/// linked class is not reused.
+#[tokio::test(flavor = "current_thread")]
+async fn a_class_file_edited_between_two_requests_links_its_new_revision() {
+    let site = Site::new("edited-class");
+    let model = site.root.join("model.php");
+    std::fs::write(
+        &model,
+        "<?php class Model { function value() { return 'old'; } }",
+    )
+    .expect("model");
+    std::fs::write(site.root.join("index.php"), "<?php require __DIR__ . '/model.php'; $m = new Model; echo $m->value(), ' ', method_exists($m, 'added') ? 'added' : 'none';").expect("index");
+    let runtime = Runtime::new().with_web_development(true);
+    let local = tokio::task::LocalSet::new();
+    let answers = local
+        .run_until(async {
+            let worker = runtime.web_worker(0);
+            let index = site.root.join("index.php");
+            let mut answers = Vec::new();
+            for step in 0..4 {
+                if step == 2 {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    std::fs::write(&model, "<?php class Model { function value() { return 'new'; } function added() {} }").expect("edit");
+                }
+                let response = worker.handle_request(&index, &site.root, request("/index.php")).await;
+                answers.push(String::from_utf8_lossy(&response.body).into_owned());
+            }
+            answers
+        })
+        .await;
+    assert_eq!(answers, ["old none", "old none", "new added", "new added"]);
+}
+
+/// Conditional declarations resolve per request: a class declared in either
+/// branch of an `if`, and one name declared by two files on alternating
+/// requests, are each request's own class.
+#[tokio::test(flavor = "current_thread")]
+async fn conditional_and_same_name_declarations_resolve_per_request() {
+    let site = Site::new("conditional-classes");
+    std::fs::write(site.root.join("branch.php"), "<?php if (isset($_GET['one'])) { class C { function n() { return 'one'; } } } else { class C { function n() { return 'two'; } } } echo (new C)->n();").expect("branch");
+    std::fs::write(site.root.join("first.php"), "<?php class D { const V = 'first'; } echo D::V, ' ', class_exists('E', false) ? 'E' : 'no E';").expect("first");
+    std::fs::write(site.root.join("second.php"), "<?php class D { const V = 'second'; } class E {} echo D::V, ' ', class_exists('E', false) ? 'E' : 'no E';").expect("second");
+    let answers = worker_answers(
+        Runtime::new(),
+        &site,
+        &[
+            "branch.php?one=1",
+            "branch.php",
+            "branch.php?one=1",
+            "first.php",
+            "second.php",
+            "first.php",
+            "second.php",
+        ],
+    )
+    .await;
+    assert_eq!(
+        answers,
+        [
+            "one",
+            "two",
+            "one",
+            "first no E",
+            "second E",
+            "first no E",
+            "second E"
+        ]
+    );
+}
+
+/// A class whose parent is a different class in two requests is linked by
+/// each: its linked class from the first request is not reused.
+#[tokio::test(flavor = "current_thread")]
+async fn a_class_with_another_parent_in_another_request_is_linked_again() {
+    let site = Site::new("other-parent");
+    std::fs::write(site.root.join("child.php"), "<?php class Child extends Base { use Greets; function name() { return parent::name() . '+child'; } }").expect("child");
+    std::fs::write(
+        site.root.join("greets.php"),
+        "<?php trait Greets { function greet() { return 'hi ' . $this->name(); } }",
+    )
+    .expect("trait");
+    std::fs::write(site.root.join("a.php"), "<?php class Base { function name() { return 'a'; } } require __DIR__ . '/greets.php'; require __DIR__ . '/child.php'; echo (new Child)->greet();").expect("a");
+    std::fs::write(site.root.join("b.php"), "<?php class Base { function name() { return 'b'; } } require __DIR__ . '/greets.php'; require __DIR__ . '/child.php'; echo (new Child)->greet();").expect("b");
+    let answers =
+        worker_answers(Runtime::new(), &site, &["a.php", "b.php", "a.php", "b.php"]).await;
+    assert_eq!(
+        answers,
+        ["hi a+child", "hi b+child", "hi a+child", "hi b+child"]
+    );
+}
+
+/// `class_alias` names are each request's own: an alias made in one request
+/// of a worker is no class in the next, and may name another class there.
+#[tokio::test(flavor = "current_thread")]
+async fn class_aliases_are_each_requests_own() {
+    let site = Site::new("aliases");
+    std::fs::write(
+        site.root.join("classes.php"),
+        "<?php class Alpha { const N = 'alpha'; } class Beta { const N = 'beta'; }",
+    )
+    .expect("classes");
+    std::fs::write(site.root.join("alias.php"), "<?php require __DIR__ . '/classes.php'; if (isset($_GET['to'])) { class_alias($_GET['to'], 'Named'); } echo class_exists('Named', false) ? Named::N : 'none', ' ', class_exists('stdAlias', false) ? 'std' : 'nostd'; if (isset($_GET['std'])) { class_alias('stdClass', 'stdAlias'); echo ' ', get_class(new stdAlias); }").expect("alias");
+    let answers = worker_answers(
+        Runtime::new(),
+        &site,
+        &[
+            "alias.php?to=Alpha",
+            "alias.php",
+            "alias.php?to=Beta&std=1",
+            "alias.php",
+        ],
+    )
+    .await;
+    assert_eq!(
+        answers,
+        [
+            "alpha nostd",
+            "none nostd",
+            "beta nostd stdClass",
+            "none nostd"
+        ]
+    );
+}
+
+/// Class names ignore case in static references (`new POST`), in strings a
+/// script builds, and across requests that share the class.
+#[tokio::test(flavor = "current_thread")]
+async fn class_lookups_ignore_case_in_every_request() {
+    let site = Site::new("case-insensitive");
+    std::fs::write(
+        site.root.join("post.php"),
+        "<?php class Post { public static function query() { return 'query'; } }",
+    )
+    .expect("post");
+    std::fs::write(site.root.join("index.php"), "<?php require __DIR__ . '/post.php'; $name = 'pOsT'; echo get_class(new POST), ' ', post::query(), ' ', get_class(new $name), ' ', class_exists('POST', false) ? 'yes' : 'no', ' ', (new Post) instanceof pOST ? 'is' : 'not';").expect("index");
+    let answers = worker_answers(
+        Runtime::new(),
+        &site,
+        &["index.php", "index.php", "index.php"],
+    )
+    .await;
+    assert_eq!(answers, ["Post query Post yes is"; 3]);
+}
+
+/// A script with forty enums: shared by the worker's requests, each enum's
+/// cases are still each request's own objects, and lookups of built-in and
+/// application classes answer as PHP does.
+fn forty_enums_script() -> String {
+    let mut source = String::from("<?php\n");
+    for index in 0..40 {
+        source.push_str(&format!(
+            "enum Status{index}: string {{ case On = 'on{index}'; case Off = 'off{index}'; const DEFAULT = self::On; }}\n"
+        ));
+    }
+    source.push_str(
+        "class Order { const LIMIT = 3; public Status7 $status = Status7::Off; }
+         $a = Status3::On; $b = Status3::On;
+         echo $a === $b ? 'same' : 'other', ' ', spl_object_id($a) === spl_object_id(Status3::On) ? 'id' : 'noid', ' ';
+         echo unserialize(serialize(Status39::Off)) === Status39::Off ? 'serial' : 'noserial', ' ';
+         echo Status12::DEFAULT === Status12::On ? 'const' : 'noconst', ' ', Status20::tryFrom('off20')?->name, ' ';
+         $order = new Order; echo Order::LIMIT, ' ', $order->status->value, ' ', $order instanceof Order ? 'order' : 'no', ' ';
+         echo (new ArrayObject([1])) instanceof Countable ? 'countable' : 'no', ' ', count(get_declared_classes()) > 40 ? 'declared' : 'missing';",
+    );
+    source
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn forty_shared_enums_keep_their_cases_per_request() {
+    let site = Site::new("forty-enums");
+    let source = forty_enums_script();
+    std::fs::write(site.root.join("index.php"), &source).expect("script");
+    let expected = phera_extension_api::testing::oracle::run_php("forty-enums", &source)
+        .map(|lines| lines.concat());
+    let answers = worker_answers(Runtime::new(), &site, &["index.php"; 3]).await;
+    if let Some(expected) = expected {
+        assert_eq!(answers, [expected.clone(), expected.clone(), expected]);
+    }
+    assert_eq!(
+        answers[0],
+        "same id serial const Off 3 off7 order countable declared"
+    );
+}
+
+/// A fork shares the snapshot's code table and the cells the boot filled,
+/// and copies a table only when its request changes it. Each request below
+/// changes one of them (declares a class of its own under a name another
+/// request uses differently, loads a file, composes a trait method, links a
+/// function symbol the boot left unlinked, writes a static property that a
+/// site of the boot read, fills a property site and a
+/// method site with a class the boot never saw); every
+/// other request, at the same time or after it, and the snapshot see none
+/// of it.
+#[tokio::test(flavor = "current_thread")]
+async fn a_forks_code_table_and_caches_are_its_own_when_it_changes_them() {
+    let site = Site::new("code-sharing");
+    std::fs::create_dir_all(site.root.join("late")).expect("late directory");
+    std::fs::write(
+        site.root.join("late/LoadedA.php"),
+        "<?php class LoadedA extends Base { use Greets; } function loaded_a(): int { return 1; }",
+    )
+    .expect("LoadedA.php");
+    std::fs::write(
+        site.root.join("late/LoadedB.php"),
+        "<?php class LoadedB extends Base { use Greets; } function loaded_b(): int { return 2; }",
+    )
+    .expect("LoadedB.php");
+    let script = site.root.join("index.php");
+    std::fs::write(
+        &script,
+        r#"<?php
+        trait Greets { public function hi(): string { return 'hi ' . $this->name(); } }
+        class Base { public function name(): string { return 'base'; } }
+        class Boot extends Base { use Greets; public static int $count = 0; public int $n = 1; public function name(): string { return 'boot'; } }
+        function call_name(Base $o): string { return $o->name(); }
+        function read_n(object $o): int { return $o->n; }
+        function read_static(): int { return Boot::$count; }
+        function slow(): void { usleep(3000); }
+        function doubled(): int { return array_sum(array_map(fn(int $x) => $x * 2, [1, 2])) + strlen('ab'); }
+        function bound_n(object $o): int { return (fn() => $this->n)->call($o); }
+        function via_symbol(): string {
+            return (function_exists('loaded_a') ? loaded_a() : 0) . '/' . (function_exists('loaded_b') ? loaded_b() : 0);
+        }
+        via_symbol();
+        call_name(new Boot); read_n(new Boot); (new Boot)->hi(); doubled(); bound_n(new Boot); read_static();
+        Phera\snapshot();
+        $mode = $_GET['mode'] ?? 'plain';
+        $out = [];
+        if ($mode === 'a' || $mode === 'b') {
+            Boot::$count = $mode === 'a' ? 5 : 7;
+            if ($mode === 'a') {
+                class Other extends Base { public int $n = 10; public function name(): string { return 'other-a'; } }
+            } else {
+                class Other extends Base { public int $n = 20; public function name(): string { return 'other-b'; } }
+            }
+            slow();
+            $out[] = call_name(new Other);
+            $out[] = read_n(new Other) + bound_n(new Other);
+            $loaded = $mode === 'a' ? 'LoadedA' : 'LoadedB';
+            include __DIR__ . '/late/' . $loaded . '.php';
+            slow();
+            $out[] = (new $loaded)->hi();
+        }
+        slow();
+        $out[] = call_name(new Boot);
+        $out[] = read_n(new Boot) + bound_n(new Boot) + doubled();
+        $out[] = (new Boot)->hi();
+        $out[] = via_symbol();
+        $out[] = read_static();
+        $out[] = (class_exists('Other', false) ? 'O' : 'o')
+            . (function_exists('loaded_a') ? 'A' : 'a')
+            . (function_exists('loaded_b') ? 'B' : 'b');
+        echo implode(',', $out);
+        "#,
+    )
+    .expect("index.php");
+    let expected = |mode: &str| match mode {
+        "a" => "other-a,20,hi base,boot,10,hi boot,1/0,5,OAb",
+        "b" => "other-b,40,hi base,boot,10,hi boot,0/2,7,OaB",
+        _ => "boot,10,hi boot,0/0,0,oab",
+    };
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let worker = Runtime::new().web_worker(0);
+            assert!(matches!(
+                worker.boot(&script, &site.root).await,
+                BootReport::Snapshot { .. }
+            ));
+            let ask = |worker: WebWorker, mode: &'static str| {
+                let (root, script) = (site.root.clone(), script.clone());
+                async move {
+                    let target = format!("/index.php?mode={mode}");
+                    let response = worker
+                        .handle_request(&script, &root, request(&target))
+                        .await;
+                    (mode, String::from_utf8_lossy(&response.body).into_owned())
+                }
+            };
+            // One after the other.
+            for mode in ["plain", "a", "plain", "b", "a", "plain"] {
+                let (mode, answer) = ask(worker.clone(), mode).await;
+                assert_eq!(answer, expected(mode), "mode {mode}, one at a time");
+            }
+            // At the same time: each request sleeps between its changes.
+            let tasks: Vec<_> = ["a", "plain", "b", "plain", "a", "b", "plain"]
+                .into_iter()
+                .map(|mode| tokio::task::spawn_local(ask(worker.clone(), mode)))
+                .collect();
+            for task in tasks {
+                let (mode, answer) = task.await.expect("request task");
+                assert_eq!(answer, expected(mode), "mode {mode}, at the same time");
+            }
+            // And a fork taken after all of that still starts from the boot.
+            let (_, answer) = ask(worker.clone(), "plain").await;
+            assert_eq!(answer, expected("plain"));
+        })
+        .await;
+}
+
+/// A worker boots again (a changed file, or the warm-up boot after its
+/// requests settle) while forks of the old snapshot are alive. The old
+/// snapshot is dropped when the new one replaces it; its forks keep what
+/// they share with it (the code table, the cells the boot filled, the
+/// function numbers it leased) and run to the end, whatever the new
+/// snapshot's forks load and declare before, between and after.
+#[tokio::test(flavor = "current_thread")]
+async fn forks_of_a_replaced_snapshot_run_on_after_the_new_one_loads_and_declares() {
+    let site = Site::new("replaced");
+    std::fs::create_dir_all(site.root.join("late")).expect("late directory");
+    std::fs::write(
+        site.root.join("late/LoadedA.php"),
+        "<?php class LoadedA extends Base { use Greets; } function loaded_a(): int { return 1; }",
+    )
+    .expect("LoadedA.php");
+    let script = site.root.join("index.php");
+    std::fs::write(
+        &script,
+        r#"<?php
+        trait Greets { public function hi(): string { return 'hi ' . $this->name(); } }
+        class Base { public function name(): string { return 'base'; } }
+        class Boot extends Base { use Greets; public int $n = 1; public function name(): string { return 'boot'; } }
+        function call_name(Base $o): string { return $o->name(); }
+        function read_n(object $o): int { return $o->n; }
+        function via_symbol(): string { return function_exists('loaded_a') ? (string) loaded_a() : '0'; }
+        call_name(new Boot); read_n(new Boot); (new Boot)->hi(); via_symbol();
+        Phera\snapshot();
+        echo via_symbol(), ',', call_name(new Boot), ',', read_n(new Boot), ',';
+        include __DIR__ . '/late/LoadedA.php';
+        echo via_symbol(), ',', (new LoadedA)->hi(), ',', call_name(new LoadedA), ',', read_n(new Boot);
+        "#,
+    )
+    .expect("index.php");
+    let expected = "0,boot,1,1,hi base,base,1";
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let worker = Runtime::new().web_worker(0);
+            let boot = |worker: WebWorker| {
+                let (script, root) = (script.clone(), site.root.clone());
+                async move {
+                    assert!(matches!(
+                        worker.boot(&script, &root).await,
+                        BootReport::Snapshot { .. }
+                    ));
+                }
+            };
+            let run = |mut vm: phera_vm::Vm| async move {
+                vm.resume().await;
+                String::from_utf8_lossy(&vm.output).into_owned()
+            };
+            boot(worker.clone()).await;
+            let old = worker
+                .fork_snapshot(&script)
+                .expect("a snapshot")
+                .expect("a fork");
+            let old_unrun = worker
+                .fork_snapshot(&script)
+                .expect("a snapshot")
+                .expect("a fork");
+            // The new boot replaces the snapshot; the old one is dropped.
+            boot(worker.clone()).await;
+            let new = worker
+                .fork_snapshot(&script)
+                .expect("a snapshot")
+                .expect("a fork");
+            assert_eq!(run(new).await, expected, "a fork of the new snapshot");
+            assert_eq!(run(old).await, expected, "a fork of the old snapshot");
+            // A third boot, with the old forks still alive, and a fork of each.
+            boot(worker.clone()).await;
+            let newer = worker
+                .fork_snapshot(&script)
+                .expect("a snapshot")
+                .expect("a fork");
+            assert_eq!(
+                run(old_unrun).await,
+                expected,
+                "an old fork never run before"
+            );
+            assert_eq!(run(newer).await, expected, "a fork of the newest snapshot");
+        })
+        .await;
 }

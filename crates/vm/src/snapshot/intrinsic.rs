@@ -28,7 +28,7 @@ pub(crate) struct SnapshotStop;
 impl Vm {
     /// `Phera\snapshot()`; `destination` is the register that receives its
     /// result, where a fork resumes.
-    pub(crate) fn snapshot_intrinsic(
+    pub(crate) async fn snapshot_intrinsic(
         &mut self,
         destination: Option<Reg>,
         mut arguments: Vec<Value>,
@@ -43,8 +43,29 @@ impl Vm {
             }
             SnapshotMode::Boot => {
                 self.snapshot.resume = destination;
+                // Warm-up: declare the classes this worker's requests
+                // autoloaded, through the application's own autoloaders, so
+                // that requests find them declared. A class the boot cannot
+                // load (its file is gone, the load throws) is removed from
+                // the list and loads in the request as before; the boot
+                // never fails because of the warm-up.
+                if let Some(sink) = self.snapshot.boot_warmup.take() {
+                    let names = sink.borrow().clone();
+                    let mut failed = Vec::new();
+                    for name in names {
+                        if self.classes.get(&name).is_none() {
+                            match self.lookup_class_from(&name, None).await {
+                                Ok(Some(_)) => {}
+                                _ => failed.push(name),
+                            }
+                        }
+                    }
+                    if !failed.is_empty() {
+                        sink.borrow_mut().retain(|name| !failed.contains(name));
+                    }
+                }
                 // From here the classes are shared by every fork.
-                self.classes.build_method_tables(&self.code);
+                self.classes.build_method_tables();
                 let mut frozen = self.fork_vm().map_err(|refusal| {
                     let error = self.snapshot_exception(&refusal);
                     if let NativeError::Throw { message, .. } = &error {

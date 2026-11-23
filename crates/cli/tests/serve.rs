@@ -13,10 +13,13 @@ mod scenarios {
     mod proxy;
     mod request_headers;
     mod request_parse_body;
+    mod service_warmup;
     mod session;
     mod spl_policy;
     mod static_files;
     mod uploads;
+    mod warmup_requests;
+    mod web_log;
 }
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -54,6 +57,17 @@ impl Served {
         directory: &str,
         flags: &[&str],
     ) -> Served {
+        Self::start_with_stderr(name, workers, files, directory, flags, Stdio::inherit())
+    }
+
+    fn start_with_stderr(
+        name: &str,
+        workers: usize,
+        files: &[(&str, &str)],
+        directory: &str,
+        flags: &[&str],
+        stderr: Stdio,
+    ) -> Served {
         let root = Served::root_of(name);
         for (path, contents) in files {
             let file = root.join(path);
@@ -68,6 +82,7 @@ impl Served {
             .args(flags)
             .arg(root.join(directory))
             .stdout(Stdio::piped())
+            .stderr(stderr)
             .spawn()
             .expect("start phera serve");
 

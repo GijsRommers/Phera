@@ -122,7 +122,11 @@ impl Vm {
             signatures.resize_with(index + 1, || None);
         }
         signatures[index]
-            .get_or_insert_with(|| closure_callee(&self.code, function))
+            .get_or_insert_with(|| {
+                cache
+                    .base_closure_signature(index)
+                    .unwrap_or_else(|| closure_callee(&self.code, function))
+            })
             .clone()
     }
 
@@ -167,6 +171,12 @@ pub(crate) fn captured_values(object: &phera_value::Object) -> Vec<Value> {
 impl ClosureState {
     /// PHP clone and bind copy the current static values into independent reference cells.
     pub(crate) fn duplicate(&self) -> Self {
+        let mut callee = self.callee.clone();
+        if let CallTarget::Magic(target) = &mut callee.target {
+            // Each closure owns its magic receiver once, including when
+            // several copies are examined by the cycle collector.
+            *target = Rc::new((**target).clone());
+        }
         let statics = self.statics.as_ref().map(|statics| {
             let copied = statics
                 .borrow()
@@ -185,7 +195,7 @@ impl ClosureState {
         });
         Self {
             origin: self.origin,
-            callee: self.callee.clone(),
+            callee,
             captures: self.captures.clone(),
             context: self.context.clone(),
             binding: self.binding,

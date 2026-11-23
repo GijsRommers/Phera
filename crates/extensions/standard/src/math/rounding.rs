@@ -52,10 +52,9 @@ impl RoundingMode {
         let Value::Object(object) = value else {
             return Self::from_integer(args::int(std::slice::from_ref(value), 0)?);
         };
-        let Value::String(name) = object.get(&ArrayKey::str("name"))? else {
-            return None;
-        };
-        Some(match name.as_bytes() {
+        let name = object.get(&ArrayKey::str("name"))?;
+        let name = name.as_str_bytes()?;
+        Some(match name {
             b"HalfAwayFromZero" => Self::HalfUp,
             b"HalfTowardsZero" => Self::HalfDown,
             b"HalfEven" => Self::HalfEven,

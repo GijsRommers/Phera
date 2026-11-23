@@ -55,8 +55,80 @@ pub fn file_put_contents(
         } else {
             b"wb"
         };
+        if !lock
+            && let Some(stream) = crate::filters::open_request_filter(
+                context,
+                function,
+                name,
+                mode,
+                flags & USE_PATH != 0,
+                args::value(&arguments, 3),
+            )
+            .await?
+        {
+            return write_request_filter(
+                context,
+                stream,
+                function,
+                data,
+                source.map(|stream| stream.as_ref()),
+            )
+            .await;
+        }
         if flags & crate::whole_file::NO_DEFAULT_CONTEXT == 0 {
             files(context).use_default_context(args::value(&arguments, 3));
+        }
+        if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+            let explicit = args::value(&arguments, 3);
+            let supplied =
+                if explicit.is_null() && flags & crate::whole_file::NO_DEFAULT_CONTEXT == 0 {
+                    crate::context_options::default_for_wrapper(context)
+                } else {
+                    explicit.clone()
+                };
+            let options = if flags & USE_PATH != 0 {
+                crate::user_wrappers::USE_PATH
+            } else {
+                0
+            };
+            let Some(file) =
+                crate::user_file::open(context, wrapper, function, name, mode, options, supplied)
+                    .await?
+            else {
+                return Ok(Value::Bool(false));
+            };
+            files(context).claim_id();
+            let written = async {
+                if lock
+                    && (!file.lock(context, function, 0).await?
+                        || !file.lock(context, function, LOCK_EX).await?)
+                {
+                    return Ok(None);
+                }
+                if mode == b"cb" && context.has_method(&file.object, "stream_truncate") {
+                    file.truncate(context, function, 0).await?;
+                }
+                write_user(
+                    context,
+                    &file,
+                    function,
+                    data,
+                    source.map(|stream| stream.as_ref()),
+                )
+                .await
+                .map(Some)
+            }
+            .await;
+            let closed = file.close(context).await;
+            let written = written?;
+            closed?;
+            return match written {
+                Some(value) => Ok(value),
+                None => warn_false(
+                    context,
+                    "file_put_contents(): Exclusive locks are not supported for this stream".into(),
+                ),
+            };
         }
         let Some(mut stream) = open(context, function, name, mode, flags & USE_PATH != 0).await?
         else {
@@ -84,7 +156,12 @@ pub fn file_put_contents(
             }
         }
         let bytes = if let Some(resource) = source {
-            match read(resource, None).await? {
+            let input = if let Some(file) = crate::user_file::resource_file(resource) {
+                Ok(file.collect(context, function, None).await?)
+            } else {
+                read(resource, None).await?
+            };
+            match input {
                 Ok(bytes) => bytes,
                 Err(error) => {
                     read_notice(context, function, &error, CHUNK as u64);
@@ -113,6 +190,36 @@ pub fn file_put_contents(
         }
         finish_write(context, wrapper, &bytes, function, result)
     })
+}
+
+async fn write_request_filter(
+    context: &mut dyn Context,
+    stream: Value,
+    function: &str,
+    data: &Value,
+    source: Option<&phera_extension_api::value::Resource>,
+) -> NativeResult {
+    let Value::Resource(resource) = &stream else {
+        return Ok(stream);
+    };
+    let result = async {
+        let bytes = if let Some(source) = source {
+            match crate::transfer::read_context(context, source, function, None, false).await? {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    read_notice(context, function, &error, CHUNK as u64);
+                    return Ok(Value::Bool(false));
+                }
+            }
+        } else if let Some(bytes) = join_data(context, data)? {
+            bytes
+        } else {
+            return Ok(Value::Bool(false));
+        };
+        crate::transfer::write(context, resource, &bytes, function).await
+    }
+    .await;
+    crate::filtered_files::close_after(context, stream, function, result).await
 }
 
 /// Appends the bytes of `error_log($message, 3, $destination)` using the
@@ -168,4 +275,45 @@ fn join_data(context: &mut dyn Context, data: &Value) -> Result<Option<Vec<u8>>,
         value => bytes.extend_from_slice(to_php_string(value, context.diagnostics())?.as_bytes()),
     }
     Ok(Some(bytes))
+}
+
+async fn write_user(
+    context: &mut dyn Context,
+    file: &crate::user_file::UserFile,
+    function: &str,
+    value: &Value,
+    source: Option<&phera_extension_api::value::Resource>,
+) -> NativeResult {
+    let bytes = if let Some(source) = source {
+        if let Some(user) = crate::user_file::resource_file(source) {
+            user.collect(context, function, None).await?
+        } else {
+            match read(source, None).await? {
+                Ok(data) => data,
+                Err(error) => {
+                    read_notice(context, function, &error, CHUNK as u64);
+                    return Ok(Value::Bool(false));
+                }
+            }
+        }
+    } else {
+        let Some(bytes) = join_data(context, value)? else {
+            return Ok(Value::Bool(false));
+        };
+        bytes
+    };
+    let Some(count) = file.write(context, function, &bytes).await? else {
+        return Ok(Value::Bool(false));
+    };
+    if count == bytes.len() {
+        Ok(Value::Int(count as i64))
+    } else {
+        warn_false(
+            context,
+            format!(
+                "{function}(): Only {count} of {} bytes written, possibly out of free disk space",
+                bytes.len()
+            ),
+        )
+    }
 }

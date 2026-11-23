@@ -6,6 +6,19 @@ use phera_extension_api::{ArrayKey, NativeError, Value};
 pub fn additional_headers(function: &str, value: Option<&Value>) -> Result<Vec<u8>, NativeError> {
     let mut headers = Vec::new();
     match value {
+        Some(Value::InternedStr(text)) => {
+            let bytes = text.as_bytes();
+            if bytes.contains(&0) {
+                return Err(NativeError::value_error(format!(
+                    "{function}(): Argument #4 ($additional_headers) must not contain any null bytes"
+                )));
+            }
+            let end = bytes
+                .iter()
+                .rposition(|byte| !b" \r\n\t\x0b".contains(byte))
+                .map_or(0, |index| index + 1);
+            headers.extend_from_slice(&bytes[..end]);
+        }
         Some(Value::String(text)) => {
             let bytes = text.as_bytes();
             if bytes.contains(&0) {
@@ -27,6 +40,7 @@ pub fn additional_headers(function: &str, value: Option<&Value>) -> Result<Vec<u
                             "Header name cannot be numeric, {index} given"
                         )));
                     }
+                    ArrayKey::Interned(key) => key.to_php_string(),
                     ArrayKey::String(key) => key,
                 };
                 let name = key.as_bytes();
@@ -39,6 +53,7 @@ pub fn additional_headers(function: &str, value: Option<&Value>) -> Result<Vec<u
                     }
                 }
                 match &*value.deref() {
+                    Value::InternedStr(value) => field(&mut headers, name, value.as_bytes())?,
                     Value::String(value) => field(&mut headers, name, value.as_bytes())?,
                     Value::Array(values) => {
                         if matches!(
@@ -59,21 +74,22 @@ pub fn additional_headers(function: &str, value: Option<&Value>) -> Result<Vec<u
                             )));
                         }
                         for (key, value) in values.iter() {
-                            if let ArrayKey::String(key) = key {
+                            if let Some(key) = key.as_str_bytes() {
                                 return Err(NativeError::type_error(format!(
                                     "Header \"{}\" must only contain numeric keys, \"{}\" found",
                                     display(name),
-                                    display(key.as_bytes())
+                                    display(key)
                                 )));
                             }
-                            let Value::String(value) = &*value.deref() else {
+                            let value = value.deref();
+                            let Some(value_bytes) = value.as_str_bytes() else {
                                 return Err(NativeError::type_error(format!(
                                     "Header \"{}\" must only contain values of type string, {} found",
                                     display(name),
-                                    value_name(value)
+                                    value_name(&value)
                                 )));
                             };
-                            field(&mut headers, name, value.as_bytes())?;
+                            field(&mut headers, name, value_bytes)?;
                         }
                     }
                     other => {

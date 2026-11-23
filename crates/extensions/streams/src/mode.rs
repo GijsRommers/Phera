@@ -79,6 +79,13 @@ impl Mode {
         }
     }
 
+    /// Opens the file a stream of this mode opened before, as it is now:
+    /// it is never created or truncated again. A fork of a snapshot opens
+    /// the files the boot held this way.
+    pub fn reopen(self, path: &Path) -> io::Result<File> {
+        self.options().open(path)
+    }
+
     fn options(self) -> OpenOptions {
         let mut options = OpenOptions::new();
         options

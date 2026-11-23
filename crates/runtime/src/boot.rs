@@ -65,7 +65,7 @@ impl WebWorker {
         tokio::task::spawn_local(async move {
             if let BootReport::Failed(message) = worker.boot(&script, &document_root).await {
                 eprintln!(
-                    "phera: worker {}: booting {} failed: {message}",
+                    "phera: worker {}: DEFECT: {} cannot be snapshotted, its requests run from the top: {message}",
                     worker.index,
                     script.display()
                 );
@@ -91,6 +91,14 @@ impl Runtime {
         };
         let mut vm = self.new_vm(&worker.native, Sapi::Web, worker.environment.clone());
         vm.set_local_loader(code);
+        if self.class_warmup {
+            let sink = worker.snapshots.warmup_sink(script);
+            let len = sink.borrow().len();
+            if len > 0 {
+                worker.snapshots.note_declared(script, len);
+                vm.set_boot_warmup(sink);
+            }
+        }
         crate::http::define_boot_superglobals(
             &mut vm,
             script,

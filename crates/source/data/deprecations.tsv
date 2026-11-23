@@ -63,8 +63,8 @@ function	enchant_broker_get_dict_path	8.0		omit
 function	enchant_broker_set_dict_path	8.0		omit
 function	enchant_dict_add_to_personal	8.0	use enchant_dict_add() instead	omit
 function	enchant_dict_is_in_session	8.0	use enchant_dict_is_added() instead	omit
-function	finfo_close	8.5	as finfo objects are freed automatically	omit
-function	gmstrftime	8.1	use IntlDateFormatter::format() instead	omit
+function	finfo_close	8.5	as finfo objects are freed automatically	keep
+function	gmstrftime	8.1	use IntlDateFormatter::format() instead	keep
 function	imagedestroy	8.5	as it has no effect since PHP 8.0	keep
 function	intlcal_set	8.4	use IntlCalendar::set(), IntlCalendar::setDate(), or IntlCalendar::setDateTime() instead	omit
 function	intlgregcal_create_instance	8.4	use IntlGregorianCalendar::__construct(), IntlGregorianCalendar::createFromDate(), or IntlGregorianCalendar::createFromDateTime() instead	omit
@@ -110,10 +110,10 @@ function	pg_numrows	8.0	use pg_num_rows() instead	keep
 function	pg_result	8.0	use pg_fetch_result() instead	keep
 function	pg_setclientencoding	8.0	use pg_set_client_encoding() instead	keep
 function	shmop_close	8.0	as Shmop objects are freed automatically	omit
-function	socket_set_timeout	8.5	use stream_set_timeout() instead	omit
-function	strftime	8.1	use IntlDateFormatter::format() instead	omit
+function	socket_set_timeout	8.5	use stream_set_timeout() instead	keep
+function	strftime	8.1	use IntlDateFormatter::format() instead	keep
 function	strptime	8.2	use date_parse_from_format() (for locale-independent parsing), or IntlDateFormatter::parse() (for locale-dependent parsing) instead	omit
-function	utf8_decode	8.2	visit the php.net documentation for various alternatives	omit
+function	utf8_decode	8.2	visit the php.net documentation for various alternatives	keep
 function	utf8_encode	8.2	visit the php.net documentation for various alternatives	keep
 function	xml_parser_free	8.5	as it has no effect since PHP 8.0	keep
 function	xml_set_object	8.4	provide a proper method callable to xml_set_*_handler() functions	omit

@@ -41,7 +41,7 @@ pub(crate) async fn fread_arguments(
 ) -> NativeResult {
     let resource = stream_arg(&arguments, function)?;
     let length = positive(function, args::int(&arguments, 1).unwrap_or(0))?;
-    match crate::child_pipe::bounded(context, resource, read(resource, Some(length))).await?? {
+    match read_context(context, resource, function, Some(length), false).await? {
         Ok(bytes) => Ok(Value::from(bytes)),
         Err(error) => {
             read_notice(context, function, &error, read_amount(Some(length)));
@@ -60,7 +60,7 @@ pub(crate) async fn fgetc_arguments(
     function: &str,
 ) -> NativeResult {
     let resource = stream_arg(&arguments, function)?;
-    match crate::child_pipe::bounded(context, resource, read(resource, Some(1))).await?? {
+    match read_context(context, resource, function, Some(1), false).await? {
         Ok(bytes) if !bytes.is_empty() => Ok(Value::from(bytes)),
         Ok(_) => Ok(Value::Bool(false)),
         Err(error) => {
@@ -83,7 +83,7 @@ pub(crate) async fn fgets_arguments(
     let length = args::int(&arguments, 1)
         .map(|length| positive(function, length).map(|length| length - 1))
         .transpose()?;
-    match crate::child_pipe::bounded(context, resource, line(resource, length)).await?? {
+    match read_context(context, resource, function, length, true).await? {
         Ok(bytes) if !bytes.is_empty() => Ok(Value::from(bytes)),
         Ok(_) => Ok(Value::Bool(false)),
         Err(error) => {
@@ -93,12 +93,100 @@ pub(crate) async fn fgets_arguments(
     }
 }
 
+pub async fn read_context(
+    context: &mut dyn Context,
+    resource: &Resource,
+    function: &str,
+    length: Option<u64>,
+    by_line: bool,
+) -> Result<io::Result<Vec<u8>>, phera_extension_api::NativeError> {
+    if let Some(chains) = crate::filters::user::lookup(context, resource.id)
+        && chains.reading()
+    {
+        let size = length
+            .and_then(|length| usize::try_from(length).ok())
+            .unwrap_or(usize::MAX);
+        return chains
+            .read(context, resource, function, size, by_line)
+            .await;
+    }
+    read_unfiltered(context, resource, function, length, by_line).await
+}
+
+pub async fn read_unfiltered(
+    context: &mut dyn Context,
+    resource: &Resource,
+    function: &str,
+    length: Option<u64>,
+    by_line: bool,
+) -> Result<io::Result<Vec<u8>>, phera_extension_api::NativeError> {
+    if let Some(file) = crate::user_file::resource_file(resource) {
+        let length = length
+            .and_then(|size| usize::try_from(size).ok())
+            .unwrap_or(usize::MAX);
+        return file.read(context, function, length, by_line).await;
+    }
+    let action = with_stream(resource, |stream| {
+        if let Some(socket) = crate::socket::StreamIo::of(stream) {
+            ReadAction::Socket(socket)
+        } else if let Some(pipe) = stream.child_pipe.clone() {
+            ReadAction::Pipe(pipe)
+        } else if matches!(
+            stream.read_policy(length),
+            crate::io_policy::IoPolicy::Inline
+        ) {
+            ReadAction::Done(read_native(stream, length, by_line))
+        } else {
+            ReadAction::Blocking
+        }
+    })?;
+    match action {
+        ReadAction::Socket(socket) => Ok(socket.read(length, by_line.then_some(b"\n")).await),
+        ReadAction::Pipe(pipe) => {
+            if by_line {
+                crate::child_pipe::wait_with_execution_limit(context, pipe.line(resource, length))
+                    .await?
+            } else {
+                crate::child_pipe::wait_with_execution_limit(context, pipe.read(resource, length))
+                    .await?
+            }
+        }
+        ReadAction::Blocking => {
+            operate(
+                resource,
+                crate::io_policy::IoPolicy::Blocking,
+                move |stream| read_native(stream, length, by_line),
+            )
+            .await
+        }
+        ReadAction::Done(result) => Ok(result),
+    }
+}
+
+enum ReadAction {
+    Socket(crate::socket::StreamIo),
+    Pipe(crate::child_pipe::ChildPipe),
+    Blocking,
+    Done(io::Result<Vec<u8>>),
+}
+
+fn read_native(stream: &mut Stream, length: Option<u64>, by_line: bool) -> io::Result<Vec<u8>> {
+    if by_line {
+        stream.line(length)
+    } else {
+        stream.read(length)
+    }
+}
+
 pub async fn line(
     resource: &Resource,
     length: Option<u64>,
 ) -> Result<io::Result<Vec<u8>>, phera_extension_api::NativeError> {
     if let Some(pipe) = crate::child_pipe::of(resource)? {
         return pipe.line(resource, length).await;
+    }
+    if let Some(socket) = crate::socket::StreamIo::for_resource(resource) {
+        return Ok(socket.read(length, Some(b"\n")).await);
     }
     let policy = with_stream(resource, |stream| stream.read_policy(length))?;
     operate(resource, policy, move |stream| stream.line(length)).await
@@ -110,6 +198,9 @@ pub async fn read(
 ) -> Result<io::Result<Vec<u8>>, phera_extension_api::NativeError> {
     if let Some(pipe) = crate::child_pipe::of(resource)? {
         return pipe.read(resource, length).await;
+    }
+    if let Some(socket) = crate::socket::StreamIo::for_resource(resource) {
+        return Ok(socket.read(length, None).await);
     }
     let policy = with_stream(resource, |stream| stream.read_policy(length))?;
     operate(resource, policy, move |stream| stream.read(length)).await
@@ -144,25 +235,90 @@ pub async fn write(
     data: &[u8],
     function: &str,
 ) -> NativeResult {
+    if let Some(chains) = crate::filters::user::lookup(context, resource.id)
+        && chains.writing()
+    {
+        return chains.write(context, resource, function, data).await;
+    }
+    write_unfiltered(context, resource, data, function).await
+}
+
+pub async fn write_unfiltered(
+    context: &mut dyn Context,
+    resource: &Resource,
+    data: &[u8],
+    function: &str,
+) -> NativeResult {
+    if let Some(file) = crate::user_file::resource_file(resource) {
+        return Ok(file
+            .write(context, function, data)
+            .await?
+            .map_or(Value::Bool(false), |count| Value::Int(count as i64)));
+    }
     let length = data.len();
-    let (wrapper, policy) = with_stream(resource, |stream| {
-        (stream.wrapper, stream.write_policy(length as u64))
+    let (wrapper, action) = with_stream(resource, |stream| {
+        let wrapper = stream.wrapper;
+        let action = if let Some(socket) = crate::socket::StreamIo::of(stream) {
+            WriteAction::Socket(socket)
+        } else if let Some(pipe) = stream.child_pipe.clone() {
+            WriteAction::Pipe(pipe)
+        } else if wrapper == Wrapper::Output
+            && stream
+                .filters
+                .as_ref()
+                .is_some_and(|filters| filters.write.active())
+        {
+            WriteAction::Output(stream.filter_write(data, crate::filters::Flush::No))
+        } else if wrapper != Wrapper::Output
+            && matches!(
+                stream.write_policy(length as u64),
+                crate::io_policy::IoPolicy::Blocking
+            )
+        {
+            WriteAction::Blocking
+        } else {
+            WriteAction::Done(stream.write(data))
+        };
+        (wrapper, action)
     })?;
-    let result = if let Some(pipe) = crate::child_pipe::of(resource)? {
-        crate::child_pipe::bounded(context, resource, pipe.write(resource, data)).await??
-    } else {
-        match policy {
-            crate::io_policy::IoPolicy::Inline => {
-                with_stream(resource, |stream| stream.write(data))?
-            }
-            policy if wrapper != Wrapper::Output => {
-                let data = data.to_vec();
-                operate(resource, policy, move |stream| write_bytes(stream, &data)).await?
-            }
-            _ => with_stream(resource, |stream| stream.write(data))?,
+    let result = match action {
+        WriteAction::Socket(socket) => socket.write(data).await,
+        WriteAction::Pipe(pipe) => {
+            crate::child_pipe::wait_with_execution_limit(context, pipe.write(resource, data))
+                .await??
         }
+        WriteAction::Blocking => {
+            let data = data.to_vec();
+            operate(
+                resource,
+                crate::io_policy::IoPolicy::Blocking,
+                move |stream| write_bytes(stream, &data),
+            )
+            .await?
+        }
+        WriteAction::Output(output) => {
+            return match output {
+                Ok(output) => {
+                    context.write(&output);
+                    Ok(Value::Int(length as i64))
+                }
+                Err(error) => {
+                    context.warning(format!("{function}(): {error}"));
+                    Ok(Value::Bool(false))
+                }
+            };
+        }
+        WriteAction::Done(result) => result,
     };
     finish_write(context, wrapper, data, function, result)
+}
+
+enum WriteAction {
+    Socket(crate::socket::StreamIo),
+    Pipe(crate::child_pipe::ChildPipe),
+    Blocking,
+    Output(io::Result<Vec<u8>>),
+    Done(io::Result<usize>),
 }
 
 pub fn finish_write(
@@ -212,8 +368,14 @@ pub(crate) async fn fpassthru_arguments(
     let stream = stream_arg(&arguments, function)?;
     let mut total = 0;
     loop {
-        let bytes = read(stream, Some(crate::io_policy::CHUNK as u64));
-        let result = crate::child_pipe::bounded(context, stream, bytes).await??;
+        let result = read_context(
+            context,
+            stream,
+            function,
+            Some(crate::io_policy::CHUNK as u64),
+            false,
+        )
+        .await?;
         match result {
             Ok(bytes) if bytes.is_empty() => break,
             Ok(bytes) => {

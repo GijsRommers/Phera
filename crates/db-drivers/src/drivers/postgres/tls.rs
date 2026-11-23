@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use rustls::pki_types::{PrivateKeyDer, ServerName, pem::PemObject};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, pem::PemObject};
 use rustls::{ClientConfig, RootCertStore};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -25,6 +25,20 @@ pub(super) enum Mode {
     Require,
     VerifyCa,
     VerifyFull,
+}
+
+pub(super) struct Negotiated {
+    pub socket: Box<dyn Socket>,
+    pub certificate: Option<CertificateDer<'static>>,
+}
+
+impl Negotiated {
+    pub fn plain(socket: impl Socket + 'static) -> Self {
+        Self {
+            socket: Box::new(socket),
+            certificate: None,
+        }
+    }
 }
 
 impl Mode {
@@ -49,9 +63,9 @@ pub(super) async fn negotiate(
     host: &str,
     port: u16,
     mode: Mode,
-) -> Result<Box<dyn Socket>, DbError> {
+) -> Result<Negotiated, DbError> {
     if matches!(mode, Mode::Disable | Mode::Allow) {
-        return Ok(Box::new(socket));
+        return Ok(Negotiated::plain(socket));
     }
     socket
         .write_all(&[0, 0, 0, 8, 4, 210, 22, 47])
@@ -62,7 +76,7 @@ pub(super) async fn negotiate(
         .await
         .map_err(|error| failed(host, port, error))?;
     match reply {
-        b'N' if mode == Mode::Prefer => return Ok(Box::new(socket)),
+        b'N' if mode == Mode::Prefer => return Ok(Negotiated::plain(socket)),
         b'N' => {
             return Err(failed(
                 host,
@@ -92,7 +106,16 @@ pub(super) async fn negotiate(
         .connect(name, socket)
         .await
         .map_err(|error| tls_failure(host, port, error))?;
-    Ok(Box::new(stream))
+    let certificate = stream
+        .get_ref()
+        .1
+        .peer_certificates()
+        .and_then(|chain| chain.first())
+        .cloned();
+    Ok(Negotiated {
+        socket: Box::new(stream),
+        certificate,
+    })
 }
 
 async fn client_config(dsn: &Dsn, mode: Mode) -> Result<ClientConfig, String> {

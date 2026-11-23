@@ -140,6 +140,16 @@ pub(crate) fn oid(value: &Value, allow_zero: bool) -> Result<u32, NativeError> {
     match &*value.deref() {
         Value::Int(value) if *value > 0 || (allow_zero && *value == 0) => Ok(*value as u32),
         Value::Int(_) => Err(invalid()),
+        Value::InternedStr(value) => {
+            let text = value.to_string_lossy();
+            if text.is_empty() {
+                return Ok(0);
+            }
+            text.trim_start()
+                .parse::<i128>()
+                .map(|number| number as u32)
+                .map_err(|_| invalid())
+        }
         Value::String(value) => {
             let text = value.to_string_lossy();
             if text.is_empty() {
@@ -272,7 +282,7 @@ async fn number_result(state: &Handle, expression: String) -> Result<Option<i64>
 }
 
 async fn scalar(state: &Handle, expression: String) -> Result<Option<Vec<u8>>, NativeError> {
-    let lease = state.borrow().lease()?;
+    let lease = crate::connection::lease(state).await?;
     let result = connection::run(&lease, move |driver| {
         Box::pin(scalar_query(driver, expression))
     })

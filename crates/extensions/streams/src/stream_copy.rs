@@ -50,7 +50,18 @@ fn get_contents(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture
         if offset >= 0 && !seek(context, resource, name, offset as u64, Seek::Current).await? {
             return Ok(Value::Bool(false));
         }
-        let result = if let Some(pipe) = crate::child_pipe::of(resource)? {
+        let result = if let Some(chains) = crate::filters::user::lookup(context, resource.id)
+            && chains.reading()
+        {
+            let size = length
+                .and_then(|length| usize::try_from(length).ok())
+                .unwrap_or(usize::MAX);
+            chains.read(context, resource, name, size, false).await?
+        } else if let Some(file) = crate::user_file::resource_file(resource) {
+            Ok(file.collect(context, name, length).await?)
+        } else if let Some(socket) = crate::socket::StreamIo::for_resource(resource) {
+            socket.read(length, Some(b"")).await
+        } else if let Some(pipe) = crate::child_pipe::of(resource)? {
             crate::child_pipe::bounded(context, resource, pipe.contents(resource, length)).await??
         } else {
             read(resource, length).await?
@@ -100,15 +111,27 @@ pub async fn copy(
     while remaining > 0 {
         let requested = remaining.min(CHUNK as u64);
         // A long transfer also yields when each individual chunk could run inline.
-        let policy = if length > crate::io_policy::INLINE_LIMIT {
-            IoPolicy::Blocking
+        let result = if let Some(chains) = crate::filters::user::lookup(context, from.id)
+            && chains.reading()
+        {
+            chains
+                .read(context, from, name, requested as usize, false)
+                .await?
+        } else if let Some(file) = crate::user_file::resource_file(from) {
+            file.read(context, name, requested as usize, false).await?
+        } else if let Some(socket) = crate::socket::StreamIo::for_resource(from) {
+            socket.read(Some(requested), None).await
         } else {
-            with_stream(from, |stream| stream.read_policy(Some(requested)))?
-        };
-        let result = if crate::child_pipe::of(from)?.is_some() {
-            crate::child_pipe::bounded(context, from, read(from, Some(requested))).await??
-        } else {
-            operate(from, policy, move |stream| stream.read(Some(requested))).await?
+            let policy = if length > crate::io_policy::INLINE_LIMIT {
+                IoPolicy::Blocking
+            } else {
+                with_stream(from, |stream| stream.read_policy(Some(requested)))?
+            };
+            if crate::child_pipe::of(from)?.is_some() {
+                crate::child_pipe::bounded(context, from, read(from, Some(requested))).await??
+            } else {
+                operate(from, policy, move |stream| stream.read(Some(requested))).await?
+            }
         };
         let bytes = match result {
             Ok(bytes) if bytes.is_empty() => break,
@@ -138,6 +161,19 @@ async fn seek(
     offset: u64,
     kind: Seek,
 ) -> Result<bool, NativeError> {
+    if let Some(file) = crate::user_file::resource_file(resource) {
+        if matches!(kind, Seek::Current) && file.position.get() == offset as i64 {
+            return Ok(true);
+        }
+        if file.seek(context, function, offset as i64, 0).await? {
+            return Ok(true);
+        }
+        warn_false(
+            context,
+            format!("{function}(): Failed to seek to position {offset} in the stream"),
+        )?;
+        return Ok(false);
+    }
     let (position, seekable) = with_stream(resource, |stream| (stream.position, stream.seekable))?;
     if matches!(kind, Seek::Current) && offset == position {
         return Ok(true);

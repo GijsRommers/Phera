@@ -2,13 +2,25 @@
 
 use phera_bytecode::Reg;
 use phera_extension_api::{NativeError, RequestState};
-use phera_value::to_php_string;
+use phera_value::{Value, to_php_string};
 
 use crate::{OutputSink, Vm, diagnostics::SourceLocation, output_buffer::Buffers};
 
 impl Vm {
     /// Implements PHP Echo semantics outside the dispatch loop.
     pub(crate) fn echo_value(&mut self, source: Reg) -> Result<(), NativeError> {
+        let text = match &*self.operand(source) {
+            Value::InternedStr(text) => Some(text.to_php_string()),
+            Value::String(text) => Some(text.clone()),
+            _ => None,
+        };
+        if let Some(text) = text {
+            if self.diagnostic_reporter.has_pending() {
+                self.flush_operator_diagnostics();
+            }
+            self.out(text.as_bytes());
+            return Ok(());
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let text = to_php_string(&diagnostics.vm.operand(source), &mut diagnostics.buffer)?;
         drop(diagnostics);

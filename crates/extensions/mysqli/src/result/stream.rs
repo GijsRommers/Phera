@@ -4,10 +4,10 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use phera_db_drivers::drivers::{Driver, Rows};
+use phera_db_drivers::drivers::Rows;
 use phera_db_drivers::errors::DbError;
+use phera_db_drivers::pool::Lease;
 use phera_extension_api::{Context, NativeError, Object};
-use phera_io_pool::Lease;
 
 use super::{closed, decode, handle};
 use crate::connection;
@@ -15,13 +15,13 @@ use crate::connection;
 #[derive(Clone)]
 pub struct Stream {
     connection: Weak<RefCell<connection::Connection>>,
-    lease: Lease<Driver>,
+    lease: Lease,
     pub owner: Arc<()>,
     native: bool,
 }
 
 impl Stream {
-    pub fn new(connection: &connection::Handle, lease: Lease<Driver>, native: bool) -> Self {
+    pub fn new(connection: &connection::Handle, lease: Lease, native: bool) -> Self {
         Self {
             connection: Rc::downgrade(connection),
             lease,

@@ -108,6 +108,12 @@ impl Vm {
         };
         let scope =
             self.with_argument_origin(origin, |vm| vm.closure_scope_argument(operation, scope))?;
+        if let Some(name) = scope.str_ref()
+            && name.as_bytes() != b"static"
+            && self.classes.get(&name.to_string_lossy()).is_none()
+        {
+            self.lookup_class(&name.to_string_lossy()).await?;
+        }
         let Some(state) = self.rebind_closure(&object, new_this, &scope)? else {
             return Ok(Value::Null);
         };
@@ -154,7 +160,10 @@ impl Vm {
 
     /// Weak native union parameters accept scalar strings, while strict calls reject them.
     fn closure_scope_argument(&mut self, operation: ClosureMethod, scope: Value) -> NativeResult {
-        if matches!(scope, Value::Null | Value::Object(_) | Value::String(_)) {
+        if matches!(
+            scope,
+            Value::Null | Value::Object(_) | Value::InternedStr(_) | Value::String(_)
+        ) {
             return Ok(scope);
         }
         if !phera_extension_api::Context::strict_types(self)
@@ -260,10 +269,12 @@ fn existing_closure(value: &Value) -> Option<Rc<Object>> {
     let object = match &*value {
         Value::Object(object) => object.clone(),
         Value::Array(array) if array.len() == 2 => {
-            let Value::String(method) = &*array.get(&phera_value::ArrayKey::Int(1))?.deref() else {
-                return None;
-            };
-            if !method.to_string_lossy().eq_ignore_ascii_case("__invoke") {
+            let method = array
+                .get(&phera_value::ArrayKey::Int(1))?
+                .deref()
+                .str_ref()?
+                .to_string_lossy();
+            if !method.eq_ignore_ascii_case("__invoke") {
                 return None;
             }
             let Value::Object(object) = &*array.get(&phera_value::ArrayKey::Int(0))?.deref() else {

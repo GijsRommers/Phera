@@ -10,7 +10,7 @@ pub use iteration::{get_iterator, iterator};
 pub use object::fetch_object;
 pub use properties::ACCESS;
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 
 use crate::connection::properties::uint;
@@ -40,6 +40,7 @@ type Handle = Rc<RefCell<Option<ResultSet>>>;
 
 pub struct ResultSet {
     pub rows: Rows,
+    keys: OnceCell<Vec<ArrayKey>>,
     position: usize,
     last: Option<usize>,
     field: usize,
@@ -95,6 +96,7 @@ pub fn create_rows(context: &mut dyn Context, rows: Rows, unbuffered: bool) -> N
 fn attach(object: &Object, rows: Rows, unbuffered: bool, stream: Option<stream::Stream>) {
     let set = ResultSet {
         rows,
+        keys: OnceCell::new(),
         position: 0,
         last: None,
         field: 0,
@@ -115,6 +117,42 @@ fn handle(object: &Object) -> Result<Handle, NativeError> {
         .ok_or_else(|| NativeError::error("mysqli_result object is not fully initialized"))
 }
 
+/// The fork hook of `mysqli_result`: a stored result is rows in memory, and
+/// each fork reads its own copy from the same position. A result still
+/// streaming from the server (`MYSQLI_USE_RESULT`) belongs to its session.
+///
+/// ```php
+/// $options = $db->query('SELECT * FROM options');   // stored
+/// Phera\snapshot();
+/// $options->fetch_assoc();   // every request: the first row
+/// ```
+pub fn fork_result(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    _fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    let handle = state
+        .downcast_ref::<Handle>()
+        .ok_or("its built-in state is not initialized")?;
+    let copy = match handle.borrow().as_ref() {
+        None => None,
+        Some(set) if set.stream.is_some() => {
+            return Err("it is still being read from the server (MYSQLI_USE_RESULT); read it to the end or free it before Phera\\snapshot()".into());
+        }
+        Some(set) => Some(ResultSet {
+            rows: set.rows.clone(),
+            keys: OnceCell::new(),
+            position: set.position,
+            last: set.last,
+            field: set.field,
+            unbuffered: set.unbuffered,
+            stream: None,
+            stream_count: set.stream_count,
+        }),
+    };
+    Ok(Box::new(Rc::new(RefCell::new(copy))) as Box<dyn std::any::Any>)
+}
+
 fn closed() -> NativeError {
     NativeError::error("mysqli_result object is already closed")
 }
@@ -129,7 +167,7 @@ pub fn construct(
         let connection = crate::connection::handle(args::object(&arguments, 0))?;
         let (pending, native) = {
             let mut connection = connection.borrow_mut();
-            connection.lease()?;
+            connection.ensure_open()?;
             let pending = connection.pending.take().ok_or_else(|| {
                 NativeError::error("mysqli_result object is not fully initialized")
             })?;
@@ -175,32 +213,43 @@ async fn attach_pending(
 }
 
 impl ResultSet {
-    fn take(&mut self) -> Option<&[Value]> {
+    fn next_index(&mut self) -> Option<usize> {
         let index = self.position;
-        let row = self.rows.values.get(index);
-        self.last = row.map(|_| index);
+        self.last = (index < self.rows.values.len()).then_some(index);
         self.position = index.saturating_add(1);
-        row.map(Vec::as_slice)
+        self.last
+    }
+
+    fn take(&mut self) -> Option<&[Value]> {
+        let index = self.next_index()?;
+        self.rows.values.get(index)
     }
 
     fn array(&mut self, mode: Fetch) -> Result<Option<PhpArray>, NativeError> {
-        let row = self.take();
-        if row.is_none() {
-            return Ok(None);
-        }
-        let Some(values) = self.last.and_then(|index| self.rows.values.get(index)) else {
+        let Some(values) = self
+            .next_index()
+            .and_then(|index| self.rows.values.get(index))
+        else {
             return Ok(None);
         };
-        let mut row = PhpArray::new();
-        for (index, (column, value)) in self.rows.columns.iter().zip(values).enumerate() {
-            if matches!(mode, Fetch::Num | Fetch::Both) {
-                row.insert(ArrayKey::Int(index as i64), value.clone());
+        let mut row = PhpArray::with_capacity(values.len());
+        if matches!(mode, Fetch::Num) {
+            for value in values {
+                row.push(value.clone())?;
             }
-            if matches!(mode, Fetch::Assoc | Fetch::Both) {
-                row.insert(
-                    ArrayKey::from_string(column.name.as_str().into()),
-                    value.clone(),
-                );
+        } else {
+            let keys = self.keys.get_or_init(|| {
+                self.rows
+                    .columns
+                    .iter()
+                    .map(|column| ArrayKey::from_string(column.name.as_str().into()))
+                    .collect()
+            });
+            for (index, (value, key)) in values.iter().zip(keys).enumerate() {
+                if matches!(mode, Fetch::Both) {
+                    row.insert(ArrayKey::Int(index as i64), value.clone());
+                }
+                row.insert(key.clone(), value.clone());
             }
         }
         Ok(Some(row))
@@ -308,7 +357,8 @@ pub fn execute<const OP: usize>(
                 )?,
             };
             if OP == ALL {
-                let mut all = PhpArray::new();
+                let remaining = results.rows.values.len().saturating_sub(results.position);
+                let mut all = PhpArray::with_capacity(remaining);
                 while let Some(row) = results.array(mode)? {
                     all.push(Value::from(row))?;
                 }

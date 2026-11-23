@@ -75,7 +75,7 @@ impl Vm {
     ) -> NativeResult {
         let length = arrays.iter().map(|array| array.len()).max().unwrap_or(0);
         let mut iterators: Vec<_> = arrays.iter().map(|array| array.iter()).collect();
-        let mut result = PhpArray::new();
+        let mut result = PhpArray::with_capacity(length);
         for _ in 0..length {
             let mut key = None;
             let mut values = iterators.iter_mut().map(|iterator| {
@@ -93,11 +93,7 @@ impl Vm {
             } else if arrays.len() == 1 {
                 values.next().unwrap_or_default()
             } else {
-                let mut tuple = PhpArray::new();
-                for value in values {
-                    let _ = tuple.push(value);
-                }
-                Value::Array(Rc::new(tuple))
+                Value::Array(Rc::new(PhpArray::from_values(values, arrays.len())))
             };
             if arrays.len() == 1 {
                 if let Some(key) = key {

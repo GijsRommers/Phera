@@ -41,7 +41,7 @@ pub fn register(registry: &mut Registry) {
     for entry in const {
         [
             FunctionEntry::asynchronous("fclose", const { &[STREAM] }, fclose),
-            FunctionEntry::sync("feof", const { &[STREAM] }, feof),
+            FunctionEntry::asynchronous("feof", const { &[STREAM] }, feof),
             FunctionEntry::sync("ftell", const { &[STREAM] }, ftell),
             FunctionEntry::asynchronous(
                 "fseek",
@@ -78,32 +78,79 @@ fn fopen(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
         let include_path = args::bool(&arguments, 2).unwrap_or(false);
         let stream_context = args::value(&arguments, 3);
         validate(stream_context, "fopen", 4)?;
-        files(context).use_default_context(stream_context);
-        let stream = if let Target::Gzip(filename) = Target::parse(name)
-            && let Some(level) = crate::context_options::option(stream_context, "zlib", "level")
-        {
-            let level = phera_extension_api::value::to_int(&level, context.diagnostics())?;
-            let level = u32::try_from(level).ok().filter(|level| *level <= 9);
-            crate::gzip::open_gzip(
+        if crate::filters::is_filter_uri(name)
+            && let Some(result) = Box::pin(crate::filters::open_request_filter(
                 context,
                 "fopen",
-                filename,
                 name,
                 mode,
-                crate::gzip::GzipOptions {
-                    include_path,
-                    level,
-                    wrapper: Wrapper::Gzip,
-                },
-            )
+                include_path,
+                stream_context,
+            ))
             .await?
+        {
+            return Ok(result);
+        }
+        open_resource(context, "fopen", name, mode, include_path, stream_context).await
+    })
+}
+
+pub(crate) async fn open_resource(
+    context: &mut dyn Context,
+    function: &str,
+    name: &[u8],
+    mode: &[u8],
+    include_path: bool,
+    stream_context: &Value,
+) -> NativeResult {
+    files(context).use_default_context(stream_context);
+    if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+        let supplied = if stream_context.is_null() {
+            crate::context_options::default_for_wrapper(context)
         } else {
-            open(context, "fopen", name, mode, include_path).await?
+            stream_context.clone()
         };
-        Ok(match stream {
-            Some(stream) => new_resource(context.state(), "stream", stream),
+        let flags = if include_path {
+            crate::user_wrappers::USE_PATH
+        } else {
+            0
+        };
+        let opened =
+            crate::user_file::open(context, wrapper, function, name, mode, flags, supplied).await?;
+        return Ok(match opened {
+            Some(stream) => crate::user_resource::make_file(context, stream),
             None => Value::Bool(false),
-        })
+        });
+    }
+    if crate::socket::http::is_url(name) {
+        return crate::socket::http::fopen(context, function, name, mode, stream_context, true)
+            .await;
+    }
+    let stream = if let Target::Gzip(filename) = Target::parse(name)
+        && !crate::user_wrappers::protocol_disabled(context, b"compress.zlib")
+        && let Some(level) = crate::context_options::option(stream_context, "zlib", "level")
+    {
+        let level = phera_extension_api::value::to_int(&level, context.diagnostics())?;
+        let level = u32::try_from(level).ok().filter(|level| *level <= 9);
+        crate::gzip::open_gzip(
+            context,
+            function,
+            filename,
+            name,
+            mode,
+            crate::gzip::GzipOptions {
+                include_path,
+                level,
+                wrapper: Wrapper::Gzip,
+            },
+        )
+        .await?
+    } else {
+        open(context, function, name, mode, include_path).await?
+    };
+    Ok(match stream {
+        Some(stream) => new_resource(context.state(), "stream", stream),
+        None => Value::Bool(false),
     })
 }
 
@@ -124,7 +171,50 @@ pub(crate) async fn close_arguments(
         return Ok(Value::Bool(false));
     }
     let resource = stream_arg(&arguments, function)?;
-    let gzip = with_stream(resource, |stream| stream.wrapper.is_gzip())?;
+    if let Some(chains) = crate::filters::user::lookup(context, resource.id) {
+        if chains.is_busy() {
+            context.warning(format!(
+                "{function}(): cannot close the provided stream, as it must not be manually closed"
+            ));
+            return Ok(Value::Bool(false));
+        }
+        crate::filters::user::close(context, resource).await?;
+    }
+    if let Some(file) = crate::user_file::resource_file(resource) {
+        if file.busy() {
+            context.warning(format!(
+                "{function}(): cannot close the provided stream, as it must not be manually closed"
+            ));
+            return Ok(Value::Bool(false));
+        }
+        crate::user_resource::release(context, resource);
+        file.close(context).await?;
+        return Ok(Value::Bool(true));
+    }
+    let (gzip, filtered) = with_stream(resource, |stream| {
+        if let crate::stream::Backing::Socket(socket) = &stream.backing {
+            socket.retire();
+        }
+        (
+            stream.wrapper.is_gzip(),
+            stream
+                .filters
+                .as_ref()
+                .is_some_and(|filters| filters.write.active()),
+        )
+    })?;
+    if filtered {
+        let result = operate(resource, IoPolicy::Blocking, |stream| {
+            stream.filter_write(&[], crate::filters::Flush::Closing)
+        })
+        .await?;
+        match result {
+            Ok(output) if !output.is_empty() => context.write(&output),
+            Ok(_) => (),
+            Err(error) => context.warning(format!("{function}(): {error}")),
+        }
+        with_stream(resource, |stream| stream.filters = None)?;
+    }
     let success = if gzip {
         operate(resource, IoPolicy::Blocking, |stream| stream.finish())
             .await?
@@ -140,16 +230,33 @@ pub(crate) async fn close_arguments(
     Ok(Value::Bool(success))
 }
 
-fn feof(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    with_stream(stream_arg(arguments, "feof")?, |stream| {
-        Value::Bool(stream.eof)
+fn feof(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let resource = stream_arg(&arguments, "feof")?;
+        if crate::filters::user::lookup(context, resource.id)
+            .is_some_and(|chain| chain.has_buffered())
+        {
+            return Ok(Value::Bool(false));
+        }
+        if let Some(file) = crate::user_file::resource_file(resource) {
+            return Ok(Value::Bool(file.at_end(context, "feof").await?));
+        }
+        with_stream(resource, |stream| {
+            let eof = match &stream.backing {
+                crate::stream::Backing::Socket(socket) => socket.eof(),
+                _ => stream.eof,
+            };
+            Value::Bool(eof)
+        })
     })
 }
 
 fn ftell(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    with_stream(stream_arg(arguments, "ftell")?, |stream| {
-        Value::Int(stream.position as i64)
-    })
+    let resource = stream_arg(arguments, "ftell")?;
+    if let Some(file) = crate::user_file::resource_file(resource) {
+        return Ok(Value::Int(file.position.get()));
+    }
+    with_stream(resource, |stream| Value::Int(stream.position as i64))
 }
 
 pub fn seek_from(offset: i64, whence: i64) -> Option<SeekFrom> {
@@ -175,12 +282,16 @@ pub(crate) async fn seek_arguments(
     let candidate = argument_resource(args::value(&arguments, 0), function, "#1 ($stream)")?;
     if crate::directory::is_open(candidate) {
         if offset == 0 && whence == 0 {
-            crate::directory::rewind(candidate).await?;
+            crate::directory::rewind(context, candidate).await?;
             return Ok(Value::Int(0));
         }
         return Ok(Value::Int(-1));
     }
     let resource = stream_arg(&arguments, function)?;
+    if let Some(file) = crate::user_file::resource_file(resource) {
+        let success = file.seek(context, function, offset, whence).await?;
+        return Ok(Value::Int(if success { 0 } else { -1 }));
+    }
     let policy = with_stream(resource, |stream| stream.seek_policy())?;
     if whence == 2 && with_stream(resource, |stream| stream.wrapper.is_gzip())? {
         context.warning(format!("{function}(): SEEK_END is not supported"));
@@ -209,12 +320,27 @@ pub(crate) async fn rewind_arguments(
     function: &str,
 ) -> NativeResult {
     let resource = stream_arg(&arguments, function)?;
-    let policy = with_stream(resource, |stream| stream.seek_policy())?;
-    let result = operate(resource, policy, |stream| stream.seek(SeekFrom::Start(0))).await?;
-    if !with_stream(resource, |stream| stream.seekable)? {
+    if let Some(file) = crate::user_file::resource_file(resource) {
+        return Ok(Value::Bool(file.seek(context, function, 0, 0).await?));
+    }
+    let (seekable, immediate) = with_stream(resource, |stream| {
+        let seekable = stream.seekable;
+        let result = matches!(stream.seek_policy(), IoPolicy::Inline)
+            .then(|| stream.seek(SeekFrom::Start(0)).is_ok());
+        (seekable, result)
+    })?;
+    let success = match immediate {
+        Some(result) => result,
+        None => operate(resource, IoPolicy::Blocking, |stream| {
+            stream.seek(SeekFrom::Start(0))
+        })
+        .await?
+        .is_ok(),
+    };
+    if !seekable {
         context.warning(format!("{function}(): Stream does not support seeking"));
     }
-    Ok(Value::Bool(result.is_ok()))
+    Ok(Value::Bool(success))
 }
 
 fn ftruncate(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -225,6 +351,11 @@ fn ftruncate(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
             "#2 ($size)",
             args::int(&arguments, 1).unwrap_or(0),
         )?;
+        if let Some(file) = crate::user_file::resource_file(stream) {
+            return Ok(Value::Bool(
+                file.truncate(context, "ftruncate", size).await?,
+            ));
+        }
         let result = operate(stream, IoPolicy::Blocking, move |stream| {
             stream.truncate(size)
         })
@@ -254,31 +385,67 @@ impl Flush {
         function: &str,
     ) -> NativeResult {
         let stream = stream_arg(arguments, function)?;
+        if matches!(self, Self::Buffers)
+            && let Some(chains) = crate::filters::user::lookup(context, stream.id)
+            && chains.writing()
+            && !chains.flush(context, stream, function).await?
+        {
+            return Ok(Value::Bool(false));
+        }
+        if let Some(file) = crate::user_file::resource_file(stream) {
+            if matches!(self, Self::Buffers) {
+                return Ok(Value::Bool(file.flush(context).await?));
+            }
+            context.warning(format!("{function}(): Can't fsync this stream!"));
+            return Ok(Value::Bool(false));
+        }
         let result = operate(stream, IoPolicy::Blocking, move |stream| {
+            let output = if matches!(self, Self::Buffers)
+                && stream
+                    .filters
+                    .as_ref()
+                    .is_some_and(|filters| filters.write.active())
+            {
+                stream.filter_write(&[], crate::filters::Flush::Incremental)?
+            } else {
+                Vec::new()
+            };
             if let crate::stream::Backing::Gzip(gzip) = &mut stream.backing {
                 return if matches!(self, Self::Buffers) {
-                    gzip.flush()
+                    gzip.flush().map(|()| output)
                 } else {
                     Err(io::ErrorKind::Unsupported.into())
                 };
             }
             let Some(file) = stream.descriptor() else {
                 return match self {
-                    Self::Buffers => Ok(()),
+                    Self::Buffers => Ok(output),
                     _ => Err(io::ErrorKind::Unsupported.into()),
                 };
             };
             match self {
-                Self::Buffers => (&*file).flush(),
-                Self::Data => file.sync_data(),
-                Self::All => file.sync_all(),
+                Self::Buffers => (&*file).flush().map(|()| output),
+                Self::Data => file.sync_data().map(|()| output),
+                Self::All => file.sync_all().map(|()| output),
             }
         })
         .await?;
-        if result.is_err() && !matches!(self, Self::Buffers) {
-            context.warning(format!("{function}(): Can't fsync this stream!"));
+        match result {
+            Ok(output) => {
+                if !output.is_empty() {
+                    context.write(&output);
+                }
+                Ok(Value::Bool(true))
+            }
+            Err(error) => {
+                if !matches!(self, Self::Buffers) {
+                    context.warning(format!("{function}(): Can't fsync this stream!"));
+                } else if error.kind() == io::ErrorKind::Other {
+                    context.warning(format!("{function}(): {error}"));
+                }
+                Ok(Value::Bool(false))
+            }
         }
-        Ok(Value::Bool(result.is_ok()))
     }
 }
 
@@ -295,7 +462,12 @@ fn fdatasync(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
 }
 
 pub fn read_notice(context: &mut dyn Context, function: &str, error: &io::Error, amount: u64) {
-    if let Some(errno) = error.raw_os_error() {
+    if error.kind() == io::ErrorKind::TimedOut {
+        return;
+    }
+    if error.kind() == io::ErrorKind::Other && error.get_ref().is_some() {
+        context.warning(format!("{function}(): {error}"));
+    } else if let Some(errno) = error.raw_os_error() {
         context.notice(format!(
             "{function}(): Read of {amount} bytes failed with errno={errno} {}",
             reason(error)
@@ -314,7 +486,9 @@ pub fn write_notice(
     error: &io::Error,
     length: usize,
 ) {
-    if matches!(wrapper, Wrapper::Data | Wrapper::Input) {
+    if error.kind() == io::ErrorKind::Other && error.get_ref().is_some() {
+        context.warning(format!("{function}(): {error}"));
+    } else if matches!(wrapper, Wrapper::Data | Wrapper::Input) {
         context.notice(format!("{function}(): Stream is not writable"));
     } else if let Some(errno) = error.raw_os_error() {
         context.notice(format!(

@@ -41,10 +41,13 @@ fn type_message(symbol: u8, suffix: &str) -> String {
 }
 
 async fn pack(context: &mut dyn Context, args: &mut [Value]) -> NativeResult {
-    let Some((Value::String(format), values)) = args.split_first_mut() else {
+    let Some((first, values)) = args.split_first_mut() else {
         return Err(NativeError::error("pack(): missing binary format"));
     };
-    let fields = parse(context, format.as_bytes(), values).await?;
+    let Some(format) = first.as_str_bytes() else {
+        return Err(NativeError::error("pack(): missing binary format"));
+    };
+    let fields = parse(context, format, values).await?;
     let size = output_size(context, &fields)?;
     let mut output = Vec::new();
     output

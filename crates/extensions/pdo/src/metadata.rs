@@ -6,7 +6,7 @@ use phera_extension_api::{
     ArrayKey, Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
 
-use tokio_postgres::types::Type;
+use postgres_types::Type;
 
 use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_LOB, PARAM_STR};
 
@@ -64,7 +64,7 @@ pub fn get<'a>(
             }
             return Ok(Value::Bool(false));
         };
-        let result = connection.driver.lock().await.metadata(&column).await;
+        let result = connection.driver.metadata(&column).await;
         match result {
             Ok(values) => Ok(Value::from(values)),
             Err(error) => connection.fail(context, error, "PDOStatement::getColumnMeta"),

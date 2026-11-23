@@ -6,8 +6,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+memchr.workspace = true
 phera-dotenv.workspace = true
 indexmap.workspace = true
+hickory-resolver.workspace = true
 phera-extension-api.workspace = true
 nix.workspace = true
 rustix.workspace = true

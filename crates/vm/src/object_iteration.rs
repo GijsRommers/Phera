@@ -37,7 +37,7 @@ impl Vm {
                 state.position = Some(index);
                 state.started = true;
                 if let Some(key) = key {
-                    self.set(key, Value::from(name));
+                    self.set_iteration_target(key, Value::from(name))?;
                 }
                 drop(properties);
                 let previous = self
@@ -45,7 +45,7 @@ impl Vm {
                     .and_then(|frame| frame.slots(&self.registers).get(destination.index()))
                     .cloned()
                     .flatten();
-                self.set(destination, reference);
+                self.set_iteration_target(destination, reference)?;
                 if let Some(Value::Reference(reference)) = previous {
                     self.release_property_reference(reference);
                 }

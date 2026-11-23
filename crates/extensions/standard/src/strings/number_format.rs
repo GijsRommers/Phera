@@ -1,10 +1,10 @@
 //! `number_format(1234567.891, 2)` is `"1,234,567.89"`.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpString, Value, args,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
 
-use super::{buffer, decimal};
+use super::{buffer, check_size, decimal::FixedDigits};
 use crate::math::rounding::{RoundingMode, round_to_places};
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[NUMBER_FORMAT];
@@ -49,8 +49,9 @@ fn number_format(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         ));
     }
     let precision = places.max(0) as usize;
-    let point = args::string(arguments, 2).map_or(&b"."[..], PhpString::as_bytes);
-    let thousands = args::string(arguments, 3).map_or(&b","[..], PhpString::as_bytes);
+    let point = args::string(arguments, 2).map_or(&b"."[..], phera_extension_api::StrRef::as_bytes);
+    let thousands =
+        args::string(arguments, 3).map_or(&b","[..], phera_extension_api::StrRef::as_bytes);
     let number = args::float(arguments, 0).unwrap_or_default();
     // Integers must not pass through a double, which would lose the low
     // digits of numbers near PHP_INT_MAX.
@@ -59,74 +60,99 @@ fn number_format(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             && (i64::MIN as f64..-(i64::MIN as f64)).contains(&number))
         .then_some(number as i64)
     });
-    // Room for the longest result, reserved before any digit is made, so
-    // that a huge `$decimals` is PHP's size error: up to 400 digits, a
-    // thousands separator for each three of them, and the point.
-    let mut result = buffer(
+    // Preserve the string-size check before calculating or formatting digits.
+    check_size(
         precision
             .saturating_add(400)
             .saturating_add(point.len())
             .saturating_add(thousands.len().saturating_mul(110)),
     )?;
-    let (digits, negative) = if let Some(integer) = integer {
-        format_integer(integer, places, precision)
+    let result = if let Some(integer) = integer {
+        let magnitude = rounded_magnitude(integer, places);
+        let whole = integer_digits(magnitude);
+        let fraction = std::iter::repeat_n(b'0', precision);
+        group_thousands(
+            whole,
+            fraction,
+            integer < 0 && magnitude != 0,
+            point,
+            thousands,
+        )?
     } else {
         if !number.is_finite() {
             return Ok(Value::from(if number.is_nan() { "nan" } else { "inf" }));
         }
         let rounded = round_to_places(number.abs(), places, RoundingMode::HalfUp);
-        (
-            decimal::fixed(rounded, precision),
+        let digits = FixedDigits::new(rounded, precision);
+        group_thousands(
+            digits.whole(),
+            digits.fraction(precision),
             number < 0.0 && rounded != 0.0,
-        )
+            point,
+            thousands,
+        )?
     };
-    if negative {
-        result.push(b'-');
-    }
-    group_thousands(&mut result, &digits, precision, point, thousands);
     Ok(Value::from(result))
 }
 
-/// `digits`, a plain `1234.5`, with the separators put in.
 fn group_thousands(
-    result: &mut Vec<u8>,
-    digits: &[u8],
-    precision: usize,
+    whole: impl ExactSizeIterator<Item = u8>,
+    fraction: impl ExactSizeIterator<Item = u8>,
+    negative: bool,
     point: &[u8],
     thousands: &[u8],
-) {
-    let whole = digits
-        .iter()
-        .position(|&byte| byte == b'.')
-        .unwrap_or(digits.len());
-    for (index, &digit) in digits[..whole].iter().enumerate() {
-        if index > 0 && (whole - index).is_multiple_of(3) {
+) -> Result<Vec<u8>, NativeError> {
+    let whole_length = whole.len();
+    let groups = (whole_length - 1) / 3;
+    let has_fraction = fraction.len() > 0;
+    let length = whole_length
+        .saturating_add(groups.saturating_mul(thousands.len()))
+        .saturating_add(usize::from(negative))
+        .saturating_add(fraction.len());
+    let mut result = buffer(if has_fraction {
+        length.saturating_add(point.len())
+    } else {
+        length
+    })?;
+    if negative {
+        result.push(b'-');
+    }
+    for (index, digit) in whole.enumerate() {
+        if index > 0 && (whole_length - index).is_multiple_of(3) {
             result.extend_from_slice(thousands);
         }
         result.push(digit);
     }
-    if precision > 0 {
+    if has_fraction {
         result.extend_from_slice(point);
-        result.extend_from_slice(&digits[whole + 1..]);
+        result.extend(fraction);
     }
+    Ok(result)
 }
 
-/// An integer's digits, rounded half up to `places` when that is negative,
-/// with `precision` zeros after the point, and whether it needs a minus.
-fn format_integer(integer: i64, places: i64, precision: usize) -> (Vec<u8>, bool) {
-    let mut magnitude = integer.unsigned_abs();
+/// Yield an integer's decimal bytes from its highest place to its units.
+fn integer_digits(mut magnitude: u64) -> impl ExactSizeIterator<Item = u8> {
+    let exponent = magnitude.checked_ilog10().unwrap_or(0);
+    let mut place = 10u64.pow(exponent);
+    (0..exponent as usize + 1).map(move |_| {
+        let digit = (magnitude / place) as u8;
+        magnitude %= place;
+        place /= 10;
+        b'0' + digit
+    })
+}
+
+/// Round an integer half up at a negative number of decimal places.
+fn rounded_magnitude(integer: i64, places: i64) -> u64 {
+    let magnitude = integer.unsigned_abs();
     if places < -19 {
         // 10^20 is beyond any i64.
-        magnitude = 0;
+        0
     } else if places < 0 {
         let power = 10u64.pow((-places) as u32);
         let round_up = magnitude % power >= power / 2;
-        magnitude = (magnitude / power + u64::from(round_up)) * power;
+        (magnitude / power + u64::from(round_up)) * power
+    } else {
+        magnitude
     }
-    let mut digits = magnitude.to_string().into_bytes();
-    if precision > 0 {
-        digits.push(b'.');
-        digits.resize(digits.len() + precision, b'0');
-    }
-    (digits, integer < 0 && magnitude != 0)
 }

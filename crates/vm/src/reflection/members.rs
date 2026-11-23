@@ -4,12 +4,16 @@ use std::collections::HashSet;
 
 use phera_bytecode::reflection::DeclarationMetadata;
 use phera_bytecode::{ClassDeclaration, CompiledUnit, TraitAdaptation, Visibility};
-use phera_extension_api::reflection::{AttributeTarget, MemberInfo, PropertyHandle, PropertySlot};
+use phera_extension_api::reflection::{
+    AttributeTarget, MemberInfo, MethodHandle, PropertyHandle, PropertySlot,
+};
 
 use crate::classes::class::ConstantInitializer;
 use crate::{Vm, classes::Class, code_table::FunctionIndex};
 
 use super::{flags, source_info, visibility_bits};
+
+pub(super) const VIRTUAL_PROPERTY: i64 = 512;
 
 impl Vm {
     pub(super) fn reflection_trait_aliases(
@@ -105,7 +109,12 @@ impl Vm {
         methods.sort_by_key(|method| self.method_listing_order(class, method));
         methods
             .into_iter()
-            .map(|method| MemberInfo {
+            .enumerate()
+            .map(|(index, method)| MemberInfo {
+                method: u32::try_from(index).ok().map(|index| MethodHandle {
+                    class: class.index.number(),
+                    index,
+                }),
                 name: method.name.clone(),
                 class: method.declaring.clone(),
                 lookup_class: class.name.clone(),
@@ -168,11 +177,17 @@ impl Vm {
                         .position(|candidate| candidate.name == property.name)
                 });
             }
+            let native_virtual = owner.declaration.is_none()
+                && owner
+                    .hooks
+                    .as_ref()
+                    .is_some_and(|hooks| hooks.virtual_properties);
             for (slot, property) in properties {
                 let is_virtual = property
                     .hooks
                     .as_ref()
-                    .is_some_and(|hooks| hooks.hooks.is_virtual);
+                    .is_some_and(|hooks| hooks.hooks.is_virtual)
+                    || (native_virtual && property.static_storage.is_none());
                 let is_abstract = property
                     .hooks
                     .as_ref()
@@ -185,7 +200,7 @@ impl Vm {
                         | flags(property.static_storage.is_some(), 16)
                         | flags(property.is_readonly, 128)
                         | flags(property.is_final, 32)
-                        | flags(is_virtual, 512)
+                        | flags(is_virtual, VIRTUAL_PROPERTY)
                         | flags(is_abstract, 64)
                         | flags(
                             property.set_visibility == Some(Visibility::Protected)
@@ -201,6 +216,7 @@ impl Vm {
                         class: class.index.number(),
                         slot,
                     }),
+                    slot_access: slot_access(slot, property, is_virtual, class),
                     ..MemberInfo::default()
                 };
                 if let Some((_, first, unit, declared)) = property_source(&property.name) {
@@ -316,4 +332,38 @@ impl Vm {
         }
         members
     }
+}
+
+/// Where an object keeps a plain instance property, for the direct methods
+/// of `ReflectionProperty` (see `phera_extension_api::reflection::SlotAccess`):
+/// none for a static, virtual or hooked property. Writes take the slot only
+/// for a property that is not readonly, has no asymmetric visibility, and
+/// whose type names no class.
+fn slot_access(
+    slot: PropertySlot,
+    property: &crate::classes::class::PropertyDefault,
+    is_virtual: bool,
+    class: &Class,
+) -> Option<phera_extension_api::reflection::SlotAccess> {
+    let PropertySlot::Instance(index) = slot else {
+        return None;
+    };
+    if is_virtual || property.hooks.is_some() {
+        return None;
+    }
+    let writes = (!property.is_readonly
+        && property.set_visibility.is_none()
+        && property.ty.as_ref().is_none_or(|ty| ty.classes.is_empty()))
+    .then(|| {
+        property
+            .ty
+            .as_ref()
+            .map_or(phera_bytecode::TypeMask::MIXED, |ty| ty.mask)
+    });
+    Some(phera_extension_api::reflection::SlotAccess {
+        key: property.key.clone(),
+        slot: index,
+        layout: class.layout.clone()?,
+        writes,
+    })
 }

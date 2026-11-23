@@ -2,4 +2,6 @@
 
 pub mod sqlite;
 
-pub use phera_db_drivers::drivers::{Column, Driver, Execution, Prepared, Rows, connection_error};
+pub use phera_db_drivers::drivers::{
+    Column, Driver, Execution, Prepared, RowBuffer, Rows, connection_error,
+};

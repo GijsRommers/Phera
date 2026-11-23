@@ -24,7 +24,7 @@ pub const TTY: usize = 16;
 pub fn jit(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let state = connection::argument(context, args::value(&arguments, 0), "pg_jit")?;
-        let lease = state.borrow().lease()?;
+        let lease = connection::lease(&state).await?;
         let values = connection::run(&lease, |driver| {
             Box::pin(async move {
                 Ok([
@@ -74,7 +74,10 @@ pub(crate) fn sync_named<const OP: usize>(
 ) -> NativeResult {
     let state = connection::argument(c, args::value(a, 0), name)?;
     let state = state.borrow();
-    let lease = state.lease()?;
+    state.ensure_open()?;
+    // A fork's copy that has not connected yet reports an idle, healthy
+    // connection, as the session it will borrow is.
+    let lease = state.lease.clone();
     Ok(match OP {
         DBNAME => Value::from(state.dsn.get("dbname", "").to_owned()),
         HOST => Value::from(state.dsn.get("host", "localhost").to_owned()),
@@ -87,9 +90,14 @@ pub(crate) fn sync_named<const OP: usize>(
         POLL => Value::Int(3),
         STATUS => Value::Int(
             lease
-                .try_inspect(|driver| match driver {
-                    phera_db_drivers::drivers::Driver::Postgres(pg) => i64::from(pg.is_broken()),
-                    _ => 1,
+                .as_ref()
+                .map_or(Some(0), |lease| {
+                    lease.try_inspect(|driver| match driver {
+                        phera_db_drivers::drivers::Driver::Postgres(pg) => {
+                            i64::from(pg.is_broken())
+                        }
+                        _ => 1,
+                    })
                 })
                 .unwrap_or(0),
         ),
@@ -97,9 +105,12 @@ pub(crate) fn sync_named<const OP: usize>(
             1
         } else {
             lease
-                .try_inspect(|driver| match driver {
-                    phera_db_drivers::drivers::Driver::Postgres(pg) => pg.transaction_status(),
-                    _ => 4,
+                .as_ref()
+                .map_or(Some(0), |lease| {
+                    lease.try_inspect(|driver| match driver {
+                        phera_db_drivers::drivers::Driver::Postgres(pg) => pg.transaction_status(),
+                        _ => 4,
+                    })
                 })
                 .unwrap_or(1)
         }),
@@ -127,7 +138,7 @@ pub(crate) fn asynchronous_named<'a, const OP: usize>(
             &Value::Null
         };
         let state = connection::argument(c, arg, name)?;
-        let lease = state.borrow().lease()?;
+        let lease = connection::lease(&state).await?;
         match OP {
             VERSION => {
                 let server = state.borrow().server_version.clone();
@@ -234,11 +245,10 @@ pub(crate) fn asynchronous_named<'a, const OP: usize>(
             }
             NOTIFY => {
                 let mode = args::int(&a, 1).unwrap_or(1);
-                let notification =
-                    connection::run(&lease, |pg| Box::pin(async move { Ok(pg.notification()) }))
-                        .await
-                        .ok()
-                        .flatten();
+                let notification = connection::run(&lease, |pg| Box::pin(pg.notification()))
+                    .await
+                    .ok()
+                    .flatten();
                 let Some(notification) = notification else {
                     return Ok(Value::Bool(false));
                 };

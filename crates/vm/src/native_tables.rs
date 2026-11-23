@@ -16,13 +16,26 @@ pub struct NativeTables {
     pub(crate) registry: Arc<Registry>,
     pub(crate) classes: Rc<ClassDefinitions>,
     pub(crate) constants: Rc<NativeConstants>,
+    /// The worker's function numbers (see `crate::worker_code`).
+    pub(crate) code: Rc<crate::worker_code::WorkerCode>,
+    /// The worker's static and constant slot numbers.
+    pub(crate) slots: Rc<crate::classes::class_state::SlotNumbers>,
+    /// The worker's linked classes (see `crate::classes::worker_classes`).
+    pub(crate) linked: Rc<crate::classes::worker_classes::WorkerClasses>,
 }
 
 impl NativeTables {
     pub fn new(registry: Arc<Registry>) -> Self {
         Self {
-            classes: Rc::new(ClassDefinitions::native(&registry)),
+            classes: Rc::new({
+                let mut classes = ClassDefinitions::native(&registry);
+                classes.number_keys();
+                classes
+            }),
             constants: Rc::new(native_constants(&registry)),
+            code: Rc::default(),
+            slots: Rc::default(),
+            linked: Rc::default(),
             registry,
         }
     }
@@ -35,6 +48,9 @@ impl crate::Vm {
             registry: self.registry.clone(),
             classes: self.classes.native_definitions(),
             constants: self.constants.native_definitions(),
+            code: self.code.worker(),
+            slots: self.class_states.numbers(),
+            linked: self.classes.worker(),
         });
         child.execution_time = self.execution_time.clone();
         child

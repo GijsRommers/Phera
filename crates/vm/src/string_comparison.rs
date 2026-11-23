@@ -18,8 +18,10 @@ pub(crate) struct PendingComparison {
 pub(crate) fn needs_comparison_step(operator: BinaryOp, left: &Value, right: &Value) -> bool {
     matches!(
         (left, right),
-        (Value::Object(_), Value::Object(_) | Value::String(_))
-            | (Value::String(_), Value::Object(_))
+        (
+            Value::Object(_),
+            Value::Object(_) | Value::InternedStr(_) | Value::String(_)
+        ) | (Value::InternedStr(_) | Value::String(_), Value::Object(_))
             | (Value::Array(_), Value::Array(_))
     ) && crate::object_comparison::is_comparison(operator)
 }

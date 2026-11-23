@@ -1,5 +1,6 @@
 //! Mixed array and property paths preserve evaluation order and shared object identity.
 
+use super::operand_order::is_superglobal;
 use crate::ir::PathStep as Step;
 use crate::ir::{Constant, Instruction, Place, PlaceScope};
 use crate::{CompileError, Compiler};
@@ -173,6 +174,24 @@ impl Compiler<'_> {
                 (self.allocate_register()?, PlaceScope::This)
             }
 
+            ast::ExpressionKind::StaticProperty {
+                class,
+                name: ast::Variable::Named(name),
+                ..
+            } if matches!(class.kind, ast::ExpressionKind::Name(_)) => {
+                // `Post::$count`, and `self::`, `static::` and `parent::`,
+                // which the VM resolves from the running frame.
+                let class = self.object_class_name(class, line)?;
+                let scratch = self.allocate_register()?;
+                (
+                    scratch,
+                    PlaceScope::NamedStaticProperty {
+                        class,
+                        name: name.clone(),
+                        scratch,
+                    },
+                )
+            }
             ast::ExpressionKind::StaticProperty { class, name, .. } => {
                 let class = if matches!(class.kind, ast::ExpressionKind::Name(_)) {
                     let class = self.object_class_name(class, line)?;
@@ -203,24 +222,10 @@ impl Compiler<'_> {
             ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name == "GLOBALS" => {
                 (self.allocate_register()?, PlaceScope::Globals)
             }
-            ast::ExpressionKind::Variable(ast::Variable::Named(name))
-                if matches!(
-                    name.as_str(),
-                    "_GET"
-                        | "_POST"
-                        | "_COOKIE"
-                        | "_SERVER"
-                        | "_REQUEST"
-                        | "_FILES"
-                        | "_ENV"
-                        | "_SESSION"
-                ) =>
-            {
-                (
-                    self.literal(Constant::Bytes(name.as_bytes().to_vec()), line)?,
-                    PlaceScope::Global(self.allocate_register()?),
-                )
-            }
+            ast::ExpressionKind::Variable(ast::Variable::Named(name)) if is_superglobal(name) => (
+                self.literal(Constant::Bytes(name.as_bytes().to_vec()), line)?,
+                PlaceScope::Global(self.allocate_register()?),
+            ),
             ast::ExpressionKind::Variable(ast::Variable::Named(name)) if name != "this" => {
                 (self.local(name)?, PlaceScope::Local)
             }
@@ -240,7 +245,11 @@ impl Compiler<'_> {
                 let access_line = self.access_line(access);
                 if fetch_line != access_line
                     && (!place.path.is_empty()
-                        || matches!(place.scope, PlaceScope::StaticProperty { .. }))
+                        || matches!(
+                            place.scope,
+                            PlaceScope::StaticProperty { .. }
+                                | PlaceScope::NamedStaticProperty { .. }
+                        ))
                 {
                     let base = self.emit_path_read(place, fetch_line)?;
                     place = Place {

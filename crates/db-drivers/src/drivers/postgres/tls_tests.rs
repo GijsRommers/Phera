@@ -17,6 +17,41 @@ struct Proxy {
     task: JoinHandle<()>,
 }
 
+#[tokio::test]
+async fn required_tls_closes_a_socket_that_declines_encryption() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let dsn = Dsn {
+        driver: crate::dsn::DriverName::Postgres,
+        fields: crate::dsn::postgres::fields(
+            &format!("host=127.0.0.1;port={port};sslmode=require"),
+            true,
+        )
+        .unwrap(),
+        options: Default::default(),
+    };
+    let peer = async {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = [0; 8];
+        socket.read_exact(&mut request).await.unwrap();
+        assert_eq!(request, [0, 0, 0, 8, 4, 210, 22, 47]);
+        socket.write_all(b"N").await.unwrap();
+        assert_eq!(socket.read(&mut request).await.unwrap(), 0);
+    };
+    let client = async {
+        assert!(
+            Postgres::connect(&dsn, "scripted-user", "unused")
+                .await
+                .is_err()
+        );
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        tokio::join!(peer, client);
+    })
+    .await
+    .unwrap();
+}
+
 impl Drop for Proxy {
     fn drop(&mut self) {
         self.task.abort();
@@ -153,17 +188,13 @@ async fn encrypted_queries_and_transaction_status_reach_the_database() {
         ("wrong.example", "prefer", None),
         ("wrong.example", "allow", None),
     ] {
-        let driver = proxy.connect(host, mode, ca, None).await.unwrap();
+        let mut driver = proxy.connect(host, mode, ca, None).await.unwrap();
         driver.run_unprepared("BEGIN").await.unwrap();
-        assert!(driver.transaction_state().await, "{mode}");
-        let row = driver
-            .client
-            .query_one("SELECT 42 AS answer", &[])
-            .await
-            .unwrap();
-        assert_eq!(row.get::<_, i32>(0), 42, "{mode}");
+        assert!(driver.transaction_state(), "{mode}");
+        let row = driver.single_row("SELECT 42 AS answer", &[]).await.unwrap();
+        assert_eq!(row[0].as_deref(), Some(b"42".as_slice()), "{mode}");
         driver.run_unprepared("ROLLBACK").await.unwrap();
-        assert!(!driver.transaction_state().await, "{mode}");
+        assert!(!driver.transaction_state(), "{mode}");
     }
 }
 

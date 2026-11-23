@@ -30,7 +30,10 @@ pub async fn execute<const OP: usize>(
     arguments: &[Value],
     call: &str,
 ) -> NativeResult {
-    let lease = state.borrow().lease()?;
+    let lease = match super::lease(context, &state, call).await {
+        Ok(lease) => lease,
+        Err(answer) => return answer,
+    };
     if OP == NEXT {
         let mut state = state.borrow_mut();
         state.pending = None;
@@ -54,6 +57,8 @@ pub async fn execute<const OP: usize>(
             "{call}(): Argument #{index} ($query) must not be empty"
         )));
     }
+    // A fork replays what the script changed about its session.
+    let noted = state.borrow().session.concerns(&sql).then(|| sql.clone());
     let mode = args::int(arguments, 1).unwrap_or_default();
     if OP == QUERY {
         if mode & 8 != 0 {
@@ -95,6 +100,9 @@ pub async fn execute<const OP: usize>(
         {
             let mut state = state.borrow_mut();
             state.observe(&outcome);
+            if let Some(sql) = &noted {
+                state.session.ran(sql);
+            }
             if let Some(backslashes) = backslashes {
                 state.backslashes = backslashes;
             }
@@ -131,6 +139,11 @@ pub async fn execute<const OP: usize>(
     let mut state = state.borrow_mut();
     state.observe(&outcome);
     state.backslashes = backslashes;
+    if OP == MULTI_QUERY {
+        state.session.ran_several();
+    } else if let Some(sql) = &noted {
+        state.session.ran(sql);
+    }
     if OP == QUERY {
         if outcome.rows.has_columns() {
             return result::create(context, outcome.rows, state.native_numbers, mode == 1);
@@ -149,7 +162,7 @@ pub async fn execute<const OP: usize>(
 
 pub fn more_results(state: Handle) -> NativeResult {
     let state = state.borrow();
-    state.lease()?;
+    state.ensure_open()?;
     Ok(Value::Bool(!state.more.is_empty()))
 }
 
@@ -159,7 +172,7 @@ pub async fn result_operation<const OP: usize>(
 ) -> NativeResult {
     let (pending, native) = {
         let mut state = state.borrow_mut();
-        state.lease()?;
+        state.ensure_open()?;
         (state.pending.take(), state.native_numbers)
     };
     match pending {

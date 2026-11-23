@@ -58,7 +58,12 @@ impl Vm {
             line,
         };
         let missing = self
-            .unresolved_contract_types(property_type(property), Some(&parameter_type.display), unit)
+            .unresolved_contract_types(
+                property_type(property),
+                Some(&parameter_type.display),
+                scope,
+                unit,
+            )
             .map(str::to_owned);
         Err(crate::autoload::ClassMiss::property_signature(
             missing, failure,
@@ -81,7 +86,7 @@ impl Vm {
             return Ok(());
         }
         self.check_property_hook_signatures(property, inherited, unit)?;
-        self.check_hook_property_type(property, inherited, unit)?;
+        self.check_property_type(property, inherited, unit)?;
         let virtual_property = is_virtual(property) && is_virtual(inherited);
         let mut linked =
             property
@@ -122,7 +127,7 @@ impl Vm {
         Ok(())
     }
 
-    fn check_hook_property_type(
+    pub(super) fn check_property_type(
         &self,
         property: &PropertyDefault,
         inherited: &PropertyDefault,
@@ -153,11 +158,6 @@ impl Vm {
             return Ok(());
         }
         let name = &property.name;
-        let Some(expected) = expected else {
-            return Err(NativeError::error(format!(
-                "Type of {class}::${name} must be omitted to match the parent definition in class {parent}"
-            )));
-        };
         let variance = if covariant {
             "subtype of "
         } else if contravariant {
@@ -165,9 +165,26 @@ impl Vm {
         } else {
             ""
         };
-        Err(NativeError::error(format!(
-            "Type of {class}::${name} must be {variance}{expected} (as in class {parent})"
-        )))
+        let message = match expected {
+            Some(expected) => format!(
+                "Type of {class}::${name} must be {variance}{expected} (as in class {parent})"
+            ),
+            None => format!(
+                "Type of {class}::${name} must be omitted to match the parent definition in class {parent}"
+            ),
+        };
+        let missing = self.unresolved_contract_types(actual, expected, class, unit);
+        if let Some(declaration) = unit.classes.iter().find(|entry| entry.name == *class) {
+            return Err(crate::autoload::ClassMiss::property_signature(
+                missing.map(str::to_owned),
+                crate::error_traces::DeclarationFailure {
+                    message,
+                    file: unit.file.clone(),
+                    line: declaration.line as usize,
+                },
+            ));
+        }
+        Err(NativeError::error(message))
     }
 
     pub(super) fn link_property_contracts(
@@ -210,7 +227,7 @@ impl Vm {
                     self.inherit_property_hooks(property, requirement, unit)?;
                 } else {
                     self.check_property_hook_signatures(property, requirement, unit)?;
-                    self.check_hook_property_type(property, requirement, unit)?;
+                    self.check_property_type(property, requirement, unit)?;
                 }
                 self.check_plain_set_contract(property, requirement, "interface", unit)?;
             }

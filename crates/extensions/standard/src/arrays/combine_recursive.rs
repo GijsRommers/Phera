@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use phera_extension_api::{ArrayKey, Context, NativeError, PhpArray, Value};
 
-use super::combine::{Collision, Depth};
+use super::combine::Collision;
 
 struct Frame {
     result: PhpArray,
@@ -48,14 +48,12 @@ enum Resolution {
     Descend(Frame),
 }
 
-/// Combines `source` into `result`, descending into nested arrays when
-/// `depth` is recursive.
+/// Combines `source` into `result`, descending when values collide.
 pub(super) fn combine_pair(
     context: &mut dyn Context,
     result: PhpArray,
     source: Rc<PhpArray>,
     collision: Collision,
-    depth: Depth,
 ) -> Result<PhpArray, NativeError> {
     let mut frames = vec![Frame::new(result, source, None, Vec::new())];
     loop {
@@ -78,11 +76,9 @@ pub(super) fn combine_pair(
             continue;
         }
         let previous = frame.result.get(&key).cloned();
-        let resolution = match (depth, previous) {
-            (Depth::Recursive, Some(previous)) => {
-                resolve(context, key.clone(), previous, value, collision)?
-            }
-            _ => Resolution::Store(value),
+        let resolution = match previous {
+            Some(previous) => resolve(context, key.clone(), previous, value, collision)?,
+            None => Resolution::Store(value),
         };
         match resolution {
             Resolution::Store(value) => {
