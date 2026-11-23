@@ -32,7 +32,7 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | WordPress | `mysqli` and the engine fixes it needed are in. The end-to-end comparison with PHP has not been repeated since |
 | PHP's own test suite (php-src) | 9,136 of the 13,388 core tests pass. Of 4,542 tests for the later extensions (dom, the XML family, openssl, session, curl, intl and others) 1,737 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | About 2.1 times PHP's instruction count for one Laravel API request in production mode: 34.5 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 138 million against 27 million, 5.0 times, and a Symfony and Doctrine route with 49 statements 301 million against 30 million, 10 times. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
+| Speed of a framework request | With warm-up snapshots ([below](#-boot-once-fork-every-request)) against PHP 8.5.13 FPM (OPcache on, JIT off): Symfony 7.4 + Doctrine `/api/products` uses **7.46M vs 6.02M** instructions (**1.24× PHP**), `/api/ping` **5.77M vs 3.21M** (**1.80×**), Laravel 13 `/api/hello` **15.68M vs 5.96M** (**2.63×**), and Laravel `/api/posts?page=2` **34.14M vs 13.70M** (**2.49×**). Under load on 2 cores / 2 GiB RAM with PostgreSQL 17 (2 Phera workers vs 40 static PHP-FPM children behind nginx): Symfony `/api/products` serves **1,075 RPS** (`c=16`) and **1,051 RPS** (`c=64`) vs FPM's **821 / 854 RPS**; with a 20 ms DB wait (`/api/products-io`), **910 RPS** (`c=64`) and **792 RPS** (`c=128`) vs FPM's **721 / 690 RPS**; plain Symfony `/api/ping` serves **1,513 / 1,441 RPS** vs FPM's **1,938 / 1,984 RPS**; Laravel `/api/posts?page=2` serves **243 / 237 RPS** vs FPM's **494 / 513 RPS** |
 
 Phera validates union and intersection declarations during compilation and
 checks inherited property types when linking classes. Ordinary typed
@@ -131,6 +131,12 @@ finish. Explicit file destinations keep their file write behavior.
 headers and the body. It defaults to 60 seconds and gains one second for every
 16 KiB of body data received. If the budget runs out, the server returns HTTP 408
 and closes the connection.
+
+Each worker bounds the number of concurrently forked request VMs to 32 by
+default (`PHERA_MAX_CONCURRENT_REQUESTS_PER_WORKER`; set `0` to disable the
+cap). Extra HTTP requests stay parked as lightweight async tasks until an
+active VM finishes and drops, keeping memory bounded under traffic spikes while
+saturating database connection pools.
 
 `phera serve` caches compiled PHP files and rechecks their paths and timestamps
 every two seconds by default. Set `-d opcache.revalidate_freq=0` to check on
@@ -299,9 +305,11 @@ Not started: zip.
 ### Database connection pool
 
 MySQL and PostgreSQL sockets stay on the worker that opens them.
-`PHERA_PDO_POOL_SIZE` (20 by default) limits pooled sockets to each database
-across the process. An idle worker can close one of its sockets when
-another worker is waiting for a turn. `PHERA_PDO_POOL_IDLE_SECONDS` (60),
+`PHERA_PDO_POOL_SIZE` (64 by default) limits pooled sockets to each database
+across the process. Balanced workers reuse their own returned sockets directly
+to avoid connection churn, while an over-subscribed or idle worker (after a
+25 ms grace period) releases a socket when another worker is waiting for a turn.
+`PHERA_PDO_POOL_IDLE_SECONDS` (60),
 `PHERA_PDO_POOL_LIFETIME_SECONDS` (1800) and
 `PHERA_PDO_POOL_WAIT_SECONDS` (30) control the pool's timeouts.
 `PHERA_PDO_IO_THREADS` is accepted for compatibility and has no effect.
@@ -477,7 +485,8 @@ warmup = ["/api/posts", "/"]
 or `phera serve --warmup /api/posts --warmup / public` (the option wins over
 the file; both become the environment variable `PHERA_WARMUP`, which you can
 also set yourself). On the test applications a Laravel Eloquent route went
-from WARMUP_README.
+from 46.9 to 34.1 million instructions per request, and a Symfony Doctrine
+route from 28.2 to 7.5 million.
 
 The contract:
 
