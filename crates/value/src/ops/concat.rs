@@ -12,12 +12,12 @@ pub fn concat(a: &Value, b: &Value, d: &mut dyn Diagnostics) -> Result<Value, Op
     if let (Value::String(left), Value::Int(number)) = (a, b) {
         let mut out = Vec::with_capacity(left.len() + 20);
         out.extend_from_slice(left.as_bytes());
-        crate::string::push_integer(&mut out, *number);
+        crate::integer_text::push_integer(&mut out, *number);
         return Ok(Value::String(PhpString::from(out)));
     }
     if let (Value::Int(number), Value::String(right)) = (a, b) {
         let mut out = Vec::with_capacity(right.len() + 20);
-        crate::string::push_integer(&mut out, *number);
+        crate::integer_text::push_integer(&mut out, *number);
         out.extend_from_slice(right.as_bytes());
         return Ok(Value::String(PhpString::from(out)));
     }
