@@ -234,8 +234,9 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
                 )
             },
         ),
-        MethodEntry::public_async("newInstanceWithoutConstructor", &[], |c, o, _| {
-            instantiate(c, o, None, None)
+        MethodEntry::public("newInstanceWithoutConstructor", &[], |c, o, _| {
+            let class = reflected_class(o)?;
+            engine(c)?.reflect_new_instance_without_constructor(&class.info)
         }),
         MethodEntry::public_async("getAttributes", crate::attribute::FILTER, |c, o, a| {
             Box::pin(async move {

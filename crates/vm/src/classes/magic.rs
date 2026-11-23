@@ -2,7 +2,9 @@
 //!
 //! `$object->missing()` uses the receiver's __call when it has one.
 
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
+
+use foldhash::HashMap;
 
 use super::Method;
 

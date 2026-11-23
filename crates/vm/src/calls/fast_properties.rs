@@ -27,8 +27,8 @@
 
 use std::rc::Rc;
 
-use phera_bytecode::{IncDec, NameId, PathBase, PathId, Reg, Step as PathStep};
-use phera_value::{Object, Value};
+use phera_bytecode::{IncDec, NameId, PathBase, PathId, Reg, Step as PathStep, TypeMask};
+use phera_value::{ArrayKey, Object, Value};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::prepared_call::CallKind;
@@ -80,7 +80,7 @@ impl Machine<'_> {
         Some((table, packed))
     }
 
-    /// Read a single declared property slot directly from `object`.
+    /// Read a single declared (or plain dynamic) property directly from `object`.
     #[inline(always)]
     fn read_prop_value(
         &self,
@@ -90,7 +90,9 @@ impl Machine<'_> {
         scope: Option<ClassIndex>,
         quiet: bool,
     ) -> Option<Value> {
-        let (table, packed) = self.resolve_prop(position, object, name, scope)?;
+        let Some((table, packed)) = self.resolve_prop(position, object, name, scope) else {
+            return self.read_dynamic_prop_named(position, object, name, scope, quiet);
+        };
         if !packed.is_plain_readable() {
             return None;
         }
@@ -103,6 +105,109 @@ impl Machine<'_> {
             Some(value) => Some(value),
             None if quiet && table.quiet_null_when_missing() => Some(Value::Null),
             None => None,
+        }
+    }
+
+    /// Cold fallback for reading an undeclared dynamic property (`stdClass` or
+    /// dynamic property stored in `object.properties`).
+    #[cold]
+    #[inline(never)]
+    fn read_dynamic_prop_named(
+        &self,
+        position: Position,
+        object: &Object,
+        name: NameId,
+        scope: Option<ClassIndex>,
+        quiet: bool,
+    ) -> Option<Value> {
+        if self.classes.has_lazy_objects && object.lazy().is_some() {
+            return None;
+        }
+        let class = object.class.as_any().downcast_ref::<Class>()?;
+        let table = class.property_table();
+        if !table.allows_dynamic_read() {
+            return None;
+        }
+        let key = self.code.unit_prop_key(position.frame.function, name);
+        if table.resolve(key, scope).is_some() {
+            return None;
+        }
+        let name_str = self
+            .code
+            .unit(position.frame.function)
+            .names
+            .get(name.index())?;
+        if name_str.starts_with('\0') {
+            return None;
+        }
+        let array_key = ArrayKey::String(
+            self.code
+                .cache(position.frame.function)
+                .names
+                .get(name.index())?
+                .clone(),
+        );
+        read_dynamic_key(object, &array_key, quiet)
+    }
+
+    /// Read a dynamic-name property `$obj->$name` directly in the loop.
+    #[cold]
+    #[inline(never)]
+    fn read_dynamic_name_prop(
+        &self,
+        position: Position,
+        base: PathBase,
+        name_reg: Reg,
+        quiet: bool,
+    ) -> Option<Value> {
+        let object = self.property_object(position, base)?;
+        if self.classes.has_lazy_objects && object.lazy().is_some() {
+            return None;
+        }
+        let (name_str, array_key) = self.dynamic_prop_name(position, name_reg)?;
+        let class = object.class.as_any().downcast_ref::<Class>()?;
+        let table = class.property_table();
+        if table.has_native_props() {
+            return None;
+        }
+        let scope = self.caller_scope_index(position);
+        let scope_name = scope.map(|s| self.classes.class(s).name.as_str());
+        if let Some(slot_idx) = class.instance_property_named(name_str, scope_name) {
+            let packed = table.by_slot(slot_idx)?;
+            if !packed.visible_to(scope, self.classes) || !packed.is_plain_readable() {
+                return None;
+            }
+            let found = object.with_properties(|properties| {
+                properties.layout()?;
+                Some(properties.slot(packed.slot()).map(|v| v.deref().clone()))
+            })??;
+            return match found {
+                Some(value) => Some(value),
+                None if quiet && table.quiet_null_when_missing() => Some(Value::Null),
+                None => None,
+            };
+        }
+        if !table.allows_dynamic_read() {
+            return None;
+        }
+        read_dynamic_key(object, &array_key, quiet)
+    }
+
+    /// Borrow the UTF-8 name and non-normalized string [`ArrayKey`] from a
+    /// `DynamicProperty` register.
+    #[inline]
+    fn dynamic_prop_name(&self, position: Position, name_reg: Reg) -> Option<(&str, ArrayKey)> {
+        let slot = position.frame.base() + name_reg.index();
+        match self.registers.window(slot, 1) {
+            [Some(Value::InternedStr(s))] => {
+                let name = std::str::from_utf8(s.as_bytes()).ok()?;
+                (!name.starts_with('\0')).then_some((name, ArrayKey::Interned(s)))
+            }
+            [Some(Value::String(s))] => {
+                let name = std::str::from_utf8(s.as_bytes()).ok()?;
+                (!name.starts_with('\0')).then(|| (name, ArrayKey::String(s.clone())))
+            }
+            _ => None,
         }
     }
 
@@ -189,6 +294,9 @@ impl Machine<'_> {
             let object = self.property_object(position, path_body.base)?;
             let scope = self.caller_scope_index(position);
             return self.read_prop_value(position, object, *name, scope, quiet);
+        }
+        if let [PathStep::DynamicProperty(name_reg)] = steps {
+            return self.read_dynamic_name_prop(position, path_body.base, *name_reg, quiet);
         }
         // `[Property, Index..]` directly on `$this` or register: single borrow, zero array clone.
         if let [PathStep::Property(name), rest @ ..] = steps
@@ -389,7 +497,8 @@ impl Machine<'_> {
     }
 
     /// `AssignPath`, or with `result` `AssignPathFromLocal`, of a value to
-    /// a declared property (single or chained: `$this->x = $v`, `$this->a->b = $v`).
+    /// a declared or plain dynamic property (single or chained: `$this->x = $v`,
+    /// `$this->a->b = $v`, `$obj->$name = $v`).
     #[inline(never)]
     pub(super) fn assign_property<const GUARDED: bool>(
         &mut self,
@@ -402,7 +511,7 @@ impl Machine<'_> {
         if result.is_some_and(|result| self.registers.window(base + result.index(), 1).is_empty()) {
             return Step::Slow;
         }
-        let value = match self.registers.window(base + source.index(), 1) {
+        let mut value = match self.registers.window(base + source.index(), 1) {
             [Some(value)] => value.deref().clone(),
             _ => return Step::Slow,
         };
@@ -413,21 +522,46 @@ impl Machine<'_> {
         let Some(path_body) = body.paths.get(path.index()) else {
             return Step::Slow;
         };
-        let Some((PathStep::Property(last_name), prefix)) = path_body.steps.split_last() else {
+        let Some((last_step, prefix)) = path_body.steps.split_last() else {
             return Step::Slow;
         };
         let scope = self.caller_scope_index(position);
-        let written = if prefix.is_empty() {
-            let Some(object) = self.property_object(position, path_body.base) else {
-                return Step::Slow;
-            };
-            self.write_declared_prop(position, object, *last_name, scope, &value)
-        } else {
-            let Some(object) = self.resolve_target_object(position, path_body.base, prefix, scope)
-            else {
-                return Step::Slow;
-            };
-            self.write_declared_prop(position, &object, *last_name, scope, &value)
+        let written = match *last_step {
+            PathStep::Property(last_name) => {
+                if prefix.is_empty() {
+                    let Some(object) = self.property_object(position, path_body.base) else {
+                        return Step::Slow;
+                    };
+                    self.write_declared_or_dynamic_prop(
+                        position, object, last_name, scope, &mut value,
+                    )
+                } else {
+                    let Some(object) =
+                        self.resolve_target_object(position, path_body.base, prefix, scope)
+                    else {
+                        return Step::Slow;
+                    };
+                    self.write_declared_or_dynamic_prop(
+                        position, &object, last_name, scope, &mut value,
+                    )
+                }
+            }
+            PathStep::DynamicProperty(name_reg) => {
+                if prefix.is_empty() {
+                    let Some(object) = self.property_object(position, path_body.base) else {
+                        return Step::Slow;
+                    };
+                    self.write_dynamic_name_prop(position, object, name_reg, scope, &mut value)
+                } else {
+                    let Some(object) =
+                        self.resolve_target_object(position, path_body.base, prefix, scope)
+                    else {
+                        return Step::Slow;
+                    };
+                    self.write_dynamic_name_prop(position, &object, name_reg, scope, &mut value)
+                }
+            }
+            _ => return Step::Slow,
         };
         if !written {
             return Step::Slow;
@@ -438,10 +572,72 @@ impl Machine<'_> {
         Step::Done(position.ip)
     }
 
-    /// Write a declared property via [`PropertyTable`] (including class-typed
-    /// object assignments, for both single and chained targets, with zero site cache).
+    /// Write a declared property via [`PropertyTable`] (including `readonly`
+    /// first-time init, asymmetric `set_visibility`, lossless `int->float`
+    /// widening, and class-typed object assignments), or a plain dynamic property.
     #[inline(always)]
-    pub(super) fn write_declared_prop(
+    fn write_declared_or_dynamic_prop(
+        &self,
+        position: Position,
+        object: &Object,
+        name: NameId,
+        scope: Option<ClassIndex>,
+        value: &mut Value,
+    ) -> bool {
+        let Some((table, packed)) = self.resolve_prop(position, object, name, scope) else {
+            return self.write_dynamic_prop_named(position, object, name, scope, value);
+        };
+        self.write_packed_prop(object, table, packed, scope, value)
+    }
+
+    /// Apply visibility, type, and readonly checks for a resolved [`PackedProp`]
+    /// and store `value` directly into `object`'s property slot.
+    #[inline(always)]
+    fn write_packed_prop(
+        &self,
+        object: &Object,
+        table: &crate::classes::property_table::PropertyTable,
+        packed: PackedProp,
+        scope: Option<ClassIndex>,
+        value: &mut Value,
+    ) -> bool {
+        if !packed.is_direct_assignable() {
+            return false;
+        }
+        if packed.has_set_visibility() && !packed.set_visible_to(scope, self.classes) {
+            return false;
+        }
+        let type_ok = if packed.allows_type(crate::types::own_type(value)) {
+            true
+        } else if let Value::Int(integer) = *value
+            && packed.allows_type(TypeMask::FLOAT)
+        {
+            *value = Value::Float(integer as f64);
+            true
+        } else if packed.has_class_type()
+            && let Value::Object(val_obj) = value
+            && let Some(val_class) = val_obj.class.as_any().downcast_ref::<Class>()
+            && table.allows_object_class(packed.slot(), val_class, self.classes)
+        {
+            true
+        } else {
+            false
+        };
+        if !type_ok {
+            return false;
+        }
+        if packed.is_readonly() {
+            return table.fills_missing_directly()
+                && write_readonly_init_direct(object, packed.slot(), value);
+        }
+        write_slot_direct(object, packed.slot(), value, table.fills_missing_directly())
+    }
+
+    /// Cold fallback for writing an undeclared dynamic property on `stdClass`
+    /// or any `#[AllowDynamicProperties]` class without `__set`.
+    #[cold]
+    #[inline(never)]
+    fn write_dynamic_prop_named(
         &self,
         position: Position,
         object: &Object,
@@ -449,23 +645,80 @@ impl Machine<'_> {
         scope: Option<ClassIndex>,
         value: &Value,
     ) -> bool {
-        let Some((table, packed)) = self.resolve_prop(position, object, name, scope) else {
+        if self.classes.has_lazy_objects && object.lazy().is_some() {
+            return false;
+        }
+        let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
             return false;
         };
-        if !packed.is_plain_writable() {
+        let table = class.property_table();
+        if !table.allows_dynamic_write() {
             return false;
         }
-        if packed.allows_type(crate::types::own_type(value)) {
-            return write_slot_direct(object, packed.slot(), value, table.fills_missing_directly());
+        let key = self.code.unit_prop_key(position.frame.function, name);
+        if table.resolve(key, scope).is_some() {
+            return false;
         }
-        if packed.has_class_type()
-            && let Value::Object(val_obj) = value
-            && let Some(val_class) = val_obj.class.as_any().downcast_ref::<Class>()
-            && table.allows_object_class(packed.slot(), val_class, self.classes)
-        {
-            return write_slot_direct(object, packed.slot(), value, table.fills_missing_directly());
+        let Some(name_str) = self
+            .code
+            .unit(position.frame.function)
+            .names
+            .get(name.index())
+        else {
+            return false;
+        };
+        if name_str.starts_with('\0') {
+            return false;
         }
-        false
+        let Some(php_name) = self
+            .code
+            .cache(position.frame.function)
+            .names
+            .get(name.index())
+        else {
+            return false;
+        };
+        write_dynamic_key(object, ArrayKey::String(php_name.clone()), value)
+    }
+
+    /// Cold handler for `$obj->$name = $value` (`PathStep::DynamicProperty`).
+    #[cold]
+    #[inline(never)]
+    fn write_dynamic_name_prop(
+        &self,
+        position: Position,
+        object: &Object,
+        name_reg: Reg,
+        scope: Option<ClassIndex>,
+        value: &mut Value,
+    ) -> bool {
+        if self.classes.has_lazy_objects && object.lazy().is_some() {
+            return false;
+        }
+        let Some((name_str, array_key)) = self.dynamic_prop_name(position, name_reg) else {
+            return false;
+        };
+        let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
+            return false;
+        };
+        let table = class.property_table();
+        if table.has_native_props() {
+            return false;
+        }
+        let scope_name = scope.map(|s| self.classes.class(s).name.as_str());
+        if let Some(slot_idx) = class.instance_property_named(name_str, scope_name) {
+            let Some(packed) = table.by_slot(slot_idx) else {
+                return false;
+            };
+            if !packed.visible_to(scope, self.classes) {
+                return false;
+            }
+            return self.write_packed_prop(object, table, packed, scope, value);
+        }
+        if !table.allows_dynamic_write() {
+            return false;
+        }
+        write_dynamic_key(object, array_key, value)
     }
 
     /// Write an element of an array held in a declared property (single or chained:
@@ -509,10 +762,10 @@ impl Machine<'_> {
                 let Some(Value::Array(array)) = properties.slot_mut(slot) else {
                     return None;
                 };
-                if !crate::element_writes::writable(array, keys.as_slice(), keys.target) {
+                if !crate::element_writes::writable_creating(array, keys.as_slice(), keys.target) {
                     return None;
                 }
-                crate::element_writes::write(array, keys.as_slice(), keys.target, value)
+                crate::element_writes::write_creating(array, keys.as_slice(), keys.target, value)
             })
             .flatten()
     }
@@ -651,4 +904,131 @@ pub(super) fn write_slot_direct(
         })
         .flatten()
         .unwrap_or(false)
+}
+
+/// Initializes an uninitialized `readonly` property slot; returns `false` if
+/// already initialized so the VM handles the error or `__clone` reinitialization.
+#[inline(always)]
+fn write_readonly_init_direct(object: &Object, slot: usize, value: &Value) -> bool {
+    object
+        .update(|properties| {
+            properties.layout()?;
+            if properties.slot(slot).is_some() {
+                return Some(false);
+            }
+            properties.set_slot(slot, value.clone());
+            Some(true)
+        })
+        .flatten()
+        .unwrap_or(false)
+}
+
+#[inline]
+fn read_dynamic_key(object: &Object, key: &ArrayKey, quiet: bool) -> Option<Value> {
+    let found = object.with_properties(|properties| match properties.get(key) {
+        Some(Value::Reference(_)) => None,
+        Some(value) => Some(Some(value.clone())),
+        None => Some(None),
+    })??;
+    match found {
+        Some(value) => Some(value),
+        None if quiet => Some(Value::Null),
+        None => None,
+    }
+}
+
+#[inline]
+fn write_dynamic_key(object: &Object, key: ArrayKey, value: &Value) -> bool {
+    object
+        .update(|properties| {
+            if matches!(properties.get(&key), Some(Value::Reference(_))) {
+                return false;
+            }
+            properties.insert(key, value.clone());
+            true
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use phera_extension_api::{Extension, Registry};
+
+    async fn run_php(source: &str) -> (i32, String) {
+        let mut registry = Registry::new();
+        phera_ext_core::Core.register(&mut registry);
+        let unit = Arc::new(phera_compiler::compile(source, "fast_props_test.php").unwrap());
+        let mut vm = crate::Vm::new(Arc::new(registry));
+        let status = vm.run(unit).await;
+        (status, String::from_utf8_lossy(&vm.output).into_owned())
+    }
+
+    #[tokio::test]
+    async fn readonly_asymmetric_dynamic_and_nested_array_fast_paths() {
+        let source = r#"<?php
+readonly class Product {
+    public function __construct(
+        public int $id,
+        public float $price,
+    ) {}
+}
+$p = new Product(7, 12);
+echo $p->id, ':', gettype($p->price), ':', $p->price, "\n";
+try {
+    $p->id = 9;
+    echo "FAIL\n";
+} catch (Error $e) {
+    echo "RO_ERR\n";
+}
+
+class Holder {
+    public private(set) int $count = 0;
+    public float $ratio = 0.0;
+    public array $nested = [];
+    public function bump(): void {
+        $this->count = 5;
+        $v = 3;
+        $r = ($this->ratio = $v);
+        echo gettype($r), ':', gettype($this->ratio), ':', $r, "\n";
+        $this->nested['a']['b'] = 42;
+        $this->nested['list'][] = 99;
+    }
+}
+$h = new Holder();
+$h->bump();
+echo $h->count, ':', $h->nested['a']['b'], ':', $h->nested['list'][0], "\n";
+try {
+    $h->count = 10;
+    echo "FAIL2\n";
+} catch (Error $e) {
+    echo "ASYM_ERR\n";
+}
+
+#[\AllowDynamicProperties]
+class Bag {
+    public int $fixed = 1;
+}
+$bag = new Bag();
+$bag->dyn = 'hi';
+$k1 = 'fixed';
+$k2 = 'dyn';
+$k3 = 'fresh';
+$bag->$k1 = 2;
+$bag->$k3 = 'ok';
+echo $bag->$k1, ':', $bag->$k2, ':', $bag->$k3, ':', ($bag->missing ?? 'null'), "\n";
+
+$arr = [];
+$arr['x']['y'] = 11;
+$arr['z'][] = 22;
+echo $arr['x']['y'], ':', $arr['z'][0], "\n";
+"#;
+        let (status, out) = run_php(source).await;
+        assert_eq!(status, 0, "output: {out}");
+        assert_eq!(
+            out,
+            "7:double:12\nRO_ERR\ndouble:double:3\n5:42:99\nASYM_ERR\n2:hi:ok:null\n11:22\n"
+        );
+    }
 }

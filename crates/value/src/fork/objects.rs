@@ -49,7 +49,10 @@ impl Fork<'_> {
             Destruction::Never => {}
         }
         self.objects.insert(address, copy.clone());
-        self.identities.insert(original.identity(), copy.identity());
+        let original_identity = original.identity();
+        if original_identity != address {
+            self.identities.insert(original_identity, copy.identity());
+        }
         self.unfilled_objects.push((original.clone(), copy.clone()));
         copy
     }
@@ -71,7 +74,10 @@ impl Fork<'_> {
     /// The identity of the copy of the object whose identity was
     /// `original`, if that object has been copied.
     pub fn identity(&self, original: usize) -> Option<usize> {
-        self.identities.get(&original).copied()
+        self.objects
+            .get(&original)
+            .map(|copy| copy.identity())
+            .or_else(|| self.identities.get(&original).copied())
     }
 
     pub(super) fn fill_object(&mut self, original: &Rc<Object>, copy: &Rc<Object>) {

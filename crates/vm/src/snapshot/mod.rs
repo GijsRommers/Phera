@@ -159,7 +159,9 @@ impl<K: Clone + Eq + std::hash::Hash, V: ForkCopy> ForkCopy for indexmap::IndexM
     }
 }
 
-impl<K: Clone + Eq + std::hash::Hash, V: ForkCopy> ForkCopy for std::collections::HashMap<K, V> {
+impl<K: Clone + Eq + std::hash::Hash, V: ForkCopy, S: std::hash::BuildHasher + Default> ForkCopy
+    for std::collections::HashMap<K, V, S>
+{
     fn fork_copy(&self, fork: &mut Fork<'_>) -> Self {
         self.iter()
             .map(|(key, value)| (key.clone(), value.fork_copy(fork)))

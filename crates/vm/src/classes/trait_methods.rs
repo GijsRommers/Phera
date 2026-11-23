@@ -1,9 +1,8 @@
 //! In `class C { use T; }`, T's methods become ordinary methods on C.
 
-use std::{
-    collections::{HashMap, HashSet},
-    rc::Rc,
-};
+use std::rc::Rc;
+
+use foldhash::{HashMap, HashSet, HashSetExt};
 
 use phera_bytecode::{ClassDeclaration, ClassKind, CompiledUnit, Visibility};
 use phera_extension_api::NativeError;

@@ -266,6 +266,29 @@ impl ReflectionContext for Vm {
         })
     }
 
+    fn reflect_new_instance_without_constructor(&mut self, class: &ClassInfo) -> NativeResult {
+        use phera_bytecode::ClassKind;
+        let class = self
+            .classes
+            .numbered(class.id)
+            .ok_or_else(|| exception("Class does not exist"))?;
+        if matches!(class.kind, ClassKind::Trait | ClassKind::Enum) {
+            return Err(NativeError::error(format!(
+                "Cannot instantiate {} {}",
+                class.kind.description().to_ascii_lowercase(),
+                class.name
+            )));
+        }
+        if class.has_native_layout && class.is_final {
+            return Err(exception(format!(
+                "Class {} is an internal class marked as final that cannot be instantiated without invoking its constructor",
+                class.name
+            )));
+        }
+        Self::check_factory_class(&class)?;
+        self.create_linked_object(class, PhpArray::new())
+    }
+
     fn reflect_make_lazy(
         &mut self,
         class: &ClassInfo,
