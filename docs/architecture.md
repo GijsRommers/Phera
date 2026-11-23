@@ -1865,6 +1865,11 @@ The last row is the deciding one. The handlers themselves are cheap (`FetchThis`
 
 So the structure stays: the scalar loop, the trip out, `step` inlined into `run`. The work goes into the handlers the trip reaches (the return's release and checks, the call's record lookup, push and argument writes), measured on the routes each time. The targets below are rewritten from the measured pieces of a method call (924 per iteration on main `c4750d18`: return 163, call 263, the trip about 230, the loop body and dispatch the rest).
 
+On a scalar fallback, `run_simple` lends the fetched instruction from the
+frame's immutable code slice to `step`. The register-window borrow ends
+before dispatch, so a call can still grow the register file. The VM exit
+copies the instruction when it needs to carry it out of the loop.
+
 #### Definition of done
 
 - Loop at most 165 (as today: the floor's 90 needs the one-loop structure), function call at most 620, method call at most 750, measured on the honest floor's script. The property read is the property engineer's arm. These come from the handler plan: about 70 off the return (checks settled at entry, the release and pop), about 40 off the call's site record and decision, about 30 off the push and argument writes, about 20 off the work budget and the published position. They are revised as each piece lands.
