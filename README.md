@@ -438,8 +438,8 @@ The warm-up builds, once per worker, what nearly every request would build
 first. For Laravel: every Eloquent model under `app/Models` is booted and
 one query is built for it (no connection is opened), and the framework
 services Octane resolves in a new worker are resolved (the application's
-`octane.warm` list when it has one). For Symfony: the HTTP kernel, the
-router's matcher and Doctrine's metadata. On the test applications a
+`octane.warm` list when it has one). For Symfony: the event dispatcher,
+with its listeners still created on first use. On the test applications a
 Laravel Eloquent route went from WARM_README. Two things to know:
 
 - A model's `boot()` and `booted()` run once per worker, not once per

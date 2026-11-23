@@ -444,16 +444,18 @@ $response = $this->kernel->handle(Request::createFromGlobals());
 | --- | --- | --- |
 | Laravel | every Eloquent model booted, and one query built for it without its global scopes (no connection is opened) | the PHP files under `app/Models`, as `model:prune` finds them |
 | Laravel | the services Octane resolves in a new worker, without `session.store` | the application's `octane.warm`, else Octane's default list |
-| Symfony | the HTTP kernel and its event dispatcher (listeners stay lazy), the router's matcher | the container's public services |
-| Symfony | Doctrine's metadata of the mapped entities | every entity manager of `doctrine`, when the application has it |
+| Symfony | the event dispatcher, with its listeners registered and none of them created | the container's `event_dispatcher`, in a kernel that is not in debug mode |
 
 The rule for what may be built: no request exists yet, and nothing built may
 be something a request could tell from what it would have built itself. That
 excludes anything that takes its value from a request, a user, the clock or a
 random source when it is built. Laravel's session store draws its id then,
-so it is not resolved; Symfony's event listeners are application services
+so it is not resolved. Symfony's event listeners are application services
 that may read the current request in their constructors, so the dispatcher
-is built but its listeners are not. A Laravel model's boot is application
+is built but its listeners are not; its HTTP kernel and router take the
+logger, whose processors the application configures (Monolog's
+`UidProcessor` draws a request id when it is built), so they are not built
+either. A Laravel model's boot is application
 code too, and it is run, with this guard: no request is bound while the
 models boot, so boot code that asks for the request or the signed-in user
 fails, and a model that fails is put back exactly as it was (Eloquent's
@@ -465,9 +467,12 @@ worker, and the HTTP kernel replaces it before any application code runs.
 A step that throws is skipped. `phera serve --no-service-warmup` (in the
 adapters: `PHERA_SERVICE_WARMUP=0`) takes the snapshot right after the boot.
 
-A fork copies what the snapshot holds, so the warm-up makes every fork a
-little dearer and the requests that use what it built much cheaper; the
-numbers, per step, are in
+A fork copies what the snapshot holds, so the warm-up makes every fork
+dearer and the requests that use what it built much cheaper. That is also a
+limit on what is worth building for every application: Doctrine's metadata
+of all entities was measured and left out, because class metadata is a
+graph of objects that every fork of every route would copy. The numbers,
+per step, are in
 `docs/decisions/2026-11-23-the-adapters-warm-up-before-the-snapshot.md`.
 
 **Step 4, only if a profile asks for it: copy on first write.** Objects are

@@ -26,11 +26,11 @@ Laravel and Symfony application; `phera serve --no-service-warmup` (or
    Laravel's console binds (`SetRequestForConsole`: a `GET` of `APP_URL`)
    standing in for the request. `session.store` is left out.
 3. `auth->forgetGuards()`, `forgetScopedInstances()`, and a session store
-   that step 1 or 2 caused is forgotten.
+   that step 1 or 2 caused is forgotten, in the session manager too.
 
-**Symfony**: `http_kernel` (with the event dispatcher; listeners stay lazy),
-the router's matcher, and Doctrine's metadata of every mapped entity when
-the application has `doctrine`.
+**Symfony**: the event dispatcher is built (`event_dispatcher`), which
+registers its listeners without creating any of them. Nothing else, and not
+in a debug kernel.
 
 A step that throws is skipped, silently: the application then behaves as it
 does without the warm-up, and the request that needs the thing reports the
@@ -81,7 +81,21 @@ Where it comes from, each step alone (Laravel, main `1fcc6383`):
 | ... and the default connection opened | 23.90M | 54.69M |
 | ... and all deferred providers loaded | 24.58M | 55.71M |
 
-SYMFONY_STEPS
+Symfony, each candidate alone (main `1fcc6383`; "fork" is a request that
+ends right after `Phera\snapshot()`):
+
+| Step | `/api/ping` | `/api/db-yardstick` | fork |
+|---|---:|---:|---:|
+| nothing | 14.16M | 442.56M | 1.63M |
+| the event dispatcher (kept) | 13.35M | 442.59M | 1.86M |
+| `http_kernel` | 12.88M | 441.44M | |
+| the router's matcher | 13.26M | 441.81M | |
+| `http_kernel` and matcher | 12.10M | 440.54M | 2.10M |
+| the listeners of the kernel events | 10.05M | 438.49M | |
+| the entity manager | 14.08M | 441.63M | |
+| Doctrine's metadata of all entities | 15.47M | 428.76M | 3.19M |
+| kernel, matcher, metadata | 13.48M | 427.65M | |
+| ... and `services_resetter` run in every request | 15.04M | 428.13M | |
 
 The cost: a fork copies what the snapshot holds, so every request pays for
 what the warm-up built, whether it uses it or not. FORK_COST
@@ -104,7 +118,25 @@ The boot of a worker: BOOT_COST
   it is built. Octane replaces it before every request
   (`FlushSessionState`); nothing of Phera runs before a request, so every
   request of a worker would start from the same id.
-- **Symfony: the listeners of the kernel events.** SYMFONY_LISTENERS
+- **Symfony: the listeners of the kernel events** (28% on `/api/ping`).
+  Listeners are services of the application. Symfony creates one when its
+  event is first dispatched, which is inside a request, so a constructor may
+  read the current request; created before the snapshot it would read
+  "none" and keep that for every request. A test application has such a
+  listener.
+- **Symfony: `http_kernel` and the router's matcher** (14.5% on
+  `/api/ping` together). Both take the logger, and building the logger
+  builds what the application configured for it. A Monolog `UidProcessor`
+  draws its id in its constructor: every request of a worker would log the
+  same one. Running `services_resetter` in every request renews what is
+  resettable, costs 0.6M per request, and does nothing for a processor of
+  the application's own that is not.
+- **Symfony: Doctrine's metadata of all entities.** It takes 14M off the
+  Doctrine route and puts 1.4M on every route that does not use Doctrine,
+  for two entities: class metadata is a graph of objects, and a fork copies
+  every object the snapshot holds. The cost grows with the number of
+  entities, on every route. Declared warm-up requests load only what their
+  routes use.
 - **Removing the stand-in request after the warm-up.** `Container::instance()`
   calls the rebinding callbacks only when the name was bound, so the URL
   generator would keep `APP_URL` as its host in every request.

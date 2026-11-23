@@ -72,43 +72,30 @@ final class SnapshotRunner implements RunnerInterface
     }
 
     /**
-     * Builds, before the snapshot, what nearly every request would build
-     * first. Whatever exists at Phera\snapshot() is not built again by any
-     * request.
+     * Builds, before the snapshot, what every request would build first and
+     * what is safe to build without one: the event dispatcher. Whatever
+     * exists at Phera\snapshot() is not built again by any request.
      *
-     * No request exists while this runs, so it only builds what Symfony
-     * itself builds once and keeps for many requests when a kernel is
-     * long-running, and it runs no code of the application: the HTTP
-     * kernel with its event dispatcher (listeners are not created, they
-     * stay lazy), the router's matcher loaded from the cache the build
-     * warmed, and Doctrine's metadata of the mapped entities. No connection
-     * is opened. `phera serve --no-service-warmup` turns it off.
+     * Building the dispatcher registers its listeners without creating
+     * them: Symfony creates a listener when its event is first dispatched,
+     * inside a request, and that stays so. Nothing else is built here,
+     * because everything else creates services the application defines
+     * (the HTTP kernel and the router take the logger, with its processors
+     * and handlers), and a service created before the snapshot keeps for
+     * every request whatever its constructor read or drew.
+     * `phera serve --no-service-warmup` turns this off.
      */
     private function warmUp(KernelInterface $kernel): void
     {
-        if ('0' === ($_SERVER['PHERA_SERVICE_WARMUP'] ?? '')) {
+        // A debug kernel wraps the dispatcher in one that records and logs.
+        if ('0' === ($_SERVER['PHERA_SERVICE_WARMUP'] ?? '') || $kernel->isDebug()) {
             return;
         }
 
-        $container = $kernel->getContainer();
-        $steps = [
-            static fn () => $container->get('http_kernel'),
-            static fn () => $container->get('router')->getMatcher(),
-            static function () use ($container) {
-                $doctrine = $container->get('doctrine');
-                foreach ($doctrine->getManagerNames() as $name => $service) {
-                    $doctrine->getManager($name)->getMetadataFactory()->getAllMetadata();
-                }
-            },
-        ];
-        foreach ($steps as $step) {
-            try {
-                $step();
-            } catch (\Throwable) {
-                // A service the application does not have, or one that
-                // cannot be built yet: the request that needs it reports
-                // it, as it always did.
-            }
+        try {
+            $kernel->getContainer()->get('event_dispatcher');
+        } catch (\Throwable) {
+            // The request that needs it reports it, as it always did.
         }
     }
 }

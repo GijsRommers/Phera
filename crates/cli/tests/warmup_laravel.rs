@@ -92,7 +92,9 @@ fn every_route_answers_as_without_the_warm_up_and_as_php() {
     // The pagination links carry the request's host (`Host: localhost`), not
     // APP_URL's (`warmup.test`).
     assert!(
-        posts.body.contains(r#""next_page_url":"http:\/\/localhost\/api\/posts?page=3""#),
+        posts
+            .body
+            .contains(r#""next_page_url":"http:\/\/localhost\/api\/posts?page=3""#),
         "{}",
         posts.body
     );
@@ -101,8 +103,16 @@ fn every_route_answers_as_without_the_warm_up_and_as_php() {
     // user, no session, no transaction, the time is this request's.
     let state = laravel.same_answer("/api/state", &[("X-Probe", "mine"), ("Cookie", "plain=1")]);
     assert_eq!(state.status, 200);
-    assert!(state.body.contains(r#""is_the_bound_one":true"#), "{}", state.body);
-    assert!(state.body.contains(r#""user":null,"signed_in":false"#), "{}", state.body);
+    assert!(
+        state.body.contains(r#""is_the_bound_one":true"#),
+        "{}",
+        state.body
+    );
+    assert!(
+        state.body.contains(r#""user":null,"signed_in":false"#),
+        "{}",
+        state.body
+    );
     assert!(
         state
             .body
@@ -110,7 +120,11 @@ fn every_route_answers_as_without_the_warm_up_and_as_php() {
         "{}",
         state.body
     );
-    assert!(state.body.contains(r#""transaction_level":0"#), "{}", state.body);
+    assert!(
+        state.body.contains(r#""transaction_level":0"#),
+        "{}",
+        state.body
+    );
 
     // A session route: the first visit finds nothing, the same visitor
     // finds their name again, another visitor does not.
@@ -193,7 +207,10 @@ fn a_worker_that_boots_again_warms_up_again_to_the_same_state() {
     // That second boot ran the warm-up again, with the same result.
     assert_eq!(
         after,
-        before.replace(r#""paginator_declared":false"#, r#""paginator_declared":true"#)
+        before.replace(
+            r#""paginator_declared":false"#,
+            r#""paginator_declared":true"#
+        )
     );
     laravel.same_answer("/api/posts?page=2", &[]);
 
@@ -201,8 +218,11 @@ fn a_worker_that_boots_again_warms_up_again_to_the_same_state() {
     // and the state is the same again.
     let routes = laravel.project.root.join("routes/api.php");
     let source = std::fs::read_to_string(&routes).expect("read the routes");
-    std::fs::write(&routes, format!("{source}\nRoute::get('/added', fn () => ['added' => true]);\n"))
-        .expect("write the routes");
+    std::fs::write(
+        &routes,
+        format!("{source}\nRoute::get('/added', fn () => ['added' => true]);\n"),
+    )
+    .expect("write the routes");
     let mut added = 0;
     for _ in 0..200 {
         added = get(&laravel.warm, "/api/added", &[]).status;

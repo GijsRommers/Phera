@@ -3,7 +3,7 @@
 //! ```php
 //! // What Phera's runtime for symfony/runtime runs once per worker:
 //! $kernel->boot();
-//! $this->warmUp($kernel);    // HTTP kernel, router matcher, Doctrine metadata
+//! $this->warmUp($kernel);    // the event dispatcher, its listeners still lazy
 //! Phera\snapshot();
 //! $response = $kernel->handle(Request::createFromGlobals());   // every request
 //! ```
@@ -62,7 +62,11 @@ impl Symfony {
         // warms the cache in var/, as a deployment's build step does, and
         // both Phera servers then boot from that cache.
         let php = Server::start_php(&php, &root, 1);
-        assert_eq!(get(&php, "/api/ping", &[]).status, 200, "PHP cannot run the application");
+        assert_eq!(
+            get(&php, "/api/ping", &[]).status,
+            200,
+            "PHP cannot run the application"
+        );
         let phera = Path::new(env!("CARGO_BIN_EXE_phera"));
         Some(Symfony {
             warm: Server::start(phera, &root, 1, &[]),
@@ -95,7 +99,10 @@ fn every_route_answers_as_without_the_warm_up_and_as_php() {
     assert_eq!(ping.header("x-listener-built-for"), ["/api/ping"]);
 
     let products = symfony.same_answer("/api/products", &[]);
-    assert_eq!(products.body, r#"[[1,"Lamp",1200],[2,"Desk",34000],[3,"Chair",8900]]"#);
+    assert_eq!(
+        products.body,
+        r#"[[1,"Lamp",1200],[2,"Desk",34000],[3,"Chair",8900]]"#
+    );
 
     // Nothing of the boot is visible: the request is the client's own, no
     // session, no managed entity, no transaction, the time is this request's.
@@ -105,21 +112,30 @@ fn every_route_answers_as_without_the_warm_up_and_as_php() {
         r#"{"request":{"is_the_main_one":true,"host":"localhost","url":"http:\/\/localhost\/api\/ping","header":"mine","cookies":{"plain":"1"}},"session_started":false,"time":{"request_time_is_this_request":true,"now_is_this_request":true},"entities_managed":0,"transaction_open":false,"output_buffers":0}"#
     );
     symfony.same_answer("/api/missing", &[]);
+
+    // A session route: the first visit finds nothing, the same visitor
+    // finds their name again, another visitor does not.
+    for server in [&symfony.php, &symfony.plain, &symfony.warm] {
+        let first = get(server, "/visit?name=ada", &[]);
+        assert_eq!(first.body, r#"{"before":null}"#);
+        let again = get(server, "/visit", &[("Cookie", &first.cookies())]);
+        assert_eq!(again.body, r#"{"before":"ada"}"#);
+        let other = get(server, "/visit", &[]);
+        assert_eq!(other.body, r#"{"before":null}"#);
+    }
+    symfony.same_answer("/visit", &[]);
 }
 
 #[test]
-fn the_warm_up_loads_the_metadata_and_opens_no_connection() {
+fn the_warm_up_builds_no_service_of_the_application() {
     let Some(symfony) = Symfony::start() else {
         return;
     };
-    assert_eq!(
-        get(&symfony.warm, "/api/warmed", &[]).body,
-        r#"{"metadata_loaded":["App\\Entity\\Product"],"connected":false}"#
-    );
-    assert_eq!(
-        get(&symfony.plain, "/api/warmed", &[]).body,
-        r#"{"metadata_loaded":[],"connected":false}"#
-    );
+    // No entity metadata is loaded and no connection is opened before the
+    // snapshot: a request finds what it finds without the warm-up.
+    let untouched = r#"{"metadata_loaded":[],"connected":false}"#;
+    assert_eq!(get(&symfony.warm, "/api/warmed", &[]).body, untouched);
+    assert_eq!(get(&symfony.plain, "/api/warmed", &[]).body, untouched);
 }
 
 #[test]

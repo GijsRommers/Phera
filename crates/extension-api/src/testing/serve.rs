@@ -15,7 +15,7 @@
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
 use std::time::Duration;
 
 /// A running `phera serve`, stopped when dropped.
@@ -23,6 +23,10 @@ pub struct Server {
     process: Child,
     /// `127.0.0.1:<port>`, as the server's banner printed it.
     pub address: String,
+    /// The server's standard output, kept open: a worker that boots an
+    /// application prints a line about it later, and a closed pipe would
+    /// make that print fail.
+    _output: Option<BufReader<ChildStdout>>,
 }
 
 impl Server {
@@ -53,7 +57,8 @@ impl Server {
             .spawn()
             .expect("start phera serve");
         let mut banner = String::new();
-        BufReader::new(process.stdout.take().expect("piped stdout"))
+        let mut output = BufReader::new(process.stdout.take().expect("piped stdout"));
+        output
             .read_line(&mut banner)
             .expect("read the listen banner");
         let address = banner
@@ -62,7 +67,11 @@ impl Server {
             .and_then(|rest| rest.split_whitespace().next())
             .unwrap_or_else(|| panic!("no address in the banner {banner:?}"))
             .to_owned();
-        Self { process, address }
+        Self {
+            process,
+            address,
+            _output: Some(output),
+        }
     }
 
     /// PHP's built-in server (`php -n -S`) on `root` with `workers`
@@ -103,7 +112,11 @@ impl Server {
             .stderr(Stdio::null())
             .spawn()
             .expect("start php -S");
-        let server = Self { process, address };
+        let server = Self {
+            process,
+            address,
+            _output: None,
+        };
         for _ in 0..200 {
             if TcpStream::connect(&server.address).is_ok() {
                 return server;
