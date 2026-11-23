@@ -110,11 +110,11 @@ fn render<'a>(
         }
         let pre = prefix(context, object, &tree).await?;
         let item = entry(context, object, op).await?;
-        let (Value::String(pre), Value::String(item)) = (pre, item) else {
+        let (Some(pre), Some(item)) = (pre.as_str_bytes(), item.as_str_bytes()) else {
             return Err(NativeError::error("Cannot render recursive iterator entry"));
         };
-        let mut text = pre.as_bytes().to_vec();
-        text.extend_from_slice(item.as_bytes());
+        let mut text = pre.to_vec();
+        text.extend_from_slice(item);
         text.extend_from_slice(tree.postfix.as_bytes());
         Ok(Value::from(text))
     })
@@ -157,9 +157,7 @@ pub(super) fn get_prefix(
 
 pub(super) fn set_part(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> NativeResult {
     let part = args::int(arguments, 0).unwrap_or_default();
-    let value = args::string(arguments, 1)
-        .ok_or_else(uninitialized)?
-        .clone();
+    let value = args::string(arguments, 1).ok_or_else(uninitialized)?;
     let object = receiver(this)?;
     update(object, |state| {
         let parts = &mut state.tree.as_mut().ok_or_else(uninitialized)?.parts;
@@ -169,7 +167,7 @@ pub(super) fn set_part(_: &mut dyn Context, this: This<'_>, arguments: &[Value])
                 "{TREE}::setPrefixPart(): Argument #1 ($part) must be a RecursiveTreeIterator::PREFIX_* constant"
             ))
         })?;
-        *slot = value;
+        *slot = value.to_php_string();
         Ok(Value::Null)
     })?
 }
@@ -183,11 +181,9 @@ pub(super) fn set_postfix(
     this: This<'_>,
     arguments: &[Value],
 ) -> NativeResult {
-    let postfix = args::string(arguments, 0)
-        .ok_or_else(uninitialized)?
-        .clone();
+    let postfix = args::string(arguments, 0).ok_or_else(uninitialized)?;
     update(receiver(this)?, |state| {
-        state.tree.as_mut().ok_or_else(uninitialized)?.postfix = postfix;
+        state.tree.as_mut().ok_or_else(uninitialized)?.postfix = postfix.to_php_string();
         Ok(Value::Null)
     })?
 }

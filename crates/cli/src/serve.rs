@@ -56,6 +56,26 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         }
     };
     loaded.paths.extend(settings.path);
+    let adapter = Adapter::detect(&site, &mut loaded.environment);
+    if !options.service_warmup {
+        loaded.environment.insert(
+            phera_runtime::adapters::SERVICE_WARMUP_VARIABLE.to_vec(),
+            b"0".to_vec(),
+        );
+    }
+    // The option wins over the project's file; with neither, a variable
+    // the environment already holds stays as it is.
+    let warmup = if options.warmup.is_empty() {
+        &settings.warmup
+    } else {
+        &options.warmup
+    };
+    if !warmup.is_empty() {
+        loaded.environment.insert(
+            phera_runtime::adapters::WARMUP_REQUESTS_VARIABLE.to_vec(),
+            warmup.join(" ").into_bytes(),
+        );
+    }
     site.exclude_files(loaded.paths);
     let site = Arc::new(site);
     let trusted_proxies = match options
@@ -86,10 +106,17 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     }
     let workers = config.workers;
 
-    let runtime = Runtime::with_environment(loaded.environment)
+    let mut runtime = Runtime::with_environment(loaded.environment)
         .with_startup_ini(options.ini)
         .with_web_development(options.dev)
-        .without_web_processes(options.no_process);
+        .without_web_processes(options.no_process)
+        .without_class_warmup(!options.class_warmup);
+    if let (Adapter::Laravel, Some(front_controller)) = (adapter, site.front_controller()) {
+        runtime = runtime.with_entry_script(
+            front_controller.to_path_buf(),
+            phera_runtime::adapters::LARAVEL_ENTRY,
+        );
+    }
     let preload = if options.preload || settings.preload {
         match runtime.preload_composer(&project) {
             Ok(summary) => {
@@ -110,6 +137,7 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     };
     let factory = SiteHandlerFactory {
         runtime,
+        adapter,
         site: site.clone(),
         compress: options.compress,
         trusted_proxies: Arc::new(trusted_proxies),
@@ -127,11 +155,49 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
         site.describe(),
         server.local_addr()
     );
-    match server.run() {
+    let result = server.run();
+    phera_runtime::flush_web_log();
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("The server stopped: {error}");
             ExitCode::FAILURE
+        }
+    }
+}
+
+/// Which framework adapter `phera serve` uses (see `phera_runtime::adapters`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Adapter {
+    None,
+    /// The front controller runs Phera's Laravel entry script.
+    Laravel,
+    /// `APP_RUNTIME` names Phera's runtime for symfony/runtime.
+    SymfonyRuntime,
+}
+
+impl Adapter {
+    /// The adapter for the site, setting `APP_RUNTIME` for a symfony/runtime
+    /// application that has not chosen a runtime itself.
+    fn detect(site: &Site, environment: &mut phera_dotenv::Environment) -> Adapter {
+        let root = site.document_root();
+        let front_controller = site.front_controller();
+        if front_controller.is_some_and(|script| script == root.join("index.php"))
+            && phera_runtime::adapters::is_laravel(root)
+        {
+            Adapter::Laravel
+        } else if phera_runtime::adapters::uses_symfony_runtime(root)
+            && environment.get(b"APP_RUNTIME").is_none()
+        {
+            environment.insert(
+                b"APP_RUNTIME".to_vec(),
+                phera_runtime::adapters::SYMFONY_RUNTIME_CLASS
+                    .as_bytes()
+                    .to_vec(),
+            );
+            Adapter::SymfonyRuntime
+        } else {
+            Adapter::None
         }
     }
 }
@@ -155,6 +221,9 @@ fn default_address() -> SocketAddr {
 /// request, on the worker's own thread.
 struct SiteHandlerFactory {
     runtime: Runtime,
+    /// The framework adapter in use, which makes the front controller boot
+    /// at start.
+    adapter: Adapter,
     site: Arc<Site>,
     compress: bool,
     trusted_proxies: Arc<TrustedProxies>,
@@ -162,9 +231,13 @@ struct SiteHandlerFactory {
 }
 
 impl HandlerFactory for SiteHandlerFactory {
-    fn create(&self, _worker_index: usize) -> Rc<dyn Handler> {
+    fn create(&self, worker_index: usize) -> Rc<dyn Handler> {
         Rc::new(SiteHandler {
-            runtime: self.runtime.web_worker(),
+            runtime: self
+                .runtime
+                .web_worker(worker_index)
+                .with_background_boots(),
+            adapter: self.adapter,
             site: self.site.clone(),
             compress: self.compress,
             trusted_proxies: self.trusted_proxies.clone(),
@@ -175,6 +248,7 @@ impl HandlerFactory for SiteHandlerFactory {
 
 struct SiteHandler {
     runtime: WebWorker,
+    adapter: Adapter,
     site: Arc<Site>,
     /// `--compress`: compress responses for clients that accept it.
     compress: bool,
@@ -188,15 +262,51 @@ impl Handler for SiteHandler {
     fn handle(&self, request: Request) -> Pin<Box<dyn Future<Output = Response> + '_>> {
         Box::pin(self.respond(request))
     }
+
+    fn start(&self) -> Pin<Box<dyn Future<Output = ()> + '_>> {
+        Box::pin(self.boot())
+    }
 }
 
 impl SiteHandler {
+    /// Boots the front controller before the first connection when it is
+    /// known to call `Phera\snapshot()` (see `phera_runtime::BootReport`).
+    async fn boot(&self) {
+        let Some(script) = self.site.front_controller() else {
+            return;
+        };
+        if self.adapter == Adapter::None && !phera_runtime::snapshot_remembered(script) {
+            return;
+        }
+        let worker = self.runtime.index();
+        match self.runtime.boot(script, self.site.document_root()).await {
+            phera_runtime::BootReport::Snapshot { elapsed, files } => println!(
+                "Worker {worker} booted {} in {} ms ({files} files); requests continue after Phera\\snapshot()",
+                script.display(),
+                elapsed.as_millis()
+            ),
+            phera_runtime::BootReport::Classic => println!(
+                "Worker {worker}: {} ended without calling Phera\\snapshot(); it runs from the top for every request",
+                script.display()
+            ),
+            phera_runtime::BootReport::Failed(message) => eprintln!(
+                "Worker {worker}: DEFECT: {} cannot be snapshotted, its requests run from the top until a boot succeeds: {message}",
+                script.display()
+            ),
+        }
+    }
+
     async fn respond(&self, request: Request) -> Response {
         // A platform asks "are you alive?" every few seconds. The answer
         // must not depend on the application, its database or a free worker
         // slot in PHP.
         if self.health_path.as_deref() == Some(request.path.as_str()) {
-            return Response::text(200, "ok\n").with_header("Cache-Control", "no-store");
+            // How many requests ran from the top because a snapshot could
+            // not be kept or copied: each one is a defect to fix.
+            let from_the_top = phera_runtime::requests_from_the_top().to_string();
+            return Response::text(200, "ok\n")
+                .with_header("Cache-Control", "no-store")
+                .with_header("Phera-From-The-Top", from_the_top);
         }
         let site = self.site.clone();
         let path = request.path.clone();

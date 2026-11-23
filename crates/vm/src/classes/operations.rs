@@ -113,15 +113,21 @@ pub(super) fn inherit_hooks(
     };
     let base = base.map_or(phera_extension_api::ClassHooks::EMPTY, |hooks| **hooks);
     Some(Rc::new(phera_extension_api::ClassHooks {
+        construction_error: own.construction_error.or(base.construction_error),
+        legacy_unserialize: own.legacy_unserialize.or(base.legacy_unserialize),
         clone: own.clone.or(base.clone),
         compare: own.compare.or(base.compare),
         binary: own.binary.or(base.binary),
         unary: own.unary.or(base.unary),
         cast: own.cast.or(base.cast),
+        release: own.release.or(base.release),
         forbid_serialization: own.forbid_serialization || base.forbid_serialization,
         redact_trace_arguments: own.redact_trace_arguments || base.redact_trace_arguments,
+        fork: own.fork.or(base.fork),
         properties: own.properties.or(base.properties),
         property_access: own.property_access.or(base.property_access),
+        virtual_properties: own.virtual_properties,
+        trace_native: own.trace_native,
         iterator: own.iterator.or(base.iterator),
         iterator_by_reference: if own.iterator.is_some() {
             own.iterator_by_reference

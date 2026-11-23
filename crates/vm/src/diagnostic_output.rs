@@ -86,6 +86,7 @@ impl Vm {
         message: PhpString,
         location: SourceLocation,
     ) {
+        self.diagnostic_reporter.raised += 1;
         const FATAL: i64 = 1 | 4 | 16 | 64 | 256 | 4096;
         let display = Display::from_ini(self.ini_get(b"display_errors").as_ref());
         if level & FATAL != 0 && matches!(display, Display::Off) {
@@ -160,13 +161,17 @@ impl Vm {
         {
             return;
         }
-        let mut stderr = std::io::stderr().lock();
-        if let Some(web) = &self.output_writer.web_diagnostics
-            && let Some((method, target, protocol)) = (web.request_line)(&self.state)
-        {
-            let _ = write!(stderr, "phera-server: {method} {target} {protocol}: ");
+        if let Some(web) = &self.output_writer.web_diagnostics {
+            if let Some((method, target, protocol)) = (web.request_line)(&self.state) {
+                let mut record =
+                    format!("phera-server: {method} {target} {protocol}: ").into_bytes();
+                record.extend(line);
+                line = record;
+            }
+            phera_extension_api::web_log::write(line);
+        } else {
+            let _ = std::io::stderr().lock().write_all(&line);
         }
-        let _ = stderr.write_all(&line);
     }
 
     fn append_diagnostic(&self, path: &str, line: &[u8]) -> std::io::Result<()> {

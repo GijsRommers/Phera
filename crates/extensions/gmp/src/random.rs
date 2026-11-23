@@ -80,7 +80,7 @@ impl Generator {
 }
 
 #[derive(Default)]
-struct Random(Option<Generator>);
+pub(crate) struct Random(Option<Generator>);
 
 fn generator(context: &mut dyn Context) -> Result<&mut Generator> {
     let state = context.state().get_or_default::<Random>();

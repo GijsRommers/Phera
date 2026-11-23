@@ -11,7 +11,7 @@ use crate::{Vm, code_table::FunctionIndex};
 
 impl Vm {
     pub(super) fn link_class_constants(
-        &self,
+        &mut self,
         declaration: &ClassDeclaration,
         unit: &CompiledUnit,
         unit_first: FunctionIndex,
@@ -63,10 +63,10 @@ impl Vm {
                 && let Some(expected) = &inherited.ty
             {
                 let declared = constant.ty.map(|index| &unit.types[index.index()]);
-                let compatible = self.type_subset(
+                let compatible = self.constant_type_subset(
                     declared.map(|declared| declared.display.as_str()),
                     name,
-                    Some(&expected.display),
+                    &expected.display,
                     &inherited.declaring,
                     unit,
                 );
@@ -98,7 +98,7 @@ impl Vm {
                     is_final: constant.is_final,
                     initializer: super::class::ConstantInitializer::Compiled {
                         function: self.code.declared(unit_first, constant.initializer.index()),
-                        state: std::cell::RefCell::new(super::ConstantState::Uninitialized),
+                        slot: self.class_states.new_constant(),
                     },
                     ty: constant.ty.map(|index| unit.types[index.index()].clone()),
                 }),
@@ -126,7 +126,7 @@ impl Vm {
         for property in &declaration.properties {
             let property_name = &unit.names[property.name.index()];
             let key = match property.visibility {
-                Visibility::Public => ArrayKey::str(property_name.as_bytes()),
+                Visibility::Public => ArrayKey::interned_str(property_name.as_bytes()),
                 Visibility::Protected => Object::protected_key(property_name),
                 Visibility::Private => Object::private_key(name, property_name),
             };
@@ -149,9 +149,7 @@ impl Vm {
                 is_final: property.is_final,
                 set_visibility: property.set_visibility,
                 key: key.clone(),
-                static_storage: property
-                    .is_static
-                    .then(|| crate::reference_holders::StaticProperty::new(value.clone())),
+                static_storage: property.is_static.then(|| self.class_states.new_static()),
                 value,
                 name: property_name.clone(),
                 declaring: name.clone(),
@@ -165,8 +163,6 @@ impl Vm {
                 },
                 ty: property.ty.map(|index| unit.types[index.index()].clone()),
                 is_readonly: property.is_readonly,
-                static_initialized: Rc::new(std::cell::Cell::new(false)),
-                value_initialized: Rc::new(std::cell::Cell::new(initialized)),
             };
             self.verify_set_hook_type(&linked, unit, declaration.line as usize)?;
             if let Some(value) = linked
@@ -174,15 +170,9 @@ impl Vm {
                 .as_ref()
                 .and_then(|reference| super::class::literal_initializer(&self.code, reference))
             {
-                let value = super::class::widen_property_value(value, linked.ty.as_ref());
-                if property.is_static {
-                    if let Some(storage) = &linked.static_storage {
-                        *storage.reference.borrow().borrow_mut() = value.clone();
-                        linked.value = value;
-                    }
-                } else {
-                    linked.value = value;
-                }
+                // A static property's storage is made from this value on
+                // first use (see `class_state`).
+                linked.value = super::class::widen_property_value(value, linked.ty.as_ref());
                 linked.initializer = None;
             }
             let inherited = if property.is_static {

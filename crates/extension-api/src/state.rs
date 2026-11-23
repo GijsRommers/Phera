@@ -26,38 +26,111 @@ use std::sync::{
 /// ```
 #[derive(Default)]
 pub struct RequestState {
-    /// One value per type. `TypeId` is Rust's run-time name for a type.
-    slots: HashMap<TypeId, Box<dyn Any>>,
+    /// One value per type in a flat vector (typically 4–12 entries per request).
+    /// Linear scan over `TypeId` avoids SipHash overhead and hash table allocations.
+    slots: Vec<(TypeId, Slot)>,
+}
+
+/// One extension's state, with the name of its type for error messages.
+struct Slot {
+    value: Box<dyn Any>,
+    name: &'static str,
+}
+
+/// How a fork of a snapshot gets an extension's state; registered with
+/// [`crate::Registry::fork_state`]. `None` means the fork starts without
+/// it, as a new request does ([`fresh_state`]); [`copy_state`] copies it.
+pub type StateFork = fn(&dyn Any, &mut phera_value::Fork<'_>) -> Option<Box<dyn Any>>;
+
+/// The fork starts without this state, as a new request would.
+pub fn fresh_state(_state: &dyn Any, _fork: &mut phera_value::Fork<'_>) -> Option<Box<dyn Any>> {
+    None
+}
+
+/// The fork gets a clone of this state; for state that holds no PHP value.
+pub fn copy_state<T: Clone + 'static>(
+    state: &dyn Any,
+    _fork: &mut phera_value::Fork<'_>,
+) -> Option<Box<dyn Any>> {
+    Some(Box::new(state.downcast_ref::<T>()?.clone()))
 }
 
 impl RequestState {
     /// The state of type `T`, created on first use.
+    #[inline]
     pub fn get_or_default<T: Default + 'static>(&mut self) -> &mut T {
-        let slot = self
-            .slots
-            .entry(TypeId::of::<T>())
-            .or_insert_with(|| Box::new(T::default()));
+        let id = TypeId::of::<T>();
+        let index = match self.slots.iter().position(|(key, _)| *key == id) {
+            Some(index) => index,
+            None => {
+                let index = self.slots.len();
+                self.slots.push((
+                    id,
+                    Slot {
+                        value: Box::new(T::default()),
+                        name: std::any::type_name::<T>(),
+                    },
+                ));
+                index
+            }
+        };
+        let slot = &mut self.slots[index].1;
         // The slot under `T`'s id always holds a `T`. If that were ever not
         // so, start over with a fresh value instead of panicking.
-        if !slot.is::<T>() {
-            *slot = Box::new(T::default());
+        if !slot.value.is::<T>() {
+            slot.value = Box::new(T::default());
         }
-        match slot.downcast_mut::<T>() {
+        match slot.value.downcast_mut::<T>() {
             Some(state) => state,
             None => unreachable!("the slot was just checked to hold this type"),
         }
     }
 
     /// The state of type `T`, if anything created it.
+    #[inline]
     pub fn get<T: 'static>(&self) -> Option<&T> {
-        self.slots.get(&TypeId::of::<T>())?.downcast_ref()
+        let id = TypeId::of::<T>();
+        self.slots
+            .iter()
+            .find(|(key, _)| *key == id)?
+            .1
+            .value
+            .downcast_ref()
     }
 
     /// Removes and returns the state of type `T`. The runtime uses this after
     /// a request to collect what an extension gathered.
     pub fn take<T: 'static>(&mut self) -> Option<T> {
-        let slot = self.slots.remove(&TypeId::of::<T>())?;
-        slot.downcast().ok().map(|state| *state)
+        let id = TypeId::of::<T>();
+        let index = self.slots.iter().position(|(key, _)| *key == id)?;
+        let (_, slot) = self.slots.swap_remove(index);
+        slot.value.downcast().ok().map(|state| *state)
+    }
+
+    /// The state of a fork of a snapshot: each extension's state as its
+    /// registered [`StateFork`] makes it. A type with no registered fork
+    /// cannot be copied safely; its name is the error.
+    pub fn fork(
+        &self,
+        forks: &HashMap<TypeId, StateFork>,
+        fork: &mut phera_value::Fork<'_>,
+    ) -> Result<RequestState, &'static str> {
+        let mut copy = RequestState {
+            slots: Vec::with_capacity(self.slots.len()),
+        };
+        for (type_id, slot) in &self.slots {
+            let make = forks.get(type_id).ok_or(slot.name)?;
+            if let Some(value) = make(slot.value.as_ref(), fork) {
+                copy.slots.push((
+                    *type_id,
+                    Slot {
+                        value,
+                        name: slot.name,
+                    },
+                ));
+            }
+        }
+        Ok(copy)
     }
 }
 

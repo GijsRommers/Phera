@@ -36,15 +36,20 @@
 
 mod builtin;
 mod class;
+mod code;
 mod display;
 mod function;
 mod ids;
 mod instruction;
+pub mod name_keys;
 pub mod reflection;
 mod unit;
 mod unit_metadata;
 
-pub use unit_metadata::{DeclarationScope, FunctionShape, FunctionSignature, UnitMetadata};
+pub use name_keys::{NameKey, PropKey};
+pub use unit_metadata::{
+    DeclarationScope, FunctionShape, FunctionSignature, UnitMetadata, class_keys,
+};
 
 pub use builtin::{BuiltinFrame, BuiltinUnary, CallbackArguments};
 pub use class::{
@@ -52,9 +57,13 @@ pub use class::{
     MethodDeclaration, PropertyDeclaration, PropertyHook, PropertyHooks, TRAIT_CLASS_NAME,
     TraitAdaptation, TraitUse, Visibility,
 };
-pub use function::{ArgumentLayout, Function, Handler, Parameter, Path, PathBase, Step};
+pub use code::Code;
+pub use function::{
+    ArgumentLayout, Function, Handler, MethodSite, Parameter, Path, PathBase, SiteArgument, Step,
+};
 pub use ids::{
-    ClassId, ConstId, FunctionId, IterId, NameId, PathId, Reg, StaticId, SymbolId, Target, TypeId,
+    ClassId, ConstId, FunctionId, IterId, MethodSiteId, NameId, PathId, Reg, StaticId, SymbolId,
+    Target, TypeId,
 };
 pub use instruction::{
     BinaryOp, CallResult, CaptureKind, CastKind, ClassBinding, ClosureBinding, FetchMode,

@@ -7,9 +7,11 @@ use indexmap::IndexSet;
 use crate::{CodeLoader, IncludeCachePolicy, code_table::FunctionIndex};
 
 /// The runtime supplies code; the VM remembers which files have executed.
+#[derive(Clone)]
 pub(crate) struct IncludeState {
     loader: Option<Rc<dyn CodeLoader>>,
     pub(crate) policy: IncludeCachePolicy,
+    pub(crate) stream_wrappers: bool,
     included: IndexSet<String>,
     entry_script: Option<FunctionIndex>,
 }
@@ -19,6 +21,7 @@ impl IncludeState {
         Self {
             loader: None,
             policy: IncludeCachePolicy::default(),
+            stream_wrappers: false,
             included: IndexSet::new(),
             entry_script: None,
         }

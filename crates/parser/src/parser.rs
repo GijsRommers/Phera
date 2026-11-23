@@ -14,8 +14,15 @@ use phera_source::Span;
 use crate::error::ParseError;
 use crate::nesting::Nesting;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ParsePurpose {
+    Syntax,
+    Compilation,
+}
+
 pub(crate) struct Parser<'src> {
     pub(crate) source: &'src [u8],
+    pub(crate) purpose: ParsePurpose,
     tokens: Vec<Token>,
     doc_comments: Vec<(usize, Span)>,
     pos: usize,
@@ -35,7 +42,7 @@ pub(crate) struct Parser<'src> {
 impl<'src> Parser<'src> {
     pub(crate) fn new(
         source: &'src [u8],
-        collect_diagnostics: bool,
+        purpose: ParsePurpose,
         skip_shebang: bool,
     ) -> (Self, ScanReport) {
         let lexer = Lexer::new_bytes(source).with_doc_comments();
@@ -44,7 +51,7 @@ impl<'src> Parser<'src> {
         } else {
             lexer
         };
-        let mut lexer = if collect_diagnostics {
+        let mut lexer = if purpose == ParsePurpose::Compilation {
             lexer.with_diagnostics(ScanMode::Parsed)
         } else {
             lexer
@@ -74,6 +81,7 @@ impl<'src> Parser<'src> {
 
         let parser = Self {
             source,
+            purpose,
             tokens,
             doc_comments: lexer.take_doc_comments(),
             pos: 0,
@@ -101,6 +109,30 @@ impl<'src> Parser<'src> {
         let statements = self.parse_top_level(&[])?;
         if self.at(TokenKind::RightBrace) {
             return Err(self.error("unexpected '}'"));
+        }
+        if self.purpose == ParsePurpose::Syntax {
+            return Ok(Program { statements });
+        }
+        let mut body = statements
+            .iter()
+            .skip_while(|statement| matches!(statement.kind, StatementKind::Declare { .. }));
+        let first_style = body.next().and_then(|statement| match statement.kind {
+            StatementKind::Namespace { braced, .. } => Some(braced),
+            _ => None,
+        });
+        for statement in body {
+            if let StatementKind::Namespace { braced, .. } = statement.kind {
+                let message = match first_style {
+                    None => {
+                        "Namespace declaration statement has to be the very first statement or after any declare call in the script"
+                    }
+                    Some(first) if first != braced => {
+                        "Cannot mix bracketed namespace declarations with unbracketed namespace declarations"
+                    }
+                    Some(_) => continue,
+                };
+                return Err(ParseError::compile(message, statement.span));
+            }
         }
         Ok(Program { statements })
     }

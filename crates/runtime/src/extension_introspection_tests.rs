@@ -31,6 +31,18 @@ foreach ([{entries}] as $name) {{
         ? $version : 'bundled', PHP_EOL;
     echo (int) in_array(strtolower($name), array_map('strtolower', get_loaded_extensions()), true), PHP_EOL;
 }}
+foreach ([
+    'FiLeInFo' => ['finfo_open', 'finfo_close', 'finfo_set_flags', 'finfo_file',
+                   'finfo_buffer', 'mime_content_type'],
+    'gD' => ['gd_info', 'imagecreatetruecolor', 'imagepng', 'imagesx', 'imagettftext'],
+    'eXiF' => ['exif_imagetype'],
+    'standard' => ['getimagesize', 'getimagesizefromstring', 'image_type_to_mime_type',
+                   'image_type_to_extension'],
+] as $module => $sample) {{
+    $functions = get_extension_funcs($module);
+    $selected = $functions === false ? false : array_values(array_intersect($functions, $sample));
+    echo json_encode($selected), PHP_EOL;
+}}
 "#
     );
     let Some(expected) = oracle::run_php("runtime-extension-introspection", &source) else {

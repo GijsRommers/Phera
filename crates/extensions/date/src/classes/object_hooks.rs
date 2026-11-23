@@ -25,6 +25,7 @@ use super::{
 
 pub(super) const DATETIME: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Copy(clone_state::<Instant>)),
+    fork: Some(fork_state::<Instant>),
     compare: Some(compare_instants),
     properties: Some(datetime_view),
     ..ClassHooks::EMPTY
@@ -32,6 +33,7 @@ pub(super) const DATETIME: ClassHooks = ClassHooks {
 
 pub(super) const ZONE: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Copy(clone_state::<ZoneKind>)),
+    fork: Some(fork_state::<ZoneKind>),
     compare: Some(compare_zones),
     properties: Some(timezone_view),
     ..ClassHooks::EMPTY
@@ -39,6 +41,7 @@ pub(super) const ZONE: ClassHooks = ClassHooks {
 
 pub(super) const INTERVAL: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Copy(clone_state::<Interval>)),
+    fork: Some(fork_state::<Interval>),
     compare: Some(compare_intervals),
     properties: Some(interval_view),
     property_access: Some(&interval_properties::ACCESS),
@@ -47,11 +50,25 @@ pub(super) const INTERVAL: ClassHooks = ClassHooks {
 
 pub(super) const PERIOD: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Copy(clone_state::<Period>)),
+    fork: Some(fork_state::<Period>),
     properties: Some(period_view),
     property_access: Some(&period_properties::ACCESS),
     iterator: Some(period_dates::cursor),
     ..ClassHooks::EMPTY
 };
+
+/// Date objects hold calendar data and no PHP value: a fork of a snapshot
+/// gets a copy of it.
+fn fork_state<T: Clone + 'static>(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    _fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    state
+        .downcast_ref::<T>()
+        .map(|state| Box::new(state.clone()) as Box<dyn std::any::Any>)
+        .ok_or_else(|| "its date state is not initialized".into())
+}
 
 fn clone_state<T: Clone + 'static>(
     original: &std::rc::Rc<Object>,
@@ -210,7 +227,7 @@ fn interval_view(
             for (key, value) in projected.iter() {
                 stored.insert(key, value.clone());
             }
-            stored.clone()
+            stored.to_array()
         })
         .ok_or_else(|| {
             NativeError::error(

@@ -13,7 +13,7 @@
 //! headers give one cookie string, and two `Content-Type` headers describe a
 //! form only when the form type comes first.
 
-use std::path::Path;
+use std::{path::Path, rc::Rc};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::TempPath;
@@ -65,25 +65,31 @@ pub(crate) fn define_superglobals(
 
     // PHP's default `request_order` is "GP": POST values override GET ones,
     // and cookies are left out.
-    let mut merged = get.clone();
-    for (key, value) in post.iter() {
-        merged.insert(key.clone(), value.clone());
-    }
-
-    vm.set_global(
-        "_SERVER",
-        Value::from(server(
-            request,
-            &headers,
-            script,
-            document_root,
-            environment,
-        )),
-    );
-    vm.set_global("_GET", Value::from(get));
-    vm.set_global("_POST", Value::from(post));
-    vm.set_global("_COOKIE", Value::from(cookie));
-    vm.set_global("_REQUEST", Value::from(merged));
+    let server = Rc::new(server(
+        request,
+        &headers,
+        script,
+        document_root,
+        environment,
+    ));
+    let get = Rc::new(get);
+    let merged = if post.is_empty() {
+        get.clone()
+    } else {
+        let mut merged = (*get).clone();
+        for (key, value) in post.iter() {
+            merged.insert(key.clone(), value.clone());
+        }
+        Rc::new(merged)
+    };
+    let post = Rc::new(post);
+    let cookie = Rc::new(cookie);
+    phera_ext_filter::capture_http_inputs(vm.state_mut(), &get, &post, &cookie, &server);
+    vm.set_global("_SERVER", Value::Array(server));
+    vm.set_global("_GET", Value::Array(get));
+    vm.set_global("_POST", Value::Array(post));
+    vm.set_global("_COOKIE", Value::Array(cookie));
+    vm.set_global("_REQUEST", Value::Array(merged));
     vm.set_global("_FILES", Value::from(files));
     temporary_files
 }
@@ -201,4 +207,45 @@ fn server(
         );
     }
     server
+}
+
+/// The superglobals of a boot run (see `crate::boot`): no request. `$_SERVER`
+/// holds the environment and what PHP's command line sets without a
+/// request: the script's paths (`SCRIPT_FILENAME`, `SCRIPT_NAME`,
+/// `PHP_SELF`), `DOCUMENT_ROOT`, `SERVER_SOFTWARE` and the start time
+/// (`REQUEST_TIME`, `REQUEST_TIME_FLOAT`), which each request replaces with
+/// its own. Nothing a client sends is there.
+pub(crate) fn define_boot_superglobals(
+    vm: &mut Vm,
+    script: &Path,
+    document_root: &Path,
+    mut server: PhpArray,
+) {
+    let script_name = script
+        .strip_prefix(document_root)
+        .map(|relative| format!("/{}", relative.to_string_lossy()))
+        .unwrap_or_else(|_| script.to_string_lossy().into_owned());
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let mut set = |name: &str, value: Value| {
+        server.insert(ArrayKey::str(name), value);
+    };
+    set("SERVER_SOFTWARE", Value::from("Phera"));
+    set(
+        "DOCUMENT_ROOT",
+        Value::from(document_root.to_string_lossy().into_owned()),
+    );
+    set(
+        "SCRIPT_FILENAME",
+        Value::from(script.to_string_lossy().into_owned()),
+    );
+    set("SCRIPT_NAME", Value::from(script_name.as_str()));
+    set("PHP_SELF", Value::from(script_name.as_str()));
+    set("REQUEST_TIME", Value::Int(now.as_secs() as i64));
+    set("REQUEST_TIME_FLOAT", Value::Float(now.as_secs_f64()));
+    vm.set_global("_SERVER", Value::from(server));
+    for name in ["_GET", "_POST", "_COOKIE", "_REQUEST", "_FILES"] {
+        vm.set_global(name, Value::from(PhpArray::new()));
+    }
 }

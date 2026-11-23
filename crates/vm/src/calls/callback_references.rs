@@ -23,6 +23,14 @@ impl Vm {
     /// in a reference cell of its own, so that the callee finds a reference
     /// there as it does on every other path.
     pub(crate) fn warn_callback_references(&mut self) {
+        // The common callback, a PHP function whose parameters all take
+        // values, has nothing to warn about.
+        if let Some(call) = self.call_stack.last_call()
+            && let crate::calls::prepared_call::PreparedCallee::Php(function) = call.callee
+            && self.code.facts(function).takes_values_only()
+        {
+            return;
+        }
         let Ok(view) = CallView::top(&self.code, &self.call_stack) else {
             return;
         };
@@ -55,7 +63,7 @@ impl Vm {
         let [Some(value)] = self.registers.window(slot, 1) else {
             return None;
         };
-        (parameters.by_reference(parameter) && !value.is_reference()).then(|| {
+        (parameters.requires_reference(parameter) && !value.is_reference()).then(|| {
             (
                 slot,
                 format!(

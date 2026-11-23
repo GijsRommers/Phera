@@ -16,9 +16,8 @@
 //! and stores each value on the key object, tagged with the map's identity
 //! (see `Object::identity`): freeing the key frees its values in the same moment.
 //!
-//! It also gives PHP's rule for cycles through a map: a value that refers
-//! back to its own key keeps nothing alive by itself, and the cycle
-//! collector, which walks a key's attached values, finds such a cycle.
+//! The collector counts the attached owner but only follows the value
+//! when both the map and key are reachable independently of that entry.
 
 use std::cell::Cell;
 
@@ -84,12 +83,20 @@ impl Object {
 
     /// Whether any value is attached, for the cycle collector.
     pub(crate) fn has_attachments(&self) -> bool {
-        self.with_attachments(|attached| !attached.is_empty())
+        let attached = self.attachments.take();
+        let any = attached.is_some();
+        self.attachments.set(attached);
+        any
     }
 
-    /// Calls `visit` on every attached value, for the cycle collector.
-    pub(crate) fn visit_attachments(&self, visit: &mut impl FnMut(&Value)) {
-        self.with_attachments(|attached| attached.iter().for_each(|(_, value)| visit(value)));
+    /// Calls `visit` with each map identity and its value, for the cycle collector.
+    pub(crate) fn visit_attachments(&self, mut visit: impl FnMut(usize, &Value)) {
+        if let Some(attached) = self.attachments.take() {
+            for (owner, value) in attached.iter() {
+                visit(*owner, value);
+            }
+            self.attachments.set(Some(attached));
+        }
     }
 
     /// Empties the attachments, for breaking a garbage cycle apart and for
@@ -104,7 +111,10 @@ impl Object {
     /// Runs `use_them` on the attachments. They are taken out of the cell
     /// for the call and put back after, so no borrow is held; nothing in
     /// `use_them` reaches this object's attachments again.
-    fn with_attachments<R>(&self, use_them: impl FnOnce(&mut Vec<(usize, Value)>) -> R) -> R {
+    pub(crate) fn with_attachments<R>(
+        &self,
+        use_them: impl FnOnce(&mut Vec<(usize, Value)>) -> R,
+    ) -> R {
         let mut attached = self.attachments.take().unwrap_or_default();
         let result = use_them(&mut attached);
         if !attached.is_empty() {

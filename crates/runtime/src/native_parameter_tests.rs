@@ -31,7 +31,6 @@ fn native_parameter_tables_match_php_stubs() {
             "CurlShareHandle::__construct",
             "CurlSharePersistentHandle::__construct",
             "DeflateContext::__construct",
-            "Directory::__construct",
             "InflateContext::__construct",
             "OpenSSLAsymmetricKey::__construct",
             "OpenSSLCertificate::__construct",
@@ -39,6 +38,7 @@ fn native_parameter_tables_match_php_stubs() {
             "PgSql\\Connection::__construct",
             "PgSql\\Lob::__construct",
             "PgSql\\Result::__construct",
+            "XMLParser::__construct",
         ],
         "These private constructors have no declaration in PHP's stubs",
     );

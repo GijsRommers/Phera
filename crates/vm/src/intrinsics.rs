@@ -11,7 +11,6 @@ pub(crate) enum Intrinsic {
     /// Request-level PHP handlers use VM callable resolution.
     Handler(crate::error_handlers::HandlerFunction),
     /// Path basename is needed to inspect portable Throwable locations.
-    Basename,
     /// Linked class introspection needs VM metadata.
     Class(crate::class_intrinsics::ClassFunction),
     /// SPL loaders belong to the current request.
@@ -48,12 +47,19 @@ pub(crate) enum Intrinsic {
     ErrorReporting,
     /// The cycle collector belongs to the request.
     Gc(crate::cycles::GcFunction),
+    /// `Phera\snapshot()` copies the whole VM (see `crate::snapshot`).
+    Snapshot,
 }
 
 impl Intrinsic {
     /// Resolve the case-insensitive PHP function name at the call boundary.
     pub(crate) fn resolve(name: &str) -> Option<Self> {
-        Some(match name.to_ascii_lowercase().as_str() {
+        Self::resolve_folded(&phera_extension_api::folded_name(name))
+    }
+
+    /// [`Intrinsic::resolve`] for a name already in lowercase.
+    pub(crate) fn resolve_folded(lowercase_name: &str) -> Option<Self> {
+        Some(match lowercase_name {
             "set_exception_handler" => {
                 Self::Handler(crate::error_handlers::HandlerFunction::SetException)
             }
@@ -73,7 +79,6 @@ impl Intrinsic {
             }
             "clone" => Self::Clone,
             "array_map" => Self::ArrayMap,
-            "basename" => Self::Basename,
             "is_callable" => Self::IsCallable,
             "call_user_func" => Self::CallUserFunc,
             "call_user_func_array" => Self::CallUserFuncArray,
@@ -88,6 +93,7 @@ impl Intrinsic {
             "func_get_args" => Self::FuncGetArgs,
             "func_get_arg" => Self::FuncGetArg,
             "error_reporting" => Self::ErrorReporting,
+            "phera\\snapshot" => Self::Snapshot,
             name => {
                 if let Some(function) = crate::cycles::GcFunction::resolve(name) {
                     Self::Gc(function)
@@ -123,7 +129,6 @@ impl Intrinsic {
             Self::CallUserFuncArray => &["callback", "args"],
             Self::Clone => &["object", "withProperties"],
             Self::ArrayMap => &["callback", "array", "arrays"],
-            Self::Basename => &["path", "suffix"],
             Self::Compact => &["var_name", "var_names"],
             Self::Extract => &["array", "flags", "prefix"],
             Self::Define => &["constant_name", "value", "case_insensitive"],
@@ -139,8 +144,8 @@ impl Intrinsic {
     pub(crate) fn parameters(self) -> Option<&'static [phera_extension_api::Param]> {
         match self {
             Self::Class(function) => Some(function.parameters()),
-            // The gc_* functions take no arguments.
-            Self::Gc(_) => Some(&[]),
+            // The gc_* functions take no arguments, nor does Phera\snapshot.
+            Self::Gc(_) | Self::Snapshot => Some(&[]),
             Self::SplAutoload(function) => Some(function.parameters()),
             Self::Runtime(function) => Some(function.parameters()),
             Self::Output(function) => Some(function.parameters()),
@@ -151,7 +156,6 @@ impl Intrinsic {
     pub(crate) fn names() -> impl Iterator<Item = &'static str> {
         [
             "array_map",
-            "basename",
             "is_callable",
             "call_user_func",
             "call_user_func_array",
@@ -174,6 +178,7 @@ impl Intrinsic {
             "get_exception_handler",
             "trigger_error",
             "user_error",
+            "Phera\\snapshot",
         ]
         .into_iter()
         .chain(

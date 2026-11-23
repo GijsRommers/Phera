@@ -1,6 +1,7 @@
 //! Async PDO for PHP: `$pdo = new PDO($dsn); $rows = $pdo->query($sql)->fetchAll()`.
 
 mod attributes;
+mod column_keys;
 mod connect_options;
 mod connection;
 mod constants;
@@ -9,6 +10,7 @@ mod dsn;
 mod errors;
 mod fetch;
 mod fetch_all;
+mod fetch_class;
 mod fetch_options;
 mod metadata;
 mod native_parameters;

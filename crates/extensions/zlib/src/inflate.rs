@@ -43,6 +43,13 @@ pub(crate) struct Decoder {
 }
 
 impl Decoder {
+    /// A fresh decoder with the same settings, for a fork of a snapshot,
+    /// while nothing was decompressed yet; `None` once it started.
+    pub(crate) fn unstarted_copy(&self) -> Option<Self> {
+        (self.codec.total_in() == 0 && self.read_len == 0 && self.status == 0)
+            .then(|| Self::new(self.encoding, self.window, self.dictionary.clone()))
+    }
+
     pub(crate) fn new(encoding: Encoding, window: u8, dictionary: Option<Vec<u8>>) -> Self {
         let mut this = Self {
             codec: Decompress::new(false),

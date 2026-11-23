@@ -13,7 +13,7 @@ use phera_extension_api::{
 use crate::{UNCLONEABLE, allocate, exception, load};
 
 #[derive(Default)]
-struct ReferenceIds {
+pub(crate) struct ReferenceIds {
     salt: RandomState,
     next: u64,
     entries: HashMap<*const RefCell<Value>, ReferenceIdentity>,
@@ -60,6 +60,7 @@ fn from_array(
     let array = args::array(arguments, 0).ok_or_else(|| exception("Expected an array"))?;
     let key = match arguments.get(1) {
         Some(Value::Int(key)) => ArrayKey::Int(*key),
+        Some(Value::InternedStr(key)) => ArrayKey::Interned(key),
         Some(Value::String(key)) => ArrayKey::String(key.clone()),
         _ => return Err(exception("Array key not found")),
     };

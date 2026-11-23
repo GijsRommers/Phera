@@ -23,6 +23,7 @@ impl Vm {
     pub(crate) fn class_target(&mut self, register: Reg) -> Result<String, NativeError> {
         match self.read_local(register) {
             Value::Object(object) => Ok(object.class.name().to_owned()),
+            Value::InternedStr(name) => Ok(name.to_string_lossy()),
             Value::String(name) => Ok(name.to_string_lossy()),
             _ => Err(NativeError::error(
                 "Class name must be a valid object or a string",
@@ -38,7 +39,7 @@ impl Vm {
     ) -> Result<(), NativeError> {
         let class = self.class_target(class)?;
         let linked = self.classes.get(&class).ok_or_else(|| {
-            if let Value::String(name) = self.read_local(name) {
+            if let Some(name) = self.read_local(name).str_ref() {
                 Self::class_member_miss(&class, ItemKind::ClassConstant, &name.to_string_lossy())
             } else {
                 Self::class_miss(&class, "Class")
@@ -65,13 +66,25 @@ impl Vm {
         name: &str,
         access: ConstantAccess,
     ) -> NativeResult {
-        let (linked, constant) = self.resolve_class_constant(class, name, access)?;
+        let linked = self.classes.get(class);
+        self.class_constant_resolved(linked, class, name, access)
+    }
+
+    /// [`Vm::class_constant_with_access`] of a class looked up already.
+    pub(crate) fn class_constant_resolved(
+        &mut self,
+        linked: Option<Rc<crate::classes::Class>>,
+        class: &str,
+        name: &str,
+        access: ConstantAccess,
+    ) -> NativeResult {
+        let (linked, constant) = self.resolve_class_constant_from(linked, class, name, access)?;
         // A linked value can return directly. The dependency stack is needed
         // only for unfinished initializers or the initial backing-table build.
         if !linked
             .as_ref()
             .is_some_and(|class| self.needs_enum_backing(class))
-            && let Some(value) = ready_value(&constant.initializer)
+            && let Some(value) = self.ready_value(&constant.initializer)
         {
             self.check_constant_access(&constant, name, access)?;
             return Ok(value);
@@ -115,7 +128,7 @@ impl Vm {
         }
         self.check_constant_access(&constant, name, *access)?;
         match &constant.initializer {
-            ConstantInitializer::EnumCase { name, backing } => {
+            ConstantInitializer::EnumCase { name, backing, .. } => {
                 let class = linked.ok_or_else(|| internal_error!("unlinked enum"))?;
                 Ok(Progress::Next(InitializerTask::Case(CaseLookup {
                     class,
@@ -125,8 +138,8 @@ impl Vm {
                 })))
             }
             ConstantInitializer::Value(value) => Ok(Progress::Done(value.clone())),
-            ConstantInitializer::Compiled { function, state } => {
-                match &*state.borrow() {
+            ConstantInitializer::Compiled { function, slot } => {
+                match self.class_states.constant(*slot) {
                     ConstantState::Ready(value) => return Ok(Progress::Done(value.clone())),
                     ConstantState::Evaluating => {
                         let receiver = spelling.as_deref().unwrap_or(&constant.declaring);
@@ -136,7 +149,8 @@ impl Vm {
                     }
                     ConstantState::Uninitialized => {}
                 }
-                *state.borrow_mut() = ConstantState::Evaluating;
+                self.class_states
+                    .set_constant(*slot, ConstantState::Evaluating);
                 let initializer =
                     InitializerTask::Expression(*function, constant.declaring.clone());
                 Ok(Progress::Await(
@@ -153,7 +167,16 @@ impl Vm {
         name: &str,
         access: ConstantAccess,
     ) -> Result<(Option<Rc<crate::classes::Class>>, Rc<LinkedConstant>), NativeError> {
-        let linked = self.classes.get(class);
+        self.resolve_class_constant_from(self.classes.get(class), class, name, access)
+    }
+
+    fn resolve_class_constant_from(
+        &self,
+        linked: Option<Rc<crate::classes::Class>>,
+        class: &str,
+        name: &str,
+        access: ConstantAccess,
+    ) -> Result<(Option<Rc<crate::classes::Class>>, Rc<LinkedConstant>), NativeError> {
         let (display, constants) = if let Some(linked) = &linked {
             (&linked.name, &linked.constants)
         } else if let Some(pending) = self
@@ -214,7 +237,7 @@ impl Vm {
         if access == ConstantAccess::Read
             && let Some(message) = &constant.deprecated
         {
-            self.diagnostic("Deprecated", message.clone());
+            self.attribute_deprecated(message.clone());
         }
         Ok(())
     }
@@ -250,7 +273,7 @@ impl Vm {
         name: &str,
         value: Value,
     ) -> NativeResult {
-        let ConstantInitializer::Compiled { state, .. } = &constant.initializer else {
+        let ConstantInitializer::Compiled { slot, .. } = &constant.initializer else {
             return Err(internal_error!("class constant completion"));
         };
         let result = if let Some(declaration_type) = &constant.ty {
@@ -271,33 +294,46 @@ impl Vm {
         } else {
             Ok(value)
         };
-        *state.borrow_mut() = match &result {
+        let state = match &result {
             Ok(value) => ConstantState::Ready(value.clone()),
             Err(_) => ConstantState::Uninitialized,
         };
+        self.class_states.set_constant(*slot, state);
         result
     }
 
-    pub(crate) fn cancel_class_constant(constant: &LinkedConstant) {
-        if let ConstantInitializer::Compiled { state, .. } = &constant.initializer {
-            *state.borrow_mut() = ConstantState::Uninitialized;
+    pub(crate) fn cancel_class_constant(&mut self, constant: &LinkedConstant) {
+        if let ConstantInitializer::Compiled { slot, .. } = &constant.initializer {
+            self.class_states
+                .set_constant(*slot, ConstantState::Uninitialized);
         }
     }
-}
 
-fn ready_value(initializer: &ConstantInitializer) -> Option<Value> {
-    match initializer {
-        ConstantInitializer::Value(value) => Some(value.clone()),
-        ConstantInitializer::Compiled { state, .. } => match &*state.borrow() {
-            ConstantState::Ready(value) => Some(value.clone()),
-            _ => None,
-        },
-        ConstantInitializer::EnumCase { .. } => None,
+    /// A constant's value if it needs no evaluation, or was evaluated in
+    /// this request already.
+    /// The value of a constant that needs no evaluation, for the named fetch.
+    pub(crate) fn ready_constant_value(&self, initializer: &ConstantInitializer) -> Option<Value> {
+        self.ready_value(initializer)
+    }
+
+    fn ready_value(&self, initializer: &ConstantInitializer) -> Option<Value> {
+        match initializer {
+            ConstantInitializer::Value(value) => Some(value.clone()),
+            ConstantInitializer::Compiled { slot, .. }
+            | ConstantInitializer::EnumCase {
+                slot: Some(slot), ..
+            } => match self.class_states.constant(*slot) {
+                ConstantState::Ready(value) => Some(value.clone()),
+                _ => None,
+            },
+            ConstantInitializer::EnumCase { slot: None, .. } => None,
+        }
     }
 }
 
 pub(crate) fn constant_name(name: Value) -> Result<String, NativeError> {
     match name {
+        Value::InternedStr(name) => Ok(name.to_string_lossy()),
         Value::String(name) => Ok(name.to_string_lossy()),
         value => Err(NativeError::type_error(format!(
             "Cannot use value of type {} as class constant name",

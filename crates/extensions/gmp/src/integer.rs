@@ -21,6 +21,8 @@ impl Argument {
 
     pub(crate) fn read(self, values: &[Value]) -> Result<BigInt> {
         match args::value(values, self.1 - 1) {
+            Value::InternedStr(string) => parse(string.as_bytes(), 0)
+                .ok_or_else(|| self.value_error("is not an integer string")),
             Value::String(string) => parse(string.as_bytes(), 0)
                 .ok_or_else(|| self.value_error("is not an integer string")),
             Value::Object(object) => Ok(object::value(object)),
@@ -38,6 +40,8 @@ impl Argument {
             return Err(Argument(self.0, 2, "base").value_error("must be 0 or between 2 and 62"));
         }
         match raw {
+            Value::InternedStr(string) => parse(string.as_bytes(), base as u32)
+                .ok_or_else(|| self.value_error("is not an integer string")),
             Value::String(string) => parse(string.as_bytes(), base as u32)
                 .ok_or_else(|| self.value_error("is not an integer string")),
             Value::Int(integer) => Ok(BigInt::from(*integer)),

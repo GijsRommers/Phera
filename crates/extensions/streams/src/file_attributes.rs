@@ -43,7 +43,13 @@ fn chmod(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
     Box::pin(async move {
         let name = args::bytes(&arguments, 0);
         check_path("chmod", "#1 ($filename)", name)?;
-        let mode = args::int(&arguments, 1).unwrap_or(0) as u32;
+        let mode = args::int(&arguments, 1).unwrap_or(0);
+        if let Some(result) =
+            crate::user_paths::metadata(context, name, "chmod", 6, Value::Int(mode)).await?
+        {
+            return Ok(result);
+        }
+        let mode = mode as u32;
         let resolved = local(context, "chmod", name);
         let result = match resolved {
             Ok(path) => {
@@ -131,6 +137,18 @@ async fn change_owner(
 ) -> NativeResult {
     let name = args::bytes(&arguments, 0);
     check_path(function, "#1 ($filename)", name)?;
+    let operand = args::value(&arguments, 1);
+    let metadata_kind = match (owner, operand) {
+        (Owner::User, Value::InternedStr(_) | Value::String(_)) => 2,
+        (Owner::User, _) => 3,
+        (Owner::Group, Value::InternedStr(_) | Value::String(_)) => 4,
+        (Owner::Group, _) => 5,
+    };
+    if let Some(result) =
+        crate::user_paths::metadata(context, name, function, metadata_kind, operand.clone()).await?
+    {
+        return Ok(result);
+    }
     let id = if let Some(id) = args::int(&arguments, 1) {
         id as u32
     } else {
@@ -182,6 +200,18 @@ fn touch(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
             )));
         }
         let atime = atime.or(mtime);
+        if crate::user_wrappers::locate(context, name).is_some() {
+            let mut times = phera_extension_api::PhpArray::new();
+            if let (Some(mtime), Some(atime)) = (mtime, atime) {
+                times.push(Value::Int(mtime))?;
+                times.push(Value::Int(atime))?;
+            }
+            if let Some(result) =
+                crate::user_paths::metadata(context, name, "touch", 1, Value::from(times)).await?
+            {
+                return Ok(result);
+            }
+        }
         let mask = files(context).mask;
         let result = local(context, "touch", name);
         let result = match result {

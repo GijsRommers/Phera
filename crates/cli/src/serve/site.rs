@@ -61,6 +61,11 @@ impl Site {
         }
     }
 
+    /// The script that answers every path without a file of its own.
+    pub(crate) fn front_controller(&self) -> Option<&Path> {
+        self.front_controller.as_deref()
+    }
+
     pub(crate) fn document_root(&self) -> &Path {
         &self.document_root
     }

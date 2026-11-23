@@ -20,6 +20,9 @@ pub(crate) struct CodeCache {
     units: Arc<Mutex<HashMap<PathBuf, FileSlot>>>,
     registry: Arc<phera_extension_api::Registry>,
     mode: FileMode,
+    /// PHP that Phera ships (an adapter's entry script, a bundled class), by
+    /// the name it is compiled under. It has no file to check for changes.
+    shipped: Arc<Mutex<HashMap<String, Arc<CompiledUnit>>>>,
 }
 
 type FileSlot = Arc<Mutex<Option<CachedRevision>>>;
@@ -75,6 +78,7 @@ impl CodeCache {
             units: Arc::default(),
             registry,
             mode,
+            shipped: Arc::default(),
         }
     }
 
@@ -174,6 +178,25 @@ impl CodeCache {
         compiled.map_err(RuntimeError::Compile)
     }
 
+    /// Compiles PHP source that Phera ships under the name `file`, once (see
+    /// `crate::adapters`). The name may be the path of a real file, such as
+    /// the Laravel entry's `public/index.php`; the file is not read.
+    pub(crate) fn compile_shipped(
+        &self,
+        source: &str,
+        file: &str,
+    ) -> Result<Arc<CompiledUnit>, RuntimeError> {
+        let mut shipped = self.shipped.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(unit) = shipped.get(file) {
+            return Ok(unit.clone());
+        }
+        let unit = self
+            .compile_source(source.as_bytes(), file, CompileStack::Dedicated)
+            .map_err(RuntimeError::Compile)?;
+        shipped.insert(file.to_owned(), unit.clone());
+        Ok(unit)
+    }
+
     fn compile_source(
         &self,
         source: &[u8],
@@ -187,10 +210,25 @@ impl CodeCache {
                         .then_some(phera_compiler::NativeFunction::General);
                 };
                 Some(match entry.handler {
+                    phera_extension_api::NativeFn::DeprecatedSync(_)
+                    | phera_extension_api::NativeFn::DeprecatedAsync(_) => {
+                        phera_compiler::NativeFunction::General
+                    }
                     phera_extension_api::NativeFn::Async(_)
                         if self.registry.sync_selector(entry.name).is_none() =>
                     {
                         phera_compiler::NativeFunction::General
+                    }
+                    phera_extension_api::NativeFn::Async(_)
+                        if entry
+                            .params
+                            .last()
+                            .is_some_and(|parameter| parameter.variadic)
+                            && entry.params.iter().all(|parameter| !parameter.by_ref) =>
+                    {
+                        phera_compiler::NativeFunction::Direct {
+                            positional_by_value: 4,
+                        }
                     }
                     _ => phera_compiler::NativeFunction::Direct {
                         positional_by_value: entry
@@ -217,9 +255,10 @@ impl CodeCache {
             }
         }
         .map(|mut unit| {
-            if matches!(self.mode, FileMode::Web) {
-                unit.metadata = Some(Arc::new(phera_bytecode::UnitMetadata::new(&unit)));
-            }
+            // Every file from the cache gets its process number and name keys,
+            // on the command line too: its classes are then found by key, as
+            // a web request finds them.
+            unit.metadata = Some(Arc::new(phera_bytecode::UnitMetadata::new(&unit)));
             Arc::new(unit)
         })
     }
@@ -227,12 +266,52 @@ impl CodeCache {
 
 /// An include uses the same native inventory as the file that includes it.
 impl phera_vm::CodeLoader for CodeCache {
+    fn wraps_include(&self, context: &mut dyn phera_extension_api::Context, path: &[u8]) -> bool {
+        phera_ext_streams::wraps_include(context, path)
+    }
+
+    fn load_stream<'a>(
+        &'a self,
+        context: &'a mut dyn phera_extension_api::Context,
+        path: &'a [u8],
+        operation: &'a str,
+        once: bool,
+    ) -> phera_extension_api::LocalFuture<
+        'a,
+        Result<phera_vm::StreamInclude, phera_extension_api::NativeError>,
+    > {
+        use phera_ext_streams::IncludeSource;
+        use phera_vm::StreamInclude;
+        Box::pin(async move {
+            let source = phera_ext_streams::include_source(context, path, operation, once).await?;
+            Ok(match source {
+                None => StreamInclude::LocalFile,
+                Some(IncludeSource::Unavailable) => StreamInclude::Unavailable,
+                Some(IncludeSource::AlreadyIncluded) => StreamInclude::AlreadyIncluded,
+                Some(IncludeSource::Source { name, bytes }) => StreamInclude::Compiled(
+                    self.compile_source(&bytes, &name, CompileStack::Dedicated),
+                ),
+            })
+        })
+    }
+
     fn load(
         &self,
         path: PathBuf,
     ) -> phera_extension_api::LocalFuture<'_, Result<Arc<CompiledUnit>, phera_vm::CodeLoadError>>
     {
         Box::pin(async move { self.compile(path).await.map_err(include_error) })
+    }
+
+    fn load_bundled(
+        &self,
+        source: phera_extension_api::BundledSource,
+    ) -> phera_extension_api::LocalFuture<'_, Result<Arc<CompiledUnit>, phera_vm::CodeLoadError>>
+    {
+        Box::pin(async move {
+            self.compile_shipped(source.source, source.file)
+                .map_err(include_error)
+        })
     }
 }
 

@@ -7,6 +7,10 @@ mod arrays;
 mod constants;
 pub mod csv;
 pub mod environment;
+mod forward_call;
+mod getopt;
+pub use getopt::set_arguments as set_cli_arguments;
+mod information;
 pub mod ini;
 mod last_error;
 mod locale;
@@ -20,6 +24,7 @@ mod process_info;
 mod sleep;
 mod strings;
 mod time;
+mod unsupported;
 mod version_compare;
 
 pub use arrays::zend_sort::order as zend_sort_order;
@@ -34,6 +39,17 @@ impl Extension for Standard {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<Option<crate::locale::state::RequestLocale>>(
+            phera_extension_api::copy_state::<Option<crate::locale::state::RequestLocale>>,
+        );
+        registry.fork_state::<crate::process_info::memory::Peak>(phera_extension_api::fresh_state);
+        registry.fork_state::<crate::strings::tokens::Tokenizer>(
+            phera_extension_api::copy_state::<crate::strings::tokens::Tokenizer>,
+        );
+        registry.fork_state::<crate::environment::RequestEnvironment>(
+            phera_extension_api::copy_state::<crate::environment::RequestEnvironment>,
+        );
         registry.function(version_compare::ENTRY);
         strings::register(registry);
         registry.describe_function("strlen", "int", Some("Core"));
@@ -44,16 +60,20 @@ impl Extension for Standard {
         constants::register(registry);
         csv::register(registry);
         ini::register(registry);
+        information::register(registry);
         for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
             registry.function(*entry);
         }
         environment::register(registry);
+        getopt::register(registry);
+        forward_call::register(registry);
         process::register(registry);
         last_error::register(registry);
         locale::register(registry);
         process_info::register(registry);
         sleep::register(registry);
         network::register(registry);
+        unsupported::register(registry);
     }
 }
 
@@ -61,6 +81,7 @@ pub use arrays::associative_sort;
 /// Exposes PHP comparison traversal for adversarial comparator regression tests.
 #[doc(hidden)]
 pub use arrays::zend_sort::order as php_sort_order;
+pub use process_info::shell::escape_shell_command;
 
 pub use strings::format::{Values as FormatValues, render as render_format};
 

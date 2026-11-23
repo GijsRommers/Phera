@@ -86,6 +86,7 @@ fn private_constructor(_: &mut dyn Context, _: Option<&Rc<Object>>, _: &[Value])
 }
 
 static DRIVER_PROPERTIES: NativePropertyAccess = NativePropertyAccess {
+    string_property: None,
     read: |context, _, name, _| {
         Ok(match name {
             "client_info" => Some(Value::from(properties::CLIENT_INFO)),
@@ -115,6 +116,7 @@ static DRIVER_PROPERTIES: NativePropertyAccess = NativePropertyAccess {
 
 const MYSQLI_HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    fork: Some(crate::connection::fork::fork_connection),
     properties: Some(properties::view),
     property_access: Some(&properties::ACCESS),
     ..ClassHooks::EMPTY

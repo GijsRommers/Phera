@@ -108,8 +108,23 @@ impl Compiler<'_> {
                 .flatten();
             // A run of `false && ...` steps keeps one literal result.
             let mut decided = false;
+            let mut first_local = if spine.last().is_some_and(|step| {
+                !matches!(
+                    step.operator,
+                    ast::BinaryOperator::And
+                        | ast::BinaryOperator::Or
+                        | ast::BinaryOperator::NullCoalesce
+                        | ast::BinaryOperator::Pipe
+                )
+            }) {
+                self.compiled_variable(node)?
+            } else {
+                None
+            };
             let mut lhs = if let Some(bytes) = folded {
                 self.literal(Constant::Bytes(bytes), self.lines.line(node.span.start))?
+            } else if first_local.is_some() {
+                self.allocate_register()?
             } else if spine
                 .last()
                 .is_some_and(|step| step.operator == ast::BinaryOperator::NullCoalesce)
@@ -147,17 +162,26 @@ impl Compiler<'_> {
                         lhs = self.compile_pipe_step(operator, lhs, right, line)?;
                     }
                     _ => {
-                        let rhs = self.compile_expression(right)?;
+                        let right_local = self.compiled_variable(right)?;
+                        let rhs = match right_local {
+                            Some(local) => local,
+                            None => self.compile_expression(right)?,
+                        };
+                        let operation_line = if first_local.is_some() || right_local.is_some() {
+                            self.operand_line(right)
+                        } else {
+                            line
+                        };
                         self.emit(
                             Instruction::Binary {
                                 destination: lhs,
                                 operator: binary(operator).ok_or_else(|| {
                                     self.error("Operator not supported yet", line)
                                 })?,
-                                left: lhs,
+                                left: first_local.take().unwrap_or(lhs),
                                 right: rhs,
                             },
-                            line,
+                            operation_line,
                         );
                     }
                 }
@@ -246,6 +270,7 @@ impl Compiler<'_> {
                     source: crate::ir::ArgumentSource::Value(lhs),
                     name: None,
                     spread: false,
+                    of_call: false,
                 }],
             },
             line,

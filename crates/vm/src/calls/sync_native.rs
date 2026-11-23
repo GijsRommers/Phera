@@ -5,7 +5,7 @@
 //! abs('-12');     // the argument parser applies the calling file's coercion rules
 //! ```
 
-use phera_bytecode::{Reg, SymbolId, TypeMask};
+use phera_bytecode::{Instruction, Reg, SymbolId, TypeMask};
 use phera_extension_api::{
     FunctionEntry, NativeError, NativeFn, PropertyViewRequest, SyncFn, SyncSelector,
 };
@@ -18,15 +18,64 @@ use super::native_signature::{accepts, exact_types, native_type};
 use super::pending::LinkedFunction;
 use crate::Vm;
 
+/// Pure, side-effect-free built-ins that the interpreter loop can answer
+/// inline on exact-typed arguments without exiting to `Vm::execute`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PureNative {
+    StrStartsWith,
+    StrEndsWith,
+    StrContains,
+    Strpos,
+    Strrpos,
+    Substr,
+    Trim,
+    Ltrim,
+    Rtrim,
+    InArray,
+    ArrayKeyExists,
+    Implode,
+    Explode,
+    StrReplace,
+    Ord,
+    Chr,
+    Abs,
+}
+
+impl PureNative {
+    fn for_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "str_starts_with" => Self::StrStartsWith,
+            "str_ends_with" => Self::StrEndsWith,
+            "str_contains" => Self::StrContains,
+            "strpos" => Self::Strpos,
+            "strrpos" => Self::Strrpos,
+            "substr" => Self::Substr,
+            "trim" => Self::Trim,
+            "ltrim" => Self::Ltrim,
+            "rtrim" | "chop" => Self::Rtrim,
+            "in_array" => Self::InArray,
+            "array_key_exists" | "key_exists" => Self::ArrayKeyExists,
+            "implode" | "join" => Self::Implode,
+            "explode" => Self::Explode,
+            "str_replace" => Self::StrReplace,
+            "ord" => Self::Ord,
+            "chr" => Self::Chr,
+            "abs" => Self::Abs,
+            _ => return None,
+        })
+    }
+}
+
 /// The registry signature reduced to the checks needed by a positional call.
 #[derive(Clone, Copy)]
 pub(crate) struct NativeLink {
     handler: Handler,
     name: &'static str,
-    min: usize,
-    max: usize,
+    pub(crate) min: usize,
+    pub(crate) max: usize,
     masks: [TypeMask; 4],
     object_handler: bool,
+    pub(crate) pure: Option<PureNative>,
 }
 
 #[derive(Clone, Copy)]
@@ -39,19 +88,37 @@ impl NativeLink {
     fn new(entry: FunctionEntry, registry: &phera_extension_api::Registry) -> Option<Self> {
         let handler = match entry.handler {
             NativeFn::Sync(handler) => Handler::Sync(handler),
+            NativeFn::DeprecatedSync(_) | NativeFn::DeprecatedAsync(_) => return None,
             NativeFn::Async(_) => Handler::Select(registry.sync_selector(entry.name)?),
         };
         let mut masks = [TypeMask::default(); 4];
-        for (mask, parameter) in masks.iter_mut().zip(entry.params) {
-            *mask = exact_types(parameter);
+        // A selector can validate a positional window containing variadic
+        // arguments. The signature still rejects references and coercions.
+        let variadic = matches!(handler, Handler::Select(_))
+            .then(|| entry.params.last().filter(|parameter| parameter.variadic))
+            .flatten();
+        for (index, mask) in masks.iter_mut().enumerate() {
+            let Some(parameter) = entry.params.get(index).or(variadic) else {
+                break;
+            };
+            let mut parameter = *parameter;
+            if variadic.is_some() {
+                parameter.variadic = false;
+            }
+            *mask = exact_types(&parameter);
         }
         Some(Self {
             handler,
             name: entry.name,
             min: entry.min_args(),
-            max: entry.params.len().min(masks.len()),
+            max: if variadic.is_some() {
+                masks.len()
+            } else {
+                entry.params.len().min(masks.len())
+            },
             masks,
             object_handler: registry.object_handler(entry.name).is_some(),
+            pure: PureNative::for_name(entry.name),
         })
     }
 
@@ -86,13 +153,20 @@ impl Vm {
             .ok_or_else(|| internal_error!("native call frame"))?;
         let base = frame.base() + args.index();
         let count = usize::from(count);
-        let link = self
-            .code
-            .cache(frame.function)
+        let cache = self.code.cache(frame.function);
+        let mut link = cache
             .direct_natives
             .get()
             .and_then(|links| links.get(symbol.index()))
             .and_then(std::cell::Cell::get);
+        if link.is_none() && cache.direct_natives.get().is_none() {
+            // The first native call of this file in this request: take the
+            // links the snapshot made.
+            link = cache
+                .direct_native_cells()
+                .get(symbol.index())
+                .and_then(std::cell::Cell::get);
+        }
         let values = self.registers.window(base, count);
         if let Some(link) = link
             && count >= link.min
@@ -142,11 +216,7 @@ impl Vm {
             && let Some(frame) = self.call_stack.current()
         {
             let cache = self.code.cache(frame.function);
-            let links = cache.direct_natives.get_or_init(|| {
-                (0..cache.symbols.borrow().len())
-                    .map(|_| std::cell::Cell::new(None))
-                    .collect()
-            });
+            let links = cache.direct_native_cells();
             if let Some(slot) = links.get(symbol.index())
                 && slot.get().is_none()
             {
@@ -158,7 +228,75 @@ impl Vm {
             let argument = self.registers.take(base + offset);
             self.store_sent_value(offset, argument)?;
         }
-        self.call_native(destination)
+        let result = self.call_native(destination);
+        if let Err(error) = &result
+            && crate::autoload::ClassMiss::is(error)
+        {
+            self.unprepare_direct_call();
+        }
+        result
+    }
+
+    /// After a class miss in `CallNativeDirect`, which the interpreter runs
+    /// again once the class is loaded (see `calls::native_retries`): its
+    /// arguments go back to the caller's registers it reads them from.
+    /// Nothing for any other instruction.
+    #[cold]
+    #[inline(never)]
+    fn return_direct_arguments(&mut self, arguments: &[Value]) {
+        let Some(frame) = self.current() else {
+            return;
+        };
+        let instruction = frame
+            .function()
+            .instructions
+            .get(frame.ip().wrapping_sub(1));
+        let Some(Instruction::CallNativeDirect { args, .. }) = instruction.copied() else {
+            return;
+        };
+        let base = frame.base() + args.index();
+        for (offset, argument) in arguments.iter().enumerate() {
+            self.registers.put(base + offset, argument.clone());
+        }
+    }
+
+    /// The same when the direct call went through a prepared call:
+    /// `call_native` put that call back, but `CallNativeDirect` prepares its
+    /// own when it runs again, so the prepared call goes (its arguments are
+    /// back in the caller's registers already).
+    #[cold]
+    #[inline(never)]
+    fn unprepare_direct_call(&mut self) {
+        if let Ok((call, _)) = self.call_stack.pop_call() {
+            self.registers.truncate(call.start());
+        }
+    }
+
+    /// `spl_object_id($object)`: the object's id, with nothing else to do
+    /// (a lazy object stays uninitialized). Any other shape goes to the
+    /// general intrinsic.
+    #[inline(never)]
+    fn object_id_call(
+        &mut self,
+        call: crate::calls::prepared_call::PreparedCall,
+        destination: Reg,
+    ) -> Option<BatchExit> {
+        let plain = call.is_plain()
+            && call.sent == 1
+            && self
+                .call_stack
+                .top_details()
+                .is_some_and(|details| details.named.is_none() && details.extra_named.is_empty());
+        let id = match self.registers.window(call.base(), 1) {
+            [Some(Value::Object(object))] if plain => object.id,
+            _ => return Some(BatchExit::NativeCall(destination)),
+        };
+        if self.call_stack.pop_call().is_err() {
+            return Some(BatchExit::NativeCall(destination));
+        }
+        self.registers.truncate(call.start());
+        self.set(destination, Value::Int(id.into()));
+        None
     }
 
     /// Unhandled shapes keep their window intact for the ordinary native binder.
@@ -175,13 +313,96 @@ impl Vm {
             return Ok(Some(BatchExit::NativeCall(destination)));
         };
         let CallTarget::Native(entry) = callee.target else {
-            return if matches!(callee.target, CallTarget::Method { .. }) {
-                self.call_sync_native_method(call, destination)
-            } else {
-                Ok(Some(BatchExit::NativeCall(destination)))
+            return match callee.target {
+                CallTarget::Method { .. } => self.call_sync_native_method(call, destination),
+                // Its callbacks run on the frame stack (`calls::native_loops`).
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::ArrayMap) => {
+                    match self.start_array_map(destination)? {
+                        Some(exit) => Ok(exit),
+                        None => Ok(Some(BatchExit::NativeCall(destination))),
+                    }
+                }
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::FunctionExists) => {
+                    Ok(self.function_exists_call(call, destination))
+                }
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(function)) => {
+                    Ok(match function {
+                        crate::class_intrinsics::ClassFunction::ObjectId => {
+                            self.object_id_call(call, destination)
+                        }
+                        crate::class_intrinsics::ClassFunction::ClassExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Class,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::InterfaceExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Interface,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::TraitExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Trait,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::EnumExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Enum,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::IsA => self.relation_query_call(
+                            crate::class_relation_queries::RelationQuery::IsA,
+                            call,
+                            destination,
+                        ),
+                        crate::class_intrinsics::ClassFunction::IsSubclassOf => self
+                            .relation_query_call(
+                                crate::class_relation_queries::RelationQuery::IsSubclassOf,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::MethodExists => self
+                            .member_query_call(
+                                crate::class_member_queries::MemberQuery::Method,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::PropertyExists => self
+                            .member_query_call(
+                                crate::class_member_queries::MemberQuery::Property,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::GetClass => self.class_name_call(
+                            crate::class_queries::ClassNameQuery::GetClass,
+                            call,
+                            destination,
+                        ),
+                        crate::class_intrinsics::ClassFunction::GetParentClass => self
+                            .class_name_call(
+                                crate::class_queries::ClassNameQuery::GetParentClass,
+                                call,
+                                destination,
+                            ),
+                        _ => Some(BatchExit::NativeCall(destination)),
+                    })
+                }
+                _ => Ok(Some(BatchExit::NativeCall(destination))),
             };
         };
         let NativeFn::Sync(handler) = entry.handler else {
+            // Their callbacks run on the frame stack (`calls::native_loops`).
+            if matches!(
+                entry.name,
+                "array_filter" | "array_reduce" | "usort" | "uasort" | "uksort"
+            ) && let Some(exit) = self.start_native_function_loop(destination, entry)?
+            {
+                return Ok(exit);
+            }
             return Ok(Some(BatchExit::NativeCall(destination)));
         };
         let binding = callee.argument_binding;
@@ -202,16 +423,29 @@ impl Vm {
                 arguments.push(value);
             }
         }
-        self.call_stack.pop_call()?;
+        let record = self.call_stack.pop_call()?;
         self.registers.truncate(call.start());
 
         let result =
             self.invoke_sync_function(entry.name, handler, &arguments, destination, binding);
+        // The interpreter runs the `Call` again once the class is loaded
+        // (see `calls::native_retries`).
+        if let Err(error) = &result
+            && crate::autoload::ClassMiss::is(error)
+        {
+            // A function's window keeps nothing below its first register.
+            self.restore_native_call(record, [None, None], &arguments);
+        }
         self.call_stack.recycle_native_arguments(arguments);
         result
     }
 
-    fn accepts_sync_call(&self, entry: FunctionEntry, base: usize, count: usize) -> bool {
+    pub(crate) fn accepts_sync_call(
+        &self,
+        entry: FunctionEntry,
+        base: usize,
+        count: usize,
+    ) -> bool {
         let slots = self.registers.window(base, count);
         slots.len() == count
             && accepts(entry.params, slots)
@@ -219,7 +453,7 @@ impl Vm {
                 || self.registry.object_handler(entry.name).is_none())
     }
 
-    fn invoke_sync_function(
+    pub(crate) fn invoke_sync_function(
         &mut self,
         name: &'static str,
         handler: SyncFn,
@@ -281,6 +515,9 @@ impl Vm {
         error: NativeError,
         binding: ArgumentBinding,
     ) -> Result<Option<BatchExit>, NativeError> {
+        if crate::autoload::ClassMiss::is(&error) {
+            self.return_direct_arguments(arguments);
+        }
         if binding.has_native_frame() {
             self.record_native_failure(
                 &error,

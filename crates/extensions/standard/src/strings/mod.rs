@@ -6,6 +6,7 @@
 
 use phera_extension_api::{NativeError, Registry};
 
+mod alphanumeric;
 pub(crate) mod base64;
 mod case;
 mod compare;
@@ -13,10 +14,13 @@ mod decimal;
 mod encode;
 mod escaping;
 pub(crate) mod format;
+mod hebrew;
 mod html;
+mod join;
 mod metaphone;
 mod number_format;
 mod padding;
+mod quoted_printable;
 mod replace;
 mod search;
 mod similarity;
@@ -25,16 +29,22 @@ mod substitute;
 mod substring;
 mod tags;
 mod text;
-mod tokens;
+pub(crate) mod tokens;
 mod trim;
 pub(crate) mod url;
+mod uuencode;
 
 /// The longest string a function here builds before failing as PHP fails
 /// for a string past its memory limit.
 pub(crate) const MAX_STRING_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 pub(crate) fn register(registry: &mut Registry) {
+    registry.function(hebrew::ENTRY);
+    registry.function(quoted_printable::ENCODE);
+    registry.function(quoted_printable::DECODE);
+    registry.function(encode::UTF8_DECODE);
     for entry in [
+        alphanumeric::FUNCTIONS,
         base64::FUNCTIONS,
         case::FUNCTIONS,
         compare::FUNCTIONS,
@@ -47,6 +57,7 @@ pub(crate) fn register(registry: &mut Registry) {
         registry.function(*entry);
     }
     format::register(registry);
+    join::register_sync_selectors(registry);
     let modules = [
         html::FUNCTIONS,
         metaphone::FUNCTIONS,
@@ -63,10 +74,13 @@ pub(crate) fn register(registry: &mut Registry) {
         tokens::FUNCTIONS,
         trim::FUNCTIONS,
         url::FUNCTIONS,
+        uuencode::FUNCTIONS,
     ];
     for entry in modules.into_iter().flatten() {
         registry.function(*entry);
     }
+    registry.describe_function("utf8_encode", "string", None);
+    registry.describe_function("utf8_decode", "string", None);
     replace::register_sync_selectors(registry);
 }
 
@@ -112,30 +126,32 @@ pub(super) enum CaseSensitivity {
 }
 
 impl CaseSensitivity {
-    pub(super) fn equal(self, left: &[u8], right: &[u8]) -> bool {
-        match self {
-            Self::Sensitive => left == right,
-            Self::Insensitive => left.eq_ignore_ascii_case(right),
-        }
-    }
-
     /// The first position of `needle` in `haystack`; an empty needle is
     /// found at 0.
     pub(super) fn find(self, haystack: &[u8], needle: &[u8]) -> Option<usize> {
         match (self, needle) {
-            (_, []) => return Some(0),
-            (Self::Sensitive, [byte]) => {
-                return haystack.iter().position(|candidate| candidate == byte);
-            }
-            _ => {}
+            (_, []) => Some(0),
+            (Self::Sensitive, [byte]) => memchr::memchr(*byte, haystack),
+            (Self::Sensitive, _) if haystack.starts_with(needle) => Some(0),
+            (Self::Sensitive, _) => memchr::memmem::find(haystack, needle),
+            (Self::Insensitive, _) => haystack
+                .windows(needle.len())
+                .position(|candidate| candidate.eq_ignore_ascii_case(needle)),
         }
-        // One loop per case, so the sensitive search compares plain slices.
-        let mut candidates = haystack.windows(needle.len());
-        match self {
-            Self::Sensitive => candidates.position(|candidate| candidate == needle),
-            Self::Insensitive => {
-                candidates.position(|candidate| candidate.eq_ignore_ascii_case(needle))
+    }
+
+    /// The last position of the needle, including the end for an empty needle.
+    pub(super) fn rfind(self, haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        match (self, needle) {
+            (_, []) => Some(haystack.len()),
+            (Self::Sensitive, [byte]) => memchr::memrchr(*byte, haystack),
+            (Self::Sensitive, _) if haystack.ends_with(needle) => {
+                Some(haystack.len() - needle.len())
             }
+            (Self::Sensitive, _) => memchr::memmem::rfind(haystack, needle),
+            (Self::Insensitive, _) => haystack
+                .windows(needle.len())
+                .rposition(|candidate| candidate.eq_ignore_ascii_case(needle)),
         }
     }
 }

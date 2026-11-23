@@ -49,6 +49,7 @@ const METHODS: [MethodEntry; 1] =
 
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    fork: Some(crate::connection::fork_connection),
     ..ClassHooks::EMPTY
 };
 

@@ -1,6 +1,6 @@
 //! Verify the additional intl APIs directly against native PHP 8.5.
 
-use phera_extension_api::{ArrayKey, PhpArray, Value};
+use phera_extension_api::{ArrayKey, PhpArray, Value, testing::oracle};
 
 use crate::Matrix;
 
@@ -39,6 +39,14 @@ fn collation_and_transforms() {
         ("Any-Latin; Latin-ASCII; Lower()", "À New York"),
         ("Upper", "Straße"),
         ("NFD", "é"),
+        ("NFD; [:Nonspacing Mark:] Remove; NFC", "crème brûlée"),
+        (
+            "NFKC; [:Nonspacing Mark:] Remove; NFKC; Any-Latin; Latin-ASCII;",
+            "crème brûlée",
+        ),
+        ("[:Mn:] Any-Remove", "e\u{301} का \u{1d185}"),
+        ("[:^Letter:] Remove", "Café 42"),
+        ("Remove", "😀𝟫"),
         ("Null", "😀𝟫"),
     ] {
         matrix.case(
@@ -53,6 +61,11 @@ fn collation_and_transforms() {
         "اللغة العربية",
         "नमस्ते दुनिया",
         "中文测试",
+        "こんにちは世界",
+        "東京と大阪",
+        "hello中文测试ok",
+        "A。中、B",
+        "五5六",
     ] {
         for id in ["Any-Latin", "Any-Latin;Latin-ASCII;Lower()"] {
             matrix.case(
@@ -62,6 +75,9 @@ fn collation_and_transforms() {
         }
     }
     matrix.case("Transliterator::create", &[Value::from("Any-Latin/BGN")]);
+    for id in ["NFD; ", "NFD;;NFC", "NFD;;;"] {
+        matrix.case("Transliterator::create", &[Value::from(id)]);
+    }
     let invalid = Value::from(vec![255]);
     let locale = [Value::from("en_US")];
     for (left, right) in [
@@ -87,6 +103,217 @@ fn collation_and_transforms() {
         matrix.instance("Collator", &locale, method, &[], Some(Value::from(values)));
     }
     matrix.compare("intl-collation-and-transforms");
+}
+
+#[test]
+fn unicode_character_and_property_names() {
+    let mut matrix = Matrix::new();
+    for code in [
+        0, 65, 0x1a2, 0x378, 0x2603, 0x4e00, 0xac00, 0xd800, 0x17000, 0x10ffff, -1,
+    ] {
+        for kind in [0, 1, 2, 3, 4] {
+            matrix.case("IntlChar::charName", &[Value::Int(code), Value::Int(kind)]);
+        }
+    }
+    for (name, kind) in [
+        ("SNOWMAN", 0),
+        ("snow\tman", 0),
+        ("latin capital letter a", 0),
+        ("cjk unified ideograph-4e00", 0),
+        ("cjk unified ideograph-20000", 0),
+        ("CJK unified ideograph-+4E00", 0),
+        ("HANGUL SYLLABLE GA", 0),
+        ("LATIN CAPITAL LETTER GHA", 3),
+        ("latin capital letter gha", 3),
+        ("snowman", 2),
+        ("<control-0>", 2),
+        ("<unassigned-0378>", 2),
+        ("<unassigned-2603>", 2),
+        ("snowman\0extra", 0),
+        ("", 0),
+        ("not a character name", 0),
+        ("SNOWMAN", 4),
+    ] {
+        matrix.case(
+            "IntlChar::charFromName",
+            &[Value::from(name), Value::Int(kind)],
+        );
+    }
+    if oracle::supports_php_since("IntlChar::charFromName exact ICU 78 spelling", 80_513) {
+        for (name, kind) in [
+            ("snow-man", 0),
+            ("snow man", 0),
+            (" Snowman ", 0),
+            ("latin_capital-letter A", 0),
+            ("LATINCAPITALLETTERA", 0),
+            ("LATIN  CAPITAL LETTER A", 0),
+            ("CJK unified ideograph-04E00", 0),
+            ("CJK unified ideograph-020000", 0),
+            ("CJK unified ideograph 4E00", 0),
+            ("CJK unified ideograph-4E00 ", 0),
+            ("hangul_syllable GA", 0),
+            ("HANGULSYLLABLEGA", 0),
+            ("latin_capital-letter GHA", 3),
+            ("snow-man", 2),
+        ] {
+            matrix.case(
+                "IntlChar::charFromName",
+                &[Value::from(name), Value::Int(kind)],
+            );
+        }
+    }
+    for (property, value) in [(0, 1), (3, 0), (4098, 230), (4101, 1), (4106, 25), (-1, 0)] {
+        for kind in [0, 1, 2, 99] {
+            matrix.case(
+                "IntlChar::getPropertyName",
+                &[Value::Int(property), Value::Int(kind)],
+            );
+            matrix.case(
+                "IntlChar::getPropertyValueName",
+                &[Value::Int(property), Value::Int(value), Value::Int(kind)],
+            );
+        }
+    }
+    matrix.compare("intl-unicode-character-and-property-names");
+}
+
+#[test]
+fn unicode_and_single_byte_conversion() {
+    let mut matrix = Matrix::new();
+    for encoding in [
+        "UTF-8",
+        "UTF-16",
+        "UTF-16BE",
+        "UTF-16LE",
+        "UTF-32",
+        "UTF-32BE",
+        "UTF-32LE",
+        "US-ASCII",
+        "ISO-8859-1",
+        "ISO-8859-5",
+        "ISO-8859-15",
+        "windows-1250",
+        "windows-1251",
+        "windows-1252",
+        "windows-1256",
+        "windows-1258",
+    ] {
+        for text in ["", "é😀", "cost: €", "Αθήνα", "Београд", "القاهرة", "A\0b"]
+        {
+            matrix.case(
+                "UConverter::transcode",
+                &[
+                    Value::from(text),
+                    Value::from(encoding),
+                    Value::from("UTF-8"),
+                ],
+            );
+        }
+    }
+    for (encoding, bytes) in [
+        ("ASCII", &[0xff, b'x'][..]),
+        ("UTF-8", &[0xe2, 0x82]),
+        ("UTF-16BE", &[0, 0xe9, 0xd8, 0x3d, 0xde, 0]),
+        ("UTF-32LE", &[0xe9, 0, 0, 0, 0, 0xf6, 1, 0]),
+        ("windows-1252", &[0x80, 0x81, 0xe9]),
+        ("ISO-8859-7", &[0xa0, 0xff]),
+        ("missing-encoding", b"hello"),
+    ] {
+        matrix.case(
+            "UConverter::transcode",
+            &[
+                Value::from(bytes.to_vec()),
+                Value::from("UTF-8"),
+                Value::from(encoding),
+            ],
+        );
+    }
+    for substitute in ["?", "", "too long"] {
+        matrix.case(
+            "UConverter::transcode",
+            &[
+                Value::from("é😀"),
+                Value::from("ASCII"),
+                Value::from("UTF-8"),
+                map(&[("to_subst", Value::from(substitute))]),
+            ],
+        );
+    }
+    let constructor = [Value::from("UTF-16BE"), Value::from("UTF-8")];
+    for method in [
+        "getSourceEncoding",
+        "getDestinationEncoding",
+        "getSourceType",
+        "getDestinationType",
+        "getErrorCode",
+        "getErrorMessage",
+        "getSubstChars",
+    ] {
+        matrix.instance("UConverter", &constructor, method, &[], None);
+    }
+    matrix.instance(
+        "UConverter",
+        &constructor,
+        "convert",
+        &[Value::from("é😀")],
+        None,
+    );
+    matrix.instance(
+        "UConverter",
+        &constructor,
+        "convert",
+        &[
+            Value::from(vec![0, 0xe9, 0xd8, 0x3d, 0xde, 0]),
+            Value::Bool(true),
+        ],
+        None,
+    );
+    for label in ["UTF-8", "ASCII", "windows-1252", "unknown"] {
+        matrix.case("UConverter::getAliases", &[Value::from(label)]);
+    }
+    matrix.case("UConverter::getStandards", &[]);
+    for reason in [-1, 0, 1, 2, 3, 4, 5, 6] {
+        matrix.case("UConverter::reasonText", &[Value::Int(reason)]);
+    }
+    matrix.compare("intl-unicode-and-single-byte-conversion");
+}
+
+#[test]
+fn calendar_component_errors() {
+    let mut matrix = Matrix::new();
+    let constructor = [Value::from("UTC"), Value::from("en_US")];
+    for (setter, factory, count) in [
+        ("setDate", "IntlGregorianCalendar::createFromDate", 3),
+        (
+            "setDateTime",
+            "IntlGregorianCalendar::createFromDateTime",
+            6,
+        ),
+    ] {
+        for index in 0..count {
+            for invalid in [i64::from(i32::MAX) + 1, i64::from(i32::MIN) - 1] {
+                let mut args = vec![Value::Int(1); count];
+                args[index] = Value::Int(invalid);
+                matrix.instance("IntlGregorianCalendar", &constructor, setter, &args, None);
+                matrix.case(factory, &args);
+            }
+        }
+    }
+    for (method, value) in [
+        ("clear", -1),
+        ("setMinimalDaysInFirstWeek", 0),
+        ("setSkippedWallTimeOption", 3),
+        ("setRepeatedWallTimeOption", 2),
+    ] {
+        matrix.instance(
+            "IntlGregorianCalendar",
+            &constructor,
+            method,
+            &[Value::Int(value)],
+            None,
+        );
+    }
+    matrix.compare("intl-calendar-component-errors");
 }
 
 #[test]

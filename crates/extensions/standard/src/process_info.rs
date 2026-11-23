@@ -7,9 +7,9 @@ use phera_extension_api::{
     PhpArray, Registry, Value, args,
 };
 
-mod memory;
+pub(crate) mod memory;
 mod script;
-mod shell;
+pub(crate) mod shell;
 
 pub(crate) fn register(registry: &mut Registry) {
     const MODE: &[Param] =

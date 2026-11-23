@@ -76,13 +76,20 @@ pub fn effective(context: &dyn Context, value: &[u8]) -> String {
 }
 
 pub fn too_long(context: &mut dyn Context, site: &str) -> NativeResult {
-    error::fail(
-        context,
-        site,
-        error::ILLEGAL_ARGUMENT,
-        "Locale string too long, should be no longer than 156 characters",
-        Value::Null,
-    )
+    too_long_for(context, site, false)
+}
+
+pub fn too_long_for(context: &mut dyn Context, site: &str, constructor: bool) -> NativeResult {
+    const DETAIL: &str = "Locale string too long, should be no longer than 156 characters";
+    if constructor {
+        error::store(context, site, error::ILLEGAL_ARGUMENT, DETAIL);
+        Err(NativeError::throw(
+            "IntlException",
+            format!("{site}(): {DETAIL}"),
+        ))
+    } else {
+        error::fail(context, site, error::ILLEGAL_ARGUMENT, DETAIL, Value::Null)
+    }
 }
 
 fn get_default(context: &mut dyn Context, _: &[Value], _: &str) -> NativeResult {
@@ -91,7 +98,9 @@ fn get_default(context: &mut dyn Context, _: &[Value], _: &str) -> NativeResult 
 
 fn set_default(context: &mut dyn Context, arguments: &[Value], site: &str) -> NativeResult {
     check_null(arguments, 0, "locale", site)?;
-    let value = args::string(arguments, 0).cloned().unwrap_or_default();
+    let value = args::string(arguments, 0)
+        .map(|s| s.to_php_string())
+        .unwrap_or_default();
     let value = if value.as_bytes().is_empty() {
         process_locale().into()
     } else {
@@ -224,6 +233,7 @@ fn compose(context: &mut dyn Context, arguments: &[Value], site: &str) -> Native
     };
     if let Some(value) = fields.get(&ArrayKey::str("grandfathered")) {
         return match &*value.deref() {
+            Value::InternedStr(value) => Ok(Value::InternedStr(value)),
             Value::String(value) => Ok(Value::from(value.clone())),
             _ => invalid_field(context, site),
         };
@@ -233,10 +243,11 @@ fn compose(context: &mut dyn Context, arguments: &[Value], site: &str) -> Native
             "{site}(): Argument #1 ($subtags) must contain a \"language\" key"
         )));
     };
-    let Value::String(language) = &*language.deref() else {
+    let language = language.deref();
+    let Some(language) = language.as_str_bytes() else {
         return invalid_field(context, site);
     };
-    let mut result = language.as_bytes().to_vec();
+    let mut result = language.to_vec();
     for (field, groups, prefix) in [
         ("extlang", 3, Some("a")),
         ("script", 0, None),
@@ -262,13 +273,12 @@ fn append(
     let mut values = Vec::new();
     if let Some(value) = fields.get(&key) {
         match &*value.deref() {
+            Value::InternedStr(string) if groups == 0 => values.push(string.to_php_string()),
             Value::String(string) if groups == 0 => values.push(string.clone()),
             Value::Array(items) if groups > 0 => {
                 for (_, value) in items.iter() {
-                    let Value::String(string) = &*value.deref() else {
-                        return None;
-                    };
-                    values.push(string.clone());
+                    let string = value.deref().to_php_string()?;
+                    values.push(string);
                 }
             }
             _ => return None,
@@ -276,10 +286,8 @@ fn append(
     } else {
         for index in 0..groups {
             if let Some(value) = fields.get(&ArrayKey::str(format!("{field}{index}"))) {
-                let Value::String(string) = &*value.deref() else {
-                    return None;
-                };
-                values.push(string.clone());
+                let string = value.deref().to_php_string()?;
+                values.push(string);
             }
         }
     }

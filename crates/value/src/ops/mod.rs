@@ -10,9 +10,10 @@ pub mod incdec;
 pub use arithmetic::{add, div, modulo, mul, negate, pow, sub, unary_plus};
 pub use bitwise::{bitwise_and, bitwise_not, bitwise_or, bitwise_xor, shift_left, shift_right};
 pub use compare::{
-    LazyComparison, ObjectComparator, ObjectComparison, StringComparison, StringComparisonStep,
-    compare, compare_after_error, compare_op, compare_with_objects, compare_with_string_objects,
-    less, less_equal, loose_equals, loose_equals_with_objects, strict_equals,
+    LazyComparison, ObjectComparator, ObjectComparison, ObjectOperands, StringComparison,
+    StringComparisonStep, compare, compare_after_error, compare_op, compare_with_objects,
+    compare_with_string_objects, less, less_equal, loose_equals, loose_equals_with_objects,
+    strict_equals,
 };
 pub use concat::concat;
 pub use incdec::{decrement, increment};
@@ -52,8 +53,9 @@ pub(crate) fn to_number(v: &Value, diag: &mut dyn Diagnostics) -> Result<NumVal,
         Value::Float(f) => Ok(NumVal::Float(*f)),
         Value::Bool(b) => Ok(NumVal::Int(*b as i64)),
         Value::Null => Ok(NumVal::Int(0)),
-        Value::String(s) => {
-            let p = parse_numeric(s.as_bytes());
+        Value::InternedStr(_) | Value::String(_) => {
+            let bytes = v.as_str_bytes().expect("checked string");
+            let p = parse_numeric(bytes);
             match p.value {
                 None => Err(ConvFail),
                 Some(val) => {
@@ -90,8 +92,9 @@ pub fn try_get_long(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, ConvFa
         Value::Bool(b) => Ok(*b as i64),
         Value::Null => Ok(0),
         Value::Float(f) => Ok(crate::convert::float_to_key_int(*f, diag)),
-        Value::String(s) => {
-            let p = parse_numeric(s.as_bytes());
+        Value::InternedStr(_) | Value::String(_) => {
+            let bytes = v.as_str_bytes().expect("checked string");
+            let p = parse_numeric(bytes);
             match p.value {
                 None => Err(ConvFail),
                 Some(NumVal::Int(i)) => {
@@ -108,7 +111,7 @@ pub fn try_get_long(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, ConvFa
                     if l as f64 != f {
                         diag.deprecated(format!(
                             "Implicit conversion from float-string \"{}\" to int loses precision",
-                            String::from_utf8_lossy(s.as_bytes())
+                            String::from_utf8_lossy(bytes)
                         ));
                     }
                     Ok(l)

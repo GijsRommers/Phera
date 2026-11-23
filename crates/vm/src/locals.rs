@@ -20,7 +20,6 @@ impl Vm {
         if let Some(slot) = self.current_slot_mut(register) {
             let previous = slot.take();
             if let Some(phera_value::Value::Reference(reference)) = previous {
-                self.forget_global_cell(register, &reference);
                 self.release_property_reference(reference);
             }
         }

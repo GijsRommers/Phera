@@ -152,6 +152,15 @@ fn pcg_construct(
 ) -> NativeResult {
     let seed = match arguments.first() {
         Some(Value::Int(seed)) => u128::from(*seed as u64),
+        Some(Value::InternedStr(seed)) => {
+            let Ok(bytes) = <[u8; 16]>::try_from(seed.as_bytes()) else {
+                return Err(NativeError::value_error(
+                    "Random\\Engine\\PcgOneseq128XslRr64::__construct(): Argument #1 ($seed) \
+                     must be a 16 byte (128 bit) string",
+                ));
+            };
+            u128::from_be_bytes(bytes)
+        }
         Some(Value::String(seed)) => {
             let Ok(bytes) = <[u8; 16]>::try_from(seed.as_bytes()) else {
                 return Err(NativeError::value_error(
@@ -221,6 +230,7 @@ fn xoshiro_construct(
     }
     let mut random = [0; 32];
     let bytes = match arguments.first() {
+        Some(Value::InternedStr(seed)) => seed.as_bytes(),
         Some(Value::String(seed)) => seed.as_bytes(),
         _ => {
             fill(&mut random)?;
@@ -281,6 +291,7 @@ const SECURE: ClassEntry = ClassEntry {
 /// PHP's seeded native engines disallow dynamic properties, including clone-with updates.
 const ENGINE_PROPERTIES: phera_extension_api::NativePropertyAccess =
     phera_extension_api::NativePropertyAccess {
+        string_property: None,
         read: |_, _, _, _| Ok(None),
         mutate: |_, object, name, operation| match operation {
             phera_extension_api::NativePropertyMutation::Assign(_) => {

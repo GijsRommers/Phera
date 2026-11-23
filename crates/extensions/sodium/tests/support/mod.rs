@@ -133,8 +133,8 @@ async fn invoke(
 ) -> NativeResult {
     prepare_arguments(entry, &mut arguments, context)?;
     match entry.handler {
-        NativeFn::Sync(call) => call(context, &arguments),
-        NativeFn::Async(call) => call(context, arguments).await,
+        NativeFn::Sync(call) | NativeFn::DeprecatedSync(call) => call(context, &arguments),
+        NativeFn::Async(call) | NativeFn::DeprecatedAsync(call) => call(context, arguments).await,
     }
 }
 

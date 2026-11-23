@@ -27,6 +27,52 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn replace_caller_variable(&mut self, name: &str, value: Value) -> Result<(), NativeError> {
+        if self.current().is_none() {
+            self.set_global(name, value);
+            return Ok(());
+        }
+        let local = self.named_slot(name)?;
+        self.set(local, value);
+        Ok(())
+    }
+
+    fn is_snapshot_boot(&self) -> bool {
+        self.snapshot.mode == crate::SnapshotMode::Boot
+    }
+
+    fn set_protocol_property(
+        &mut self,
+        object: &phera_value::Object,
+        name: &str,
+        value: Value,
+    ) -> Result<Option<phera_value::ArrayKey>, NativeError> {
+        let property = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()
+            .and_then(|class| {
+                class.defaults.iter().rev().find(|property| {
+                    property.name == name
+                        && (property.visibility != phera_bytecode::Visibility::Private
+                            || property.declaring == class.name)
+                })
+            });
+        let key = property.map_or_else(|| phera_value::ArrayKey::str(name), |p| p.key.clone());
+        if property.is_none() && object.get(&key).is_none() {
+            return Ok(None);
+        }
+        let value = if let Some(property) = property
+            && let Some(ty) = &property.ty
+        {
+            self.coerce_property_in_mode(value, property, ty, Some(true))?
+        } else {
+            value
+        };
+        crate::property_storage::write(object, key.clone(), value);
+        Ok(Some(key))
+    }
+
     fn extension_value(&self, key: &'static str) -> Option<Value> {
         self.extension_values.get(key).cloned()
     }
@@ -94,12 +140,20 @@ impl Context for Vm {
         Box::pin(self.fiber_inspect(object, inspection))
     }
 
+    fn iconv_converter(&self) -> Option<phera_extension_api::IconvConverter> {
+        self.registry.iconv_converter()
+    }
+
     fn ini_get(&self, name: &[u8]) -> Option<phera_value::PhpString> {
         Vm::ini_get(self, name)
     }
 
     fn serialization_precision(&self) -> i32 {
         Vm::serialization_precision(self)
+    }
+
+    fn ini_value(&self, name: &[u8]) -> Option<phera_value::PhpString> {
+        Vm::ini_value(self, name)
     }
 
     fn ini_set(
@@ -136,13 +190,17 @@ impl Context for Vm {
         Vm::include_path(self)
     }
 
+    fn set_include_wrappers(&mut self, enabled: bool) {
+        self.include_state.stream_wrappers = enabled;
+    }
+
     fn source_location(&self) -> Option<(String, usize)> {
         let location = self.location();
         Some((location.file, location.line))
     }
 
     fn request_global(&self, name: &str) -> Option<Value> {
-        self.globals.get(name).cloned()
+        self.request_global_value(name).cloned()
     }
 
     fn replace_request_global(&mut self, name: &str, value: Value) {
@@ -161,6 +219,18 @@ impl Context for Vm {
         self.state_mut()
             .get_or_default::<crate::request_callbacks::ResourceFinalizers>()
             .register(key, callback);
+    }
+
+    fn resource_release(
+        &self,
+        kind: &'static str,
+        id: i64,
+    ) -> Option<phera_value::ResourceRelease> {
+        Some(phera_value::ResourceRelease::new(
+            &self.object_ids,
+            kind,
+            id,
+        ))
     }
 
     fn script_path(&self) -> Option<std::path::PathBuf> {
@@ -494,6 +564,46 @@ impl Context for Vm {
         }
     }
 
+    fn forward_static_callback(
+        &mut self,
+        function: &str,
+        callable: &Value,
+        arguments: &phera_value::PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        use crate::calls::call_state::CallTarget;
+
+        let call = self
+            .current()
+            .and_then(|frame| frame.called())
+            .ok_or_else(|| {
+                NativeError::error(format!(
+                    "Cannot call {function}() when no class scope is active"
+                ))
+            });
+        let resolved = call.and_then(|called| {
+            let mut callee = self.resolve_callable(callable)?;
+            match &mut callee.target {
+                CallTarget::Method { context, .. }
+                    if context.receiver.is_none() && called.is_a(&context.called.name) =>
+                {
+                    context.called = called;
+                }
+                CallTarget::Magic(magic)
+                    if magic.context.receiver.is_none()
+                        && called.is_a(&magic.context.called.name) =>
+                {
+                    std::rc::Rc::make_mut(magic).context.called = called;
+                }
+                _ => {}
+            }
+            Ok(callee)
+        });
+        match resolved {
+            Ok(callee) => self.invoke_array_callback(callee, arguments),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
     fn call_method(
         &mut self,
         object: std::rc::Rc<phera_value::Object>,
@@ -696,7 +806,9 @@ impl Context for Vm {
     ) -> Option<std::rc::Rc<phera_value::Object>> {
         let class = class.as_any().downcast_ref::<crate::classes::Class>()?;
         let class = class.identity.upgrade()?;
-        Some(self.classes.allocate_with_properties(class, properties))
+        let mut table = phera_value::Properties::for_class(&*class);
+        table.replace_all(properties);
+        Some(self.classes.allocate_with_properties(class, table))
     }
 
     fn serialization_properties(
@@ -785,6 +897,9 @@ impl Context for Vm {
             .and_then(|class| class.hooks.as_ref()?.properties);
         match projection {
             Some(project) => project(self, object, purpose),
+            None if purpose == phera_extension_api::PropertyPurpose::ArrayCast => {
+                Ok(object.to_cast_array())
+            }
             None => Ok(object.to_array()),
         }
     }
@@ -838,6 +953,27 @@ impl Context for Vm {
             initialized: false,
         }));
         Ok(value)
+    }
+
+    fn call_hydration_constructor(
+        &mut self,
+        object: std::rc::Rc<phera_value::Object>,
+        arguments: &phera_value::PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        let callee = self
+            .classes
+            .for_object(&object)
+            .and_then(|class| class.constructor.clone().map(|method| (class, method)));
+        let Some((class, method)) = callee else {
+            return Box::pin(std::future::ready(Ok(Value::Null)));
+        };
+        let Some(scope) = self.classes.get(&method.declaring) else {
+            return Box::pin(std::future::ready(Err(internal_error!(
+                "hydration constructor scope"
+            ))));
+        };
+        let callee = self.reflection_callee(class, scope, method, Some(object));
+        self.invoke_array_callback(callee, arguments)
     }
 
     fn ensure_instantiable(&self, name: &str) -> Result<(), phera_extension_api::NativeError> {
@@ -957,7 +1093,7 @@ impl Vm {
         if !properties.is_empty() {
             object.update(|storage| {
                 if storage.is_empty() {
-                    *storage = properties;
+                    storage.replace_all(properties);
                 } else {
                     for (key, value) in properties.iter() {
                         storage.insert(key, value.clone());

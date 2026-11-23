@@ -82,7 +82,7 @@ pub fn local_method<const OP: usize>(
         }
         CHARSET => {
             let state = handle.borrow();
-            state.lease()?;
+            state.ensure_open()?;
             Ok(Value::from(state.charset.clone().unwrap_or_default()))
         }
         _ => escape::escape(handle, args::bytes(a, 0)),

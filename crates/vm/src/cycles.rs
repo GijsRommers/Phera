@@ -44,6 +44,7 @@ const THRESHOLD_MAX: usize = 1_000_000_000;
 const PRODUCTIVE_RUN: usize = 100;
 
 /// Allocations left before the next automatic run.
+#[derive(Clone)]
 pub(crate) struct Countdown(usize);
 
 impl Countdown {
@@ -112,6 +113,7 @@ impl GcFunction {
 }
 
 /// The collector's settings and counters for one request.
+#[derive(Clone)]
 pub(crate) struct CycleCollector {
     enabled: bool,
     /// Allocations after which the next automatic run starts.
@@ -240,7 +242,14 @@ impl Vm {
 fn break_apart(garbage: Garbage) {
     let mut contents = Vec::new();
     let mut values = Vec::new();
+    let mut payloads = Vec::new();
+    for (key, owner) in &garbage.inactive_attachments {
+        values.extend(key.detach(*owner));
+    }
     for object in &garbage.objects {
+        if let Some(payload) = object.native.borrow_mut().take() {
+            payloads.push(payload);
+        }
         if let Some(properties) = object.update(std::mem::take) {
             contents.push(properties);
         }
@@ -251,6 +260,7 @@ fn break_apart(garbage: Garbage) {
             values.push(std::mem::take(&mut *value));
         }
     }
+    drop(payloads);
     drop(garbage);
     drop(contents);
     drop(values);

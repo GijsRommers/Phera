@@ -15,11 +15,13 @@ mod combine_recursive;
 mod filter;
 mod find;
 mod keys;
+mod multisort;
 mod ordering;
 mod pointer;
 mod range;
 mod range_endpoint;
 mod range_values;
+mod search;
 mod sets;
 mod slice;
 mod sort;
@@ -35,9 +37,11 @@ pub fn associative_sort(name: &str) -> Option<phera_extension_api::FunctionEntry
 mod stack;
 mod tables;
 mod walk;
-pub(crate) mod zend_sort;
+pub(crate) use phera_extension_api::zend_sort;
 
 pub(crate) fn register(registry: &mut Registry) {
+    multisort::register(registry);
+    search::register_sync_selectors(registry);
     let modules = [
         build::FUNCTIONS,
         callback_sets::FUNCTIONS,
@@ -87,7 +91,7 @@ pub(super) fn append_entry(
     value: &Value,
     keys: IntegerKeys,
 ) -> Result<(), NativeError> {
-    if keys == IntegerKeys::Preserve || matches!(key, ArrayKey::String(_)) {
+    if keys == IntegerKeys::Preserve || matches!(key, ArrayKey::Interned(_) | ArrayKey::String(_)) {
         result.insert(key, value.clone());
     } else {
         result.push(value.clone())?;
@@ -127,12 +131,7 @@ pub(super) fn variable_in_use() -> NativeError {
 
 /// A PHP list, `[0 => $a, 1 => $b, …]`, of these values.
 pub(crate) fn list(values: impl IntoIterator<Item = Value>) -> PhpArray {
-    let mut array = PhpArray::new();
-    for value in values {
-        // Only an array whose next key would pass PHP_INT_MAX refuses a push.
-        array
-            .push(value)
-            .expect("a new array has a free key for every value");
-    }
-    array
+    let values = values.into_iter();
+    let capacity = values.size_hint().0;
+    PhpArray::from_values(values, capacity)
 }

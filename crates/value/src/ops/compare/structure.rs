@@ -5,7 +5,6 @@
 //! [1, 'x' => 2] === ['x' => 2, 1]; // false
 //! ```
 
-use std::cell::Ref;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -16,7 +15,9 @@ use crate::object::Object;
 use crate::value::Value;
 
 use super::casting::CastPair;
-use super::{ObjectComparator, ObjectComparison, cmp3, compare_leaf, identical_leaf};
+use super::{
+    ObjectComparator, ObjectComparison, ObjectOperands, cmp3, compare_leaf, identical_leaf,
+};
 
 pub(super) enum Comparison<'a, 'callback> {
     Strict,
@@ -46,7 +47,7 @@ impl Comparison<'_, '_> {
             return Ok(Pair::Compared(1));
         }
         if let Self::Native(compare) = self {
-            match compare(left, right, diagnostics)? {
+            match compare(ObjectOperands::Pair(left, right), diagnostics)? {
                 ObjectComparison::Compared(result) => return Ok(Pair::Compared(result)),
                 ObjectComparison::Projected(a, b) => {
                     return Ok(Pair::Tables(
@@ -65,6 +66,24 @@ impl Comparison<'_, '_> {
             Table::Object(left.clone()),
             Table::Object(right.clone()),
         ))
+    }
+
+    /// A native object can also compare directly with a scalar operand.
+    pub(super) fn mixed(
+        &mut self,
+        left: &Value,
+        right: &Value,
+        diagnostics: &mut dyn Diagnostics,
+    ) -> Result<Option<i8>, OpError> {
+        if let Self::Native(compare) = self
+            && matches!((left, right), (Value::Object(_), _) | (_, Value::Object(_)))
+            && !matches!((left, right), (Value::Object(_), Value::Object(_)))
+            && let ObjectComparison::Compared(order) =
+                compare(ObjectOperands::Mixed(left, right), diagnostics)?
+        {
+            return Ok(Some(order));
+        }
+        Ok(None)
     }
 
     pub(super) fn leaf(
@@ -88,7 +107,8 @@ pub(super) enum Table {
 
 enum Entries<'a> {
     Array(&'a PhpArray),
-    Object(Ref<'a, PhpArray>),
+    /// An object's properties in PHP's order, taken when the step starts.
+    Object(PhpArray),
 }
 
 impl Deref for Entries<'_> {
@@ -115,17 +135,15 @@ impl Table {
         match self {
             Self::Array(array) => Ok(Entries::Array(array)),
             Self::Projected(_, properties) => Ok(Entries::Array(properties)),
-            Self::Object(object) => {
-                object
-                    .properties
-                    .try_borrow()
-                    .map(Entries::Object)
-                    .map_err(|_| {
-                        OpError::error(
-                            "Cannot compare an object while its properties are being modified",
-                        )
-                    })
-            }
+            Self::Object(object) => object
+                .properties
+                .try_borrow()
+                .map(|properties| Entries::Object(properties.to_array()))
+                .map_err(|_| {
+                    OpError::error(
+                        "Cannot compare an object while its properties are being modified",
+                    )
+                }),
         }
     }
 
@@ -299,6 +317,11 @@ impl TableComparison {
                                 break;
                             }
                         }
+                    }
+                    _ if let Some(order) =
+                        comparison.mixed(&left_value, &right_value, diagnostics)? =>
+                    {
+                        order
                     }
                     _ => {
                         if CAST_STRINGS

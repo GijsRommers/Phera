@@ -11,7 +11,6 @@ use phera_source::{CompileDiagnostic, LineTable};
 
 use crate::context::Compiler;
 use crate::ir::{CompiledUnit, Constant, Instruction};
-use crate::policies::DeclarationTiming;
 use crate::{CompileError, passes::lower};
 
 /// Included files return 1 by default; evaluated expressions return null.
@@ -126,7 +125,7 @@ fn compile_program(
     }
     compiler.function.dynamic_scope = true;
     if let Err(mut error) = compiler
-        .block(&ast.statements, DeclarationTiming::Hoisted)
+        .compile_file_body(&ast.statements)
         .and_then(|()| compiler.finish_gotos())
     {
         error

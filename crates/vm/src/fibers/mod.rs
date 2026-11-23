@@ -63,6 +63,35 @@ enum State {
     Exited,
 }
 
+/// The fork of a fiber the boot made, for [`crate::snapshot`]: `None` when
+/// `state` is not a fiber's. One not started yet starts in each fork, and
+/// a finished one keeps its result. A suspended fiber's stack is a VM of
+/// its own, which the boot cannot be stopped inside: it is refused when
+/// the snapshot is taken.
+pub(crate) fn fork_fiber(
+    state: &dyn std::any::Any,
+    fork: &mut phera_value::Fork<'_>,
+) -> Option<Result<Box<dyn std::any::Any>, String>> {
+    use crate::snapshot::ForkCopy;
+    let fiber = state.downcast_ref::<Fiber>()?;
+    let state = match &fiber.state {
+        State::Ready(callee) => State::Ready(callee.fork_copy(fork)),
+        State::Returned(value) => State::Returned(fork.value(value)),
+        State::Failed => State::Failed,
+        State::Exited => State::Exited,
+        State::Running | State::Suspended(_) => {
+            return Some(Err(
+                "it is suspended; let it finish before Phera\\snapshot()".into(),
+            ));
+        }
+    };
+    Some(Ok(Box::new(Fiber {
+        callable: fork.value(&fiber.callable),
+        live: None,
+        state,
+    })))
+}
+
 fn current(active: &Option<Box<Active>>) -> Option<Rc<Object>> {
     active.as_ref().and_then(|active| active.object.upgrade())
 }

@@ -73,7 +73,7 @@ async fn a_worker_keeps_inherited_environment_separate_from_request_writes() {
     );
     let mut environment = phera_dotenv::Environment::default();
     environment.insert(b"APP_ENV".to_vec(), b"inherited".to_vec());
-    let worker = Runtime::with_environment(environment).web_worker();
+    let worker = Runtime::with_environment(environment).web_worker(0);
     let first = worker
         .handle_request(&script, &site.root, request("GET", "/index.php?change=1"))
         .await;
@@ -281,5 +281,45 @@ mb_language('Japanese');
             .handle_request(&script, &site.root, request("GET", "/text.php"))
             .await;
         assert_eq!(body(&response), "UTF-8|63|neutral|STRASSE|4|é|日本語");
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn wrapper_registration_and_included_source_belong_to_each_request() {
+    let site = Site::new("wrapper-includes");
+    let script = site.file(
+        "index.php",
+        r#"<?php
+class RequestSource {
+    public $context;
+    private $code;
+    private $read = false;
+    public function stream_open($path, $mode, $flags, &$opened_path) {
+        $opened_path = 'virtual-source.php';
+        $this->code = '<?php return ' . (int) $_GET['value'] . ';';
+        return true;
+    }
+    public function stream_read($count) {
+        if ($this->read) return '';
+        $this->read = true;
+        return $this->code;
+    }
+    public function stream_eof() { return $this->read; }
+    public function stream_set_option($option, $arg1, $arg2) { return true; }
+    public function stream_stat() { return ['size' => strlen($this->code)]; }
+}
+echo in_array('request-code', stream_get_wrappers(), true) ? 'leaked:' : 'fresh:';
+stream_wrapper_register('request-code', RequestSource::class);
+echo include 'request-code://source';
+"#,
+    );
+    let worker = Runtime::new().web_worker(0);
+    for (value, output) in [(1, "fresh:1"), (2, "fresh:2")] {
+        let path = format!("/index.php?value={value}");
+        let response = worker
+            .handle_request(&script, &site.root, request("GET", &path))
+            .await;
+        assert_eq!(response.status, 200);
+        assert_eq!(body(&response), output);
     }
 }

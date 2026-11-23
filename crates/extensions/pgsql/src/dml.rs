@@ -6,7 +6,8 @@ mod metadata;
 use std::rc::Rc;
 
 use phera_extension_api::{
-    ArrayKey, Context, LocalFuture, NativeResult, PhpArray, Value, args, value::to_php_string,
+    ArrayKey, Context, LocalFuture, NativeError, NativeResult, PhpArray, Value, args,
+    value::to_php_string,
 };
 
 use crate::{connection, escape, result};
@@ -34,7 +35,7 @@ pub fn execute<const OP: usize>(
         ];
         let call = names.get(OP).copied().unwrap_or_default();
         let handle = connection::argument(c, args::value(&a, 0), call)?;
-        let lease = handle.borrow().lease()?;
+        let lease = crate::connection::lease(&handle).await?;
         let table = args::string(&a, 1).map_or_else(String::new, |value| value.to_string_lossy());
         let flags = args::int(&a, if OP == UPDATE { 4 } else { 3 }).unwrap_or(if OP == CONVERT {
             0
@@ -134,9 +135,11 @@ pub fn execute<const OP: usize>(
             return Ok(Value::from(sql));
         }
         if flags & 1024 != 0 {
-            handle.borrow_mut().busy = Some(connection::start(&lease, move |pg| {
+            let pending = connection::start(&lease, move |pg| {
                 Box::pin(async move { pg.native_query(&sql).await })
-            }));
+            })
+            .map_err(|error| NativeError::error(error.detail))?;
+            handle.borrow_mut().busy = Some(pending);
             return Ok(Value::Bool(true));
         }
         let output = connection::run(&lease, move |pg| {

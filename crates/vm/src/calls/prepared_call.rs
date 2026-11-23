@@ -50,6 +50,13 @@ pub(crate) enum PreparedCallee {
     /// `new` of a class without a constructor: the arguments are evaluated
     /// and dropped, and the call gives the new object, kept below them.
     Constructed,
+    /// A synchronous native function, by its number in the registry. The
+    /// call has no details: its parameters are the registry entry's. When
+    /// the general path has to handle such a call (a named argument, a
+    /// by-reference parameter, an argument to convert), it first turns it
+    /// into a `General` call with its full description (see
+    /// `calls::native_calls`).
+    Native(phera_extension_api::NativeId),
     /// Anything else; its [`Callee`] is in the call's details.
     General,
 }
@@ -231,6 +238,13 @@ impl<'a> Parameters<'a> {
         }
     }
 
+    pub(crate) fn requires_reference(self, index: usize) -> bool {
+        match self {
+            Self::Php { function, .. } => function.parameters[index].by_reference,
+            Self::Listed(parameters) => parameters[index].requires_reference,
+        }
+    }
+
     pub(crate) fn is_variadic(self, index: usize) -> bool {
         match self {
             Self::Php { function, .. } => function.parameters[index].variadic,
@@ -268,5 +282,15 @@ impl<'a> Parameters<'a> {
     pub(crate) fn position_of(self, name: &[u8]) -> Option<usize> {
         (0..self.len())
             .find(|&index| !self.is_variadic(index) && self.name(index).as_bytes() == name)
+    }
+}
+
+impl crate::snapshot::ForkCopy for CallDetails {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        CallDetails {
+            callee: self.callee.fork_copy(fork),
+            named: self.named.clone(),
+            extra_named: self.extra_named.clone(),
+        }
     }
 }

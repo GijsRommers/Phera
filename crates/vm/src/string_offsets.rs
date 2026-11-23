@@ -1,7 +1,7 @@
 //! PHP string offset reads use byte positions, including negative offsets.
 
 use phera_extension_api::{NativeError, NativeResult};
-use phera_value::{ArrayKey, PhpString, Value};
+use phera_value::{ArrayKey, Value};
 
 use crate::{Vm, access_mode::Missing};
 
@@ -23,27 +23,30 @@ impl Vm {
     /// they see "not there".
     pub(crate) fn read_string_offset(
         &mut self,
-        string: &PhpString,
+        string: &[u8],
         key: ArrayKey,
         missing: Missing,
     ) -> NativeResult {
         let asking_whether_it_exists = missing != Missing::Warn;
         let index = match key {
             ArrayKey::Int(index) => index,
-            ArrayKey::String(key) => match key.to_string_lossy().parse::<i64>() {
-                Ok(index) => index,
-                // `isset` also takes an integer with spaces around it
-                // (`" 1"`), as PHP's numeric strings allow.
-                Err(_) if asking_whether_it_exists => match whole_integer(key.as_bytes()) {
-                    Some(index) => index,
-                    None => return Ok(Value::Null),
-                },
-                Err(_) => {
-                    return Err(NativeError::type_error(
-                        "Cannot access offset of type string on string",
-                    ));
+            ArrayKey::Interned(_) | ArrayKey::String(_) => {
+                let bytes = key.as_str_bytes().expect("checked string key");
+                match String::from_utf8_lossy(bytes).parse::<i64>() {
+                    Ok(index) => index,
+                    // `isset` also takes an integer with spaces around it
+                    // (`" 1"`), as PHP's numeric strings allow.
+                    Err(_) if asking_whether_it_exists => match whole_integer(bytes) {
+                        Some(index) => index,
+                        None => return Ok(Value::Null),
+                    },
+                    Err(_) => {
+                        return Err(NativeError::type_error(
+                            "Cannot access offset of type string on string",
+                        ));
+                    }
                 }
-            },
+            }
         };
         let from_start = if index < 0 {
             string.len() as i64 + index
@@ -52,7 +55,7 @@ impl Vm {
         };
         let byte = usize::try_from(from_start)
             .ok()
-            .and_then(|position| string.as_bytes().get(position));
+            .and_then(|position| string.get(position));
         Ok(match byte {
             Some(byte) => Value::from(vec![*byte]),
             None if asking_whether_it_exists => Value::Null,

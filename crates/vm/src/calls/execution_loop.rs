@@ -14,17 +14,17 @@
 //! [`LoopExit::Slow`]; the VM runs that one instruction through
 //! `Vm::execute` and starts the loop again where the frame now is.
 
-use phera_bytecode::{Instruction, Reg};
+use phera_bytecode::{BinaryOp, Instruction, Reg, Target};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
 use crate::Vm;
 use crate::calls::call_stack::CallStack;
-use crate::calls::frame::{Frame, TraversalMode};
-use crate::calls::registers::Registers;
+use crate::calls::frame::Frame;
+use crate::calls::registers::{Registers, WINDOW};
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
-use crate::fast::{ScalarStep, array_index_step, scalar_step};
+use crate::fast::{ScalarStep, array_index_step, assign_literal, scalar_step};
 
 /// How many loop rounds or calls a script may run before it lets other tasks
 /// on the same thread have a turn.
@@ -50,6 +50,27 @@ pub(crate) enum BatchExit {
     BindCall(Reg),
     /// A comparison reached an object whose __toString must run.
     Compare(crate::string_comparison::PendingComparison),
+    /// An undefined operand can run PHP before the other operand is read.
+    UndefinedBinary {
+        op: BinaryOp,
+        dst: Reg,
+        lhs: Reg,
+        rhs: Reg,
+    },
+    /// A compare-and-branch with an undefined operand: warn, then decide.
+    UndefinedBinaryBranch {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: Reg,
+        target: Target,
+        when: bool,
+    },
+    /// A pending string comparison whose result decides a branch.
+    CompareBranch {
+        pending: crate::string_comparison::PendingComparison,
+        target: Target,
+        when: bool,
+    },
     /// The frame that native code called has returned this value.
     Returned(Value),
     /// A PHP yield published a suspension for the generator driver.
@@ -76,6 +97,15 @@ enum LoopExit {
 }
 
 /// The parts of the VM the loop borrows, and its counters.
+/// A value the loop hands to the batch loop when it leaves as if yielding
+/// (see `CallStack::handed_back`).
+pub(crate) enum HandedBack {
+    /// The function native code called returned it (`Machine::leave_to_native`).
+    Native(Value),
+    /// A callback of a native loop returned it (`Machine::leave_to_native_loop`).
+    NativeLoop(Value),
+}
+
 pub(super) struct Machine<'a> {
     pub(super) code: &'a CodeTable,
     pub(super) classes: &'a mut ClassTable,
@@ -90,6 +120,14 @@ pub(super) struct Machine<'a> {
     pub(super) frame_limit: usize,
     /// The request's object ids, which say whether a destructor is due.
     pub(super) ids: &'a phera_value::ObjectIds,
+    /// The native functions, for the parameters of a lean native call.
+    pub(super) registry: &'a phera_extension_api::Registry,
+    /// The request's evaluated class constants, read by the loop's
+    /// class constant reads.
+    pub(super) class_states: &'a crate::classes::class_state::ClassStates,
+    /// The request's validated enum cases, read by class constants and
+    /// `Enum::from`/`Enum::tryFrom`.
+    pub(super) enum_cases: &'a crate::classes::enums::EnumCases,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -136,6 +174,9 @@ impl Vm {
                 stop,
                 frame_limit: self.frame_limit,
                 ids: &self.object_ids,
+                registry: &self.registry,
+                class_states: &self.class_states,
+                enum_cases: &self.enum_cases,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
@@ -150,11 +191,60 @@ impl Vm {
             self.executed_instructions += machine.executed;
             let instruction = match exit {
                 LoopExit::Slow(instruction) => instruction,
-                LoopExit::Yield => return Ok(BatchExit::Yield),
+                LoopExit::Yield => {
+                    match self.call_stack.handed_back.take() {
+                        Some(HandedBack::NativeLoop(value)) => {
+                            // The built-in's next step (`calls::native_loops`).
+                            self.resume_native_loop(value)?;
+                            if self.destructors_due() {
+                                return Ok(BatchExit::Destructors);
+                            }
+                            if self.pending_callbacks
+                                || (TRACK_GENERATORS && self.generator_releases_pending())
+                            {
+                                return Ok(BatchExit::Handlers);
+                            }
+                            continue;
+                        }
+                        Some(HandedBack::Native(value)) => return Ok(BatchExit::Returned(value)),
+                        None => return Ok(BatchExit::Yield),
+                    }
+                }
                 LoopExit::Destructors => return Ok(BatchExit::Destructors),
                 LoopExit::Invalid => return Err(internal_error!("invalid IP")),
             };
-            if let Some(exit) = self.execute::<TRACK_GENERATORS>(instruction, stop, work)? {
+            let exit = match instruction {
+                // A call of a native function goes straight to it: the
+                // general handler would only find that out and come here.
+                Instruction::Call { dst, .. } if !TRACK_GENERATORS && self.calls_plain_native() => {
+                    *work += 1;
+                    self.call_lean_native(dst)
+                }
+                Instruction::CallNativeDirect {
+                    function,
+                    args,
+                    count,
+                    dst,
+                    ..
+                } if !TRACK_GENERATORS => {
+                    *work += 1;
+                    self.call_native_direct(function, args, count, dst)
+                }
+                _ => {
+                    // The VM's handlers need the description of a lean
+                    // native record (see `calls::native_calls`).
+                    if self.call_stack.last_call().is_some_and(|call| {
+                        matches!(
+                            call.callee,
+                            crate::calls::prepared_call::PreparedCallee::Native(_)
+                        )
+                    }) {
+                        self.describe_native_call(&instruction);
+                    }
+                    self.execute::<TRACK_GENERATORS>(instruction, stop, work)
+                }
+            };
+            if let Some(exit) = exit? {
                 return Ok(exit);
             }
             if self.destructors_due() {
@@ -168,6 +258,23 @@ impl Vm {
                 return Ok(BatchExit::Yield);
             }
         }
+    }
+}
+
+impl Vm {
+    /// Whether the innermost prepared call is to native code that needs no
+    /// argument expansion first (a magic `__call` does).
+    #[inline]
+    fn calls_plain_native(&self) -> bool {
+        use crate::calls::prepared_call::PreparedCallee;
+        self.call_stack.last_call().is_some_and(|call| {
+            matches!(
+                call.callee,
+                PreparedCallee::General | PreparedCallee::Native(_)
+            ) && !call
+                .flags
+                .contains(crate::calls::prepared_call::CallFlags::MAGIC)
+        })
     }
 }
 
@@ -192,13 +299,27 @@ impl Machine<'_> {
             ip: frame.ip(),
         };
         let mut instructions = self.code.instructions(frame.function);
+        // Whether the frame's registers fit a window (see
+        // `registers::WINDOW`): decided when the frame is entered, not per
+        // instruction.
+        let mut windowed = self.windowed(frame);
         loop {
-            let instruction = match self.run_simple::<GUARDED>(instructions, &mut position) {
-                Ok(instruction) => instruction,
-                Err(exit) => return exit,
-            };
+            let instruction =
+                match self.run_simple::<GUARDED>(instructions, &mut position, windowed) {
+                    Ok(instruction) => instruction,
+                    Err(exit) => return exit,
+                };
             match self.step::<GUARDED>(instruction, position) {
-                Step::Done(ip) => position.ip = ip,
+                Step::Done(ip) => {
+                    // In the guarded loop a step may have let go of the
+                    // last handle on an object with a destructor: it runs
+                    // before the next instruction, as the VM runs it.
+                    if GUARDED && self.ids.has_doomed() {
+                        self.publish(ip);
+                        return destructors_due();
+                    }
+                    position.ip = ip;
+                }
                 Step::Switched(next) => {
                     // A return releases the frame's variables. Simple
                     // instructions release nothing (see `crate::fast`), and
@@ -208,10 +329,11 @@ impl Machine<'_> {
                     }
                     position = next;
                     instructions = self.code.instructions(next.frame.function);
+                    windowed = self.windowed(next.frame);
                 }
                 Step::Slow => {
                     self.publish(position.ip);
-                    return LoopExit::Slow(instruction);
+                    return LoopExit::Slow(*instruction);
                 }
                 Step::Yield => return LoopExit::Yield,
             }
@@ -219,15 +341,32 @@ impl Machine<'_> {
     }
 
     /// Run simple instructions of one frame with its registers borrowed and
-    /// the counters in locals, until one is not simple. Returns that one,
-    /// with `position` just past it.
+    /// the counters in locals, until one is not simple. Lend that instruction
+    /// to `step`, with `position` just past it. Reading its operands from
+    /// the code slice avoids copying the instruction at each scalar exit.
     #[inline(always)]
-    fn run_simple<const GUARDED: bool>(
+    fn run_simple<'code, const GUARDED: bool>(
         &mut self,
-        instructions: &[Instruction],
+        instructions: &'code [Instruction],
         position: &mut Position,
-    ) -> Result<Instruction, LoopExit> {
-        let slots = self.registers.tail_mut(position.frame.base());
+        windowed: bool,
+    ) -> Result<&'code Instruction, LoopExit> {
+        // Code with more registers than a window runs on the checked tail
+        // of the register file, one instruction at a time, through `step`
+        // and the VM (see `registers::WINDOW`).
+        if !windowed {
+            return match instructions.get(position.ip) {
+                Some(instruction) => {
+                    position.ip += 1;
+                    self.executed += 1;
+                    Ok(instruction)
+                }
+                None => Err(LoopExit::Invalid),
+            };
+        }
+        let Some(slots) = self.registers.window_at(position.frame.base()) else {
+            return Err(LoopExit::Invalid);
+        };
         let mut ip = position.ip;
         let mut executed = 0;
         let mut work = self.work;
@@ -238,17 +377,22 @@ impl Machine<'_> {
             let previous = ip;
             ip += 1;
             executed += 1;
-            let step = match scalar_step::<GUARDED>(instruction, slots, &mut ip) {
+            let step = match scalar_step::<GUARDED, _>(instruction, slots, &mut ip) {
                 ScalarStep::Fallback => match *instruction {
                     Instruction::FetchIndex {
                         dst, base, index, ..
-                    } => array_index_step::<GUARDED>(dst, base, index, slots),
+                    } => array_index_step::<GUARDED, _>(dst, base, index, slots),
                     _ => ScalarStep::Fallback,
                 },
                 complete => complete,
             };
             if step == ScalarStep::Fallback {
-                break Ok(*instruction);
+                break Ok(instruction);
+            }
+            // Only the guarded loop's writes answer `Released`: freeing what
+            // a register held may have queued a destructor.
+            if GUARDED && step == ScalarStep::Released && self.ids.has_doomed() {
+                break Err(destructors_due());
             }
             // Only backward jumps count as work; comparing positions also
             // covers fused compare-and-branch instructions.
@@ -269,15 +413,23 @@ impl Machine<'_> {
         result
     }
 
-    /// The instructions that are not simple but need only the borrowed
-    /// state: `foreach` over a snapshot, direct calls and plain returns.
-    #[inline(always)]
-    fn step<const GUARDED: bool>(&mut self, instruction: Instruction, position: Position) -> Step {
+    /// The arms of [`Machine::step`] that the routes rarely run: kept out of
+    /// its line, so that `step`, which `run` inlines, stays small (see the
+    /// rule for `step`'s arms in `LOOP-PLAN.md`).
+    #[inline(never)]
+    fn cold_step<const GUARDED: bool>(
+        &mut self,
+        instruction: Instruction,
+        position: Position,
+    ) -> Step {
         let base = position.frame.base();
         let mut ip = position.ip;
         match instruction {
             Instruction::IterNext { iter, value, end } if position.frame.has_extras() => {
-                let iterators = &mut self.stack.current_extras_mut().iterators;
+                let Some(extras) = self.stack.current_extras_present() else {
+                    return Step::Slow;
+                };
+                let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
                 match crate::iteration::snapshot_step(iter, value, end, iterators, slots, &mut ip) {
                     true => Step::Done(ip),
@@ -285,32 +437,118 @@ impl Machine<'_> {
                 }
             }
             Instruction::IterNextKeyed {
-                iter, key, value, ..
+                iter,
+                key,
+                value,
+                end,
             } if position.frame.has_extras() => {
-                let iterators = &mut self.stack.current_extras_mut().iterators;
+                let Some(extras) = self.stack.current_extras_present() else {
+                    return Step::Slow;
+                };
+                let iterators = &mut extras.iterators;
                 let slots = self.registers.tail_mut(base);
-                if iterators.get_mut(iter.0).is_some_and(|state| {
-                    state.traversal_mode == TraversalMode::Value
-                        && crate::iteration::native_step(state, Some(key), value, slots)
-                }) {
-                    Step::Done(ip)
-                } else {
-                    Step::Slow
+                match crate::iteration::keyed_step(
+                    iter,
+                    (key, value),
+                    end,
+                    iterators,
+                    slots,
+                    &mut ip,
+                ) {
+                    true => Step::Done(ip),
+                    false => Step::Slow,
                 }
             }
-            Instruction::FetchIndex {
-                dst,
-                base,
-                index,
-                mode: phera_bytecode::FetchMode::Read,
-                ..
-            } => self.fetch_native_dimension(position, dst, base, index),
             Instruction::AppendLocal { local, src } => {
                 self.write_native_dimension(position, local, None, src)
             }
-            Instruction::AssignPath { path, src } if self.classes.has_dimensions => {
-                self.write_dimension_path(position, path, src)
+            Instruction::InitStaticCall {
+                class,
+                method,
+                binding,
+            } => self.prepare_static::<GUARDED>(position, (class, method), binding),
+            Instruction::StaticCall {
+                class,
+                method,
+                binding,
+            } => self.prepare_dynamic_static::<GUARDED>(position, class, method, binding),
+            Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
+            Instruction::New { class } => self.new_object::<GUARDED>(position, class),
+            Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
+            Instruction::GuardBuiltin { .. } => self.builtin_guard(position),
+            _ => Step::Slow,
+        }
+    }
+
+    /// `AssignConst` and `SendConst`: a literal of the file assigned or sent
+    /// where it is read. Out of line: inlined, these two arms grew `step`
+    /// enough to raise the routes (`LOOP-PLAN.md`, the bisect of
+    /// 2026-11-22).
+    #[inline(never)]
+    fn literal_step<const GUARDED: bool>(
+        &mut self,
+        instruction: Instruction,
+        position: Position,
+    ) -> Step {
+        let base = position.frame.base();
+        match instruction {
+            Instruction::AssignConst { local, constant } => {
+                let literal = self
+                    .code
+                    .cache(position.frame.function)
+                    .constants
+                    .get(constant.index());
+                match literal {
+                    Some(literal) => {
+                        let slots = self.registers.tail_mut(base);
+                        match assign_literal::<GUARDED, _>(slots, local, literal) {
+                            ScalarStep::Fallback => Step::Slow,
+                            _ => Step::Done(position.ip),
+                        }
+                    }
+                    None => Step::Slow,
+                }
             }
+            Instruction::SendConst { constant } => {
+                match self
+                    .code
+                    .cache(position.frame.function)
+                    .constants
+                    .get(constant.index())
+                {
+                    Some(literal) => match self.send_owned(position, literal.clone()) {
+                        Ok(step) => step,
+                        Err(_) => Step::Slow,
+                    },
+                    None => Step::Slow,
+                }
+            }
+            _ => Step::Slow,
+        }
+    }
+
+    /// Whether `frame`'s code fits a register window.
+    #[inline(always)]
+    fn windowed(&self, frame: Frame) -> bool {
+        self.code.facts(frame.function).registers as usize <= WINDOW
+    }
+
+    /// The instructions that are not simple but need only the borrowed
+    /// state: `foreach` over a snapshot, direct calls and plain returns.
+    #[inline(always)]
+    fn step<const GUARDED: bool>(&mut self, instruction: &Instruction, position: Position) -> Step {
+        let base = position.frame.base();
+        match *instruction {
+            // Rare on the routes: out of `step`'s line (see `cold_step`).
+            Instruction::IterNext { .. }
+            | Instruction::IterNextKeyed { .. }
+            | Instruction::AppendLocal { .. }
+            | Instruction::InitStaticCall { .. }
+            | Instruction::StaticCall { .. }
+            | Instruction::CheckType { .. }
+            | Instruction::New { .. }
+            | Instruction::InitDynamicCall { .. }
+            | Instruction::GuardBuiltin { .. } => self.cold_step::<GUARDED>(*instruction, position),
             Instruction::CallDirect {
                 function,
                 args,
@@ -321,12 +559,33 @@ impl Machine<'_> {
             Instruction::InitMethodCall { receiver, method } => {
                 self.prepare_method(position, receiver, method)
             }
-            Instruction::InitStaticCall {
-                class,
-                method,
-                binding,
-            } => self.prepare_static(position, (class, method), binding),
-            Instruction::SendValue { src } => self.send(position, src),
+            Instruction::CallMethod { site, dst, .. } => self.call_method(position, site, dst),
+            Instruction::SendValue { src, .. } => self.send(position, src),
+            // A temporary read once: moved into the callee's window. A
+            // reference, or a call on the general path, gets it back.
+            Instruction::SendTake { src, .. } => {
+                let slot = base + src.index();
+                match self.registers.take_defined(slot) {
+                    Some(value) if !matches!(value, Value::Reference(_)) => {
+                        match self.send_owned(position, value) {
+                            Ok(step) => step,
+                            Err(value) => {
+                                self.registers.put(slot, value);
+                                Step::Slow
+                            }
+                        }
+                    }
+                    other => {
+                        if let Some(value) = other {
+                            self.registers.put(slot, value);
+                        }
+                        Step::Slow
+                    }
+                }
+            }
+            Instruction::AssignConst { .. } | Instruction::SendConst { .. } => {
+                self.literal_step::<GUARDED>(*instruction, position)
+            }
             Instruction::SendLocal { local } => match self.send(position, local) {
                 Step::Slow => self.send_reference(position, local),
                 done => done,
@@ -335,15 +594,50 @@ impl Machine<'_> {
                 self.receive_default(position, param, passed)
             }
             Instruction::LoadConst { dst, constant } => self.load_constant(position, dst, constant),
-            Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
             Instruction::Call { dst, .. } => self.enter_prepared(position, dst),
-            Instruction::New { class } => self.new_object::<GUARDED>(position, class),
-            Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
             Instruction::FetchThis { dst } | Instruction::ThisOrNull { dst } => {
                 self.fetch_this(position, dst)
             }
             Instruction::Return { src } => self.leave_plain::<GUARDED>(Some(src)),
             Instruction::ReturnNull => self.leave_plain::<GUARDED>(None),
+            // Listed, so that the instructions further_step never takes do
+            // not pay for a call to it on their way to the VM.
+            Instruction::Binary { .. }
+            | Instruction::BinaryBranch { .. }
+            | Instruction::BinaryBranchIf { .. }
+            | Instruction::BinaryIntBranch { .. }
+            | Instruction::BinaryIntBranchIf { .. }
+            | Instruction::Unary { .. }
+            | Instruction::Cast {
+                to: phera_bytecode::CastKind::String,
+                ..
+            }
+            | Instruction::JumpIfNull { .. }
+            | Instruction::JumpIfNotNull { .. }
+            | Instruction::NewArray { .. }
+            | Instruction::ArraySet { .. }
+            | Instruction::ArrayPush { .. }
+            | Instruction::ArrayKeyExists { .. }
+            | Instruction::InLiteralArray { .. }
+            | Instruction::CallNativeDirect { .. }
+            | Instruction::FetchIndex { .. }
+            | Instruction::Fetch { .. }
+            | Instruction::AssignPath { .. }
+            | Instruction::AssignPathFromLocal { .. }
+            | Instruction::AssignOpPath { .. }
+            | Instruction::IncDecPath { .. }
+            | Instruction::InitCall { .. }
+            | Instruction::FetchClassName { .. }
+            | Instruction::FetchClassConstant { .. }
+            | Instruction::InstanceOf { .. }
+            | Instruction::InstanceOfBranch { .. }
+            | Instruction::InstanceOfBranchIf { .. }
+            | Instruction::SendPath { .. }
+            | Instruction::IterStart { .. }
+            | Instruction::IterEnd { .. }
+            | Instruction::FetchNamedClassConstant { .. } => {
+                self.further_step::<GUARDED>(*instruction, position)
+            }
             _ => Step::Slow,
         }
     }

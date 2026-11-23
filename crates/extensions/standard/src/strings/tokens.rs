@@ -15,8 +15,8 @@ use phera_extension_api::{Context, FunctionEntry, NativeResult, Param, ParamType
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[STRTOK];
 
 /// The string being cut and how far the cutting has come.
-#[derive(Default)]
-struct Tokenizer {
+#[derive(Clone, Default)]
+pub(crate) struct Tokenizer {
     string: Vec<u8>,
     position: usize,
 }

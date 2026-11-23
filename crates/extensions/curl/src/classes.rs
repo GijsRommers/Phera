@@ -17,6 +17,7 @@ pub(crate) fn register(registry: &mut Registry) {
         hooks: Some(&ClassHooks {
             cast: Some(object_id),
             clone: Some(NativeClone::Copy(clone_handle)),
+            fork: Some(crate::easy::fork_handle),
             forbid_serialization: true,
             ..ClassHooks::EMPTY
         }),
@@ -26,6 +27,7 @@ pub(crate) fn register(registry: &mut Registry) {
         &[PropertyEntry::typed("options", PropertyType::Array, Visibility::Public).readonly()];
     const NON_CLONEABLE: ClassHooks = ClassHooks {
         clone: Some(NativeClone::Copy(reject_clone)),
+        fork: Some(fork_multi_or_share),
         forbid_serialization: true,
         ..ClassHooks::EMPTY
     };
@@ -55,6 +57,22 @@ pub(crate) fn register(registry: &mut Registry) {
         });
     }
     crate::upload::register(registry);
+}
+
+/// The fork hook of `CurlMultiHandle` and the share handles.
+fn fork_multi_or_share(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    if let Some(multi) = state.downcast_ref::<Rc<std::cell::RefCell<crate::multi::Multi>>>() {
+        let copy = multi.borrow().forked(fork)?;
+        return Ok(Box::new(Rc::new(std::cell::RefCell::new(copy))));
+    }
+    if let Some(share) = state.downcast_ref::<crate::share::ShareHandle>() {
+        return Ok(Box::new(crate::share::forked(share, fork)));
+    }
+    Err("its built-in state is not initialized".into())
 }
 
 /// `(int) $handle` gives the handle's object ID, as it gave the resource ID before PHP 8.

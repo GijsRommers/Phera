@@ -59,7 +59,7 @@ pub(crate) const FUNCTIONS: &[FunctionEntry] = &[
         &[KEY, PATH, PASSPHRASE, OPTIONS],
         export_to_file,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::deprecated_sync(
         "openssl_pkey_free",
         &[Param::new("key", ParamType::Class(CLASS))],
         free,
@@ -71,8 +71,8 @@ pub(crate) const FUNCTIONS: &[FunctionEntry] = &[
     ),
 ];
 
-fn free(context: &mut dyn Context, _: &[Value]) -> NativeResult {
-    deprecate_free(context, "openssl_pkey_free")
+fn free(_: &mut dyn Context, _: &[Value]) -> NativeResult {
+    Ok(Value::Null)
 }
 
 fn free_alias(context: &mut dyn Context, _: &[Value]) -> NativeResult {
@@ -133,7 +133,7 @@ impl GenerateKey {
                 return None;
             }
             3 => {
-                let Some(Value::String(curve)) = value("curve_name") else {
+                let Some(curve) = value("curve_name").and_then(|v| v.to_php_string()) else {
                     context.warning(
                         concat!(
                             "openssl_pkey_new(): Missing configuration value: ",

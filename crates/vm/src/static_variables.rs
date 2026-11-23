@@ -27,3 +27,11 @@ impl StaticVariables {
         self.values.insert(key, value);
     }
 }
+
+impl crate::snapshot::ForkCopy for StaticVariables {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        StaticVariables {
+            values: self.values.fork_copy(fork),
+        }
+    }
+}

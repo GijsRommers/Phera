@@ -23,7 +23,7 @@ mod callables;
 mod constants;
 mod functions;
 pub(crate) mod hook_calls;
-mod initializers;
+pub(crate) mod initializers;
 mod lazy;
 mod members;
 mod properties;
@@ -37,7 +37,7 @@ enum Construction {
 }
 
 #[derive(Default)]
-struct AttributeCallSite(Option<Rc<AttributeSite>>);
+pub(crate) struct AttributeCallSite(Option<Rc<AttributeSite>>);
 
 pub(super) fn exception(message: impl Into<String>) -> NativeError {
     NativeError::throw("ReflectionException", message)
@@ -197,15 +197,23 @@ impl ReflectionContext for Vm {
         Ok(Value::Null)
     }
 
-    fn reflect_class(&mut self, name: &str) -> LocalFuture<'_, Result<Rc<ClassInfo>, NativeError>> {
-        if let Some(class) = self.classes.get(name) {
-            let info = self.cached_class_info(&class);
-            return Box::pin(async move { Ok(info) });
-        }
-        let name = name.to_owned();
+    fn reflect_loaded_class(&mut self, name: &str) -> Option<Rc<ClassInfo>> {
+        let class = self.classes.get(name)?;
+        Some(self.cached_class_info(&class))
+    }
+
+    fn reflect_object_class(&mut self, object: &Object) -> Option<Rc<ClassInfo>> {
+        let class = self.classes.for_object(object)?;
+        Some(self.cached_class_info(&class))
+    }
+
+    fn reflect_class<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<'a, Result<Rc<ClassInfo>, NativeError>> {
         Box::pin(async move {
             let class = self
-                .lookup_class(&name)
+                .lookup_class(name)
                 .await?
                 .ok_or_else(|| exception(format!("Class \"{name}\" does not exist")))?;
             Ok(self.cached_class_info(&class))
@@ -440,6 +448,7 @@ impl Vm {
             }
         }
         ClassInfo {
+            name_value: class.name_value.clone(),
             id: class.index.number(),
             name: class.name.clone(),
             kind,
@@ -535,7 +544,10 @@ impl Vm {
             )));
         }
         let args = match args {
-            Some(args) => args,
+            Some(args) => {
+                Self::check_script_construction(&class)?;
+                args
+            }
             None => {
                 if class.has_native_layout && class.is_final {
                     return Err(exception(format!(
@@ -629,7 +641,7 @@ impl Vm {
         Ok(created)
     }
 
-    fn reflection_callee(
+    pub(crate) fn reflection_callee(
         &self,
         called: Rc<Class>,
         scope: Rc<Class>,

@@ -29,7 +29,7 @@ impl ConstantValue {
             ConstantValue::Bool(value) => Value::Bool(*value),
             ConstantValue::Int(value) => Value::Int(*value),
             ConstantValue::Float(value) => Value::Float(*value),
-            ConstantValue::String(value) => Value::from(*value),
+            ConstantValue::String(value) => Value::interned(value.as_bytes()),
             ConstantValue::EmptyArray => Value::from(phera_value::PhpArray::new()),
         }
     }
@@ -84,8 +84,13 @@ impl DeferredRegistration {
 
 #[derive(Clone, Default)]
 struct Registration {
-    /// Keyed by lowercase name: PHP function names are case-insensitive.
-    functions: HashMap<String, FunctionEntry>,
+    iconv_converter: Option<crate::IconvConverter>,
+    /// Every native function, in registration order; a function's
+    /// [`NativeId`](crate::NativeId) is its index here.
+    functions: Vec<FunctionEntry>,
+    /// The index of each function by lowercase name: PHP function names are
+    /// case-insensitive. Used when a name is linked, not when a call runs.
+    function_ids: HashMap<String, crate::NativeId>,
     /// Only calls already holding a first-argument object need to check this table.
     object_handlers: HashMap<&'static str, crate::AsyncFn>,
     sync_selectors: HashMap<&'static str, crate::SyncSelector>,
@@ -106,7 +111,33 @@ struct Registration {
     /// In registration order, which puts every parent before its children.
     classes: Vec<ClassEntry>,
     class_modules: HashMap<&'static str, &'static str>,
+    /// How a fork of a snapshot gets each extension's request state.
+    state_forks: HashMap<std::any::TypeId, crate::state::StateFork>,
+    /// How a fork copies an open resource, by the resource's kind.
+    resource_forks: HashMap<&'static str, ResourceFork>,
+    resource_releases: HashMap<&'static str, ResourceReleaseFn>,
+    /// Classes Phera ships written in PHP, by lowercase name: the file name
+    /// their code reports and its source.
+    bundled_classes: HashMap<String, BundledSource>,
 }
+
+/// PHP source that Phera ships for a class in its own namespace.
+#[derive(Clone, Copy)]
+pub struct BundledSource {
+    /// The file name the code reports (`__FILE__`, traces).
+    pub file: &'static str,
+    pub source: &'static str,
+}
+
+/// Copies the data of an open resource of one kind for a fork of a
+/// snapshot, or says why it cannot be copied (an open file, a socket).
+pub type ResourceFork =
+    fn(&dyn std::any::Any, &mut phera_value::Fork<'_>) -> Result<Box<dyn std::any::Any>, String>;
+
+pub type ResourceReleaseFn = for<'a> fn(
+    &'a mut dyn crate::Context,
+    i64,
+) -> crate::LocalFuture<'a, Result<(), crate::NativeError>>;
 
 #[derive(Clone)]
 struct NativeConstant {
@@ -143,6 +174,59 @@ impl Registry {
             self.entries = deferred.load().clone();
         }
         &mut self.entries
+    }
+
+    pub fn set_iconv_converter(&mut self, converter: crate::IconvConverter) {
+        self.entries_mut().iconv_converter = Some(converter);
+    }
+
+    pub fn iconv_converter(&self) -> Option<crate::IconvConverter> {
+        self.entries().iconv_converter
+    }
+
+    /// Says how a fork of a snapshot gets the request state of type `T`
+    /// (see [`crate::RequestState::fork`]). Every state type an extension
+    /// stores must be registered, or a snapshot that holds it is refused.
+    pub fn fork_state<T: 'static>(&mut self, fork: crate::state::StateFork) {
+        self.entries_mut()
+            .state_forks
+            .insert(std::any::TypeId::of::<T>(), fork);
+    }
+
+    /// Ships a class written in PHP: when a script uses `name` and no class
+    /// of that name is declared, the VM compiles `source` and runs it.
+    pub fn bundled_class(&mut self, name: &str, source: BundledSource) {
+        self.entries_mut()
+            .bundled_classes
+            .insert(name.to_ascii_lowercase(), source);
+    }
+
+    /// The PHP source of a bundled class, by lowercase name.
+    pub fn bundled_source(&self, lowercase_name: &str) -> Option<BundledSource> {
+        self.entries().bundled_classes.get(lowercase_name).copied()
+    }
+
+    /// Says how a fork copies an open resource of this kind (`"stream"`).
+    pub fn fork_resource(&mut self, kind: &'static str, fork: ResourceFork) {
+        self.entries_mut().resource_forks.insert(kind, fork);
+    }
+
+    /// How a fork copies a resource of this kind, if it can.
+    pub fn resource_fork(&self, kind: &str) -> Option<ResourceFork> {
+        self.entries().resource_forks.get(kind).copied()
+    }
+
+    pub fn register_resource_release(&mut self, kind: &'static str, release: ResourceReleaseFn) {
+        self.entries_mut().resource_releases.insert(kind, release);
+    }
+
+    pub fn resource_release(&self, kind: &str) -> Option<ResourceReleaseFn> {
+        self.entries().resource_releases.get(kind).copied()
+    }
+
+    /// The registered forks of request state, by type.
+    pub fn state_forks(&self) -> &HashMap<std::any::TypeId, crate::state::StateFork> {
+        &self.entries().state_forks
     }
 
     /// Runs the extension's registration against this registry.
@@ -233,7 +317,7 @@ impl Registry {
         let entries = self.entries_mut();
         let key = entry.name.to_ascii_lowercase();
         assert!(
-            !entries.functions.contains_key(&key),
+            !entries.function_ids.contains_key(&key),
             "function {}() is already registered",
             entry.name
         );
@@ -241,7 +325,9 @@ impl Registry {
             entries.function_modules.insert(entry.name, module);
         }
         entries.function_order.push(entry.name);
-        entries.functions.insert(key, entry);
+        let id = crate::NativeId(entries.functions.len() as u32);
+        entries.function_ids.insert(key, id);
+        entries.functions.push(FunctionEntry { id, ..entry });
     }
 
     /// Panics on a duplicate name, like [`Registry::function`].
@@ -367,8 +453,20 @@ impl Registry {
     }
 
     pub fn get_function(&self, name: &str) -> Option<&FunctionEntry> {
+        self.get_folded_function(&folded_name(name))
+    }
+
+    /// [`Registry::get_function`] for a name already in lowercase.
+    pub fn get_folded_function(&self, lowercase_name: &str) -> Option<&FunctionEntry> {
         let entries = self.entries();
-        entries.functions.get(&name.to_ascii_lowercase())
+        let id = entries.function_ids.get(lowercase_name)?;
+        entries.functions.get(id.0 as usize)
+    }
+
+    /// The function with this number.
+    #[inline]
+    pub fn function_at(&self, id: crate::NativeId) -> Option<&FunctionEntry> {
+        self.entries().functions.get(id.0 as usize)
     }
 
     pub fn get_constant(&self, name: &str) -> Option<&ConstantValue> {
@@ -416,9 +514,14 @@ impl Registry {
         handler: crate::SyncFn,
     ) {
         self.function(entry);
+        self.register_extra_named_handler(entry.name, handler);
+    }
+
+    /// Attach the extra-name handler independently of the function's frame policy.
+    pub fn register_extra_named_handler(&mut self, name: &'static str, handler: crate::SyncFn) {
         self.entries_mut()
             .extra_named_handlers
-            .insert(entry.name, handler);
+            .insert(name, handler);
     }
 
     pub fn extra_named_handler(&self, name: &str) -> Option<crate::SyncFn> {
@@ -481,6 +584,17 @@ impl Registry {
             .constants
             .iter()
             .map(|(name, constant)| (name.as_str(), &constant.value, constant.deprecated))
+    }
+}
+
+/// A PHP function or class name in lowercase, the form name lookups use
+/// (PHP's names are case-insensitive). Most names are written in
+/// lowercase already, and are given back as they are, without a copy.
+pub fn folded_name(name: &str) -> std::borrow::Cow<'_, str> {
+    if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        std::borrow::Cow::Owned(name.to_ascii_lowercase())
+    } else {
+        std::borrow::Cow::Borrowed(name)
     }
 }
 

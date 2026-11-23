@@ -180,12 +180,14 @@ impl Vm {
         self.finish_include_scope()?;
         self.abandon_native_view();
         if let Some(frame) = self.call_stack.pop() {
+            if frame.returns_to_native_loop() {
+                self.abandon_native_loop();
+            }
             self.closure_captures
                 .retain(|capture| capture.base < frame.base());
             self.abandon_calls_unconstructed(frame.start());
             self.mark_failed_constructor(&frame);
-            self.release_main_temporaries(&frame);
-            self.release_frame_registers(&frame);
+            self.registers.release_frame(frame.start(), frame.base());
         }
         self.restore_lexical_silence(None);
         Ok(())

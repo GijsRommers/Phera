@@ -50,6 +50,9 @@ impl Vm {
             {
                 return Ok(None);
             }
+            if self.fetch_plain_property(&place, destination, mode)? {
+                return Ok(None);
+            }
             return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
                 dst: destination,
                 path,
@@ -112,6 +115,18 @@ impl Vm {
             self.set(destination, value);
             return Ok(None);
         }
+        // An object that converts through PHP code (`__toString`) needs
+        // the async handler, as a `Binary` of it does.
+        if crate::object_operators::has_binary(&left, &right)
+            || (operator == BinaryOp::Concat && (left.is_object() || right.is_object()))
+        {
+            return Ok(Some(BatchExit::Instruction(Instruction::AssignOpPath {
+                op: operator,
+                dst: destination,
+                path,
+                src: source,
+            })));
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let value = ops::binary(
             operator,
@@ -156,6 +171,11 @@ impl Vm {
         };
         drop(diagnostics);
         let value = value?;
+        if let Some(limit) = crate::typed_increment::IntegerLimit::reached(&old, &value, mode)
+            && let Some(register) = register
+        {
+            self.check_increment_place(&place, register, &keys, limit)?;
+        }
         self.finish_indexed_update(&place, register, keys, value.clone())?;
         self.set(
             destination,
@@ -174,8 +194,7 @@ impl Vm {
         place: &AccessPath,
     ) -> Result<(Option<Reg>, InlineStack<PathKey>, Value), NativeError> {
         let register = self.base_register(place, Creation::Existing, Missing::Warn)?;
-        self.check_static_read(place, Missing::Warn)?;
-        if let phera_bytecode::PathBase::StaticProperty { class, name, .. } = place.base()? {
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
             self.validate_static_mutation(
                 class,
                 name,
@@ -234,14 +253,17 @@ impl Vm {
         {
             self.restart_subject_iterators(register);
         }
+        if place.has_properties()?
+            && !(self.classes.has_dimensions && self.prepare_dimension(&place)?)
+            && self.assign_plain_property(&place, &value)?.is_some()
+        {
+            return Ok(None);
+        }
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?
             || (self.may_cast_typed_reference(&value) && place.steps()?.next().is_some())
             || (matches!(value, phera_value::Value::Object(_))
-                && matches!(
-                    place.base()?,
-                    phera_bytecode::PathBase::StaticProperty { .. }
-                )
+                && crate::static_places::static_base(place.base()?).is_some()
                 && place.steps()?.next().is_none()
                 && Self::has_string_conversion(&value))
         {

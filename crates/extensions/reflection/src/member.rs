@@ -8,7 +8,7 @@ use phera_extension_api::{
     Param, ParamType, PropertyEntry, PropertyType, Registry, Value, Visibility, args,
 };
 
-use crate::class::{NAME_PROPERTY, reflect_class, target_class};
+use crate::class::{NAME_PROPERTY, load_target_class, loaded_target_class, reflect_class};
 use crate::{UNCLONEABLE, bind, engine, exception, load, receiver};
 
 pub(crate) const CLASS_PROPERTY: PropertyEntry =
@@ -35,7 +35,8 @@ pub(crate) fn register(registry: &mut Registry) {
                     "__construct",
                     const { &[CLASS_ARGUMENT, Param::new("constant", ParamType::String)] },
                     |c, o, a| construct(c, o, a, MemberKind::Constant),
-                ),
+                )
+                .with_ready(|c, o, a| construct_loaded(c, o, a, MemberKind::Constant)),
                 MethodEntry::public("getName", &[], |_, o, _| {
                     data(o, |m| Value::from(m.name.as_str()))
                 }),
@@ -99,33 +100,52 @@ pub(crate) fn construct(
         let argument = args
             .first()
             .ok_or_else(|| exception("Missing reflection class name"))?;
-        let name = target_class(argument)?;
-        let info = engine(context)?.reflect_class(&name).await?;
-        let object = match argument {
-            Value::Object(object) => Some(Rc::downgrade(object)),
-            _ => None,
-        };
-        let class = crate::class::ReflectedClass { info, object };
-        let name = args::string(&args, 1)
-            .map(|name| name.to_string_lossy())
-            .unwrap_or_default();
-        let member = crate::class_members::find(
-            crate::class_members::members(context, &class, kind)?,
-            &name,
-            kind,
-        )
-        .ok_or_else(|| {
-            let name = match kind {
-                MemberKind::Method => format!("Method {}::{name}()", class.info.name),
-                MemberKind::Property => format!("Property {}::${name}", class.info.name),
-                MemberKind::Constant => format!("Constant {}::{name}", class.info.name),
-            };
-            exception(format!("{name} does not exist"))
-        })?;
-        let name = member.name.clone();
-        this.set(ArrayKey::str("class"), Value::from(member.class.as_str()));
-        bind(this, Some(&name), member)
+        let info = load_target_class(context, argument).await?;
+        bind_member(context, this, &args, kind, info)
     })
+}
+
+/// Bind an already loaded member, as in `new ReflectionProperty($post, 'title')`.
+pub(crate) fn construct_loaded(
+    context: &mut dyn Context,
+    this: &Rc<Object>,
+    args: &[Value],
+    kind: MemberKind,
+) -> Option<NativeResult> {
+    let info = loaded_target_class(context, args.first()?)?;
+    Some(bind_member(context, this, args, kind, info))
+}
+
+fn bind_member(
+    context: &mut dyn Context,
+    this: &Object,
+    args: &[Value],
+    kind: MemberKind,
+    info: Rc<phera_extension_api::reflection::ClassInfo>,
+) -> NativeResult {
+    let object = match args.first() {
+        Some(Value::Object(object)) => Some(Rc::downgrade(object)),
+        _ => None,
+    };
+    let class = crate::class::ReflectedClass { info, object };
+    let name = args::string(args, 1)
+        .map(|name| String::from_utf8_lossy(name.as_bytes()))
+        .unwrap_or_default();
+    let member = crate::class_members::find(
+        crate::class_members::members(context, &class, kind)?,
+        &name,
+        kind,
+    )
+    .ok_or_else(|| {
+        let name = match kind {
+            MemberKind::Method => format!("Method {}::{name}()", class.info.name),
+            MemberKind::Property => format!("Property {}::${name}", class.info.name),
+            MemberKind::Constant => format!("Constant {}::{name}", class.info.name),
+        };
+        exception(format!("{name} does not exist"))
+    })?;
+    this.set(ArrayKey::str("class"), Value::from(member.class.as_str()));
+    bind(this, Some(&member.name), member.clone())
 }
 
 pub(crate) fn reflected(
@@ -182,8 +202,5 @@ pub(crate) fn accessible(
     context: &mut dyn Context,
     class: &str,
 ) -> Result<phera_extension_api::MethodPreparation, phera_extension_api::NativeError> {
-    context.deprecated(format!(
-        "Method {class}::setAccessible() is deprecated since 8.5, as it has no effect since PHP 8.1"
-    ));
-    Ok(phera_extension_api::MethodPreparation::Default)
+    phera_extension_api::deprecated_method(context, &format!("{class}::setAccessible"))
 }

@@ -39,6 +39,12 @@ impl Compiler<'_> {
             self.emit(Instruction::Write { place, source }, line);
             return Ok(source);
         }
+        if matches!(target.kind, ast::ExpressionKind::Index { .. }) {
+            return self.compile_index_assignment(target, value, line);
+        }
+        if let ast::ExpressionKind::Variable(ast::Variable::Named(name)) = &target.kind {
+            self.declare_file_symbol(name);
+        }
         let references = super::places::contains_reference(target);
         let src = if references && (writable(value) || crate::helpers::is_this(value)) {
             let place = self.reference_source(value, line)?;
@@ -56,6 +62,35 @@ impl Compiler<'_> {
         };
         self.assign(target, src, line)?;
         Ok(src)
+    }
+
+    /// Index expressions run before the right-hand side. A compiled local
+    /// key is looked up by the write, after that side has run.
+    fn compile_index_assignment(
+        &mut self,
+        target: &ast::Expression,
+        value: &ast::Expression,
+        line: usize,
+    ) -> Result<Reg, CompileError> {
+        let mut indexes = Vec::new();
+        let place = self.assignment_place(target, &mut indexes)?;
+        let source = self.compile_expression(value)?;
+        self.read_deferred_indexes(&indexes);
+        self.emit(Instruction::Write { place, source }, line);
+        Ok(source)
+    }
+
+    fn read_deferred_indexes(&mut self, indexes: &[super::paths::DeferredIndex]) {
+        for index in indexes {
+            self.emit(
+                Instruction::Read {
+                    destination: index.destination,
+                    place: index.source.clone(),
+                    mode: phera_bytecode::FetchMode::Read,
+                },
+                index.line,
+            );
+        }
     }
 
     /// Bind references while retaining the original target evaluation order.
@@ -139,8 +174,10 @@ impl Compiler<'_> {
         line: usize,
     ) -> Result<Reg, CompileError> {
         if *operator != ast::BinaryOperator::NullCoalesce {
-            let place = self.place(target)?;
+            let mut indexes = Vec::new();
+            let place = self.assignment_place(target, &mut indexes)?;
             let source = self.compile_expression(value)?;
+            self.read_deferred_indexes(&indexes);
             let dst = self.allocate_register()?;
             let operator =
                 binary(*operator).ok_or_else(|| self.error("Operator not supported yet", line))?;
@@ -165,7 +202,9 @@ impl Compiler<'_> {
         value: &ast::Expression,
         line: usize,
     ) -> Result<Reg, CompileError> {
-        let place = self.place(target)?;
+        let mut indexes = Vec::new();
+        let place = self.assignment_place(target, &mut indexes)?;
+        self.read_deferred_indexes(&indexes);
         let lhs = self.allocate_register()?;
         self.emit(
             Instruction::Read {
@@ -185,6 +224,7 @@ impl Compiler<'_> {
         let end = self.emit(Instruction::Jump(Target(0)), line);
         self.patch(jump, self.position());
         let rhs = self.compile_expression(value)?;
+        self.read_deferred_indexes(&indexes);
         self.emit(Instruction::Write { place, source: rhs }, line);
         self.emit(
             Instruction::Move {

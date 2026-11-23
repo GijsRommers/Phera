@@ -83,8 +83,11 @@ impl Vm {
         let function = crate::code_table::body(&unit, self.code.local(*reference));
         while let Some(instruction) = function.instructions.get(*position).copied() {
             *position += 1;
-            if crate::fast::scalar_step::<false>(&instruction, slots, position)
-                == crate::fast::ScalarStep::Complete
+            if crate::fast::scalar_step::<false, [Option<phera_value::Value>]>(
+                &instruction,
+                slots,
+                position,
+            ) == crate::fast::ScalarStep::Complete
             {
                 continue;
             }
@@ -121,6 +124,15 @@ impl Vm {
                         _ => name.clone(),
                     };
                     (dst, Value::from(name))
+                }
+                Instruction::FetchNamedClassConstant { dst, class, name } => {
+                    let lookup = crate::initializer_tasks::ConstantLookup {
+                        class: unit.symbols[class.index()].written.clone(),
+                        name: unit.names[name.index()].clone(),
+                        spelling: None,
+                        access: crate::class_constants::ConstantAccess::Read,
+                    };
+                    return Ok(InitializerStep::Read(lookup, dst));
                 }
                 Instruction::FetchClassConstant { dst, class, name } => {
                     let name = &unit.names[name.index()];
@@ -280,8 +292,13 @@ impl Vm {
                     let key = ArrayKey::from_value(&slot(slots, index))?;
                     match value {
                         Value::Array(array) => array.get(&key).cloned().unwrap_or_default(),
+                        Value::InternedStr(string) => self.read_string_offset(
+                            string.as_bytes(),
+                            key,
+                            crate::access_mode::Missing::Warn,
+                        )?,
                         Value::String(string) => self.read_string_offset(
-                            &string,
+                            string.as_bytes(),
                             key,
                             crate::access_mode::Missing::Warn,
                         )?,
@@ -333,6 +350,7 @@ fn make_lookup(
     name: String,
 ) -> Result<crate::initializer_tasks::ConstantLookup, NativeError> {
     let class = match value {
+        Value::InternedStr(name) => name.to_string_lossy(),
         Value::String(name) => name.to_string_lossy(),
         Value::Object(object) => object.class.name().to_owned(),
         _ => {

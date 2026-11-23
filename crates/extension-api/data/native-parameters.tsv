@@ -847,6 +847,10 @@ exception::getprevious	Zend/zend_exceptions.stub.php:61
 exception::gettrace	Zend/zend_exceptions.stub.php:59
 exception::gettraceasstring	Zend/zend_exceptions.stub.php:63
 exec	ext/standard/basic_functions.stub.php:2687	command	r--		-	output	o-&	null	n	result_code	o-&	null	n
+exif_imagetype	ext/exif/exif.stub.php:30	filename	r--		-
+exif_read_data	ext/exif/exif.stub.php:19	file	r--		-	required_sections	o--	null	n	as_arrays	o--	false	f	read_thumbnail	o--	false	f
+exif_tagname	ext/exif/exif.stub.php:12	index	r--		-
+exif_thumbnail	ext/exif/exif.stub.php:28	file	r--		-	width	o-&	null	n	height	o-&	null	n	image_type	o-&	null	n
 exit	Zend/zend_builtin_functions.stub.php:13	status	o--	0	i0
 exp	ext/standard/basic_functions.stub.php:3187	num	r--		-
 explode	ext/standard/basic_functions.stub.php:2329	separator	r--		-	string	r--		-	limit	o--	PHP_INT_MAX	i9223372036854775807
@@ -903,6 +907,15 @@ filteriterator::__construct	ext/spl/spl_iterators.stub.php:153	iterator	r--		-
 filteriterator::accept	ext/spl/spl_iterators.stub.php:151
 filteriterator::next	ext/spl/spl_iterators.stub.php:159
 filteriterator::rewind	ext/spl/spl_iterators.stub.php:156
+finfo::__construct	ext/fileinfo/fileinfo.stub.php:69	flags	o--	FILEINFO_NONE	i0	magic_database	o--	null	n
+finfo::buffer	ext/fileinfo/fileinfo.stub.php:83	string	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo::file	ext/fileinfo/fileinfo.stub.php:76	filename	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo::set_flags	ext/fileinfo/fileinfo.stub.php:89	flags	r--		-
+finfo_buffer	ext/fileinfo/fileinfo.stub.php:110	finfo	r--		-	string	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo_close	ext/fileinfo/fileinfo.stub.php:96	finfo	r--		-
+finfo_file	ext/fileinfo/fileinfo.stub.php:104	finfo	r--		-	filename	r--		-	flags	o--	FILEINFO_NONE	i0	context	o--	null	n
+finfo_open	ext/fileinfo/fileinfo.stub.php:93	flags	o--	FILEINFO_NONE	i0	magic_database	o--	null	n
+finfo_set_flags	ext/fileinfo/fileinfo.stub.php:98	finfo	r--		-	flags	r--		-
 floatval	ext/standard/basic_functions.stub.php:3592	value	r--		-
 flock	ext/standard/basic_functions.stub.php:2717	stream	r--		-	operation	r--		-	would_block	o-&	null	n
 floor	ext/standard/basic_functions.stub.php:3107	num	r--		-
@@ -937,6 +950,7 @@ gc_enable	Zend/zend_builtin_functions.stub.php:211
 gc_enabled	Zend/zend_builtin_functions.stub.php:209
 gc_mem_caches	Zend/zend_builtin_functions.stub.php:205
 gc_status	Zend/zend_builtin_functions.stub.php:219
+gd_info	ext/gd/gd.stub.php:478
 generator::__debuginfo	Zend/zend_generators.stub.php:27
 generator::current	Zend/zend_generators.stub.php:15
 generator::getreturn	Zend/zend_generators.stub.php:25
@@ -1146,6 +1160,113 @@ idn_to_utf8	ext/intl/php_intl.stub.php:457	domain	r--		-	flags	o--	IDNA_DEFAULT	
 ignore_user_abort	ext/standard/basic_functions.stub.php:2023	enable	o--	null	n
 image_type_to_extension	ext/standard/basic_functions.stub.php:3020	image_type	r--		-	include_dot	o--	true	t
 image_type_to_mime_type	ext/standard/basic_functions.stub.php:3014	image_type	r--		-
+imageaffine	ext/gd/gd.stub.php:762	image	r--		-	affine	r--		-	clip	o--	null	n
+imageaffinematrixconcat	ext/gd/gd.stub.php:775	matrix1	r--		-	matrix2	r--		-
+imageaffinematrixget	ext/gd/gd.stub.php:769	type	r--		-	options	r--		-
+imagealphablending	ext/gd/gd.stub.php:501	image	r--		-	enable	r--		-
+imageantialias	ext/gd/gd.stub.php:750	image	r--		-	enable	r--		-
+imagearc	ext/gd/gd.stub.php:665	image	r--		-	center_x	r--		-	center_y	r--		-	width	r--		-	height	r--		-	start_angle	r--		-	end_angle	r--		-	color	r--		-
+imageavif	ext/gd/gd.stub.php:595	image	r--		-	file	o--	null	n	quality	o--	-1	i-1	speed	o--	-1	i-1
+imagebmp	ext/gd/gd.stub.php:624	image	r--		-	file	o--	null	n	compressed	o--	true	t
+imagechar	ext/gd/gd.stub.php:689	image	r--		-	font	r--		-	x	r--		-	y	r--		-	char	r--		-	color	r--		-
+imagecharup	ext/gd/gd.stub.php:691	image	r--		-	font	r--		-	x	r--		-	y	r--		-	char	r--		-	color	r--		-
+imagecolorallocate	ext/gd/gd.stub.php:629	image	r--		-	red	r--		-	green	r--		-	blue	r--		-
+imagecolorallocatealpha	ext/gd/gd.stub.php:507	image	r--		-	red	r--		-	green	r--		-	blue	r--		-	alpha	r--		-
+imagecolorat	ext/gd/gd.stub.php:633	image	r--		-	x	r--		-	y	r--		-
+imagecolorclosest	ext/gd/gd.stub.php:635	image	r--		-	red	r--		-	green	r--		-	blue	r--		-
+imagecolorclosestalpha	ext/gd/gd.stub.php:511	image	r--		-	red	r--		-	green	r--		-	blue	r--		-	alpha	r--		-
+imagecolorclosesthwb	ext/gd/gd.stub.php:637	image	r--		-	red	r--		-	green	r--		-	blue	r--		-
+imagecolordeallocate	ext/gd/gd.stub.php:639	image	r--		-	color	r--		-
+imagecolorexact	ext/gd/gd.stub.php:643	image	r--		-	red	r--		-	green	r--		-	blue	r--		-
+imagecolorexactalpha	ext/gd/gd.stub.php:513	image	r--		-	red	r--		-	green	r--		-	blue	r--		-	alpha	r--		-
+imagecolormatch	ext/gd/gd.stub.php:493	image1	r--		-	image2	r--		-
+imagecolorresolve	ext/gd/gd.stub.php:641	image	r--		-	red	r--		-	green	r--		-	blue	r--		-
+imagecolorresolvealpha	ext/gd/gd.stub.php:509	image	r--		-	red	r--		-	green	r--		-	blue	r--		-	alpha	r--		-
+imagecolorset	ext/gd/gd.stub.php:645	image	r--		-	color	r--		-	red	r--		-	green	r--		-	blue	r--		-	alpha	o--	0	i0
+imagecolorsforindex	ext/gd/gd.stub.php:651	image	r--		-	color	r--		-
+imagecolorstotal	ext/gd/gd.stub.php:673	image	r--		-
+imagecolortransparent	ext/gd/gd.stub.php:675	image	r--		-	color	o--	null	n
+imageconvolution	ext/gd/gd.stub.php:746	image	r--		-	matrix	r--		-	divisor	r--		-	offset	r--		-
+imagecopy	ext/gd/gd.stub.php:697	dst_image	r--		-	src_image	r--		-	dst_x	r--		-	dst_y	r--		-	src_x	r--		-	src_y	r--		-	src_width	r--		-	src_height	r--		-
+imagecopymerge	ext/gd/gd.stub.php:699	dst_image	r--		-	src_image	r--		-	dst_x	r--		-	dst_y	r--		-	src_x	r--		-	src_y	r--		-	src_width	r--		-	src_height	r--		-	pct	r--		-
+imagecopymergegray	ext/gd/gd.stub.php:701	dst_image	r--		-	src_image	r--		-	dst_x	r--		-	dst_y	r--		-	src_x	r--		-	src_y	r--		-	src_width	r--		-	src_height	r--		-	pct	r--		-
+imagecopyresampled	ext/gd/gd.stub.php:515	dst_image	r--		-	src_image	r--		-	dst_x	r--		-	dst_y	r--		-	src_x	r--		-	src_y	r--		-	dst_width	r--		-	dst_height	r--		-	src_width	r--		-	src_height	r--		-
+imagecopyresized	ext/gd/gd.stub.php:703	dst_image	r--		-	src_image	r--		-	dst_x	r--		-	dst_y	r--		-	src_x	r--		-	src_y	r--		-	dst_width	r--		-	dst_height	r--		-	src_width	r--		-	src_height	r--		-
+imagecreate	ext/gd/gd.stub.php:535	width	r--		-	height	r--		-
+imagecreatefromavif	ext/gd/gd.stub.php:545	filename	r--		-
+imagecreatefrombmp	ext/gd/gd.stub.php:587	filename	r--		-
+imagecreatefromgd	ext/gd/gd.stub.php:578	filename	r--		-
+imagecreatefromgd2	ext/gd/gd.stub.php:581	filename	r--		-
+imagecreatefromgd2part	ext/gd/gd.stub.php:584	filename	r--		-	x	r--		-	y	r--		-	width	r--		-	height	r--		-
+imagecreatefromgif	ext/gd/gd.stub.php:549	filename	r--		-
+imagecreatefromjpeg	ext/gd/gd.stub.php:553	filename	r--		-
+imagecreatefrompng	ext/gd/gd.stub.php:558	filename	r--		-
+imagecreatefromstring	ext/gd/gd.stub.php:541	data	r--		-
+imagecreatefromtga	ext/gd/gd.stub.php:589	filename	r--		-
+imagecreatefromwbmp	ext/gd/gd.stub.php:575	filename	r--		-
+imagecreatefromwebp	ext/gd/gd.stub.php:563	filename	r--		-
+imagecreatefromxbm	ext/gd/gd.stub.php:567	filename	r--		-
+imagecreatefromxpm	ext/gd/gd.stub.php:571	filename	r--		-
+imagecreatetruecolor	ext/gd/gd.stub.php:485	width	r--		-	height	r--		-
+imagecrop	ext/gd/gd.stub.php:753	image	r--		-	rectangle	r--		-
+imagecropauto	ext/gd/gd.stub.php:756	image	r--		-	mode	o--	IMG_CROP_DEFAULT	i0	threshold	o--	0.5	d0.5	color	o--	-1	i-1
+imagedashedline	ext/gd/gd.stub.php:659	image	r--		-	x1	r--		-	y1	r--		-	x2	r--		-	y2	r--		-	color	r--		-
+imagedestroy	ext/gd/gd.stub.php:627	image	r--		-
+imageellipse	ext/gd/gd.stub.php:667	image	r--		-	center_x	r--		-	center_y	r--		-	width	r--		-	height	r--		-	color	r--		-
+imagefill	ext/gd/gd.stub.php:671	image	r--		-	x	r--		-	y	r--		-	color	r--		-
+imagefilledarc	ext/gd/gd.stub.php:499	image	r--		-	center_x	r--		-	center_y	r--		-	width	r--		-	height	r--		-	start_angle	r--		-	end_angle	r--		-	color	r--		-	style	r--		-
+imagefilledellipse	ext/gd/gd.stub.php:497	image	r--		-	center_x	r--		-	center_y	r--		-	width	r--		-	height	r--		-	color	r--		-
+imagefilledpolygon	ext/gd/gd.stub.php:683	image	r--		-	points	r--		-	num_points_or_color	r--		-	color	o--	null	n
+imagefilledrectangle	ext/gd/gd.stub.php:663	image	r--		-	x1	r--		-	y1	r--		-	x2	r--		-	y2	r--		-	color	r--		-
+imagefilltoborder	ext/gd/gd.stub.php:669	image	r--		-	x	r--		-	y	r--		-	border_color	r--		-	color	r--		-
+imagefilter	ext/gd/gd.stub.php:744	image	r--		-	filter	r--		-	args	ov-		-
+imageflip	ext/gd/gd.stub.php:748	image	r--		-	mode	r--		-
+imagefontheight	ext/gd/gd.stub.php:687	font	r--		-
+imagefontwidth	ext/gd/gd.stub.php:685	font	r--		-
+imageftbbox	ext/gd/gd.stub.php:722	size	r--		-	angle	r--		-	font_filename	r--		-	string	r--		-	options	o--	[]	a
+imagefttext	ext/gd/gd.stub.php:728	image	r--		-	size	r--		-	angle	r--		-	x	r--		-	y	r--		-	color	r--		-	font_filename	r--		-	text	r--		-	options	o--	[]	a
+imagegammacorrect	ext/gd/gd.stub.php:653	image	r--		-	input_gamma	r--		-	output_gamma	r--		-
+imagegd	ext/gd/gd.stub.php:619	image	r--		-	file	o--	null	n
+imagegd2	ext/gd/gd.stub.php:621	image	r--		-	file	o--	null	n	chunk_size	o--	128	i128	mode	o--	IMG_GD2_RAW	i1
+imagegetclip	ext/gd/gd.stub.php:715	image	r--		-
+imagegetinterpolation	ext/gd/gd.stub.php:777	image	r--		-
+imagegif	ext/gd/gd.stub.php:599	image	r--		-	file	o--	null	n
+imagegrabscreen	ext/gd/gd.stub.php:523
+imagegrabwindow	ext/gd/gd.stub.php:520	handle	r--		-	client_area	o--	false	f
+imageinterlace	ext/gd/gd.stub.php:677	image	r--		-	enable	o--	null	n
+imageistruecolor	ext/gd/gd.stub.php:487	image	r--		-
+imagejpeg	ext/gd/gd.stub.php:613	image	r--		-	file	o--	null	n	quality	o--	-1	i-1
+imagelayereffect	ext/gd/gd.stub.php:505	image	r--		-	effect	r--		-
+imageline	ext/gd/gd.stub.php:657	image	r--		-	x1	r--		-	y1	r--		-	x2	r--		-	y2	r--		-	color	r--		-
+imageloadfont	ext/gd/gd.stub.php:480	filename	r--		-
+imageopenpolygon	ext/gd/gd.stub.php:681	image	r--		-	points	r--		-	num_points_or_color	r--		-	color	o--	null	n
+imagepalettecopy	ext/gd/gd.stub.php:631	dst	r--		-	src	r--		-
+imagepalettetotruecolor	ext/gd/gd.stub.php:491	image	r--		-
+imagepng	ext/gd/gd.stub.php:603	image	r--		-	file	o--	null	n	quality	o--	-1	i-1	filters	o--	-1	i-1
+imagepolygon	ext/gd/gd.stub.php:679	image	r--		-	points	r--		-	num_points_or_color	r--		-	color	o--	null	n
+imagerectangle	ext/gd/gd.stub.php:661	image	r--		-	x1	r--		-	y1	r--		-	x2	r--		-	y2	r--		-	color	r--		-
+imageresolution	ext/gd/gd.stub.php:785	image	r--		-	resolution_x	o--	null	n	resolution_y	o--	null	n
+imagerotate	ext/gd/gd.stub.php:528	image	r--		-	angle	r--		-	background_color	r--		-
+imagesavealpha	ext/gd/gd.stub.php:503	image	r--		-	enable	r--		-
+imagescale	ext/gd/gd.stub.php:759	image	r--		-	width	r--		-	height	o--	-1	i-1	mode	o--	IMG_BILINEAR_FIXED	i3
+imagesetbrush	ext/gd/gd.stub.php:532	image	r--		-	brush	r--		-
+imagesetclip	ext/gd/gd.stub.php:709	image	r--		-	x1	r--		-	y1	r--		-	x2	r--		-	y2	r--		-
+imagesetinterpolation	ext/gd/gd.stub.php:779	image	r--		-	method	o--	IMG_BILINEAR_FIXED	i3
+imagesetpixel	ext/gd/gd.stub.php:655	image	r--		-	x	r--		-	y	r--		-	color	r--		-
+imagesetstyle	ext/gd/gd.stub.php:482	image	r--		-	style	r--		-
+imagesetthickness	ext/gd/gd.stub.php:495	image	r--		-	thickness	r--		-
+imagesettile	ext/gd/gd.stub.php:530	image	r--		-	tile	r--		-
+imagestring	ext/gd/gd.stub.php:693	image	r--		-	font	r--		-	x	r--		-	y	r--		-	string	r--		-	color	r--		-
+imagestringup	ext/gd/gd.stub.php:695	image	r--		-	font	r--		-	x	r--		-	y	r--		-	string	r--		-	color	r--		-
+imagesx	ext/gd/gd.stub.php:705	image	r--		-
+imagesy	ext/gd/gd.stub.php:707	image	r--		-
+imagetruecolortopalette	ext/gd/gd.stub.php:489	image	r--		-	dither	r--		-	num_colors	r--		-
+imagettfbbox	ext/gd/gd.stub.php:734	size	r--		-	angle	r--		-	font_filename	r--		-	string	r--		-	options	o--	[]	a
+imagettftext	ext/gd/gd.stub.php:740	image	r--		-	size	r--		-	angle	r--		-	x	r--		-	y	r--		-	color	r--		-	font_filename	r--		-	text	r--		-	options	o--	[]	a
+imagetypes	ext/gd/gd.stub.php:538
+imagewbmp	ext/gd/gd.stub.php:617	image	r--		-	file	o--	null	n	foreground_color	o--	null	n
+imagewebp	ext/gd/gd.stub.php:608	image	r--		-	file	o--	null	n	quality	o--	-1	i-1
+imagexbm	ext/gd/gd.stub.php:591	image	r--		-	filename	r--		-	foreground_color	o--	null	n
 implode	ext/standard/basic_functions.stub.php:2336	separator	r--		-	array	o--	null	n
 in_array	ext/standard/basic_functions.stub.php:1618	needle	r--		-	haystack	r--		-	strict	o--	false	f
 inet_ntop	ext/standard/basic_functions.stub.php:2211	ip	r--		-
@@ -1673,6 +1794,7 @@ mhash_get_block_size	ext/hash/hash.stub.php:74	algo	r--		-
 mhash_get_hash_name	ext/hash/hash.stub.php:80	algo	r--		-
 mhash_keygen_s2k	ext/hash/hash.stub.php:86	algo	r--		-	password	r--		-	salt	r--		-	length	r--		-
 microtime	ext/standard/basic_functions.stub.php:3266	as_float	o--	false	f
+mime_content_type	ext/fileinfo/fileinfo.stub.php:116	filename	r--		-
 min	ext/standard/basic_functions.stub.php:1601	value	r--		-	values	ov-		-
 mkdir	ext/standard/basic_functions.stub.php:2818	directory	r--		-	permissions	o--	0777	i511	recursive	o--	false	f	context	o--	null	n
 mktime	ext/date/php_date.stub.php:103	hour	r--		-	minute	o--	null	n	second	o--	null	n	month	o--	null	n	day	o--	null	n	year	o--	null	n
@@ -3202,13 +3324,78 @@ shell_exec	ext/standard/basic_functions.stub.php:2705	command	r--		-
 show_source	ext/standard/basic_functions.stub.php:1986	filename	r--		-	return	o--	false	f
 shuffle	ext/standard/basic_functions.stub.php:1644	array	r-&		-
 similar_text	ext/standard/basic_functions.stub.php:2486	string1	r--		-	string2	r--		-	percent	o-&	null	n
+simplexml_import_dom	ext/simplexml/simplexml.stub.php:9	node	r--		-	class_name	o--	SimpleXMLElement::class	s53696d706c65584d4c456c656d656e74
+simplexml_load_file	ext/simplexml/simplexml.stub.php:5	filename	r--		-	class_name	o--	SimpleXMLElement::class	s53696d706c65584d4c456c656d656e74	options	o--	0	i0	namespace_or_prefix	o--	""	s	is_prefix	o--	false	f
+simplexml_load_string	ext/simplexml/simplexml.stub.php:7	data	r--		-	class_name	o--	SimpleXMLElement::class	s53696d706c65584d4c456c656d656e74	options	o--	0	i0	namespace_or_prefix	o--	""	s	is_prefix	o--	false	f
+simplexmlelement::__construct	ext/simplexml/simplexml.stub.php:41	data	r--		-	options	o--	0	i0	dataIsURL	o--	false	f	namespaceOrPrefix	o--	""	s	isPrefix	o--	false	f
+simplexmlelement::__debuginfo	ext/simplexml/simplexml.stub.php:54
+simplexmlelement::__tostring	ext/simplexml/simplexml.stub.php:52
+simplexmlelement::addattribute	ext/simplexml/simplexml.stub.php:47	qualifiedName	r--		-	value	r--		-	namespace	o--	null	n
+simplexmlelement::addchild	ext/simplexml/simplexml.stub.php:44	qualifiedName	r--		-	value	o--	null	n	namespace	o--	null	n
+simplexmlelement::asxml	ext/simplexml/simplexml.stub.php:21	filename	o--	null	n
+simplexmlelement::attributes	ext/simplexml/simplexml.stub.php:39	namespaceOrPrefix	o--	null	n	isPrefix	o--	false	f
+simplexmlelement::children	ext/simplexml/simplexml.stub.php:36	namespaceOrPrefix	o--	null	n	isPrefix	o--	false	f
+simplexmlelement::count	ext/simplexml/simplexml.stub.php:57
+simplexmlelement::current	ext/simplexml/simplexml.stub.php:66
+simplexmlelement::getchildren	ext/simplexml/simplexml.stub.php:78
+simplexmlelement::getdocnamespaces	ext/simplexml/simplexml.stub.php:33	recursive	o--	false	f	fromRoot	o--	true	t
+simplexmlelement::getname	ext/simplexml/simplexml.stub.php:50
+simplexmlelement::getnamespaces	ext/simplexml/simplexml.stub.php:30	recursive	o--	false	f
+simplexmlelement::haschildren	ext/simplexml/simplexml.stub.php:75
+simplexmlelement::key	ext/simplexml/simplexml.stub.php:69
+simplexmlelement::next	ext/simplexml/simplexml.stub.php:72
+simplexmlelement::registerxpathnamespace	ext/simplexml/simplexml.stub.php:18	prefix	r--		-	namespace	r--		-
+simplexmlelement::rewind	ext/simplexml/simplexml.stub.php:60
+simplexmlelement::savexml	ext/simplexml/simplexml.stub.php:27	filename	o--	null	n
+simplexmlelement::valid	ext/simplexml/simplexml.stub.php:63
+simplexmlelement::xpath	ext/simplexml/simplexml.stub.php:15	expression	r--		-
 sin	ext/standard/basic_functions.stub.php:3124	num	r--		-
 sinh	ext/standard/basic_functions.stub.php:3148	num	r--		-
 sizeof	ext/standard/basic_functions.stub.php:1562	value	r--		-	mode	o--	COUNT_NORMAL	i0
 sleep	ext/standard/basic_functions.stub.php:1942	seconds	r--		-
+socket_accept	ext/sockets/sockets.stub.php:2072	socket	r--		-
+socket_addrinfo_bind	ext/sockets/sockets.stub.php:2178	address	r--		-
+socket_addrinfo_connect	ext/sockets/sockets.stub.php:2176	address	r--		-
+socket_addrinfo_explain	ext/sockets/sockets.stub.php:2184	address	r--		-
+socket_addrinfo_lookup	ext/sockets/sockets.stub.php:2174	host	r--		-	service	o--	null	n	hints	o--	[]	a
+socket_atmark	ext/sockets/sockets.stub.php:2151	socket	r--		-
+socket_bind	ext/sockets/sockets.stub.php:2104	socket	r--		-	address	r--		-	port	o--	0	i0
+socket_clear_error	ext/sockets/sockets.stub.php:2156	socket	o--	null	n
+socket_close	ext/sockets/sockets.stub.php:2080	socket	r--		-
+socket_cmsg_space	ext/sockets/sockets.stub.php:2168	level	r--		-	type	r--		-	num	o--	0	i0
+socket_connect	ext/sockets/sockets.stub.php:2100	socket	r--		-	address	r--		-	port	o--	null	n
+socket_create	ext/sockets/sockets.stub.php:2098	domain	r--		-	type	r--		-	protocol	r--		-
+socket_create_listen	ext/sockets/sockets.stub.php:2070	port	r--		-	backlog	o--	SOMAXCONN	i128
+socket_create_pair	ext/sockets/sockets.stub.php:2143	domain	r--		-	type	r--		-	protocol	r--		-	pair	r-&		-
+socket_export_stream	ext/sockets/sockets.stub.php:2162	socket	r--		-
+socket_get_option	ext/sockets/sockets.stub.php:2124	socket	r--		-	level	r--		-	option	r--		-
 socket_get_status	ext/standard/basic_functions.stub.php:3521	stream	r--		-
+socket_getopt	ext/sockets/sockets.stub.php:2130	socket	r--		-	level	r--		-	option	r--		-
+socket_getpeername	ext/sockets/sockets.stub.php:2096	socket	r--		-	address	r-&		-	port	o-&	null	n
+socket_getsockname	ext/sockets/sockets.stub.php:2090	socket	r--		-	address	r-&		-	port	o-&	null	n
+socket_import_stream	ext/sockets/sockets.stub.php:2159	stream	r--		-
+socket_last_error	ext/sockets/sockets.stub.php:2154	socket	o--	null	n
+socket_listen	ext/sockets/sockets.stub.php:2078	socket	r--		-	backlog	o--	0	i0
+socket_read	ext/sockets/sockets.stub.php:2084	socket	r--		-	length	r--		-	mode	o--	PHP_BINARY_READ	i2
+socket_recv	ext/sockets/sockets.stub.php:2107	socket	r--		-	data	r-&		-	length	r--		-	flags	r--		-
+socket_recvfrom	ext/sockets/sockets.stub.php:2116	socket	r--		-	data	r-&		-	length	r--		-	flags	r--		-	address	r-&		-	port	o-&	null	n
+socket_recvmsg	ext/sockets/sockets.stub.php:2166	socket	r--		-	message	r-&		-	flags	o--	0	i0
+socket_select	ext/sockets/sockets.stub.php:2068	read	r-&		-	write	r-&		-	except	r-&		-	seconds	r--		-	microseconds	o--	0	i0
+socket_send	ext/sockets/sockets.stub.php:2109	socket	r--		-	data	r--		-	length	r--		-	flags	r--		-
+socket_sendmsg	ext/sockets/sockets.stub.php:2164	socket	r--		-	message	r--		-	flags	o--	0	i0
+socket_sendto	ext/sockets/sockets.stub.php:2118	socket	r--		-	data	r--		-	length	r--		-	flags	r--		-	address	r--		-	port	o--	null	n
+socket_set_block	ext/sockets/sockets.stub.php:2076	socket	r--		-
 socket_set_blocking	ext/standard/basic_functions.stub.php:3508	stream	r--		-	enable	r--		-
+socket_set_nonblock	ext/sockets/sockets.stub.php:2074	socket	r--		-
+socket_set_option	ext/sockets/sockets.stub.php:2133	socket	r--		-	level	r--		-	option	r--		-	value	r--		-
 socket_set_timeout	ext/standard/basic_functions.stub.php:3567	stream	r--		-	seconds	r--		-	microseconds	o--	0	i0
+socket_setopt	ext/sockets/sockets.stub.php:2139	socket	r--		-	level	r--		-	option	r--		-	value	r--		-
+socket_shutdown	ext/sockets/sockets.stub.php:2147	socket	r--		-	mode	o--	2	i2
+socket_strerror	ext/sockets/sockets.stub.php:2102	error_code	r--		-
+socket_write	ext/sockets/sockets.stub.php:2082	socket	r--		-	data	r--		-	length	o--	null	n
+socket_wsaprotocol_info_export	ext/sockets/sockets.stub.php:2187	socket	r--		-	process_id	r--		-
+socket_wsaprotocol_info_import	ext/sockets/sockets.stub.php:2189	info_id	r--		-
+socket_wsaprotocol_info_release	ext/sockets/sockets.stub.php:2191	info_id	r--		-
 sodium_add	ext/sodium/libsodium.stub.php:775	string1	r-&		-	string2	r--		-
 sodium_base642bin	ext/sodium/libsodium.stub.php:796	string	r--		-	id	r--		-	ignore	o--	""	s
 sodium_bin2base64	ext/sodium/libsodium.stub.php:794	string	r--		-	id	r--		-
@@ -3757,6 +3944,143 @@ weakreference::__construct	Zend/zend_weakrefs.stub.php:11
 weakreference::create	Zend/zend_weakrefs.stub.php:13	object	r--		-
 weakreference::get	Zend/zend_weakrefs.stub.php:15
 wordwrap	ext/standard/basic_functions.stub.php:2322	string	r--		-	width	o--	75	i75	break	o--	"\n"	s0a	cut_long_words	o--	false	f
+xml_error_string	ext/xml/xml.stub.php:184	error_code	r--		-
+xml_get_current_byte_index	ext/xml/xml.stub.php:190	parser	r--		-
+xml_get_current_column_number	ext/xml/xml.stub.php:188	parser	r--		-
+xml_get_current_line_number	ext/xml/xml.stub.php:186	parser	r--		-
+xml_get_error_code	ext/xml/xml.stub.php:181	parser	r--		-
+xml_parse	ext/xml/xml.stub.php:173	parser	r--		-	data	r--		-	is_final	o--	false	f
+xml_parse_into_struct	ext/xml/xml.stub.php:179	parser	r--		-	data	r--		-	values	r-&		-	index	o-&	null	n
+xml_parser_create	ext/xml/xml.stub.php:148	encoding	o--	null	n
+xml_parser_create_ns	ext/xml/xml.stub.php:150	encoding	o--	null	n	separator	o--	":"	s3a
+xml_parser_free	ext/xml/xml.stub.php:193	parser	r--		-
+xml_parser_get_option	ext/xml/xml.stub.php:199	parser	r--		-	option	r--		-
+xml_parser_set_option	ext/xml/xml.stub.php:196	parser	r--		-	option	r--		-	value	r--		-
+xml_set_character_data_handler	ext/xml/xml.stub.php:157	parser	r--		-	handler	r--		-
+xml_set_default_handler	ext/xml/xml.stub.php:161	parser	r--		-	handler	r--		-
+xml_set_element_handler	ext/xml/xml.stub.php:155	parser	r--		-	start_handler	r--		-	end_handler	r--		-
+xml_set_end_namespace_decl_handler	ext/xml/xml.stub.php:171	parser	r--		-	handler	r--		-
+xml_set_external_entity_ref_handler	ext/xml/xml.stub.php:167	parser	r--		-	handler	r--		-
+xml_set_notation_decl_handler	ext/xml/xml.stub.php:165	parser	r--		-	handler	r--		-
+xml_set_object	ext/xml/xml.stub.php:153	parser	r--		-	object	r--		-
+xml_set_processing_instruction_handler	ext/xml/xml.stub.php:159	parser	r--		-	handler	r--		-
+xml_set_start_namespace_decl_handler	ext/xml/xml.stub.php:169	parser	r--		-	handler	r--		-
+xml_set_unparsed_entity_decl_handler	ext/xml/xml.stub.php:163	parser	r--		-	handler	r--		-
+xmlreader::close	ext/xmlreader/php_xmlreader.stub.php:145
+xmlreader::expand	ext/xmlreader/php_xmlreader.stub.php:224	baseNode	o--	null	n
+xmlreader::fromstream	ext/xmlreader/php_xmlreader.stub.php:195	stream	r--		-	encoding	o--	null	n	flags	o--	0	i0	documentUri	o--	null	n
+xmlreader::fromstring	ext/xmlreader/php_xmlreader.stub.php:221	source	r--		-	encoding	o--	null	n	flags	o--	0	i0
+xmlreader::fromuri	ext/xmlreader/php_xmlreader.stub.php:192	uri	r--		-	encoding	o--	null	n	flags	o--	0	i0
+xmlreader::getattribute	ext/xmlreader/php_xmlreader.stub.php:148	name	r--		-
+xmlreader::getattributeno	ext/xmlreader/php_xmlreader.stub.php:151	index	r--		-
+xmlreader::getattributens	ext/xmlreader/php_xmlreader.stub.php:154	name	r--		-	namespace	r--		-
+xmlreader::getparserproperty	ext/xmlreader/php_xmlreader.stub.php:157	property	r--		-
+xmlreader::isvalid	ext/xmlreader/php_xmlreader.stub.php:160
+xmlreader::lookupnamespace	ext/xmlreader/php_xmlreader.stub.php:163	prefix	r--		-
+xmlreader::movetoattribute	ext/xmlreader/php_xmlreader.stub.php:166	name	r--		-
+xmlreader::movetoattributeno	ext/xmlreader/php_xmlreader.stub.php:169	index	r--		-
+xmlreader::movetoattributens	ext/xmlreader/php_xmlreader.stub.php:172	name	r--		-	namespace	r--		-
+xmlreader::movetoelement	ext/xmlreader/php_xmlreader.stub.php:175
+xmlreader::movetofirstattribute	ext/xmlreader/php_xmlreader.stub.php:178
+xmlreader::movetonextattribute	ext/xmlreader/php_xmlreader.stub.php:181
+xmlreader::next	ext/xmlreader/php_xmlreader.stub.php:187	name	o--	null	n
+xmlreader::open	ext/xmlreader/php_xmlreader.stub.php:190	uri	r--		-	encoding	o--	null	n	flags	o--	0	i0
+xmlreader::read	ext/xmlreader/php_xmlreader.stub.php:184
+xmlreader::readinnerxml	ext/xmlreader/php_xmlreader.stub.php:198
+xmlreader::readouterxml	ext/xmlreader/php_xmlreader.stub.php:201
+xmlreader::readstring	ext/xmlreader/php_xmlreader.stub.php:204
+xmlreader::setparserproperty	ext/xmlreader/php_xmlreader.stub.php:210	property	r--		-	value	r--		-
+xmlreader::setrelaxngschema	ext/xmlreader/php_xmlreader.stub.php:213	filename	r--		-
+xmlreader::setrelaxngschemasource	ext/xmlreader/php_xmlreader.stub.php:216	source	r--		-
+xmlreader::setschema	ext/xmlreader/php_xmlreader.stub.php:207	filename	r--		-
+xmlreader::xml	ext/xmlreader/php_xmlreader.stub.php:219	source	r--		-	encoding	o--	null	n	flags	o--	0	i0
+xmlwriter::endattribute	ext/xmlwriter/php_xmlwriter.stub.php:146
+xmlwriter::endcdata	ext/xmlwriter/php_xmlwriter.stub.php:230
+xmlwriter::endcomment	ext/xmlwriter/php_xmlwriter.stub.php:134
+xmlwriter::enddocument	ext/xmlwriter/php_xmlwriter.stub.php:260
+xmlwriter::enddtd	ext/xmlwriter/php_xmlwriter.stub.php:278
+xmlwriter::enddtdattlist	ext/xmlwriter/php_xmlwriter.stub.php:314
+xmlwriter::enddtdelement	ext/xmlwriter/php_xmlwriter.stub.php:296
+xmlwriter::enddtdentity	ext/xmlwriter/php_xmlwriter.stub.php:332
+xmlwriter::endelement	ext/xmlwriter/php_xmlwriter.stub.php:176
+xmlwriter::endpi	ext/xmlwriter/php_xmlwriter.stub.php:212
+xmlwriter::flush	ext/xmlwriter/php_xmlwriter.stub.php:350	empty	o--	true	t
+xmlwriter::fullendelement	ext/xmlwriter/php_xmlwriter.stub.php:182
+xmlwriter::openmemory	ext/xmlwriter/php_xmlwriter.stub.php:105
+xmlwriter::openuri	ext/xmlwriter/php_xmlwriter.stub.php:96	uri	r--		-
+xmlwriter::outputmemory	ext/xmlwriter/php_xmlwriter.stub.php:344	flush	o--	true	t
+xmlwriter::setindent	ext/xmlwriter/php_xmlwriter.stub.php:116	enable	r--		-
+xmlwriter::setindentstring	ext/xmlwriter/php_xmlwriter.stub.php:122	indentation	r--		-
+xmlwriter::startattribute	ext/xmlwriter/php_xmlwriter.stub.php:140	name	r--		-
+xmlwriter::startattributens	ext/xmlwriter/php_xmlwriter.stub.php:158	prefix	r--		-	name	r--		-	namespace	r--		-
+xmlwriter::startcdata	ext/xmlwriter/php_xmlwriter.stub.php:224
+xmlwriter::startcomment	ext/xmlwriter/php_xmlwriter.stub.php:128
+xmlwriter::startdocument	ext/xmlwriter/php_xmlwriter.stub.php:254	version	o--	"1.0"	s312e30	encoding	o--	null	n	standalone	o--	null	n
+xmlwriter::startdtd	ext/xmlwriter/php_xmlwriter.stub.php:272	qualifiedName	r--		-	publicId	o--	null	n	systemId	o--	null	n
+xmlwriter::startdtdattlist	ext/xmlwriter/php_xmlwriter.stub.php:308	name	r--		-
+xmlwriter::startdtdelement	ext/xmlwriter/php_xmlwriter.stub.php:290	qualifiedName	r--		-
+xmlwriter::startdtdentity	ext/xmlwriter/php_xmlwriter.stub.php:326	name	r--		-	isParam	r--		-
+xmlwriter::startelement	ext/xmlwriter/php_xmlwriter.stub.php:170	name	r--		-
+xmlwriter::startelementns	ext/xmlwriter/php_xmlwriter.stub.php:188	prefix	r--		-	name	r--		-	namespace	r--		-
+xmlwriter::startpi	ext/xmlwriter/php_xmlwriter.stub.php:206	target	r--		-
+xmlwriter::text	ext/xmlwriter/php_xmlwriter.stub.php:242	content	r--		-
+xmlwriter::tomemory	ext/xmlwriter/php_xmlwriter.stub.php:107
+xmlwriter::tostream	ext/xmlwriter/php_xmlwriter.stub.php:110	stream	r--		-
+xmlwriter::touri	ext/xmlwriter/php_xmlwriter.stub.php:98	uri	r--		-
+xmlwriter::writeattribute	ext/xmlwriter/php_xmlwriter.stub.php:152	name	r--		-	value	r--		-
+xmlwriter::writeattributens	ext/xmlwriter/php_xmlwriter.stub.php:164	prefix	r--		-	name	r--		-	namespace	r--		-	value	r--		-
+xmlwriter::writecdata	ext/xmlwriter/php_xmlwriter.stub.php:236	content	r--		-
+xmlwriter::writecomment	ext/xmlwriter/php_xmlwriter.stub.php:266	content	r--		-
+xmlwriter::writedtd	ext/xmlwriter/php_xmlwriter.stub.php:284	name	r--		-	publicId	o--	null	n	systemId	o--	null	n	content	o--	null	n
+xmlwriter::writedtdattlist	ext/xmlwriter/php_xmlwriter.stub.php:320	name	r--		-	content	r--		-
+xmlwriter::writedtdelement	ext/xmlwriter/php_xmlwriter.stub.php:302	name	r--		-	content	r--		-
+xmlwriter::writedtdentity	ext/xmlwriter/php_xmlwriter.stub.php:338	name	r--		-	content	r--		-	isParam	o--	false	f	publicId	o--	null	n	systemId	o--	null	n	notationData	o--	null	n
+xmlwriter::writeelement	ext/xmlwriter/php_xmlwriter.stub.php:194	name	r--		-	content	o--	null	n
+xmlwriter::writeelementns	ext/xmlwriter/php_xmlwriter.stub.php:200	prefix	r--		-	name	r--		-	namespace	r--		-	content	o--	null	n
+xmlwriter::writepi	ext/xmlwriter/php_xmlwriter.stub.php:218	target	r--		-	content	r--		-
+xmlwriter::writeraw	ext/xmlwriter/php_xmlwriter.stub.php:248	content	r--		-
+xmlwriter_end_attribute	ext/xmlwriter/php_xmlwriter.stub.php:19	writer	r--		-
+xmlwriter_end_cdata	ext/xmlwriter/php_xmlwriter.stub.php:47	writer	r--		-
+xmlwriter_end_comment	ext/xmlwriter/php_xmlwriter.stub.php:15	writer	r--		-
+xmlwriter_end_document	ext/xmlwriter/php_xmlwriter.stub.php:57	writer	r--		-
+xmlwriter_end_dtd	ext/xmlwriter/php_xmlwriter.stub.php:63	writer	r--		-
+xmlwriter_end_dtd_attlist	ext/xmlwriter/php_xmlwriter.stub.php:75	writer	r--		-
+xmlwriter_end_dtd_element	ext/xmlwriter/php_xmlwriter.stub.php:69	writer	r--		-
+xmlwriter_end_dtd_entity	ext/xmlwriter/php_xmlwriter.stub.php:81	writer	r--		-
+xmlwriter_end_element	ext/xmlwriter/php_xmlwriter.stub.php:29	writer	r--		-
+xmlwriter_end_pi	ext/xmlwriter/php_xmlwriter.stub.php:41	writer	r--		-
+xmlwriter_flush	ext/xmlwriter/php_xmlwriter.stub.php:87	writer	r--		-	empty	o--	true	t
+xmlwriter_full_end_element	ext/xmlwriter/php_xmlwriter.stub.php:31	writer	r--		-
+xmlwriter_open_memory	ext/xmlwriter/php_xmlwriter.stub.php:7
+xmlwriter_open_uri	ext/xmlwriter/php_xmlwriter.stub.php:5	uri	r--		-
+xmlwriter_output_memory	ext/xmlwriter/php_xmlwriter.stub.php:85	writer	r--		-	flush	o--	true	t
+xmlwriter_set_indent	ext/xmlwriter/php_xmlwriter.stub.php:9	writer	r--		-	enable	r--		-
+xmlwriter_set_indent_string	ext/xmlwriter/php_xmlwriter.stub.php:11	writer	r--		-	indentation	r--		-
+xmlwriter_start_attribute	ext/xmlwriter/php_xmlwriter.stub.php:17	writer	r--		-	name	r--		-
+xmlwriter_start_attribute_ns	ext/xmlwriter/php_xmlwriter.stub.php:23	writer	r--		-	prefix	r--		-	name	r--		-	namespace	r--		-
+xmlwriter_start_cdata	ext/xmlwriter/php_xmlwriter.stub.php:45	writer	r--		-
+xmlwriter_start_comment	ext/xmlwriter/php_xmlwriter.stub.php:13	writer	r--		-
+xmlwriter_start_document	ext/xmlwriter/php_xmlwriter.stub.php:55	writer	r--		-	version	o--	"1.0"	s312e30	encoding	o--	null	n	standalone	o--	null	n
+xmlwriter_start_dtd	ext/xmlwriter/php_xmlwriter.stub.php:61	writer	r--		-	qualifiedName	r--		-	publicId	o--	null	n	systemId	o--	null	n
+xmlwriter_start_dtd_attlist	ext/xmlwriter/php_xmlwriter.stub.php:73	writer	r--		-	name	r--		-
+xmlwriter_start_dtd_element	ext/xmlwriter/php_xmlwriter.stub.php:67	writer	r--		-	qualifiedName	r--		-
+xmlwriter_start_dtd_entity	ext/xmlwriter/php_xmlwriter.stub.php:79	writer	r--		-	name	r--		-	isParam	r--		-
+xmlwriter_start_element	ext/xmlwriter/php_xmlwriter.stub.php:27	writer	r--		-	name	r--		-
+xmlwriter_start_element_ns	ext/xmlwriter/php_xmlwriter.stub.php:33	writer	r--		-	prefix	r--		-	name	r--		-	namespace	r--		-
+xmlwriter_start_pi	ext/xmlwriter/php_xmlwriter.stub.php:39	writer	r--		-	target	r--		-
+xmlwriter_text	ext/xmlwriter/php_xmlwriter.stub.php:51	writer	r--		-	content	r--		-
+xmlwriter_write_attribute	ext/xmlwriter/php_xmlwriter.stub.php:21	writer	r--		-	name	r--		-	value	r--		-
+xmlwriter_write_attribute_ns	ext/xmlwriter/php_xmlwriter.stub.php:25	writer	r--		-	prefix	r--		-	name	r--		-	namespace	r--		-	value	r--		-
+xmlwriter_write_cdata	ext/xmlwriter/php_xmlwriter.stub.php:49	writer	r--		-	content	r--		-
+xmlwriter_write_comment	ext/xmlwriter/php_xmlwriter.stub.php:59	writer	r--		-	content	r--		-
+xmlwriter_write_dtd	ext/xmlwriter/php_xmlwriter.stub.php:65	writer	r--		-	name	r--		-	publicId	o--	null	n	systemId	o--	null	n	content	o--	null	n
+xmlwriter_write_dtd_attlist	ext/xmlwriter/php_xmlwriter.stub.php:77	writer	r--		-	name	r--		-	content	r--		-
+xmlwriter_write_dtd_element	ext/xmlwriter/php_xmlwriter.stub.php:71	writer	r--		-	name	r--		-	content	r--		-
+xmlwriter_write_dtd_entity	ext/xmlwriter/php_xmlwriter.stub.php:83	writer	r--		-	name	r--		-	content	r--		-	isParam	o--	false	f	publicId	o--	null	n	systemId	o--	null	n	notationData	o--	null	n
+xmlwriter_write_element	ext/xmlwriter/php_xmlwriter.stub.php:35	writer	r--		-	name	r--		-	content	o--	null	n
+xmlwriter_write_element_ns	ext/xmlwriter/php_xmlwriter.stub.php:37	writer	r--		-	prefix	r--		-	name	r--		-	namespace	r--		-	content	o--	null	n
+xmlwriter_write_pi	ext/xmlwriter/php_xmlwriter.stub.php:43	writer	r--		-	target	r--		-	content	r--		-
+xmlwriter_write_raw	ext/xmlwriter/php_xmlwriter.stub.php:53	writer	r--		-	content	r--		-
 zend_thread_id	Zend/zend_builtin_functions.stub.php:202
 zend_version	Zend/zend_builtin_functions.stub.php:19
 zlib_decode	ext/zlib/zlib.stub.php:186	data	r--		-	max_length	o--	0	i0

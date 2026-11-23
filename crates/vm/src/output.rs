@@ -2,13 +2,25 @@
 
 use phera_bytecode::Reg;
 use phera_extension_api::{NativeError, RequestState};
-use phera_value::to_php_string;
+use phera_value::{Value, to_php_string};
 
 use crate::{OutputSink, Vm, diagnostics::SourceLocation, output_buffer::Buffers};
 
 impl Vm {
     /// Implements PHP Echo semantics outside the dispatch loop.
     pub(crate) fn echo_value(&mut self, source: Reg) -> Result<(), NativeError> {
+        let text = match &*self.operand(source) {
+            Value::InternedStr(text) => Some(text.to_php_string()),
+            Value::String(text) => Some(text.clone()),
+            _ => None,
+        };
+        if let Some(text) = text {
+            if self.diagnostic_reporter.has_pending() {
+                self.flush_operator_diagnostics();
+            }
+            self.out(text.as_bytes());
+            return Ok(());
+        }
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let text = to_php_string(&diagnostics.vm.operand(source), &mut diagnostics.buffer)?;
         drop(diagnostics);
@@ -216,6 +228,21 @@ impl Vm {
         }
         if !bytes.is_empty() {
             self.output_writer.write(&mut self.output, bytes);
+        }
+    }
+}
+
+/// A fork writes to the sink its request gives it; the buffers are the
+/// snapshot's, emptied (see `crate::output_buffer`).
+impl crate::snapshot::ForkCopy for Output {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        Output {
+            buffers: self.buffers.fork_copy(fork),
+            implicit_flush: self.implicit_flush,
+            prepare_headers: self.prepare_headers,
+            set_error_status: self.set_error_status,
+            web: self.web,
+            ..Output::new()
         }
     }
 }

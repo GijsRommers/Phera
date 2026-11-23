@@ -176,7 +176,7 @@ fn unserialize(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nati
     for (key, value) in data.iter() {
         match key {
             ArrayKey::Int(_) => values.push(value.deref().clone()),
-            ArrayKey::String(_) => {
+            ArrayKey::Interned(_) | ArrayKey::String(_) => {
                 properties.insert(key, value.clone());
             }
         }
@@ -193,3 +193,17 @@ fn unserialize(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nati
     }
     Ok(Value::Null)
 }
+
+impl crate::native_state::ForkValues for Fixed {
+    fn fork_values(
+        &mut self,
+        fork: &mut phera_extension_api::value::Fork<'_>,
+    ) -> Result<(), String> {
+        for slot in &mut self.slots {
+            crate::native_state::fork_value(slot, fork);
+        }
+        Ok(())
+    }
+}
+
+pub(crate) const FORK: crate::native_state::StoredFork = crate::native_state::fork_as::<Fixed>;

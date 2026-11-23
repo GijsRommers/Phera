@@ -36,6 +36,9 @@ fn create<'a>(
 ) -> LocalFuture<'a, NativeResult> {
     Box::pin(async move {
         error::clear(context);
+        if args::bytes(&values, 0).len() > locale::MAX_LEN {
+            return locale::too_long_for(context, site, object.is_some());
+        }
         if let Some(object) = &object
             && object.native_payload().map_err(|_| missing())?.is_some()
         {
@@ -105,9 +108,12 @@ fn update<T>(object: &Object, action: impl FnOnce(&mut State) -> T) -> Result<T,
 fn lookup(table: &Table, key: &Value) -> Option<Node> {
     let row = match &*key.deref() {
         Value::Int(index) => table.get(usize::try_from(*index).ok()?),
+        Value::InternedStr(key) => table
+            .iter()
+            .find(|(name, _)| name.as_str_bytes() == Some(key.as_bytes())),
         Value::String(key) => table
             .iter()
-            .find(|(name, _)| matches!(name, ArrayKey::String(name) if name == key)),
+            .find(|(name, _)| name.as_str_bytes() == Some(key.as_bytes())),
         _ => None,
     }?;
     Some(row.1.clone())
@@ -127,10 +133,13 @@ fn get(
                 "Index must be between -2147483648 and 2147483647",
             ));
         }
+        Value::InternedStr(index) if index.as_bytes().is_empty() => {
+            return Err(NativeError::value_error("Offset must not be empty"));
+        }
         Value::String(index) if index.as_bytes().is_empty() => {
             return Err(NativeError::value_error("Offset must not be empty"));
         }
-        Value::Int(_) | Value::String(_) => {}
+        Value::Int(_) | Value::InternedStr(_) | Value::String(_) => {}
         value => {
             return Err(NativeError::type_error(format!(
                 "Cannot access offset of type {} on ResourceBundle",
@@ -155,6 +164,10 @@ fn get(
         return wrap(context, value);
     }
     let detail = match &*index.deref() {
+        Value::InternedStr(index) => format!(
+            "Cannot load resource element '{}'",
+            String::from_utf8_lossy(index.as_bytes())
+        ),
         Value::String(index) => format!(
             "Cannot load resource element '{}'",
             String::from_utf8_lossy(index.as_bytes())
@@ -269,6 +282,7 @@ impl NativeIterator for Cursor {
             .get(self.index)
             .map_or(Value::Null, |(key, _)| match key {
                 ArrayKey::Int(index) => Value::Int(*index),
+                ArrayKey::Interned(name) => Value::InternedStr(name),
                 ArrayKey::String(name) => Value::String(name.clone()),
             }))
     }

@@ -7,7 +7,7 @@ use phera_ext_http::Sapi;
 use phera_extension_api::Registry;
 use phera_vm::Vm;
 
-use crate::http;
+use crate::{adapters, http};
 
 static CLI: LazyLock<Arc<Registry>> = LazyLock::new(|| Arc::new(Registry::deferred(register_cli)));
 static WEB: LazyLock<Arc<Registry>> = LazyLock::new(|| Arc::new(Registry::deferred(register_web)));
@@ -38,9 +38,15 @@ fn register_common(registry: &mut Registry) {
         parent: Some("LogicException"),
         ..phera_extension_api::ClassEntry::class("Phera\\NotSupportedException")
     });
+    // Thrown by `Phera\snapshot()` when the state cannot be kept.
+    registry.class(phera_extension_api::ClassEntry {
+        parent: Some("RuntimeException"),
+        ..phera_extension_api::ClassEntry::class("Phera\\SnapshotException")
+    });
     registry.load(&phera_ext_standard::Standard);
     registry.load(&phera_ext_tokenizer::Tokenizer);
     registry.load(&phera_ext_streams::Streams);
+    registry.load(&phera_ext_sockets::Sockets);
     registry.load(&phera_ext_process::Process);
     registry.load(&phera_ext_process::Posix);
     registry.load(&phera_ext_zlib::Zlib);
@@ -51,6 +57,13 @@ fn register_common(registry: &mut Registry) {
     registry.load(&phera_ext_curl::Curl);
     registry.load(&phera_ext_dom::Libxml);
     registry.load(&phera_ext_dom::Dom);
+    registry.load(&phera_ext_xml::Xml);
+    registry.load(&phera_ext_xmlreader::XmlReader);
+    registry.load(&phera_ext_xmlwriter::XmlWriter);
+    registry.load(&phera_ext_fileinfo::FileInfo);
+    registry.load(&phera_ext_gd::Gd);
+    registry.load(&phera_ext_gd::ImageMetadata);
+    registry.load(&phera_ext_gd::ExifImageType);
     registry.load(&phera_ext_filter::Filter);
     registry.load(&phera_ext_intl::Intl);
     registry.load(&phera_ext_json::Json);
@@ -74,6 +87,9 @@ fn register_common(registry: &mut Registry) {
     registry.load(&phera_ext_reflection::Reflection);
     registry.load(&phera_ext_serialize::Serialize);
     Vm::register_fiber_classes(registry);
+    Vm::register_state_forks(registry);
     registry.load(&phera_ext_spl::Spl);
+    registry.load(&phera_ext_simplexml::SimpleXml);
     registry.load(&phera_ext_session::Session);
+    adapters::register(registry);
 }

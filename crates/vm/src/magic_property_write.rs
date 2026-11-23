@@ -32,15 +32,19 @@ impl Vm {
             .for_object(&object)
             .ok_or_else(|| internal_error!("property class"))?;
         let display = property_name(&name);
-        if let Some(access) = class.property_access
-            && (access.mutate)(
+        if let Some(access) = class.property_access {
+            let converted = self
+                .native_string_assignment(access, &object, &display, &value)
+                .await?;
+            let assigned = converted.as_ref().unwrap_or(&value);
+            if (access.mutate)(
                 self,
                 &object,
                 &display,
-                NativePropertyMutation::Assign(&value),
-            )?
-        {
-            return Ok(None);
+                NativePropertyMutation::Assign(assigned),
+            )? {
+                return Ok(None);
+            }
         }
         let (stored, slot) = self.property_slot(&object, &display);
         let declared = slot

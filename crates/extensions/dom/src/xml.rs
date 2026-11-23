@@ -12,9 +12,12 @@ mod dtd;
 mod elements;
 mod encoding;
 mod entities;
+mod entity_resolver;
 pub(crate) mod names;
 mod replacement;
-pub(crate) use encoding::supported_encoding;
+pub use encoding::supported_encoding;
+pub use entity_resolver::EntityResolver;
+pub use names::valid as valid_name;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -49,6 +52,7 @@ pub fn parse(input: &[u8], options: Options) -> Parsed {
     parse_with_encoding(input, options, None)
 }
 
+/// Parse with an explicit encoding when the caller supplies one.
 pub fn parse_with_encoding(
     input: &[u8],
     options: Options,

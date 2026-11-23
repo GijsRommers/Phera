@@ -54,12 +54,20 @@ impl Machine<'_> {
         }
         let arguments = self.registers.window(from, count);
         let mut typed = facts.typed_parameters();
-        for (argument, mask) in arguments.iter().zip(facts.parameter_masks.iter()) {
+        for (index, (argument, mask)) in arguments
+            .iter()
+            .zip(facts.parameter_masks.iter())
+            .enumerate()
+        {
             let Some(value) = argument else {
                 return Step::Slow;
             };
             if value.is_reference()
-                || (typed & 1 != 0 && !mask.intersects(crate::types::own_type(value)))
+                || (typed & 1 != 0
+                    && !mask.intersects(crate::types::own_type(value))
+                    && !self.code.function(function).parameters[index]
+                        .ty
+                        .is_some_and(|declared| self.class_type_matches(function, declared, value)))
             {
                 return Step::Slow;
             }
@@ -94,6 +102,10 @@ impl Machine<'_> {
         let Some(destination) = frame.destination() else {
             return if frame.discards_result() {
                 self.leave_discarded(frame, source)
+            } else if !GUARDED && frame.returns_to_native_loop() {
+                self.leave_to_native_loop(frame, source)
+            } else if !GUARDED && self.stack.depth() == self.stop + 1 {
+                self.leave_to_native(frame, source)
             } else {
                 Step::Slow
             };
@@ -120,18 +132,12 @@ impl Machine<'_> {
             None => &Value::Null,
         };
         if let Some(mask) = facts.return_mask
-            && !mask.intersects(crate::types::own_type(value))
+            && !return_fits(mask, value)
             && !self
                 .code
                 .function(frame.function)
                 .return_type
-                .is_some_and(|declared| {
-                    crate::class_types::known_class_match(
-                        self.code.cache(frame.function),
-                        declared,
-                        value,
-                    )
-                })
+                .is_some_and(|declared| self.class_type_matches(frame.function, declared, value))
         {
             return Step::Slow;
         }
@@ -148,7 +154,7 @@ impl Machine<'_> {
         {
             return self.leave_in_order(frame, caller, (source, destination), value);
         }
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.truncate(start);
         self.registers
             .put(caller.base() + destination.index(), value);
@@ -178,7 +184,7 @@ impl Machine<'_> {
         } else {
             Some(value)
         };
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.release_frame(frame.start(), frame.base());
         if let Some(value) = value {
             self.registers
@@ -188,6 +194,100 @@ impl Machine<'_> {
             frame: caller,
             ip: caller.ip(),
         })
+    }
+
+    /// A plain return of the function native code called (a callback of
+    /// `array_map`, `usort`, a `Closure` called from native code), as the
+    /// VM makes it (`Vm::finish_return_value` at the boundary): the frame
+    /// goes, and the value is handed to the batch loop, which gives it back
+    /// to the native caller as `BatchExit::Returned`. Generators, includes,
+    /// functions returning by reference, frames with a pending call or side
+    /// state to release, references, and a value the declared type does not
+    /// take as it is stay with the VM.
+    #[cold]
+    #[inline(never)]
+    fn leave_to_native(&mut self, frame: Frame, source: Option<Reg>) -> Step {
+        let facts = self.code.facts(frame.function);
+        let depth = self.stack.depth();
+        let function = self.code.function(frame.function);
+        if facts.local.is_none()
+            || frame.returns_to_native_loop()
+            || function.is_generator
+            || function.returns_reference
+            || (frame.has_extras() && !self.stack.extras(depth - 1).plain_return_can_release())
+            || self.stack.has_calls_from(frame.start())
+        {
+            return Step::Slow;
+        }
+        let kind = frame.kind();
+        let value = match (kind, source) {
+            (CallKind::Constructor, _) => match self.registers.window(frame.base() - 1, 1) {
+                [Some(value)] => value,
+                _ => return Step::Slow,
+            },
+            (_, Some(source)) => match self.registers.window(frame.base() + source.index(), 1) {
+                [Some(value)] if !value.is_reference() => value,
+                _ => return Step::Slow,
+            },
+            (_, None) => &Value::Null,
+        };
+        if kind != CallKind::Constructor
+            && let Some(mask) = facts.return_mask
+            && !return_fits(mask, value)
+            && !function
+                .return_type
+                .is_some_and(|declared| self.class_type_matches(frame.function, declared, value))
+        {
+            return Step::Slow;
+        }
+        let value = value.clone();
+        self.stack.pop_for_return();
+        self.registers.release_frame(frame.start(), frame.base());
+        self.stack.handed_back = Some(super::execution_loop::HandedBack::Native(value));
+        Step::Yield
+    }
+
+    /// A plain return of a callback of a native loop (`array_map`'s
+    /// closure), as the VM makes it: the frame goes, and the value goes to
+    /// the batch loop, which hands it to the built-in's next step
+    /// (`calls::native_loops`). The cases `leave_to_native` leaves to the
+    /// VM stay with it here too.
+    #[inline(never)]
+    fn leave_to_native_loop(&mut self, frame: Frame, source: Option<Reg>) -> Step {
+        let facts = self.code.facts(frame.function);
+        let depth = self.stack.depth();
+        let function = self.code.function(frame.function);
+        if facts.local.is_none()
+            || function.is_generator
+            || function.returns_reference
+            || (frame.has_extras() && !self.stack.extras(depth - 1).plain_return_can_release())
+            || self.stack.has_calls_from(frame.start())
+        {
+            return Step::Slow;
+        }
+        let value = match source {
+            Some(source) => match self.registers.window(frame.base() + source.index(), 1) {
+                [Some(value)] if !value.is_reference() => value,
+                _ => return Step::Slow,
+            },
+            None => &Value::Null,
+        };
+        if let Some(mask) = facts.return_mask
+            && !return_fits(mask, value)
+            && !function
+                .return_type
+                .is_some_and(|declared| self.class_type_matches(frame.function, declared, value))
+        {
+            return Step::Slow;
+        }
+        let value = match source {
+            Some(source) => self.registers.take(frame.base() + source.index()),
+            None => Value::Null,
+        };
+        self.stack.pop_for_return();
+        self.registers.release_frame(frame.start(), frame.base());
+        self.stack.handed_back = Some(super::execution_loop::HandedBack::NativeLoop(value));
+        Step::Yield
     }
 
     /// A setter with no suspended caller action returns without publishing a result.
@@ -210,17 +310,14 @@ impl Machine<'_> {
             .code
             .facts(frame.function)
             .return_mask
-            .is_some_and(|mask| {
-                !mask.intersects(crate::types::own_type(value))
-                    && !(mask.intersects(phera_bytecode::TypeMask::VOID) && value.is_null())
-            })
+            .is_some_and(|mask| !return_fits(mask, value))
         {
             return Step::Slow;
         }
         let Some(caller) = self.stack.caller().copied() else {
             return Step::Slow;
         };
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.truncate(frame.start());
         Step::Switched(Position {
             frame: caller,
@@ -276,10 +373,6 @@ impl Machine<'_> {
     /// type accepts the value as it is: write it into the window.
     #[inline(always)]
     pub(super) fn send(&mut self, position: Position, source: Reg) -> Step {
-        let Some(call) = self.stack.last_call().copied() else {
-            return Step::Slow;
-        };
-        let index = call.sent as usize;
         let value = match self
             .registers
             .window(position.frame.base() + source.index(), 1)
@@ -287,60 +380,169 @@ impl Machine<'_> {
             [Some(value)] => value.deref().clone(),
             _ => return Step::Slow,
         };
+        self.send_owned(position, value).unwrap_or(Step::Slow)
+    }
+
+    /// Sends `value` as [`Self::send`] does, or gives it back untouched
+    /// when the call takes the general path.
+    #[inline(always)]
+    pub(super) fn send_owned(
+        &mut self,
+        position: Position,
+        mut value: Value,
+    ) -> Result<Step, Value> {
+        let Some(call) = self.stack.last_call().copied() else {
+            return Err(value);
+        };
+        let index = call.sent as usize;
         let accepted = match call.callee {
             PreparedCallee::Php(function) => {
                 !call.flags.contains(CallFlags::DETAILS)
-                    && self.accepts_argument(function, index, &value)
+                    && (self.accepts_argument(function, index, &value)
+                        || self.accepts_on_second_look(function, index, &mut value))
             }
-            PreparedCallee::General => self.general_accepts(index),
+            // One out-of-line arm for both, so that the match keeps the
+            // shape the loop was laid out with.
+            PreparedCallee::General | PreparedCallee::Native(_) => {
+                self.other_accepts(call.callee, index, &value)
+            }
             PreparedCallee::Constructed => false,
         };
         if !accepted {
-            return Step::Slow;
+            return Err(value);
         }
         let Some(call) = self.stack.last_call_mut() else {
-            return Step::Slow;
+            return Err(value);
         };
         self.registers.put(call.base() + index, value);
         call.mark_sent(index, true);
-        Step::Done(position.ip)
+        Ok(Step::Done(position.ip))
+    }
+
+    /// The second look at an argument the first test refused, out of line:
+    /// an object passes an absolute class/union/intersection type its class
+    /// satisfies, and an integer sent to a `float` parameter becomes that
+    /// float (the one conversion PHP makes in strict mode too, so `new Vec($i, 0)`
+    /// for `float $x` stays in the loop). `false`, with `value` untouched, for
+    /// anything else.
+    #[inline(never)]
+    pub(super) fn accepts_on_second_look(
+        &self,
+        function: FunctionIndex,
+        index: usize,
+        value: &mut Value,
+    ) -> bool {
+        let facts = self.code.facts(function);
+        if let Value::Object(_) = value {
+            return facts.takes_value(index)
+                && self
+                    .code
+                    .function(function)
+                    .parameters
+                    .get(index)
+                    .and_then(|parameter| parameter.ty)
+                    .is_some_and(|declared| self.class_type_matches(function, declared, value));
+        }
+        let Value::Int(integer) = *value else {
+            return false;
+        };
+        let widens = facts.takes_value(index)
+            && facts
+                .parameter_masks
+                .get(index)
+                .is_some_and(|mask| mask.intersects(phera_bytecode::TypeMask::FLOAT));
+        if widens {
+            *value = Value::Float(integer as f64);
+        }
+        widens
     }
 
     /// Whether parameter `index` of `function` takes `value` as it is, by
-    /// value: no declared type, a built-in type the value has, or a class
-    /// type the unit's cache knows the value's class satisfies.
+    /// value: no declared type, or a built-in type the value has. Class types
+    /// are checked directly in [`Self::accepts_on_second_look`].
     #[inline(always)]
-    fn accepts_argument(&self, function: FunctionIndex, index: usize, value: &Value) -> bool {
+    pub(super) fn accepts_argument(
+        &self,
+        function: FunctionIndex,
+        index: usize,
+        value: &Value,
+    ) -> bool {
         let facts = self.code.facts(function);
         if !facts.takes_value(index) {
             return false;
         }
-        if !facts.is_typed(index)
+        !facts.is_typed(index)
             || facts.parameter_masks[index].intersects(crate::types::own_type(value))
-        {
-            return true;
-        }
-        let declared = self.code.function(function).parameters[index].ty;
-        declared.is_some_and(|declared| {
-            crate::class_types::known_class_match(self.code.cache(function), declared, value)
-        })
+    }
+
+    /// Whether `value` is an object of a class that the absolute class, union,
+    /// or intersection type `declared` of `function` allows, checked directly
+    /// by pre-interned `NameKey` and pointer-walk ancestry with no cache.
+    #[inline]
+    fn class_type_matches(
+        &self,
+        function: FunctionIndex,
+        declared: phera_bytecode::TypeId,
+        value: &Value,
+    ) -> bool {
+        crate::class_types::fast_class_type_matches(
+            self.code,
+            self.classes,
+            function,
+            declared,
+            value,
+        )
     }
 
     /// The same for a general callee, which is native code: any value, for
     /// an untyped by-value parameter. A pending named argument takes the
     /// general path.
     #[inline(always)]
-    fn general_accepts(&self, index: usize) -> bool {
+    fn general_accepts(&self, index: usize, value: &Value) -> bool {
         let Some(details) = self.stack.top_details() else {
             return false;
         };
         let Some(callee) = details.callee.as_ref().filter(|_| details.named.is_none()) else {
             return false;
         };
+        // `spl_object_id($object)`: an object needs no coercion, and the
+        // batch loop answers the call (`Vm::object_id_call`).
+        if let CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
+            crate::class_intrinsics::ClassFunction::ObjectId,
+        )) = callee.target
+        {
+            return index == 0 && matches!(value, Value::Object(_));
+        }
         let intrinsic = matches!(callee.target, CallTarget::Intrinsic(_));
         callee.parameters.get(index).is_some_and(|parameter| {
             !intrinsic && !parameter.by_reference && !parameter.variadic && parameter.ty.is_none()
         })
+    }
+
+    /// [`Machine::general_accepts`] for a described callee; for a lean
+    /// native call, [`Machine::native_accepts`]. Inline, so that a
+    /// described callee costs what it did before lean records existed.
+    #[inline(always)]
+    pub(super) fn other_accepts(
+        &self,
+        callee: PreparedCallee,
+        index: usize,
+        value: &Value,
+    ) -> bool {
+        match callee {
+            PreparedCallee::Native(id) => self.native_accepts(id, index),
+            _ => self.general_accepts(index, value),
+        }
+    }
+
+    /// For a lean native call: a by-value parameter that is not variadic
+    /// (its type is the function's to check, at the call).
+    #[inline(never)]
+    fn native_accepts(&self, id: phera_extension_api::NativeId, index: usize) -> bool {
+        self.registry
+            .function_at(id)
+            .and_then(|entry| entry.params.get(index))
+            .is_some_and(|parameter| !parameter.by_ref && !parameter.variadic)
     }
 
     /// `Call` of a prepared function, method or closure written in PHP whose
@@ -354,7 +556,10 @@ impl Machine<'_> {
         let function = match call.callee {
             PreparedCallee::Php(function) => function,
             PreparedCallee::Constructed => return self.finish_construction(position, destination),
-            PreparedCallee::General => {
+            // A lean native record is not a direct method, so it answers
+            // `Step::Slow` there, and the batch loop runs it
+            // (`Vm::call_lean_native`).
+            PreparedCallee::General | PreparedCallee::Native(_) => {
                 return self.finish_direct_method(position, destination, call);
             }
         };
@@ -390,6 +595,7 @@ impl Machine<'_> {
 impl Machine<'_> {
     /// `Call` after `new` of a class without a constructor: the object is the
     /// result, and the arguments, already evaluated, are dropped.
+    #[inline(always)]
     fn finish_construction(&mut self, position: Position, destination: Reg) -> Step {
         let Some(call) = self.stack.pop_plain() else {
             return Step::Slow;
@@ -400,4 +606,11 @@ impl Machine<'_> {
             .put(position.frame.base() + destination.index(), object);
         Step::Done(position.ip)
     }
+}
+
+/// Whether a returned value passes the bit test of the declared return
+/// type: `return;` of a `void` function returns null.
+fn return_fits(mask: phera_bytecode::TypeMask, value: &Value) -> bool {
+    mask.intersects(crate::types::own_type(value))
+        || (mask.intersects(phera_bytecode::TypeMask::VOID) && value.is_null())
 }

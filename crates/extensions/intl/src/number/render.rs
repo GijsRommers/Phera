@@ -14,7 +14,7 @@ use icu_decimal::CompactDecimalFormatter;
 use phera_extension_api::{Context, NativeError, NativeResult, Value, args};
 
 use super::affixes::{affixes, currency_formatter, digit, pattern_affixes, split_number};
-use super::{Call, Formatter, Style, attributes};
+use super::{Call, Formatter, Style, attributes, spellout};
 
 pub fn format(
     context: &mut dyn Context,
@@ -100,6 +100,9 @@ fn result(
 }
 
 fn nonfinite(state: &Formatter, value: f64) -> String {
+    if state.style == Style::Spellout {
+        return spellout::nonfinite(state, value);
+    }
     let symbol =
         attributes::symbol(state, if value.is_nan() { 15 } else { 14 }).unwrap_or_default();
     if value.is_sign_negative() && !value.is_nan() {
@@ -110,6 +113,9 @@ fn nonfinite(state: &Formatter, value: f64) -> String {
 }
 
 pub fn render(state: &mut Formatter, original: &Decimal, currency: Option<&str>) -> Option<String> {
+    if matches!(state.style, Style::Spellout | Style::Ordinal) {
+        return spellout::format(state, original);
+    }
     let currency = match currency {
         Some(code) if !code.bytes().any(|byte| byte.is_ascii_lowercase()) => Cow::Borrowed(code),
         Some(code) => Cow::Owned(code.to_ascii_uppercase()),

@@ -70,7 +70,7 @@ impl Vm {
         let parameters = view.parameters();
         if parameters
             .receiving(index)
-            .is_some_and(|parameter| parameters.by_reference(parameter))
+            .is_some_and(|parameter| parameters.requires_reference(parameter))
         {
             self.warn(format!(
                 "Cannot pass by-reference argument {} of {}() by unpacking a Traversable, passing by-value instead",
@@ -83,7 +83,10 @@ impl Vm {
 }
 
 fn spread_key(value: Value, target: SpreadTarget) -> Result<ArrayKey, NativeError> {
-    if matches!(&*value.deref(), Value::Int(_) | Value::String(_)) {
+    if matches!(
+        &*value.deref(),
+        Value::Int(_) | Value::InternedStr(_) | Value::String(_)
+    ) {
         return Ok(ArrayKey::from_value(&value)?);
     }
     let target = match target {

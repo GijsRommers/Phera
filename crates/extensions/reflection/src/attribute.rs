@@ -24,7 +24,7 @@ const INSTANCEOF: i64 = 2;
 const REPEATABLE: i64 = 128;
 
 #[derive(Clone)]
-struct ReflectedAttribute {
+pub(crate) struct ReflectedAttribute {
     info: Rc<AttributeInfo>,
     repeated: bool,
 }

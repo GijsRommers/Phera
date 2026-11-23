@@ -43,7 +43,7 @@ struct Encoder {
 
 /// Serializable methods may call serialize() with the parent's slot table.
 #[derive(Default)]
-struct SerializationSlots {
+pub(crate) struct SerializationSlots {
     identities: HashMap<Identity, (usize, Value)>,
     count: usize,
 }
@@ -215,6 +215,7 @@ impl Encoder {
                 frame.position = frame.entries.next_position(position);
                 match key {
                     ArrayKey::Int(key) => self.output.integer(key),
+                    ArrayKey::Interned(key) => self.output.string(key.as_bytes()),
                     ArrayKey::String(key) => self.output.string(key.as_bytes()),
                 }
                 if write_scalar(&mut self.output, &mut self.precision, context, value) {
@@ -331,6 +332,7 @@ fn write_scalar(
                 with_float_repr(*float, precision, |decimal| output.float(decimal));
             }
         }
+        Value::InternedStr(string) => output.string(string.as_bytes()),
         Value::String(string) => output.string(string.as_bytes()),
         Value::Resource(_) => output.integer(0),
         _ => return false,

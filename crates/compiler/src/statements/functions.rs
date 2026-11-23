@@ -1,6 +1,7 @@
 //! Function declarations, parameter prologues, and nested declarations.
 
 use super::builtin_attributes::AttributePlacement;
+use super::type_declarations::{TypeScope, TypeSite};
 use phera_ast as ast;
 use phera_source::attributes::AttributeTarget;
 
@@ -34,6 +35,12 @@ impl<'ast> Compiler<'ast> {
         timing: DeclarationTiming,
         line: usize,
     ) -> Result<(), CompileError> {
+        if declaration.name.name.eq_ignore_ascii_case("assert") {
+            return Err(self.error(
+                "Defining a custom assert() function is not allowed, as the function has special semantics",
+                line,
+            ));
+        }
         self.compile_captured_function(
             &FunctionSource {
                 span: declaration.span,
@@ -75,6 +82,22 @@ impl<'ast> Compiler<'ast> {
             return Err(self.error(format!("Cannot redeclare function {name}()"), line));
         }
         let mut builder = self.function_builder(declaration, &name, captures, line)?;
+        let is_closure = declaration.name.starts_with("{closure:");
+        if !declaration.name.contains("::") || is_closure {
+            let scope = if is_closure {
+                TypeScope::Deferred
+            } else {
+                TypeScope::Global
+            };
+            for parameter in declaration.parameters {
+                if let Some(ty) = &parameter.ty {
+                    builder.validate_declared_type(ty, TypeSite::Parameter, scope)?;
+                }
+            }
+            if let Some(ty) = declaration.return_type {
+                builder.validate_declared_type(ty, TypeSite::Return, scope)?;
+            }
+        }
         if builder.has_builtin(declaration.attributes, "Deprecated")
             || builder.has_builtin(declaration.attributes, "NoDiscard")
         {
@@ -249,6 +272,7 @@ impl<'ast> Compiler<'ast> {
         } else {
             self.class_scope.clone()
         };
+        builder.parent_scope = self.parent_scope.clone();
         builder.function.definition_line = line;
         builder.function.returns_reference = declaration.by_reference;
         builder.function.is_generator = declaration.is_generator;
@@ -256,6 +280,7 @@ impl<'ast> Compiler<'ast> {
         builder.function.strict_types = self.function.strict_types;
         for parameter in declaration.parameters {
             builder.local(&parameter.name)?;
+            let declaration_type = builder.parameter_type(parameter);
             builder.function.parameters.push(Parameter {
                 default_display: parameter
                     .default
@@ -263,10 +288,7 @@ impl<'ast> Compiler<'ast> {
                     .map(crate::helpers::default_display),
                 name: parameter.name.clone(),
                 has_default: parameter.default.is_some(),
-                declaration_type: parameter
-                    .ty
-                    .as_ref()
-                    .map(|declared_type| self.declaration_type(declared_type)),
+                declaration_type,
                 by_reference: parameter.by_reference,
                 variadic: parameter.variadic,
             });

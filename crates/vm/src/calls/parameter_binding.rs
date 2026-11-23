@@ -113,7 +113,7 @@ impl Vm {
             return Ok(value);
         }
         if scope == types::DeclarationScope::Absolute
-            && self.matches_cached_class_type(&value, declaration, unit, cache)
+            && self.matches_declared_class_type(entry, declaration, &value)
         {
             return Ok(value);
         }

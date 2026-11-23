@@ -247,6 +247,16 @@ fn cell<const OP: usize>(
             }
             field
         }
+        Value::InternedStr(name) => state
+            .rows
+            .columns
+            .iter()
+            .position(|column| column.name.as_bytes() == name.as_bytes())
+            .ok_or_else(|| {
+                NativeError::value_error(format!(
+                    "Argument #{argument} must be a field name from this result set"
+                ))
+            })?,
         Value::String(name) => state
             .rows
             .columns

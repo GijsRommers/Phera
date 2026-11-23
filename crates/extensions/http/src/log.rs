@@ -45,12 +45,14 @@ fn error_log(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_
             )),
             3 => phera_ext_streams::append_log(context, destination, message).await,
             _ => {
-                let prefix = match sapi(context) {
-                    Sapi::Cli => b"".as_slice(),
-                    Sapi::Web => b"phera-server: ",
-                };
                 let message = message.split(|&byte| byte == 0).next().unwrap_or_default();
-                let line = [prefix, message, b"\n"].concat();
+                if matches!(sapi(context), Sapi::Web) {
+                    phera_extension_api::web_log::write(
+                        [b"phera-server: ", message, b"\n"].concat(),
+                    );
+                    return Ok(Value::Bool(true));
+                }
+                let line = [message, b"\n"].concat();
                 let result =
                     tokio::task::spawn_blocking(move || std::io::stderr().write_all(&line)).await;
                 Ok(Value::Bool(result.is_ok_and(|result| result.is_ok())))

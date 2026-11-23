@@ -28,7 +28,9 @@ mod strings;
 mod transactions;
 mod unimplemented;
 
-use phera_extension_api::{ClassEntry, LocalFuture, MethodEntry, NativeResult, Registry};
+use phera_extension_api::{
+    ClassEntry, ClassHooks, LocalFuture, MethodEntry, NativeResult, Registry,
+};
 
 use crate::connection::exception;
 
@@ -40,9 +42,15 @@ pub fn register(registry: &mut Registry) {
     registry.class(ClassEntry {
         methods: METHODS,
         constants: constants::CONSTANTS,
+        hooks: Some(&HOOKS),
         ..ClassEntry::class("Redis")
     });
 }
+
+const HOOKS: ClassHooks = ClassHooks {
+    fork: Some(crate::connection::fork_session),
+    ..ClassHooks::EMPTY
+};
 
 /// The body of a method that is declared, so that its signature errors match
 /// phpredis, but not implemented.

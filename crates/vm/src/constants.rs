@@ -15,13 +15,28 @@ impl Vm {
         destination: Reg,
         constant: ConstId,
     ) -> Result<(), NativeError> {
-        let value = self
-            .current()
-            .and_then(|frame| frame.cache().constants.get(constant.index()))
-            .cloned()
-            .ok_or_else(|| internal_error!("constant"))?;
+        let value = self.literal(constant)?;
         self.set(destination, value);
         Ok(())
+    }
+
+    /// Literal `constant` of the running file.
+    pub(crate) fn literal(&self, constant: ConstId) -> Result<Value, NativeError> {
+        self.current()
+            .and_then(|frame| frame.cache().constants.get(constant.index()))
+            .cloned()
+            .ok_or_else(|| internal_error!("constant"))
+    }
+
+    /// `AssignConst`: a literal into a local, as `Assign` of it would.
+    pub(crate) fn assign_literal(
+        &mut self,
+        local: Reg,
+        constant: ConstId,
+    ) -> Result<(), NativeError> {
+        let value = self.literal(constant)?;
+        self.restart_subject_iterators(local);
+        self.assign_local(local, value)
     }
 
     /// Implements PHP FetchConstant semantics outside the dispatch loop.

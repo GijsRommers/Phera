@@ -14,9 +14,9 @@ use crate::class::{NAME_PROPERTY, reflect_class, target_class};
 use crate::{UNCLONEABLE, allocate, bind, engine, exception, load, receiver};
 
 #[derive(Clone)]
-struct ReflectedParameter {
-    function: Rc<FunctionInfo>,
-    position: usize,
+pub(crate) struct ReflectedParameter {
+    pub(crate) function: Rc<FunctionInfo>,
+    pub(crate) position: usize,
 }
 
 impl ReflectedParameter {
@@ -75,7 +75,7 @@ pub(crate) fn register(registry: &mut Registry) {
                     data(o, |p| Value::Bool(p.by_reference))
                 }),
                 MethodEntry::public("canBePassedByValue", &[], |_, o, _| {
-                    data(o, |p| Value::Bool(!p.by_reference))
+                    data(o, |p| Value::Bool(p.can_pass_by_value))
                 }),
                 MethodEntry::public("isPromoted", &[], |_, o, _| {
                     data(o, |p| Value::Bool(p.promoted))
@@ -101,13 +101,19 @@ pub(crate) fn register(registry: &mut Registry) {
                     crate::function::make(c, parameter(o)?.function.target.clone())
                 }),
                 MethodEntry::public_async("getDeclaringClass", &[], declaring),
-                MethodEntry::public_async("getClass", &[], legacy_class),
-                MethodEntry::public("isArray", &[], |c, o, _| {
-                    legacy_type(c, o, "isArray", "array")
-                }),
-                MethodEntry::public("isCallable", &[], |c, o, _| {
-                    legacy_type(c, o, "isCallable", "callable")
-                }),
+                MethodEntry::public_async("getClass", &[], legacy_class).with_preparation(
+                    |c, _, _| {
+                        phera_extension_api::deprecated_method(c, "ReflectionParameter::getClass")
+                    },
+                ),
+                MethodEntry::public("isArray", &[], |_, o, _| legacy_type(o, "array"))
+                    .with_preparation(|c, _, _| {
+                        phera_extension_api::deprecated_method(c, "ReflectionParameter::isArray")
+                    }),
+                MethodEntry::public("isCallable", &[], |_, o, _| legacy_type(o, "callable"))
+                    .with_preparation(|c, _, _| {
+                        phera_extension_api::deprecated_method(c, "ReflectionParameter::isCallable")
+                    }),
                 MethodEntry::public_async(
                     "getAttributes",
                     crate::attribute::FILTER,
@@ -178,6 +184,13 @@ fn construct(
         }
         let function = engine(context)?.reflect_function(&target)?;
         let position = match args.get(1) {
+            Some(Value::InternedStr(name)) => function
+                .parameters
+                .iter()
+                .position(|p| name.as_bytes() == p.name.as_bytes())
+                .ok_or_else(|| {
+                    exception("The parameter specified by its name could not be found")
+                })?,
             Some(Value::String(name)) => function
                 .parameters
                 .iter()
@@ -207,6 +220,7 @@ fn construct(
 
 fn function_target(value: &Value) -> Result<FunctionTarget, phera_extension_api::NativeError> {
     match value {
+        Value::InternedStr(name) => Ok(FunctionTarget::Named(name.to_string_lossy())),
         Value::String(name) => Ok(FunctionTarget::Named(name.to_string_lossy())),
         Value::Object(object) if object.class.name() == "Closure" => {
             Ok(FunctionTarget::Closure(Rc::downgrade(object)))
@@ -216,16 +230,17 @@ fn function_target(value: &Value) -> Result<FunctionTarget, phera_extension_api:
             name: "__invoke".into(),
         }),
         Value::Array(array) => {
-            let (Some(class), Some(Value::String(method))) =
-                (array.get(&ArrayKey::Int(0)), array.get(&ArrayKey::Int(1)))
-            else {
+            let (Some(class), Some(method)) = (
+                array.get(&ArrayKey::Int(0)),
+                array.get(&ArrayKey::Int(1)).and_then(Value::str_ref),
+            ) else {
                 return Err(exception(
                     "Expected array($object, $method) or array($classname, $method)",
                 ));
             };
             Ok(crate::method::method_target(
                 class,
-                target_class(class)?,
+                target_class(class)?.into_owned(),
                 method.to_string_lossy(),
             ))
         }
@@ -302,7 +317,6 @@ fn legacy_class(
     _: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        deprecation(context, "getClass");
         let parameter = parameter(this.as_ref())?;
         let Some(declared) = parameter.info()?.declared_type.as_deref() else {
             return Ok(Value::Null);
@@ -333,13 +347,7 @@ fn legacy_class(
     })
 }
 
-fn legacy_type(
-    context: &mut dyn Context,
-    this: Option<&Rc<Object>>,
-    method: &str,
-    ty: &str,
-) -> NativeResult {
-    deprecation(context, method);
+fn legacy_type(this: Option<&Rc<Object>>, ty: &str) -> NativeResult {
     data(this, |parameter| {
         Value::Bool(
             parameter
@@ -348,10 +356,4 @@ fn legacy_type(
                 .is_some_and(|declared| declared.trim_start_matches('?') == ty),
         )
     })
-}
-
-fn deprecation(context: &mut dyn Context, method: &str) {
-    context.deprecated(format!(
-        "Method ReflectionParameter::{method}() is deprecated since 8.0, use ReflectionParameter::getType() instead"
-    ));
 }

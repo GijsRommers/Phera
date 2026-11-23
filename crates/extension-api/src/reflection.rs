@@ -31,6 +31,7 @@ pub enum ReflectedClassKind {
 pub struct ClassInfo {
     pub id: u32,
     pub name: String,
+    pub name_value: Value,
     pub kind: ReflectedClassKind,
     pub source: Option<SourceInfo>,
     pub extension: Option<String>,
@@ -96,6 +97,92 @@ pub struct MemberInfo {
     pub has_default: bool,
     pub dynamic: bool,
     pub property: Option<PropertyHandle>,
+    /// For a method in a class's member list, where the VM keeps its
+    /// reflected function (see [`FunctionTarget::Member`]).
+    pub method: Option<MethodHandle>,
+    /// For a plain instance property (no hooks, not virtual), where an
+    /// object keeps it, for the direct methods of `ReflectionProperty`.
+    pub slot_access: Option<SlotAccess>,
+}
+
+/// An instance property in an object's slots (see
+/// `phera_value::Properties`): its key and slot, and the types a write may
+/// store as they are.
+///
+/// The slot is the same in the declaring class and in every class that
+/// extends it, because a layout lists the parent's properties first. So a
+/// direct method checks only that the object's layout has this key there:
+/// any other object (of an unrelated class, or with a lazy or native
+/// table) gets the general path.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlotAccess {
+    pub key: crate::ArrayKey,
+    pub slot: usize,
+    /// The layout of the class the reflector was made for. An object with
+    /// this layout is of that class, which has the property; an object of
+    /// another layout is of the property's class only if it is an instance
+    /// of it, which a layout holding the key in the slot does not show (a
+    /// parent of a class that redeclares the property, or an unrelated
+    /// class with a property of the same name).
+    pub layout: Rc<phera_value::PropertyLayout>,
+    /// `None` when a write must take the general path: a readonly
+    /// property, or a type that names a class.
+    pub writes: Option<phera_bytecode::TypeMask>,
+}
+
+impl SlotAccess {
+    /// Whether an object with these `properties` is of the class the
+    /// reflector was made for.
+    #[inline]
+    pub fn is_own_layout(&self, properties: &crate::value::Properties) -> bool {
+        properties
+            .layout()
+            .is_some_and(|layout| Rc::ptr_eq(layout, &self.layout))
+    }
+
+    /// The property's value in `properties`, or `None` when it has none:
+    /// `None` outside when the properties do not keep it in this slot. An
+    /// object of the reflector's own layout keeps it there by construction;
+    /// for any other the key in the slot is compared.
+    #[inline]
+    pub fn read<'a>(&self, properties: &'a crate::value::Properties) -> Option<Option<&'a Value>> {
+        if self.is_own_layout(properties) {
+            return Some(properties.slot(self.slot));
+        }
+        (properties.slot_for(&self.key, Some(self.slot)) == Some(self.slot))
+            .then(|| properties.slot(self.slot))
+    }
+
+    /// Whether a write may store `value` as it is: a type the declaration
+    /// accepts without a conversion, and not a PHP reference.
+    pub fn accepts(&self, value: &Value) -> bool {
+        use phera_bytecode::TypeMask;
+        let Some(mask) = self.writes else {
+            return false;
+        };
+        let own = match value {
+            Value::Null => TypeMask::NULL,
+            Value::Bool(true) => TypeMask::TRUE,
+            Value::Bool(false) => TypeMask::FALSE,
+            Value::Int(_) => TypeMask::INT,
+            Value::Float(_) => TypeMask::FLOAT,
+            Value::InternedStr(_) | Value::String(_) => TypeMask::STRING,
+            Value::Array(_) => TypeMask::ARRAY,
+            Value::Object(_) => TypeMask::OBJECT,
+            _ => return false,
+        };
+        mask.intersects(own)
+    }
+}
+
+/// A method by its place in the member list of a linked class: the class's
+/// number and the method's position. The VM keeps the reflected function
+/// of each in a column of that class, so that `getMethods()` finds them
+/// without a name. Valid only for the current PHP request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MethodHandle {
+    pub class: u32,
+    pub index: u32,
 }
 
 /// A property slot in a linked class, valid only for the current PHP request.
@@ -199,11 +286,17 @@ pub trait ReflectionContext {
         value: Value,
     ) -> NativeResult;
 
+    /// Finds a loaded class, as in `new ReflectionClass(Service::class)`.
+    fn reflect_loaded_class(&mut self, name: &str) -> Option<Rc<ClassInfo>>;
+
+    /// Finds the class carried by an object, as in `new ReflectionClass($object)`.
+    fn reflect_object_class(&mut self, object: &Object) -> Option<Rc<ClassInfo>>;
+
     /// Loads a class by name, with PHP autoloading.
-    fn reflect_class(
-        &mut self,
-        name: &str,
-    ) -> LocalFuture<'_, Result<Rc<ClassInfo>, crate::NativeError>>;
+    fn reflect_class<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<'a, Result<Rc<ClassInfo>, crate::NativeError>>;
 
     /// Lists visible reflection members in declaration order, including non-public members.
     fn reflect_members(&mut self, class: ClassSelector<'_>, kind: MemberKind) -> Members;
@@ -346,6 +439,13 @@ pub enum FunctionTarget {
         class: String,
         name: String,
     },
+    /// A method selected by a constructor after the class was linked.
+    LinkedMethod {
+        class: u32,
+        name: String,
+    },
+    /// A method of a class's member list, by its place (`getMethods()`).
+    Member(MethodHandle),
     PropertyHook {
         property: PropertyHandle,
         kind: PropertyHookKind,
@@ -380,6 +480,7 @@ pub struct ParameterInfo {
     pub position: usize,
     pub declared_type: Option<String>,
     pub by_reference: bool,
+    pub can_pass_by_value: bool,
     pub variadic: bool,
     pub optional: bool,
     pub promoted: bool,

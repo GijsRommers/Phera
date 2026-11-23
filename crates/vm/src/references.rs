@@ -1,15 +1,12 @@
 //! Global and static reference identity.
 
-use std::{cell::RefCell, rc::Rc};
-
 use phera_bytecode::Reg;
 use phera_extension_api::NativeError;
-use phera_value::Value;
 
 use crate::Vm;
 
 /// Trait imports have distinct function indices even when the source bytecode is shared.
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub(crate) struct StaticKey {
     pub(crate) function: crate::code_table::FunctionIndex,
     pub(crate) variable: u16,
@@ -35,29 +32,9 @@ impl Vm {
         })
     }
 
-    /// Share the main-scope cell with a function local rather than copying its value.
+    /// A local declaration aliases the request symbol, wherever it currently lives.
     pub(crate) fn bind_global(&mut self, local: Reg, name: String) -> Result<(), NativeError> {
-        if let Some(frame) = self
-            .frame_at(0)
-            .filter(|frame| frame.function_id().is_none())
-            && let Some(index) = frame
-                .function()
-                .locals
-                .iter()
-                .position(|candidate| frame.unit().names.get(candidate.index()) == Some(&name))
-            && let (base, count) = (frame.base(), frame.count())
-            && let Some(slot) = self.registers.window_mut(base, count).get_mut(index)
-        {
-            let value = slot.take().unwrap_or_default();
-            let reference = if value.is_reference() {
-                value
-            } else {
-                Value::Reference(Rc::new(RefCell::new(value)))
-            };
-            *slot = Some(reference.clone());
-            self.globals.insert(name.clone(), reference);
-        }
-        let value = self.globals.reference(name);
+        let value = self.global_reference(name);
         self.set(local, value);
         Ok(())
     }

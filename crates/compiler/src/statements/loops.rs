@@ -26,16 +26,11 @@ impl Compiler<'_> {
         let continue_at = self.position();
         self.fresh_temporaries();
         let mark = self.temporaries_start();
-        let register = self.compile_expression(condition)?;
+        let back = self.compile_condition(condition, true, line)?;
         let condition = self.temporaries_since(mark);
-        self.emit(
-            Instruction::Branch {
-                value: register,
-                target: Target(start),
-                when: true,
-            },
-            line,
-        );
+        for patch in &back {
+            self.patch(*patch, start);
+        }
         self.clear_condition_temporaries(&condition, line);
         self.loop_end(continue_at);
 
@@ -59,21 +54,15 @@ impl Compiler<'_> {
         }
         let start = self.position();
         let mark = self.temporaries_start();
-        let mut last = None;
-        for expression in condition {
-            last = Some(self.compile_expression(expression)?)
+        // Only the last condition controls the loop; earlier ones still run.
+        for expression in condition.iter().take(condition.len().saturating_sub(1)) {
+            self.compile_expression(expression)?;
         }
+        let end = condition
+            .last()
+            .map(|expression| self.compile_condition(expression, false, line))
+            .transpose()?;
         let conditions = self.temporaries_since(mark);
-        let end = last.map(|register| {
-            self.emit(
-                Instruction::Branch {
-                    value: register,
-                    target: Target(0),
-                    when: false,
-                },
-                line,
-            )
-        });
         self.clear_condition_temporaries(&conditions, line);
         self.loops.push(Loop {
             start: self.position(),
@@ -91,8 +80,10 @@ impl Compiler<'_> {
             self.clear_owning_temporaries(&temporaries, line);
         }
         self.emit(Instruction::Jump(Target(start)), line);
-        if let Some(jump) = end {
-            self.patch(jump, self.position());
+        if let Some(end) = end {
+            for patch in &end {
+                self.patch(*patch, self.position());
+            }
             self.clear_condition_temporaries(&conditions, line);
         }
         self.loop_end(continue_at);

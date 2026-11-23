@@ -71,6 +71,14 @@ impl Extension for Http {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::syslog::Opened>(
+            phera_extension_api::copy_state::<crate::syslog::Opened>,
+        );
+        registry.fork_state::<crate::Sapi>(phera_extension_api::copy_state::<crate::Sapi>);
+        registry.fork_state::<crate::RequestHeaders>(phera_extension_api::fresh_state);
+        registry.fork_state::<crate::ResponseHead>(phera_extension_api::fresh_state);
+        registry.fork_state::<crate::UploadedFiles>(phera_extension_api::fresh_state);
         cookies::register(registry);
         log::register(registry);
         syslog::register(registry);

@@ -176,3 +176,33 @@ fn aligned_capacity(size: usize) -> usize {
         size.saturating_add(CHUNK_ALIGNMENT - 1) & !(CHUNK_ALIGNMENT - 1)
     }
 }
+
+/// A fork keeps the buffers `ob_start()` opened before the snapshot, with
+/// their handlers, but not what they held: output written before the
+/// snapshot is not sent again.
+impl crate::snapshot::ForkCopy for Buffers {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        Buffers {
+            stack: self
+                .stack
+                .iter()
+                .map(|buffer| Buffer {
+                    name: buffer.name.clone(),
+                    callback: buffer.callback.fork_copy(fork),
+                    bytes: Vec::new(),
+                    chunk: buffer.chunk,
+                    capacity: buffer.capacity,
+                    settings: buffer.settings,
+                    started: buffer.started,
+                    disabled: buffer.disabled,
+                    processed: buffer.processed,
+                    produced_output: false,
+                })
+                .collect(),
+            running: None,
+            pending: None,
+            lock_broken: self.lock_broken,
+            finalizing: false,
+        }
+    }
+}

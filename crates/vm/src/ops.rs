@@ -49,7 +49,7 @@ pub fn binary(
             left,
             right,
             diagnostics,
-            &mut crate::object_comparison::compare_objects,
+            &mut crate::object_comparison::compare_objects_without_context,
         ),
         Binary::LogicalXor => Ok(Value::Bool(to_bool(left) ^ to_bool(right))),
     }

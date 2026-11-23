@@ -16,6 +16,7 @@ mod class_members;
 mod constant;
 mod enum_reflection;
 mod extension;
+mod fork;
 mod function;
 mod generator;
 mod lazy;
@@ -24,6 +25,7 @@ mod method;
 mod modifiers;
 mod parameter;
 mod property;
+mod property_slots;
 mod reference;
 mod types;
 
@@ -35,6 +37,8 @@ impl Extension for Reflection {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::reference::ReferenceIds>(phera_extension_api::fresh_state);
         builtins::register(registry);
         registry.class(ClassEntry {
             parent: Some("Exception"),
@@ -66,6 +70,7 @@ impl Extension for Reflection {
 static UNCLONEABLE: phera_extension_api::ClassHooks = phera_extension_api::ClassHooks {
     clone: Some(NativeClone::Forbidden),
     properties: Some(reflected_properties),
+    fork: Some(fork::fork_state),
     ..phera_extension_api::ClassHooks::EMPTY
 };
 
@@ -114,8 +119,13 @@ fn load<T: Any + Clone>(this: Option<&Rc<Object>>) -> Result<T, NativeError> {
 }
 
 fn bind<T: Any>(object: &Object, name: Option<&str>, value: T) -> NativeResult {
+    bind_value(object, name.map(Value::from), value)
+}
+
+/// Install native state and a PHP string, for example the name of `new ReflectionClass(Foo::class)`.
+fn bind_value<T: Any>(object: &Object, name: Option<Value>, value: T) -> NativeResult {
     if let Some(name) = name {
-        object.set(ArrayKey::str("name"), Value::from(name));
+        object.set(ArrayKey::str("name"), name);
     }
     *object
         .native

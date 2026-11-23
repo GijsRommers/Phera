@@ -31,6 +31,18 @@ pub(crate) enum LinkedFunction {
     NamespaceFallback,
 }
 
+impl LinkedFunction {
+    /// This link as a request forked from a snapshot may use it, if it may:
+    /// a function by number or a native one, which hold no object of the
+    /// VM they were made in.
+    pub(crate) fn shared(&self) -> Option<Self> {
+        match self {
+            LinkedFunction::Other(callee) => callee.shared().map(LinkedFunction::Other),
+            LinkedFunction::Php(_) | LinkedFunction::NamespaceFallback => Some(self.clone()),
+        }
+    }
+}
+
 impl Vm {
     /// Resolve the callee before argument evaluation so reference parameters are known.
     pub(crate) fn init_call(&mut self, symbol: SymbolId) -> Result<(), NativeError> {
@@ -53,13 +65,15 @@ impl Vm {
         symbol: SymbolId,
     ) -> Result<LinkedFunction, NativeError> {
         let linked = self.current().and_then(|frame| {
-            frame
-                .cache()
+            let cache = frame.cache();
+            let own = cache
                 .symbols
                 .borrow()
                 .get(symbol.index())
                 .cloned()
-                .flatten()
+                .flatten();
+            // What the snapshot linked, copied once into this request's cache.
+            own.or_else(|| cache.base_symbol(symbol.index()))
         });
         match linked {
             Some(linked) => Ok(linked),
@@ -76,10 +90,8 @@ impl Vm {
         } else {
             self.resolve_function_symbol(&definition)?
         };
-        if let Some(frame) = self.current()
-            && let Some(slot) = frame.cache().symbols.borrow_mut().get_mut(symbol.index())
-        {
-            *slot = Some(linked.clone());
+        if let Some(frame) = self.current() {
+            frame.cache().set_symbol(symbol.index(), linked.clone());
         }
         Ok(linked)
     }
@@ -100,8 +112,8 @@ impl Vm {
             .current()
             .ok_or_else(|| internal_error!("namespace call frame"))?;
         let site = frame
-            .cache()
-            .site(frame.function_id(), frame.ip())
+            .code
+            .site(frame.frame.function, frame.ip())
             .ok_or_else(|| internal_error!("namespace call site"))?;
         if let CachedSite::Function(callee) = &*site.borrow() {
             return Ok((**callee).clone());
@@ -165,19 +177,19 @@ impl Vm {
         written: &str,
         policy_name: &str,
     ) -> Result<Callee, NativeError> {
-        let lower = name.trim_start_matches('\\').to_ascii_lowercase();
+        let lower = phera_extension_api::folded_name(name.trim_start_matches('\\'));
         if let Some(index) = self.function_table.get(&lower) {
             return Ok(self.function_callee(index));
         }
         let (name, target, parameters): (_, _, Vec<_>) = if let Some(entry) =
-            self.registry.get_function(name.trim_start_matches('\\'))
+            self.registry.get_folded_function(&lower)
         {
             (
                 entry.name.into(),
                 CallTarget::Native(*entry),
                 entry.params.iter().map(ParameterSpec::native).collect(),
             )
-        } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve(name) {
+        } else if let Some(intrinsic) = crate::intrinsics::Intrinsic::resolve_folded(&lower) {
             let parameters = if let Some(parameters) = intrinsic.parameters() {
                 parameters.iter().map(ParameterSpec::native).collect()
             } else {
@@ -189,6 +201,10 @@ impl Vm {
                         ty: None,
                         by_reference: matches!(intrinsic, crate::intrinsics::Intrinsic::IsCallable)
                             && *name == "callable_name",
+                        requires_reference: matches!(
+                            intrinsic,
+                            crate::intrinsics::Intrinsic::IsCallable
+                        ) && *name == "callable_name",
                         variadic: matches!(
                             (intrinsic, *name),
                             (crate::intrinsics::Intrinsic::CallUserFunc, "args")

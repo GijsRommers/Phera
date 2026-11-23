@@ -45,6 +45,23 @@ struct Declaration {
     _pin: Rc<()>,
 }
 
+/// A namespace node in a fork points into the fork's copy of its document,
+/// and holds the fork's copy of its pin.
+fn fork_declaration(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    let declaration = state
+        .downcast_ref::<Declaration>()
+        .ok_or("its built-in state is not initialized")?;
+    Ok(Box::new(Declaration {
+        node: declaration.node.forked(fork),
+        parent: declaration.parent,
+        _pin: fork.shared_native(&declaration._pin, |_, _| ()),
+    }) as Box<dyn std::any::Any>)
+}
+
 pub(super) fn location(object: &Object) -> Option<Location> {
     let declaration: Declaration = native(object)?;
     Some(declaration.node)
@@ -189,8 +206,9 @@ pub(super) fn register(registry: &mut Registry) {
         hooks: const {
             Some(&ClassHooks {
                 clone: Some(NativeClone::copy::<Declaration>()),
+                fork: Some(fork_declaration),
                 properties: Some(debug),
-                property_access: Some(&NativePropertyAccess { read, mutate }),
+                property_access: Some(&NativePropertyAccess::new(read, mutate)),
                 ..ClassHooks::EMPTY
             })
         },

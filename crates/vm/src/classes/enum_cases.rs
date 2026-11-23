@@ -1,4 +1,18 @@
 //! `Color::Red === Color::Red` because the request owns one object per case.
+//!
+//! ```php
+//! enum Suit: string { case Hearts = 'H'; case Spades = 'S'; }
+//! $a = Suit::Hearts;          // first read: makes the cases, checks 'H' != 'S'
+//! $b = Suit::Hearts;          // later reads: the object from the case's slot
+//! var_dump($a === $b);        // true
+//! ```
+//!
+//! A case is made on its first use. Once it may be handed out without any
+//! further work it is stored in its constant's slot of the request (see
+//! `ClassStates`), where the interpreter reads it like `Post::LIMIT`. A unit
+//! enum's case is stored when it is made. A backed enum's cases are stored
+//! together when all of them exist and their backing values were found to
+//! be distinct, so a read before that still runs the check.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -9,7 +23,10 @@ use phera_bytecode::EnumBacking;
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object, Value};
 
-use super::{Class, ClassIndex, class::ConstantInitializer};
+use super::{
+    Class, ClassIndex,
+    class::{ConstantInitializer, ConstantState},
+};
 use crate::{
     Vm,
     initializer_tasks::{CaseLookup, Continuation, InitializerTask, Progress},
@@ -23,6 +40,24 @@ pub(crate) struct EnumCases {
     initializing: HashSet<(ClassIndex, String)>,
     backed: HashMap<ClassIndex, BackingTable>,
     validating: HashSet<ClassIndex>,
+}
+
+impl EnumCases {
+    #[inline]
+    pub(crate) fn needs_backing(&self, class: &Class) -> bool {
+        class
+            .enum_info
+            .as_ref()
+            .is_some_and(|info| info.backing.is_some())
+            && !self.backed.contains_key(&class.index)
+            && !self.validating.contains(&class.index)
+    }
+
+    #[inline]
+    pub(crate) fn backed_case(&self, class: ClassIndex, key: &ArrayKey) -> Option<Value> {
+        let object = self.backed.get(&class)?.get(key)?;
+        Some(Value::Object(object.clone()))
+    }
 }
 
 /// The request stores one object per case and indexes backing values separately.
@@ -80,12 +115,53 @@ impl Vm {
         if let Some(value) = backing {
             object.set(ArrayKey::str("value"), value);
         }
+        let is_unit_enum = class
+            .enum_info
+            .as_ref()
+            .is_some_and(|info| info.backing.is_none());
+        if is_unit_enum {
+            self.publish_enum_case(&class, &name, &object);
+        }
         self.enum_cases
             .objects
             .entry(class.index)
             .or_default()
             .insert(name, object.clone());
         Value::Object(object)
+    }
+
+    /// From here on `Suit::Hearts` is read like any evaluated constant:
+    /// the case object is in the constant's slot of this request.
+    fn publish_enum_case(&mut self, class: &Class, name: &str, object: &Rc<Object>) {
+        if let Some(constant) = class.constants.get(name)
+            && let ConstantInitializer::EnumCase {
+                slot: Some(slot), ..
+            } = &constant.initializer
+        {
+            let case = Value::Object(object.clone());
+            self.class_states
+                .set_constant(*slot, ConstantState::Ready(case));
+        }
+    }
+
+    /// A backed enum's cases become directly readable together, once every
+    /// backing value was evaluated and no two are equal. Until then each
+    /// read goes through the lookup, which starts that check.
+    fn publish_backed_cases(&mut self, class: &Class) {
+        let Some(cases) = self.enum_cases.objects.get(&class.index) else {
+            return;
+        };
+        for (name, object) in cases {
+            if let Some(constant) = class.constants.get(name)
+                && let ConstantInitializer::EnumCase {
+                    slot: Some(slot), ..
+                } = &constant.initializer
+            {
+                let case = Value::Object(object.clone());
+                self.class_states
+                    .set_constant(*slot, ConstantState::Ready(case));
+            }
+        }
     }
 
     pub(crate) fn cancel_enum_case(&mut self, class: &Class, name: String) {
@@ -154,6 +230,7 @@ impl Vm {
             };
         }
         self.cancel_enum_backing(&builder.class);
+        self.publish_backed_cases(&builder.class);
         self.enum_cases
             .backed
             .insert(builder.class.index, builder.table);
@@ -175,6 +252,7 @@ impl BackingBuilder {
             .ok_or_else(|| internal_error!("backed enum value"))?;
         let key = match (self.backing, backing) {
             (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(number),
+            (EnumBacking::String, Value::InternedStr(string)) => ArrayKey::Interned(string),
             (EnumBacking::String, Value::String(string)) => ArrayKey::String(string),
             (backing, value) => {
                 let expected = match backing {
@@ -201,8 +279,11 @@ impl BackingBuilder {
 }
 
 fn name_of(object: &Object) -> Result<String, NativeError> {
-    if let Some(Value::String(name)) = object.get(&ArrayKey::str("name")) {
-        Ok(name.to_string_lossy())
+    if let Some(name) = object
+        .get(&ArrayKey::interned_str(b"name"))
+        .and_then(|value| value.str_ref().map(|s| s.to_string_lossy()))
+    {
+        Ok(name)
     } else {
         Err(internal_error!("enum case name"))
     }
@@ -227,5 +308,18 @@ impl Vm {
     pub(super) fn backed_enum_case(&self, class: &Class, key: &ArrayKey) -> Option<Value> {
         let object = self.enum_cases.backed.get(&class.index)?.get(key)?;
         Some(Value::Object(object.clone()))
+    }
+}
+
+/// The fork's case objects are the copies of the snapshot's, so that
+/// `Suit::Hearts === $card->suit` holds in the fork as it did before.
+impl crate::snapshot::ForkCopy for EnumCases {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        EnumCases {
+            objects: self.objects.fork_copy(fork),
+            initializing: Default::default(),
+            backed: self.backed.fork_copy(fork),
+            validating: Default::default(),
+        }
     }
 }

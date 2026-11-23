@@ -213,6 +213,7 @@ impl Vm {
         value: Option<Value>,
     ) -> NativeResult {
         let name = match &key {
+            ArrayKey::Interned(name) => Value::InternedStr(name),
             ArrayKey::String(name) => Value::String(name.clone()),
             ArrayKey::Int(index) => Value::from(index.to_string()),
         };
@@ -348,5 +349,18 @@ impl Vm {
         self.validate_getter_value(&class, accessible.as_ref(), result)
             .await
             .map(|value| ReadProperty::from_getter(value).into())
+    }
+}
+
+/// Which typed properties an object had unset, for the fork's copy of it.
+impl crate::snapshot::ForkCopy for UnsetProperties {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        UnsetProperties {
+            object: self
+                .object
+                .upgrade()
+                .map_or_else(Weak::new, |object| Rc::downgrade(&fork.object(&object))),
+            keys: self.keys.clone(),
+        }
     }
 }

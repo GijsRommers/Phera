@@ -9,6 +9,7 @@ use phera_extension_api::{ClassHooks, NativeClone};
 
 const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    fork: Some(result::fork_result),
     property_access: Some(&result::ACCESS),
     iterator: Some(result::iterator),
     ..ClassHooks::EMPTY

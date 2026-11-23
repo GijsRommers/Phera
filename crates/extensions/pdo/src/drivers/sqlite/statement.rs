@@ -1,8 +1,8 @@
 //! SQLite owns parameter numbering: `prepare('SELECT ?2, :name, @other')`.
 
-use crate::drivers::{Column, Prepared, Rows};
+use crate::drivers::{Column, Prepared, RowBuffer, Rows};
 use crate::errors::{DbError, ErrorState};
-use crate::parameters;
+use crate::parameters::Bindings;
 use crate::statement::Statement;
 use phera_extension_api::{ArrayKey, Context, NativeResult, PhpArray, Value};
 use phera_sqlite::{Cell, kind};
@@ -17,7 +17,7 @@ pub async fn execute(
     method: &str,
 ) -> NativeResult {
     if let Some(params) = arguments.first().filter(|v| !v.is_null()) {
-        state.borrow_mut().bindings = parameters::execute_bindings(params)?;
+        state.borrow_mut().bindings = Bindings::from_execute(params)?;
     }
     let (handle, bindings, extended) = {
         let statement = state.borrow();
@@ -27,7 +27,12 @@ pub async fn execute(
             ));
         };
         let mut bindings = Vec::new();
-        for (key, binding) in &statement.bindings {
+        let Bindings::Keyed(parameters) = &statement.bindings else {
+            return Err(phera_extension_api::NativeError::error(
+                "SQLite statement bindings must be keyed",
+            ));
+        };
+        for (key, binding) in parameters {
             let index = key.parse::<usize>().ok().map(|i| i + 1).or_else(|| {
                 handle
                     .description
@@ -63,7 +68,7 @@ pub async fn execute(
     match handle.execute(bindings).await {
         Ok(execution) => {
             let mut statement = state.borrow_mut();
-            let columns = execution
+            let columns: Vec<_> = execution
                 .description
                 .columns
                 .into_iter()
@@ -75,7 +80,8 @@ pub async fn execute(
                         execution
                             .first
                             .as_ref()
-                            .map_or(kind::NULL, |row| row[index].kind()),
+                            .and_then(|row| row.get(index))
+                            .map_or(kind::NULL, Cell::kind),
                     ),
                 })
                 .collect();
@@ -84,17 +90,17 @@ pub async fn execute(
             } else {
                 execution.changes
             };
-            statement.rows = Rows {
+            let mut values = RowBuffer::with_capacity(columns.len(), 1);
+            if let Some(row) = execution.first {
+                values.push(row.into_iter().map(value));
+            }
+            statement.set_rows(Rows {
                 columns,
-                values: execution
-                    .first
-                    .into_iter()
-                    .map(|row| row.into_iter().map(value).collect())
-                    .collect(),
+                values,
                 affected,
-            };
+                has_pending_rows: false,
+            });
             statement.sqlite_executed = true;
-            statement.cursor = 0;
             statement.error = ErrorState::Success;
             Ok(Value::Bool(true))
         }

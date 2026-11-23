@@ -12,7 +12,7 @@ const FLUSH: i64 = 4;
 const FINAL: i64 = 8;
 
 #[derive(Default)]
-struct Output {
+pub(crate) struct Output {
     encoding: Option<Encoding>,
     encoder: Option<Encoder>,
 }

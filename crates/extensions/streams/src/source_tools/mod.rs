@@ -2,6 +2,8 @@
 //! php_strip_whitespace('example.php') returns the same source with trivia collapsed.
 
 mod highlight;
+mod iptc;
+mod meta_tags;
 mod strip;
 
 use phera_extension_api::{
@@ -20,6 +22,8 @@ const RETURN: Param =
     Param::new("return", ParamType::Bool).with_default(ConstantValue::Bool(false));
 
 pub(crate) fn register(registry: &mut Registry) {
+    iptc::register(registry);
+    meta_tags::register(registry);
     registry.function(FunctionEntry::sync(
         "highlight_string",
         const { &[Param::new("string", ParamType::String), RETURN] },
@@ -31,6 +35,11 @@ pub(crate) fn register(registry: &mut Registry) {
         highlight_file,
     ));
     registry.function(FunctionEntry::asynchronous(
+        "show_source",
+        const { &[FILENAME, RETURN] },
+        show_source,
+    ));
+    registry.function(FunctionEntry::asynchronous(
         "php_strip_whitespace",
         &[FILENAME],
         strip_file,
@@ -38,6 +47,7 @@ pub(crate) fn register(registry: &mut Registry) {
     for (name, returns) in [
         ("highlight_string", "string|true"),
         ("highlight_file", "string|bool"),
+        ("show_source", "string|bool"),
         ("php_strip_whitespace", "string"),
     ] {
         registry.describe_function(name, returns, Some("standard"));
@@ -53,26 +63,36 @@ fn highlight_file(
     context: &mut dyn Context,
     arguments: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move {
-        let path = args::bytes(&arguments, 0);
-        let function = "highlight_file";
-        check_path(function, "#1 ($filename)", path)?;
-        let input = read_source(context, function, path).await;
-        match input {
-            Ok(Some(source)) => Ok(highlight_result(context, &arguments, &source)),
-            result => {
-                context.warning_bytes(
-                    &[
-                        b"highlight_file(): Failed opening '",
-                        path,
-                        b"' for highlighting",
-                    ]
-                    .concat(),
-                );
-                result.map(|_| Value::Bool(false))
-            }
+    Box::pin(highlight_path(context, arguments, "highlight_file"))
+}
+
+fn show_source(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(highlight_path(context, arguments, "show_source"))
+}
+
+async fn highlight_path(
+    context: &mut dyn Context,
+    arguments: Vec<Value>,
+    function: &str,
+) -> NativeResult {
+    let path = args::bytes(&arguments, 0);
+    check_path(function, "#1 ($filename)", path)?;
+    let input = read_source(context, function, path).await;
+    match input {
+        Ok(Some(source)) => Ok(highlight_result(context, &arguments, &source)),
+        result => {
+            context.warning_bytes(
+                &[
+                    function.as_bytes(),
+                    b"(): Failed opening '",
+                    path,
+                    b"' for highlighting",
+                ]
+                .concat(),
+            );
+            result.map(|_| Value::Bool(false))
         }
-    })
+    }
 }
 
 fn highlight_result(context: &mut dyn Context, arguments: &[Value], source: &[u8]) -> Value {

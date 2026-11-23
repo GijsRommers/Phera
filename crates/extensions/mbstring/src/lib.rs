@@ -22,6 +22,7 @@ mod entities;
 mod iconv;
 mod ini;
 mod kana;
+mod mail;
 mod mime;
 mod names;
 mod query;
@@ -31,6 +32,7 @@ mod state;
 mod text;
 mod trim;
 mod unicode;
+pub mod unicode_codec;
 mod walk;
 
 use phera_extension_api::{Extension, Param, ParamType, Registry};
@@ -52,6 +54,13 @@ impl Extension for Mbstring {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::state::Settings>(
+            phera_extension_api::copy_state::<crate::state::Settings>,
+        );
+        registry.fork_state::<crate::iconv::settings::Settings>(
+            phera_extension_api::copy_state::<crate::iconv::settings::Settings>,
+        );
         text::register(registry);
         casing::register(registry);
         search::register(registry);
@@ -63,6 +72,7 @@ impl Extension for Mbstring {
         ini::register(registry);
         entities::register(registry);
         kana::register(registry);
+        mail::register(registry);
         mime::register(registry);
         query::register(registry);
         iconv::register(registry);

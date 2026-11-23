@@ -42,17 +42,40 @@ pub(super) enum Current {
 #[derive(Clone)]
 pub(super) struct Directory {
     path: PhpString,
-    entries: Rc<[PhpString]>,
+    entries: Entries,
     glob: Option<PhpString>,
     flags: i64,
-    offset: usize,
     position: i64,
     sub_path: PhpString,
 }
 
+#[derive(Clone)]
+enum Entries {
+    List {
+        names: Rc<[PhpString]>,
+        offset: usize,
+    },
+    Wrapped {
+        handle: native::DirectoryStream,
+        entry: Option<PhpString>,
+    },
+}
+
+impl Entries {
+    fn list(names: Vec<PhpString>) -> Self {
+        Self::List {
+            names: names.into(),
+            offset: 0,
+        }
+    }
+}
+
 impl Directory {
     pub(super) fn entry(&self) -> Option<&PhpString> {
-        self.entries.get(self.offset)
+        match &self.entries {
+            Entries::List { names, offset } => names.get(*offset),
+            Entries::Wrapped { entry, .. } => entry.as_ref(),
+        }
     }
 
     fn filename(&self) -> &[u8] {
@@ -99,8 +122,12 @@ impl Directory {
     }
 
     fn skip_dots(&mut self) {
-        while self.flags & SKIP_DOTS != 0 && self.entry().is_some_and(|name| dot(name.as_bytes())) {
-            self.offset += 1;
+        if let Entries::List { names, offset } = &mut self.entries {
+            while self.flags & SKIP_DOTS != 0
+                && names.get(*offset).is_some_and(|name| dot(name.as_bytes()))
+            {
+                *offset += 1;
+            }
         }
     }
 }
@@ -190,34 +217,46 @@ fn open<'a>(
         if glob && pattern.is_none() {
             pattern = Some(path.to_vec());
         }
-        let entries: Vec<PhpString> = if let Some(pattern) = &pattern {
-            match context
-                .call(&Value::from("glob"), vec![Value::from(pattern.clone())])
-                .await?
-            {
-                Value::Array(rows) => rows
-                    .values()
-                    .filter_map(|entry| match entry {
-                        Value::String(entry) => Some(entry.clone()),
-                        _ => None,
-                    })
-                    .collect(),
-                _ => Vec::new(),
-            }
+        let flags = if basic {
+            AS_SELF
         } else {
-            native::directory_entries(context, path)
-                .await?
-                .map_err(|error| {
-                    let prefix = format!("{name}(");
-                    let suffix = format!("): Failed to open directory: {}", native::reason(&error));
-                    NativeError::throw_bytes(
-                        "UnexpectedValueException",
-                        [prefix.as_bytes(), path, suffix.as_bytes()].concat(),
-                    )
-                })?
-                .into_iter()
-                .map(PhpString::from)
-                .collect()
+            args::int(&arguments, 1).unwrap_or(default_flags)
+        };
+        let entries = if let Some(pattern) = &pattern {
+            Entries::list(
+                match context
+                    .call(&Value::from("glob"), vec![Value::from(pattern.clone())])
+                    .await?
+                {
+                    Value::Array(rows) => rows
+                        .values()
+                        .filter_map(|entry| entry.to_php_string())
+                        .collect(),
+                    _ => Vec::new(),
+                },
+            )
+        } else if let Some(handle) =
+            native::DirectoryStream::open_wrapper(context, path, &name).await?
+        {
+            let entry = cursor::read_wrapper_entry(context, &handle, flags, &name).await?;
+            Entries::Wrapped { handle, entry }
+        } else {
+            Entries::list(
+                native::directory_entries(context, path)
+                    .await?
+                    .map_err(|error| {
+                        let prefix = format!("{name}(");
+                        let suffix =
+                            format!("): Failed to open directory: {}", native::reason(&error));
+                        NativeError::throw_bytes(
+                            "UnexpectedValueException",
+                            [prefix.as_bytes(), path, suffix.as_bytes()].concat(),
+                        )
+                    })?
+                    .into_iter()
+                    .map(PhpString::from)
+                    .collect(),
+            )
         };
         let glob = pattern.map(|pattern| {
             let mut uri = b"glob://".to_vec();
@@ -225,17 +264,11 @@ fn open<'a>(
             PhpString::from(uri)
         });
         let len = path.len() - usize::from(path.len() > 1 && path.ends_with(b"/"));
-        let flags = if basic {
-            AS_SELF
-        } else {
-            args::int(&arguments, 1).unwrap_or(default_flags)
-        };
         let mut directory = Directory {
             path: PhpString::from(&path[..len]),
-            entries: Rc::from(entries),
+            entries,
             glob,
             flags,
-            offset: 0,
             position: 0,
             sub_path: PhpString::from(""),
         };
@@ -269,7 +302,10 @@ fn visible_flags(flags: i64) -> i64 {
 }
 
 pub(super) fn native_count(_: &mut dyn Context, object: &Object) -> Result<i64, NativeError> {
-    get(object, |dir| dir.entries.len() as i64)
+    get(object, |dir| match &dir.entries {
+        Entries::List { names, .. } => names.len() as i64,
+        Entries::Wrapped { .. } => 0,
+    })
 }
 
 pub(super) fn count(context: &mut dyn Context, this: This<'_>, _: &[Value]) -> NativeResult {

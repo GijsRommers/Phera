@@ -17,9 +17,11 @@ pub struct Files {
     pub directory: Option<Rc<Resource>>,
     pub input: RequestInput,
     pub stream_contexts: HashMap<i64, Rc<Resource>>,
+    pub(crate) wrappers: Option<crate::user_wrappers::Wrappers>,
     resources: Vec<Weak<Resource>>,
     next_id: i64,
-    default_context_claimed: bool,
+    pub(crate) default_context_id: Option<i64>,
+    pub(crate) default_context: Option<Value>,
 }
 
 impl Default for Files {
@@ -29,9 +31,11 @@ impl Default for Files {
             directory: None,
             input: RequestInput::default(),
             stream_contexts: HashMap::new(),
+            wrappers: None,
             resources: Vec::new(),
             next_id: 4,
-            default_context_claimed: false,
+            default_context_id: None,
+            default_context: None,
         }
     }
 }
@@ -92,9 +96,8 @@ impl Files {
 
     /// The default stream context occupies a resource ID on its first use.
     pub(crate) fn use_default_context(&mut self, explicit: &Value) {
-        if explicit.is_null() && !self.default_context_claimed {
-            self.claim_id();
-            self.default_context_claimed = true;
+        if explicit.is_null() && self.default_context_id.is_none() {
+            self.default_context_id = Some(self.claim_id());
         }
     }
 
@@ -155,4 +158,38 @@ pub fn canonical(path: &Path) -> io::Result<PathBuf> {
         std::fs::metadata(path)?;
     }
     path.canonicalize()
+}
+
+/// A fork keeps the wrapper table, default context, umask and resource numbering.
+/// Attached options follow their stream's resource id into the fork.
+pub(crate) fn fork_files(
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Option<Box<dyn std::any::Any>> {
+    let files = state.downcast_ref::<Files>()?;
+    if files
+        .directory
+        .as_ref()
+        .is_some_and(|directory| !directory.is_closed())
+    {
+        fork.refuse_state(
+            "streams",
+            "a directory handle opened before the call belongs to one request",
+        );
+    }
+    let mut copy = Files::default();
+    copy.mask = files.mask;
+    copy.next_id = files.next_id;
+    copy.wrappers = files.wrappers.clone();
+    copy.default_context_id = files.default_context_id;
+    copy.default_context = files
+        .default_context
+        .as_ref()
+        .map(|context| fork.value(context));
+    for (&id, context) in &files.stream_contexts {
+        if let Value::Resource(context) = fork.value(&Value::Resource(context.clone())) {
+            copy.stream_contexts.insert(id, context);
+        }
+    }
+    Some(Box::new(copy))
 }

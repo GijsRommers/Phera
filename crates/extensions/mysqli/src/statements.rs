@@ -55,7 +55,7 @@ pub fn attach(object: &Object, connection: connection::Handle) -> Handle {
 }
 
 pub fn init(context: &mut dyn Context, connection: connection::Handle) -> NativeResult {
-    connection.borrow().lease()?;
+    connection.borrow().ensure_open()?;
     let value = context.create_object("mysqli_stmt", PhpArray::new())?;
     if let Value::Object(object) = &value {
         attach(object, connection);
@@ -97,7 +97,10 @@ pub async fn prepare(
     call: &str,
 ) -> NativeResult {
     let connection = handle.borrow().connection.clone();
-    let lease = connection.borrow().lease()?;
+    let lease = match connection::lease(context, &connection, call).await {
+        Ok(lease) => lease,
+        Err(answer) => return answer,
+    };
     if connection.borrow().waiting_for_result() {
         let error = errors::out_of_sync();
         handle.borrow_mut().error = Some(error.clone());
@@ -149,7 +152,10 @@ pub async fn execute(
         let params = binding::parameters(context, &mut state, list, call)?;
         (statement, state.connection.clone(), params)
     };
-    let lease = connection.borrow().lease()?;
+    let lease = match connection::lease(context, &connection, call).await {
+        Ok(lease) => lease,
+        Err(answer) => return answer,
+    };
     if connection.borrow().waiting_for_result() {
         let error = errors::out_of_sync();
         handle.borrow_mut().error = Some(error.clone());

@@ -1,11 +1,13 @@
 //! `is_file('link')` follows a symlink. `lstat('link')` describes the link itself.
 
+use std::borrow::Cow;
 use std::fs::{self, Metadata};
+use std::future::ready;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
-    Registry, Value, args,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
+    PhpArray, Registry, Value, args,
 };
 use rustix::fs::{Access, access, statvfs};
 
@@ -13,6 +15,7 @@ use crate::errors::{check_path, reason, warn_false, wrapper_warning};
 use crate::handles::{FILENAME, STREAM};
 use crate::request::{bytes, canonical, directory, path};
 use crate::resource::{argument_resource, stream_arg, with_stream};
+use crate::user_wrappers::{self, UserWrapper};
 use crate::wrapper::Target;
 
 pub fn register(registry: &mut Registry) {
@@ -23,29 +26,30 @@ pub fn register(registry: &mut Registry) {
         FILENAME.optional(),
     ];
     for entry in [
-        FunctionEntry::sync("file_exists", &[FILENAME], file_exists),
-        FunctionEntry::sync("is_file", &[FILENAME], is_file),
-        FunctionEntry::sync("is_dir", &[FILENAME], is_dir),
-        FunctionEntry::sync("is_link", &[FILENAME], is_link),
-        FunctionEntry::sync("is_readable", &[FILENAME], is_readable),
-        FunctionEntry::sync("is_writable", &[FILENAME], is_writable),
-        FunctionEntry::sync("is_writeable", &[FILENAME], is_writeable),
-        FunctionEntry::sync("is_executable", &[FILENAME], is_executable),
-        FunctionEntry::sync("filesize", &[FILENAME], filesize),
-        FunctionEntry::sync("filemtime", &[FILENAME], filemtime),
-        FunctionEntry::sync("fileatime", &[FILENAME], fileatime),
-        FunctionEntry::sync("filectime", &[FILENAME], filectime),
-        FunctionEntry::sync("fileperms", &[FILENAME], fileperms),
-        FunctionEntry::sync("fileinode", &[FILENAME], fileinode),
-        FunctionEntry::sync("fileowner", &[FILENAME], fileowner),
-        FunctionEntry::sync("filegroup", &[FILENAME], filegroup),
-        FunctionEntry::sync("filetype", &[FILENAME], filetype),
-        FunctionEntry::sync("stat", &[FILENAME], stat),
-        FunctionEntry::sync("lstat", &[FILENAME], lstat),
-        FunctionEntry::sync("fstat", &[STREAM], fstat),
-        FunctionEntry::sync("clearstatcache", CACHE, |_, _| Ok(Value::Null)),
+        FunctionEntry::asynchronous("file_exists", &[FILENAME], file_exists),
+        FunctionEntry::asynchronous("is_file", &[FILENAME], is_file),
+        FunctionEntry::asynchronous("is_dir", &[FILENAME], is_dir),
+        FunctionEntry::asynchronous("is_link", &[FILENAME], is_link),
+        FunctionEntry::asynchronous("is_readable", &[FILENAME], is_readable),
+        FunctionEntry::asynchronous("is_writable", &[FILENAME], is_writable),
+        FunctionEntry::asynchronous("is_writeable", &[FILENAME], is_writeable),
+        FunctionEntry::asynchronous("is_executable", &[FILENAME], is_executable),
+        FunctionEntry::asynchronous("filesize", &[FILENAME], filesize),
+        FunctionEntry::asynchronous("filemtime", &[FILENAME], filemtime),
+        FunctionEntry::asynchronous("fileatime", &[FILENAME], fileatime),
+        FunctionEntry::asynchronous("filectime", &[FILENAME], filectime),
+        FunctionEntry::asynchronous("fileperms", &[FILENAME], fileperms),
+        FunctionEntry::asynchronous("fileinode", &[FILENAME], fileinode),
+        FunctionEntry::asynchronous("fileowner", &[FILENAME], fileowner),
+        FunctionEntry::asynchronous("filegroup", &[FILENAME], filegroup),
+        FunctionEntry::asynchronous("filetype", &[FILENAME], filetype),
+        FunctionEntry::asynchronous("stat", &[FILENAME], stat),
+        FunctionEntry::asynchronous("lstat", &[FILENAME], lstat),
+        FunctionEntry::asynchronous("fstat", &[STREAM], fstat),
+        FunctionEntry::sync("clearstatcache", CACHE, crate::user_stat::clear),
         FunctionEntry::sync("realpath", PATH, realpath),
         FunctionEntry::sync("disk_free_space", DIRECTORY, disk_free_space),
+        FunctionEntry::sync("diskfreespace", DIRECTORY, diskfreespace),
         FunctionEntry::sync("disk_total_space", DIRECTORY, disk_total_space),
     ] {
         registry.function(entry);
@@ -61,23 +65,85 @@ pub(crate) enum Query {
     Type,
     Stat,
     LinkStat,
-    Field(fn(&Metadata) -> i64),
+    Field(StatField),
+}
+
+enum StatPath {
+    Ready(NativeResult),
+    Wrapper(UserWrapper),
 }
 
 impl Query {
-    fn quiet(self) -> bool {
+    pub(crate) fn quiet(self) -> bool {
         matches!(
             self,
             Self::Access(_) | Self::IsFile | Self::IsDirectory | Self::IsLink
         )
     }
 
-    fn follow(self) -> bool {
+    pub(crate) fn follow(self) -> bool {
         !matches!(self, Self::IsLink | Self::LinkStat | Self::Type)
     }
 
-    fn run(self, context: &mut dyn Context, args: &[Value], function: &str) -> NativeResult {
-        self.path(context, args::bytes(args, 0), function, false)
+    fn run<'a>(
+        self,
+        context: &'a mut dyn Context,
+        args: Vec<Value>,
+        function: &'static str,
+    ) -> LocalFuture<'a, NativeResult> {
+        match self.local_path(context, args::bytes(&args, 0), function, false) {
+            StatPath::Ready(result) => Box::pin(ready(result)),
+            StatPath::Wrapper(wrapper) => Box::pin(async move {
+                crate::user_stat::url_stat(
+                    context,
+                    wrapper,
+                    args::bytes(&args, 0),
+                    function,
+                    self,
+                    false,
+                )
+                .await
+            }),
+        }
+    }
+
+    pub(crate) async fn path_async(
+        self,
+        context: &mut dyn Context,
+        name: &[u8],
+        function: &str,
+        throws: bool,
+    ) -> NativeResult {
+        match self.local_path(context, name, function, throws) {
+            StatPath::Ready(result) => result,
+            StatPath::Wrapper(wrapper) => {
+                crate::user_stat::url_stat(context, wrapper, name, function, self, throws).await
+            }
+        }
+    }
+
+    /// Built-in paths finish here. A user wrapper needs an asynchronous PHP call.
+    fn local_path(
+        self,
+        context: &mut dyn Context,
+        name: &[u8],
+        function: &str,
+        throws: bool,
+    ) -> StatPath {
+        let Some(target) = self.target(context, name, function) else {
+            return StatPath::Ready(Ok(Value::Bool(false)));
+        };
+        if !matches!(target, Target::RemoteFile)
+            && let Some(wrappers) = user_wrappers::active(context)
+        {
+            if let Some(wrapper) = wrappers.locate(name) {
+                return StatPath::Wrapper(wrapper);
+            }
+            if matches!(target, Target::File(_)) && wrappers.get(b"file").is_none() {
+                return StatPath::Ready(self.failed(context, name, function, throws));
+            }
+        }
+        StatPath::Ready(self.builtin_path(context, target, name, function, throws))
     }
 
     pub(crate) fn path(
@@ -87,17 +153,40 @@ impl Query {
         function: &str,
         throws: bool,
     ) -> NativeResult {
-        if name.is_empty() {
+        let Some(target) = self.target(context, name, function) else {
             return Ok(Value::Bool(false));
+        };
+        self.builtin_path(context, target, name, function, throws)
+    }
+
+    fn target<'a>(
+        self,
+        context: &mut dyn Context,
+        name: &'a [u8],
+        function: &str,
+    ) -> Option<Target<'a>> {
+        if name.is_empty() {
+            return None;
         }
         // Unlike the path-typed APIs, PHP's stat family parses an ordinary string.
         if name.contains(&0) {
             if !self.quiet() {
                 context.warning(format!("{function}(): Filename contains null byte"));
             }
-            return Ok(Value::Bool(false));
+            return None;
         }
-        let file = match Target::parse(name) {
+        Some(Target::parse(name))
+    }
+
+    fn builtin_path(
+        self,
+        context: &mut dyn Context,
+        target: Target<'_>,
+        name: &[u8],
+        function: &str,
+        throws: bool,
+    ) -> NativeResult {
+        let file = match target {
             Target::File(file) => Some(file),
             Target::Unavailable(scheme) => {
                 wrapper_warning(context, function, scheme);
@@ -105,10 +194,16 @@ impl Query {
             }
             _ => None,
         };
-        let resolved = file.and_then(|file| directory(context).resolve(path(file)).ok());
+        let resolved = file.map(path).and_then(|file| {
+            if file.is_absolute() {
+                Some(Cow::Borrowed(file))
+            } else {
+                directory(context).resolve(file).ok().map(Cow::Owned)
+            }
+        });
         if let Some(path) = resolved {
             if let Self::Access(mode) = self {
-                return Ok(Value::Bool(access(path, mode).is_ok()));
+                return Ok(Value::Bool(access(path.as_ref(), mode).is_ok()));
             }
             let metadata = if self.follow() {
                 fs::metadata(path)
@@ -119,6 +214,16 @@ impl Query {
                 return self.value(&metadata);
             }
         }
+        self.failed(context, name, function, throws)
+    }
+
+    pub(crate) fn failed(
+        self,
+        context: &mut dyn Context,
+        name: &[u8],
+        function: &str,
+        throws: bool,
+    ) -> NativeResult {
         if self.quiet() {
             return Ok(Value::Bool(false));
         }
@@ -140,7 +245,16 @@ impl Query {
             Self::IsDirectory => Value::Bool(meta.is_dir()),
             Self::IsLink => Value::Bool(meta.is_symlink()),
             Self::Type => Value::from(file_type(meta.file_type())),
-            Self::Field(read) => Value::Int(read(meta)),
+            Self::Field(field) => Value::Int(match field {
+                StatField::Inode => meta.ino() as i64,
+                StatField::Mode => i64::from(meta.mode()),
+                StatField::Uid => i64::from(meta.uid()),
+                StatField::Gid => i64::from(meta.gid()),
+                StatField::Size => meta.len() as i64,
+                StatField::Atime => meta.atime(),
+                StatField::Mtime => meta.mtime(),
+                StatField::Ctime => meta.ctime(),
+            }),
             Self::Stat | Self::LinkStat => return stat_array(metadata_fields(meta)),
             Self::Access(_) => Value::Bool(true),
         })
@@ -160,62 +274,62 @@ fn file_type(kind: fs::FileType) -> &'static str {
     }
 }
 
-fn file_exists(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn file_exists(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Query::Access(Access::EXISTS).run(context, args, "file_exists")
 }
-fn is_readable(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn is_readable(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Query::Access(Access::READ_OK).run(context, args, "is_readable")
 }
-fn is_writable(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn is_writable(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Query::Access(Access::WRITE_OK).run(context, args, "is_writable")
 }
-fn is_writeable(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn is_writeable(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Query::Access(Access::WRITE_OK).run(context, args, "is_writeable")
 }
-fn is_executable(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn is_executable(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Query::Access(Access::EXEC_OK).run(context, args, "is_executable")
 }
-fn is_file(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn is_file(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Query::IsFile.run(context, args, "is_file")
 }
-fn is_dir(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn is_dir(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Query::IsDirectory.run(context, args, "is_dir")
 }
-fn is_link(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn is_link(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Query::IsLink.run(context, args, "is_link")
 }
-fn filetype(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn filetype(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Query::Type.run(context, args, "filetype")
 }
-fn stat(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn stat(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Query::Stat.run(context, args, "stat")
 }
-fn lstat(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+fn lstat(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Query::LinkStat.run(context, args, "lstat")
 }
-fn filesize(context: &mut dyn Context, args: &[Value]) -> NativeResult {
-    Query::Field(|meta| meta.len() as i64).run(context, args, "filesize")
+fn filesize(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Query::Field(StatField::Size).run(context, args, "filesize")
 }
-fn filemtime(context: &mut dyn Context, args: &[Value]) -> NativeResult {
-    Query::Field(MetadataExt::mtime).run(context, args, "filemtime")
+fn filemtime(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Query::Field(StatField::Mtime).run(context, args, "filemtime")
 }
-fn fileatime(context: &mut dyn Context, args: &[Value]) -> NativeResult {
-    Query::Field(MetadataExt::atime).run(context, args, "fileatime")
+fn fileatime(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Query::Field(StatField::Atime).run(context, args, "fileatime")
 }
-fn filectime(context: &mut dyn Context, args: &[Value]) -> NativeResult {
-    Query::Field(MetadataExt::ctime).run(context, args, "filectime")
+fn filectime(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Query::Field(StatField::Ctime).run(context, args, "filectime")
 }
-fn fileperms(context: &mut dyn Context, args: &[Value]) -> NativeResult {
-    Query::Field(|meta| i64::from(meta.mode())).run(context, args, "fileperms")
+fn fileperms(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Query::Field(StatField::Mode).run(context, args, "fileperms")
 }
-fn fileinode(context: &mut dyn Context, args: &[Value]) -> NativeResult {
-    Query::Field(|meta| meta.ino() as i64).run(context, args, "fileinode")
+fn fileinode(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Query::Field(StatField::Inode).run(context, args, "fileinode")
 }
-fn fileowner(context: &mut dyn Context, args: &[Value]) -> NativeResult {
-    Query::Field(|meta| i64::from(meta.uid())).run(context, args, "fileowner")
+fn fileowner(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Query::Field(StatField::Uid).run(context, args, "fileowner")
 }
-fn filegroup(context: &mut dyn Context, args: &[Value]) -> NativeResult {
-    Query::Field(|meta| i64::from(meta.gid())).run(context, args, "filegroup")
+fn filegroup(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Query::Field(StatField::Gid).run(context, args, "filegroup")
 }
 
 fn metadata_fields(meta: &Metadata) -> [i64; 13] {
@@ -236,23 +350,47 @@ fn metadata_fields(meta: &Metadata) -> [i64; 13] {
     ]
 }
 
-fn stat_array(fields: [i64; 13]) -> NativeResult {
-    const NAMES: [&str; 13] = [
-        "dev", "ino", "mode", "nlink", "uid", "gid", "rdev", "size", "atime", "mtime", "ctime",
-        "blksize", "blocks",
-    ];
-    let mut result = PhpArray::new();
-    for value in fields {
-        result.push(Value::Int(value))?;
-    }
-    for (name, value) in NAMES.into_iter().zip(fields) {
+#[derive(Clone, Copy)]
+pub(crate) enum StatField {
+    Inode = 1,
+    Mode = 2,
+    Uid = 4,
+    Gid = 5,
+    Size = 7,
+    Atime = 8,
+    Mtime = 9,
+    Ctime = 10,
+}
+
+pub(crate) const STAT_NAMES: [&str; 13] = [
+    "dev", "ino", "mode", "nlink", "uid", "gid", "rdev", "size", "atime", "mtime", "ctime",
+    "blksize", "blocks",
+];
+
+pub(crate) fn stat_array(fields: [i64; 13]) -> NativeResult {
+    let mut result = PhpArray::from_values(fields.map(Value::Int), fields.len());
+    for (name, value) in STAT_NAMES.into_iter().zip(fields) {
         result.insert(ArrayKey::str(name), Value::Int(value));
     }
     Ok(Value::from(result))
 }
 
-fn fstat(_: &mut dyn Context, args: &[Value]) -> NativeResult {
-    let resource = argument_resource(args::value(args, 0), "fstat", "#1 ($stream)")?;
+fn fstat(context: &mut dyn Context, args: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let resource = argument_resource(args::value(&args, 0), "fstat", "#1 ($stream)")?;
+        if let Some(file) = crate::user_file::resource_file(resource) {
+            return match file.stat(context, "fstat").await? {
+                Some(Value::Array(fields)) => {
+                    stat_array(crate::user_stat::fields(context, &fields)?)
+                }
+                _ => Ok(Value::Bool(false)),
+            };
+        }
+        fstat_native(resource, &args)
+    })
+}
+
+fn fstat_native(resource: &phera_extension_api::value::Resource, args: &[Value]) -> NativeResult {
     if crate::directory::is_open(resource) {
         return Ok(Value::Bool(false));
     }
@@ -286,6 +424,9 @@ pub(crate) fn real_path(context: &mut dyn Context, name: &[u8]) -> Value {
 
 fn disk_free_space(context: &mut dyn Context, args: &[Value]) -> NativeResult {
     disk_space(context, args, "disk_free_space", |stats| stats.f_bavail)
+}
+fn diskfreespace(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+    disk_space(context, args, "diskfreespace", |stats| stats.f_bavail)
 }
 fn disk_total_space(context: &mut dyn Context, args: &[Value]) -> NativeResult {
     disk_space(context, args, "disk_total_space", |stats| stats.f_blocks)

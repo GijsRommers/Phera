@@ -16,7 +16,6 @@ use std::rc::Rc;
 use phera_extension_api::{
     Context, LocalFuture, NativeError, NativeResult, Object, PhpArray, Value, args,
 };
-use tokio::sync::Mutex;
 
 use crate::attributes::{AttributeCall, Attributes};
 use crate::constants::{
@@ -27,7 +26,7 @@ use crate::errors::{DbError, ErrorMode, ErrorState, unsupported};
 use crate::pool::Lease;
 
 pub struct Session {
-    pub driver: Mutex<Lease>,
+    pub driver: Lease,
     pub name: DriverName,
     pub version: String,
     pub attributes: RefCell<Attributes>,
@@ -95,6 +94,37 @@ impl Session {
     }
 }
 
+/// The fork hook of `PDO`: each fork's copy borrows its own session on
+/// first use (see [`crate::pool::Lease::forked`]). Laravel and Doctrine
+/// connect after `Phera\snapshot()` anyway; WordPress plugins and plain
+/// scripts often connect before it.
+pub fn fork_session(
+    _object: &Object,
+    state: &dyn std::any::Any,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    let session = state
+        .downcast_ref::<Rc<Session>>()
+        .ok_or("its built-in state is not initialized")?;
+    if session.transaction.get() {
+        return Err("a transaction is open on it (beginTransaction()); commit it before Phera\\snapshot(), or connect after the call".into());
+    }
+    let driver = session.driver.forked()?;
+    let mut attributes = session.attributes.borrow().clone();
+    attributes.statement_class = attributes.statement_class.forked(fork);
+    let copy = Session {
+        driver,
+        name: session.name,
+        version: session.version.clone(),
+        attributes: RefCell::new(attributes),
+        error: RefCell::new(session.error.borrow().clone()),
+        last_error: RefCell::new(session.last_error.borrow().clone()),
+        transaction: Cell::new(false),
+        statement_sequence: Cell::new(session.statement_sequence.get()),
+    };
+    Ok(Box::new(Rc::new(copy)) as Box<dyn std::any::Any>)
+}
+
 pub fn session(this: Option<&Rc<Object>>) -> Result<Rc<Session>, NativeError> {
     let object = this.ok_or_else(|| NativeError::error("PDO object is missing"))?;
     object
@@ -133,12 +163,11 @@ pub fn exec<'a>(
                 "PDO::exec(): Argument #1 ($statement) must not be empty",
             ));
         }
-        let mut driver = session.driver.lock().await;
+        let driver = &session.driver;
         let result = driver.exec(&sql).await;
         if let Some(active) = driver.observed_transaction_state() {
             session.transaction.set(active);
         }
-        drop(driver);
         match result {
             Ok(rows) => {
                 session.success();
@@ -179,7 +208,7 @@ pub fn quote<'a>(
         if std::str::from_utf8(bytes).is_err() {
             return Err(unsupported("Quoting non-UTF-8 strings"));
         }
-        let result = session.driver.lock().await.quote(bytes).await;
+        let result = session.driver.quote(bytes).await;
         match result {
             Ok(quoted) => {
                 let prefix = if session.name != DriverName::Mysql {
@@ -212,7 +241,7 @@ pub fn last_id<'a>(
     Box::pin(async move {
         let session = session(this.as_ref())?;
         let name = args::string(&arguments, 0).map(|s| s.to_string_lossy());
-        let result = session.driver.lock().await.last_id(name.as_deref()).await;
+        let result = session.driver.last_id(name.as_deref()).await;
         match result {
             Ok(id) => {
                 session.success();

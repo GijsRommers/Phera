@@ -146,9 +146,19 @@ fn is(_: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value]) -> NativeR
 fn matches_kind(this: &Object, kind: &Value, array_entry: bool) -> Result<bool, NativeError> {
     match kind {
         Value::Int(kind) => Ok(id(this)? == *kind),
+        Value::InternedStr(kind) => {
+            let text = property(this, "text")?;
+            Ok(text
+                .deref()
+                .as_str_bytes()
+                .is_some_and(|text| text == kind.as_bytes()))
+        }
         Value::String(kind) => {
             let text = property(this, "text")?;
-            Ok(matches!(&*text.deref(), Value::String(text) if text == kind))
+            Ok(text
+                .deref()
+                .as_str_bytes()
+                .is_some_and(|text| text == kind.as_bytes()))
         }
         _ => {
             let requirement = if array_entry {

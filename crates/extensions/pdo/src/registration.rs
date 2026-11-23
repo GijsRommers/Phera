@@ -5,10 +5,17 @@ use phera_extension_api::{
     ParamType, PropertyEntry, Registry, Visibility,
 };
 
-use crate::{attributes, connection, constants, fetch, statement, transactions};
+use crate::{attributes, connection, constants, statement, transactions};
 
-static UNCOPYABLE_CONNECTION: ClassHooks = ClassHooks {
+static CONNECTION: ClassHooks = ClassHooks {
     clone: Some(NativeClone::Forbidden),
+    fork: Some(connection::fork_session),
+    ..ClassHooks::EMPTY
+};
+
+static STATEMENT: ClassHooks = ClassHooks {
+    clone: Some(NativeClone::Forbidden),
+    fork: Some(refuse_fork),
     ..ClassHooks::EMPTY
 };
 
@@ -28,7 +35,7 @@ pub fn register(registry: &mut Registry) {
         constants: constants::CONSTANTS,
         deprecated_constants: constants::DRIVER_DEPRECATED,
         methods: PDO_METHODS,
-        hooks: Some(&UNCOPYABLE_CONNECTION),
+        hooks: Some(&CONNECTION),
         ..ClassEntry::class("PDO")
     });
     for (name, constants) in [
@@ -56,7 +63,7 @@ pub fn register(registry: &mut Registry) {
             )]
         },
         methods: STATEMENT_METHODS,
-        hooks: Some(&UNCOPYABLE_CONNECTION),
+        hooks: Some(&STATEMENT),
         ..ClassEntry::class("PDOStatement")
     });
     registry.function(FunctionEntry::sync("pdo_drivers", &[], connection::drivers));
@@ -272,13 +279,13 @@ const STATEMENT_METHODS: &[MethodEntry] = &[
         &[Param::new("column", ParamType::Int).optional()],
         crate::drivers::sqlite::fetch::column,
     ),
-    MethodEntry::public(
+    MethodEntry::public_async(
         "setFetchMode",
         &[
             Param::new("mode", ParamType::Int),
             Param::new("args", ParamType::Mixed).variadic(),
         ],
-        fetch::set_mode,
+        crate::drivers::sqlite::fetch::set_mode,
     ),
     MethodEntry::public_async("closeCursor", &[], crate::drivers::sqlite::fetch::close),
     MethodEntry::public("columnCount", &[], statement::column_count),
@@ -332,3 +339,13 @@ const SQLITE_METHODS: &[MethodEntry] = &[MethodEntry::public(
     &[Param::new("name", ParamType::String)],
     crate::drivers::sqlite::methods::load,
 )];
+
+/// A statement belongs to the session that prepared it, and a fork has a
+/// session of its own: prepare it again after `Phera\snapshot()`.
+fn refuse_fork(
+    _object: &phera_extension_api::Object,
+    _state: &dyn std::any::Any,
+    _fork: &mut phera_extension_api::value::Fork<'_>,
+) -> Result<Box<dyn std::any::Any>, String> {
+    Err("a prepared statement belongs to the session of one request; prepare it after Phera\\snapshot()".into())
+}

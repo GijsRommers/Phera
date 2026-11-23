@@ -21,6 +21,11 @@ use phera_extension_api::{
     ClassEntry, Extension, FunctionEntry, MethodEntry, Param, ParamType, Registry,
 };
 
+/// Check JSON syntax without changing the request's `json_last_error()`.
+pub fn valid_json(bytes: &[u8], depth: usize) -> bool {
+    decode::validate(bytes, depth, 0).is_ok()
+}
+
 pub struct Json;
 
 impl Extension for Json {
@@ -29,6 +34,9 @@ impl Extension for Json {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::recursion::Active>(phera_extension_api::fresh_state);
+        registry.fork_state::<crate::error::Error>(phera_extension_api::fresh_state);
         registry.class(ClassEntry {
             methods: const { &[MethodEntry::required("jsonSerialize", &[]).tentative_return("mixed")] },
             ..ClassEntry::interface("JsonSerializable")
@@ -39,6 +47,9 @@ impl Extension for Json {
             Param::new("depth", ParamType::Int).optional(),
         ];
         registry.function_with_callback_frame("json_encode", ENCODE, encode::json_encode);
+        registry.register_sync_selector("json_encode", |slots| {
+            encode::can_encode_sync(slots).then_some(encode::encode_sync)
+        });
 
         const DECODE: &[Param] = &[
             Param::new("json", ParamType::String),

@@ -87,7 +87,46 @@ fn file_get_contents(
             .transpose()?;
         let offset = args::int(&arguments, 3).unwrap_or(0);
         let use_include = args::bool(&arguments, 1).unwrap_or(false);
+        if crate::filters::is_filter_uri(name)
+            && let Some(stream) = Box::pin(crate::filters::open_request_filter(
+                context,
+                function,
+                name,
+                b"rb",
+                use_include,
+                args::value(&arguments, 2),
+            ))
+            .await?
+        {
+            return crate::filtered_files::contents(context, stream, function, offset, length)
+                .await;
+        }
         files(context).use_default_context(args::value(&arguments, 2));
+        if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+            return user_contents(
+                context,
+                (wrapper, name),
+                function,
+                use_include,
+                args::value(&arguments, 2),
+                (offset, length),
+                true,
+            )
+            .await;
+        }
+        if crate::socket::http::is_url(name) {
+            let stream = crate::socket::http::fopen(
+                context,
+                function,
+                name,
+                b"rb",
+                args::value(&arguments, 2),
+                true,
+            )
+            .await?;
+            return crate::filtered_files::contents(context, stream, function, offset, length)
+                .await;
+        }
         let Some(mut stream) = open(context, function, name, b"rb", use_include).await? else {
             return Ok(Value::Bool(false));
         };
@@ -119,7 +158,57 @@ fn readfile(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
         let function = "readfile";
         let name = name(&arguments, function, 2)?;
         let use_include = args::bool(&arguments, 1).unwrap_or(false);
+        if crate::filters::is_filter_uri(name)
+            && let Some(stream) = Box::pin(crate::filters::open_request_filter(
+                context,
+                function,
+                name,
+                b"rb",
+                use_include,
+                args::value(&arguments, 2),
+            ))
+            .await?
+        {
+            return crate::filtered_files::passthru(context, stream, function).await;
+        }
         files(context).use_default_context(args::value(&arguments, 2));
+        if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+            let explicit = args::value(&arguments, 2);
+            let supplied = if explicit.is_null() {
+                crate::context_options::default_for_wrapper(context)
+            } else {
+                explicit.clone()
+            };
+            let flags = if use_include {
+                crate::user_wrappers::USE_PATH
+            } else {
+                0
+            };
+            let Some(file) =
+                crate::user_file::open(context, wrapper, function, name, b"rb", flags, supplied)
+                    .await?
+            else {
+                return Ok(Value::Bool(false));
+            };
+            files(context).claim_id();
+            let result = user_passthru(context, &file, function).await;
+            let closed = file.close(context).await;
+            let result = result?;
+            closed?;
+            return Ok(result);
+        }
+        if crate::socket::http::is_url(name) {
+            let stream = crate::socket::http::fopen(
+                context,
+                function,
+                name,
+                b"rb",
+                args::value(&arguments, 2),
+                true,
+            )
+            .await?;
+            return crate::filtered_files::passthru(context, stream, function).await;
+        }
         let Some(stream) = open(context, function, name, b"rb", use_include).await? else {
             return Ok(Value::Bool(false));
         };
@@ -156,13 +245,64 @@ fn file(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
         if flags & NO_DEFAULT_CONTEXT == 0 {
             files(context).use_default_context(args::value(&arguments, 2));
         }
-        let Some(stream) = open(context, "file", name, b"rb", flags & USE_PATH != 0).await? else {
-            return Ok(Value::Bool(false));
+        let use_path = flags & USE_PATH != 0;
+        let use_default = flags & NO_DEFAULT_CONTEXT == 0;
+        let bytes = if crate::filters::is_filter_uri(name)
+            && let Some(stream) = Box::pin(crate::filters::open_request_filter(
+                context,
+                "file",
+                name,
+                b"rb",
+                use_path,
+                args::value(&arguments, 2),
+            ))
+            .await?
+        {
+            match crate::filtered_files::contents(context, stream, "file", 0, None).await? {
+                Value::InternedStr(bytes) => bytes.to_php_string(),
+                Value::String(bytes) => bytes,
+                other => return Ok(other),
+            }
+        } else if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+            match user_contents(
+                context,
+                (wrapper, name),
+                "file",
+                use_path,
+                args::value(&arguments, 2),
+                (0, None),
+                use_default,
+            )
+            .await?
+            {
+                Value::InternedStr(bytes) => bytes.to_php_string(),
+                Value::String(bytes) => bytes,
+                other => return Ok(other),
+            }
+        } else if crate::socket::http::is_url(name) {
+            let stream = crate::socket::http::fopen(
+                context,
+                "file",
+                name,
+                b"rb",
+                args::value(&arguments, 2),
+                use_default,
+            )
+            .await?;
+            match crate::filtered_files::contents(context, stream, "file", 0, None).await? {
+                Value::InternedStr(bytes) => bytes.to_php_string(),
+                Value::String(bytes) => bytes,
+                other => return Ok(other),
+            }
+        } else {
+            let Some(stream) = open(context, "file", name, b"rb", use_path).await? else {
+                return Ok(Value::Bool(false));
+            };
+            files(context).claim_id();
+            collect(context, stream, "file", None).await?.into()
         };
-        files(context).claim_id();
-        let bytes = collect(context, stream, "file", None).await?;
         let mut lines = PhpArray::new();
-        for mut line in bytes.split_inclusive(|&byte| byte == b'\n') {
+        for mut line in bytes.as_bytes().split_inclusive(|&byte| byte == b'\n') {
             if flags & IGNORE_ENDINGS != 0
                 && let Some(text) = line.strip_suffix(b"\n")
             {
@@ -215,4 +355,78 @@ async fn collect(
             Ok(Vec::new())
         }
     }
+}
+
+async fn user_contents(
+    context: &mut dyn Context,
+    (wrapper, name): (crate::user_wrappers::UserWrapper, &[u8]),
+    function: &str,
+    use_include: bool,
+    supplied_context: &Value,
+    (offset, length): (i64, Option<u64>),
+    use_default: bool,
+) -> NativeResult {
+    let flags = if use_include {
+        crate::user_wrappers::USE_PATH
+    } else {
+        0
+    };
+    let supplied_context = if supplied_context.is_null() && use_default {
+        crate::context_options::default_for_wrapper(context)
+    } else {
+        supplied_context.clone()
+    };
+    let Some(file) = crate::user_file::open(
+        context,
+        wrapper,
+        function,
+        name,
+        b"rb",
+        flags,
+        supplied_context,
+    )
+    .await?
+    else {
+        return Ok(Value::Bool(false));
+    };
+    files(context).claim_id();
+    let result = async {
+        if offset != 0
+            && !file
+                .seek(context, function, offset, if offset < 0 { 2 } else { 0 })
+                .await?
+        {
+            return warn_false(
+                context,
+                format!("{function}(): Failed to seek to position {offset} in the stream"),
+            );
+        }
+        file.collect(context, function, length)
+            .await
+            .map(Value::from)
+    }
+    .await;
+    let closed = file.close(context).await;
+    let result = result?;
+    closed?;
+    Ok(result)
+}
+
+async fn user_passthru(
+    context: &mut dyn Context,
+    file: &crate::user_file::UserFile,
+    function: &str,
+) -> NativeResult {
+    let mut count = 0;
+    loop {
+        match file.read(context, function, CHUNK, false).await? {
+            Ok(bytes) if bytes.is_empty() => break,
+            Ok(bytes) => {
+                count += bytes.len();
+                context.write(&bytes);
+            }
+            Err(_) => return Ok(Value::Int(if count == 0 { -1 } else { count as i64 })),
+        }
+    }
+    Ok(Value::Int(count as i64))
 }

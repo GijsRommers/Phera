@@ -71,7 +71,7 @@ pub fn transfer<const IMPORT: bool, const ALIAS: bool>(
         } else {
             lob::oid(args::value(&arguments, oid_at), IMPORT)?
         };
-        let lease = state.borrow().lease()?;
+        let lease = crate::connection::lease(&state).await?;
         let result = connection::run(&lease, move |driver| {
             Box::pin(async move {
                 if IMPORT {

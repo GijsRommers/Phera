@@ -21,7 +21,7 @@
 
 mod convert;
 mod mime;
-mod settings;
+pub(crate) mod settings;
 
 use phera_extension_api::{
     Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
@@ -33,6 +33,7 @@ use self::settings::encoding_argument;
 use crate::text::bounds;
 
 pub fn register(registry: &mut Registry) {
+    registry.set_iconv_converter(convert::try_convert);
     registry.function(FunctionEntry::asynchronous("iconv", ICONV, iconv));
     registry.function(FunctionEntry::asynchronous(
         "iconv_strlen",

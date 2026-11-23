@@ -4,9 +4,17 @@ use phera_extension_api::NativeError;
 
 use crate::calls::frame::Frame;
 use crate::calls::frame_extras::FrameExtras;
-use crate::calls::prepared_call::{CallDetails, CallFlags, PreparedCall};
+use crate::calls::prepared_call::{CallDetails, CallFlags, PreparedCall, PreparedCallee};
 
-pub(crate) const MAX_CALLBACK_DEPTH: usize = 32;
+/// How deeply native code may nest on the Rust stack: callbacks a built-in
+/// awaits, and fiber switches (each counts `fibers::switch::SWITCH_DEPTH`
+/// plus its entry call). Measured in a release build on 21 November 2026,
+/// one level of an awaited callback takes about 12 KB of Rust stack and one
+/// nested fiber about 16 KB (three counts), so 64 counts stay under about
+/// 1 MB of a worker thread's 2 MB. Callbacks that run on the frame stack
+/// (`calls::native_loops`) and plain PHP calls take no Rust stack and do
+/// not count.
+pub(crate) const MAX_CALLBACK_DEPTH: usize = 64;
 
 /// The running PHP functions of a request, innermost last, and the calls
 /// whose arguments are being evaluated.
@@ -24,6 +32,12 @@ pub(crate) struct CallStack {
     callback_depth: usize,
     /// Sync natives return their temporary API buffers to this request-local pool.
     native_arguments: Vec<Vec<phera_value::Value>>,
+    /// The built-ins whose callbacks run on these frames (`array_map`), with
+    /// what each has done so far (see `calls::native_loops`).
+    pub(crate) native_loops: Vec<super::native_loops::NativeLoop>,
+    /// What the interpreter loop hands to the batch loop when it leaves as
+    /// if yielding: a return to native code, or to a native loop.
+    pub(crate) handed_back: Option<super::execution_loop::HandedBack>,
 }
 
 impl CallStack {
@@ -35,6 +49,8 @@ impl CallStack {
             empty: FrameExtras::new(),
             callback_depth: 0,
             native_arguments: Vec::new(),
+            native_loops: Vec::new(),
+            handed_back: None,
             preparing: Vec::new(),
             details: Vec::new(),
         }
@@ -89,11 +105,25 @@ impl CallStack {
     /// Leave a function, releasing what its side-table entry held.
     #[inline]
     pub(crate) fn pop(&mut self) -> Option<Frame> {
-        let frame = self.frames.pop()?;
-        if frame.has_extras() {
-            self.extras[self.frames.len()].clear();
-        }
+        let frame = self.current().copied()?;
+        self.pop_for_return();
         Some(frame)
+    }
+
+    /// A PHP return already has its frame. Release the current activation
+    /// and its optional side-table owners without handing the frame back.
+    #[inline]
+    pub(crate) fn pop_for_return(&mut self) {
+        if self.frames.pop().is_some_and(|frame| frame.has_extras()) {
+            self.clear_popped_extras();
+        }
+    }
+
+    /// Only frames that acquired side-table state have an entry to release.
+    #[cold]
+    #[inline(never)]
+    fn clear_popped_extras(&mut self) {
+        self.extras[self.frames.len()].clear();
     }
 
     /// Detach a generator without releasing the owners in its side table.
@@ -148,6 +178,17 @@ impl CallStack {
         &mut self.extras[depth]
     }
 
+    /// The side-table entry of the innermost frame, which is marked as
+    /// having one; `None` if it has none yet. Unlike
+    /// [`CallStack::current_extras_mut`] this never makes an entry, so it
+    /// is a bounds check and an index: the interpreter loop's `foreach`
+    /// step uses it every round.
+    #[inline]
+    pub(crate) fn current_extras_present(&mut self) -> Option<&mut FrameExtras> {
+        let depth = self.frames.len().checked_sub(1)?;
+        self.extras.get_mut(depth)
+    }
+
     /// The innermost frame's side-table entry, for writing.
     pub(crate) fn current_extras_mut(&mut self) -> &mut FrameExtras {
         let depth = self.frames.len().saturating_sub(1);
@@ -167,6 +208,16 @@ impl CallStack {
             self.details.push(details);
         }
         self.preparing.push(call);
+    }
+
+    /// Gives the innermost prepared call the details it did not need so far:
+    /// it becomes a `General` call described by `details`.
+    pub(crate) fn describe_top_call(&mut self, details: CallDetails) {
+        if let Some(call) = self.preparing.last_mut() {
+            call.callee = PreparedCallee::General;
+            call.flags.insert(CallFlags::DETAILS);
+            self.details.push(details);
+        }
     }
 
     /// The innermost prepared call, if there is one.
@@ -245,7 +296,7 @@ impl CallStack {
 
     /// Finish preparing the innermost call when the caller does not need
     /// its details (the interpreter loop enters only calls without any).
-    #[inline]
+    #[inline(always)]
     pub(crate) fn pop_plain(&mut self) -> Option<PreparedCall> {
         let call = self.preparing.pop()?;
         if call.flags.contains(CallFlags::DETAILS) {
@@ -324,5 +375,25 @@ impl CallStack {
     /// shrinks, so deep recursion shows here after it has returned.
     pub(crate) fn frame_capacity(&self) -> usize {
         self.frames.capacity()
+    }
+}
+
+/// The fork's stack is the snapshot's: the same frames at the same
+/// positions, including calls whose arguments were being evaluated.
+impl crate::snapshot::ForkCopy for CallStack {
+    fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        CallStack {
+            frames: self.frames.clone(),
+            extras: self.extras.fork_copy(fork),
+            empty: FrameExtras::new(),
+            preparing: self.preparing.clone(),
+            details: self.details.fork_copy(fork),
+            callback_depth: self.callback_depth,
+            native_arguments: Vec::new(),
+            // A snapshot is taken from top-level code, never inside a
+            // built-in's callback.
+            native_loops: Vec::new(),
+            handed_back: None,
+        }
     }
 }

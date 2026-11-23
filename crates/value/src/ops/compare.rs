@@ -15,7 +15,7 @@ use crate::array::PhpArray;
 use crate::convert::{NumVal, parse_numeric};
 use crate::error::{Diagnostics, OpError};
 use crate::float_format::{NumberText, float_text_precision14};
-use crate::object::Object;
+use crate::object::{Object, ObjectCast};
 use crate::value::Value;
 
 mod casting;
@@ -88,8 +88,14 @@ pub enum ObjectComparison {
     Projected(PhpArray, PhpArray),
 }
 
+/// Operands offered to the runtime's comparison hooks.
+pub enum ObjectOperands<'a> {
+    Pair(&'a Object, &'a Object),
+    Mixed(&'a Value, &'a Value),
+}
+
 pub type ObjectComparator<'a> =
-    dyn FnMut(&Object, &Object, &mut dyn Diagnostics) -> Result<ObjectComparison, OpError> + 'a;
+    dyn FnMut(ObjectOperands<'_>, &mut dyn Diagnostics) -> Result<ObjectComparison, OpError> + 'a;
 
 /// The same hook serves ordering and equality, including objects inside containers.
 pub fn compare_with_objects(
@@ -138,7 +144,10 @@ fn compare_resolved(
             )),
             structure::Pair::Tables(left, right) => compare_tables(left, right, comparison, d),
         },
-        _ => comparison.leaf(a, b, d),
+        _ => match comparison.mixed(a, b, d)? {
+            Some(order) => Ok(order),
+            None => comparison.leaf(a, b, d),
+        },
     }
 }
 
@@ -186,22 +195,58 @@ fn compare_non_resource(
         | (Value::Bool(true), Value::Bool(true)) => Ok(0),
         (Value::Null, Value::Bool(true)) => Ok(-1),
         (Value::Bool(true), Value::Null) => Ok(1),
-        (Value::String(x), Value::String(y)) => Ok(smart_strcmp(x.as_bytes(), y.as_bytes())),
-        (Value::Null, Value::String(y)) => Ok(if y.is_empty() { 0 } else { -1 }),
-        (Value::String(x), Value::Null) => Ok(if x.is_empty() { 0 } else { 1 }),
-        (Value::Int(x), Value::String(y)) => Ok(long_to_string_cmp(*x, y.as_bytes())),
-        (Value::String(x), Value::Int(y)) => Ok(-long_to_string_cmp(*y, x.as_bytes())),
-        (Value::Float(x), Value::String(y)) => {
+        (Value::InternedStr(x), Value::InternedStr(y)) => {
+            if std::ptr::eq(*x, *y) {
+                Ok(0)
+            } else {
+                Ok(smart_strcmp(x.as_bytes(), y.as_bytes()))
+            }
+        }
+        (Value::InternedStr(_) | Value::String(_), Value::InternedStr(_) | Value::String(_)) => {
+            Ok(smart_strcmp(
+                a.as_str_bytes().expect("checked string"),
+                b.as_str_bytes().expect("checked string"),
+            ))
+        }
+        (Value::Null, Value::InternedStr(_) | Value::String(_)) => {
+            Ok(if b.as_str_bytes().expect("checked string").is_empty() {
+                0
+            } else {
+                -1
+            })
+        }
+        (Value::InternedStr(_) | Value::String(_), Value::Null) => {
+            Ok(if a.as_str_bytes().expect("checked string").is_empty() {
+                0
+            } else {
+                1
+            })
+        }
+        (Value::Int(x), Value::InternedStr(_) | Value::String(_)) => Ok(long_to_string_cmp(
+            *x,
+            b.as_str_bytes().expect("checked string"),
+        )),
+        (Value::InternedStr(_) | Value::String(_), Value::Int(y)) => Ok(-long_to_string_cmp(
+            *y,
+            a.as_str_bytes().expect("checked string"),
+        )),
+        (Value::Float(x), Value::InternedStr(_) | Value::String(_)) => {
             if x.is_nan() {
                 return Ok(1);
             }
-            Ok(double_to_string_cmp(*x, y.as_bytes()))
+            Ok(double_to_string_cmp(
+                *x,
+                b.as_str_bytes().expect("checked string"),
+            ))
         }
-        (Value::String(x), Value::Float(y)) => {
+        (Value::InternedStr(_) | Value::String(_), Value::Float(y)) => {
             if y.is_nan() {
                 return Ok(1);
             }
-            Ok(-double_to_string_cmp(*y, x.as_bytes()))
+            Ok(-double_to_string_cmp(
+                *y,
+                a.as_str_bytes().expect("checked string"),
+            ))
         }
         (Value::Object(_), Value::Null) => Ok(1),
         (Value::Null, Value::Object(_)) => Ok(-1),
@@ -255,6 +300,30 @@ fn compare_non_resource(
             }
             match other {
                 Value::Int(_) | Value::Float(_) => {
+                    if let Value::Object(object) = obj {
+                        let kind = if other.is_int() {
+                            ObjectCast::Int
+                        } else {
+                            ObjectCast::Float
+                        };
+                        match (object.class.cast(object, kind), other) {
+                            (Some(Value::Int(left)), Value::Int(right)) => {
+                                return Ok(cmp3(if obj_first {
+                                    left.cmp(right)
+                                } else {
+                                    right.cmp(&left)
+                                }));
+                            }
+                            (Some(Value::Float(left)), Value::Float(right)) => {
+                                return Ok(if obj_first {
+                                    threeway(left, *right)
+                                } else {
+                                    threeway(*right, left)
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
                     // stdClass cannot cast to numbers: PHP notices and
                     // treats the object as 1.
                     d.notice(format!(
@@ -312,11 +381,13 @@ fn silent_number(v: &Value) -> Value {
         Value::Int(_) | Value::Float(_) => v.clone(),
         Value::Null | Value::Bool(false) => Value::Int(0),
         Value::Bool(true) => Value::Int(1),
-        Value::String(s) => match parse_numeric(s.as_bytes()).value {
-            Some(NumVal::Int(i)) => Value::Int(i),
-            Some(NumVal::Float(f)) => Value::Float(f),
-            None => Value::Int(0),
-        },
+        Value::InternedStr(_) | Value::String(_) => {
+            match parse_numeric(v.as_str_bytes().expect("checked string")).value {
+                Some(NumVal::Int(i)) => Value::Int(i),
+                Some(NumVal::Float(f)) => Value::Float(f),
+                None => Value::Int(0),
+            }
+        }
         other => other.clone(),
     }
 }
@@ -339,7 +410,7 @@ fn cmp3(o: std::cmp::Ordering) -> i8 {
 
 /// `ZEND_THREEWAY_COMPARE`: `a == b ? 0 : a < b ? -1 : 1`; NaN therefore
 /// compares as greater.
-fn threeway(x: f64, y: f64) -> i8 {
+pub fn threeway(x: f64, y: f64) -> i8 {
     if x == y {
         0
     } else if x < y {
@@ -351,7 +422,7 @@ fn threeway(x: f64, y: f64) -> i8 {
 
 /// `zendi_smart_strcmp`: numeric comparison when both strings are numeric
 /// (no trailing data), byte comparison otherwise.
-fn smart_strcmp(s1: &[u8], s2: &[u8]) -> i8 {
+pub fn smart_strcmp(s1: &[u8], s2: &[u8]) -> i8 {
     let p1 = parse_numeric(s1);
     let p2 = parse_numeric(s2);
     match (p1.value, p2.value) {
@@ -417,6 +488,10 @@ fn identical_leaf(a: &Value, b: &Value) -> bool {
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Int(a), Value::Int(b)) => a == b,
         (Value::Float(a), Value::Float(b)) => a == b,
+        (Value::InternedStr(a), Value::InternedStr(b)) => std::ptr::eq(*a, *b),
+        (Value::InternedStr(a), Value::String(b)) | (Value::String(b), Value::InternedStr(a)) => {
+            a.as_bytes() == b.as_bytes()
+        }
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Array(a), Value::Array(b)) => Rc::ptr_eq(a, b),
         (Value::Object(a), Value::Object(b)) => Rc::ptr_eq(a, b),

@@ -12,11 +12,13 @@
 
 use crate::compile::Compiled;
 use crate::errors::Error;
+use crate::mark::Marks;
 use pcre2::bytes::CaptureLocations;
 
 /// The span of each group of one match, group 0 being the whole match;
 /// `None` for a group that did not take part.
 pub(crate) type Captures = Vec<Option<(usize, usize)>>;
+pub(crate) type MarkedCaptures<'a> = (Captures, Option<&'a [u8]>);
 
 /// The matches of `compiled` in `subject` from `position` on, as an
 /// iterator. An error ends it.
@@ -46,11 +48,7 @@ impl Iterator for Scanner<'_> {
     type Item = Result<Captures, Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let found = self.find();
-        if found.is_err() {
-            self.finished = true;
-        }
-        found.transpose()
+        self.next_with(|locations, _, _, _| captures(locations))
     }
 }
 
@@ -102,7 +100,41 @@ impl<'a> Scanner<'a> {
         Ok(())
     }
 
-    fn find(&mut self) -> Result<Option<Captures>, Error> {
+    /// Counts matches without copying capture positions into Rust vectors.
+    pub(crate) fn count_up_to(&mut self, limit: usize) -> Result<usize, Error> {
+        std::iter::from_fn(|| self.next_with(|_, _, _, _| ()))
+            .take(limit)
+            .try_fold(0, |count, found| found.map(|()| count + 1))
+    }
+
+    pub(crate) fn next_marked<'m>(
+        &mut self,
+        marks: &'m Marks,
+    ) -> Option<Result<MarkedCaptures<'m>, Error>> {
+        let subject = self.subject;
+        self.next_with(|locations, position, retry, span| {
+            (
+                captures(locations),
+                marks.find(subject, position, retry, span),
+            )
+        })
+    }
+
+    fn next_with<T>(
+        &mut self,
+        matched: impl FnOnce(&CaptureLocations, usize, bool, (usize, usize)) -> T,
+    ) -> Option<Result<T, Error>> {
+        let found = self.find(matched);
+        if found.is_err() {
+            self.finished = true;
+        }
+        found.transpose()
+    }
+
+    fn find<T>(
+        &mut self,
+        matched: impl FnOnce(&CaptureLocations, usize, bool, (usize, usize)) -> T,
+    ) -> Result<Option<T>, Error> {
         if self.finished {
             return Ok(None);
         }
@@ -127,11 +159,15 @@ impl<'a> Scanner<'a> {
                 if found.end() < found.start() {
                     return Err(Error::Internal);
                 }
+                let result = matched(
+                    locations,
+                    self.position,
+                    self.after_empty,
+                    (found.start(), found.end()),
+                );
                 self.position = found.end();
                 self.after_empty = found.start() == found.end();
-                return Ok(Some(
-                    (0..locations.len()).map(|i| locations.get(i)).collect(),
-                ));
+                return Ok(Some(result));
             }
             if !self.after_empty || self.position == self.subject.len() {
                 self.finished = true;
@@ -151,6 +187,10 @@ impl<'a> Scanner<'a> {
             self.after_empty = false;
         }
     }
+}
+
+fn captures(locations: &CaptureLocations) -> Captures {
+    (0..locations.len()).map(|i| locations.get(i)).collect()
 }
 
 /// A byte in the middle of a UTF-8 character: `10xxxxxx`.

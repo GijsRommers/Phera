@@ -1,0 +1,15 @@
+[package]
+name = "phera-ext-xml"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+indexmap.workspace = true
+phera-ext-dom.workspace = true
+phera-extension-api.workspace = true
+quick-xml.workspace = true
+
+[lints]
+workspace = true

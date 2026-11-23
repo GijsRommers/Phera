@@ -34,7 +34,7 @@ pub fn register(registry: &mut Registry) {
     }
 }
 
-fn flock(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+fn flock(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let candidate = argument_resource(args::value(&arguments, 0), "flock", "#1 ($stream)")?;
         let is_directory = crate::directory::is_open(candidate);
@@ -45,6 +45,7 @@ fn flock(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeRe
         };
         let operation = args::int(&arguments, 1).unwrap_or(0);
         let no_wait = operation & 4 != 0;
+        let user_operation = operation & 7;
         let operation = match (operation & 3, no_wait) {
             (1, false) => FlockOperation::LockShared,
             (1, true) => FlockOperation::NonBlockingLockShared,
@@ -57,6 +58,13 @@ fn flock(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeRe
                 ));
             }
         };
+        if let Some(file) = crate::user_file::resource_file(resource) {
+            let locked = file.lock(context, "flock", user_operation).await?;
+            if let Some(output) = args::reference(&arguments, 2) {
+                *output.borrow_mut() = Value::Int(0);
+            }
+            return Ok(Value::Bool(locked));
+        }
         let policy = match operation {
             FlockOperation::LockShared | FlockOperation::LockExclusive => IoPolicy::Blocking,
             _ => IoPolicy::Inline,
@@ -66,7 +74,9 @@ fn flock(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeRe
         } else {
             operate(resource, policy, move |stream: &mut Stream| {
                 let file = stream.lock_descriptor().ok_or(Errno::NOTSUP)?;
-                rustix::fs::flock(file, operation)
+                rustix::fs::flock(file, operation)?;
+                stream.locked = operation != FlockOperation::Unlock;
+                Ok(())
             })
             .await?
         };

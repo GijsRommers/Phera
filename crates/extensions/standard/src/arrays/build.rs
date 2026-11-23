@@ -71,7 +71,7 @@ async fn combine(context: &mut dyn Context, arguments: &[Value]) -> NativeResult
             "array_combine(): Argument #1 ($keys) and argument #2 ($values) must have the same number of elements",
         ));
     }
-    let mut result = PhpArray::new();
+    let mut result = PhpArray::with_capacity(keys.len());
     for (key, value) in keys.values().zip(values.values()) {
         result.insert(key_from_string(context, key).await?, value.clone());
     }
@@ -91,9 +91,13 @@ const ARRAY_FLIP: FunctionEntry = FunctionEntry::sync(
 );
 
 fn array_flip(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let mut result = PhpArray::new();
-    for (key, value) in required_array(arguments, 0).iter() {
-        if matches!(&*value.deref(), Value::Int(_) | Value::String(_)) {
+    let array = required_array(arguments, 0);
+    let mut result = PhpArray::with_capacity(array.len());
+    for (key, value) in array.iter() {
+        if matches!(
+            &*value.deref(),
+            Value::Int(_) | Value::InternedStr(_) | Value::String(_)
+        ) {
             result.insert(ArrayKey::from_value(value)?, Value::from(key));
         } else {
             context.warning(
@@ -133,17 +137,8 @@ fn array_fill(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         ));
     }
     let start = args::int(arguments, 0).unwrap_or_default();
-    if count > 0 && start.checked_add(count - 1).is_none() {
-        return Err(NativeError::error(
-            "Cannot add element to the array as the next element is already occupied",
-        ));
-    }
-    let value = &arguments[2];
-    let mut result = PhpArray::new();
-    for offset in 0..count {
-        result.insert(ArrayKey::Int(start + offset), value.clone());
-    }
-    Ok(Value::from(result))
+    let values = std::iter::repeat_n(arguments[2].clone(), count as usize);
+    Ok(Value::from(PhpArray::from_indexed_values(start, values)?))
 }
 
 /// `array_fill_keys(array $keys, mixed $value): array`
@@ -173,8 +168,9 @@ fn array_fill_keys(
 
 async fn fill_keys(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let value = &arguments[1];
-    let mut result = PhpArray::new();
-    for key in required_array(arguments, 0).values() {
+    let keys = required_array(arguments, 0);
+    let mut result = PhpArray::with_capacity(keys.len());
+    for key in keys.values() {
         result.insert(key_from_string(context, key).await?, value.clone());
     }
     Ok(Value::from(result))
@@ -213,7 +209,7 @@ fn array_pad(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     }
     let padding = wanted - array.len() as u64;
     let value = &arguments[2];
-    let mut result = PhpArray::new();
+    let mut result = PhpArray::with_capacity(wanted as usize);
     if length < 0 {
         for _ in 0..padding {
             result.push(value.clone())?;

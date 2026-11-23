@@ -187,24 +187,11 @@ impl crate::Vm {
                 "Access level to {class}::${name} must be {visibility} (as in class {parent}){suffix}"
             )));
         }
-        if (property.set_visibility.is_some() || inherited.set_visibility.is_some())
-            && property.hooks.is_none()
+        if property.hooks.is_none()
             && inherited.hooks.is_none()
+            && (property.ty.is_some() || inherited.ty.is_some())
         {
-            let child = property.ty.as_ref().map(|ty| ty.display.as_str());
-            let base = inherited.ty.as_ref().map(|ty| ty.display.as_str());
-            if child.is_some() != base.is_some()
-                || !self.type_subset(child, class, base, parent, unit)
-                || !self.type_subset(base, parent, child, class, unit)
-            {
-                let required = base.map_or_else(
-                    || format!("omitted to match the parent definition in class {parent}"),
-                    |ty| format!("{ty} (as in class {parent})"),
-                );
-                return Err(NativeError::error(format!(
-                    "Type of {class}::${name} must be {required}"
-                )));
-            }
+            self.check_property_type(property, inherited, unit)?;
         }
         Ok(())
     }

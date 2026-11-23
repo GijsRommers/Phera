@@ -17,12 +17,17 @@ mod directory_class;
 mod errors;
 mod file_attributes;
 pub mod file_io;
+mod filtered_files;
+mod filters;
 mod formatted;
 mod glob;
 mod gzip;
 pub use gzip::register as register_gzip_functions;
 mod handles;
 mod include_path;
+mod include_stream;
+pub use include_stream::{IncludeSource, include_source, wraps_include};
+mod file_details;
 mod ini;
 mod input;
 mod io_policy;
@@ -38,13 +43,21 @@ mod resource;
 mod scan;
 mod scan_format;
 mod select;
+mod socket;
 mod source_tools;
 mod stream;
 mod stream_copy;
+mod stream_fork;
 mod stream_options;
 mod temporary;
 mod terminal;
 mod transfer;
+mod user_directory;
+mod user_file;
+mod user_paths;
+mod user_resource;
+mod user_stat;
+mod user_wrappers;
 mod whole_file;
 mod whole_write;
 mod wrapper;
@@ -57,6 +70,11 @@ pub use input::RequestInput;
 pub use path_text::parent as dirname_parent;
 pub use request::{creation_mask, new_resource};
 pub use request::{request_input, set_request, track_standard};
+pub use socket::descriptor::{
+    close_socket_stream, export_socket_stream, import_socket_stream, received_file_stream,
+    set_socket_stream_blocking, socket_stream_blocking,
+};
+pub use socket::{Connection as SocketConnection, Socket as StreamSocket};
 pub use terminal::{stream_kind, with_descriptor};
 pub use whole_write::append_log;
 pub use wrapper::standard_constants;
@@ -75,6 +93,16 @@ impl Extension for Streams {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<request::Files>(request::fork_files);
+        registry.fork_resource("stream", stream_fork::fork_stream);
+        registry.fork_resource("stream-context", context_options::fork_context);
+        user_file::register_fork(registry);
+        user_stat::register_fork(registry);
+        user_resource::register(registry);
+        registry.fork_state::<phera_extension_api::WorkingDirectory>(
+            phera_extension_api::copy_state::<phera_extension_api::WorkingDirectory>,
+        );
         context_options::register(registry);
         crypto_constants::register(registry);
         copy::register(registry);
@@ -82,6 +110,7 @@ impl Extension for Streams {
         directory::register(registry);
         directory_class::register(registry);
         file_attributes::register(registry);
+        filters::register(registry);
         formatted::register(registry);
         glob::register(registry);
         handles::register(registry);
@@ -89,6 +118,7 @@ impl Extension for Streams {
         ini::register(registry);
         locking::register(registry);
         metadata::register(registry);
+        file_details::register(registry);
         mutations::register(registry);
         path_text::register(registry);
         pattern::register(registry);
@@ -98,8 +128,10 @@ impl Extension for Streams {
         stream_copy::register(registry);
         stream_options::register(registry);
         select::register(registry);
+        socket::register(registry);
         temporary::register(registry);
         transfer::register(registry);
+        user_wrappers::register(registry);
         whole_file::register(registry);
     }
 }

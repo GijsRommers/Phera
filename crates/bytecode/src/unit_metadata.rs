@@ -8,32 +8,62 @@ use crate::{ArgumentLayout, CompiledUnit, Function, Parameter, Type, TypeMask};
 /// Unit-local lookup facts with no request-dependent indexes or PHP values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnitMetadata {
+    /// The file revision's number in the process, from 1: a request finds
+    /// a file it loaded already at this position of a flat table.
+    pub id: u32,
     pub functions: Box<[FunctionSignature]>,
     pub names: Box<[String]>,
     pub symbols: Box<[String]>,
+    /// The process's key of each name and of each symbol (see
+    /// [`crate::name_keys`]), given when the file was compiled.
+    pub name_keys: Arc<[crate::NameKey]>,
+    pub prop_keys: Arc<[crate::PropKey]>,
+    pub symbol_keys: Arc<[crate::NameKey]>,
+    /// The key of each class the file declares, by its lowercased name: a
+    /// declaration looks itself up by it.
+    pub class_keys: Arc<[crate::NameKey]>,
     pub type_scopes: Arc<[DeclarationScope]>,
 }
 
 impl UnitMetadata {
     pub fn new(unit: &CompiledUnit) -> Self {
+        let names: Box<[String]> = unit
+            .names
+            .iter()
+            .map(|name| name.to_ascii_lowercase())
+            .collect();
+        let symbols: Box<[String]> = unit
+            .symbols
+            .iter()
+            .map(|symbol| symbol.name.to_ascii_lowercase())
+            .collect();
+        // Four billion compiled file revisions would not fit in memory first.
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
         Self {
+            id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            name_keys: crate::name_keys::keys(names.iter().map(String::as_str)),
+            prop_keys: crate::name_keys::prop_keys(unit.names.iter().map(String::as_str)),
+            symbol_keys: crate::name_keys::keys(symbols.iter().map(String::as_str)),
+            class_keys: class_keys(unit),
             functions: std::iter::once(&unit.main)
                 .chain(&unit.functions)
                 .map(|body| FunctionSignature::new(body, &unit.types))
                 .collect(),
-            names: unit
-                .names
-                .iter()
-                .map(|name| name.to_ascii_lowercase())
-                .collect(),
-            symbols: unit
-                .symbols
-                .iter()
-                .map(|symbol| symbol.name.to_ascii_lowercase())
-                .collect(),
+            names,
+            symbols,
             type_scopes: unit.types.iter().map(DeclarationScope::of).collect(),
         }
     }
+}
+
+/// The key of each class `unit` declares, by its lowercased name.
+pub fn class_keys(unit: &CompiledUnit) -> Arc<[crate::NameKey]> {
+    let names: Vec<String> = unit
+        .classes
+        .iter()
+        .map(|class| class.name.to_ascii_lowercase())
+        .collect();
+    crate::name_keys::keys(names.iter().map(String::as_str))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

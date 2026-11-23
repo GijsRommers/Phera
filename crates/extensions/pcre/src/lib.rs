@@ -19,6 +19,8 @@ mod compile;
 mod errors;
 mod flags;
 mod grep;
+mod mark;
+mod mark_pattern;
 mod matches;
 mod matching;
 mod pattern;
@@ -26,6 +28,7 @@ mod quote;
 mod replace;
 mod replacement;
 mod scan;
+mod settings;
 mod signatures;
 mod split;
 mod transform;
@@ -41,6 +44,9 @@ impl Extension for Pcre {
     }
 
     fn register(&self, registry: &mut Registry) {
+        // How a fork of a snapshot gets this extension's request state.
+        registry.fork_state::<crate::errors::Error>(phera_extension_api::fresh_state);
+        settings::register(registry);
         signatures::register(registry);
         for &(name, value) in CONSTANTS {
             registry.constant(name, value);
@@ -56,12 +62,12 @@ impl Extension for Pcre {
 
 /// Prepare a pattern for a native caller that owns the diagnostic, such as RegexIterator.
 pub fn validate_pattern(pattern: &[u8]) -> Result<(), String> {
-    cache::lookup(pattern, compile::Settings::default()).map(drop)
+    cache::lookup(pattern, settings::Settings::default()).map(drop)
 }
 
 /// Match without altering the request's preg_last_error state.
 pub fn simple_match(pattern: &[u8], subject: &[u8]) -> bool {
-    cache::lookup(pattern, compile::Settings::default())
+    cache::lookup(pattern, settings::Settings::default())
         .is_ok_and(|compiled| compiled.regex.is_match(subject).unwrap_or(false))
 }
 

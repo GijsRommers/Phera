@@ -107,6 +107,11 @@ pub trait Context {
     /// Per-request storage for extensions; see [`RequestState`].
     fn state(&mut self) -> &mut RequestState;
 
+    /// Whether this execution can still create an application snapshot.
+    fn is_snapshot_boot(&self) -> bool {
+        false
+    }
+
     /// The PHP source location of the current operation.
     fn source_location(&self) -> Option<(String, usize)> {
         None
@@ -120,6 +125,11 @@ pub trait Context {
     /// Replaces the symbol, retaining aliases to the old variable.
     fn replace_request_global(&mut self, _name: &str, _value: Value) {}
 
+    /// Replace a symbol in the executing PHP scope, leaving its old aliases intact.
+    fn replace_caller_variable(&mut self, _name: &str, _value: Value) -> Result<(), NativeError> {
+        Ok(())
+    }
+
     /// Flushes an extension after user shutdown callbacks and output finalization.
     fn register_request_finalizer(&mut self, _callback: crate::AsyncFn) {}
 
@@ -132,6 +142,15 @@ pub trait Context {
 
     /// Releases resources after output and extension finalizers have run.
     fn register_resource_finalizer(&mut self, _key: &'static str, _callback: crate::AsyncFn) {}
+
+    /// Schedule a native close callback when an application handle is dropped.
+    fn resource_release(
+        &self,
+        _kind: &'static str,
+        _id: i64,
+    ) -> Option<phera_value::ResourceRelease> {
+        None
+    }
 
     /// The PHP file making this call, for include-path lookups.
     fn script_path(&self) -> Option<std::path::PathBuf> {
@@ -153,9 +172,22 @@ pub trait Context {
         ".".into()
     }
 
+    /// The request's wrapper table can intercept or disable an include.
+    fn set_include_wrappers(&mut self, _enabled: bool) {}
+
+    /// The converter provided by the registered iconv module.
+    fn iconv_converter(&self) -> Option<crate::IconvConverter> {
+        None
+    }
+
     /// Return the current string value of a registered INI directive.
     fn ini_get(&self, _name: &[u8]) -> Option<PhpString> {
         None
+    }
+
+    /// A registered INI string before PHP's public ini_get() maps null to empty.
+    fn ini_value(&self, name: &[u8]) -> Option<PhpString> {
+        self.ini_get(name)
     }
 
     /// Decimal precision for serialization and PHP variable dumps.
@@ -317,6 +349,19 @@ pub trait Context {
         Box::pin(std::future::ready(Err(NativeError::error(
             "Cannot call a PHP callback without a runtime",
         ))))
+    }
+
+    /// Calls a PHP callback with the active late-static class when it has a compatible scope.
+    fn forward_static_callback(
+        &mut self,
+        function: &str,
+        _callable: &Value,
+        _arguments: &PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        let error = NativeError::error(format!(
+            "Cannot call {function}() when no class scope is active"
+        ));
+        Box::pin(std::future::ready(Err(error)))
     }
 
     /// Calls an instance method with ordinary PHP method dispatch.
@@ -503,6 +548,21 @@ pub trait Context {
         false
     }
 
+    /// Writes an existing property from the object's own scope for a native protocol callback.
+    fn set_protocol_property(
+        &mut self,
+        object: &Object,
+        name: &str,
+        value: Value,
+    ) -> Result<Option<crate::ArrayKey>, NativeError> {
+        let key = crate::ArrayKey::str(name);
+        if object.get(&key).is_none() {
+            return Ok(None);
+        }
+        object.set(key.clone(), value);
+        Ok(Some(key))
+    }
+
     /// The class selected by a native static method call, including inherited factories.
     fn called_class(&self) -> Option<&str> {
         None
@@ -620,6 +680,16 @@ pub trait Context {
         Err(NativeError::error(format!(
             "An object of class {class} cannot be created here"
         )))
+    }
+
+    /// Invoke an allocated object's constructor in its declaring scope.
+    /// Factories may call this after hydrating properties, including for private constructors.
+    fn call_hydration_constructor(
+        &mut self,
+        _object: Rc<Object>,
+        _arguments: &PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        Box::pin(std::future::ready(Ok(Value::Null)))
     }
 
     /// Access to the runtime's cold reflection queries.
