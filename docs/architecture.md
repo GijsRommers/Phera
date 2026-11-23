@@ -1429,6 +1429,9 @@ Done on the branch `engine/calls` (pull request #9):
 - A frame is `{ function, base, ip, destination, flags }`, 16 bytes in a
   `Vec`. What only some frames need (dynamic names, `foreach` state,
   argument facts, a closure, a class context) is in a side table by depth.
+  Returns pop the frame and release that entry when present. The compiler
+  can omit the trailing scratch slot when binding, branch and call operands
+  all fit in the smaller window.
 - One flat code table per request; functions, methods, closures and
   class initializers refer to code by `FunctionIndex`.
 - One `match` executes an instruction. The interpreter loop borrows the

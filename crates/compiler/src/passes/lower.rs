@@ -313,6 +313,23 @@ impl Tables<'_> {
         // Then the temporaries read once and cleared are taken.
         crate::passes::takes::rewrite(&mut function);
         use_immediate_literals(&mut function, &self.unit.constants);
+        // A binding uses the scratch register explicitly. A comparison branch
+        // uses the last register implicitly on its VM fallback. Direct calls
+        // can also name the end of the window, even for zero arguments.
+        if areas.is_none()
+            && scratch.0 > 0
+            && function.registers == scratch.0 + 1
+            && !function.instructions.iter().any(|op| {
+                matches!(
+                    op,
+                    Instruction::BindReference { .. }
+                        | Instruction::BinaryBranch { .. }
+                        | Instruction::BinaryBranchIf { .. }
+                )
+            })
+        {
+            function.registers = scratch.0;
+        }
         function
     }
 }

@@ -1,7 +1,7 @@
 file golden.php
   const#0 = Array([])
 
-function {main} (6 registers, dynamic scope)
+function {main} (5 registers, dynamic scope)
   r0 = $grid
   path#0 = Register(r0) [Index(r2), Index(r3)]
   0000  line 1    AssignConst { local: r0, constant: const#0 }
