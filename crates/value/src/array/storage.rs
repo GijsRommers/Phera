@@ -30,7 +30,7 @@ fn array_hash_seed() -> &'static ArrayHashSeed {
 }
 
 pub(crate) fn hash_str_bytes(bytes: &[u8]) -> u64 {
-    array_hash_seed().strings.hash_one(bytes)
+    array_hash_seed().strings.hash_one(bytes).max(1)
 }
 
 #[inline]

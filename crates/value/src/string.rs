@@ -1,12 +1,32 @@
-use std::fmt;
 use std::rc::Rc;
+use std::{cell::Cell, fmt};
 
 use crate::intern::InternedStr;
+
+struct SharedStr {
+    hash: Cell<u64>,
+    bytes: Vec<u8>,
+}
+
+const _: () = assert!(std::mem::size_of::<SharedStr>() == 32);
+
+impl Clone for SharedStr {
+    fn clone(&self) -> Self {
+        // Copy-on-write separates the buffer before mutation.
+        Self {
+            hash: Cell::new(0),
+            bytes: self.bytes.clone(),
+        }
+    }
+}
 
 #[derive(Clone)]
 enum Repr {
     Interned(&'static InternedStr),
-    Shared { bytes: Rc<Vec<u8>>, literal: bool },
+    Shared {
+        storage: Rc<SharedStr>,
+        literal: bool,
+    },
 }
 
 /// A PHP byte string. Literal copies need no reference-count traffic.
@@ -28,6 +48,16 @@ impl Default for PhpString {
 }
 
 impl PhpString {
+    fn from_shared_bytes(bytes: Vec<u8>, literal: bool) -> Self {
+        Self(Repr::Shared {
+            storage: Rc::new(SharedStr {
+                hash: Cell::new(0),
+                bytes,
+            }),
+            literal,
+        })
+    }
+
     /// Wrap a canonical literal such as `'name'` without allocating a buffer.
     #[inline]
     pub fn from_interned(value: &'static InternedStr) -> Self {
@@ -53,10 +83,10 @@ impl PhpString {
     /// A literal in request-selected code keeps its diagnostic without entering
     /// the process-wide interner.
     pub fn from_request_literal(bytes: &[u8]) -> Self {
-        Self(Repr::Shared {
-            bytes: Rc::new(bytes.to_vec()),
-            literal: bytes.len() <= crate::intern::MAX_SINGLE_INTERN_LEN,
-        })
+        Self::from_shared_bytes(
+            bytes.to_vec(),
+            bytes.len() <= crate::intern::MAX_SINGLE_INTERN_LEN,
+        )
     }
 
     /// The process's canonical empty PHP string.
@@ -75,7 +105,9 @@ impl PhpString {
         }
         let (storage, literal) = self.shared_mut();
         *literal = false;
-        Rc::make_mut(storage).extend_from_slice(bytes);
+        let storage = Rc::make_mut(storage);
+        storage.hash.set(0);
+        storage.bytes.extend_from_slice(bytes);
     }
 
     /// Borrow mutable bytes if the buffer has no other handle.
@@ -83,25 +115,25 @@ impl PhpString {
         let (storage, literal) = self.shared_mut();
         let storage = Rc::get_mut(storage)?;
         *literal = false;
-        Some(storage.as_mut_slice())
+        storage.hash.set(0);
+        Some(storage.bytes.as_mut_slice())
     }
 
     /// Mutate bytes without changing other PHP values.
     pub fn make_mut_bytes(&mut self) -> &mut [u8] {
         let (storage, literal) = self.shared_mut();
         *literal = false;
-        Rc::make_mut(storage).as_mut_slice()
+        let storage = Rc::make_mut(storage);
+        storage.hash.set(0);
+        storage.bytes.as_mut_slice()
     }
 
-    fn shared_mut(&mut self) -> (&mut Rc<Vec<u8>>, &mut bool) {
+    fn shared_mut(&mut self) -> (&mut Rc<SharedStr>, &mut bool) {
         if let Repr::Interned(value) = self.0 {
-            self.0 = Repr::Shared {
-                bytes: Rc::new(value.as_bytes().to_vec()),
-                literal: false,
-            };
+            *self = Self::from(value.as_bytes());
         }
         match &mut self.0 {
-            Repr::Shared { bytes, literal } => (bytes, literal),
+            Repr::Shared { storage, literal } => (storage, literal),
             Repr::Interned(_) => unreachable!("an immutable string was materialized above"),
         }
     }
@@ -110,7 +142,7 @@ impl PhpString {
     pub fn as_bytes(&self) -> &[u8] {
         match &self.0 {
             Repr::Interned(value) => value.as_bytes(),
-            Repr::Shared { bytes, .. } => bytes.as_slice(),
+            Repr::Shared { storage, .. } => storage.bytes.as_slice(),
         }
     }
 
@@ -132,7 +164,9 @@ impl PhpString {
     pub(crate) fn is_truthy(&self) -> bool {
         match &self.0 {
             Repr::Interned(value) => value.is_truthy(),
-            Repr::Shared { bytes, .. } => !(bytes.is_empty() || bytes.as_slice() == b"0"),
+            Repr::Shared { storage, .. } => {
+                !(storage.bytes.is_empty() || storage.bytes.as_slice() == b"0")
+            }
         }
     }
 
@@ -140,7 +174,7 @@ impl PhpString {
     pub fn storage_owners(&self) -> usize {
         match &self.0 {
             Repr::Interned(_) => 1,
-            Repr::Shared { bytes, .. } => Rc::strong_count(bytes),
+            Repr::Shared { storage, .. } => Rc::strong_count(storage),
         }
     }
 
@@ -154,7 +188,7 @@ impl PhpString {
     pub fn ptr_eq(&self, other: &Self) -> bool {
         match (&self.0, &other.0) {
             (Repr::Interned(left), Repr::Interned(right)) => std::ptr::eq(*left, *right),
-            (Repr::Shared { bytes: left, .. }, Repr::Shared { bytes: right, .. }) => {
+            (Repr::Shared { storage: left, .. }, Repr::Shared { storage: right, .. }) => {
                 Rc::ptr_eq(left, right)
             }
             _ => false,
@@ -164,10 +198,23 @@ impl PhpString {
     /// The hash of these bytes under the process-wide array seed.
     #[inline]
     pub(crate) fn array_hash(&self) -> u64 {
-        match &self.0 {
-            Repr::Interned(value) => value.array_hash(),
-            Repr::Shared { bytes, .. } => crate::array::hash_str_bytes(bytes),
+        let shared = match &self.0 {
+            Repr::Interned(value) => return value.array_hash(),
+            Repr::Shared { storage, .. } => storage,
+        };
+        let cached = shared.hash.get();
+        if cached != 0 {
+            return cached;
         }
+        Self::compute_array_hash(shared)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn compute_array_hash(shared: &SharedStr) -> u64 {
+        let hash = crate::array::hash_str_bytes(&shared.bytes);
+        shared.hash.set(hash);
+        hash
     }
 
     /// The canonical integer array key for a spelling such as `'-8'`.
@@ -175,7 +222,7 @@ impl PhpString {
     pub(crate) fn numeric_key(&self) -> Option<i64> {
         match &self.0 {
             Repr::Interned(value) => value.numeric_key(),
-            Repr::Shared { bytes, .. } => crate::array::numeric_string_key(bytes),
+            Repr::Shared { storage, .. } => crate::array::numeric_string_key(&storage.bytes),
         }
     }
 
@@ -201,10 +248,7 @@ impl From<String> for PhpString {
 impl From<Vec<u8>> for PhpString {
     #[inline]
     fn from(bytes: Vec<u8>) -> Self {
-        Self(Repr::Shared {
-            bytes: Rc::new(bytes),
-            literal: false,
-        })
+        Self::from_shared_bytes(bytes, false)
     }
 }
 
@@ -220,7 +264,7 @@ impl PartialEq for PhpString {
     fn eq(&self, other: &Self) -> bool {
         match (&self.0, &other.0) {
             (Repr::Interned(left), Repr::Interned(right)) => std::ptr::eq(*left, *right),
-            (Repr::Shared { bytes: left, .. }, Repr::Shared { bytes: right, .. })
+            (Repr::Shared { storage: left, .. }, Repr::Shared { storage: right, .. })
                 if Rc::ptr_eq(left, right) =>
             {
                 true
@@ -314,5 +358,31 @@ mod tests {
             s.push_bytes(i.to_string().as_bytes());
         }
         assert_eq!(s.len(), 38890);
+    }
+    #[test]
+    fn cached_hash_invalidates_on_mutation() {
+        let mut a = PhpString::from("alpha");
+        let b = a.clone();
+        let original = a.array_hash();
+        assert_ne!(original, 0);
+        assert_eq!(b.array_hash(), original);
+        assert!(a.ptr_eq(&b));
+
+        a.push_bytes(b"_beta");
+        assert!(!a.ptr_eq(&b));
+        assert_eq!(b.array_hash(), original);
+        assert_eq!(a.array_hash(), PhpString::from("alpha_beta").array_hash());
+
+        let mut c = PhpString::from("alpha");
+        let _ = c.array_hash();
+        c.as_unique_bytes_mut().unwrap()[0] = b'A';
+        assert_eq!(c, PhpString::from("Alpha"));
+        assert_eq!(c.array_hash(), PhpString::from("Alpha").array_hash());
+
+        let mut d = PhpString::from("gamma");
+        let _ = d.array_hash();
+        d.make_mut_bytes()[0] = b'G';
+        assert_eq!(d, PhpString::from("Gamma"));
+        assert_eq!(d.array_hash(), PhpString::from("Gamma").array_hash());
     }
 }

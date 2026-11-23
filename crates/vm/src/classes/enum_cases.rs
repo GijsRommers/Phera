@@ -171,6 +171,8 @@ impl Vm {
         let backing = info
             .backing
             .ok_or_else(|| internal_error!("enum backing type"))?;
+        // The cached string hash does not change key equality or hashing.
+        #[allow(clippy::mutable_key_type)]
         let table = HashMap::with_capacity(info.names.len());
         self.enum_cases.validating.insert(class.index);
         self.next_enum_backing(BackingBuilder {

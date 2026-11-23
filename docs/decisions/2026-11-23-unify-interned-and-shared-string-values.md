@@ -40,3 +40,12 @@ rests on a process-wide seed. PHP uses no secret array-key seed.
 | Structure | Was | Is |
 | --- | --- | --- |
 | Integer-key hash | `foldhash::hash_one(i64)` with a seeded multiplier | Seeded key and fixed multiplier, with high and low halves XORed |
+
+
+| Structure | Was | Is |
+| --- | --- | --- |
+| Shared string array hash | Recomputed for every lookup | Stored on the shared allocation and invalidated before mutation |
+| Shared vector allocation | 40 bytes including reference counts | 48 bytes including the cached hash |
+
+Only a hash of zero is recorded as one. The full width is retained for all
+other hashes. Caching and the inline-byte layout are measured separately.
