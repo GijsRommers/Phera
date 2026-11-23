@@ -20,4 +20,10 @@ final class VisitController
 
         return new JsonResponse(['before' => $before]);
     }
+
+    #[Route('/fails', methods: ['GET'])]
+    public function fails(): JsonResponse
+    {
+        throw new \RuntimeException('this route always fails');
+    }
 }

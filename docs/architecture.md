@@ -487,6 +487,41 @@ graph of objects that every fork of every route would copy. The numbers,
 per step, are in
 `docs/decisions/2026-11-23-the-adapters-warm-up-before-the-snapshot.md`.
 
+**Warm-up requests, declared by the application.** What is safe to build for
+every application is little. Most of a route's first-use work is the
+application's own, and only the application can say that one of its routes
+may run without a visitor. So it can name paths, in the place `phera serve`
+is already configured:
+
+```toml
+# phera.toml; or: phera serve --warmup /api/posts --warmup / public
+[server]
+warmup = ["/api/posts", "/"]
+```
+
+`phera serve` hands the list to both adapters in the environment variable
+`PHERA_WARMUP`, as it hands `APP_RUNTIME` to symfony/runtime. After the
+warm-up above, an adapter handles each path as an anonymous `GET` through
+the framework's kernel, terminates it like a real request and discards the
+response. A path that throws or is not answered with a 2xx status is logged
+and the boot goes on.
+
+What keeps a warm-up request from reaching the requests after it is the
+framework's own reset for long-running workers. Symfony needs nothing added:
+a booted kernel that has handled a request runs `services_resetter` when the
+next request arrives, and since every request is a copy of that kernel,
+every request starts with it. Laravel has no such reset of its own, so
+`Phera\Laravel\WarmUp` runs, after each warm-up request, what Octane runs
+between two requests (session, guards, queued cookies, locale,
+configuration, query log, log context, scoped instances, the route's
+controller, the bound request), written against the framework's services
+because Octane need not be installed; each step names its Octane listener.
+One thing differs from Octane and is the point: Octane handles a request in
+a copy of the container and throws the copy away, here what the request
+resolved stays. The contract an application signs by declaring a path is in
+the README ("Warm-up requests") and in
+`docs/decisions/2026-11-23-an-application-may-declare-warm-up-requests.md`.
+
 **Step 4, only if a profile asks for it: copy on first write.** Objects are
 reached through a table of the request, and a fork copies an object only when
 the request first writes to it. A fork then costs nothing up front. This is a

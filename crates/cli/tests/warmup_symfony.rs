@@ -31,7 +31,7 @@ struct Symfony {
     plain: Server,
     php: Server,
     // Dropped last: the servers run in it.
-    _project: Project,
+    project: Project,
 }
 
 impl Symfony {
@@ -72,8 +72,24 @@ impl Symfony {
             warm: Server::start(phera, &root, 1, &[]),
             plain: Server::start(phera, &root, 1, &[("PHERA_SERVICE_WARMUP", "0")]),
             php,
-            _project: project,
+            project,
         })
+    }
+
+    /// One more server, which handled `paths` as requests before its
+    /// snapshot (`PHERA_WARMUP`, what `--warmup` sets), and the file its
+    /// log is written to.
+    fn warmed_by(&self, paths: &str) -> (Server, std::path::PathBuf) {
+        let log = self.project.root.join("var/server.log");
+        let server = Server::start_with(
+            Path::new(env!("CARGO_BIN_EXE_phera")),
+            &self.project.document_root(),
+            1,
+            &[("PHERA_WARMUP", paths)],
+            &[],
+            std::fs::File::create(&log).expect("create the server's log"),
+        );
+        (server, log)
     }
 
     /// The answer all three give to `target`, which must be the same one.
@@ -155,4 +171,65 @@ fn randomness_is_drawn_in_the_request() {
     for (index, (one, other)) in first.iter().zip(&second).enumerate() {
         assert_ne!(one, other, "value {index} is the same in two requests");
     }
+}
+
+#[test]
+fn a_warm_up_request_leaves_no_session_and_no_entity() {
+    let Some(symfony) = Symfony::start() else {
+        return;
+    };
+    // The warm-up stores a name in a session and reads every product.
+    let (warmed, _log) = symfony.warmed_by("/visit?name=warm /api/products");
+
+    // An anonymous visitor has no session of the warm-up's...
+    assert_eq!(get(&warmed, "/visit", &[]).body, r#"{"before":null}"#);
+    // ...two visitors have their own...
+    let ada = get(&warmed, "/visit?name=ada", &[]).cookies();
+    let bob = get(&warmed, "/visit?name=bob", &[]).cookies();
+    assert_eq!(get(&warmed, "/visit", &[("Cookie", &ada)]).body, r#"{"before":"ada"}"#);
+    assert_eq!(get(&warmed, "/visit", &[("Cookie", &bob)]).body, r#"{"before":"bob"}"#);
+    assert_eq!(get(&warmed, "/visit", &[]).body, r#"{"before":null}"#);
+    // ...and no entity the warm-up loaded is still managed: Symfony's own
+    // reset of its services runs at the start of every request.
+    let state = get(&symfony.php, "/api/state", &[]).body;
+    assert!(state.contains(r#""entities_managed":0,"transaction_open":false"#), "{state}");
+    assert_eq!(get(&warmed, "/api/state", &[]).body, state);
+    assert_eq!(
+        get(&warmed, "/api/products", &[]).body,
+        get(&symfony.php, "/api/products", &[]).body
+    );
+}
+
+#[test]
+fn a_listener_the_warm_up_built_was_built_for_the_warm_up() {
+    let Some(symfony) = Symfony::start() else {
+        return;
+    };
+    // The stated cost of a warm-up request: a service it made Symfony
+    // build is the one every request gets. This application's listener
+    // reads the current request in its constructor; under PHP that is the
+    // request being answered, here it is the warm-up's.
+    let (warmed, _log) = symfony.warmed_by("/visit");
+    assert_eq!(get(&symfony.php, "/api/ping", &[]).header("x-listener-built-for"), ["/api/ping"]);
+    assert_eq!(get(&symfony.warm, "/api/ping", &[]).header("x-listener-built-for"), ["/api/ping"]);
+    assert_eq!(get(&warmed, "/api/ping", &[]).header("x-listener-built-for"), ["/visit"]);
+}
+
+#[test]
+fn a_warm_up_request_that_fails_does_not_stop_the_worker() {
+    let Some(symfony) = Symfony::start() else {
+        return;
+    };
+    let (warmed, log) = symfony.warmed_by("/fails /api/missing /api/products");
+    assert_eq!(
+        get(&warmed, "/api/products", &[]).body,
+        get(&symfony.php, "/api/products", &[]).body
+    );
+    let log = std::fs::read_to_string(log).expect("the server's log");
+    for (path, status) in [("/fails", 500), ("/api/missing", 404)] {
+        let line = format!("the warm-up request {path} was answered with status {status}");
+        assert_eq!(log.matches(&line).count(), 1, "{line}\n{log}");
+    }
+    assert!(!log.contains("the warm-up request /api/products"), "{log}");
+    assert!(!log.contains("DEFECT"), "{log}");
 }
