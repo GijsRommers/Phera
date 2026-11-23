@@ -194,6 +194,27 @@ impl Vm {
 }
 
 impl Vm {
+    /// Write one iteration entry into its destination. A destination inside
+    /// the locals prefix is a named variable, so it is assigned exactly as
+    /// `Assign` does: iterators over the old value restart, and a PHP
+    /// reference in the slot is written through.
+    pub(crate) fn set_iteration_target(
+        &mut self,
+        register: Reg,
+        value: Value,
+    ) -> Result<(), NativeError> {
+        let locals = self
+            .current()
+            .map(|frame| frame.function().locals.len())
+            .unwrap_or(usize::MAX);
+        if register.index() >= locals {
+            self.set(register, value);
+            return Ok(());
+        }
+        self.restart_subject_iterators(register);
+        self.assign_local(register, value)
+    }
+
     /// Snapshot iteration borrows its owner directly, avoiding a new array owner on every element.
     #[inline]
     fn next_snapshot(
@@ -221,16 +242,19 @@ impl Vm {
         else {
             return self.jump(end);
         };
+        // Bind first: the entry's borrow must end before a local destination
+        // is assigned through a PHP reference.
+        let element_key = match element_key {
+            ArrayKey::Int(integer) => Value::Int(integer),
+            ArrayKey::String(string) => Value::String(string.clone()),
+        };
+        let element = element.deref().clone();
+        // PHP writes the value, then the key: an old value the loop variable
+        // held is released first.
+        self.set_iteration_target(destination, element)?;
         if let Some(key) = key {
-            self.set(
-                key,
-                match element_key {
-                    ArrayKey::Int(integer) => Value::Int(integer),
-                    ArrayKey::String(string) => Value::String(string.clone()),
-                },
-            );
+            self.set_iteration_target(key, element_key)?;
         }
-        self.set(destination, element.deref().clone());
         Ok(())
     }
 
@@ -243,29 +267,34 @@ impl Vm {
         key: Option<Reg>,
         destination: Reg,
     ) -> Result<(), NativeError> {
-        if source.is_none() && key.is_none() {
-            self.set(destination, element);
+        let element_key = match element_key {
+            ArrayKey::Int(i) => Value::Int(i),
+            ArrayKey::String(string) => Value::String(string),
+        };
+        let Some(position) = source else {
+            // By value, PHP writes the value, then the key.
+            self.set_iteration_target(destination, element)?;
+            if let Some(key) = key {
+                self.set_iteration_target(key, element_key)?;
+            }
             return Ok(());
-        }
+        };
         let key_register = key.unwrap_or(destination);
-        self.set(
-            key_register,
-            match element_key {
-                ArrayKey::Int(i) => Value::Int(i),
-                ArrayKey::String(string) => Value::String(string),
-            },
-        );
-        if let Some(position) = source {
-            let position = position.clone().with_key(key_register);
-            element = self.reference(&position)?;
-        }
-        self.set(destination, element);
+        self.set_iteration_target(key_register, element_key)?;
+        let position = position.clone().with_key(key_register);
+        element = self.reference(&position)?;
+        self.set_iteration_target(destination, element)?;
         Ok(())
     }
 }
 
 /// By-value, unkeyed iteration retains the current
 /// register window and local IP. Live reference iteration uses iter_next instead.
+///
+/// The destination may be the loop's own variable (see the compiler's
+/// foreach bindings). A variable that holds a PHP reference is written
+/// through by the general handler, so the step leaves before the iterator
+/// advances; any other old value is replaced, as `Assign` replaces it.
 #[inline(always)]
 pub(crate) fn snapshot_step(
     iterator: IterId,
@@ -275,6 +304,9 @@ pub(crate) fn snapshot_step(
     slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> bool {
+    if holds_reference(slots, destination) {
+        return false;
+    }
     let Some(state) = iterators.get_mut(iterator.0) else {
         return false;
     };
@@ -302,9 +334,7 @@ pub(crate) fn snapshot_step(
     match entry {
         Some((_, value)) => {
             let value = crate::fast::duplicate(&value.deref());
-            if let Some(slot) = slots.get_mut(destination.index()) {
-                *slot = Some(value);
-            }
+            put(slots, destination, value);
         }
         None => *ip = end.index(),
     }
@@ -312,9 +342,10 @@ pub(crate) fn snapshot_step(
 }
 
 /// `IterNextKeyed` of a by-value loop, as `Vm::iter_next` makes it: the
-/// next entry of the array the loop iterates over (its key, then its
-/// value), or the next of an object's own cursor; `false` with nothing
-/// changed for a by-reference loop or any other state.
+/// next entry of the array the loop iterates over (its value, then its
+/// key, as PHP writes them), or the next of an object's own cursor; `false`
+/// with nothing changed when the general handler must run, as for
+/// [`snapshot_step`].
 #[inline(never)]
 pub(crate) fn keyed_step(
     iterator: IterId,
@@ -324,6 +355,9 @@ pub(crate) fn keyed_step(
     slots: &mut [Option<Value>],
     ip: &mut usize,
 ) -> bool {
+    if holds_reference(slots, destination) || holds_reference(slots, key) {
+        return false;
+    }
     let Some(state) = iterators.get_mut(iterator.0) else {
         return false;
     };
@@ -352,19 +386,16 @@ pub(crate) fn keyed_step(
                 ArrayKey::String(string) => Value::String(string.clone()),
             };
             let value = crate::fast::duplicate(&value.deref());
-            if let Some(slot) = slots.get_mut(key.index()) {
-                *slot = Some(element_key);
-            }
-            if let Some(slot) = slots.get_mut(destination.index()) {
-                *slot = Some(value);
-            }
+            put(slots, destination, value);
+            put(slots, key, element_key);
         }
         None => *ip = end.index(),
     }
     true
 }
 
-/// Consume a combined entry from a by-value cursor on the ordinary path.
+/// Consume a combined entry from a by-value cursor on the ordinary path:
+/// the value, then the key.
 pub(crate) fn native_step(
     state: &mut frame::IteratorState,
     key: Option<Reg>,
@@ -379,15 +410,26 @@ pub(crate) fn native_step(
         return false;
     };
     state.started = true;
-    if let Some((key, index)) = key.zip(index)
-        && let Some(slot) = slots.get_mut(key.index())
-    {
-        *slot = Some(owned_value(index));
-    }
-    if let Some(slot) = slots.get_mut(destination.index()) {
-        *slot = Some(owned_value(value));
+    put(slots, destination, owned_value(value));
+    if let Some((key, index)) = key.zip(index) {
+        put(slots, key, owned_value(index));
     }
     true
+}
+
+/// Whether `register` holds a PHP reference, which an iteration entry is
+/// written through rather than replacing it.
+#[inline(always)]
+fn holds_reference(slots: &[Option<Value>], register: Reg) -> bool {
+    matches!(slots.get(register.index()), Some(Some(Value::Reference(_))))
+}
+
+/// Store one iteration entry over whatever the register held.
+#[inline(always)]
+fn put(slots: &mut [Option<Value>], register: Reg, value: Value) {
+    if let Some(slot) = slots.get_mut(register.index()) {
+        *slot = Some(value);
+    }
 }
 
 fn owned_value(value: Value) -> Value {

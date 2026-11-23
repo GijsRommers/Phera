@@ -43,6 +43,7 @@ struct PlainProperty {
     object: Rc<Object>,
     class: Rc<Class>,
     key: ArrayKey,
+    slot_hint: Option<usize>,
 }
 
 impl PlainProperty {
@@ -79,7 +80,11 @@ impl Vm {
         };
         let value = property
             .object
-            .with_properties(|properties| properties.get(&property.key).map(|v| v.deref().clone()))
+            .with_properties(|properties| {
+                properties
+                    .get_at(&property.key, property.slot_hint)
+                    .map(|v| v.deref().clone())
+            })
             .flatten();
         let value = match value {
             Some(value) => value,
@@ -122,18 +127,24 @@ impl Vm {
             declared.is_some() || property.class.property_facts().has(PropertyFacts::DYNAMIC);
         let written = property
             .object
-            .update(|properties| match properties.get_mut(&property.key) {
-                Some(Value::Reference(_)) => false,
-                Some(slot) => {
-                    *slot = value.clone();
-                    true
-                }
-                None if creates => {
-                    properties.insert(property.key.clone(), value.clone());
-                    true
-                }
-                None => false,
-            })
+            .update(
+                |properties| match properties.get_mut_at(&property.key, property.slot_hint) {
+                    Some(Value::Reference(_)) => false,
+                    Some(slot) => {
+                        *slot = value.clone();
+                        true
+                    }
+                    None if creates => {
+                        properties.insert_at(
+                            property.key.clone(),
+                            property.slot_hint,
+                            value.clone(),
+                        );
+                        true
+                    }
+                    None => false,
+                },
+            )
             .unwrap_or(false);
         Ok(written.then_some(value))
     }
@@ -163,10 +174,12 @@ impl Vm {
         }
         let removed = property
             .object
-            .update(|properties| match properties.get(&property.key) {
-                Some(Value::Reference(_)) => None,
-                _ => Some(properties.remove(&property.key)),
-            })
+            .update(
+                |properties| match properties.get_at(&property.key, property.slot_hint) {
+                    Some(Value::Reference(_)) => None,
+                    _ => Some(properties.remove(&property.key)),
+                },
+            )
             .flatten();
         // The old value is dropped here, after the borrow ends.
         Ok(removed.is_some())
@@ -272,9 +285,14 @@ impl Vm {
         {
             return Ok(None);
         }
-        let Ok(key) = self.property_key(&object, name) else {
+        let Ok((key, slot_hint)) = self.resolve_property_key(&object, name) else {
             return Ok(None);
         };
-        Ok(Some(PlainProperty { object, class, key }))
+        Ok(Some(PlainProperty {
+            object,
+            class,
+            key,
+            slot_hint,
+        }))
     }
 }

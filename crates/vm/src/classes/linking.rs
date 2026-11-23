@@ -623,6 +623,7 @@ impl Vm {
             serialized_fields: std::cell::OnceCell::new(),
             property_template,
             layout,
+            property_names: super::property_names::PropertyNames::new(&defaults),
             defaults,
             static_properties,
             constants,
