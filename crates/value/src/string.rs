@@ -6,8 +6,9 @@ use crate::intern::InternedStr;
 #[derive(Clone)]
 #[repr(u8)]
 enum Repr {
-    Interned(&'static InternedStr),
-    Shared(Rc<Vec<u8>>),
+    // Leave 0 through 7 free for the enclosing Value's non-string variants.
+    Interned(&'static InternedStr) = 8,
+    Shared(Rc<Vec<u8>>) = 9,
 }
 
 /// A PHP byte string. Literal copies need no reference-count traffic.

@@ -3,9 +3,9 @@
 A PHP string has one variant in each of `Value` and `ArrayKey`.
 Interned bytes retain their process-lifetime pointer and precomputed hash,
 truthiness and numeric-key classification. Shared bytes retain the existing
-copy-on-write vector. The string representation has a byte-sized tag so
-integer and other scalar checks can still read one byte. Compile-time
-assertions cover all four 16-byte layouts.
+copy-on-write vector. The byte-sized string tags follow the eight other
+value tags. This gives the compiler consecutive tags for dispatch on
+non-string values. Compile-time assertions cover all four 16-byte layouts.
 
 | Structure | Was | Is |
 | --- | --- | --- |

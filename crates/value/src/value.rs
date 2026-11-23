@@ -16,7 +16,6 @@ pub enum Value {
     Bool(bool),
     Int(i64),
     Float(f64),
-    String(PhpString),
     /// Copy-on-write through `Rc::make_mut`.
     Array(Rc<PhpArray>),
     /// Handle semantics: clones share the object.
@@ -26,6 +25,8 @@ pub enum Value {
     /// operators see through it. The inner value is never itself a
     /// `Reference` (enforced where references are created).
     Reference(Rc<RefCell<Value>>),
+    // Keep the string last so the other eight variants use consecutive tags.
+    String(PhpString),
 }
 
 /// What [`Value::deref`] hands out: either the value itself, or the guarded
