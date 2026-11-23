@@ -453,7 +453,7 @@ impl Machine<'_> {
             return false;
         };
         if !packed.is_plain_writable() {
-            return false;
+            return self.initialize_readonly(object, (table, packed), scope, value);
         }
         if packed.allows_type(crate::types::own_type(value)) {
             return write_slot_direct(object, packed.slot(), value, table.fills_missing_directly());
@@ -466,6 +466,33 @@ impl Machine<'_> {
             return write_slot_direct(object, packed.slot(), value, table.fills_missing_directly());
         }
         false
+    }
+
+    /// `$this->p = $v` that initializes a readonly property from its own
+    /// class, as a constructor does (`public function __construct(private
+    /// readonly Connection $connection) {}`): the slot must be empty and the
+    /// value fit the declared type as it is. A second write, a write from
+    /// another class, a class with `__set` (an unset property calls it) and a
+    /// value that needs a conversion are the VM's, which raises PHP's error.
+    #[cold]
+    #[inline(never)]
+    fn initialize_readonly(
+        &self,
+        object: &Object,
+        (table, packed): (&crate::classes::property_table::PropertyTable, PackedProp),
+        scope: Option<ClassIndex>,
+        value: &Value,
+    ) -> bool {
+        if !packed.initializes_readonly_from(scope) || !table.fills_missing_directly() {
+            return false;
+        }
+        let fits = packed.allows_type(crate::types::own_type(value))
+            || (packed.has_class_type()
+                && matches!(value, Value::Object(given)
+                if given.class.as_any().downcast_ref::<Class>().is_some_and(|given| {
+                    table.allows_object_class(packed.slot(), given, self.classes)
+                })));
+        fits && fill_empty_slot(object, packed.slot(), value)
     }
 
     /// Write an element of an array held in a declared property (single or chained:
@@ -648,6 +675,21 @@ pub(super) fn write_slot_direct(
                 }
                 None => Some(false),
             }
+        })
+        .flatten()
+        .unwrap_or(false)
+}
+
+/// Puts `value` in slot `slot` if it is empty; `false`, with nothing
+/// changed, if it holds a value or the properties left the class layout.
+fn fill_empty_slot(object: &Object, slot: usize, value: &Value) -> bool {
+    object
+        .update(|properties| {
+            properties.layout()?;
+            if properties.slot(slot).is_some() {
+                return Some(false);
+            }
+            Some(properties.set_slot(slot, value.clone()).is_some())
         })
         .flatten()
         .unwrap_or(false)

@@ -71,6 +71,17 @@ impl PackedProp {
         self.flags & (HAS_HOOKS | IS_READONLY | HAS_SET_VISIBILITY | STATIC_COLLISION) == 0
     }
 
+    /// Whether a write from `scope` may initialize this readonly property
+    /// directly, while its slot is empty: no hooks, no static property of the
+    /// name, and `scope` is the declaring class, which every set visibility
+    /// (`private(set)`, the implicit `protected(set)`) lets write.
+    #[inline(always)]
+    pub(crate) fn initializes_readonly_from(self, scope: Option<ClassIndex>) -> bool {
+        self.flags & (HAS_HOOKS | STATIC_COLLISION | IS_READONLY) == IS_READONLY
+            && self.owner != UNRESOLVED_OWNER
+            && scope.is_some_and(|scope| scope.number() == self.owner)
+    }
+
     #[inline(always)]
     pub(crate) fn allows_type(self, own: TypeMask) -> bool {
         self.flags & UNTYPED != 0 || self.type_mask.intersects(own)
