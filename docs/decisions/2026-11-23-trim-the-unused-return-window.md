@@ -37,3 +37,29 @@ gates determine whether the change pays for itself in the interpreter.
 A per-frame bitmap would add work to register writes. The compiler can
 identify the unused trailing slot once without changing the representation
 of a value or the order in which live values are released.
+
+## Measurements
+
+Normal release binaries on Apple silicon, compared with main at `0c63b85f`.
+The function and method in the four-shape study both use two registers
+where they used to use three. In the generated machine code the common
+return no longer calls the general frame pop. The cold side-table cleanup
+still has a call site.
+
+| Shape | Main instructions per iteration | With this change | Difference |
+| --- | ---: | ---: | ---: |
+| Loop | 145.196 | 145.207 | +0.011 |
+| Function | 679.414 | 651.419 | −27.995 |
+| Method | 857.409 | 829.414 | −27.995 |
+| Property | 549.210 | 549.215 | +0.005 |
+
+| Route | Main, millions of instructions per request | With this change | Difference | Repeat |
+| --- | ---: | ---: | ---: | ---: |
+| Laravel hello | 23.143 | 23.054 | −0.38% | −0.34% |
+| Laravel posts | 104.480 | 104.215 | −0.25% | −0.26% |
+| Symfony database yardstick | 432.71 | 431.71 | −0.23% | |
+
+Laravel used six alternating pairs per gate. The spread warranted a second
+gate on both Laravel routes. Symfony used two pairs with 300 warm-up requests
+per worker. The ten benchmarks used five paired runs each. Every minimum and
+median fell, by 0.55% to 3.33%.
