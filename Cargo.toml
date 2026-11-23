@@ -227,7 +227,7 @@ fluent-uri = "0.4.1"
 url = "2.5"
 foldhash = "0.2"
 hashbrown = { version = "0.17", default-features = false }
-mimalloc = { version = "0.1", default-features = false }
+mimalloc = { version = "0.1", default-features = false, features = ["v2"] }
 # PHP's own regex engine. Pinned because the bundled PCRE2 source version
 # (10.46) decides compile error texts.
 pcre2 = "=0.2.11"
