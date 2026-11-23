@@ -26,8 +26,8 @@ impl Vm {
                 let Some((class, name)) = crate::static_places::static_base(place.base()?) else {
                     return Err(internal_error!("static property base"));
                 };
-                let reference = match self.static_property(class, name) {
-                    Ok(reference) => reference,
+                let storage = match self.static_storage(class, name) {
+                    Ok(storage) => storage,
                     Err(error)
                         if creation == Creation::Existing
                             && missing != Missing::Warn
@@ -37,6 +37,16 @@ impl Vm {
                     }
                     Err(error) => return Err(error),
                 };
+                // A typed static without a value is not null: a read that
+                // warns throws.
+                if missing == Missing::Warn && !storage.value_initialized.get() {
+                    let (class_name, name) = self.static_property_names(class, name)?;
+                    return Err(NativeError::error(format!(
+                        "Typed static property {class_name}::${name} must not be accessed before \
+                         initialization"
+                    )));
+                }
+                let reference = Value::Reference(storage.reference.borrow().clone());
                 self.set(scratch, reference);
                 return Ok(Some(scratch));
             }
@@ -119,49 +129,35 @@ impl Vm {
         let Some(register) = self.base_register(place, Creation::Existing, missing)? else {
             return Ok(Value::Null);
         };
-        self.check_static_read(place, missing)?;
         let mut value = self.read_root(register, missing);
         for step in place.steps()? {
             value = self.ordinary_step(value, step, missing)?;
         }
         Ok(value)
     }
-    /// An uninitialized static slot must remain distinct from a null value.
-    pub(crate) fn check_static_read(
-        &mut self,
-        place: &AccessPath,
-        missing: Missing,
-    ) -> Result<(), NativeError> {
-        if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
-            let (class_name, name) = self.static_property_names(class, name)?;
-            let states = &mut self.class_states;
-            if missing == Missing::Warn
-                && self.classes.get(&class_name).is_some_and(|class| {
-                    class
-                        .static_properties
-                        .iter()
-                        .filter(|property| property.name == name)
-                        .any(|property| {
-                            states
-                                .static_property(property)
-                                .is_some_and(|storage| !storage.value_initialized.get())
-                        })
-                })
-            {
-                return Err(NativeError::error(format!(
-                    "Typed static property {class_name}::${name} must not be accessed before \
-                     initialization"
-                )));
-            }
-        }
-        Ok(())
-    }
 }
 
 pub(crate) fn display_key(key: &ArrayKey) -> String {
     match key {
         ArrayKey::Int(index) => index.to_string(),
-        ArrayKey::String(string) => format!("\"{}\"", string.to_string_lossy()),
+        // PHP formats the key as a C string: it ends at the first NUL, which a
+        // mangled property name (`"\0Class\0name"`) starts with.
+        ArrayKey::Interned(string) => {
+            let bytes = string.as_bytes();
+            let end = bytes
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(bytes.len());
+            format!("\"{}\"", String::from_utf8_lossy(&bytes[..end]))
+        }
+        ArrayKey::String(string) => {
+            let bytes = string.as_bytes();
+            let end = bytes
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(bytes.len());
+            format!("\"{}\"", String::from_utf8_lossy(&bytes[..end]))
+        }
     }
 }
 

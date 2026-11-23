@@ -1,5 +1,6 @@
 //! Monomorphic property sites retain visibility decisions, never property values.
 
+use crate::classes::property_facts::PropertyFacts;
 use crate::{
     AccessPath, Vm,
     property_hook_sites::CachedPropertyHooks,
@@ -57,23 +58,24 @@ impl PropertyEntry {
     /// the object's class and that scope and the value fits the declared
     /// type as it is, as [`Vm::write_property_site`] does; `false`, with
     /// nothing changed, otherwise (a setter, a coercion, a reference, a
-    /// readonly property: the general path).
+    /// readonly property: the general path). An integer written to a
+    /// `float` property is stored as a float, which is also the
+    /// assignment's result: the VM's site write gives that, so the loop
+    /// leaves it to the VM.
     pub(crate) fn write_matching(
         &self,
         object: &Object,
         scope: Option<&Rc<crate::classes::Class>>,
         value: &Value,
     ) -> bool {
-        if !self.matches(object, scope) {
-            return false;
-        }
-        let widened = self.write_rule.widened(value);
-        let value = widened.as_ref().unwrap_or(value);
-        if matches!(value, Value::Reference(_)) || !self.write_rule.accepts(value) {
+        if !self.matches(object, scope)
+            || matches!(value, Value::Reference(_))
+            || !self.write_rule.accepts(value)
+        {
             return false;
         }
         crate::property_storage::write_direct_known(object, self.known(), value, || {
-            !has_magic_properties(object) && object.lazy().is_none()
+            self.write_rule.may_create() && !has_magic_properties(object) && object.lazy().is_none()
         })
     }
 
@@ -99,21 +101,6 @@ impl PropertyEntry {
         crate::property_storage::write_element_known(object, self.known(), keys, value)
     }
 
-    /// `++` or `--` of an integer property, for an increment from `scope`,
-    /// as [`Vm::increment_property_site`] does: the expression's value, or
-    /// `None` with nothing changed.
-    pub(crate) fn increment_matching(
-        &self,
-        object: &Object,
-        scope: Option<&Rc<crate::classes::Class>>,
-        mode: phera_bytecode::IncDec,
-    ) -> Option<Value> {
-        if !self.matches(object, scope) {
-            return None;
-        }
-        self.increment(object, mode)
-    }
-
     /// Whether this entry was made for the object's class and a read or
     /// write from class scope `scope`.
     fn matches(&self, object: &Object, scope: Option<&Rc<crate::classes::Class>>) -> bool {
@@ -128,28 +115,10 @@ impl PropertyEntry {
     /// The integer increment of [`Vm::increment_property_site`], once the
     /// entry is known to fit the object.
     fn increment(&self, object: &Object, mode: phera_bytecode::IncDec) -> Option<Value> {
-        use phera_bytecode::IncDec;
         if !self.write_rule.allows(TypeMask::INT) {
             return None;
         }
-        let Some(Value::Int(old)) = crate::property_storage::read_known(object, self.known())
-        else {
-            return None;
-        };
-        let delta = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
-            1
-        } else {
-            -1
-        };
-        let new = old.checked_add(delta)?;
-        crate::property_storage::write_known(object, self.known(), Value::Int(new));
-        Some(Value::Int(
-            if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
-                old
-            } else {
-                new
-            },
-        ))
+        crate::property_storage::increment_known(object, self.known(), mode)
     }
 
     fn read(&self, object: &Object) -> Option<Value> {
@@ -247,6 +216,27 @@ impl Vm {
                     },
                 }
             }
+            // A name a static property of the class has gets PHP's notice
+            // on the general path.
+            None if class.is_some_and(|class| {
+                class
+                    .static_properties
+                    .iter()
+                    .any(|property| property.name == *name)
+            }) =>
+            {
+                WriteRule::General
+            }
+            None => match class.map(crate::classes::Class::property_facts) {
+                Some(facts)
+                    if !facts.has(PropertyFacts::MAGIC_SET)
+                        && !facts.has(PropertyFacts::HOOKS)
+                        && !facts.has(PropertyFacts::READONLY) =>
+                {
+                    WriteRule::Undeclared(facts.has(PropertyFacts::DYNAMIC))
+                }
+                _ => WriteRule::General,
+            },
             _ => WriteRule::General,
         };
         let entry = Rc::new(PropertyEntry {
@@ -413,7 +403,13 @@ enum WriteRule {
     /// was made: an object fits when its class is one of them or extends or
     /// implements one (all of them, for an intersection).
     TypedClasses(TypeMask, Rc<ClassTargets>),
-    /// Readonly, or not a declared property: always take the full path.
+    /// A property the class does not declare, of a class with no `__set`,
+    /// no hooks and nothing readonly: any value fits. One that does not
+    /// exist yet is made here only when the class allows that without a
+    /// deprecation (`true`: `stdClass`, `#[AllowDynamicProperties]`).
+    Undeclared(bool),
+    /// Readonly, or a property whose writes need more: always take the
+    /// full path.
     General,
 }
 
@@ -428,7 +424,7 @@ impl WriteRule {
     /// Whether a value of this built-in type may be stored as it is.
     fn allows(&self, own_type: TypeMask) -> bool {
         match self {
-            WriteRule::Untyped => true,
+            WriteRule::Untyped | WriteRule::Undeclared(_) => true,
             WriteRule::Typed(declared) | WriteRule::TypedClasses(declared, _) => {
                 declared.intersects(own_type)
             }
@@ -458,6 +454,12 @@ impl WriteRule {
         } else {
             targets.classes.iter().any(derives)
         }
+    }
+
+    /// Whether a write may make the property when the object does not have
+    /// it yet: all but an undeclared property of a class that warns.
+    fn may_create(&self) -> bool {
+        !matches!(self, WriteRule::Undeclared(false))
     }
 
     /// `public float $x` assigned an int stores the float, as PHP does.
@@ -532,7 +534,6 @@ impl Vm {
             return Ok(false);
         };
         // `public float $x` assigned an int stores the float, as PHP does.
-        let original = value;
         let widened = entry.write_rule.widened(value);
         let value = widened.as_ref().unwrap_or(value);
         let accepted = !matches!(value, Value::Reference(_)) && entry.write_rule.accepts(value);
@@ -544,12 +545,18 @@ impl Vm {
             &entry.key,
             entry.slot(),
             value,
-            || !has_magic_properties(&object) && object.lazy().is_none(),
+            || {
+                entry.write_rule.may_create()
+                    && !has_magic_properties(&object)
+                    && object.lazy().is_none()
+            },
         ) {
             return Ok(false);
         }
+        // The assignment's result is the value stored (`1.0` for a `float`
+        // property assigned `1`).
         if let Some((_, result)) = assignment {
-            self.set(result, original.clone());
+            self.set(result, value.clone());
         }
         Ok(true)
     }

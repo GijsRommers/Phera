@@ -73,12 +73,12 @@ type_test!(is_null, Value::Null);
 type_test!(is_bool, Value::Bool(_));
 type_test!(is_int, Value::Int(_));
 type_test!(is_float, Value::Float(_));
-type_test!(is_string, Value::String(_));
+type_test!(is_string, Value::InternedStr(_) | Value::String(_));
 type_test!(is_array, Value::Array(_));
 type_test!(is_object, Value::Object(_));
 type_test!(
     is_scalar,
-    Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_)
+    Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::InternedStr(_) | Value::String(_)
 );
 fn is_iterable(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(args::value(arguments, 0).is_iterable()))
@@ -103,6 +103,7 @@ fn is_resource(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult 
 fn is_numeric_value(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::Bool(match args::value(arguments, 0) {
         Value::Int(_) | Value::Float(_) => true,
+        Value::InternedStr(string) => is_numeric(string.as_bytes()),
         Value::String(string) => is_numeric(string.as_bytes()),
         _ => false,
     }))
@@ -114,6 +115,9 @@ fn intval(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     match value {
         // The base only applies to strings, and base 10 follows the ordinary
         // cast, which also understands "1e3".
+        Value::InternedStr(string) if base != 10 => {
+            Ok(Value::Int(parse_in_base(string.as_bytes(), base)))
+        }
         Value::String(string) if base != 10 => {
             Ok(Value::Int(parse_in_base(string.as_bytes(), base)))
         }

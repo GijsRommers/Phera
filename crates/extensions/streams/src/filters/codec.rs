@@ -114,6 +114,7 @@ pub(super) fn field<'a>(params: &'a Value, key: &str) -> Option<&'a Value> {
 pub(super) fn integer(params: &Value, key: &str) -> Option<i64> {
     match field(params, key)? {
         Value::Int(value) => Some(*value),
+        Value::InternedStr(value) => std::str::from_utf8(value.as_bytes()).ok()?.parse().ok(),
         Value::String(value) => std::str::from_utf8(value.as_bytes()).ok()?.parse().ok(),
         _ => None,
     }
@@ -135,8 +136,9 @@ impl Base64Encode {
             * 4;
         let line_break = if width == 0 {
             Vec::new()
-        } else if let Some(Value::String(value)) = field(params, "line-break-chars") {
-            value.as_bytes()[..value.as_bytes().len().min(MAX_BUCKET)].to_vec()
+        } else if let Some(value) = field(params, "line-break-chars").and_then(Value::as_str_bytes)
+        {
+            value[..value.len().min(MAX_BUCKET)].to_vec()
         } else {
             b"\r\n".to_vec()
         };

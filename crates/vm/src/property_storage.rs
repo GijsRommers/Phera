@@ -7,20 +7,11 @@
 //! property site whose entry has matched the object's class: its slot is
 //! the property's, and it is used as it is.
 
-use crate::classes::Class;
 use phera_value::{ArrayKey, Object, Value};
-
-/// The declared slot of `key` in the object's class: the property's place
-/// in the class's layout (`Class::layout`), which is also its place in
-/// `Class::defaults`.
-fn position(object: &Object, key: &ArrayKey) -> Option<usize> {
-    let class = object.class.as_any().downcast_ref::<Class>()?;
-    class.layout.as_ref()?.slot(key)
-}
 
 /// The value of the property stored under `key`.
 pub(crate) fn read(object: &Object, key: &ArrayKey) -> Option<Value> {
-    read_at(object, key, position(object, key))
+    read_at(object, key, None)
 }
 
 /// The same, with the slot a site or a `ReflectionProperty` remembered.
@@ -32,11 +23,10 @@ pub(crate) fn read_at(object: &Object, key: &ArrayKey, slot: Option<usize>) -> O
 
 /// Move an array out of a property so nested append retains its unique owner.
 pub(crate) fn take(object: &Object, key: &ArrayKey) -> Value {
-    let position = position(object, key);
     object
         .update(|properties| {
             properties
-                .get_mut_at(key, position)
+                .get_mut(key)
                 .map(std::mem::take)
                 .unwrap_or_default()
         })
@@ -45,8 +35,7 @@ pub(crate) fn take(object: &Object, key: &ArrayKey) -> Value {
 
 /// Writes the property stored under `key`, creating it if needed.
 pub(crate) fn write(object: &Object, key: ArrayKey, value: Value) {
-    let slot = position(object, &key);
-    write_at(object, key, slot, value);
+    write_at(object, key, None, value);
 }
 
 /// The same, with a remembered slot.
@@ -153,9 +142,35 @@ pub(crate) fn read_known(object: &Object, property: Known<'_>) -> Option<Value> 
         .flatten()
 }
 
-/// [`write_at`] for a site.
-pub(crate) fn write_known(object: &Object, property: Known<'_>, value: Value) {
-    object.update(|properties| property.set(properties, value));
+/// Increment or decrement an integer property in a single mutable borrow.
+pub(crate) fn increment_known(
+    object: &Object,
+    property: Known<'_>,
+    mode: phera_bytecode::IncDec,
+) -> Option<Value> {
+    use phera_bytecode::IncDec;
+    object
+        .update(|properties| {
+            let Some(Value::Int(slot)) = property.get_mut(properties) else {
+                return None;
+            };
+            let old = *slot;
+            let delta = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
+                1
+            } else {
+                -1
+            };
+            let new = old.checked_add(delta)?;
+            *slot = new;
+            Some(Value::Int(
+                if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
+                    old
+                } else {
+                    new
+                },
+            ))
+        })
+        .flatten()
 }
 
 /// [`write_direct_at`] for a site.

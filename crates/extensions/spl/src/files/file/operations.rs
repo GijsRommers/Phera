@@ -192,6 +192,7 @@ pub(super) fn scan(
         )
         .await?;
         match line {
+            Value::InternedStr(line) => native::scan_line(line.as_bytes(), &arguments),
             Value::String(line) => native::scan_line(line.as_bytes(), &arguments),
             _ => Ok(Value::Null),
         }

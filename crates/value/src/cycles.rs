@@ -98,15 +98,17 @@ impl Node {
     fn visit_children(&self, mut visit: impl FnMut(&Value)) -> bool {
         match self {
             Node::Object(object) => {
-                let Ok(native) = object.native.try_borrow() else {
+                let Ok(native) = object.native.try_borrow_mut() else {
                     return false;
                 };
-                if native.is_some() && !object.class.native_state_is_weak() {
-                    return false;
-                }
                 let Ok(properties) = object.properties.try_borrow() else {
                     return false;
                 };
+                if let Some(native) = native.as_deref()
+                    && !object.class.trace_native_values(native, &mut visit)
+                {
+                    return false;
+                }
                 properties.values().for_each(visit);
                 true
             }

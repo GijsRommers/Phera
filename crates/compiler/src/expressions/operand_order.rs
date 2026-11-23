@@ -8,7 +8,7 @@ use crate::{CompileError, Compiler};
 
 impl Compiler<'_> {
     /// Superglobals, `$this`, and computed accesses still need their own fetch.
-    pub(super) fn compiled_variable(
+    pub(crate) fn compiled_variable(
         &mut self,
         expression: &Expression,
     ) -> Result<Option<Reg>, CompileError> {

@@ -127,7 +127,9 @@ fn accept(
             if frame.container == Container::Object {
                 let key = members.key.take().ok_or(Error::Syntax)?;
                 if !flags.associative
-                    && matches!(&key, ArrayKey::String(name) if name.as_bytes().first() == Some(&0))
+                    && key
+                        .as_str_bytes()
+                        .is_some_and(|name| name.first() == Some(&0))
                 {
                     return Err(Error::Property);
                 }

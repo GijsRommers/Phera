@@ -39,6 +39,9 @@ impl Vm {
         let MethodBody::Native(entry) = method.body else {
             return fallback;
         };
+        if let Some(ready) = entry.ready {
+            return self.call_ready_native_method(call, destination, ready);
+        }
         let NativeMethod::Sync(handler) = entry.handler else {
             return fallback;
         };
@@ -136,6 +139,84 @@ impl Vm {
                     NativeFrame::Method(&method),
                     &arguments[..count],
                 );
+                Err(error)
+            }
+        }
+    }
+
+    /// Finish a typed call such as `new ReflectionClass(Foo::class)`.
+    /// On a miss, leave its prepared call and arguments for the ordinary binder.
+    #[inline(never)]
+    fn call_ready_native_method(
+        &mut self,
+        call: PreparedCall,
+        destination: Reg,
+        ready: phera_extension_api::ReadyMethod,
+    ) -> Result<Option<BatchExit>, NativeError> {
+        let fallback = Ok(Some(BatchExit::NativeCall(destination)));
+        let Some(details) = self.call_stack.top_details() else {
+            return fallback;
+        };
+        let Some(CallTarget::Method { method, context }) =
+            details.callee.as_ref().map(|callee| &callee.target)
+        else {
+            return fallback;
+        };
+        let MethodBody::Native(entry) = method.body else {
+            return fallback;
+        };
+        let count = call.sent as usize;
+        let slots = self.registers.window(call.base(), count);
+        let Some(receiver) = context.receiver.as_ref() else {
+            return fallback;
+        };
+        if !call.is_plain()
+            || details.named.is_some()
+            || !details.extra_named.is_empty()
+            || (self.classes.has_lazy_objects && receiver.lazy().is_some())
+            || count > 2
+            || slots.len() != count
+            || !super::native_signature::accepts_ready(entry.params, slots)
+        {
+            return fallback;
+        }
+        let mut arguments = [const { Value::Null }; 2];
+        let receiver = receiver.clone();
+        let construction = context.invocation == Invocation::Constructor;
+        for (offset, argument) in arguments[..count].iter_mut().enumerate() {
+            *argument = self.registers.take(call.base() + offset);
+        }
+        let Some(result) = ready(self, &receiver, &arguments[..count]) else {
+            for (offset, argument) in arguments.into_iter().take(count).enumerate() {
+                self.registers.put(call.base() + offset, argument);
+            }
+            return fallback;
+        };
+        let (_, details) = self.call_stack.pop_call()?;
+        self.registers.truncate(call.start());
+        match result {
+            Ok(value) => {
+                self.set(
+                    destination,
+                    if construction {
+                        Value::Object(receiver)
+                    } else {
+                        value
+                    },
+                );
+                Ok(None)
+            }
+            Err(error) => {
+                if let Some(CallTarget::Method { method, .. }) = details
+                    .and_then(|details| details.callee)
+                    .map(|callee| callee.target)
+                {
+                    self.record_native_failure(
+                        &error,
+                        NativeFrame::Method(&method),
+                        &arguments[..count],
+                    );
+                }
                 Err(error)
             }
         }

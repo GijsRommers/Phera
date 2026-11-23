@@ -4,7 +4,7 @@
 
 use phera_ext_standard::Standard;
 use phera_extension_api::testing::{TestContext, call};
-use phera_extension_api::{Extension, Registry, Value};
+use phera_extension_api::{ArrayKey, Extension, Registry, Value};
 
 fn registry() -> Registry {
     let mut registry = Registry::new();
@@ -46,10 +46,14 @@ fn microtime_has_both_forms() {
 }
 
 #[test]
-fn hrtime_only_moves_forward() {
+fn hrtime_reads_the_system_monotonic_clock() {
     let Value::Int(first) = invoke("hrtime", vec![Value::Bool(true)]) else {
         panic!("hrtime(true) returns an int");
     };
+    // The clock started when the machine did, not when this process asked:
+    // even a machine that booted a millisecond ago reads higher than this.
+    assert!(first > 1_000_000);
+
     let Value::Int(second) = invoke("hrtime", vec![Value::Bool(true)]) else {
         panic!("hrtime(true) returns an int");
     };
@@ -59,4 +63,18 @@ fn hrtime_only_moves_forward() {
         panic!("hrtime() returns an array");
     };
     assert_eq!(parts.len(), 2);
+    let seconds = parts.get(&ArrayKey::Int(0));
+    let nanoseconds = parts.get(&ArrayKey::Int(1));
+    let (Some(Value::Int(seconds)), Some(Value::Int(nanoseconds))) = (seconds, nanoseconds) else {
+        panic!("hrtime() returns [seconds, nanoseconds] as ints");
+    };
+    assert!(*nanoseconds >= 0 && *nanoseconds < 1_000_000_000);
+    // The two forms read the same clock, a few microseconds apart.
+    let seconds_from_number = first / 1_000_000_000;
+    assert!((*seconds - seconds_from_number).abs() <= 1);
+
+    let Value::Array(again) = invoke("hrtime", vec![Value::Bool(false)]) else {
+        panic!("hrtime(false) returns an array");
+    };
+    assert_eq!(again.len(), 2);
 }

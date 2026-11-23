@@ -13,10 +13,12 @@ mod scenarios {
     mod proxy;
     mod request_headers;
     mod request_parse_body;
+    mod service_warmup;
     mod session;
     mod spl_policy;
     mod static_files;
     mod uploads;
+    mod warmup_requests;
     mod web_log;
 }
 

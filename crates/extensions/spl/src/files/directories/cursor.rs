@@ -103,7 +103,7 @@ pub(super) async fn read_wrapper_entry(
     flags: i64,
     method: &str,
 ) -> Result<Option<PhpString>, NativeError> {
-    while let Value::String(entry) = handle.read(context, method).await? {
+    while let Some(entry) = handle.read(context, method).await?.to_php_string() {
         if flags & SKIP_DOTS == 0 || !dot(entry.as_bytes()) {
             return Ok(Some(entry));
         }

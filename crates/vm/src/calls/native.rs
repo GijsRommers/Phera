@@ -111,9 +111,10 @@ impl Vm {
                     Err(error) => Err(error),
                 }
             }
-            CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Snapshot) => {
-                self.snapshot_intrinsic(destination, arguments).map(Some)
-            }
+            CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Snapshot) => self
+                .snapshot_intrinsic(destination, arguments)
+                .await
+                .map(Some),
             CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Clone)
                 if let Some(destination) = destination =>
             {
@@ -122,12 +123,12 @@ impl Vm {
             }
             CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
                 crate::class_function::ClassFunction::PropertyExists,
-            )) if let (Some(destination), [Value::Object(object), Value::String(name)]) =
+            )) if let (Some(destination), [Value::Object(object), name]) =
                 (destination, arguments.as_slice())
+                && let Some(name) = name.to_php_string()
                 && object.lazy().is_some() =>
             {
-                Box::pin(self.lazy_property_exists(destination, object.clone(), name.clone()))
-                    .await?;
+                Box::pin(self.lazy_property_exists(destination, object.clone(), name)).await?;
                 self.call_stack.recycle_native_arguments(arguments);
                 Ok(None)
             }

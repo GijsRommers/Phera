@@ -52,7 +52,10 @@ pub(crate) fn register(registry: &mut Registry) {
                     "__construct",
                     const { &[CLASS_ARGUMENT, Param::new("property", ParamType::String)] },
                     |c, o, a| construct(c, o, a, MemberKind::Property),
-                ),
+                )
+                .with_ready(|c, o, a| {
+                    crate::member::construct_loaded(c, o, a, MemberKind::Property)
+                }),
                 MethodEntry::public("getName", &[], |_, o, _| {
                     data(o, |m| Value::from(m.name.as_str()))
                 }),
@@ -315,9 +318,9 @@ fn default_value(
 
 fn hook_kind(args: &[Value]) -> Result<PropertyHookKind, NativeError> {
     let name = args::object(args, 0).and_then(|object| object.get(&ArrayKey::str("name")));
-    match name {
-        Some(Value::String(name)) if name.as_bytes() == b"Get" => Ok(PropertyHookKind::Get),
-        Some(Value::String(name)) if name.as_bytes() == b"Set" => Ok(PropertyHookKind::Set),
+    match name.as_ref().and_then(Value::as_str_bytes) {
+        Some(b"Get") => Ok(PropertyHookKind::Get),
+        Some(b"Set") => Ok(PropertyHookKind::Set),
         _ => Err(NativeError::type_error("Expected a PropertyHookType case")),
     }
 }

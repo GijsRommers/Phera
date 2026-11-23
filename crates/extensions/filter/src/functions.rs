@@ -5,10 +5,12 @@
 //! // ['id' => 3, 'name' => null]
 //! ```
 
+use std::rc::Rc;
+
 use phera_extension_api::value::to_int;
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
-    PhpArray, Registry, Value, args, prepare_call,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
+    Registry, Value, args, prepare_call,
 };
 
 use crate::apply;
@@ -76,18 +78,28 @@ fn array(context: &mut dyn Context, mut arguments: Vec<Value>) -> LocalFuture<'_
         let Value::Array(input) = arguments.remove(0) else {
             unreachable!("signature requires an array")
         };
-        match definition {
-            Value::Array(definition) => by_key(context, &input, &definition, add_empty).await,
-            Value::Int(id) if !known(id) => {
-                warn(context, Call::Array, id);
-                Ok(Value::Bool(false))
-            }
-            _ => {
-                let options = Options::new(context, Call::Array, -1, REQUIRE_ARRAY, &definition)?;
-                apply::value(context, Value::Array(input), &options).await
-            }
-        }
+        apply_array(context, input, definition, add_empty, Call::Array).await
     })
+}
+
+pub(super) async fn apply_array(
+    context: &mut dyn Context,
+    input: Rc<PhpArray>,
+    definition: Value,
+    add_empty: bool,
+    call: Call,
+) -> NativeResult {
+    match definition {
+        Value::Array(definition) => by_key(context, &input, &definition, add_empty, call).await,
+        Value::Int(id) if !known(id) => {
+            warn(context, call, id);
+            Ok(Value::Bool(false))
+        }
+        _ => {
+            let options = Options::new(context, call, -1, REQUIRE_ARRAY, &definition)?;
+            apply::value(context, Value::Array(input), &options).await
+        }
+    }
 }
 
 async fn by_key(
@@ -95,16 +107,18 @@ async fn by_key(
     input: &PhpArray,
     definition: &PhpArray,
     add_empty: bool,
+    call: Call,
 ) -> NativeResult {
     let mut result = PhpArray::new();
     for (key, filter) in definition.iter() {
-        let ArrayKey::String(name) = &key else {
-            return Err(NativeError::type_error(
-                "filter_var_array(): Argument #2 ($options) must contain only string keys",
-            ));
+        let Some(name) = key.as_str_bytes() else {
+            return Err(NativeError::type_error(format!(
+                "{}(): Argument #2 ($options) must contain only string keys",
+                call.name()
+            )));
         };
         if name.is_empty() {
-            return Err(Call::Array.option_error("cannot contain empty keys"));
+            return Err(call.option_error("cannot contain empty keys"));
         }
         if let Some(source) = input.get(&key) {
             let filter = if filter.is_array() && !filter.is_reference() {
@@ -112,12 +126,12 @@ async fn by_key(
             } else {
                 let id = to_int(filter, context.diagnostics())?;
                 if !known(id) {
-                    warn(context, Call::Array, id);
+                    warn(context, call, id);
                 }
                 // PHP converts a non-array entry a second time when applying it.
                 Value::Int(to_int(filter, context.diagnostics())?)
             };
-            let options = Options::new(context, Call::Array, -1, REQUIRE_SCALAR, &filter)?;
+            let options = Options::new(context, call, -1, REQUIRE_SCALAR, &filter)?;
             let source = source.deref().clone();
             let filtered = apply::value(context, source, &options).await?;
             result.insert(key, filtered);
@@ -129,10 +143,10 @@ async fn by_key(
 }
 
 /// PHP accepts gaps in the numeric filter ID ranges and treats them as raw.
-fn known(id: i64) -> bool {
+pub(super) fn known(id: i64) -> bool {
     matches!(id, 256..=277 | 512..=SANITIZE_ADD_SLASHES | CALLBACK)
 }
 
-fn warn(context: &mut dyn Context, call: Call, id: i64) {
+pub(super) fn warn(context: &mut dyn Context, call: Call, id: i64) {
     context.warning(format!("{}(): Unknown filter with ID {id}", call.name()));
 }

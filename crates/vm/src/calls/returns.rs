@@ -84,20 +84,40 @@ impl Vm {
         {
             return Ok(float);
         }
-        let typed_return = self.current().and_then(|frame| {
+        let mut typed_return = self.unaccepted_return(&value);
+        // A fork's file has no class checks until one is asked for: make
+        // them from the snapshot's and ask again, so that this value and
+        // the next of its class are accepted by the remembered answer.
+        if let Some(site) = &typed_return
+            && !self.code.cache(site.function).class_types.is_made()
+        {
+            self.code.make_class_types(site.function);
+            typed_return = self.unaccepted_return(&value);
+        }
+        match typed_return {
+            Some(site) => self.coerce_return_value(value, site),
+            None => Ok(value),
+        }
+    }
+
+    /// The return type of the running function, unless `value` satisfies it
+    /// as it is: by its built-in type, or by a class the file's class checks
+    /// remember.
+    fn unaccepted_return(&self, value: &Value) -> Option<ReturnTypeSite> {
+        self.current().and_then(|frame| {
             let declaration = frame.function().return_type?;
             if frame
                 .unit()
                 .types
                 .get(declaration.index())
-                .is_some_and(|declared| crate::types::accepts_as_is(&value, declared))
+                .is_some_and(|declared| crate::types::accepts_as_is(value, declared))
             {
                 return None;
             }
             // A cached class identity can accept an object without cloning its declaration.
             // References still need the ordinary cell-write and borrow checks below.
-            if matches!(&value, Value::Object(_))
-                && self.matches_cached_class_type(&value, declaration, frame.unit(), frame.cache())
+            if matches!(value, Value::Object(_))
+                && self.matches_cached_class_type(value, declaration, frame.unit(), frame.cache())
             {
                 return None;
             }
@@ -106,11 +126,7 @@ impl Vm {
                 function: frame.frame.function,
                 declaration,
             })
-        });
-        match typed_return {
-            Some(site) => self.coerce_return_value(value, site),
-            None => Ok(value),
-        }
+        })
     }
 
     /// Slow coercion may warn, throw or update a returned PHP reference cell.
@@ -224,7 +240,7 @@ impl Vm {
         } else {
             None
         };
-        self.call_stack.pop();
+        self.call_stack.pop_for_return();
         self.call_stack.abandon_calls_from(frame.start());
         self.registers.release_frame(frame.start(), frame.base());
         if frame.returns_to_native_loop() {

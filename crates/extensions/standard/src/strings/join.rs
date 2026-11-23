@@ -1,7 +1,5 @@
 //! Joining arrays. `implode("-", ["a", "b"])` is `"a-b"`.
 
-use std::io::Write;
-
 use phera_extension_api::{
     Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
     Registry, Value, args, value::to_php_string,
@@ -24,7 +22,10 @@ fn can_join_sync(slots: &[Option<Value>]) -> bool {
     let array = match slots {
         [Some(Value::Array(array))]
         | [Some(Value::Array(array)), Some(Value::Null)]
-        | [Some(Value::String(_)), Some(Value::Array(array))] => array,
+        | [
+            Some(Value::InternedStr(_) | Value::String(_)),
+            Some(Value::Array(array)),
+        ] => array,
         _ => return false,
     };
     array
@@ -99,7 +100,27 @@ fn join_sync(context: &mut dyn Context, arguments: &[Value], function: &str) -> 
     {
         return Ok(Value::String(to_php_string(value, context.diagnostics())?));
     }
-    let mut result = joined_buffer(separator, array)?;
+    // Strings, integers, booleans and null have a length that is known
+    // before any is written: the result is made at its size, once.
+    if let Some(length) = joined_length(separator, array) {
+        let mut result = buffer(length)?;
+        for (index, value) in array.values().enumerate() {
+            if index > 0 {
+                result.extend_from_slice(separator);
+            }
+            match value {
+                Value::InternedStr(string) => result.extend_from_slice(string.as_bytes()),
+                Value::String(string) => result.extend_from_slice(string.as_bytes()),
+                Value::Int(number) => {
+                    phera_extension_api::value::push_integer(&mut result, *number)
+                }
+                Value::Bool(true) => result.push(b'1'),
+                _ => {}
+            }
+        }
+        return Ok(Value::from(result));
+    }
+    let mut result = buffer(0)?;
     for (index, value) in array.values().enumerate() {
         append_scalar(context, &mut result, separator_at(separator, index), value)?;
     }
@@ -128,14 +149,16 @@ fn separator_at(separator: &[u8], index: usize) -> &[u8] {
     if index == 0 { &[] } else { separator }
 }
 
-/// Count the bytes when every value has a known length. Other conversions
-/// build the result in order, so their warnings and errors keep their place.
-fn joined_buffer(separator: &[u8], array: &PhpArray) -> Result<Vec<u8>, NativeError> {
+/// The bytes the result takes when every value has a known length. Other
+/// conversions build the result in order, so their warnings and errors keep
+/// their place.
+fn joined_length(separator: &[u8], array: &PhpArray) -> Option<usize> {
     let separators = separator
         .len()
         .saturating_mul(array.len().saturating_sub(1));
-    let length = array.values().try_fold(separators, |length, value| {
+    array.values().try_fold(separators, |length, value| {
         let bytes = match value {
+            Value::InternedStr(string) => string.len(),
             Value::String(string) => string.len(),
             Value::Int(number) => integer_length(*number),
             Value::Bool(boolean) => usize::from(*boolean),
@@ -143,8 +166,7 @@ fn joined_buffer(separator: &[u8], array: &PhpArray) -> Result<Vec<u8>, NativeEr
             _ => return None,
         };
         Some(length.saturating_add(bytes))
-    });
-    buffer(length.unwrap_or_default())
+    })
 }
 
 fn integer_length(number: i64) -> usize {
@@ -158,6 +180,7 @@ fn append_scalar(
     value: &Value,
 ) -> Result<(), NativeError> {
     match value {
+        Value::InternedStr(string) => append_bytes(result, separator, string.as_bytes()),
         Value::String(string) => append_bytes(result, separator, string.as_bytes()),
         Value::Int(number) => {
             reserve(
@@ -165,7 +188,8 @@ fn append_scalar(
                 separator.len().saturating_add(integer_length(*number)),
             )?;
             result.extend_from_slice(separator);
-            write!(result, "{number}").map_err(|_| NativeError::error("Could not write integer"))
+            phera_extension_api::value::push_integer(result, *number);
+            Ok(())
         }
         Value::Bool(true) => append_bytes(result, separator, b"1"),
         Value::Bool(false) | Value::Null => append_bytes(result, separator, b""),

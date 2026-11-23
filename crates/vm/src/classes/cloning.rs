@@ -310,6 +310,7 @@ impl CloneUpdates {
         }
         let name = match name {
             ArrayKey::Int(index) => index.to_string(),
+            ArrayKey::Interned(name) => name.to_string_lossy(),
             ArrayKey::String(name) => name.to_string_lossy(),
         };
         if name.starts_with('\0') {

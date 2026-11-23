@@ -31,6 +31,7 @@ pub enum ReflectedClassKind {
 pub struct ClassInfo {
     pub id: u32,
     pub name: String,
+    pub name_value: Value,
     pub kind: ReflectedClassKind,
     pub source: Option<SourceInfo>,
     pub extension: Option<String>,
@@ -117,15 +118,37 @@ pub struct MemberInfo {
 pub struct SlotAccess {
     pub key: crate::ArrayKey,
     pub slot: usize,
+    /// The layout of the class the reflector was made for. An object with
+    /// this layout is of that class, which has the property; an object of
+    /// another layout is of the property's class only if it is an instance
+    /// of it, which a layout holding the key in the slot does not show (a
+    /// parent of a class that redeclares the property, or an unrelated
+    /// class with a property of the same name).
+    pub layout: Rc<phera_value::PropertyLayout>,
     /// `None` when a write must take the general path: a readonly
     /// property, or a type that names a class.
     pub writes: Option<phera_bytecode::TypeMask>,
 }
 
 impl SlotAccess {
+    /// Whether an object with these `properties` is of the class the
+    /// reflector was made for.
+    #[inline]
+    pub fn is_own_layout(&self, properties: &crate::value::Properties) -> bool {
+        properties
+            .layout()
+            .is_some_and(|layout| Rc::ptr_eq(layout, &self.layout))
+    }
+
     /// The property's value in `properties`, or `None` when it has none:
-    /// `None` outside when the properties do not keep it in this slot.
+    /// `None` outside when the properties do not keep it in this slot. An
+    /// object of the reflector's own layout keeps it there by construction;
+    /// for any other the key in the slot is compared.
+    #[inline]
     pub fn read<'a>(&self, properties: &'a crate::value::Properties) -> Option<Option<&'a Value>> {
+        if self.is_own_layout(properties) {
+            return Some(properties.slot(self.slot));
+        }
         (properties.slot_for(&self.key, Some(self.slot)) == Some(self.slot))
             .then(|| properties.slot(self.slot))
     }
@@ -143,7 +166,7 @@ impl SlotAccess {
             Value::Bool(false) => TypeMask::FALSE,
             Value::Int(_) => TypeMask::INT,
             Value::Float(_) => TypeMask::FLOAT,
-            Value::String(_) => TypeMask::STRING,
+            Value::InternedStr(_) | Value::String(_) => TypeMask::STRING,
             Value::Array(_) => TypeMask::ARRAY,
             Value::Object(_) => TypeMask::OBJECT,
             _ => return false,
@@ -263,11 +286,17 @@ pub trait ReflectionContext {
         value: Value,
     ) -> NativeResult;
 
+    /// Finds a loaded class, as in `new ReflectionClass(Service::class)`.
+    fn reflect_loaded_class(&mut self, name: &str) -> Option<Rc<ClassInfo>>;
+
+    /// Finds the class carried by an object, as in `new ReflectionClass($object)`.
+    fn reflect_object_class(&mut self, object: &Object) -> Option<Rc<ClassInfo>>;
+
     /// Loads a class by name, with PHP autoloading.
-    fn reflect_class(
-        &mut self,
-        name: &str,
-    ) -> LocalFuture<'_, Result<Rc<ClassInfo>, crate::NativeError>>;
+    fn reflect_class<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<'a, Result<Rc<ClassInfo>, crate::NativeError>>;
 
     /// Lists visible reflection members in declaration order, including non-public members.
     fn reflect_members(&mut self, class: ClassSelector<'_>, kind: MemberKind) -> Members;
@@ -408,6 +437,11 @@ pub enum FunctionTarget {
     Named(String),
     Method {
         class: String,
+        name: String,
+    },
+    /// A method selected by a constructor after the class was linked.
+    LinkedMethod {
+        class: u32,
         name: String,
     },
     /// A method of a class's member list, by its place (`getMethods()`).

@@ -1,14 +1,13 @@
 file golden.php
   const#0 = Array([])
 
-function {main} (6 registers, dynamic scope)
+function {main} (5 registers, dynamic scope)
   r0 = $grid
   path#0 = Register(r0) [Index(r2), Index(r3)]
-  0000  line 1    LoadConst { dst: r1, constant: const#0 }
-  0001  line 1    Assign { local: r0, src: r1 }
-  0002  line 1    LoadInt { dst: r2, value: 1 }
-  0003  line 1    LoadInt { dst: r3, value: 2 }
-  0004  line 1    LoadInt { dst: r4, value: 3 }
-  0005  line 1    AssignPath { path: path#0, src: r4 }
-  0006  line 1    LoadInt { dst: r2, value: 1 }
-  0007  line 1    Return { src: r2 }
+  0000  line 1    AssignConst { local: r0, constant: const#0 }
+  0001  line 1    LoadInt { dst: r2, value: 1 }
+  0002  line 1    LoadInt { dst: r3, value: 2 }
+  0003  line 1    LoadInt { dst: r4, value: 3 }
+  0004  line 1    AssignPath { path: path#0, src: r4 }
+  0005  line 1    LoadInt { dst: r2, value: 1 }
+  0006  line 1    Return { src: r2 }

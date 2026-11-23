@@ -165,10 +165,12 @@ pub(crate) fn register(registry: &mut Registry) {
 fn wakeup(_: &mut dyn Context, this: Option<&Rc<Object>>, _: &[Value]) -> NativeResult {
     if let Some(object) = this {
         let message = Object::protected_key("message");
-        if object
-            .get(&message)
-            .is_some_and(|value| !matches!(value, Value::String(_) | Value::Null))
-        {
+        if object.get(&message).is_some_and(|value| {
+            !matches!(
+                value,
+                Value::InternedStr(_) | Value::String(_) | Value::Null
+            )
+        }) {
             object.remove(&message);
         }
         let code = code_key(object);
@@ -229,10 +231,7 @@ fn construct(
         return Ok(Value::Null);
     };
     if let Some(message) = args::string(arguments, 0) {
-        object.set(
-            Object::protected_key("message"),
-            Value::String(message.clone()),
-        );
+        object.set(Object::protected_key("message"), message.to_value());
     }
     if let Some(code) = args::int(arguments, 1) {
         object.set(code_key(object), Value::Int(code));
@@ -470,8 +469,9 @@ fn render_argument(value: &Value) -> Vec<u8> {
         Value::Bool(flag) => flag.to_string().into_bytes(),
         Value::Int(int) => int.to_string().into_bytes(),
         Value::Float(float) => float_to_string_precision14(*float).into_bytes(),
-        Value::String(string) => {
-            let bytes = string.as_bytes();
+        Value::InternedStr(_) | Value::String(_) => {
+            let bytes = value.deref();
+            let bytes = bytes.as_str_bytes().expect("checked string");
             let mut text = vec![b'\''];
             text.extend_from_slice(bytes.get(..SHOWN).unwrap_or(bytes));
             text.extend_from_slice(if bytes.len() > SHOWN { b"...'" } else { b"'" });

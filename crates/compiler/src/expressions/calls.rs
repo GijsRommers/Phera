@@ -45,6 +45,12 @@ impl Compiler<'_> {
         {
             return Ok(result);
         }
+        if let Some(fallback) = &fallback
+            && let Some(result) =
+                self.compile_namespaced_builtin(&resolved, fallback, arguments, line)?
+        {
+            return Ok(result);
+        }
         let assertion = fallback
             .as_deref()
             .unwrap_or(&resolved)
@@ -98,6 +104,7 @@ impl Compiler<'_> {
                         source: crate::ir::ArgumentSource::Value(description),
                         name,
                         spread: false,
+                        of_call: false,
                     },
                 },
                 line,
@@ -231,6 +238,7 @@ impl Compiler<'_> {
                     source,
                     name: argument.name.as_ref().map(|name| name.name.clone()),
                     spread: argument.spread,
+                    of_call: self.is_call_result(&argument.value),
                 },
             },
             line,

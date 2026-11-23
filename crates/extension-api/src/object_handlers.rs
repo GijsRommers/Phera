@@ -185,6 +185,10 @@ pub type NativeForkHook = fn(
     &mut phera_value::Fork<'_>,
 ) -> Result<Box<dyn std::any::Any>, String>;
 
+/// Enumerates the strong PHP handles physically owned by a native payload.
+/// A payload that cannot be inspected returns false before calling the visitor.
+pub type NativeCycleTrace = fn(&dyn std::any::Any, &mut dyn FnMut(&Value)) -> bool;
+
 #[derive(Clone, Copy, Default)]
 pub struct ClassHooks {
     /// The error for script allocation of a factory-only native object.
@@ -208,8 +212,8 @@ pub struct ClassHooks {
     pub property_access: Option<&'static crate::NativePropertyAccess>,
     /// The native class's declared instance properties have no backing slots.
     pub virtual_properties: bool,
-    /// Native state contains no strong PHP handles for the cycle collector to walk.
-    pub native_state_is_weak: bool,
+    /// Edges in native state. An absent hook leaves the payload opaque.
+    pub trace_native: Option<NativeCycleTrace>,
     pub iterator: Option<IteratorFactory>,
     /// Cursor creation for foreach by reference. Its current values must be reference cells.
     pub iterator_by_reference: Option<IteratorFactory>,
@@ -239,7 +243,7 @@ impl ClassHooks {
         properties: None,
         property_access: None,
         virtual_properties: false,
-        native_state_is_weak: false,
+        trace_native: None,
         iterator: None,
         iterator_by_reference: None,
         iterator_fallback_if_overridden: &[],

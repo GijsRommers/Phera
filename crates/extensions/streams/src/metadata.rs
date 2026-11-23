@@ -49,6 +49,7 @@ pub fn register(registry: &mut Registry) {
         FunctionEntry::sync("clearstatcache", CACHE, crate::user_stat::clear),
         FunctionEntry::sync("realpath", PATH, realpath),
         FunctionEntry::sync("disk_free_space", DIRECTORY, disk_free_space),
+        FunctionEntry::sync("diskfreespace", DIRECTORY, diskfreespace),
         FunctionEntry::sync("disk_total_space", DIRECTORY, disk_total_space),
     ] {
         registry.function(entry);
@@ -423,6 +424,9 @@ pub(crate) fn real_path(context: &mut dyn Context, name: &[u8]) -> Value {
 
 fn disk_free_space(context: &mut dyn Context, args: &[Value]) -> NativeResult {
     disk_space(context, args, "disk_free_space", |stats| stats.f_bavail)
+}
+fn diskfreespace(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+    disk_space(context, args, "diskfreespace", |stats| stats.f_bavail)
 }
 fn disk_total_space(context: &mut dyn Context, args: &[Value]) -> NativeResult {
     disk_space(context, args, "disk_total_space", |stats| stats.f_blocks)

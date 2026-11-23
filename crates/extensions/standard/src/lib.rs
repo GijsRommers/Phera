@@ -7,6 +7,10 @@ mod arrays;
 mod constants;
 pub mod csv;
 pub mod environment;
+mod forward_call;
+mod getopt;
+pub use getopt::set_arguments as set_cli_arguments;
+mod information;
 pub mod ini;
 mod last_error;
 mod locale;
@@ -20,6 +24,7 @@ mod process_info;
 mod sleep;
 mod strings;
 mod time;
+mod unsupported;
 mod version_compare;
 
 pub use arrays::zend_sort::order as zend_sort_order;
@@ -55,16 +60,20 @@ impl Extension for Standard {
         constants::register(registry);
         csv::register(registry);
         ini::register(registry);
+        information::register(registry);
         for entry in natural::FUNCTIONS.iter().chain(time::FUNCTIONS) {
             registry.function(*entry);
         }
         environment::register(registry);
+        getopt::register(registry);
+        forward_call::register(registry);
         process::register(registry);
         last_error::register(registry);
         locale::register(registry);
         process_info::register(registry);
         sleep::register(registry);
         network::register(registry);
+        unsupported::register(registry);
     }
 }
 
