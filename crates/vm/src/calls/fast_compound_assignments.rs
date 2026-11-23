@@ -170,7 +170,9 @@ impl Machine<'_> {
         if !packed.allows_type(crate::types::own_type(&stored)) {
             return None;
         }
-        write_slot_direct(object, slot, &stored, table.fills_missing_directly()).then_some(result)
+        let mut stored = Some(stored);
+        write_slot_direct(object, slot, &mut stored, table.fills_missing_directly())
+            .then_some(result)
     }
 
     /// `$local[$key]... op= $value`: the expression's value.
