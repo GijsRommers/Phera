@@ -125,3 +125,33 @@ fn deleting_the_last_slot_keeps_its_position_until_append() {
     assert_eq!(array.entry_at(3), Some((k(3), &vi(3))));
     assert_eq!(array.next_position(1), Some(3));
 }
+
+/// Entries pushed in order, with their keys distinct, become the array as
+/// they are: a map in their order, a list when the keys are 0, 1, 2, and the
+/// next free key after the largest integer key.
+#[test]
+fn distinct_entries_build_the_array_as_pushed() {
+    let map = PhpArray::build_distinct(3, |entries| {
+        entries.push(ks("name"), vi(1));
+        entries.push(k(7), vi(2));
+        entries.push(ks("price"), vi(3));
+    });
+    assert_eq!(map.len(), 3);
+    assert_eq!(
+        map.keys().collect::<Vec<_>>(),
+        vec![ks("name"), k(7), ks("price")]
+    );
+    assert_eq!(map.get(&ks("price")), Some(&vi(3)));
+    assert_eq!(map.next_free_index(), Some(8));
+    assert!(!map.is_list());
+
+    let list = PhpArray::build_distinct(0, |entries| {
+        entries.push(k(0), vi(5));
+        entries.push(k(1), vi(6));
+    });
+    assert_eq!(lookup_name(&list), "packed");
+    assert!(list.is_list());
+    assert_eq!(list.next_free_index(), Some(2));
+
+    assert!(PhpArray::build_distinct(4, |_| {}).is_empty());
+}

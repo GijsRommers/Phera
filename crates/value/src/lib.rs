@@ -18,7 +18,7 @@ mod string;
 mod value;
 mod weak_object;
 
-pub use array::{ArrayKey, PhpArray};
+pub use array::{ArrayKey, DistinctEntries, PhpArray};
 pub use convert::{
     NumVal, NumericParse, cast_to_bool, is_numeric, parse_numeric, strtod_prefix, to_array,
     to_bool, to_float, to_int, to_php_string, to_string_value,
