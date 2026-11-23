@@ -15,6 +15,14 @@ use Illuminate\Support\Str;
 // Eloquent, with URLs that must carry the request's own host.
 Route::get('/posts', fn () => Post::query()->orderBy('id')->paginate(2));
 
+// How many statements a page of posts sends, counted by the framework.
+Route::get('/post-statements', function () {
+    DB::enableQueryLog();
+    Post::query()->orderBy('id')->paginate(2);
+
+    return ['statements' => count(DB::getQueryLog())];
+});
+
 // Everything a request could inherit from the worker's boot. Values that
 // differ between any two requests are reported as facts about them, so the
 // whole response can be compared with PHP's.

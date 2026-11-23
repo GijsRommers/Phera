@@ -9,3 +9,8 @@ $insert = $database->prepare('insert into posts (title, published, created_at, u
 for ($number = 1; $number <= 5; $number++) {
     $insert->execute(["Post $number", $number % 2, '2026-01-01 10:00:00', '2026-01-01 10:00:00']);
 }
+// Two users, for the tests that sign in. Nobody ever types the password.
+$insert = $database->prepare('insert into users (id, name, email, password) values (?, ?, ?, ?)');
+$password = password_hash('secret', PASSWORD_BCRYPT, ['cost' => 4]);
+$insert->execute([1, 'Ada', 'ada@example.test', $password]);
+$insert->execute([2, 'Bob', 'bob@example.test', $password]);

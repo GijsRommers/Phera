@@ -36,6 +36,11 @@ pub const LARAVEL_ENTRY: &str = include_str!("laravel.php");
 /// the snapshot right after the framework has booted.
 pub const SERVICE_WARMUP_VARIABLE: &[u8] = b"PHERA_SERVICE_WARMUP";
 
+/// The environment variable in which both adapters find the paths to handle
+/// as requests before the snapshot, separated by white space
+/// (`phera serve --warmup`, or `warmup` under `[server]` in `phera.toml`).
+pub const WARMUP_REQUESTS_VARIABLE: &[u8] = b"PHERA_WARMUP";
+
 /// The class `APP_RUNTIME` names for an application using symfony/runtime.
 pub const SYMFONY_RUNTIME_CLASS: &str = "Phera\\Symfony\\Runtime";
 

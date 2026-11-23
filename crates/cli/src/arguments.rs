@@ -20,6 +20,9 @@ Usage:
     --no-service-warmup                   Laravel, Symfony: do not resolve the
                                           framework's services before the
                                           snapshot
+    --warmup PATH                         Laravel, Symfony: handle a GET of
+                                          PATH before the snapshot (may be
+                                          repeated; see the README)
     --no-process                          forbid starting external programs
     --request-timeout SECONDS             stop a request after this long
                                           (default 60; 0: never)
@@ -103,6 +106,9 @@ pub(crate) struct ServeOptions {
     /// Let the framework adapters resolve services before the snapshot; on
     /// unless `--no-service-warmup` is given.
     pub service_warmup: bool,
+    /// `--warmup`: the paths the framework adapters handle as requests
+    /// before the snapshot, in the order given.
+    pub warmup: Vec<String>,
     /// `--compress`: gzip or brotli for clients that accept it. Off unless
     /// given, since the proxy in front usually compresses.
     pub compress: bool,
@@ -298,6 +304,7 @@ fn parse_serve(
         preload: false,
         class_warmup: true,
         service_warmup: true,
+        warmup: Vec::new(),
         compress: false,
         no_process: false,
         request_timeout: None,
@@ -332,6 +339,13 @@ fn parse_serve(
             "--preload" => options.preload = true,
             "--no-class-warmup" => options.class_warmup = false,
             "--no-service-warmup" => options.service_warmup = false,
+            "--warmup" => {
+                let path = arguments
+                    .next()
+                    .filter(|path| is_warmup_path(path))
+                    .ok_or("--warmup needs a path like /api/posts?page=1, without spaces.")?;
+                options.warmup.push(path);
+            }
             "--dev" => options.dev = true,
             "--no-process" => options.no_process = true,
             "--trusted-proxies" => {
@@ -374,4 +388,10 @@ fn parse_serve(
         }
     }
     Ok(options)
+}
+
+/// Whether `path` can be a warm-up request: a path on this site, in one
+/// piece (the adapters receive the paths separated by white space).
+pub(crate) fn is_warmup_path(path: &str) -> bool {
+    path.starts_with('/') && !path.contains(char::is_whitespace)
 }

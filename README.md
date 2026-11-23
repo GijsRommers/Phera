@@ -460,6 +460,49 @@ the request; only the code that registers it runs once.
 `phera serve --no-service-warmup public` (or `PHERA_SERVICE_WARMUP=0` in the
 environment) turns the warm-up off and models boot per request again.
 
+### Warm-up requests
+
+Most of what a route builds the first time it is used is the application's
+own: its services, listeners, compiled routes, loaded classes. Phera cannot
+know whether running one of your routes without a visitor is safe, so this
+part is yours to declare. Name the paths, and each worker handles them as
+requests before it takes the snapshot:
+
+```toml
+# phera.toml
+[server]
+warmup = ["/api/posts", "/"]
+```
+
+or `phera serve --warmup /api/posts --warmup / public` (the option wins over
+the file; both become the environment variable `PHERA_WARMUP`, which you can
+also set yourself). On the test applications a Laravel Eloquent route went
+from WARMUP_README.
+
+The contract:
+
+- A warm-up request is an anonymous `GET`: no cookie, no credentials, the
+  host of `APP_URL` (Laravel) or `localhost` (Symfony). **It must change
+  nothing**: no row, no file, no message sent.
+- It runs once per worker boot, in every worker. A worker boots at start,
+  again when a PHP file changed, and up to three more times while it learns
+  which classes requests load. A route that writes a file the application
+  includes makes the worker boot again.
+- A path that throws, redirects or answers with an error is logged once per
+  boot, and the worker starts anyway. A route behind a login is such a path:
+  the warm-up is not signed in.
+- After each warm-up request Phera resets the framework as it is reset
+  between two requests of a long-running worker: for Laravel what Octane
+  resets (session, signed-in user, queued cookies, locale, configuration,
+  log context, scoped instances and more), for Symfony the kernel's own
+  service reset at the start of every request.
+- **Whatever a warm-up request leaves in objects that outlive a request,
+  and that those resets do not know, is what every request starts from.** A
+  singleton of yours that remembers the request it was built for, a Symfony
+  listener whose constructor reads the current request, a static property:
+  each keeps the warm-up's value. If your application runs correctly under
+  Laravel Octane or a long-running Symfony runtime, it does here.
+
 The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
 are empty and `$_SERVER` holds the environment and the script's paths. Each
 request gets its own copy of every object, static property and global, so

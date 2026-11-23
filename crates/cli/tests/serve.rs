@@ -18,6 +18,7 @@ mod scenarios {
     mod spl_policy;
     mod static_files;
     mod uploads;
+    mod warmup_requests;
     mod web_log;
 }
 

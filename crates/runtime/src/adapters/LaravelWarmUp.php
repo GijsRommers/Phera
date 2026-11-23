@@ -18,14 +18,24 @@
  * No request exists while this runs, and nothing of it may be visible to
  * the requests that follow: no user, no session, no open connection.
  * `phera serve --no-service-warmup` turns all of it off.
+ *
+ * An application can go further and name requests to handle before the
+ * snapshot (`phera serve --warmup /some/path`): see handleRequests().
  */
 
 namespace Phera\Laravel;
 
+use Illuminate\Contracts\Http\Kernel as HttpKernel;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Vite;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Route;
+use Illuminate\Support\Facades\Facade;
+use Illuminate\Support\Once;
+use Illuminate\Support\Str;
+use Monolog\ResettableInterface;
 
 final class WarmUp
 {
@@ -68,6 +78,11 @@ final class WarmUp
         if (! $hadSessionStore && $app->resolved('session')) {
             $app->make('session')->forgetDrivers();
             $app->forgetInstance('session.store');
+        }
+
+        $paths = preg_split('/\s+/', $_SERVER['PHERA_WARMUP'] ?? '', -1, PREG_SPLIT_NO_EMPTY);
+        if ($paths !== []) {
+            self::handleRequests($app, $paths);
         }
     }
 
@@ -215,5 +230,169 @@ final class WarmUp
                 // that needs the service reports it, as it always did.
             }
         }
+    }
+
+    /**
+     * Handles the warm-up requests the application declared
+     * (`phera serve --warmup PATH`, or `warmup` in phera.toml): each path is
+     * an anonymous GET through the HTTP kernel, ended like a real request.
+     * Its response goes nowhere. After each one the application is reset
+     * the way Octane resets it between two requests.
+     *
+     * Unlike everything above, this runs the application's routes. What a
+     * warm-up request leaves in objects that outlive it, and that the reset
+     * does not know, is what every request starts from; see the
+     * documentation of `--warmup`.
+     *
+     * @param list<string> $paths
+     */
+    private static function handleRequests(Application $app, array $paths): void
+    {
+        $config = $app->make('config');
+        $before = $config->all();
+        $callbacks = (fn () => $this->terminatingCallbacks)->call($app);
+        $kernel = $app->make(HttpKernel::class);
+        $root = rtrim($config->get('app.url', 'http://localhost'), '/');
+
+        foreach ($paths as $path) {
+            $request = Request::create($root.'/'.ltrim($path, '/'));
+            $buffers = ob_get_level();
+            ob_start();
+            try {
+                $response = $kernel->handle($request);
+                $kernel->terminate($request, $response);
+                $status = $response->getStatusCode();
+                $problem = $status >= 200 && $status < 300 ? null : "was answered with status $status";
+            } catch (\Throwable $error) {
+                $problem = 'threw '.$error::class.': '.$error->getMessage();
+            }
+            while (ob_get_level() > $buffers) {
+                ob_end_clean();
+            }
+            if ($problem !== null) {
+                error_log("the warm-up request $path $problem; the worker starts without what it would have built");
+            }
+
+            // Laravel\Octane\ApplicationGateway::terminate(): a route keeps
+            // the controller it made.
+            $route = $request->route();
+            if ($route instanceof Route) {
+                $route->flushController();
+            }
+
+            self::resetAfterRequest($app, $before, $callbacks);
+        }
+    }
+
+    /**
+     * Puts the application in the state Octane puts it in between two
+     * requests. Each step names where Octane 2.x does it (its listeners are
+     * in Laravel\Octane\Listeners); the steps are written against the
+     * framework's own services, because Octane need not be installed.
+     *
+     * @param array<string, mixed> $config the configuration before the requests
+     * @param list<callable> $callbacks the application's terminating callbacks before them
+     */
+    private static function resetAfterRequest(Application $app, array $config, array $callbacks): void
+    {
+        // CreateConfigurationSandbox: Octane gives every request its own
+        // copy of the configuration. Here the values are put back.
+        $repository = $app->make('config');
+        $repository->set(array_fill_keys(array_keys($repository->all()), null));
+        $repository->set($config);
+
+        // FlushLocaleState. Application::setLocale() also tells Carbon.
+        $translator = $app->make('translator');
+        if ($translator->getLocale() !== $app->getLocale()) {
+            $app->setLocale($app->getLocale());
+        }
+        $translator->setFallback($app->getFallbackLocale());
+
+        // FlushQueuedCookies.
+        if ($app->resolved('cookie')) {
+            $app->make('cookie')->flushQueuedCookies();
+        }
+
+        // FlushSessionState. The store stays, empty and with a new id: the
+        // redirector and other services may hold it.
+        if ($app->resolved('session')) {
+            foreach ($app->make('session')->getDrivers() as $session) {
+                $session->flush();
+                $session->regenerate();
+            }
+        }
+
+        // FlushAuthenticationState, and Worker::handle().
+        $app->forgetInstance('auth.driver');
+        if ($app->resolved('auth')) {
+            $app->make('auth')->forgetGuards();
+        }
+
+        // FlushDatabaseRecordModificationState, FlushDatabaseQueryLog,
+        // RefreshQueryDurationHandling. A transaction that a failed request
+        // left open is rolled back: a snapshot cannot hold one.
+        if ($app->resolved('db')) {
+            foreach ($app->make('db')->getConnections() as $connection) {
+                while ($connection->transactionLevel() > 0) {
+                    $connection->rollBack();
+                }
+                $connection->forgetRecordModificationState();
+                $connection->flushQueryLog();
+                $connection->resetTotalQueryDuration();
+                $connection->allowQueryDurationHandlersToRunAgain();
+            }
+        }
+
+        // FlushArrayCache.
+        if ($repository->get('cache.stores.array')) {
+            $app->make('cache')->store('array')->flush();
+        }
+
+        // FlushLogContext, FlushMonologState.
+        if ($app->resolved('log')) {
+            $log = $app->make('log');
+            $log->flushSharedContext();
+            $log->withoutContext();
+            foreach ($log->getChannels() as $channel) {
+                $logger = $channel->getLogger();
+                if ($logger instanceof ResettableInterface) {
+                    $logger->reset();
+                }
+            }
+        }
+
+        // FlushOnce, FlushStrCache, FlushTranslatorCache, FlushVite.
+        Once::flush();
+        Str::flushCache();
+        $translator->flushParsedKeys();
+        if ($app->resolved(Vite::class)) {
+            $app->make(Vite::class)->flush();
+        }
+
+        // FlushTemporaryContainerInstances.
+        $app->forgetScopedInstances();
+
+        // Worker::handle(): long-lived objects must not hold the last
+        // request. The stand-in is bound again, which hands it to every
+        // service that follows the bound request, and the router and the
+        // compiled view engines forget what they kept.
+        $app->instance('request', Request::create($config['app']['url'] ?? 'http://localhost'));
+        (fn () => $this->currentRequest = $this->current = null)->call($app->make('router'));
+        if ($app->resolved('view.engine.resolver')) {
+            $app->make('view.engine.resolver')->forget('blade');
+            $app->make('view.engine.resolver')->forget('php');
+        }
+
+        // CurrentApplication::set(): a facade remembers the object it
+        // found, and some of those objects were just forgotten.
+        Facade::clearResolvedInstances();
+
+        // Octane handles a request in a copy of the application and throws
+        // the copy away, and with it what the request asked the application
+        // to run when a request ends (`dispatch(...)->afterResponse()`).
+        // Here those callbacks have run once and are dropped.
+        (function () use ($callbacks) {
+            $this->terminatingCallbacks = $callbacks;
+        })->call($app);
     }
 }

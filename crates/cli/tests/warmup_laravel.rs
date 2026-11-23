@@ -68,6 +68,22 @@ impl Laravel {
         })
     }
 
+    /// One more server, which handled `paths` as requests before its
+    /// snapshot (`PHERA_WARMUP`, what `--warmup` sets), and the file its
+    /// log is written to.
+    fn warmed_by(&self, paths: &str) -> (Server, std::path::PathBuf) {
+        let log = self.project.root.join("storage/logs/server.log");
+        let server = Server::start_with(
+            Path::new(env!("CARGO_BIN_EXE_phera")),
+            &self.project.document_root(),
+            1,
+            &[("PHERA_WARMUP", paths)],
+            &[],
+            std::fs::File::create(&log).expect("create the server's log"),
+        );
+        (server, log)
+    }
+
     /// The answer all three give to `target`, which must be the same one.
     fn same_answer(&self, target: &str, headers: &[(&str, &str)]) -> Answer {
         let php = get(&self.php, target, headers).without_cookie_values();
@@ -248,4 +264,176 @@ fn a_worker_that_boots_again_warms_up_again_to_the_same_state() {
     }
     assert_eq!(added, 200, "the changed routes file was not picked up");
     assert_eq!(get(&laravel.warm, "/api/warmed", &[]).body, after);
+}
+
+/// What an anonymous visitor is to the application, on every server.
+const NOBODY: &str = r#"{"user":null,"name":null,"flash":null,"locale":"en","translator":"en","carbon":"en","queued_cookies":[],"log_context":[]}"#;
+
+#[test]
+fn a_warm_up_request_leaves_no_session_user_cookie_locale_or_flash() {
+    let Some(laravel) = Laravel::start() else {
+        return;
+    };
+    // The warm-up signs a user in, fills and flashes the session, queues a
+    // cookie, switches the locale, adds log context, and asks for work
+    // "after the response". Then a second request stores a name.
+    let (warmed, _log) = laravel.warmed_by("/leave-traces /visit?name=warm");
+
+    // An anonymous visitor is nobody, with the cookies PHP would set and
+    // no other.
+    let nobody = get(&laravel.php, "/whoami", &[]).without_cookie_values();
+    assert_eq!(nobody.body, NOBODY);
+    assert_eq!(get(&warmed, "/whoami", &[]).without_cookie_values(), nobody);
+    assert_eq!(
+        get(&warmed, "/visit", &[]).body,
+        r#"{"before":null,"token_length":40}"#
+    );
+
+    // Two users sign in: each is themselves, and neither is the warm-up.
+    let ada = get(&warmed, "/login/1", &[]).cookies();
+    let bob = get(&warmed, "/login/2", &[]).cookies();
+    assert_eq!(
+        get(&warmed, "/whoami", &[("Cookie", &ada)]).body,
+        NOBODY.replace(r#""user":null,"name":null"#, r#""user":1,"name":"user 1""#)
+    );
+    assert_eq!(
+        get(&warmed, "/whoami", &[("Cookie", &bob)]).body,
+        NOBODY.replace(r#""user":null,"name":null"#, r#""user":2,"name":"user 2""#)
+    );
+    assert_eq!(get(&warmed, "/whoami", &[]).body, NOBODY);
+
+    // What the warm-up asked to run when its request ended ran once, in
+    // the worker's boot, and in none of the requests above.
+    let ended = laravel.project.root.join("storage/logs/terminated.log");
+    assert_eq!(
+        std::fs::read_to_string(ended).unwrap_or_default(),
+        "ended\n"
+    );
+}
+
+#[test]
+fn a_warm_up_through_an_authenticated_route_is_reported_and_harmless() {
+    let Some(laravel) = Laravel::start() else {
+        return;
+    };
+    // `/account` is behind the `auth` middleware; `/login/1` signs a user
+    // in without being asked for anything.
+    let (warmed, log) = laravel.warmed_by("/account /login/1");
+    assert_eq!(get(&warmed, "/whoami", &[]).body, NOBODY);
+    // The warm-up carries no credentials: it was sent to the login form.
+    let log = std::fs::read_to_string(log).expect("the server's log");
+    assert_eq!(
+        log.matches("the warm-up request /account was answered with status 302")
+            .count(),
+        1,
+        "{log}"
+    );
+    // And the route is as closed to an anonymous visitor as on PHP.
+    let account = get(&laravel.php, "/account", &[]).without_cookie_values();
+    assert_eq!(account.status, 302);
+    assert_eq!(
+        get(&warmed, "/account", &[]).without_cookie_values(),
+        account
+    );
+}
+
+#[test]
+fn a_warm_up_request_that_fails_does_not_stop_the_worker() {
+    let Some(laravel) = Laravel::start() else {
+        return;
+    };
+    let (warmed, log) =
+        laravel.warmed_by("/fails /moved /api/missing /fails-in-transaction /api/posts");
+    let posts = get(&laravel.php, "/api/posts?page=2", &[]);
+    assert_eq!(get(&warmed, "/api/posts?page=2", &[]), posts);
+    // The transaction a failed warm-up request left open is gone.
+    let state = get(&warmed, "/api/state", &[]);
+    assert!(
+        state.body.contains(r#""transaction_level":0"#),
+        "{}",
+        state.body
+    );
+
+    let log = std::fs::read_to_string(log).expect("the server's log");
+    for (path, status) in [
+        ("/fails", 500),
+        ("/moved", 302),
+        ("/api/missing", 404),
+        ("/fails-in-transaction", 500),
+    ] {
+        let line = format!("the warm-up request {path} was answered with status {status}");
+        assert_eq!(log.matches(&line).count(), 1, "{line}\n{log}");
+    }
+    assert!(!log.contains("the warm-up request /api/posts"), "{log}");
+    // The worker has its snapshot: no request ran from the top.
+    assert!(!log.contains("DEFECT"), "{log}");
+}
+
+#[test]
+fn a_connection_the_warm_up_opened_is_each_requests_own() {
+    let Some(laravel) = Laravel::start() else {
+        return;
+    };
+    let (warmed, log) = laravel.warmed_by("/api/posts");
+    // The snapshot holds the connection the warm-up used...
+    let warmed_state = get(&warmed, "/api/warmed", &[]).body;
+    assert!(
+        warmed_state.contains(r#""connections":{"sqlite":"opened"}"#),
+        "{warmed_state}"
+    );
+    // ...and every request, also twenty at once, reads through one of its
+    // own and sends the statements it would send on PHP.
+    let posts = get(&laravel.php, "/api/posts?page=2", &[]).body;
+    let answers = warmed.get_all((0..20).map(|_| "/api/posts?page=2".to_string()));
+    for answer in answers {
+        assert_eq!(
+            Answer::parse(&answer)
+                .replacing(&warmed.address, "SERVER")
+                .body,
+            posts
+        );
+    }
+    let statements = get(&laravel.php, "/api/post-statements", &[]).body;
+    assert_eq!(statements, r#"{"statements":2}"#);
+    assert_eq!(get(&warmed, "/api/post-statements", &[]).body, statements);
+    let log = std::fs::read_to_string(log).expect("the server's log");
+    assert!(!log.contains("DEFECT"), "{log}");
+}
+
+#[test]
+fn a_worker_that_boots_again_handles_its_warm_up_requests_again() {
+    let Some(laravel) = Laravel::start() else {
+        return;
+    };
+    let (warmed, _log) = laravel.warmed_by("/leave-traces");
+    assert_eq!(get(&warmed, "/whoami", &[]).body, NOBODY);
+    let ended = laravel.project.root.join("storage/logs/terminated.log");
+    assert_eq!(
+        std::fs::read_to_string(&ended).unwrap_or_default(),
+        "ended\n"
+    );
+
+    // A changed file boots the worker again: the new route answers, the
+    // warm-up request has run once more, and a visitor is still nobody.
+    let routes = laravel.project.root.join("routes/api.php");
+    let source = std::fs::read_to_string(&routes).expect("read the routes");
+    std::fs::write(
+        &routes,
+        format!("{source}\nRoute::get('/added', fn () => ['added' => true]);\n"),
+    )
+    .expect("write the routes");
+    let mut added = 0;
+    for _ in 0..200 {
+        added = get(&warmed, "/api/added", &[]).status;
+        if added == 200 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    assert_eq!(added, 200, "the changed routes file was not picked up");
+    assert_eq!(
+        std::fs::read_to_string(&ended).unwrap_or_default(),
+        "ended\nended\n"
+    );
+    assert_eq!(get(&warmed, "/whoami", &[]).body, NOBODY);
 }
