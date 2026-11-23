@@ -1,6 +1,8 @@
 //! Matching trait members compare equivalent types and evaluated defaults.
 
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
+
+use foldhash::HashMap;
 
 use phera_bytecode::CompiledUnit;
 use phera_extension_api::NativeError;

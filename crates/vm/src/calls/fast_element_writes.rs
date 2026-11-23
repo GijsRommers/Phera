@@ -21,7 +21,7 @@ use phera_bytecode::{PathBase, PathId, Reg, Step as PathStep};
 use phera_value::{ArrayKey, Value};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
-use crate::element_writes::{MOST_KEYS, Target, writable, write};
+use crate::element_writes::{MOST_KEYS, Target, writable_creating, write_creating};
 use crate::fast::store;
 
 /// The keys of a write, read from their registers, and whether it appends
@@ -72,9 +72,9 @@ impl Machine<'_> {
                 };
                 match self.registers.window_mut(base + root.index(), 1) {
                     [Some(Value::Array(array))]
-                        if writable(array, keys.as_slice(), keys.target) =>
+                        if writable_creating(array, keys.as_slice(), keys.target) =>
                     {
-                        match write(array, keys.as_slice(), keys.target, value.clone()) {
+                        match write_creating(array, keys.as_slice(), keys.target, value.clone()) {
                             Some(old) => (true, old),
                             None => (false, None),
                         }
