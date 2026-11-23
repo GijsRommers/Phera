@@ -16,12 +16,12 @@
 //! constant; an enum case; a deprecation; an undeclared class) goes to the
 //! VM's handler ([`Step::Slow`]).
 
-use phera_bytecode::{ClassKind, NameId, Reg, SymbolId, Visibility};
+use phera_bytecode::{ClassKind, NameId, PropKey, Reg, SymbolId};
 use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::classes::Class;
-use crate::classes::class::{ConstantInitializer, ConstantState, LinkedConstant};
+use crate::classes::class::{ConstantInitializer, ConstantState};
 use crate::fast::{ScalarStep, store};
 
 impl Machine<'_> {
@@ -68,13 +68,13 @@ impl Machine<'_> {
         name: NameId,
     ) -> Option<Value> {
         let function = position.frame.function;
-        let name = self.code.unit(function).names.get(name.index())?;
+        let name_str = self.code.unit(function).names.get(name.index())?;
         let slot = position.frame.base() + class_reg.index();
         let [Some(target)] = self.registers.window(slot, 1) else {
             return None;
         };
         let target = target.deref();
-        if name.eq_ignore_ascii_case("class") {
+        if name_str.eq_ignore_ascii_case("class") {
             let Value::Object(object) = &*target else {
                 return None;
             };
@@ -96,7 +96,8 @@ impl Machine<'_> {
             }
             _ => return None,
         };
-        self.read_linked_constant(position, linked, name.as_str())
+        let prop_key = self.code.unit_prop_key(function, name);
+        self.read_linked_constant(position, linked, prop_key)
     }
 
     fn ready_named_class_constant(
@@ -106,24 +107,24 @@ impl Machine<'_> {
         name: NameId,
     ) -> Option<Value> {
         let function = position.frame.function;
-        let name = self.code.unit(function).names.get(name.index())?;
+        let prop_key = self.code.unit_prop_key(function, name);
         let key = self.code.unit_symbol_key(function, class);
         if let Some(linked) = self.classes.by_key(key) {
-            return self.read_linked_constant(position, linked, name.as_str());
+            return self.read_linked_constant(position, linked, prop_key);
         }
         let written = &self.code.unit(function).symbols.get(class.index())?.written;
         match written.as_str() {
             "self" => {
                 let scope = self.caller_scope(position)?;
-                self.read_linked_constant(position, scope, name.as_str())
+                self.read_linked_constant(position, scope, prop_key)
             }
             "parent" => {
                 let parent = self.caller_scope(position)?.parent.as_deref()?;
-                self.read_linked_constant(position, parent, name.as_str())
+                self.read_linked_constant(position, parent, prop_key)
             }
             "static" => {
                 let called = self.current_context()?.called()?;
-                self.read_linked_constant(position, &called, name.as_str())
+                self.read_linked_constant(position, &called, prop_key)
             }
             _ => None,
         }
@@ -134,13 +135,16 @@ impl Machine<'_> {
         &self,
         position: Position,
         linked: &Class,
-        name: &str,
+        key: PropKey,
     ) -> Option<Value> {
         if linked.kind == ClassKind::Trait {
             return None;
         }
-        let constant = linked.constants.get(name)?;
-        if constant.deprecated.is_some() || !self.can_read_constant(position, constant) {
+        let entry = linked.constant_table().get(key)?;
+        let constant = &entry.constant;
+        if constant.deprecated.is_some()
+            || !entry.visible_to(self.caller_scope_index(position), self.classes)
+        {
             return None;
         }
         match &constant.initializer {
@@ -157,23 +161,6 @@ impl Machine<'_> {
                 _ => None,
             },
             ConstantInitializer::EnumCase { slot: None, .. } => None,
-        }
-    }
-
-    #[inline]
-    fn can_read_constant(&self, position: Position, constant: &LinkedConstant) -> bool {
-        match constant.visibility {
-            Visibility::Public => true,
-            Visibility::Private => self
-                .caller_scope(position)
-                .is_some_and(|scope| scope.name == constant.declaring),
-            Visibility::Protected => self.caller_scope(position).is_some_and(|scope| {
-                scope.is_a(&constant.declaring)
-                    || self
-                        .classes
-                        .get_ref(&constant.declaring)
-                        .is_some_and(|declaring| declaring.is_a(&scope.name))
-            }),
         }
     }
 }

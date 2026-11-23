@@ -336,6 +336,7 @@ impl ClassTable {
                 .method_table
                 .get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)));
             let _ = class.property_table();
+            let _ = class.constant_table();
         }
     }
 

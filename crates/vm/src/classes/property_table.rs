@@ -5,9 +5,11 @@
 //! bitset, declaring class index) with zero per-instruction heap caches, zero
 //! `RefCell` borrows, and zero string comparisons at runtime.
 
+use std::rc::Rc;
+
 use phera_bytecode::{ClassKind, PropKey, TypeMask, Visibility};
 
-use super::class::Class;
+use super::class::{Class, LinkedConstant};
 use super::property_facts::PropertyFacts;
 use super::{ClassIndex, ClassTable};
 
@@ -335,4 +337,119 @@ fn resolve_owner(class: &Class, declaring: &str) -> u32 {
         current = candidate.parent.as_deref();
     }
     UNRESOLVED_OWNER
+}
+
+/// One entry in a class's flat constant lookup table.
+#[derive(Clone)]
+pub(crate) struct ConstantSlot {
+    key: u32,
+    pub(crate) owner: u32,
+    pub(crate) constant: Rc<LinkedConstant>,
+}
+
+/// Flat data-oriented class constant lookup table indexed by case-sensitive [`PropKey`].
+/// Eliminates runtime string hashing on `Class::CONST` / `self::CONST` / `$obj::CONST`.
+pub(crate) struct ConstantTable {
+    slots: Box<[Option<ConstantSlot>]>,
+    hashed: bool,
+}
+
+impl ConstantTable {
+    pub(crate) fn build(class: &Class) -> Self {
+        if class.kind == ClassKind::Trait || class.constants.is_empty() {
+            return Self {
+                slots: Box::new([]),
+                hashed: false,
+            };
+        }
+        let keys = phera_bytecode::name_keys::prop_keys(
+            class.constants.keys().map(String::as_str),
+        );
+        if class.constants.len() <= 8 {
+            let slots: Box<[Option<ConstantSlot>]> = class
+                .constants
+                .values()
+                .zip(keys.iter().copied())
+                .map(|(constant, key)| {
+                    Some(ConstantSlot {
+                        key: key.0,
+                        owner: resolve_owner(class, &constant.declaring),
+                        constant: constant.clone(),
+                    })
+                })
+                .collect();
+            Self {
+                slots,
+                hashed: false,
+            }
+        } else {
+            let size = (class.constants.len() * 2).next_power_of_two().max(16);
+            let mask = size - 1;
+            let mut slots: Box<[Option<ConstantSlot>]> = (0..size).map(|_| None).collect();
+            for (constant, key) in class.constants.values().zip(keys.iter().copied()) {
+                let mut index = start(key.0, mask);
+                while slots[index].is_some() {
+                    index = (index + 1) & mask;
+                }
+                slots[index] = Some(ConstantSlot {
+                    key: key.0,
+                    owner: resolve_owner(class, &constant.declaring),
+                    constant: constant.clone(),
+                });
+            }
+            Self {
+                slots,
+                hashed: true,
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn get(&self, key: PropKey) -> Option<&ConstantSlot> {
+        let slots = &self.slots;
+        if !self.hashed {
+            for slot in slots {
+                let entry = slot.as_ref()?;
+                if entry.key == key.0 {
+                    return Some(entry);
+                }
+            }
+            None
+        } else {
+            let mask = slots.len() - 1;
+            let mut index = start(key.0, mask);
+            loop {
+                let entry = slots[index].as_ref()?;
+                if entry.key == key.0 {
+                    return Some(entry);
+                }
+                index = (index + 1) & mask;
+            }
+        }
+    }
+}
+
+impl ConstantSlot {
+    #[inline(always)]
+    pub(crate) fn visible_to(&self, scope: Option<ClassIndex>, classes: &ClassTable) -> bool {
+        match self.constant.visibility {
+            Visibility::Public => true,
+            Visibility::Private => {
+                self.owner != UNRESOLVED_OWNER
+                    && scope.is_some_and(|scope| scope.number() == self.owner)
+            }
+            Visibility::Protected => {
+                if self.owner == UNRESOLVED_OWNER {
+                    return false;
+                }
+                let Some(scope) = scope else {
+                    return false;
+                };
+                if scope.number() == self.owner {
+                    return true;
+                }
+                protected_visible(scope, self.owner, classes)
+            }
+        }
+    }
 }

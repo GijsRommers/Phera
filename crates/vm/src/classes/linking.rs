@@ -621,6 +621,7 @@ impl Vm {
             methods,
             method_table: std::cell::OnceCell::new(),
             property_table: std::cell::OnceCell::new(),
+            constant_table: std::cell::OnceCell::new(),
             serialized_fields: std::cell::OnceCell::new(),
             property_template,
             layout,
