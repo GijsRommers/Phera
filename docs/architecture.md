@@ -431,6 +431,72 @@ new` writes it into new projects and `phera serve` uses it when it exists. Any
 other application calls `Phera\snapshot()` itself. Without an adapter or a call,
 step 1 still applies.
 
+**The adapters warm up before the snapshot.** A fork is a copy of the worker's
+state at the call, so what exists there is not built again by any request,
+and what does not exist is built by every request that needs it. Right after
+the framework has booted, little exists: each request would boot the models
+it uses, resolve the same services, load the same metadata. So both adapters
+build that once, between the boot and `Phera\snapshot()`:
+
+```php
+// Laravel: crates/runtime/src/adapters/laravel.php
+$app->make(Illuminate\Contracts\Http\Kernel::class)->bootstrap();
+Phera\Laravel\WarmUp::beforeSnapshot($app);   // LaravelWarmUp.php, shipped in the binary
+Phera\snapshot();
+$app->handleRequest(Request::capture());
+
+// Symfony: SnapshotRunner::run() in SymfonyRuntime.php
+$this->kernel->boot();
+$this->warmUp($this->kernel);
+\Phera\snapshot();
+$response = $this->kernel->handle(Request::createFromGlobals());
+```
+
+| | Built before the snapshot | How it is found |
+| --- | --- | --- |
+| Laravel | every Eloquent model booted, and one query built for it without its global scopes (no connection is opened) | the PHP files under `app/Models`, as `model:prune` finds them |
+| Laravel | the services Octane resolves in a new worker, without `session.store` | the application's `octane.warm`, else Octane's default list |
+| Symfony | the event dispatcher, with its listeners registered and none of them created | the container's `event_dispatcher`, in a kernel that is not in debug mode |
+
+The rule for what may be built: no request exists yet, and nothing built may
+be something a request could tell from what it would have built itself. That
+excludes anything that takes its value from a request, a user, the clock or a
+random source when it is built. Laravel's session store draws its id then,
+so it is not resolved. Symfony's event listeners are application services
+that may read the current request in their constructors, so the dispatcher
+is built but its listeners are not; its HTTP kernel and router take the
+logger, whose processors the application configures (Monolog's
+`UidProcessor` draws a request id when it is built), so they are not built
+either. A Laravel model's boot is application
+code too, and it is run, with this guard: no request is bound while the
+models boot, so boot code that asks for the request or the signed-in user
+fails, and a model that fails is put back exactly as it was (Eloquent's
+static state and the events that gained a listener) and boots in the
+request as before. Services are resolved after the models, with the request
+Laravel's own console binds (a `GET` of `APP_URL`) standing in, because the
+URL generator cannot be built without one; it stays bound, as in an Octane
+worker, and the HTTP kernel replaces it before any application code runs.
+A step that throws is skipped. `phera serve --no-service-warmup` (in the
+adapters: `PHERA_SERVICE_WARMUP=0`) takes the snapshot right after the boot.
+
+What a Laravel developer must know of this: a model's `boot()` and
+`booted()` now run once per worker instead of once per request, unless they
+ask for the request or the signed-in user, in which case the model boots in
+the request as it always did. Code there that reads the clock, a cache,
+`$_SERVER` or `$_COOKIE` directly keeps the worker's answer for every
+request (`static::$bootedAt = now()` is the worker's boot time; the test
+application's `Stamp` model pins this down). Closures registered there
+(`addGlobalScope()`, `creating()`) still run per query or per save. With
+`--no-service-warmup` models boot per request again.
+
+A fork copies what the snapshot holds, so the warm-up makes every fork
+dearer and the requests that use what it built much cheaper. That is also a
+limit on what is worth building for every application: Doctrine's metadata
+of all entities was measured and left out, because class metadata is a
+graph of objects that every fork of every route would copy. The numbers,
+per step, are in
+`docs/decisions/2026-11-23-the-adapters-warm-up-before-the-snapshot.md`.
+
 **Step 4, only if a profile asks for it: copy on first write.** Objects are
 reached through a table of the request, and a fork copies an object only when
 the request first writes to it. A fork then costs nothing up front. This is a
