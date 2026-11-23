@@ -69,7 +69,12 @@ fn change(context: &mut dyn Context, arguments: &[Value], name: &str) -> NativeR
     let value = args::value(arguments, 1).deref().clone();
     if !matches!(
         value,
-        Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_)
+        Value::Null
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::InternedStr(_)
+            | Value::String(_)
     ) {
         return Err(NativeError::type_error(format!(
             "{name}(): Argument #2 ($value) must be of type string|int|float|bool|null",
@@ -89,10 +94,8 @@ fn restore(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 fn list(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    context.ini_list(
-        args::string(arguments, 0),
-        args::bool(arguments, 1).unwrap_or(true),
-    )
+    let extension = args::string(arguments, 0).map(phera_extension_api::StrRef::to_php_string);
+    context.ini_list(extension.as_ref(), args::bool(arguments, 1).unwrap_or(true))
 }
 
 fn quantity(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -112,7 +115,9 @@ fn get_include_path(context: &mut dyn Context, _: &[Value]) -> NativeResult {
 }
 
 fn set_include_path(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let path = args::string(arguments, 0).cloned().unwrap_or_default();
+    let path = args::string(arguments, 0)
+        .map(phera_extension_api::StrRef::to_php_string)
+        .unwrap_or_default();
     Ok(result(context.ini_set(
         "set_include_path",
         b"include_path",

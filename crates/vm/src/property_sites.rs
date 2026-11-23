@@ -54,6 +54,26 @@ impl PropertyEntry {
         self.read(object)
     }
 
+    /// Borrows a non-hooked, non-reference property value while running `read`,
+    /// so nested array indexing does not clone the outer `PhpArray` handle.
+    pub(crate) fn with_matching_value<R>(
+        &self,
+        object: &Object,
+        scope: Option<&Rc<crate::classes::Class>>,
+        read: impl FnOnce(&Value) -> Option<R>,
+    ) -> Option<R> {
+        if self.hooks.is_some() || !self.matches(object, scope) || !self.read_without_static_notice
+        {
+            return None;
+        }
+        crate::property_storage::with_known(object, self.known(), |value| {
+            if matches!(value, Value::Reference(_)) {
+                return None;
+            }
+            read(value)
+        })
+    }
+
     /// Stores `value` for a write from `scope` when this entry was made for
     /// the object's class and that scope and the value fits the declared
     /// type as it is, as [`Vm::write_property_site`] does; `false`, with
@@ -130,28 +150,10 @@ impl PropertyEntry {
     /// The integer increment of [`Vm::increment_property_site`], once the
     /// entry is known to fit the object.
     fn increment(&self, object: &Object, mode: phera_bytecode::IncDec) -> Option<Value> {
-        use phera_bytecode::IncDec;
         if !self.write_rule.allows(TypeMask::INT) {
             return None;
         }
-        let Some(Value::Int(old)) = crate::property_storage::read_known(object, self.known())
-        else {
-            return None;
-        };
-        let delta = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
-            1
-        } else {
-            -1
-        };
-        let new = old.checked_add(delta)?;
-        crate::property_storage::write_known(object, self.known(), Value::Int(new));
-        Some(Value::Int(
-            if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
-                old
-            } else {
-                new
-            },
-        ))
+        crate::property_storage::increment_known(object, self.known(), mode)
     }
 
     fn read(&self, object: &Object) -> Option<Value> {

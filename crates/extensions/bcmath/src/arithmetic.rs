@@ -72,10 +72,10 @@ pub(crate) fn rounding(mode: Option<&Value>, argument: Argument) -> Result<Round
     } else {
         None
     };
-    let Some(Value::String(name)) = name else {
+    let Some(name) = name.as_ref().and_then(Value::as_str_bytes) else {
         return Err(argument.invalid("is an unsupported rounding mode"));
     };
-    match name.as_bytes() {
+    match name {
         b"HalfAwayFromZero" => Ok(Rounding::HalfAway),
         b"HalfTowardsZero" => Ok(Rounding::HalfToward),
         b"HalfEven" => Ok(Rounding::HalfEven),

@@ -23,9 +23,9 @@ fn string_window(slots: &[Option<Value>]) -> bool {
     matches!(
         slots,
         [
-            Some(Value::String(_)),
-            Some(Value::String(_)),
-            Some(Value::String(_))
+            Some(Value::InternedStr(_) | Value::String(_)),
+            Some(Value::InternedStr(_) | Value::String(_)),
+            Some(Value::InternedStr(_) | Value::String(_))
         ]
     )
 }
@@ -39,16 +39,18 @@ fn ireplace_strings(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 }
 
 fn replace_string_subject(arguments: &[Value], case: CaseSensitivity) -> NativeResult {
-    let [
-        search @ Value::String(needle),
-        replace @ Value::String(replacement),
-        Value::String(subject),
-    ] = arguments
-    else {
+    let [search, replace, subject_val] = arguments else {
+        return Err(NativeError::error("Invalid string replacement arguments"));
+    };
+    let (Some(needle), Some(replacement), Some(subject)) = (
+        search.as_str_bytes(),
+        replace.as_str_bytes(),
+        subject_val.as_str_bytes(),
+    ) else {
         return Err(NativeError::error("Invalid string replacement arguments"));
     };
     if needle.is_empty() || subject.is_empty() {
-        return Ok(Value::String(subject.clone()));
+        return Ok(subject_val.clone());
     }
     let mut replacer = Replacer {
         search,
@@ -56,10 +58,8 @@ fn replace_string_subject(arguments: &[Value], case: CaseSensitivity) -> NativeR
         case,
         count: 0,
     };
-    let replaced = replacer.replace_all(subject.as_bytes(), needle, replacement.as_bytes())?;
-    Ok(Value::String(
-        replaced.map_or_else(|| subject.clone(), PhpString::from),
-    ))
+    let replaced = replacer.replace_all(subject, needle, replacement)?;
+    Ok(replaced.map_or_else(|| subject_val.clone(), Value::from))
 }
 
 /// `str_replace(array|string $search, array|string $replace,

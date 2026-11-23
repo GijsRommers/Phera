@@ -1,0 +1,2 @@
+<?php
+// Marks this directory as a Laravel application for `phera serve`; the tests never run it.

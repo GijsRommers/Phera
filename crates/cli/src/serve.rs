@@ -57,6 +57,12 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     };
     loaded.paths.extend(settings.path);
     let adapter = Adapter::detect(&site, &mut loaded.environment);
+    if !options.service_warmup {
+        loaded.environment.insert(
+            phera_runtime::adapters::SERVICE_WARMUP_VARIABLE.to_vec(),
+            b"0".to_vec(),
+        );
+    }
     site.exclude_files(loaded.paths);
     let site = Arc::new(site);
     let trusted_proxies = match options

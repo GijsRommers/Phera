@@ -35,6 +35,7 @@ fn read(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
         let stream =
             open_resource(context, FUNCTION, name, b"rb", include_path, &Value::Null).await?;
         match filtered_files::contents(context, stream, FUNCTION, 0, None).await? {
+            Value::InternedStr(source) => Ok(Value::from(meta_tags(source.as_bytes()))),
             Value::String(source) => Ok(Value::from(meta_tags(source.as_bytes()))),
             other => Ok(other),
         }

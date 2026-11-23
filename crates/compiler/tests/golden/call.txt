@@ -15,5 +15,5 @@ function {main} (5 registers, dynamic scope)
 function identity (3 registers)
   r0 = $value
   0000  line 1    Return { src: r0 }
-  0001  line 1    LoadConst { dst: r1, constant: const#0 }
+  0001  line 1    LoadNull { dst: r1 }
   0002  line 1    Return { src: r1 }
