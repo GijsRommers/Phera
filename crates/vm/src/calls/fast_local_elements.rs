@@ -25,10 +25,11 @@ use phera_bytecode::{FetchMode, PathBase, PathId, Reg, Step as PathStep};
 use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
-use crate::element_writes::{MOST_KEYS, Target};
+use crate::element_writes::MOST_KEYS;
 
 impl Machine<'_> {
     /// `Fetch` of an element of a local array, in `mode`.
+    #[inline(never)]
     pub(super) fn fetch_local_element<const GUARDED: bool>(
         &mut self,
         position: Position,
@@ -55,28 +56,47 @@ impl Machine<'_> {
         let PathBase::Register(root) = body.base else {
             return None;
         };
-        if !matches!(body.steps.first(), Some(PathStep::Index(_))) || body.steps.len() > MOST_KEYS {
+        if body.steps.is_empty() || body.steps.len() > MOST_KEYS {
             return None;
         }
-        let keys = self.write_keys(position, &body.steps)?;
-        if !matches!(keys.target, Target::Last) {
-            return None;
+        let base = position.frame.base();
+        let mut key_values: [Option<&Value>; MOST_KEYS] = [None; MOST_KEYS];
+        for (slot, step) in key_values.iter_mut().zip(&body.steps) {
+            let PathStep::Index(register) = step else {
+                return None;
+            };
+            let [Some(key @ (Value::Int(_) | Value::InternedStr(_) | Value::String(_)))] =
+                self.registers.window(base + register.index(), 1)
+            else {
+                return None;
+            };
+            *slot = Some(key);
         }
-        let [Some(Value::Array(array))] = self
-            .registers
-            .window(position.frame.base() + root.index(), 1)
-        else {
+        let [Some(Value::Array(array))] = self.registers.window(base + root.index(), 1) else {
             return None;
         };
-        let (last, levels) = keys.as_slice().split_last()?;
+        let keys = &key_values[..body.steps.len()];
+        let (last, levels) = keys.split_last()?;
         let mut current = &**array;
         for key in levels {
-            current = match current.get(key) {
+            let found = match key.expect("validated above") {
+                Value::Int(integer) => current.get_int(*integer),
+                Value::InternedStr(string) => current.get_interned(string),
+                Value::String(string) => current.get_str(string),
+                _ => unreachable!("validated above"),
+            };
+            current = match found {
                 Some(Value::Array(inner)) => inner,
                 None => return Some(None),
                 Some(_) => return None,
             };
         }
-        Some(current.get(last))
+        let found = match last.expect("validated above") {
+            Value::Int(integer) => current.get_int(*integer),
+            Value::InternedStr(string) => current.get_interned(string),
+            Value::String(string) => current.get_str(string),
+            _ => unreachable!("validated above"),
+        };
+        Some(found)
     }
 }

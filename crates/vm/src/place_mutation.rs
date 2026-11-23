@@ -152,7 +152,7 @@ impl Vm {
         let updated = root;
         if let PathBase::GlobalNamed { name, .. } = place.base()? {
             let name = self.get(name);
-            if let Value::String(name) = name {
+            if let Some(name) = name.str_ref() {
                 self.publish_global(name.to_string_lossy(), updated.clone());
             }
         }
@@ -300,7 +300,7 @@ impl Vm {
         if place.steps()?.next().is_none() {
             if let PathBase::GlobalNamed { name, .. } = place.base()? {
                 let name = self.get(name).deref().clone();
-                if let Value::String(name) = name {
+                if let Some(name) = name.str_ref() {
                     self.remove_global(&name.to_string_lossy());
                 }
             }

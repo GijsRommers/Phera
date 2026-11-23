@@ -49,7 +49,10 @@ impl NativeError {
         match self.into_exception_parts() {
             Ok((class, message, _, properties)) => {
                 let code = code.into();
-                if !matches!(code, Value::Int(_) | Value::String(_)) {
+                if !matches!(
+                    code,
+                    Value::Int(_) | Value::InternedStr(_) | Value::String(_)
+                ) {
                     return Self::error(
                         "Phera internal error: native exception code must be int or string",
                     );

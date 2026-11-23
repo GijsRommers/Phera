@@ -10,7 +10,8 @@ use crate::Vm;
 impl Vm {
     /// PHP permits computed method names only when their value is a string.
     pub(crate) fn method_name(&mut self, register: Reg) -> Result<String, NativeError> {
-        let Value::String(name) = self.read_local(register) else {
+        let value = self.read_local(register);
+        let Some(name) = value.str_ref() else {
             return Err(NativeError::error("Method name must be a string"));
         };
         Ok(name.to_string_lossy())

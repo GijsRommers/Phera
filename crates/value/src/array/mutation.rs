@@ -45,11 +45,31 @@ impl PhpArray {
         if let ArrayKey::Int(index) = key {
             self.note_int_key(index);
         }
-        if let Some(slot) = self.get_mut(&key) {
-            return Some(std::mem::replace(slot, value));
+        match &mut self.storage {
+            Storage::List(values) => {
+                if let Some(position) = list_position(&key) {
+                    if let Some(slot) = values.get_mut(position) {
+                        if let Some(existing) = slot.as_mut() {
+                            return Some(std::mem::replace(existing, value));
+                        }
+                    } else if position == values.len() {
+                        values.push(Some(value));
+                        self.maybe_compact();
+                        return None;
+                    }
+                }
+                self.storage.as_map().append(key, value);
+                self.maybe_compact();
+                None
+            }
+            Storage::Map(map) => {
+                let replaced = map.insert(key, value);
+                if replaced.is_none() {
+                    self.maybe_compact();
+                }
+                replaced
+            }
         }
-        self.push_entry(key, value);
-        None
     }
 
     /// Negative keys count too, as in PHP 8.3 and later: after `[-5 => 1]`,

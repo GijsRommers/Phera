@@ -18,6 +18,7 @@ pub async fn build(
                 for (key, value) in values.iter() {
                     match key {
                         phera_extension_api::ArrayKey::Int(i) => b.token(i),
+                        phera_extension_api::ArrayKey::Interned(s) => b.token(s.as_bytes()),
                         phera_extension_api::ArrayKey::String(s) => b.token(s.as_bytes()),
                     }
                     b.value(c, value).await?;
@@ -61,6 +62,7 @@ pub async fn build(
                 for (key, value) in values.iter() {
                     match key {
                         phera_extension_api::ArrayKey::Int(i) => b.token(i),
+                        phera_extension_api::ArrayKey::Interned(s) => b.token(s.as_bytes()),
                         phera_extension_api::ArrayKey::String(s) => b.token(s.as_bytes()),
                     }
                     b.value(c, value).await?;

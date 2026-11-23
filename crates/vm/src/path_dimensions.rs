@@ -44,7 +44,7 @@ impl Vm {
         index: Reg,
     ) -> Result<ArrayKey, NativeError> {
         match current {
-            Value::Array(_) | Value::Null | Value::String(_) => {}
+            Value::Array(_) | Value::Null | Value::InternedStr(_) | Value::String(_) => {}
             Value::Bool(false) => self.diagnostic(
                 "Deprecated",
                 "Automatic conversion of false to array is deprecated".into(),
@@ -85,7 +85,9 @@ impl Vm {
                 );
                 return Ok(None);
             }
-            Value::String(_) => return Err(NativeError::error("Cannot unset string offsets")),
+            Value::InternedStr(_) | Value::String(_) => {
+                return Err(NativeError::error("Cannot unset string offsets"));
+            }
             Value::Object(object) => {
                 return Err(NativeError::error(format!(
                     "Cannot use object of type {} as array",
@@ -194,7 +196,12 @@ impl Vm {
                     Value::Null
                 }
             }
-            Value::String(string) => self.read_string_offset(&string, key.clone(), missing)?,
+            Value::InternedStr(string) => {
+                self.read_string_offset(string.as_bytes(), key.clone(), missing)?
+            }
+            Value::String(string) => {
+                self.read_string_offset(string.as_bytes(), key.clone(), missing)?
+            }
             other => return self.read_nonarray_offset(other, missing),
         };
         Ok(value)

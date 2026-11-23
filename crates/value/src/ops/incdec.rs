@@ -25,8 +25,9 @@ pub fn increment(v: &Value, d: &mut dyn Diagnostics) -> Result<Value, OpError> {
             );
             Ok(v)
         }
-        Value::String(s) => {
-            let p = parse_numeric(s.as_bytes());
+        Value::InternedStr(_) | Value::String(_) => {
+            let bytes = v.as_str_bytes().expect("checked string");
+            let p = parse_numeric(bytes);
             match p.value {
                 // Strictly numeric only (is_numeric_str_function): trailing
                 // data falls through to the string increment.
@@ -40,7 +41,7 @@ pub fn increment(v: &Value, d: &mut dyn Diagnostics) -> Result<Value, OpError> {
                         "Increment on non-numeric string is deprecated, use str_increment() instead"
                             .to_string(),
                     );
-                    Ok(Value::String(php_string_increment(s)))
+                    Ok(Value::String(php_string_increment(bytes)))
                 }
             }
         }
@@ -74,15 +75,16 @@ pub fn decrement(v: &Value, d: &mut dyn Diagnostics) -> Result<Value, OpError> {
             );
             Ok(v)
         }
-        Value::String(s) => {
-            let p = parse_numeric(s.as_bytes());
+        Value::InternedStr(_) | Value::String(_) => {
+            let bytes = v.as_str_bytes().expect("checked string");
+            let p = parse_numeric(bytes);
             match p.value {
                 Some(NumVal::Int(i)) if p.exact => Ok(match i.checked_sub(1) {
                     Some(x) => Value::Int(x),
                     None => Value::Float(i as f64 - 1.0),
                 }),
                 Some(NumVal::Float(f)) if p.exact => Ok(Value::Float(f - 1.0)),
-                _ if s.is_empty() => {
+                _ if bytes.is_empty() => {
                     d.deprecated(
                         "Decrement on empty string is deprecated as non-numeric".to_string(),
                     );
@@ -109,8 +111,8 @@ pub fn decrement(v: &Value, d: &mut dyn Diagnostics) -> Result<Value, OpError> {
 /// Perl-style string increment (`increment_string`): walk from the end,
 /// carrying through `z`→`a`/`Z`→`A`/`9`→`0`, then prepend `a`/`A`/`1` when
 /// everything carried. Runs of other bytes stop the walk.
-fn php_string_increment(s: &PhpString) -> PhpString {
-    let mut bytes = s.as_bytes().to_vec();
+fn php_string_increment(bytes: &[u8]) -> PhpString {
+    let mut bytes = bytes.to_vec();
     if bytes.is_empty() {
         return PhpString::from("1");
     }
