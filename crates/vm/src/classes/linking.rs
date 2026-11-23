@@ -24,11 +24,14 @@ impl Vm {
                         .is_some()
                 })
             {
-                let key = declaration.name.to_ascii_lowercase();
-                if self.classes.get_lowercase(&key).is_some() {
+                if self
+                    .classes
+                    .by_key(self.code.unit_class_key(unit_first, index))
+                    .is_some()
+                {
                     continue;
                 }
-                if let Err(error) = self.link_new_class(unit, unit_first, index, key) {
+                if let Err(error) = self.link_new_class(unit, unit_first, index) {
                     if crate::autoload::ClassMiss::is(&error) {
                         continue;
                     }
@@ -55,8 +58,10 @@ impl Vm {
             return Ok(());
         }
         let declaration = &unit.classes[index.index()];
-        let key = declaration.name.to_ascii_lowercase();
-        if let Some(existing) = self.classes.get_lowercase(&key) {
+        if let Some(existing) = self
+            .classes
+            .by_key(self.code.unit_class_key(unit_first, index))
+        {
             if declaration.kind == ClassKind::Anonymous {
                 return Ok(());
             }
@@ -66,20 +71,26 @@ impl Vm {
                 NativeError::error(self.class_redeclaration_message(existing, &existing.name)),
             ));
         }
-        self.link_new_class(&unit, unit_first, index, key)
+        self.link_new_class(&unit, unit_first, index)
+            .map_err(|error| crate::autoload::ClassMiss::during_declaration(error, &unit, index))
     }
 
-    /// Both callers have checked the declaration's case-insensitive name.
-    fn link_new_class(
+    /// The caller has checked that the declaration's name is available.
+    pub(crate) fn link_new_class(
         &mut self,
         unit: &Arc<CompiledUnit>,
         unit_first: FunctionIndex,
         index: ClassId,
-        key: String,
     ) -> Result<(), NativeError> {
-        if let Some(entry) = self.reusable_entry(unit, index) {
-            self.declare_linked(&entry, unit, unit_first, index);
-            return Ok(());
+        match self.reusable_entry(unit, unit_first, index) {
+            Reuse::Entry(entry) => {
+                self.declare_linked(&entry, unit, unit_first, index);
+                return Ok(());
+            }
+            Reuse::Missing(error) => {
+                return Err(super::declaration_errors::link_failure(unit, index, error));
+            }
+            Reuse::Link => {}
         }
         self.classes.begin_link();
         self.code.begin_imports();
@@ -87,13 +98,17 @@ impl Vm {
         let linked = self.link_class_body(unit, unit_first, index);
         let (dependencies, position) = self.classes.end_link();
         let imports = self.code.end_imports();
-        if let Err(error) = linked {
+        if let Err(mut error) = linked {
+            if dependencies.is_none() || self.diagnostic_reporter.raised != raised {
+                crate::autoload::ClassMiss::keep_pending_shape(&mut error);
+            }
             if let Some(position) = position {
                 self.classes.lease_position(position);
             }
             return Err(super::declaration_errors::link_failure(unit, index, error));
         }
         let declaration = &unit.classes[index.index()];
+        let key = declaration.name.to_ascii_lowercase();
         // A class whose linking raised a diagnostic is linked by each request
         // that declares it, so that each sees the diagnostic (and runs its
         // handler); an anonymous class is the request's. An enum is shared
@@ -104,6 +119,7 @@ impl Vm {
             && unit.metadata.is_some()
             && declaration.kind != ClassKind::Anonymous;
         if shared
+            && let Some(dependencies) = dependencies
             && let Some(position) = position
             && let Some(class) = self.classes.at_position(position)
         {
@@ -131,19 +147,43 @@ impl Vm {
     /// A class another request of the worker linked from this declaration,
     /// usable here: every class name its linking looked up is the same class
     /// (or no class) in this request.
+    ///
+    /// An entry whose lookups match up to a parent, interface or trait of the
+    /// declaration that is not declared yet in this request is the common
+    /// case of a class the request declares before what it extends (an
+    /// autoloader loads `Manager` before its trait). Linking it again would
+    /// make the same lookups and miss at that name, so the miss is raised
+    /// here, as linking raises it: the autoloader declares the name, and the
+    /// declaration then finds the entry usable.
     fn reusable_entry(
         &self,
         unit: &Arc<CompiledUnit>,
+        unit_first: FunctionIndex,
         index: ClassId,
-    ) -> Option<Rc<super::worker_classes::EntryFacts>> {
-        self.classes
+    ) -> Reuse {
+        let declaration = &unit.classes[index.index()];
+        let missing = std::cell::Cell::new(None);
+        let found = self
+            .classes
             .worker()
             .find_entry(unit, index.index() as u32, |entry| {
-                entry
-                    .dependencies
-                    .iter()
-                    .all(|(name, number)| self.classes.resolve_number(name) == *number)
-            })
+                for (key, number) in &entry.dependencies {
+                    let now = self.classes.resolve_number(*key);
+                    if now == *number {
+                        continue;
+                    }
+                    if now.is_none() && number.is_some() && missing.get().is_none() {
+                        missing.set(self.inherited_dependency(unit, unit_first, declaration, *key));
+                    }
+                    return false;
+                }
+                !self.inherits_from_pending_type(&entry.dependencies)
+            });
+        match (found, missing.take()) {
+            (Some(entry), _) => Reuse::Entry(entry),
+            (None, Some((written, kind))) => Reuse::Missing(Self::class_miss(written, kind)),
+            (None, None) => Reuse::Link,
+        }
     }
 
     /// Declares a class another request linked: what linking records in the
@@ -189,8 +229,7 @@ impl Vm {
             .parent
             .map(|symbol| {
                 let parent_name = &unit.symbols[symbol.index()].written;
-                self.classes
-                    .get(parent_name)
+                self.class_for_inheritance(parent_name)
                     .ok_or_else(|| Self::class_miss(parent_name, "Class"))
             })
             .transpose()?;
@@ -238,8 +277,7 @@ impl Vm {
             .map(|symbol| {
                 let interface_name = &unit.symbols[symbol.index()].written;
                 let interface = self
-                    .classes
-                    .get(interface_name)
+                    .class_for_inheritance(interface_name)
                     .ok_or_else(|| Self::class_miss(interface_name, "Interface"))?;
                 if interface.kind != ClassKind::Interface {
                     return Err(NativeError::error(format!(
@@ -357,7 +395,12 @@ impl Vm {
             if let Some(inherited) = methods.get(&key) {
                 super::inheritance_checks::check_override(name, inherited, &linked)
                     .map_err(|error| self.magic_override_error(&linked, error))?;
-                if let Some(miss) = self.check_method_contract(inherited, &linked, unit)?
+                let prototype = if key == "__construct" && !inherited.is_abstract {
+                    abstract_constructor(parent.as_deref()).unwrap_or(inherited)
+                } else {
+                    inherited
+                };
+                if let Some(miss) = self.check_method_contract(prototype, &linked, unit)?
                     && let Some(parent) = &parent
                 {
                     pending.push((
@@ -470,12 +513,6 @@ impl Vm {
                     .or_insert_with(|| method.clone());
             }
         }
-        if !pending.is_empty() {
-            pending.sort_by(|(left, _), (right, _)| left.cmp(right));
-            return Err(crate::autoload::ClassMiss::method_signatures(
-                pending.into_iter().map(|(_, miss)| miss).collect(),
-            ));
-        }
         super::inheritance_checks::check_abstract(
             name,
             declaration.kind,
@@ -551,6 +588,8 @@ impl Vm {
         }
         let declaration_location = Some((unit_first, declaration_index));
         let operations = operations.with_native_dimensions(hooks.as_deref(), &methods);
+        let layout = super::class::property_layout(&defaults);
+        let property_template = super::class::property_template(&defaults, layout.as_ref());
         let class = Rc::new_cyclic(|identity| Class {
             index,
             property_access: hooks.as_ref().and_then(|hooks| hooks.property_access),
@@ -560,7 +599,7 @@ impl Vm {
             identity: identity.clone(),
             declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
             ancestors: super::class::ancestor_names(&parent, &interfaces),
-            name_value: phera_value::Value::from(name.as_str()),
+            name_value: phera_value::Value::interned(name.as_bytes()),
             name: name.clone(),
             has_native_layout: parent.as_ref().is_some_and(|class| class.has_native_layout),
             parent,
@@ -576,12 +615,15 @@ impl Vm {
             is_final: declaration.is_final,
             is_readonly: declaration.is_readonly,
             allows_dynamic_properties,
+            property_facts: std::cell::OnceCell::new(),
             constructor: methods.get("__construct").cloned(),
             magic: super::magic::MagicMethods::link(&methods),
             methods,
             method_table: std::cell::OnceCell::new(),
             serialized_fields: std::cell::OnceCell::new(),
-            property_template: super::class::property_template(&defaults),
+            property_template,
+            layout,
+            property_names: super::property_names::PropertyNames::new(&defaults),
             defaults,
             static_properties,
             constants,
@@ -593,7 +635,96 @@ impl Vm {
                 "Enum {name} cannot implement the Serializable interface"
             )));
         }
+        if !pending.is_empty()
+            || class
+                .parent
+                .iter()
+                .chain(&class.interfaces)
+                .any(|dependency| self.is_pending_class(dependency.index))
+        {
+            pending.sort_by(|(left, _), (right, _)| left.cmp(right));
+            return Err(crate::autoload::ClassMiss::method_signatures(
+                crate::autoload::PendingClass {
+                    class,
+                    unit: unit.clone(),
+                    methods: pending.into_iter().map(|(_, miss)| miss).collect(),
+                    requested: Default::default(),
+                    publication: std::cell::Cell::new(
+                        if unit.metadata.is_some() && declaration.kind != ClassKind::Anonymous {
+                            crate::autoload::PendingPublication::RetryLink
+                        } else {
+                            crate::autoload::PendingPublication::KeepShape
+                        },
+                    ),
+                },
+            ));
+        }
         self.classes.insert(class);
         Ok(())
+    }
+}
+
+/// A concrete constructor does not erase an ancestor's abstract signature.
+fn abstract_constructor(mut parent: Option<&Class>) -> Option<&Rc<Method>> {
+    while let Some(class) = parent {
+        if let Some(method) = class
+            .methods
+            .get("__construct")
+            .filter(|method| method.is_abstract)
+        {
+            return Some(method);
+        }
+        parent = class.parent.as_deref();
+    }
+    None
+}
+
+/// What [`Vm::reusable_entry`] found for a declaration.
+enum Reuse {
+    /// A class another request linked, usable as it is.
+    Entry(Rc<super::worker_classes::EntryFacts>),
+    /// Linking would miss this parent, interface or trait.
+    Missing(NativeError),
+    /// The class must be linked.
+    Link,
+}
+
+impl Vm {
+    /// The name as written and the kind linking reports a miss of it as,
+    /// when `key` is the declaration's parent, one of its interfaces or one
+    /// of its traits.
+    fn inherited_dependency<'a>(
+        &self,
+        unit: &'a CompiledUnit,
+        unit_first: FunctionIndex,
+        declaration: &'a phera_bytecode::ClassDeclaration,
+        key: phera_bytecode::NameKey,
+    ) -> Option<(&'a str, &'static str)> {
+        let written =
+            |symbol: &phera_bytecode::SymbolId| unit.symbols[symbol.index()].written.as_str();
+        let is_key = |symbol: &phera_bytecode::SymbolId| {
+            self.code.unit_symbol_key(unit_first, *symbol) == key
+        };
+        if let Some(parent) = declaration.parent.as_ref().filter(|parent| is_key(parent)) {
+            return Some((written(parent), "Class"));
+        }
+        if let Some(interface) = declaration
+            .interfaces
+            .iter()
+            .find(|interface| is_key(interface))
+        {
+            return Some((written(interface), "Interface"));
+        }
+        // A trait is named by its written name: its key is made here, on the
+        // way to a miss.
+        declaration
+            .traits
+            .iter()
+            .flat_map(|usage| &usage.names)
+            .find(|name| {
+                let lowercase = name.trim_start_matches('\\').to_ascii_lowercase();
+                phera_bytecode::name_keys::key(&lowercase) == key
+            })
+            .map(|name| (name.as_str(), "Trait"))
     }
 }

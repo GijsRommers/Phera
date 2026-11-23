@@ -8,6 +8,34 @@ use phera_value::Value;
 /// These argument types are accepted as supplied. A zero mask reserves class,
 /// callable and by-reference checks for the normal binder.
 pub(super) fn accepts(parameters: &[Param], slots: &[Option<Value>]) -> bool {
+    accepts_with(parameters, slots, exact_types)
+}
+
+/// For `new ReflectionFunction($closure)`, check the Closure arm without coercion.
+pub(super) fn accepts_ready(parameters: &[Param], slots: &[Option<Value>]) -> bool {
+    if let ([parameter], [Some(Value::Object(object))]) = (parameters, slots)
+        && matches!(parameter.ty, ParamType::ClosureOrString)
+    {
+        return !parameter.by_ref && !parameter.variadic && object.class.name() == "Closure";
+    }
+    accepts(parameters, slots)
+}
+
+/// [`accepts`] for a direct method, which checks a reflected object's
+/// class itself (and declines one of another class): a `ReflectedObject`
+/// parameter takes any object here.
+pub(super) fn accepts_direct(parameters: &[Param], slots: &[Option<Value>]) -> bool {
+    accepts_with(parameters, slots, |parameter| match parameter.ty {
+        ParamType::ReflectedObject if !parameter.by_ref && !parameter.variadic => TypeMask::OBJECT,
+        _ => exact_types(parameter),
+    })
+}
+
+fn accepts_with(
+    parameters: &[Param],
+    slots: &[Option<Value>],
+    types: impl Fn(&Param) -> TypeMask,
+) -> bool {
     slots.len() <= parameters.len()
         && parameters[slots.len()..]
             .iter()
@@ -17,7 +45,7 @@ pub(super) fn accepts(parameters: &[Param], slots: &[Option<Value>]) -> bool {
                 !value.is_reference()
                     && !parameter.by_ref
                     && !parameter.variadic
-                    && exact_types(parameter).intersects(native_type(value))
+                    && types(parameter).intersects(native_type(value))
             })
         })
 }

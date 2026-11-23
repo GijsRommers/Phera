@@ -36,6 +36,10 @@ namespace {
     $list = &$data['list'];
     $counter = function () use (&$data) { static $n = 0; return ++$n; };
     $names = $registry->names();
+    $reflectedMethod = new ReflectionMethod($registry, 'names');
+    $reflectedClosure = new ReflectionFunction($names);
+    $bag = (object) ['label' => 'boot'];
+    $reflectedBag = new ReflectionObject($bag);
     $stack = new SplStack;
     $stack->push(new Point(5, 5));
     $storage = new SplObjectStorage;
@@ -65,6 +69,8 @@ namespace {
         tick();
         $registry->items[] = 'property';
         $alias[] = 'alias';
+        $bag->label = 'changed';
+        $bag->requestOnly = true;
         $data['nested']['point']->x = 100;
         $list[] = 4;
         $counter();
@@ -107,6 +113,12 @@ namespace {
         'case' => Suit::from('H') === Suit::Hearts,
         // A new object takes the next free id, as after a boot in PHP-FPM.
         'id' => spl_object_id(new Point(0, 0)),
+        'reflectedMethod' => ($reflectedMethod->invoke($registry))(),
+        'reflectedClosure' => $reflectedClosure->invoke(),
+        'reflectedBag' => [
+            $reflectedBag->getProperty('label')->getValue($bag),
+            $reflectedBag->hasProperty('requestOnly'),
+        ],
     ]), "\n";
     echo 1 / 3, "\n";
     trigger_error('probe');

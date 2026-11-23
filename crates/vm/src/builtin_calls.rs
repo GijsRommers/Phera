@@ -7,8 +7,9 @@
 
 use phera_bytecode::{BuiltinFrame, BuiltinUnary, ConstId, Reg};
 use phera_extension_api::NativeError;
-use phera_value::{ArrayKey, Value};
+use phera_value::Value;
 
+use crate::calls::callback_binding::ArgumentBinding;
 use crate::{Vm, calls::execution_loop::BatchExit};
 
 impl Vm {
@@ -18,24 +19,35 @@ impl Vm {
         operation: BuiltinFrame,
         destination: Reg,
     ) -> Result<(), NativeError> {
-        let frame = self
-            .current()
-            .ok_or_else(|| internal_error!("builtin caller frame"))?;
         let value = match operation {
-            BuiltinFrame::ArgumentCount => Value::Int(frame.argument_count() as i64),
-            BuiltinFrame::ArgumentsFrom(first) => self.argument_array(frame, first as usize)?,
+            BuiltinFrame::ArgumentCount | BuiltinFrame::ArgumentsFrom(_) => {
+                let frame = self
+                    .current()
+                    .ok_or_else(|| internal_error!("builtin caller frame"))?;
+                if let BuiltinFrame::ArgumentsFrom(first) = operation {
+                    self.argument_array(frame, first as usize)?
+                } else {
+                    Value::Int(frame.argument_count() as i64)
+                }
+            }
             BuiltinFrame::CalledClass => self.called_class_name()?,
+            BuiltinFrame::AssertionsDisabled => Value::Bool(self.assertions_disabled()),
         };
         self.set(destination, value);
         Ok(())
     }
 
+    /// A built-in's own instruction. An operand it cannot take as it is goes
+    /// to the native function, bound as `binding`: `Frameless` for
+    /// `\strlen($x)`, which PHP runs as an operator with no frame, `Caller`
+    /// for a namespaced `strlen($x)`, which PHP calls.
     #[cold]
     pub(crate) fn execute_builtin_unary(
         &mut self,
         operation: BuiltinUnary,
         source: Reg,
         destination: Reg,
+        binding: ArgumentBinding,
     ) -> Result<Option<BatchExit>, NativeError> {
         let value = self.read_local(source);
         let name = match operation {
@@ -50,14 +62,15 @@ impl Vm {
                 "get_class"
             }
             BuiltinUnary::Defined => {
-                let name = match value {
-                    Value::String(name) => name,
+                let name = match &value {
+                    Value::InternedStr(name) => name.to_string_lossy(),
+                    Value::String(name) => name.to_string_lossy(),
                     Value::Float(_) => {
                         phera_value::to_php_string(&value, &mut phera_value::NoDiagnostics)?
+                            .to_string_lossy()
                     }
                     _ => return Err(internal_error!("defined builtin literal")),
                 };
-                let name = name.to_string_lossy();
                 let exists = ["true", "false", "null"]
                     .iter()
                     .any(|special| special.eq_ignore_ascii_case(&name))
@@ -72,7 +85,7 @@ impl Vm {
                 return Ok(None);
             }
         };
-        self.call_builtin_fallback(name, [value], destination)
+        self.call_builtin_fallback(name, [value], destination, binding)
     }
 
     /// Numeric string keys go through the same normalization as array lookups.
@@ -86,18 +99,24 @@ impl Vm {
         let key = self.read_local(key);
         let array = self.read_local(array);
         if let Value::Array(array) = &array {
-            let normalized = match &key {
-                Value::Int(key) => Some(ArrayKey::Int(*key)),
-                Value::Bool(key) => Some(ArrayKey::Int(i64::from(*key))),
-                Value::String(key) => Some(ArrayKey::from_string(key.clone())),
+            let found = match &key {
+                Value::Int(key) => Some(array.contains_int(*key)),
+                Value::Bool(key) => Some(array.contains_int(i64::from(*key))),
+                Value::InternedStr(key) => Some(array.contains_interned(key)),
+                Value::String(key) => Some(array.contains_str(key)),
                 _ => None,
             };
-            if let Some(key) = normalized {
-                self.set(destination, Value::Bool(array.contains_key(&key)));
+            if let Some(found) = found {
+                self.set(destination, Value::Bool(found));
                 return Ok(None);
             }
         }
-        self.call_builtin_fallback("array_key_exists", [key, array], destination)
+        self.call_builtin_fallback(
+            "array_key_exists",
+            [key, array],
+            destination,
+            ArgumentBinding::Frameless,
+        )
     }
 
     /// String and integer literals compare without allocating a new haystack.
@@ -117,18 +136,26 @@ impl Vm {
             return Err(internal_error!("literal search haystack"));
         };
         let found = match &needle {
+            Value::InternedStr(needle) => values.values().any(|value| match value {
+                Value::InternedStr(other) => std::ptr::eq(*other, *needle),
+                Value::String(other) => other.as_bytes() == needle.as_bytes(),
+                _ => false,
+            }),
             Value::String(needle) => values.values().any(|value| {
-                matches!(value, Value::String(value) if value.as_bytes() == needle.as_bytes())
+                value
+                    .as_str_bytes()
+                    .is_some_and(|bytes| bytes == needle.as_bytes())
             }),
-            Value::Int(needle) if strict => values.values().any(|value| {
-                matches!(value, Value::Int(value) if value == needle)
-            }),
+            Value::Int(needle) if strict => values
+                .values()
+                .any(|value| matches!(value, Value::Int(value) if value == needle)),
             _ if strict => false,
             _ => {
                 return self.call_builtin_fallback(
                     "in_array",
                     [needle, Value::Array(values.clone()), Value::Bool(false)],
                     destination,
+                    ArgumentBinding::Frameless,
                 );
             }
         };
@@ -142,9 +169,10 @@ impl Vm {
         name: &str,
         arguments: [Value; N],
         destination: Reg,
+        binding: ArgumentBinding,
     ) -> Result<Option<BatchExit>, NativeError> {
         let mut callee = self.resolve_callee(name)?;
-        callee.argument_binding = crate::calls::callback_binding::ArgumentBinding::Frameless;
+        callee.argument_binding = binding;
         self.prepare_call(callee)?;
         for (index, value) in arguments.into_iter().enumerate() {
             self.store_sent_value(index, value)?;
@@ -159,6 +187,7 @@ pub(crate) fn builtin_value(operation: BuiltinUnary, value: &Value) -> Option<Va
     use BuiltinUnary as B;
     match (operation, value) {
         (_, Value::Reference(_)) => None,
+        (B::Strlen, Value::InternedStr(string)) => Some(Value::Int(string.len() as i64)),
         (B::Strlen, Value::String(string)) => Some(Value::Int(string.len() as i64)),
         (B::Count | B::Sizeof, Value::Array(array)) => Some(Value::Int(array.len() as i64)),
         (B::TypeCheck(mask), value) => {

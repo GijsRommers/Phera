@@ -381,6 +381,18 @@ request can change it.
   cell (`&`). Object ids stay the same. Strings are shared. An array is shared
   (copy-on-write, as always) unless it holds an object or a reference somewhere
   inside; then it is rebuilt with the copies.
+- What a fork does not copy: the caches that a request fills as it runs
+  (site cells, method-site records, function links, class checks, closure
+  signatures, native links). The snapshot keeps what the boot filled as
+  `UnitCache::base` (and `CodeTable::base_sites` for the site cells), and a
+  fork's own cells start empty. The first time a request needs a function's
+  site cells, a file's records or class checks, or a function symbol's link,
+  it makes them from the snapshot's, keeping only what holds no object of the
+  boot (a link to a function or a native function, a property or static
+  entry). It fills from the snapshot only on the miss, so a hit reads one cell
+  as before. Nothing a request writes is ever in the snapshot's cells. The
+  site cells are one table in the code table indexed by function number. A fork
+  still copies the function facts (a vector, as the loop reads them).
 - Built-in classes with state of their own (`ArrayObject`, `SplObjectStorage`,
   `WeakMap`, `Closure`, `DateTime`, ...) get a fork hook in the extension API. It
   returns a copy of the state with the objects inside replaced by their copies,
@@ -506,7 +518,7 @@ cache in front of a slow structure):
 | Name keys | a SipHash map from every lowercased name to a number, built per request and copied per fork | numbered once per process when a file is compiled (`phera_bytecode::name_keys`); the file carries its key arrays; done |
 | Finding a loaded file | a linear scan over the request's files | a flat array indexed by the file revision's process number (`UnitMetadata::id`); done |
 | Function numbering | per request: files numbered in the order the request loads them | per file revision: a function is (file number, local number), so the same function has the same number in every request |
-| Function facts | a vector per request, copied per fork | one immutable array per file revision, shared; a request keeps only what it adds (trait imports, declaring class) |
+| Function facts | a vector per request, copied per fork | a vector per request, copied per fork (the copy is most of what a fork still costs); sharing it as an `Rc<[T]>` made every read dearer, see `docs/decisions/2026-11-22-a-fork-shares-the-code-table-and-fills-its-caches.md` |
 | Linked classes | an `Rc` graph per worker (methods in a `HashMap<String, Rc<Method>>`, ancestors in a `HashSet<String>`), linked again by each request that declares the class after the boot | one table of linked classes for the worker (later the process), each entry addressed by a stable index; methods in a flat array in the order PHP lists them, property declarations in a flat array |
 | A request's declared classes | a map from name to `Rc<Class>`, plus per-file resolution slots copied per fork | a bitset over the worker's table of which entries the request has declared, the name's slot, and the request's own statics |
 
@@ -689,9 +701,9 @@ purpose must fail loudly and name the reason, never behave differently in
 silence:
 
 - **A function or class PHP 8.5 has and Phera leaves out** (for example
-  `strftime()`, deprecated since PHP 8.1): calling it throws
+  `date_sunset()`, deprecated since PHP 8.1): calling it throws
   `Phera\NotSupportedException` (a `LogicException`) with the message
-  "strftime() is not supported by Phera: deprecated since PHP 8.1".
+  "date_sunset() is not supported by Phera: deprecated since PHP 8.1".
   `function_exists()` and `class_exists()` answer false for these, so code
   that checks first takes its fallback. The list comes from the
   `#[\Deprecated]` attributes in PHP 8.5's own stub files, not from memory.
@@ -712,7 +724,7 @@ functions, methods and constants with `#[\Deprecated]` in its stub files.
 Each falls in one of three groups:
 
 1. *Named items nothing uses*: they go, as described above. Examples:
-   `strftime()`, `lcg_value()`, `utf8_decode()`, `mhash()`, `MT_RAND_PHP`,
+   `date_sunset()`, `lcg_value()`, `mhash()`, `MT_RAND_PHP`,
    `FILTER_SANITIZE_STRING`, `assert_options()`.
 2. *Named items the scan of 6.1 finds in use*, mostly calls that became
    no-ops and that current releases of widely used libraries still make:
@@ -1662,6 +1674,209 @@ What is left:
 - array literal construction: 2,786;
 - identity: 2,200; local element reads: 1,554; both are in `speed/loop-coverage`;
 - `(array)` casts and the property paths the sites do not take: the rest.
+
+### 10.13 Design: declared properties in slots (`speed/property-slots`)
+
+**What it is today.** An object's properties are one `RefCell<PhpArray>` keyed by PHP's mangled names (`name`, `\0*\0name`, `\0Class\0name`).
+- **`new`:** clones the class's default table (`Class::property_template`), with its keys, and drops it all again at release.
+- **A property site:** remembers the position of the property in that table, and compares the stored key on every read, because `unset` and re-adding move an entry to the end.
+- **Property order:** that move is also why the order is wrong. After `unset($o->a); $o->x = 9; $o->a = 1;` PHP lists `a b c x` and Phera lists `b c x a`.
+- **Reflection:** `ReflectionProperty` finds the property by name on every call, through the async native method path.
+
+Measured on main ded81397, machine instructions per operation, with PHP from the probe's baseline file (the empty loop subtracted in both):
+
+| operation | Phera | PHP |
+| --- | ---: | ---: |
+| `new P` with three properties, one read, release | 1,704 | 406 |
+| `clone` of it | 4,673 | |
+| array of four plus object, the array stored and read through the object | 7,327 | 1,276 |
+| `$rp->setRawValueWithoutLazyInitialization($o, $v)` | 5,082 | 483 |
+| `$rp->isLazy($o)` | 3,529 | 279 |
+| `$rp->isInitialized($o)` / `getValue` / `setValue` | 2,175 / 2,172 / 2,566 | 292 / 297 / 398 |
+
+On the Symfony and Doctrine yardstick, the hydrators and the UnitOfWork make per request:
+- 467 `setRawValueWithoutLazyInitialization` calls;
+- 325 `isLazy` calls;
+- 122 `isUninitializedLazyObject` calls;
+- several hundred `isInitialized` and `getValue` calls;
+- 544 `((array) $object)[$key]` reads;
+- 855 `$this->p = v` writes that the property sites do not take.
+
+**What it becomes.**
+- **The class owns the layout:** `PropertyLayout`, built once at linking, root first.
+  - the mangled keys of the declared instance properties, in declaration order, as a flat `Box<[ArrayKey]>`;
+  - for each property, its slot number.
+
+  A property site, a `ReflectionProperty` and the compiler's property names all resolve to that number when they are linked, so no name is looked up per access.
+- **The object holds:**
+  - `slots: RefCell<Box<[Option<Value>]>>`: one entry per declared property, in layout order; `None` is unset or not yet initialized, as an absent key is today;
+  - `dynamic: RefCell<Option<Box<PhpArray>>>`: properties that are not declared, in insertion order; most objects have none.
+- **`new`** copies the class's default values into the slot box: one allocation, no keys. **`clone`** copies the slots.
+- **A property site** reads and writes `slots[n]` with no key compare. `unset` sets the slot to `None`, and writing it again fills the same slot, so the declared order is PHP's (the `weakmap-and-property-order` fixture).
+- **Code that needs the whole table** goes through a `PropertyView`, which walks the declared slots in order and then the dynamic table. That covers `(array)`, `foreach` over an object, `get_object_vars`, `var_dump`, `serialize`, `json_encode` and `==`. `Object::get`, `set`, `has`, `remove` and `to_array` keep their signatures. `Object::update` and `with_properties`, which hand out a `&mut PhpArray`, become two calls on the view (read and write by key), so extensions do not see the change.
+- **Direct native methods on a slot** for `ReflectionProperty`, the pattern of #134's `MethodHandle` (they run where `Call` runs them, no frame): `isInitialized`, `getValue`, `setValue`, `setRawValue`, `setRawValueWithoutLazyInitialization`, `isLazy`, and `ReflectionClass::isUninitializedLazyObject`. The fast case is:
+  - an object that is not lazy;
+  - a public property with no hooks;
+  - and, for writes, a value whose type passes the property's bit test as it is.
+
+  Everything else (hooks, lazy objects, coercion, readonly, an error to raise) declines to the general path, as today.
+- **`(array) $object`** builds its result from the slots at its final size.
+- **The fork copies** the slot box and the dynamic table, as it copies the table today.
+
+**Expected.**
+- `new` and release from 1,704 towards 800 to 900.
+- A property read through a site about a third cheaper (no key compare, no table probe).
+- The Reflection property calls from 2,000 to 5,000 down to 300 to 500 each.
+- On the yardstick: the Reflection calls alone are about 3 to 4M per request, plus the hydration writes and `(array)` casts.
+
+**Size.** The value crate's object, destruction, cycles, fork and lazy-object code; the VM's property storage, sites, defaults, cloning and Reflection; and the whole-table users in the extensions (serialize, var_dump, json, spl `ArrayObject`): 30 to 40 files.
+
+The Reflection direct methods come in the same pull request, after the slots. That is the one pull request for item 2, as with the others.
+
+
+### 10.14 The loop core, built to the floor (`speed/loop-core`)
+
+#### Why
+
+The floor (`~/.phera-review/floor/src/bin/calls.rs`, safe Rust, fat LTO, with the six behaviours PHP needs that its first version lacked) runs the four plain shapes at PHP's cost:
+
+| Shape | Floor | PHP 8.5 | Phera main |
+|---|---|---|---|
+| Loop | 70 | 75 | 276 |
+| Function call | 231 | 260 | 808 |
+| Method call | 289 | 314 | 1,230 |
+| Property read | 141 | 118 | 679 |
+
+Half of what separates us from it is structural: the two-function loop, the base added and the bounds check on every register access, the second dispatch, and a trip out of the simple loop for every instruction it cannot finish. No step inside the present structure removes it (see `~/.phera-review/floor/ANSWER-call-protocol.md`). This section replaces the core of the loop and the frame layout in one change. Everything outside the plain shapes keeps going to today's general path, unchanged.
+
+#### The loop
+
+One function, `Machine::run`, holds the running frame's register window, the frame's instructions and the position, and dispatches every instruction with one `match`. A call it can make and the return from it switch the window and the instructions in place. The two-tier split (`run_simple` for scalar arms, `step` for the rest, with the trip between them) goes.
+
+An instruction the loop cannot finish leaves through one exit. The loop publishes the position, gives up the window and returns `LoopExit::Slow(instruction)` to the batch loop, which runs it in `Vm::execute` as today. That exit is the only place the window is given up, other than calls and returns.
+
+#### The window
+
+The register file stays one flat `Vec<Option<Value>>` for the worker. A register keeps `Option<Value>`: it is 16 bytes, the same as `Value`, with `None` in a spare tag, so `Some(Value::Int(a))` is one tag comparison. Fable measured that in the floor (design `f` against `c`: 67 against 65 instructions per loop). An undefined register stays what it is today: not a value at all. There is no `Value::Undef` and no new variant.
+
+The window is a reference to a fixed array, `&mut [Option<Value>; 256]`. It is indexed by the operand's low byte (`reg.0 as u8 as usize`), which cannot be out of bounds by type, so no register access in the loop has a bounds check. On entry to a frame, the register file is grown to `base + 256` and the array reference is taken from the slice at `base` (`try_into`, checked once per entry). A function with more than 256 registers is not run by this loop: the late pass marks it and it takes the general path. If 256 turns out too small, 512 with a 9-bit mask is the same idea. Counted on 2026-11-21 by compiling every file of both app copies with `--dump` (`yardstick-cost/tools/register_counts.py`):
+
+| App | Files | Functions | Over 128 registers | Over 256 registers |
+|---|---|---|---|---|
+| Symfony and Doctrine | 3,476 | 27,717 | 43 | 3 |
+| Laravel | 8,212 | 64,705 | 16 | 3 |
+
+The six functions over 256 are all configuration or debug code, none of it on a request's path: `DebugClassLoader::checkAnnotations` (416), `YamlFileLoader::parseDefinition` (290), `XmlDriver::loadMetadataForClass` (283), PHPUnit's `Merger::merge` (412) and `Builder::fromParameters` (308). So 256 holds.
+
+The window is held only between points where nothing can grow or move the register file. It is given up, and taken again from the frame's base after:
+- every `LoopExit` (the VM may run a native that calls back into PHP, which grows the file);
+- every call and return (the window moves to the callee's or the caller's range);
+- every yield of the work budget.
+
+The borrow checker enforces this: the array reference is a local borrow of `self.registers`, so nothing that takes `&mut Vm` can run while it lives.
+
+#### The frame
+
+A frame is four words: the function, the window's base, the position, and the caller's destination register with a few flag bits (`returns_to_native`, `discards_result`, `has_extras`). The side table (`extras`: iterators, captured `$this` scope, the called class) and the prepared-call stack stay, for the general path only. A plain call pushes one frame and nothing else. The callee's shape bit (`FunctionShape::Plain`: no variadic, no by-reference parameter, no generator, no coercion needed) decides the plain entry; that is php-rust's "simple callee" flag, which our facts already hold.
+
+#### The guarded loop is the main case
+
+A Symfony request runs entirely in the guarded copy: an object with `__destruct` stays alive for the whole request, so `object_ids.has_due()` holds from the first such object on. The new loop is one function generic over `GUARDED`, as today. In the guarded copy the work it adds is the destructor check: after each write that drops a reference-counted value (a store, a `Clear`, a return releasing the callee's registers), it tests `ids.has_doomed()`, one load and a branch. When that holds, it publishes the position and leaves through the one exit, to `Vm::run_destructors`. Writes that drop nothing (an integer over an integer) test nothing, in either copy.
+
+The definition of done holds in the guarded copy: the four shapes are measured with an object that has a destructor alive in the request, within the same limits, and the Symfony route is the number that counts.
+
+#### Calls and returns in the loop
+
+
+- **`CallDirect`:** as today, with the window switched in place.
+- **`CallMethod`:** the site table and per-site record of the call-site train. A hit enters a PHP method, calls a native getter, or prepares a native. A *VM* outcome leaves through the one exit.
+- **`Return`:** moves the value out of the callee's window, releases the callee's registers in PHP's order (locals, then `$this`), switches back to the caller and stores. The guarded loop's copy keeps the release order where a destructor can run. That case leaves through the exit, as today.
+
+#### Type tests on the plain entry and return
+
+**Made inline at the entry**, per parameter:
+- **A built-in type:** the value's own type tested against the callee's parameter mask (one bit test), as today.
+- **A class or interface type:** the receiver of the test is the argument. A one-entry check against the class that type last matched (`known_class_match`), else the declared class found by its name key, with the argument's class ancestry walked (`Class::derives_from`, from #169), as #167 does for property writes.
+- **`self`:** the callee's declaring class (its facts' `class`), then the same ancestry test.
+- **`static`:** the called class (the receiver's class for an instance call, the record's class for a static one), then the ancestry test.
+- **`iterable`:** an array (mask bit), or an object whose class derives from `Traversable`.
+- **The int-to-float widening of a `float` parameter:** made inline, as today's second look.
+
+**Declined to the general path:** `callable` (resolving a string or an array callable needs the VM; a `Closure` object passes by its class), intersection and DNF types beyond a union of classes, `mixed` with a by-reference parameter, any coercion in non-strict mode (`"5"` to `int`), and a failed test (the general path raises the `TypeError`).
+
+**Made inline at the return:** the same tests against the function's return type: mask bits, class, `self`, `static`, `iterable`, `void` (no value), `never` (a return is an error, declined). A failed test, or `callable`, declines.
+
+#### Fused instructions
+
+
+Fused instructions come from one late compiler pass, run after the bytecode engineer's passes, as the method sites do:
+- **`LessJump`:** compare two registers and branch;
+- **`AddLocal`:** `$local += register`;
+- **`IncJump`:** `$k++` and jump back.
+
+They are emitted only where the operands are locals or temporaries, the plain shape. Any other value takes their slow path, which is the general instruction's handler.
+
+#### Natives called from the loop
+
+A native that needs no VM declares a handler that takes only its arguments: `pure: fn(&[Value]) -> Option<Value>` on its `FunctionEntry`, beside the existing handler. `None` means "decline", and the general path then runs the ordinary handler, so every error, warning and coercion stays there.
+
+A native qualifies when it:
+- reads only its arguments;
+- writes no global state, runs no PHP code, takes no callback and no reference;
+- raises nothing on the arguments it accepts.
+
+Examples: the type tests (`is_null`, `is_array`, `is_int`, `is_string`), `strlen`, `str_starts_with`, `str_contains`, `array_key_exists`, `in_array` with scalars, `substr`, `strtolower`, `count` on an array.
+
+The loop knows from the entry: `CallNativeDirect` (and the function form of the site record) reads the arguments from the window, tests their types against the entry's parameter masks, calls `pure` and stores the value. A decline, or a native without `pure`, leaves through the one exit to the general path, as today. No prepared-call record is made, and nothing is allocated.
+
+#### What stays on the general path
+
+- Generators and fibers: their frames live outside the stack.
+- `__call`, `__get` and the other magic.
+- By-reference parameters, named and spread arguments, variadics.
+- Every native that needs the VM.
+- Exceptions: unwinding starts from the published position.
+- Includes.
+- Every instruction that has no arm in the loop.
+
+#### Failure modes, and what covers each
+
+| Risk | Covered by |
+|---|---|
+| The register file moving under a held window | Compile time: the window is a borrow of `self.registers`, alive only inside the loop between exits. Plus a test: a native that calls back into PHP and grows the register file deep, then returns into the loop |
+| Release order on an inline return | The 34 destructor timing cases (`review/g155`), plus a fixture with locals and `$this` that have destructors, in every return shape |
+| Generators and fibers | Stay on the general path. The fixtures of `tests/fixtures/generators` and the fibers set run unchanged |
+| Codegen under fat LTO | A release build and the four shapes plus the benchmarks at every step, recorded in the draft pull request's description daily |
+| An undefined register read as a value | As today: a register is `Option<Value>`, and an undefined one is `None`, not a value. Plus a fixture of undefined-variable warnings in every operand position |
+
+#### What measurement showed (2026-11-22)
+
+The one-loop design above assumed the trip between `run_simple` and the second dispatch could go. Five ways of removing it were built and measured on the routes at twelve pairs; all raised them, and all were reverted (`~/.phera-review/floor/LOOP-PLAN.md` has the tables, the patches and the disassembly):
+
+| Try | Function / method shape | `/api/hello` | `/api/posts` |
+|---|---|---|---|
+| Calls and returns handled in a frame loop inside `run_simple` | 697 / 871 (main 754 / 922) | +2.07% | +1.81% |
+| The same, the switch out of line | 816 / 975 | +2.47% | +2.15% |
+| `run_simple` out of line, calls dispatched in `run` | 776 / 941 | +3.33% | +3.07% |
+| The whole second dispatch called from inside the loop | 800 / 971 (control 748 / 926) | +2.75% | +2.44% |
+| Two small handlers (`FetchThis`, `SendLocal`) called from the loop | 784 / 955 (control 730 / 911) | +1.35% | +1.07% |
+
+The last row is the deciding one. The handlers themselves are cheap (`FetchThis` saves about 4 per execution, its function saves two registers), but any call inside the scalar loop makes the loop compile worse for every scalar instruction: a loop that runs none of the handled kinds pays 16 more per iteration. About half of a request's instructions leave the scalar loop, so the trip is expensive; but in safe Rust under fat LTO, with this loop, putting anything in its place costs the scalar instructions more than the trip.
+
+So the structure stays: the scalar loop, the trip out, `step` inlined into `run`. The work goes into the handlers the trip reaches (the return's release and checks, the call's record lookup, push and argument writes), measured on the routes each time. The targets below are rewritten from the measured pieces of a method call (924 per iteration on main `c4750d18`: return 163, call 263, the trip about 230, the loop body and dispatch the rest).
+
+On a scalar fallback, `run_simple` lends the fetched instruction from the
+frame's immutable code slice to `step`. The register-window borrow ends
+before dispatch, so a call can still grow the register file. The VM exit
+copies the instruction when it needs to carry it out of the loop.
+
+#### Definition of done
+
+- Loop at most 165 (as today: the floor's 90 needs the one-loop structure), function call at most 620, method call at most 750, measured on the honest floor's script. The property read is the property engineer's arm. These come from the handler plan: about 70 off the return (checks settled at entry, the release and pop), about 40 off the call's site record and decision, about 30 off the push and argument writes, about 20 off the work budget and the published position. They are revised as each piece lands.
+- The four shapes in the guarded copy as well: measured with an object that has a destructor alive in the request, within the same limits. The Symfony route is the number that counts.
+- Every fixture, `make test`, both php-src trees on both machines, the 34 destructor timing cases, the three gates at twelve pairs, and all benchmarks pass, with no route rising.
+- At every daily push: the four shapes, and the three routes at twelve pairs each.
+- The count of loop exits per request by instruction kind, before and after. It should fall sharply; what remains is the list of what to move in next.
 
 ## 11. Tools built into the runtime
 

@@ -114,6 +114,19 @@ fn file_get_contents(
             )
             .await;
         }
+        if crate::socket::http::is_url(name) {
+            let stream = crate::socket::http::fopen(
+                context,
+                function,
+                name,
+                b"rb",
+                args::value(&arguments, 2),
+                true,
+            )
+            .await?;
+            return crate::filtered_files::contents(context, stream, function, offset, length)
+                .await;
+        }
         let Some(mut stream) = open(context, function, name, b"rb", use_include).await? else {
             return Ok(Value::Bool(false));
         };
@@ -184,6 +197,18 @@ fn readfile(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_,
             closed?;
             return Ok(result);
         }
+        if crate::socket::http::is_url(name) {
+            let stream = crate::socket::http::fopen(
+                context,
+                function,
+                name,
+                b"rb",
+                args::value(&arguments, 2),
+                true,
+            )
+            .await?;
+            return crate::filtered_files::passthru(context, stream, function).await;
+        }
         let Some(stream) = open(context, function, name, b"rb", use_include).await? else {
             return Ok(Value::Bool(false));
         };
@@ -234,6 +259,7 @@ fn file(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
             .await?
         {
             match crate::filtered_files::contents(context, stream, "file", 0, None).await? {
+                Value::InternedStr(bytes) => bytes.to_php_string(),
                 Value::String(bytes) => bytes,
                 other => return Ok(other),
             }
@@ -249,6 +275,22 @@ fn file(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
             )
             .await?
             {
+                Value::InternedStr(bytes) => bytes.to_php_string(),
+                Value::String(bytes) => bytes,
+                other => return Ok(other),
+            }
+        } else if crate::socket::http::is_url(name) {
+            let stream = crate::socket::http::fopen(
+                context,
+                "file",
+                name,
+                b"rb",
+                args::value(&arguments, 2),
+                use_default,
+            )
+            .await?;
+            match crate::filtered_files::contents(context, stream, "file", 0, None).await? {
+                Value::InternedStr(bytes) => bytes.to_php_string(),
                 Value::String(bytes) => bytes,
                 other => return Ok(other),
             }

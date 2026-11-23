@@ -33,7 +33,8 @@ pub(crate) fn register(registry: &mut Registry) {
                     "__construct",
                     const { &[Param::new("function", ParamType::ClosureOrString)] },
                     construct,
-                ),
+                )
+                .with_ready(|c, o, a| Some(construct(c, Some(o), a))),
                 MethodEntry::public("isAnonymous", &[], |_, o, _| {
                     data(o, |f| Value::Bool(f.anonymous))
                 }),
@@ -233,6 +234,7 @@ fn construct(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value
         Some(Value::Object(object)) if object.class.name() == "Closure" => {
             FunctionTarget::Closure(Rc::downgrade(object))
         }
+        Some(Value::InternedStr(name)) => FunctionTarget::Named(name.to_string_lossy()),
         Some(Value::String(name)) => FunctionTarget::Named(name.to_string_lossy()),
         other => {
             return Err(phera_extension_api::NativeError::type_error(format!(
@@ -244,7 +246,7 @@ fn construct(context: &mut dyn Context, this: Option<&Rc<Object>>, args: &[Value
     let function = engine(context)?.reflect_function(&target)?;
     let object = receiver(this)?;
     keep_closure(object, &function.target);
-    bind(object, Some(&function.name.clone()), function)
+    bind(object, Some(&function.name), function.clone())
 }
 
 pub(crate) fn keep_closure(object: &Object, target: &FunctionTarget) {
@@ -413,8 +415,11 @@ fn direct_has_return_type(object: &Object, arguments: &[Option<Value>]) -> Optio
 fn direct_no_attributes(object: &Object, arguments: &[Option<Value>]) -> Option<Value> {
     let plain = matches!(
         arguments,
-        [] | [Some(Value::String(_) | Value::Null)]
-            | [Some(Value::String(_) | Value::Null), Some(Value::Int(0))]
+        [] | [Some(Value::InternedStr(_) | Value::String(_) | Value::Null)]
+            | [
+                Some(Value::InternedStr(_) | Value::String(_) | Value::Null),
+                Some(Value::Int(0))
+            ]
     );
     if !plain {
         return None;

@@ -127,6 +127,7 @@ pub(super) fn inherit_hooks(
         properties: own.properties.or(base.properties),
         property_access: own.property_access.or(base.property_access),
         virtual_properties: own.virtual_properties,
+        trace_native: own.trace_native,
         iterator: own.iterator.or(base.iterator),
         iterator_by_reference: if own.iterator.is_some() {
             own.iterator_by_reference

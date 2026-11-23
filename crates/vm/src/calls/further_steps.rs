@@ -49,6 +49,10 @@ impl Machine<'_> {
                 done => done,
             },
             Instruction::Binary { .. }
+            | Instruction::BinaryBranch { .. }
+            | Instruction::BinaryBranchIf { .. }
+            | Instruction::BinaryIntBranch { .. }
+            | Instruction::BinaryIntBranchIf { .. }
             | Instruction::Unary { .. }
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
@@ -64,9 +68,16 @@ impl Machine<'_> {
                     dst,
                     (path, FetchMode::Read),
                 ) {
-                    Step::Slow => {
-                        self.fetch_local_element::<GUARDED>(position, dst, (path, FetchMode::Read))
-                    }
+                    Step::Slow => match self.fetch_local_element::<GUARDED>(
+                        position,
+                        dst,
+                        (path, FetchMode::Read),
+                    ) {
+                        Step::Slow => {
+                            self.fetch_static::<GUARDED>(position, dst, (path, FetchMode::Read))
+                        }
+                        done => done,
+                    },
                     done => done,
                 },
                 done => done,
@@ -85,9 +96,16 @@ impl Machine<'_> {
                 None => match self.fetch_property_quietly::<GUARDED>(position, dst, path) {
                     Step::Slow => {
                         match self.fetch_property_element::<GUARDED>(position, dst, (path, mode)) {
-                            Step::Slow => {
-                                self.fetch_local_element::<GUARDED>(position, dst, (path, mode))
-                            }
+                            Step::Slow => match self.fetch_local_element::<GUARDED>(
+                                position,
+                                dst,
+                                (path, mode),
+                            ) {
+                                Step::Slow => {
+                                    self.fetch_static::<GUARDED>(position, dst, (path, mode))
+                                }
+                                done => done,
+                            },
                             done => done,
                         }
                     }
@@ -145,6 +163,12 @@ impl Machine<'_> {
             Instruction::InstanceOf { dst, src, class } => {
                 self.instance_of::<GUARDED>(position, dst, src, class)
             }
+            Instruction::InstanceOfBranch { src, class, target } => {
+                self.instance_of_branch::<GUARDED>(position, src, class, target, false)
+            }
+            Instruction::InstanceOfBranchIf { src, class, target } => {
+                self.instance_of_branch::<GUARDED>(position, src, class, target, true)
+            }
             _ => Step::Slow,
         }
     }
@@ -182,7 +206,7 @@ impl Machine<'_> {
         value: Value,
     ) -> Step {
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, value) {
+        match store::<GUARDED, _>(slots, destination, value) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }

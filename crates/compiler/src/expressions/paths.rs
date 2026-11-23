@@ -174,6 +174,24 @@ impl Compiler<'_> {
                 (self.allocate_register()?, PlaceScope::This)
             }
 
+            ast::ExpressionKind::StaticProperty {
+                class,
+                name: ast::Variable::Named(name),
+                ..
+            } if matches!(class.kind, ast::ExpressionKind::Name(_)) => {
+                // `Post::$count`, and `self::`, `static::` and `parent::`,
+                // which the VM resolves from the running frame.
+                let class = self.object_class_name(class, line)?;
+                let scratch = self.allocate_register()?;
+                (
+                    scratch,
+                    PlaceScope::NamedStaticProperty {
+                        class,
+                        name: name.clone(),
+                        scratch,
+                    },
+                )
+            }
             ast::ExpressionKind::StaticProperty { class, name, .. } => {
                 let class = if matches!(class.kind, ast::ExpressionKind::Name(_)) {
                     let class = self.object_class_name(class, line)?;
@@ -227,7 +245,11 @@ impl Compiler<'_> {
                 let access_line = self.access_line(access);
                 if fetch_line != access_line
                     && (!place.path.is_empty()
-                        || matches!(place.scope, PlaceScope::StaticProperty { .. }))
+                        || matches!(
+                            place.scope,
+                            PlaceScope::StaticProperty { .. }
+                                | PlaceScope::NamedStaticProperty { .. }
+                        ))
                 {
                     let base = self.emit_path_read(place, fetch_line)?;
                     place = Place {

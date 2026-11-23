@@ -56,13 +56,20 @@ pub enum Unary {
     Object,
 }
 /// Selects PHP's local, variable-variable, or request-global namespace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlaceScope {
     /// The base register is a scratch slot for the current receiver.
     This,
     /// The base register holds a class name or object.
     StaticProperty {
         name: Reg,
+        scratch: Reg,
+    },
+    /// A static property of a class the source names, with its name written
+    /// in the source (`Post::$count`). The base register is the scratch slot.
+    NamedStaticProperty {
+        class: String,
+        name: String,
         scratch: Reg,
     },
     Local,
@@ -90,6 +97,10 @@ pub struct Argument {
     pub source: ArgumentSource,
     pub name: Option<String>,
     pub spread: bool,
+    /// The argument was written as a call or as `new` (`f(g())`, `f(new A)`):
+    /// a by-reference parameter takes such a value with a notice, and
+    /// rejects any other computed value.
+    pub of_call: bool,
 }
 /// A function parameter and the metadata needed by the runtime call protocol.
 #[derive(Debug, Clone)]

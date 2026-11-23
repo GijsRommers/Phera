@@ -34,6 +34,7 @@ const MOST_KEYS: usize = 3;
 
 impl Machine<'_> {
     /// `Fetch` of `$this->property[$key]...` or `$object->property[$key]...`.
+    #[inline(never)]
     pub(super) fn fetch_property_element<const GUARDED: bool>(
         &mut self,
         position: Position,
@@ -49,7 +50,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, value) {
+        match store::<GUARDED, _>(slots, destination, value) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
@@ -61,40 +62,58 @@ impl Machine<'_> {
         path: PathId,
         quiet: bool,
     ) -> Option<Value> {
-        let property =
-            self.with_site(position, (path, Shape::Element), |entry, object, scope| {
-                if entry.hooks.is_some() {
-                    return None;
-                }
-                entry.read_matching(object, scope)
-            })?;
-        let keys = &self
+        let [PathStep::Property(_), keys @ ..] = self
             .code
             .function(position.frame.function)
             .paths
             .get(path.index())?
-            .steps[1..];
-        if keys.len() > MOST_KEYS {
+            .steps
+            .as_slice()
+        else {
+            return None;
+        };
+        if keys.is_empty() || keys.len() > MOST_KEYS {
             return None;
         }
-        let mut current = property;
-        for step in keys {
+        let base = position.frame.base();
+        let mut key_values: [Option<&Value>; MOST_KEYS] = [None; MOST_KEYS];
+        for (slot, step) in key_values.iter_mut().zip(keys) {
             let PathStep::Index(register) = step else {
                 return None;
             };
-            let key = self.array_key(position, *register)?;
-            current = match &current {
-                Value::Array(array) => match array.get(&key) {
-                    Some(Value::Reference(_)) => return None,
-                    Some(element) => element.clone(),
-                    None if quiet => return Some(Value::Null),
-                    None => return None,
-                },
-                Value::Null if quiet => return Some(Value::Null),
-                _ => return None,
+            let [Some(key @ (Value::Int(_) | Value::InternedStr(_) | Value::String(_)))] =
+                self.registers.window(base + register.index(), 1)
+            else {
+                return None;
             };
+            *slot = Some(key);
         }
-        Some(current)
+        let key_slice = &key_values[..keys.len()];
+        self.with_site(position, (path, Shape::Element), |entry, object, scope| {
+            entry.with_matching_value(object, scope, |mut current| {
+                for key in key_slice {
+                    current = match current {
+                        Value::Array(array) => {
+                            let found = match key.expect("validated above") {
+                                Value::Int(integer) => array.get_int(*integer),
+                                Value::InternedStr(string) => array.get_interned(string),
+                                Value::String(string) => array.get_str(string),
+                                _ => unreachable!("validated above"),
+                            };
+                            match found {
+                                Some(Value::Reference(_)) => return None,
+                                Some(element) => element,
+                                None if quiet => return Some(Value::Null),
+                                None => return None,
+                            }
+                        }
+                        Value::Null if quiet => return Some(Value::Null),
+                        _ => return None,
+                    };
+                }
+                Some(current.clone())
+            })
+        })
     }
 
     /// An integer or string key in a register, as PHP converts it.
@@ -104,6 +123,7 @@ impl Machine<'_> {
             .window(position.frame.base() + register.index(), 1)
         {
             [Some(Value::Int(integer))] => Some(ArrayKey::Int(*integer)),
+            [Some(Value::InternedStr(string))] => Some(string.to_array_key()),
             [Some(Value::String(string))] => Some(ArrayKey::from_string(string.clone())),
             _ => None,
         }

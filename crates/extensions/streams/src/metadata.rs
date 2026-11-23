@@ -1,6 +1,8 @@
 //! `is_file('link')` follows a symlink. `lstat('link')` describes the link itself.
 
+use std::borrow::Cow;
 use std::fs::{self, Metadata};
+use std::future::ready;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
 use phera_extension_api::{
@@ -13,6 +15,7 @@ use crate::errors::{check_path, reason, warn_false, wrapper_warning};
 use crate::handles::{FILENAME, STREAM};
 use crate::request::{bytes, canonical, directory, path};
 use crate::resource::{argument_resource, stream_arg, with_stream};
+use crate::user_wrappers::{self, UserWrapper};
 use crate::wrapper::Target;
 
 pub fn register(registry: &mut Registry) {
@@ -46,6 +49,7 @@ pub fn register(registry: &mut Registry) {
         FunctionEntry::sync("clearstatcache", CACHE, crate::user_stat::clear),
         FunctionEntry::sync("realpath", PATH, realpath),
         FunctionEntry::sync("disk_free_space", DIRECTORY, disk_free_space),
+        FunctionEntry::sync("diskfreespace", DIRECTORY, diskfreespace),
         FunctionEntry::sync("disk_total_space", DIRECTORY, disk_total_space),
     ] {
         registry.function(entry);
@@ -62,6 +66,11 @@ pub(crate) enum Query {
     Stat,
     LinkStat,
     Field(StatField),
+}
+
+enum StatPath {
+    Ready(NativeResult),
+    Wrapper(UserWrapper),
 }
 
 impl Query {
@@ -82,10 +91,20 @@ impl Query {
         args: Vec<Value>,
         function: &'static str,
     ) -> LocalFuture<'a, NativeResult> {
-        Box::pin(async move {
-            self.path_async(context, args::bytes(&args, 0), function, false)
+        match self.local_path(context, args::bytes(&args, 0), function, false) {
+            StatPath::Ready(result) => Box::pin(ready(result)),
+            StatPath::Wrapper(wrapper) => Box::pin(async move {
+                crate::user_stat::url_stat(
+                    context,
+                    wrapper,
+                    args::bytes(&args, 0),
+                    function,
+                    self,
+                    false,
+                )
                 .await
-        })
+            }),
+        }
     }
 
     pub(crate) async fn path_async(
@@ -95,18 +114,36 @@ impl Query {
         function: &str,
         throws: bool,
     ) -> NativeResult {
-        if !name.is_empty() && !name.contains(&0) {
-            if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
-                return crate::user_stat::url_stat(context, wrapper, name, function, self, throws)
-                    .await;
-            }
-            if matches!(Target::parse(name), Target::File(_))
-                && crate::user_wrappers::file_disabled(context)
-            {
-                return self.failed(context, name, function, throws);
+        match self.local_path(context, name, function, throws) {
+            StatPath::Ready(result) => result,
+            StatPath::Wrapper(wrapper) => {
+                crate::user_stat::url_stat(context, wrapper, name, function, self, throws).await
             }
         }
-        self.path(context, name, function, throws)
+    }
+
+    /// Built-in paths finish here. A user wrapper needs an asynchronous PHP call.
+    fn local_path(
+        self,
+        context: &mut dyn Context,
+        name: &[u8],
+        function: &str,
+        throws: bool,
+    ) -> StatPath {
+        let Some(target) = self.target(context, name, function) else {
+            return StatPath::Ready(Ok(Value::Bool(false)));
+        };
+        if !matches!(target, Target::RemoteFile)
+            && let Some(wrappers) = user_wrappers::active(context)
+        {
+            if let Some(wrapper) = wrappers.locate(name) {
+                return StatPath::Wrapper(wrapper);
+            }
+            if matches!(target, Target::File(_)) && wrappers.get(b"file").is_none() {
+                return StatPath::Ready(self.failed(context, name, function, throws));
+            }
+        }
+        StatPath::Ready(self.builtin_path(context, target, name, function, throws))
     }
 
     pub(crate) fn path(
@@ -116,17 +153,40 @@ impl Query {
         function: &str,
         throws: bool,
     ) -> NativeResult {
-        if name.is_empty() {
+        let Some(target) = self.target(context, name, function) else {
             return Ok(Value::Bool(false));
+        };
+        self.builtin_path(context, target, name, function, throws)
+    }
+
+    fn target<'a>(
+        self,
+        context: &mut dyn Context,
+        name: &'a [u8],
+        function: &str,
+    ) -> Option<Target<'a>> {
+        if name.is_empty() {
+            return None;
         }
         // Unlike the path-typed APIs, PHP's stat family parses an ordinary string.
         if name.contains(&0) {
             if !self.quiet() {
                 context.warning(format!("{function}(): Filename contains null byte"));
             }
-            return Ok(Value::Bool(false));
+            return None;
         }
-        let file = match Target::parse(name) {
+        Some(Target::parse(name))
+    }
+
+    fn builtin_path(
+        self,
+        context: &mut dyn Context,
+        target: Target<'_>,
+        name: &[u8],
+        function: &str,
+        throws: bool,
+    ) -> NativeResult {
+        let file = match target {
             Target::File(file) => Some(file),
             Target::Unavailable(scheme) => {
                 wrapper_warning(context, function, scheme);
@@ -134,10 +194,16 @@ impl Query {
             }
             _ => None,
         };
-        let resolved = file.and_then(|file| directory(context).resolve(path(file)).ok());
+        let resolved = file.map(path).and_then(|file| {
+            if file.is_absolute() {
+                Some(Cow::Borrowed(file))
+            } else {
+                directory(context).resolve(file).ok().map(Cow::Owned)
+            }
+        });
         if let Some(path) = resolved {
             if let Self::Access(mode) = self {
-                return Ok(Value::Bool(access(path, mode).is_ok()));
+                return Ok(Value::Bool(access(path.as_ref(), mode).is_ok()));
             }
             let metadata = if self.follow() {
                 fs::metadata(path)
@@ -179,7 +245,16 @@ impl Query {
             Self::IsDirectory => Value::Bool(meta.is_dir()),
             Self::IsLink => Value::Bool(meta.is_symlink()),
             Self::Type => Value::from(file_type(meta.file_type())),
-            Self::Field(field) => Value::Int(metadata_fields(meta)[field as usize]),
+            Self::Field(field) => Value::Int(match field {
+                StatField::Inode => meta.ino() as i64,
+                StatField::Mode => i64::from(meta.mode()),
+                StatField::Uid => i64::from(meta.uid()),
+                StatField::Gid => i64::from(meta.gid()),
+                StatField::Size => meta.len() as i64,
+                StatField::Atime => meta.atime(),
+                StatField::Mtime => meta.mtime(),
+                StatField::Ctime => meta.ctime(),
+            }),
             Self::Stat | Self::LinkStat => return stat_array(metadata_fields(meta)),
             Self::Access(_) => Value::Bool(true),
         })
@@ -293,10 +368,7 @@ pub(crate) const STAT_NAMES: [&str; 13] = [
 ];
 
 pub(crate) fn stat_array(fields: [i64; 13]) -> NativeResult {
-    let mut result = PhpArray::new();
-    for value in fields {
-        result.push(Value::Int(value))?;
-    }
+    let mut result = PhpArray::from_values(fields.map(Value::Int), fields.len());
     for (name, value) in STAT_NAMES.into_iter().zip(fields) {
         result.insert(ArrayKey::str(name), Value::Int(value));
     }
@@ -352,6 +424,9 @@ pub(crate) fn real_path(context: &mut dyn Context, name: &[u8]) -> Value {
 
 fn disk_free_space(context: &mut dyn Context, args: &[Value]) -> NativeResult {
     disk_space(context, args, "disk_free_space", |stats| stats.f_bavail)
+}
+fn diskfreespace(context: &mut dyn Context, args: &[Value]) -> NativeResult {
+    disk_space(context, args, "diskfreespace", |stats| stats.f_bavail)
 }
 fn disk_total_space(context: &mut dyn Context, args: &[Value]) -> NativeResult {
     disk_space(context, args, "disk_total_space", |stats| stats.f_blocks)

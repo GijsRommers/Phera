@@ -24,9 +24,17 @@ impl Vm {
             self.prepare_call_with_trace(name, &[], arguments)?;
             let mut result = PhpArray::new();
             for case in &info.names {
-                result.push(
-                    self.run_initializer(InitializerTask::Case(case_lookup(class, case)?))?,
-                )?;
+                let stored = class
+                    .constants
+                    .get(case)
+                    .and_then(|constant| self.ready_constant_value(&constant.initializer));
+                let object = match stored {
+                    Some(object) => object,
+                    None => {
+                        self.run_initializer(InitializerTask::Case(case_lookup(class, case)?))?
+                    }
+                };
+                result.push(object)?;
             }
             return Ok(Value::Array(Rc::new(result)));
         }
@@ -49,10 +57,13 @@ impl Vm {
         let key = match (backing, argument) {
             (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(*number),
             (EnumBacking::String, Value::Int(number)) => ArrayKey::str(number.to_string()),
+            (EnumBacking::String, Value::InternedStr(string)) => ArrayKey::Interned(string),
             (EnumBacking::String, Value::String(string)) => ArrayKey::String(string.clone()),
             _ => return Err(internal_error!("enum backing conversion")),
         };
-        self.run_initializer(InitializerTask::ValidateEnum(class.clone()))?;
+        if self.needs_enum_backing(class) {
+            self.run_initializer(InitializerTask::ValidateEnum(class.clone()))?;
+        }
         if let Some(value) = self.backed_enum_case(class, &key) {
             return Ok(value);
         }
@@ -61,9 +72,10 @@ impl Vm {
         }
         let value = match key {
             ArrayKey::Int(number) => number.to_string(),
-            ArrayKey::String(string) => {
-                let bytes = string
-                    .as_bytes()
+            ArrayKey::Interned(_) | ArrayKey::String(_) => {
+                let bytes = key
+                    .as_str_bytes()
+                    .expect("checked string key")
                     .split(|byte| *byte == 0)
                     .next()
                     .unwrap_or_default();

@@ -14,17 +14,17 @@
 //! [`LoopExit::Slow`]; the VM runs that one instruction through
 //! `Vm::execute` and starts the loop again where the frame now is.
 
-use phera_bytecode::{BinaryOp, Instruction, Reg};
+use phera_bytecode::{BinaryOp, Instruction, Reg, Target};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
 use crate::Vm;
 use crate::calls::call_stack::CallStack;
 use crate::calls::frame::Frame;
-use crate::calls::registers::Registers;
+use crate::calls::registers::{Registers, WINDOW};
 use crate::classes::ClassTable;
 use crate::code_table::CodeTable;
-use crate::fast::{ScalarStep, array_index_step, scalar_step};
+use crate::fast::{ScalarStep, array_index_step, assign_literal, scalar_step};
 
 /// How many loop rounds or calls a script may run before it lets other tasks
 /// on the same thread have a turn.
@@ -56,6 +56,20 @@ pub(crate) enum BatchExit {
         dst: Reg,
         lhs: Reg,
         rhs: Reg,
+    },
+    /// A compare-and-branch with an undefined operand: warn, then decide.
+    UndefinedBinaryBranch {
+        op: BinaryOp,
+        lhs: Reg,
+        rhs: Reg,
+        target: Target,
+        when: bool,
+    },
+    /// A pending string comparison whose result decides a branch.
+    CompareBranch {
+        pending: crate::string_comparison::PendingComparison,
+        target: Target,
+        when: bool,
     },
     /// The frame that native code called has returned this value.
     Returned(Value),
@@ -271,11 +285,16 @@ impl Machine<'_> {
             ip: frame.ip(),
         };
         let mut instructions = self.code.instructions(frame.function);
+        // Whether the frame's registers fit a window (see
+        // `registers::WINDOW`): decided when the frame is entered, not per
+        // instruction.
+        let mut windowed = self.windowed(frame);
         loop {
-            let instruction = match self.run_simple::<GUARDED>(instructions, &mut position) {
-                Ok(instruction) => instruction,
-                Err(exit) => return exit,
-            };
+            let instruction =
+                match self.run_simple::<GUARDED>(instructions, &mut position, windowed) {
+                    Ok(instruction) => instruction,
+                    Err(exit) => return exit,
+                };
             match self.step::<GUARDED>(instruction, position) {
                 Step::Done(ip) => {
                     // In the guarded loop a step may have let go of the
@@ -296,10 +315,11 @@ impl Machine<'_> {
                     }
                     position = next;
                     instructions = self.code.instructions(next.frame.function);
+                    windowed = self.windowed(next.frame);
                 }
                 Step::Slow => {
                     self.publish(position.ip);
-                    return LoopExit::Slow(instruction);
+                    return LoopExit::Slow(*instruction);
                 }
                 Step::Yield => return LoopExit::Yield,
             }
@@ -307,15 +327,32 @@ impl Machine<'_> {
     }
 
     /// Run simple instructions of one frame with its registers borrowed and
-    /// the counters in locals, until one is not simple. Returns that one,
-    /// with `position` just past it.
+    /// the counters in locals, until one is not simple. Lend that instruction
+    /// to `step`, with `position` just past it. Reading its operands from
+    /// the code slice avoids copying the instruction at each scalar exit.
     #[inline(always)]
-    fn run_simple<const GUARDED: bool>(
+    fn run_simple<'code, const GUARDED: bool>(
         &mut self,
-        instructions: &[Instruction],
+        instructions: &'code [Instruction],
         position: &mut Position,
-    ) -> Result<Instruction, LoopExit> {
-        let slots = self.registers.tail_mut(position.frame.base());
+        windowed: bool,
+    ) -> Result<&'code Instruction, LoopExit> {
+        // Code with more registers than a window runs on the checked tail
+        // of the register file, one instruction at a time, through `step`
+        // and the VM (see `registers::WINDOW`).
+        if !windowed {
+            return match instructions.get(position.ip) {
+                Some(instruction) => {
+                    position.ip += 1;
+                    self.executed += 1;
+                    Ok(instruction)
+                }
+                None => Err(LoopExit::Invalid),
+            };
+        }
+        let Some(slots) = self.registers.window_at(position.frame.base()) else {
+            return Err(LoopExit::Invalid);
+        };
         let mut ip = position.ip;
         let mut executed = 0;
         let mut work = self.work;
@@ -326,17 +363,17 @@ impl Machine<'_> {
             let previous = ip;
             ip += 1;
             executed += 1;
-            let step = match scalar_step::<GUARDED>(instruction, slots, &mut ip) {
+            let step = match scalar_step::<GUARDED, _>(instruction, slots, &mut ip) {
                 ScalarStep::Fallback => match *instruction {
                     Instruction::FetchIndex {
                         dst, base, index, ..
-                    } => array_index_step::<GUARDED>(dst, base, index, slots),
+                    } => array_index_step::<GUARDED, _>(dst, base, index, slots),
                     _ => ScalarStep::Fallback,
                 },
                 complete => complete,
             };
             if step == ScalarStep::Fallback {
-                break Ok(*instruction);
+                break Ok(instruction);
             }
             // Only the guarded loop's writes answer `Released`: freeing what
             // a register held may have queued a destructor.
@@ -362,10 +399,15 @@ impl Machine<'_> {
         result
     }
 
-    /// The instructions that are not simple but need only the borrowed
-    /// state: `foreach` over a snapshot, direct calls and plain returns.
-    #[inline(always)]
-    fn step<const GUARDED: bool>(&mut self, instruction: Instruction, position: Position) -> Step {
+    /// The arms of [`Machine::step`] that the routes rarely run: kept out of
+    /// its line, so that `step`, which `run` inlines, stays small (see the
+    /// rule for `step`'s arms in `LOOP-PLAN.md`).
+    #[inline(never)]
+    fn cold_step<const GUARDED: bool>(
+        &mut self,
+        instruction: Instruction,
+        position: Position,
+    ) -> Step {
         let base = position.frame.base();
         let mut ip = position.ip;
         match instruction {
@@ -406,6 +448,87 @@ impl Machine<'_> {
             Instruction::AppendLocal { local, src } => {
                 self.write_native_dimension(position, local, None, src)
             }
+            Instruction::InitStaticCall {
+                class,
+                method,
+                binding,
+            } => self.prepare_static(position, (class, method), binding),
+            Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
+            Instruction::New { class } => self.new_object::<GUARDED>(position, class),
+            Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
+            Instruction::GuardBuiltin { .. } => self.builtin_guard(position),
+            _ => Step::Slow,
+        }
+    }
+
+    /// `AssignConst` and `SendConst`: a literal of the file assigned or sent
+    /// where it is read. Out of line: inlined, these two arms grew `step`
+    /// enough to raise the routes (`LOOP-PLAN.md`, the bisect of
+    /// 2026-11-22).
+    #[inline(never)]
+    fn literal_step<const GUARDED: bool>(
+        &mut self,
+        instruction: Instruction,
+        position: Position,
+    ) -> Step {
+        let base = position.frame.base();
+        match instruction {
+            Instruction::AssignConst { local, constant } => {
+                let literal = self
+                    .code
+                    .cache(position.frame.function)
+                    .constants
+                    .get(constant.index());
+                match literal {
+                    Some(literal) => {
+                        let slots = self.registers.tail_mut(base);
+                        match assign_literal::<GUARDED, _>(slots, local, literal) {
+                            ScalarStep::Fallback => Step::Slow,
+                            _ => Step::Done(position.ip),
+                        }
+                    }
+                    None => Step::Slow,
+                }
+            }
+            Instruction::SendConst { constant } => {
+                match self
+                    .code
+                    .cache(position.frame.function)
+                    .constants
+                    .get(constant.index())
+                {
+                    Some(literal) => match self.send_owned(position, literal.clone()) {
+                        Ok(step) => step,
+                        Err(_) => Step::Slow,
+                    },
+                    None => Step::Slow,
+                }
+            }
+            _ => Step::Slow,
+        }
+    }
+
+    /// Whether `frame`'s code fits a register window.
+    #[inline(always)]
+    fn windowed(&self, frame: Frame) -> bool {
+        self.code.facts(frame.function).registers as usize <= WINDOW
+    }
+
+    /// The instructions that are not simple but need only the borrowed
+    /// state: `foreach` over a snapshot, direct calls and plain returns.
+    #[inline(always)]
+    fn step<const GUARDED: bool>(&mut self, instruction: &Instruction, position: Position) -> Step {
+        let base = position.frame.base();
+        match *instruction {
+            // Rare on the routes: out of `step`'s line (see `cold_step`).
+            Instruction::IterNext { .. }
+            | Instruction::IterNextKeyed { .. }
+            | Instruction::AppendLocal { .. }
+            | Instruction::InitStaticCall { .. }
+            | Instruction::CheckType { .. }
+            | Instruction::New { .. }
+            | Instruction::InitDynamicCall { .. }
+            | Instruction::GuardBuiltin { .. } => self.cold_step::<GUARDED>(*instruction, position),
             Instruction::CallDirect {
                 function,
                 args,
@@ -416,12 +539,33 @@ impl Machine<'_> {
             Instruction::InitMethodCall { receiver, method } => {
                 self.prepare_method(position, receiver, method)
             }
-            Instruction::InitStaticCall {
-                class,
-                method,
-                binding,
-            } => self.prepare_static(position, (class, method), binding),
-            Instruction::SendValue { src } => self.send(position, src),
+            Instruction::CallMethod { site, dst, .. } => self.call_method(position, site, dst),
+            Instruction::SendValue { src, .. } => self.send(position, src),
+            // A temporary read once: moved into the callee's window. A
+            // reference, or a call on the general path, gets it back.
+            Instruction::SendTake { src, .. } => {
+                let slot = base + src.index();
+                match self.registers.take_defined(slot) {
+                    Some(value) if !matches!(value, Value::Reference(_)) => {
+                        match self.send_owned(position, value) {
+                            Ok(step) => step,
+                            Err(value) => {
+                                self.registers.put(slot, value);
+                                Step::Slow
+                            }
+                        }
+                    }
+                    other => {
+                        if let Some(value) = other {
+                            self.registers.put(slot, value);
+                        }
+                        Step::Slow
+                    }
+                }
+            }
+            Instruction::AssignConst { .. } | Instruction::SendConst { .. } => {
+                self.literal_step::<GUARDED>(*instruction, position)
+            }
             Instruction::SendLocal { local } => match self.send(position, local) {
                 Step::Slow => self.send_reference(position, local),
                 done => done,
@@ -430,10 +574,7 @@ impl Machine<'_> {
                 self.receive_default(position, param, passed)
             }
             Instruction::LoadConst { dst, constant } => self.load_constant(position, dst, constant),
-            Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
             Instruction::Call { dst, .. } => self.enter_prepared(position, dst),
-            Instruction::New { class } => self.new_object::<GUARDED>(position, class),
-            Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
             Instruction::FetchThis { dst } | Instruction::ThisOrNull { dst } => {
                 self.fetch_this(position, dst)
             }
@@ -442,6 +583,10 @@ impl Machine<'_> {
             // Listed, so that the instructions further_step never takes do
             // not pay for a call to it on their way to the VM.
             Instruction::Binary { .. }
+            | Instruction::BinaryBranch { .. }
+            | Instruction::BinaryBranchIf { .. }
+            | Instruction::BinaryIntBranch { .. }
+            | Instruction::BinaryIntBranchIf { .. }
             | Instruction::Unary { .. }
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
@@ -455,11 +600,13 @@ impl Machine<'_> {
             | Instruction::InitCall { .. }
             | Instruction::FetchClassName { .. }
             | Instruction::InstanceOf { .. }
+            | Instruction::InstanceOfBranch { .. }
+            | Instruction::InstanceOfBranchIf { .. }
             | Instruction::SendPath { .. }
             | Instruction::IterStart { .. }
             | Instruction::IterEnd { .. }
             | Instruction::FetchNamedClassConstant { .. } => {
-                self.further_step::<GUARDED>(instruction, position)
+                self.further_step::<GUARDED>(*instruction, position)
             }
             _ => Step::Slow,
         }

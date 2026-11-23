@@ -21,6 +21,9 @@ impl Instruction {
                 *name = mapping(*name);
                 *scratch = mapping(*scratch);
             }
+            if let crate::ir::PlaceScope::NamedStaticProperty { scratch, .. } = &mut target.scope {
+                *scratch = mapping(*scratch);
+            }
             for step in &mut target.path {
                 if let crate::ir::PathStep::Index(register)
                 | crate::ir::PathStep::DynamicProperty(register) = step
@@ -202,6 +205,11 @@ impl Instruction {
                 source: src,
                 ..
             }
+            | Instruction::NamespacedBuiltin {
+                destination: dst,
+                source: src,
+                ..
+            }
             | Instruction::InLiteralArray {
                 destination: dst,
                 needle: src,
@@ -271,8 +279,19 @@ impl Instruction {
             }
             Instruction::Branch { value, .. }
             | Instruction::BranchNull { value, .. }
+            | Instruction::BranchNotNull { value, .. }
             | Instruction::Define { source: value, .. }
             | Instruction::Global { local: value, .. } => *value = map(*value),
+            Instruction::BranchCompare { left, right, .. } => {
+                *left = map(*left);
+                *right = map(*right)
+            }
+            Instruction::BranchCompareInt { left, .. } => *left = map(*left),
+            Instruction::BranchInstanceOf { source, .. } => *source = map(*source),
+            Instruction::BranchDynamicInstanceOf { source, class, .. } => {
+                *source = map(*source);
+                *class = map(*class)
+            }
             Instruction::Call {
                 destination: dst,
                 name,
@@ -324,6 +343,7 @@ impl Instruction {
             Instruction::MatchError { subject } => *subject = map(*subject),
             Instruction::Nop
             | Instruction::Jump(_)
+            | Instruction::GuardBuiltin { .. }
             | Instruction::Suppress(_)
             | Instruction::Declare(_)
             | Instruction::ReturnMissing => {}

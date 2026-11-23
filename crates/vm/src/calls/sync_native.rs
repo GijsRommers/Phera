@@ -103,13 +103,20 @@ impl Vm {
             .ok_or_else(|| internal_error!("native call frame"))?;
         let base = frame.base() + args.index();
         let count = usize::from(count);
-        let link = self
-            .code
-            .cache(frame.function)
+        let cache = self.code.cache(frame.function);
+        let mut link = cache
             .direct_natives
             .get()
             .and_then(|links| links.get(symbol.index()))
             .and_then(std::cell::Cell::get);
+        if link.is_none() && cache.direct_natives.get().is_none() {
+            // The first native call of this file in this request: take the
+            // links the snapshot made.
+            link = cache
+                .direct_native_cells()
+                .get(symbol.index())
+                .and_then(std::cell::Cell::get);
+        }
         let values = self.registers.window(base, count);
         if let Some(link) = link
             && count >= link.min
@@ -159,11 +166,7 @@ impl Vm {
             && let Some(frame) = self.call_stack.current()
         {
             let cache = self.code.cache(frame.function);
-            let links = cache.direct_natives.get_or_init(|| {
-                (0..cache.symbols.borrow().len())
-                    .map(|_| std::cell::Cell::new(None))
-                    .collect()
-            });
+            let links = cache.direct_native_cells();
             if let Some(slot) = links.get(symbol.index())
                 && slot.get().is_none()
             {

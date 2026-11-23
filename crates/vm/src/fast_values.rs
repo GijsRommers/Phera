@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use phera_bytecode::{BinaryOp, FetchMode, Instruction, Reg, Target, UnaryOp};
-use phera_value::{ArrayKey, Diagnostics, PhpArray, Value, to_bool};
+use phera_value::{Diagnostics, PhpArray, Value, to_bool};
 
 use crate::fast::{ScalarStep, store};
 
@@ -53,9 +53,57 @@ pub(crate) fn value_step<const GUARDED: bool>(
             };
             let result = quiet_binary(op, &left.deref(), &right.deref());
             match result {
-                Some(value) => store::<GUARDED>(slots, dst, value),
+                Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
+        }
+        Instruction::BinaryBranch {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => {
+            let (Some(Some(left)), Some(Some(right))) =
+                (slots.get(lhs.index()), slots.get(rhs.index()))
+            else {
+                return ScalarStep::Fallback;
+            };
+            branch_on_binary::<false>(op, &left.deref(), &right.deref(), target, ip)
+        }
+        Instruction::BinaryBranchIf {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => {
+            let (Some(Some(left)), Some(Some(right))) =
+                (slots.get(lhs.index()), slots.get(rhs.index()))
+            else {
+                return ScalarStep::Fallback;
+            };
+            branch_on_binary::<true>(op, &left.deref(), &right.deref(), target, ip)
+        }
+        Instruction::BinaryIntBranch {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => {
+            let Some(Some(left)) = slots.get(lhs.index()) else {
+                return ScalarStep::Fallback;
+            };
+            branch_on_binary::<false>(op, &left.deref(), &Value::Int(i64::from(rhs)), target, ip)
+        }
+        Instruction::BinaryIntBranchIf {
+            op,
+            lhs,
+            rhs,
+            target,
+        } => {
+            let Some(Some(left)) = slots.get(lhs.index()) else {
+                return ScalarStep::Fallback;
+            };
+            branch_on_binary::<true>(op, &left.deref(), &Value::Int(i64::from(rhs)), target, ip)
         }
         Instruction::Unary { op, dst, src } => {
             let Some(Some(value)) = slots.get(src.index()) else {
@@ -63,7 +111,7 @@ pub(crate) fn value_step<const GUARDED: bool>(
             };
             let result = quiet_unary(op, &value.deref());
             match result {
-                Some(value) => store::<GUARDED>(slots, dst, value),
+                Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -72,7 +120,7 @@ pub(crate) fn value_step<const GUARDED: bool>(
             jump_on_null(slots, value, target, false, ip)
         }
         Instruction::NewArray { dst, .. } => {
-            store::<GUARDED>(slots, dst, Value::Array(Rc::new(PhpArray::new())))
+            store::<GUARDED, _>(slots, dst, Value::Array(Rc::new(PhpArray::new())))
         }
         Instruction::FetchIndex {
             dst,
@@ -83,7 +131,7 @@ pub(crate) fn value_step<const GUARDED: bool>(
         } => {
             let element = array_element(slots, base, index, mode);
             match element {
-                Some(value) => store::<GUARDED>(slots, dst, value),
+                Some(value) => store::<GUARDED, _>(slots, dst, value),
                 None => ScalarStep::Fallback,
             }
         }
@@ -91,9 +139,10 @@ pub(crate) fn value_step<const GUARDED: bool>(
     }
 }
 
-/// `JumpIfNull` (`when_null`) or `JumpIfNotNull`. An unset register reads
-/// as null without a warning, as in the general handler: these follow a
-/// quiet read (`??`, `?->`).
+/// `JumpIfNull` (`when_null`) or `JumpIfNotNull`. An unset register falls
+/// back: the general handler reads it as null, warning when it is a named
+/// local, as in PHP for `$undef === null` (a `??` always tests a register a
+/// quiet read filled).
 #[inline(always)]
 fn jump_on_null(
     slots: &[Option<Value>],
@@ -102,10 +151,10 @@ fn jump_on_null(
     when_null: bool,
     ip: &mut usize,
 ) -> ScalarStep {
-    let Some(slot) = slots.get(register.index()) else {
+    let Some(Some(value)) = slots.get(register.index()) else {
         return ScalarStep::Fallback;
     };
-    let is_null = slot.as_ref().is_none_or(|value| value.deref().is_null());
+    let is_null = value.deref().is_null();
     if is_null == when_null {
         *ip = target.index();
     }
@@ -125,17 +174,27 @@ fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode
         FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty => true,
         FetchMode::Destructure => return None,
     };
-    let key = match slots.get(index.index())? {
-        Some(Value::Int(integer)) => ArrayKey::Int(*integer),
-        Some(Value::String(string)) => ArrayKey::from_string(string.clone()),
-        _ => return None,
-    };
+    let key = slots.get(index.index())?.as_ref()?;
+    if !matches!(
+        key,
+        Value::Int(_) | Value::InternedStr(_) | Value::String(_)
+    ) {
+        return None;
+    }
     match slots.get(base.index())? {
-        Some(Value::Array(array)) => match array.get(&key) {
-            Some(value) => Some(value.deref().clone()),
-            None if quiet => Some(Value::Null),
-            None => None,
-        },
+        Some(Value::Array(array)) => {
+            let found = match key {
+                Value::Int(integer) => array.get_int(*integer),
+                Value::InternedStr(string) => array.get_interned(string),
+                Value::String(string) => array.get_str(string),
+                _ => unreachable!("checked above"),
+            };
+            match found {
+                Some(value) => Some(value.deref().clone()),
+                None if quiet => Some(Value::Null),
+                None => None,
+            }
+        }
         None | Some(Value::Null) if quiet => Some(Value::Null),
         _ => None,
     }
@@ -146,7 +205,12 @@ fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode
 fn is_plain(value: &Value) -> bool {
     matches!(
         value,
-        Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_)
+        Value::Null
+            | Value::Bool(_)
+            | Value::Int(_)
+            | Value::Float(_)
+            | Value::InternedStr(_)
+            | Value::String(_)
     )
 }
 
@@ -206,5 +270,25 @@ impl Diagnostics for Silent {
 
     fn deprecated(&mut self, _message: String) {
         self.raised.set(true);
+    }
+}
+
+/// Run a comparison in the value tier and jump when its truthiness equals WHEN.
+#[inline(always)]
+fn branch_on_binary<const WHEN: bool>(
+    op: BinaryOp,
+    left: &Value,
+    right: &Value,
+    target: Target,
+    ip: &mut usize,
+) -> ScalarStep {
+    match quiet_binary(op, left, right) {
+        Some(value) => {
+            if to_bool(&value) == WHEN {
+                *ip = target.index();
+            }
+            ScalarStep::Complete
+        }
+        None => ScalarStep::Fallback,
     }
 }

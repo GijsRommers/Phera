@@ -28,7 +28,7 @@ pub fn next(
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        let name = args::string(&args, 0).map(phera_extension_api::PhpString::to_string_lossy);
+        let name = args::string(&args, 0).map(phera_extension_api::StrRef::to_string_lossy);
         step(context, this, name.as_deref(), false).await
     })
 }

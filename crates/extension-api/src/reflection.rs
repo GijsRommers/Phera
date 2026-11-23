@@ -31,6 +31,7 @@ pub enum ReflectedClassKind {
 pub struct ClassInfo {
     pub id: u32,
     pub name: String,
+    pub name_value: Value,
     pub kind: ReflectedClassKind,
     pub source: Option<SourceInfo>,
     pub extension: Option<String>,
@@ -99,6 +100,57 @@ pub struct MemberInfo {
     /// For a method in a class's member list, where the VM keeps its
     /// reflected function (see [`FunctionTarget::Member`]).
     pub method: Option<MethodHandle>,
+    /// For a plain instance property (no hooks, not virtual), where an
+    /// object keeps it, for the direct methods of `ReflectionProperty`.
+    pub slot_access: Option<SlotAccess>,
+}
+
+/// An instance property in an object's slots (see
+/// `phera_value::Properties`): its key and slot, and the types a write may
+/// store as they are.
+///
+/// The slot is the same in the declaring class and in every class that
+/// extends it, because a layout lists the parent's properties first. So a
+/// direct method checks only that the object's layout has this key there:
+/// any other object (of an unrelated class, or with a lazy or native
+/// table) gets the general path.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlotAccess {
+    pub key: crate::ArrayKey,
+    pub slot: usize,
+    /// `None` when a write must take the general path: a readonly
+    /// property, or a type that names a class.
+    pub writes: Option<phera_bytecode::TypeMask>,
+}
+
+impl SlotAccess {
+    /// The property's value in `properties`, or `None` when it has none:
+    /// `None` outside when the properties do not keep it in this slot.
+    pub fn read<'a>(&self, properties: &'a crate::value::Properties) -> Option<Option<&'a Value>> {
+        (properties.slot_for(&self.key, Some(self.slot)) == Some(self.slot))
+            .then(|| properties.slot(self.slot))
+    }
+
+    /// Whether a write may store `value` as it is: a type the declaration
+    /// accepts without a conversion, and not a PHP reference.
+    pub fn accepts(&self, value: &Value) -> bool {
+        use phera_bytecode::TypeMask;
+        let Some(mask) = self.writes else {
+            return false;
+        };
+        let own = match value {
+            Value::Null => TypeMask::NULL,
+            Value::Bool(true) => TypeMask::TRUE,
+            Value::Bool(false) => TypeMask::FALSE,
+            Value::Int(_) => TypeMask::INT,
+            Value::Float(_) => TypeMask::FLOAT,
+            Value::InternedStr(_) | Value::String(_) => TypeMask::STRING,
+            Value::Array(_) => TypeMask::ARRAY,
+            Value::Object(_) => TypeMask::OBJECT,
+            _ => return false,
+        };
+        mask.intersects(own)
+    }
 }
 
 /// A method by its place in the member list of a linked class: the class's
@@ -212,11 +264,17 @@ pub trait ReflectionContext {
         value: Value,
     ) -> NativeResult;
 
+    /// Finds a loaded class, as in `new ReflectionClass(Service::class)`.
+    fn reflect_loaded_class(&mut self, name: &str) -> Option<Rc<ClassInfo>>;
+
+    /// Finds the class carried by an object, as in `new ReflectionClass($object)`.
+    fn reflect_object_class(&mut self, object: &Object) -> Option<Rc<ClassInfo>>;
+
     /// Loads a class by name, with PHP autoloading.
-    fn reflect_class(
-        &mut self,
-        name: &str,
-    ) -> LocalFuture<'_, Result<Rc<ClassInfo>, crate::NativeError>>;
+    fn reflect_class<'a>(
+        &'a mut self,
+        name: &'a str,
+    ) -> LocalFuture<'a, Result<Rc<ClassInfo>, crate::NativeError>>;
 
     /// Lists visible reflection members in declaration order, including non-public members.
     fn reflect_members(&mut self, class: ClassSelector<'_>, kind: MemberKind) -> Members;
@@ -357,6 +415,11 @@ pub enum FunctionTarget {
     Named(String),
     Method {
         class: String,
+        name: String,
+    },
+    /// A method selected by a constructor after the class was linked.
+    LinkedMethod {
+        class: u32,
         name: String,
     },
     /// A method of a class's member list, by its place (`getMethods()`).

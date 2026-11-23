@@ -92,6 +92,32 @@ impl Compiler<'_> {
         otherwise: &Option<Vec<ast::Statement>>,
         line: usize,
     ) -> Result<(), CompileError> {
+        // `if (cond) continue;` as the only branch: the condition branches
+        // straight to the loop's continue edge, one instruction per round
+        // instead of a branch plus two jumps. Only when a bare `continue`
+        // would compile to a bare jump: no running finally between the `if`
+        // and the loop, and the innermost context is a loop, not a switch.
+        if elseifs.is_empty()
+            && otherwise.is_none()
+            && let [only] = then
+            && let ast::StatementKind::Continue(depth) = &only.kind
+            && (*depth == 0 || *depth == 1)
+            && let Some(loop_state) = self.loops.last()
+            && !matches!(
+                loop_state.cleanup,
+                Some(crate::statements::exits::LoopCleanup::Switch(_))
+            )
+            && self
+                .finalies
+                .iter()
+                .all(|scope| scope.loop_depth < self.loops.len())
+        {
+            let patches = self.compile_condition(condition, true, line)?;
+            if let Some(loop_state) = self.loops.last_mut() {
+                loop_state.continues.extend(patches);
+            }
+            return Ok(());
+        }
         let branches =
             std::iter::once((condition, then, line)).chain(elseifs.iter().map(|elseif| {
                 (
@@ -104,22 +130,16 @@ impl Compiler<'_> {
         for (condition, body, line) in branches {
             let mark = self.mark_temporaries();
             let start = self.temporaries_start();
-            let register = self.compile_expression(condition)?;
+            let skips = self.compile_condition(condition, false, line)?;
             let temporaries = self.temporaries_since(start);
-            let skip = self.emit(
-                Instruction::Branch {
-                    value: register,
-                    target: Target(0),
-                    when: false,
-                },
-                line,
-            );
             // The condition's values are freed on both ways out, as in PHP.
             self.clear_condition_temporaries(&temporaries, line);
             self.release_temporaries(mark);
             self.block(body, DeclarationTiming::AtExecution)?;
             ends.push(self.emit(Instruction::Jump(Target(0)), line));
-            self.patch(skip, self.position());
+            for skip in &skips {
+                self.patch(*skip, self.position());
+            }
             self.clear_condition_temporaries(&temporaries, line);
         }
         if let Some(body) = otherwise {
@@ -142,16 +162,8 @@ impl Compiler<'_> {
     ) -> Result<(), CompileError> {
         let start = self.position();
         let mark = self.temporaries_start();
-        let register = self.compile_expression(condition)?;
+        let ends = self.compile_condition(condition, false, line)?;
         let condition = self.temporaries_since(mark);
-        let end = self.emit(
-            Instruction::Branch {
-                value: register,
-                target: Target(0),
-                when: false,
-            },
-            line,
-        );
         self.clear_condition_temporaries(&condition, line);
         self.loops.push(Loop {
             start: self.position(),
@@ -161,7 +173,9 @@ impl Compiler<'_> {
         });
         self.block(body, DeclarationTiming::AtExecution)?;
         self.emit(Instruction::Jump(Target(start)), line);
-        self.patch(end, self.position());
+        for end in &ends {
+            self.patch(*end, self.position());
+        }
         self.clear_condition_temporaries(&condition, line);
         self.loop_end(start);
 

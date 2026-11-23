@@ -115,7 +115,10 @@ impl OptionName {
         context: &mut dyn Context,
         value: &Value,
     ) -> Result<bool, NativeError> {
-        if !matches!(value, Value::String(_) | Value::Int(_) | Value::Bool(_)) {
+        if !matches!(
+            value,
+            Value::InternedStr(_) | Value::String(_) | Value::Int(_) | Value::Bool(_)
+        ) {
             context.warning(format!(
                 "xml_parser_set_option(): Argument #3 ($value) must be of type string|int|bool, {} given",
                 value.type_name()

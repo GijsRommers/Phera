@@ -9,51 +9,50 @@ file golden.php
 
 function {main} (10 registers, dynamic scope)
   r0 = $error
-  handler#0 = Handler { start: @0, end: @7, catch: Some(@8), finally: None, exception: r4, cleanup: [r5, r6, r7] }
-  handler#1 = Handler { start: @0, end: @18, catch: None, finally: Some(@20), exception: r3, cleanup: [r5, r6, r7] }
-  handler#2 = Handler { start: @0, end: @24, catch: Some(@25), finally: None, exception: r2, cleanup: [r3, r4, r5, r6, r7, r8] }
-  handler#3 = Handler { start: @0, end: @36, catch: None, finally: Some(@38), exception: r1, cleanup: [r3, r4, r5, r6, r7, r8] }
+  site#0 = r0->name#1([]), after @30
+  handler#0 = Handler { start: @0, end: @6, catch: Some(@7), finally: None, exception: r4, cleanup: [r5] }
+  handler#1 = Handler { start: @0, end: @16, catch: None, finally: Some(@18), exception: r3, cleanup: [r5, r7] }
+  handler#2 = Handler { start: @0, end: @22, catch: Some(@23), finally: None, exception: r2, cleanup: [r3, r4, r5, r7] }
+  handler#3 = Handler { start: @0, end: @34, catch: None, finally: Some(@36), exception: r1, cleanup: [r3, r4, r5, r7, r8] }
   0000  line 1    New { class: symbol#0 }
-  0001  line 1    LoadConst { dst: r5, constant: const#0 }
-  0002  line 1    SendValue { src: r5 }
-  0003  line 1    Call { dst: r5, result: Used }
-  0004  line 1    Throw { source: r5 }
-  0005  line 1    Clear { reg: r5 }
-  0006  line 1    Clear { reg: r6 }
-  0007  line 1    Jump { target: @18 }
-  0008  line 1    InstanceOf { dst: r5, src: r4, class: symbol#1 }
-  0009  line 1    JumpIf { condition: r5, target: @11 }
-  0010  line 1    Jump { target: @17 }
-  0011  line 1    Assign { local: r0, src: r4 }
-  0012  line 1    Clear { reg: r4 }
-  0013  line 1    LoadConst { dst: r7, constant: const#1 }
-  0014  line 1    Echo { src: r7 }
-  0015  line 1    Clear { reg: r7 }
-  0016  line 1    Jump { target: @18 }
-  0017  line 1    Throw { source: r4 }
-  0018  line 1    FinallyCall { state: r3, target: @20, reason: Fallthrough }
-  0019  line 1    Jump { target: @24 }
-  0020  line 1    LoadConst { dst: r7, constant: const#2 }
-  0021  line 1    Echo { src: r7 }
-  0022  line 1    Clear { reg: r7 }
-  0023  line 1    FinallyReturn { state: r3 }
-  0024  line 1    Jump { target: @36 }
-  0025  line 1    InstanceOf { dst: r7, src: r2, class: symbol#2 }
-  0026  line 1    JumpIf { condition: r7, target: @28 }
-  0027  line 1    Jump { target: @35 }
-  0028  line 1    Assign { local: r0, src: r2 }
-  0029  line 1    Clear { reg: r2 }
-  0030  line 1    InitMethodCall { receiver: r0, method: name#1 }
-  0031  line 1    Call { dst: r8, result: Used }
-  0032  line 1    Echo { src: r8 }
-  0033  line 1    Clear { reg: r8 }
-  0034  line 1    Jump { target: @36 }
-  0035  line 1    Throw { source: r2 }
-  0036  line 1    FinallyCall { state: r1, target: @38, reason: Fallthrough }
-  0037  line 1    Jump { target: @42 }
-  0038  line 1    LoadConst { dst: r8, constant: const#3 }
-  0039  line 1    Echo { src: r8 }
-  0040  line 1    Clear { reg: r8 }
-  0041  line 1    FinallyReturn { state: r1 }
-  0042  line 1    LoadInt { dst: r8, value: 1 }
-  0043  line 1    Return { src: r8 }
+  0001  line 1    SendConst { constant: const#0 }
+  0002  line 1    Call { dst: r5, result: Used }
+  0003  line 1    Throw { source: r5 }
+  0004  line 1    Clear { reg: r5 }
+  0005  line 1    Clear { reg: r6 }
+  0006  line 1    Jump { target: @16 }
+  0007  line 1    InstanceOf { dst: r5, src: r4, class: symbol#1 }
+  0008  line 1    JumpIf { condition: r5, target: @10 }
+  0009  line 1    Jump { target: @15 }
+  0010  line 1    AssignTake { local: r0, src: r4 }
+  0011  line 1    LoadConst { dst: r7, constant: const#1 }
+  0012  line 1    Echo { src: r7 }
+  0013  line 1    Clear { reg: r7 }
+  0014  line 1    Jump { target: @16 }
+  0015  line 1    Throw { source: r4 }
+  0016  line 1    FinallyCall { state: r3, target: @18, reason: Fallthrough }
+  0017  line 1    Jump { target: @22 }
+  0018  line 1    LoadConst { dst: r7, constant: const#2 }
+  0019  line 1    Echo { src: r7 }
+  0020  line 1    Clear { reg: r7 }
+  0021  line 1    FinallyReturn { state: r3 }
+  0022  line 1    Jump { target: @34 }
+  0023  line 1    InstanceOf { dst: r7, src: r2, class: symbol#2 }
+  0024  line 1    JumpIf { condition: r7, target: @26 }
+  0025  line 1    Jump { target: @33 }
+  0026  line 1    AssignTake { local: r0, src: r2 }
+  0027  line 1    CallMethod { site: site#0, dst: r8, result: Used }
+  0028  line 1    InitMethodCall { receiver: r0, method: name#1 }
+  0029  line 1    Call { dst: r8, result: Used }
+  0030  line 1    Echo { src: r8 }
+  0031  line 1    Clear { reg: r8 }
+  0032  line 1    Jump { target: @34 }
+  0033  line 1    Throw { source: r2 }
+  0034  line 1    FinallyCall { state: r1, target: @36, reason: Fallthrough }
+  0035  line 1    Jump { target: @40 }
+  0036  line 1    LoadConst { dst: r8, constant: const#3 }
+  0037  line 1    Echo { src: r8 }
+  0038  line 1    Clear { reg: r8 }
+  0039  line 1    FinallyReturn { state: r1 }
+  0040  line 1    LoadInt { dst: r8, value: 1 }
+  0041  line 1    Return { src: r8 }

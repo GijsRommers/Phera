@@ -359,17 +359,28 @@ impl Machine<'_> {
     /// type accepts the value as it is: write it into the window.
     #[inline(always)]
     pub(super) fn send(&mut self, position: Position, source: Reg) -> Step {
-        let Some(call) = self.stack.last_call().copied() else {
-            return Step::Slow;
-        };
-        let index = call.sent as usize;
-        let mut value = match self
+        let value = match self
             .registers
             .window(position.frame.base() + source.index(), 1)
         {
             [Some(value)] => value.deref().clone(),
             _ => return Step::Slow,
         };
+        self.send_owned(position, value).unwrap_or(Step::Slow)
+    }
+
+    /// Sends `value` as [`Self::send`] does, or gives it back untouched
+    /// when the call takes the general path.
+    #[inline(always)]
+    pub(super) fn send_owned(
+        &mut self,
+        position: Position,
+        mut value: Value,
+    ) -> Result<Step, Value> {
+        let Some(call) = self.stack.last_call().copied() else {
+            return Err(value);
+        };
+        let index = call.sent as usize;
         let accepted = match call.callee {
             PreparedCallee::Php(function) => {
                 !call.flags.contains(CallFlags::DETAILS)
@@ -384,14 +395,14 @@ impl Machine<'_> {
             PreparedCallee::Constructed => false,
         };
         if !accepted {
-            return Step::Slow;
+            return Err(value);
         }
         let Some(call) = self.stack.last_call_mut() else {
-            return Step::Slow;
+            return Err(value);
         };
         self.registers.put(call.base() + index, value);
         call.mark_sent(index, true);
-        Step::Done(position.ip)
+        Ok(Step::Done(position.ip))
     }
 
     /// The second look at an argument the first test refused, out of line:
@@ -511,9 +522,7 @@ impl Machine<'_> {
                 && self
                     .classes
                     .by_key(self.code.unit_name_key(function, *name))
-                    .is_some_and(|target| {
-                        super::fast_instance_of::derives_from(class, target) == Some(true)
-                    })
+                    .is_some_and(|target| class.derives_from(target) == Some(true))
         });
         // Remember it, as the VM's check does, so that the next value of
         // this class is the cache's first test.

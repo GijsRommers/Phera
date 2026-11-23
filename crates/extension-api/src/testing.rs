@@ -77,7 +77,7 @@ impl Context for TestContext {
 
     fn create_object(&mut self, class: &str, properties: PhpArray) -> NativeResult {
         let object = Object::new(1, Rc::new(classes::NamedClass(class.to_string())));
-        object.update(|table| *table = properties);
+        object.update(|table| table.replace_all(properties));
         Ok(Value::Object(Rc::new(object)))
     }
 

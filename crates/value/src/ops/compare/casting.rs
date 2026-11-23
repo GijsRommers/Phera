@@ -78,13 +78,19 @@ enum Side {
 impl CastPair {
     pub(super) fn from_values(left: &Value, right: &Value) -> Option<Self> {
         let (object, other, side) = match (left, right) {
-            (Value::Object(object), Value::String(string)) => (object, string, Side::Left),
-            (Value::String(string), Value::Object(object)) => (object, string, Side::Right),
+            (Value::Object(object), Value::InternedStr(string)) => {
+                (object, string.to_php_string(), Side::Left)
+            }
+            (Value::InternedStr(string), Value::Object(object)) => {
+                (object, string.to_php_string(), Side::Right)
+            }
+            (Value::Object(object), Value::String(string)) => (object, string.clone(), Side::Left),
+            (Value::String(string), Value::Object(object)) => (object, string.clone(), Side::Right),
             _ => return None,
         };
         object.class.is_instance_of("Stringable").then(|| Self {
             object: object.clone(),
-            other: other.clone(),
+            other,
             side,
         })
     }

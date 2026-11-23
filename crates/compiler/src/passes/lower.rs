@@ -223,6 +223,16 @@ impl Tables<'_> {
                 | Instruction::JumpIf { target, .. }
                 | Instruction::JumpIfNot { target, .. }
                 | Instruction::JumpIfNull { target, .. }
+                | Instruction::JumpIfNotNull { target, .. }
+                | Instruction::GuardBuiltin { call: target, .. }
+                | Instruction::BinaryIntBranch { target, .. }
+                | Instruction::BinaryIntBranchIf { target, .. }
+                | Instruction::BinaryBranch { target, .. }
+                | Instruction::BinaryBranchIf { target, .. }
+                | Instruction::InstanceOfBranch { target, .. }
+                | Instruction::InstanceOfBranchIf { target, .. }
+                | Instruction::DynamicInstanceOfBranch { target, .. }
+                | Instruction::DynamicInstanceOfBranchIf { target, .. }
                 | Instruction::IterNext { end: target, .. }
                 | Instruction::IterNextKeyed { end: target, .. } => Some(target),
                 _ => None,
@@ -296,6 +306,12 @@ impl Tables<'_> {
             // Removes the moves that became `Nop`.
             crate::passes::optimize::optimize(&mut function);
         }
+        crate::passes::clear_flow::elide(&mut function, &self.unit.constants, &self.unit.types);
+        // Last: the passes above never see `CallMethod`, whose site table
+        // reads the argument registers.
+        crate::passes::method_calls::rewrite(&mut function);
+        // Then the temporaries read once and cleared are taken.
+        crate::passes::takes::rewrite(&mut function);
         function
     }
 }

@@ -36,6 +36,7 @@ pub(crate) fn dictionary(
         return Ok(None);
     };
     match &*value.deref() {
+        Value::InternedStr(bytes) => Ok(Some(bytes.as_bytes().to_vec())),
         Value::String(bytes) => Ok(Some(bytes.as_bytes().to_vec())),
         Value::Array(values) => {
             let mut dictionary = Vec::new();

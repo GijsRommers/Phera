@@ -62,7 +62,7 @@ impl Socket {
         self.lease.get().map(|lease| lease.connection.as_ref())
     }
 
-    pub(crate) async fn connect(&self) -> io::Result<Arc<Connection>> {
+    pub async fn connect(&self) -> io::Result<Arc<Connection>> {
         let lease = self
             .lease
             .get_or_try_init(|| async {

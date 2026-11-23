@@ -1,7 +1,7 @@
 //! Zend's direct builtin forms, such as `strlen($word)` and `ord('a')`.
 //!
-//! `namespace App; strlen($word)` remains a normal call because
-//! `App\strlen` may exist when that site first executes.
+//! `namespace App; strlen($word)` may mean `App\strlen`: such a call gets a
+//! guard in front of the built-in form (see `namespaced_builtins`).
 
 use phera_ast::{Arguments, CastKind, Expression, ExpressionKind, Literal, Variable};
 use phera_bytecode::{BuiltinFrame, BuiltinUnary, CallbackArguments, FetchMode, Reg, TypeMask};
@@ -235,7 +235,7 @@ impl Compiler<'_> {
     }
 }
 
-fn builtin_unary(name: &str) -> Option<BuiltinUnary> {
+pub(super) fn builtin_unary(name: &str) -> Option<BuiltinUnary> {
     use BuiltinUnary as B;
     use TypeMask as T;
     Some(match name {

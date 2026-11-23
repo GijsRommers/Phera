@@ -37,8 +37,10 @@ mod tests;
 
 use crate::value::Value;
 pub use key::ArrayKey;
+pub(crate) use key::numeric_string_key;
 use std::fmt;
 use storage::Storage;
+pub(crate) use storage::hash_str_bytes;
 
 #[derive(Default)]
 pub struct PhpArray {

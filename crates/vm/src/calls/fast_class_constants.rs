@@ -35,7 +35,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, value) {
+        match store::<GUARDED, _>(slots, destination, value) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
@@ -50,21 +50,35 @@ impl Machine<'_> {
         let function = position.frame.function;
         let key = self.code.unit_symbol_key(function, class);
         let linked = self.classes.by_key(key)?;
-        if linked.enum_info.is_some() {
-            return None;
-        }
         let name = self.code.unit(function).names.get(name.index())?;
         let constant = linked.constants.get(name.as_str())?;
         if constant.deprecated.is_some() || constant.visibility != Visibility::Public {
             return None;
         }
         match &constant.initializer {
+            // `Suit::Hearts`, once the request has stored the case object.
+            ConstantInitializer::EnumCase {
+                slot: Some(slot), ..
+            } => match self.class_states.constant(*slot) {
+                ConstantState::Ready(value) => Some(value.clone()),
+                _ => None,
+            },
+            // A backed enum checks its cases before any of its constants is
+            // used, so its other constants are read out of line, where that
+            // check is known. A unit enum has nothing to check.
+            _ if linked
+                .enum_info
+                .as_ref()
+                .is_some_and(|info| info.backing.is_some()) =>
+            {
+                None
+            }
             ConstantInitializer::Value(value) => Some(value.clone()),
             ConstantInitializer::Compiled { slot, .. } => match self.class_states.constant(*slot) {
                 ConstantState::Ready(value) => Some(value.clone()),
                 _ => None,
             },
-            ConstantInitializer::EnumCase { .. } => None,
+            ConstantInitializer::EnumCase { slot: None, .. } => None,
         }
     }
 }

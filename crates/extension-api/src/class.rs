@@ -33,6 +33,11 @@ pub type PrepareMethod =
 /// is static.
 pub type SyncMethod = fn(&mut dyn Context, Option<&Rc<Object>>, &[Value]) -> NativeResult;
 
+/// Try an already typed positional call, for example `new ReflectionClass(Foo::class)`.
+/// Return `None` without changing the receiver or running PHP to use the ordinary
+/// handler. Only accept shapes for which the method's preparation is unnecessary.
+pub type ReadyMethod = fn(&mut dyn Context, &Rc<Object>, &[Value]) -> Option<NativeResult>;
+
 /// An optional no-context handler for a public method with plain positional arguments.
 /// A declined call leaves state untouched and is handled by the usual method.
 pub type DirectMethod = fn(&Object, &[Option<Value>]) -> Option<Value>;
@@ -104,6 +109,7 @@ pub struct MethodEntry {
     pub handler: NativeMethod,
     /// Optional argument handling before the ordinary native signature check.
     pub preparation: Option<PrepareMethod>,
+    pub ready: Option<ReadyMethod>,
     pub direct: Option<DirectMethod>,
     pub visibility: Visibility,
     pub is_static: bool,
@@ -134,6 +140,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Sync(handler),
             preparation: None,
+            ready: None,
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
@@ -156,6 +163,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Async(handler),
             preparation: None,
+            ready: None,
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
@@ -175,6 +183,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::AsyncNamed(handler),
             preparation: None,
+            ready: None,
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
@@ -191,6 +200,7 @@ impl MethodEntry {
             params,
             handler: NativeMethod::Abstract,
             preparation: None,
+            ready: None,
             direct: None,
             visibility: Visibility::Public,
             is_static: false,
@@ -212,6 +222,11 @@ impl MethodEntry {
 
     pub const fn with_direct(mut self, handler: DirectMethod) -> Self {
         self.direct = Some(handler);
+        self
+    }
+
+    pub const fn with_ready(mut self, handler: ReadyMethod) -> Self {
+        self.ready = Some(handler);
         self
     }
 
