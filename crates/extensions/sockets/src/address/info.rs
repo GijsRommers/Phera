@@ -110,10 +110,7 @@ impl Hints {
         let mut parsed = Self::default();
         if let Some(hints) = hints {
             for (key, value) in hints.iter() {
-                let name = match &key {
-                    ArrayKey::String(key) => key.as_bytes(),
-                    _ => b"",
-                };
+                let name = key.as_str_bytes().unwrap_or(b"");
                 let target = match name {
                     b"ai_family" => &mut parsed.family,
                     b"ai_socktype" => &mut parsed.kind,
@@ -127,6 +124,7 @@ impl Hints {
                 };
                 match &*value.deref() {
                     Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Null => {}
+                    Value::InternedStr(value) if is_numeric(value.as_bytes()) => {}
                     Value::String(value) if is_numeric(value.as_bytes()) => {}
                     _ => {
                         return Err(NativeError::type_error(format!(

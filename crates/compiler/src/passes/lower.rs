@@ -312,7 +312,26 @@ impl Tables<'_> {
         crate::passes::method_calls::rewrite(&mut function);
         // Then the temporaries read once and cleared are taken.
         crate::passes::takes::rewrite(&mut function);
+        use_immediate_literals(&mut function, &self.unit.constants);
         function
+    }
+}
+
+/// Embed scalars such as the `null` in `return null;` in their load instructions.
+/// Run after the takes pass so that readers can still absorb table-backed operands.
+fn use_immediate_literals(function: &mut Function, constants: &[Constant]) {
+    for instruction in function.instructions.iter_mut() {
+        let Instruction::LoadConst { dst, constant } = *instruction else {
+            continue;
+        };
+        *instruction = match constants[constant.index()] {
+            Constant::Null => Instruction::LoadNull { dst },
+            Constant::Bool(value) => Instruction::LoadBool { dst, value },
+            Constant::Int(value) if let Ok(value) = i32::try_from(value) => {
+                Instruction::LoadInt { dst, value }
+            }
+            _ => continue,
+        };
     }
 }
 

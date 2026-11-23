@@ -121,13 +121,13 @@ fn transcode(context: &mut dyn Context, values: &[Value]) -> NativeResult {
     let mut substitution = None;
     for (key, encoding) in [("from_subst", source), ("to_subst", destination)] {
         if let Some(value) = options.and_then(|options| options.get(&ArrayKey::str(key)))
-            && let Value::String(bytes) = &*value.deref()
+            && let Some(bytes) = value.deref().as_str_bytes()
         {
-            if !encoding.valid_substitution(bytes.as_bytes()) {
+            if !encoding.valid_substitution(bytes) {
                 return error::fail(context, SITE, 1, SUBSTITUTION_ERROR, Value::Bool(false));
             }
             if key == "to_subst" {
-                substitution = Some(bytes.as_bytes().to_vec());
+                substitution = Some(bytes.to_vec());
             }
         }
     }

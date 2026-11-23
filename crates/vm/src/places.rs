@@ -142,6 +142,14 @@ pub(crate) fn display_key(key: &ArrayKey) -> String {
         ArrayKey::Int(index) => index.to_string(),
         // PHP formats the key as a C string: it ends at the first NUL, which a
         // mangled property name (`"\0Class\0name"`) starts with.
+        ArrayKey::Interned(string) => {
+            let bytes = string.as_bytes();
+            let end = bytes
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(bytes.len());
+            format!("\"{}\"", String::from_utf8_lossy(&bytes[..end]))
+        }
         ArrayKey::String(string) => {
             let bytes = string.as_bytes();
             let end = bytes

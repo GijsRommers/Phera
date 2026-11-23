@@ -62,13 +62,86 @@ impl PropertyLayout {
     }
 }
 
+/// Up to four declared properties live inline inside `Properties` so small
+/// objects (DTOs, counters, enums, iterators, proxies) need no second heap
+/// allocation for their slot slice.
+const INLINE_SLOTS: usize = 4;
+
+#[derive(Clone, Default)]
+enum PropertySlots {
+    #[default]
+    Empty,
+    Inline {
+        len: u8,
+        values: [Option<Value>; INLINE_SLOTS],
+    },
+    Heap(Box<[Option<Value>]>),
+}
+
+impl PropertySlots {
+    #[inline]
+    fn from_len(len: usize) -> Self {
+        if len == 0 {
+            Self::Empty
+        } else if len <= INLINE_SLOTS {
+            Self::Inline {
+                len: len as u8,
+                values: [const { None }; INLINE_SLOTS],
+            }
+        } else {
+            Self::Heap(vec![None; len].into_boxed_slice())
+        }
+    }
+
+    fn from_boxed(slots: Box<[Option<Value>]>) -> Self {
+        if slots.is_empty() {
+            Self::Empty
+        } else if slots.len() <= INLINE_SLOTS {
+            let len = slots.len() as u8;
+            let mut values = [const { None }; INLINE_SLOTS];
+            for (dst, src) in values.iter_mut().zip(slots.into_vec()) {
+                *dst = src;
+            }
+            Self::Inline { len, values }
+        } else {
+            Self::Heap(slots)
+        }
+    }
+
+    #[inline(always)]
+    fn as_slice(&self) -> &[Option<Value>] {
+        match self {
+            Self::Empty => &[],
+            Self::Inline { len, values } => &values[..usize::from(*len)],
+            Self::Heap(slots) => slots,
+        }
+    }
+
+    #[inline(always)]
+    fn as_mut_slice(&mut self) -> &mut [Option<Value>] {
+        match self {
+            Self::Empty => &mut [],
+            Self::Inline { len, values } => &mut values[..usize::from(*len)],
+            Self::Heap(slots) => slots,
+        }
+    }
+
+    #[inline]
+    fn heap_bytes(&self) -> usize {
+        match self {
+            Self::Empty | Self::Inline { .. } => 0,
+            Self::Heap(slots) => slots.len() * std::mem::size_of::<Option<Value>>(),
+        }
+    }
+}
+
 /// The properties of one object.
 #[derive(Clone, Default)]
 pub struct Properties {
     /// The class's layout; `None` for a class without declared properties.
     layout: Option<Rc<PropertyLayout>>,
-    /// One per key of the layout.
-    slots: Box<[Option<Value>]>,
+    /// One per key of the layout (inline for up to four declared properties).
+    slots: PropertySlots,
     /// Properties the class does not declare, in insertion order; made on
     /// the first one, since most objects have none.
     others: Option<Box<PhpArray>>,
@@ -81,7 +154,7 @@ impl Properties {
         debug_assert_eq!(layout.len(), slots.len());
         Self {
             layout: Some(layout),
-            slots,
+            slots: PropertySlots::from_boxed(slots),
             others: None,
         }
     }
@@ -91,8 +164,12 @@ impl Properties {
     pub fn for_class(class: &dyn crate::object::ClassHandle) -> Self {
         match class.property_layout() {
             Some(layout) => {
-                let slots = vec![None; layout.len()].into_boxed_slice();
-                Self::with_layout(layout, slots)
+                let slots = PropertySlots::from_len(layout.len());
+                Self {
+                    layout: Some(layout),
+                    slots,
+                    others: None,
+                }
             }
             None => Self::default(),
         }
@@ -102,7 +179,7 @@ impl Properties {
     pub fn from_array(others: PhpArray) -> Self {
         Self {
             layout: None,
-            slots: Box::default(),
+            slots: PropertySlots::Empty,
             others: Some(Box::new(others)),
         }
     }
@@ -125,36 +202,36 @@ impl Properties {
     /// The value in slot `slot`, if it has one.
     #[inline]
     pub fn slot(&self, slot: usize) -> Option<&Value> {
-        self.slots.get(slot)?.as_ref()
+        self.slots.as_slice().get(slot)?.as_ref()
     }
 
     #[inline]
     pub fn slot_mut(&mut self, slot: usize) -> Option<&mut Value> {
-        self.slots.get_mut(slot)?.as_mut()
+        self.slots.as_mut_slice().get_mut(slot)?.as_mut()
     }
 
     /// Puts `value` in slot `slot` and gives what it held; `None` (with
     /// nothing written) when there is no such slot.
     #[inline]
     pub fn set_slot(&mut self, slot: usize, value: Value) -> Option<Option<Value>> {
-        let held = self.slots.get_mut(slot)?;
+        let held = self.slots.as_mut_slice().get_mut(slot)?;
         Some(held.replace(value))
     }
 
     /// Empties slot `slot` and gives what it held.
     #[inline]
     pub fn clear_slot(&mut self, slot: usize) -> Option<Value> {
-        self.slots.get_mut(slot)?.take()
+        self.slots.as_mut_slice().get_mut(slot)?.take()
     }
 
     /// The slots, in layout order.
     pub fn slots(&self) -> &[Option<Value>] {
-        &self.slots
+        self.slots.as_slice()
     }
 
     /// The slots, writable, in layout order.
     pub(crate) fn slots_mut(&mut self) -> &mut [Option<Value>] {
-        &mut self.slots
+        self.slots.as_mut_slice()
     }
 
     /// The slot of `key`, using `hint` (a slot a site or a
@@ -224,7 +301,8 @@ impl Properties {
     }
 
     pub fn len(&self) -> usize {
-        self.slots.iter().flatten().count() + self.others.as_deref().map_or(0, PhpArray::len)
+        self.slots.as_slice().iter().flatten().count()
+            + self.others.as_deref().map_or(0, PhpArray::len)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -236,14 +314,14 @@ impl Properties {
     pub fn iter(&self) -> impl Iterator<Item = (ArrayKey, &Value)> {
         let keys = self.layout.as_ref().map_or(&[][..], |layout| layout.keys());
         keys.iter()
-            .zip(self.slots.iter())
+            .zip(self.slots.as_slice().iter())
             .filter_map(|(key, value)| Some((key.clone(), value.as_ref()?)))
             .chain(self.others.as_deref().into_iter().flat_map(PhpArray::iter))
     }
 
     /// The values in PHP's order.
     pub fn values(&self) -> impl Iterator<Item = &Value> {
-        self.slots.iter().flatten().chain(
+        self.slots.as_slice().iter().flatten().chain(
             self.others
                 .as_deref()
                 .into_iter()
@@ -253,7 +331,7 @@ impl Properties {
 
     /// The memory the properties hold beyond the object itself.
     pub fn heap_bytes(&self) -> usize {
-        self.slots.len() * std::mem::size_of::<Option<Value>>()
+        self.slots.heap_bytes()
             + self.others.as_deref().map_or(0, |others| {
                 std::mem::size_of::<PhpArray>() + others.heap_bytes()
             })
@@ -262,7 +340,11 @@ impl Properties {
     /// Every value, writable, in PHP's order.
     pub fn for_each_mut(&mut self, mut visit: impl FnMut(&ArrayKey, &mut Value)) {
         if let Some(layout) = &self.layout {
-            for (key, value) in layout.keys().iter().zip(self.slots.iter_mut()) {
+            for (key, value) in layout
+                .keys()
+                .iter()
+                .zip(self.slots.as_mut_slice().iter_mut())
+            {
                 if let Some(value) = value {
                     visit(key, value);
                 }
@@ -299,10 +381,11 @@ impl Properties {
         }
         // A declared key and an undeclared one never coincide, so the keys
         // are distinct and the array is built in one go, at its size.
-        let capacity = self.slots.len() + self.others.as_deref().map_or(0, PhpArray::len);
+        let capacity =
+            self.slots.as_slice().len() + self.others.as_deref().map_or(0, PhpArray::len);
         let array = PhpArray::build_distinct(capacity, |entries| {
             if let Some(layout) = &self.layout {
-                for (key, slot) in layout.keys().iter().zip(self.slots.iter()) {
+                for (key, slot) in layout.keys().iter().zip(self.slots.as_slice().iter()) {
                     if let Some(value) = slot {
                         entries.push(key.clone(), copy_element(value));
                     }
@@ -324,9 +407,13 @@ impl Properties {
     /// keys cannot meet: `"5"` and `5` are not both properties, and `"05"`
     /// stays a string.
     fn with_integer_names(array: PhpArray) -> PhpArray {
-        let numeric = array.keys().any(|key| {
-            matches!(&key, crate::array::ArrayKey::String(name)
-                if !matches!(crate::array::ArrayKey::from_string(name.clone()), crate::array::ArrayKey::String(_)))
+        let numeric = array.keys().any(|key| match &key {
+            crate::array::ArrayKey::String(name) => !matches!(
+                crate::array::ArrayKey::from_string(name.clone()),
+                crate::array::ArrayKey::String(_)
+            ),
+            crate::array::ArrayKey::Interned(name) => name.numeric_key().is_some(),
+            crate::array::ArrayKey::Int(_) => false,
         });
         if !numeric {
             return array;
@@ -334,6 +421,10 @@ impl Properties {
         let entries = array.iter().map(|(key, value)| {
             let key = match key {
                 crate::array::ArrayKey::String(name) => crate::array::ArrayKey::from_string(name),
+                crate::array::ArrayKey::Interned(name) => match name.numeric_key() {
+                    Some(integer) => crate::array::ArrayKey::Int(integer),
+                    None => crate::array::ArrayKey::Interned(name),
+                },
                 key => key,
             };
             Ok::<_, std::convert::Infallible>((key, value.clone()))
@@ -369,14 +460,20 @@ impl Properties {
         };
         if !in_layout_order(&layout, &array) {
             self.layout = None;
-            self.slots = Box::default();
+            self.slots = PropertySlots::Empty;
             self.others = (!array.is_empty()).then(|| Box::new(array));
             return;
         }
-        self.slots.iter_mut().for_each(|slot| *slot = None);
+        self.slots
+            .as_mut_slice()
+            .iter_mut()
+            .for_each(|slot| *slot = None);
         self.others = None;
         for (key, value) in array.iter() {
-            match layout.slot(&key).and_then(|slot| self.slots.get_mut(slot)) {
+            match layout
+                .slot(&key)
+                .and_then(|slot| self.slots.as_mut_slice().get_mut(slot))
+            {
                 Some(slot) => *slot = Some(value.clone()),
                 None => {
                     self.others_or_new().insert(key, value.clone());
@@ -392,14 +489,23 @@ impl Properties {
         if let Some(mut others) = self.others.take() {
             others.take_values(work);
         }
-        work.extend(
-            std::mem::take(&mut self.slots)
-                .into_vec()
-                .into_iter()
-                .rev()
-                .flatten(),
-        );
+        match std::mem::take(&mut self.slots) {
+            PropertySlots::Empty => {}
+            PropertySlots::Inline { len, values } => {
+                work.extend(values.into_iter().take(usize::from(len)).rev().flatten());
+            }
+            PropertySlots::Heap(slots) => {
+                work.extend(slots.into_vec().into_iter().rev().flatten());
+            }
+        }
     }
+}
+
+fn may_recurse_on_drop(slot: &Option<Value>) -> bool {
+    matches!(
+        slot,
+        Some(Value::Array(_) | Value::Object(_) | Value::Reference(_))
+    )
 }
 
 /// Whether `array` lists the declared keys of `layout` in layout order and
@@ -437,11 +543,20 @@ impl Drop for Properties {
     /// overflowing the stack. The other properties are a `PhpArray`, which
     /// does the same itself.
     fn drop(&mut self) {
-        if self.slots.is_empty() {
-            return;
+        match std::mem::take(&mut self.slots) {
+            PropertySlots::Empty => {}
+            PropertySlots::Inline { len, values } => {
+                let len = usize::from(len);
+                if values[..len].iter().any(may_recurse_on_drop) {
+                    PhpArray::release_entries(values.into_iter().take(len).flatten());
+                }
+            }
+            PropertySlots::Heap(slots) => {
+                if slots.iter().any(may_recurse_on_drop) {
+                    PhpArray::release_entries(slots.into_vec().into_iter().flatten());
+                }
+            }
         }
-        let slots = std::mem::take(&mut self.slots);
-        PhpArray::release_entries(slots.into_vec().into_iter().flatten());
     }
 }
 

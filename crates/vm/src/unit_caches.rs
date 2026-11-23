@@ -15,7 +15,7 @@ use phera_value::{PhpArray, Value};
 /// Bytecode literals never mutate, and VM-local ownership prevents cross-request reuse.
 pub(crate) struct UnitCache {
     /// Throwable properties and trace entries share the unit's immutable filename.
-    trace_file: OnceCell<phera_value::PhpString>,
+    trace_file: OnceCell<phera_value::Value>,
     /// The file's names, literals and class names as PHP values: made once
     /// when the file is loaded, never changed, and shared by every fork of
     /// a snapshot that holds the file.
@@ -180,12 +180,21 @@ pub(crate) enum SiteOutcome {
     /// A public native getter with no parameters and a direct handler
     /// (`$method->getName()`): the site runs it and stores its value.
     Getter(Getter),
+    /// A public native method with a direct handler and a few arguments
+    /// (`$property->getValue($object)`): the site runs the handler on the
+    /// arguments it finds in their registers and stores its value.
+    Direct(Getter, crate::calls::native_signature::DirectMasks),
     /// Any other native method: the general sequence that follows prepares
     /// and calls it.
     Native,
     /// The VM prepares it (`__call`, an error, a closure, a generator).
     Vm,
 }
+
+// A record is copied out of its cell at every call of a method site: the
+// outcome's variants, the direct one with the masks of its arguments
+// included, stay in 16 bytes.
+const _: () = assert!(std::mem::size_of::<SiteOutcome>() == 16);
 
 impl SiteRecord {
     const EMPTY: SiteRecord = SiteRecord {
@@ -225,11 +234,9 @@ impl UnitCache {
     }
 
     pub(crate) fn trace_file(&self, unit: &CompiledUnit) -> Value {
-        Value::String(
-            self.trace_file
-                .get_or_init(|| unit.file.as_str().into())
-                .clone(),
-        )
+        self.trace_file
+            .get_or_init(|| Value::interned(unit.file.as_bytes()))
+            .clone()
     }
 
     /// The record of method site `site` of the function `facts` describes,
@@ -322,7 +329,7 @@ impl UnitCache {
             class_names: unit
                 .symbols
                 .iter()
-                .map(|symbol| phera_value::Value::from(symbol.written.as_str()))
+                .map(|symbol| phera_value::Value::interned(symbol.written.as_bytes()))
                 .collect(),
             base: None,
         }
@@ -345,7 +352,7 @@ pub(crate) fn value(constant: &Constant) -> Value {
                         array.insert(phera_value::ArrayKey::Int(*key), value);
                     }
                     phera_bytecode::ConstantKey::String(key) => {
-                        array.insert(phera_value::ArrayKey::String(key.clone().into()), value);
+                        array.insert(phera_value::ArrayKey::interned(key), value);
                     }
                 }
             }
@@ -354,7 +361,7 @@ pub(crate) fn value(constant: &Constant) -> Value {
         Constant::Bool(value) => Value::Bool(*value),
         Constant::Int(value) => Value::Int(*value),
         Constant::Float(value) => Value::Float(*value),
-        Constant::String(value) => Value::from(value.clone()),
+        Constant::String(value) => Value::interned(value),
     }
 }
 

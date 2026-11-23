@@ -176,7 +176,7 @@ fn unserialize(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> Nati
     for (key, value) in data.iter() {
         match key {
             ArrayKey::Int(_) => values.push(value.deref().clone()),
-            ArrayKey::String(_) => {
+            ArrayKey::Interned(_) | ArrayKey::String(_) => {
                 properties.insert(key, value.clone());
             }
         }

@@ -47,7 +47,7 @@ fn memzero(_: &mut dyn Context, args: &[Value]) -> NativeResult {
     let reference =
         args::reference(args, 0).ok_or_else(|| exception("a PHP string is required"))?;
     let mut value = reference.borrow_mut();
-    if !matches!(*value, Value::String(_)) {
+    if !value.is_string() {
         return Err(exception("a PHP string is required"));
     }
     erase_string(&mut value);
@@ -58,6 +58,9 @@ fn increment(_: &mut dyn Context, args: &[Value]) -> NativeResult {
     let mut value = args::reference(args, 0)
         .ok_or_else(|| exception("a PHP string is required"))?
         .borrow_mut();
+    if let Value::InternedStr(s) = *value {
+        *value = Value::String(s.to_php_string());
+    }
     let Value::String(string) = &mut *value else {
         return Err(exception("a PHP string is required"));
     };
@@ -74,6 +77,9 @@ fn add(_: &mut dyn Context, args: &[Value]) -> NativeResult {
     let mut value = args::reference(args, 0)
         .ok_or_else(|| exception("PHP strings are required"))?
         .borrow_mut();
+    if let Value::InternedStr(s) = *value {
+        *value = Value::String(s.to_php_string());
+    }
     let Value::String(string) = &mut *value else {
         return Err(exception("PHP strings are required"));
     };

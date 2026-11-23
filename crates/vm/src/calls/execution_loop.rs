@@ -125,6 +125,9 @@ pub(super) struct Machine<'a> {
     /// The request's evaluated class constants, read by the loop's
     /// class constant reads.
     pub(super) class_states: &'a crate::classes::class_state::ClassStates,
+    /// The request's validated enum cases, read by class constants and
+    /// `Enum::from`/`Enum::tryFrom`.
+    pub(super) enum_cases: &'a crate::classes::enums::EnumCases,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -173,6 +176,7 @@ impl Vm {
                 ids: &self.object_ids,
                 registry: &self.registry,
                 class_states: &self.class_states,
+                enum_cases: &self.enum_cases,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
@@ -215,6 +219,16 @@ impl Vm {
                 Instruction::Call { dst, .. } if !TRACK_GENERATORS && self.calls_plain_native() => {
                     *work += 1;
                     self.call_lean_native(dst)
+                }
+                Instruction::CallNativeDirect {
+                    function,
+                    args,
+                    count,
+                    dst,
+                    ..
+                } if !TRACK_GENERATORS => {
+                    *work += 1;
+                    self.call_native_direct(function, args, count, dst)
                 }
                 _ => {
                     // The VM's handlers need the description of a lean
@@ -452,7 +466,12 @@ impl Machine<'_> {
                 class,
                 method,
                 binding,
-            } => self.prepare_static(position, (class, method), binding),
+            } => self.prepare_static::<GUARDED>(position, (class, method), binding),
+            Instruction::StaticCall {
+                class,
+                method,
+                binding,
+            } => self.prepare_dynamic_static::<GUARDED>(position, class, method, binding),
             Instruction::CheckType { local, ty } => self.check_type(position, local, ty),
             Instruction::New { class } => self.new_object::<GUARDED>(position, class),
             Instruction::InitDynamicCall { callee } => self.prepare_closure(position, callee),
@@ -525,6 +544,7 @@ impl Machine<'_> {
             | Instruction::IterNextKeyed { .. }
             | Instruction::AppendLocal { .. }
             | Instruction::InitStaticCall { .. }
+            | Instruction::StaticCall { .. }
             | Instruction::CheckType { .. }
             | Instruction::New { .. }
             | Instruction::InitDynamicCall { .. }
@@ -591,6 +611,11 @@ impl Machine<'_> {
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
             | Instruction::NewArray { .. }
+            | Instruction::ArraySet { .. }
+            | Instruction::ArrayPush { .. }
+            | Instruction::ArrayKeyExists { .. }
+            | Instruction::InLiteralArray { .. }
+            | Instruction::CallNativeDirect { .. }
             | Instruction::FetchIndex { .. }
             | Instruction::Fetch { .. }
             | Instruction::AssignPath { .. }
@@ -599,6 +624,7 @@ impl Machine<'_> {
             | Instruction::IncDecPath { .. }
             | Instruction::InitCall { .. }
             | Instruction::FetchClassName { .. }
+            | Instruction::FetchClassConstant { .. }
             | Instruction::InstanceOf { .. }
             | Instruction::InstanceOfBranch { .. }
             | Instruction::InstanceOfBranchIf { .. }

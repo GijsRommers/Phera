@@ -25,13 +25,16 @@ pub use phera_bytecode::{BinaryOp as NativeBinaryOp, UnaryOp as NativeUnaryOp};
 pub use phera_source::{CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite};
 pub use phera_value as value;
 pub use phera_value::ObjectCast as NativeCastKind;
-pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
+pub use phera_value::{
+    ArrayKey, Diagnostics, InternedStr, Object, PhpArray, PhpString, StrRef, Value,
+};
 
 pub use arguments::{args, prepare_arguments, prepare_call, prepare_single_argument};
 pub use class::{
-    AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
-    NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeStringProperty,
-    PrepareMethod, PropertyEntry, PropertyType, ReadyMethod, SyncMethod, Visibility, WindowMethod,
+    AsyncMethod, ClassEntry, ClassKind, DirectMethod, MethodEntry, MethodPreparation, MethodReturn,
+    NativeMethod, NativePropertyAccess, NativePropertyMutation, NativePropertyRead,
+    NativeStringProperty, PrepareMethod, PropertyEntry, PropertyType, ReadyMethod, SyncMethod,
+    Visibility, WindowMethod,
 };
 pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;

@@ -23,5 +23,5 @@ function Counter::tick (3 registers)
   0002  line 1    Clear { reg: r0 }
   0003  line 1    IncDecPath { mode: PostIncrement, dst: r1, path: path#1 }
   0004  line 1    Clear { reg: r0 }
-  0005  line 1    LoadConst { dst: r0, constant: const#0 }
+  0005  line 1    LoadNull { dst: r0 }
   0006  line 1    Return { src: r0 }

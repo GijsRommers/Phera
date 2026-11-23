@@ -112,7 +112,7 @@ fn phpinfo(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
             output.push_str("\nAdditional Modules\n\nModule Name\n");
             if let Value::Array(modules) = modules {
                 for value in modules.values() {
-                    if let Value::String(name) = value {
+                    if let Some(name) = value.str_ref() {
                         let _ = writeln!(output, "{}", name.to_string_lossy());
                     }
                 }
@@ -141,10 +141,7 @@ fn phpinfo(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
 fn general(context: &mut dyn Context, output: &mut String) {
     let version = context
         .named_constant("PHP_VERSION")
-        .and_then(|value| match value {
-            Value::String(version) => Some(version),
-            _ => None,
-        });
+        .and_then(|value| value.to_php_string());
     if let Some(version) = version {
         let _ = writeln!(output, "PHP Version => {}", version.to_string_lossy());
     }

@@ -4,7 +4,6 @@ use std::rc::Rc;
 
 use phera_bytecode::ClassKind;
 use phera_extension_api::serialization::{PlainSerializedClass, SerializedProperty};
-use phera_value::ArrayKey;
 
 use crate::{Vm, classes::Class};
 
@@ -40,14 +39,12 @@ fn linked_fields(class: &Class) -> Option<Rc<[SerializedProperty]>> {
         .defaults
         .iter()
         .map(|field| {
-            let ArrayKey::String(name) = &field.key else {
-                return None;
-            };
+            let name = field.key.as_str_bytes()?;
             if field.ty.is_some() || !field.initialized {
                 return None;
             }
             let mut token = format!("s:{}:\"", name.len()).into_bytes();
-            token.extend_from_slice(name.as_bytes());
+            token.extend_from_slice(name);
             token.extend_from_slice(b"\";");
             Some(SerializedProperty {
                 key: field.key.clone(),

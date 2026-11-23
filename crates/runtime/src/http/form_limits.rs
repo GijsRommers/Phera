@@ -37,6 +37,13 @@ impl FormLimits {
                 let option = limits.option(&key)?;
                 *option = match &*value.deref() {
                     Value::Int(value) => *value,
+                    Value::InternedStr(value) => {
+                        let (number, warning) = ini::parse_quantity(value.as_bytes());
+                        if let Some(warning) = warning {
+                            context.warning(warning);
+                        }
+                        number
+                    }
                     Value::String(value) => {
                         let (number, warning) = ini::parse_quantity(value.as_bytes());
                         if let Some(warning) = warning {
@@ -81,12 +88,11 @@ impl FormLimits {
     }
 
     fn option(&mut self, key: &ArrayKey) -> Result<&mut i64, NativeError> {
-        let ArrayKey::String(key) = key else {
+        let Some(key) = key.as_str_bytes() else {
             return Err(NativeError::value_error(
                 "Invalid integer key in $options argument",
             ));
         };
-        let key = key.as_bytes();
         if key.is_empty() {
             return Err(NativeError::value_error(
                 "Invalid empty string key in $options argument",

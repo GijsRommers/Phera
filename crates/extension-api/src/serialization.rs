@@ -199,8 +199,12 @@ pub const INCOMPLETE_CLASS_NAME: &str = "__PHP_Incomplete_Class_Name";
 
 /// All property and method handlers use the original class's name in this diagnostic.
 pub fn incomplete_object_message(object: &crate::Object, action: &str) -> String {
-    let name = match object.get(&crate::ArrayKey::str(INCOMPLETE_CLASS_NAME)) {
-        Some(crate::Value::String(name)) => name.to_string_lossy(),
+    let name = match object.get(&crate::ArrayKey::interned_str(
+        INCOMPLETE_CLASS_NAME.as_bytes(),
+    )) {
+        Some(value) if value.is_string() => {
+            value.str_ref().expect("checked string").to_string_lossy()
+        }
         _ => "unknown".into(),
     };
     format!(

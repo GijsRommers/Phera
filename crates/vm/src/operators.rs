@@ -181,6 +181,12 @@ impl Vm {
             .current_slot_mut(local)
             .and_then(Option::as_mut);
         let changed = match target {
+            Some(Value::InternedStr(existing)) => {
+                let mut owned = existing.to_php_string();
+                owned.push_bytes(source.as_bytes());
+                *target.expect("matched Some") = Value::String(owned);
+                true
+            }
             Some(Value::String(target)) => {
                 target.push_bytes(source.as_bytes());
                 true
@@ -189,11 +195,18 @@ impl Vm {
                 let mut target = reference
                     .try_borrow_mut()
                     .map_err(|_| internal_error!("borrowed string"))?;
-                if let Value::String(target) = &mut *target {
-                    target.push_bytes(source.as_bytes());
-                    true
-                } else {
-                    false
+                match &mut *target {
+                    Value::InternedStr(existing) => {
+                        let mut owned = existing.to_php_string();
+                        owned.push_bytes(source.as_bytes());
+                        *target = Value::String(owned);
+                        true
+                    }
+                    Value::String(target) => {
+                        target.push_bytes(source.as_bytes());
+                        true
+                    }
+                    _ => false,
                 }
             }
             _ => false,
@@ -317,7 +330,7 @@ impl Vm {
             CastKind::Float => {
                 Value::Float(phera_value::to_float(&value, &mut diagnostics.buffer)?)
             }
-            CastKind::String => Value::String(to_php_string(&value, &mut diagnostics.buffer)?),
+            CastKind::String => phera_value::to_string_value(&value, &mut diagnostics.buffer)?,
             CastKind::Array => Value::from(match &value {
                 // A closure has no properties to show: the array holds it.
                 Value::Object(object) if object.class.name() == "Closure" => {

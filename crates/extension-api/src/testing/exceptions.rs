@@ -42,6 +42,7 @@ pub fn materialize_exception(
         }
         let key = key.ok_or_else(|| {
             let name = match name {
+                ArrayKey::Interned(name) => name.to_string_lossy(),
                 ArrayKey::String(name) => name.to_string_lossy(),
                 ArrayKey::Int(name) => name.to_string(),
             };

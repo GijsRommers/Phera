@@ -45,10 +45,8 @@ pub fn unserialize(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> 
     period.store(object);
     restored?;
     for (key, value) in data.iter() {
-        if let ArrayKey::String(name) = &key
-            && !PROPERTIES
-                .iter()
-                .any(|field| field.as_bytes() == name.as_bytes())
+        if let Some(name) = key.as_str_bytes()
+            && !PROPERTIES.iter().any(|field| field.as_bytes() == name)
             && !value.is_reference()
         {
             object.set(key, value.clone());
