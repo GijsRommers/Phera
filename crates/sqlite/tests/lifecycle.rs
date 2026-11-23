@@ -66,3 +66,32 @@ fn statements_retain_database_and_explicit_close_invalidates_them() {
             assert!(closed.execute(Vec::new()).await.is_err());
         });
 }
+
+#[test]
+fn pooled_workers_isolate_sequential_and_failed_connections() {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            for round in 0..32 {
+                // Invalid flags must fail cleanly without poisoning a pooled worker.
+                assert!(Database::open(":memory:".into(), -1, 0).await.is_err());
+                let db = Database::open(":memory:".into(), 6, 0).await.unwrap();
+                // Previous round's :memory: table must not survive on a reused worker.
+                assert!(db.prepare("SELECT * FROM temp_only".into()).await.is_err());
+                db.exec(format!(
+                    "CREATE TABLE temp_only(v); INSERT INTO temp_only VALUES({round})"
+                ))
+                .await
+                .unwrap();
+                let stmt = db.prepare("SELECT v FROM temp_only".into()).await.unwrap();
+                assert!(matches!(
+                    stmt.execute(Vec::new()).await.unwrap().first.unwrap()[0],
+                    Cell::Integer(v) if v == round
+                ));
+                drop(stmt);
+                db.close().await.unwrap();
+            }
+        });
+}

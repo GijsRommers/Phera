@@ -321,6 +321,9 @@ pub trait ReflectionContext {
         args: Option<PhpArray>,
     ) -> LocalFuture<'_, NativeResult>;
 
+    /// Creates an instance without invoking its constructor (synchronous fast path).
+    fn reflect_new_instance_without_constructor(&mut self, class: &ClassInfo) -> NativeResult;
+
     fn reflect_make_lazy(
         &mut self,
         class: &ClassInfo,
