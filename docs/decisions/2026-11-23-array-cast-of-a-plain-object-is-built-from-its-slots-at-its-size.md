@@ -21,15 +21,21 @@
 
 ## Why
 
-Instructions per operation above an empty loop (`m.php`, Linux):
+Instructions per operation above an empty loop (`m.php` and `m5.php`, Linux, `perf stat -e instructions:u`, two iteration counts). Before: main `0c63b85f`. PHP 8.5.13 with OPcache on and JIT off (`php -n -d opcache.enable_cli=1 -d opcache.jit=disable`; it counts the same as without OPcache for these loops):
 
 | operation | PHP 8.5 | before | after |
 | --- | ---: | ---: | ---: |
-| `$a = (array) $entity` (eight declared properties) | 673 | 2,362 | 1,686 |
-| `((array) $entity)["\0Entity\0name"] ?? null` | 782 | 3,160 | 2,483 |
-| accessor `getValue` (a method with that read) | 1,052 | 4,238 | 3,560 |
+| `$a = (array) $entity` (eight declared properties) | 673 | 2,364 | 1,688 |
+| `((array) $entity)["\0Entity\0name"] ?? null` | 782 | 3,162 | 2,485 |
+| accessor `getValue` (a method with that read) | 1,054 | 4,225 | 3,548 |
+| `(array) $entity4` (4 properties) | 494 | 1,743 | 1,396 |
+| `((array) $entity4)[$mangled] ?? null` | 592 | 2,507 | 2,187 |
+| `(array) $entity40` (40 properties) | 2,206 | 10,963 | 8,596 |
+| `((array) $entity40)[$mangled] ?? null` | 2,306 | 12,021 | 9,658 |
 
-Where the 1,686 are now (`perf record`, per cast, the loop's own 175 included):
+The cost grows with the number of properties, in PHP too (about 43 instructions a property) and faster in Phera (about 200 a property after this change, 250 before): each entry takes a reference count of its key and one of its value, and the array gives both back. The cast of 40 properties is 3.9 times PHP's.
+
+Where the 1,688 are now (`perf record`, per cast, the loop's own 175 included):
 
 | part | instructions |
 | --- | ---: |
