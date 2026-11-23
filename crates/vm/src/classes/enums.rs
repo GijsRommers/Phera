@@ -277,7 +277,7 @@ pub(super) fn enum_property(class: &str, name: &str) -> PropertyDefault {
     PropertyDefault {
         set_visibility: None,
         is_final: false,
-        key: ArrayKey::str(name),
+        key: ArrayKey::interned_str(name.as_bytes()),
         value: Value::Null,
         static_storage: None,
         name: name.to_owned(),

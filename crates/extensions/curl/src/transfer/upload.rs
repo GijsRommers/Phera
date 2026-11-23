@@ -170,10 +170,13 @@ async fn read_chunk(
             )
             .await?;
         return Ok(match &*value.deref() {
+            Value::InternedStr(text) if text.as_bytes().len() as u64 <= request.limit => {
+                Ok(Bytes::copy_from_slice(text.as_bytes()))
+            }
             Value::String(text) if text.as_bytes().len() as u64 <= request.limit => {
                 Ok(Bytes::copy_from_slice(text.as_bytes()))
             }
-            Value::String(_) => Err(TransferError::new(
+            Value::InternedStr(_) | Value::String(_) => Err(TransferError::new(
                 26,
                 "read function returned too much data",
             )),

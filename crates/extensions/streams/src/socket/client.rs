@@ -147,7 +147,8 @@ fn binding(
     let Some(value) = context_options::option(attached, "socket", "bindto") else {
         return Ok(None);
     };
-    let Value::String(value) = &*value.deref() else {
+    let value = value.deref();
+    let Some(value) = value.str_ref() else {
         return Err(transport_error(
             "local_addr context option is not a string.".into(),
         ));

@@ -34,8 +34,9 @@ impl Vm {
     ) -> Result<Callee, NativeError> {
         match &*value.deref() {
             Value::Object(object) => self.resolve_callable_object(object, usage),
-            Value::String(name) => {
-                if let Some(callee) = self.function_table.resolved(name) {
+            Value::InternedStr(_) | Value::String(_) => {
+                let name = value.deref().to_php_string().expect("checked string");
+                if let Some(callee) = self.function_table.resolved(&name) {
                     return Ok(callee);
                 }
                 let written = String::from_utf8_lossy(name.as_bytes());
@@ -44,7 +45,7 @@ impl Vm {
                     self.take_resolved_callable()
                 } else {
                     let callee = self.resolve_callee(&written)?;
-                    self.function_table.cache_resolution(name, &callee);
+                    self.function_table.cache_resolution(&name, &callee);
                     Ok(callee)
                 }
             }
@@ -129,19 +130,18 @@ impl Vm {
         let method = array
             .get(&ArrayKey::Int(1))
             .ok_or_else(|| NativeError::error("Array callback has to contain indices 0 and 1"))?;
-        let Value::String(method) = &*method.deref() else {
+        let method_deref = method.deref();
+        let Some(method) = method_deref.str_ref() else {
             return Err(NativeError::error(
                 "Second array member is not a valid method",
             ));
         };
         let method = String::from_utf8_lossy(method.as_bytes());
         match &*target.deref() {
-            Value::String(class) => {
-                self.prepare_callable_class(
-                    &String::from_utf8_lossy(class.as_bytes()),
-                    &method,
-                    usage,
-                )?;
+            Value::InternedStr(_) | Value::String(_) => {
+                let class = target.deref();
+                let class = class.as_str_bytes().expect("checked string");
+                self.prepare_callable_class(&String::from_utf8_lossy(class), &method, usage)?;
             }
             Value::Object(object) => {
                 let class = self

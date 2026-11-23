@@ -64,7 +64,7 @@ pub(crate) fn snapshot_arguments(
         let sensitive = crate::sensitive_parameters::is_sensitive_at(code, function, fixed);
         for (key, value) in items.iter() {
             let name = match key {
-                ArrayKey::String(_) => Some(key),
+                ArrayKey::Interned(_) | ArrayKey::String(_) => Some(key),
                 _ => None,
             };
             snapshot.push((name, value.deref().clone(), sensitive));

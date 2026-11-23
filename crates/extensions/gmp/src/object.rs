@@ -101,10 +101,10 @@ fn unserialize(_: &mut dyn Context, object: Option<&Rc<Object>>, values: &[Value
     let invalid = || NativeError::throw("Exception", "Could not unserialize number");
     let object = object.ok_or_else(invalid)?;
     let array = args::array(values, 0).ok_or_else(invalid)?;
-    let Some(Value::String(number)) = array.get(&ArrayKey::Int(0)) else {
+    let Some(number) = array.get(&ArrayKey::Int(0)).and_then(Value::as_str_bytes) else {
         return Err(invalid());
     };
-    let number = integer::parse(number.as_bytes(), 16)
+    let number = integer::parse(number, 16)
         .ok_or_else(|| NativeError::value_error("Number is not an integer string"))?;
     set(object, number);
     if let Some(properties) = array.get(&ArrayKey::Int(1)) {

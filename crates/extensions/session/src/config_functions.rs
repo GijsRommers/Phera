@@ -64,7 +64,7 @@ fn string_setting(
         if !can_change(context, function, label, true) {
             return Ok(Value::Bool(false));
         }
-        update(context, setting, next.clone(), function)?;
+        update(context, setting, next.to_php_string(), function)?;
     }
     Ok(Value::String(previous))
 }
@@ -114,7 +114,7 @@ fn module_name(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             ));
             return Ok(Value::Bool(false));
         }
-        update(context, "save_handler", next.clone(), function)?;
+        update(context, "save_handler", next.to_php_string(), function)?;
     }
     Ok(previous)
 }

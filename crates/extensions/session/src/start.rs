@@ -84,14 +84,15 @@ fn options(context: &mut dyn Context, arguments: &[Value]) -> Result<bool, Nativ
         return Ok(false);
     };
     for (key, value) in options.iter() {
-        let ArrayKey::String(key) = key else {
+        let Some(key) = key.as_str_bytes() else {
             return Err(NativeError::value_error(
                 "session_start(): Argument #1 ($options) must be of type array with keys as string",
             ));
         };
-        let name = key.to_string_lossy();
+        let name = String::from_utf8_lossy(key).into_owned();
         let value = value.try_deref()?;
         let text = match &*value {
+            Value::InternedStr(text) => text.to_php_string(),
             Value::String(text) => text.clone(),
             Value::Int(number) => number.to_string().into(),
             Value::Bool(true) => "1".into(),
@@ -159,9 +160,9 @@ fn global_id(
     if let Some(value) = context.request_global(global)
         && let Value::Array(array) = &*value.try_deref()?
         && let Some(value) = array.get(name)
-        && let Value::String(id) = &*value.try_deref()?
+        && let Some(id) = value.try_deref()?.to_php_string()
     {
-        return Ok(Some(id.clone()));
+        return Ok(Some(id));
     }
     Ok(None)
 }

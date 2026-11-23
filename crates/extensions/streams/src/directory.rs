@@ -159,7 +159,7 @@ async fn collect_entries(
         };
         let result = async {
             let mut entries = Vec::new();
-            while let Value::String(entry) = dir.read(context, function).await? {
+            while let Some(entry) = dir.read(context, function).await?.to_php_string() {
                 entries.push(entry.as_bytes().to_vec());
             }
             sort(&mut entries, order);

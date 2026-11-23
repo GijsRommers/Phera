@@ -265,6 +265,7 @@ pub async fn select(session: &Session, value: &Value) -> NativeResult {
 
 pub fn string(value: &Value) -> String {
     match value {
+        Value::InternedStr(s) => s.to_string_lossy(),
         Value::String(s) => s.to_string_lossy(),
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
@@ -277,6 +278,7 @@ pub fn number(value: Option<&Value>, default: f64) -> f64 {
     match value {
         Some(Value::Int(i)) => *i as f64,
         Some(Value::Float(f)) => *f,
+        Some(Value::InternedStr(s)) => s.to_string_lossy().parse().unwrap_or(default),
         Some(Value::String(s)) => s.to_string_lossy().parse().unwrap_or(default),
         _ => default,
     }
