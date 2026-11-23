@@ -20,6 +20,7 @@ small query. With only read interest, the same exchange took one wait, one
 send and one receive. The Linux database trace already measured one wait on
 epoll.
 
-The write fallback keeps large statements and COPY asynchronous. A slow-peer
-test fills the send buffer, observes pending write readiness, and verifies
-the complete statement and the next read after flush.
+The write fallback keeps large statements and COPY asynchronous. Swapping the
+reactor registration wakes any stored pending read waker so concurrent readers
+re-register without hanging. Tests fill the send buffer to verify pending
+write readiness, flush restoration, and a pending reader surviving both swaps.

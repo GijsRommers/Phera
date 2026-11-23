@@ -5,7 +5,7 @@
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{Shutdown, TcpStream as StdTcpStream};
 use std::pin::Pin;
-use std::task::{Context, Poll, ready};
+use std::task::{Context, Poll, Waker};
 
 use tokio::io::{AsyncRead, AsyncWrite, Interest, ReadBuf, unix::AsyncFd};
 use tokio::net::TcpStream;
@@ -21,6 +21,8 @@ pub(in super::super) struct Tcp {
     registration: Option<Registration>,
     // Keep initialized space for std's safe Read even when ReadBuf has none.
     read_buffer: Box<[u8]>,
+    // Re-arm a pending reader when swapping the reactor registration drops its waker.
+    pending_read_waker: Option<Waker>,
 }
 
 impl Tcp {
@@ -28,6 +30,7 @@ impl Tcp {
         Ok(Self {
             registration: Some(Registration::Read(register_read(stream.into_std()?)?)),
             read_buffer: vec![0; READ_CAPACITY].into_boxed_slice(),
+            pending_read_waker: None,
         })
     }
 
@@ -39,6 +42,9 @@ impl Tcp {
         self.registration = Some(Registration::ReadWrite(TcpStream::from_std(
             socket.into_inner(),
         )?));
+        if let Some(waker) = self.pending_read_waker.take() {
+            waker.wake();
+        }
         Ok(())
     }
 
@@ -51,6 +57,9 @@ impl Tcp {
                 return Err(disconnected());
             };
             self.registration = Some(Registration::Read(register_read(socket.into_std()?)?));
+            if let Some(waker) = self.pending_read_waker.take() {
+                waker.wake();
+            }
         }
         Ok(())
     }
@@ -77,30 +86,54 @@ impl AsyncRead for Tcp {
         let Self {
             registration,
             read_buffer,
+            pending_read_waker,
         } = self.get_mut();
         match registration {
             Some(Registration::Read(socket)) => {
                 let capacity = output.remaining().min(read_buffer.len());
                 if capacity == 0 {
+                    *pending_read_waker = None;
                     return Poll::Ready(Ok(()));
                 }
                 loop {
-                    let mut ready = ready!(socket.poll_read_ready(cx))?;
+                    let mut ready = match socket.poll_read_ready(cx) {
+                        Poll::Ready(Ok(ready)) => ready,
+                        Poll::Ready(Err(error)) => {
+                            *pending_read_waker = None;
+                            return Poll::Ready(Err(error));
+                        }
+                        Poll::Pending => {
+                            *pending_read_waker = Some(cx.waker().clone());
+                            return Poll::Pending;
+                        }
+                    };
                     match socket.get_ref().read(&mut read_buffer[..capacity]) {
                         Ok(read) => {
                             // A short read drained this edge-triggered socket.
                             if 0 < read && read < capacity {
                                 ready.clear_ready();
                             }
+                            *pending_read_waker = None;
                             output.put_slice(&read_buffer[..read]);
                             return Poll::Ready(Ok(()));
                         }
                         Err(error) if error.kind() == ErrorKind::WouldBlock => ready.clear_ready(),
-                        Err(error) => return Poll::Ready(Err(error)),
+                        Err(error) => {
+                            *pending_read_waker = None;
+                            return Poll::Ready(Err(error));
+                        }
                     }
                 }
             }
-            Some(Registration::ReadWrite(socket)) => Pin::new(socket).poll_read(cx, output),
+            Some(Registration::ReadWrite(socket)) => {
+                let poll = Pin::new(socket).poll_read(cx, output);
+                if poll.is_pending() {
+                    *pending_read_waker = Some(cx.waker().clone());
+                } else {
+                    *pending_read_waker = None;
+                }
+                poll
+            }
             None => Poll::Ready(Err(disconnected())),
         }
     }
@@ -149,6 +182,7 @@ mod tests {
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpSocket};
+    use tokio::sync::Notify;
 
     use super::*;
 
@@ -196,6 +230,52 @@ mod tests {
             };
             let (received, ()) = tokio::try_join!(read, write)?;
             assert_eq!(&received[..], &payload[..]);
+            Ok(())
+        })
+        .await?
+    }
+
+    #[tokio::test]
+    async fn pending_read_survives_write_interest_swaps() -> io::Result<()> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let listener = TcpListener::bind("127.0.0.1:0").await?;
+            let socket = TcpSocket::new_v4()?;
+            socket.set_send_buffer_size(4096)?;
+            let client = Tcp::new(socket.connect(listener.local_addr()?).await?)?;
+            let (mut peer, _) = listener.accept().await?;
+            let (mut read_half, mut write_half) = tokio::io::split(client);
+            let payload = vec![b'a'; 4 * 1024 * 1024];
+            let flushed = Notify::new();
+            let drain = Notify::new();
+
+            let reader = async {
+                let mut response = [0; 5];
+                read_half.read_exact(&mut response).await?;
+                assert_eq!(&response, b"ready");
+                Ok::<_, io::Error>(())
+            };
+            let writer = async {
+                // Let the reader register its waker on the initial Read registration.
+                tokio::task::yield_now().await;
+                drain.notify_one();
+                write_half.write_all(&payload).await?;
+                write_half.flush().await?;
+                // Let the reader re-register on the restored Read registration before replying.
+                tokio::task::yield_now().await;
+                flushed.notify_one();
+                Ok::<_, io::Error>(())
+            };
+            let peer_task = async {
+                drain.notified().await;
+                let mut received = vec![0; payload.len()];
+                peer.read_exact(&mut received).await?;
+                assert_eq!(received, payload);
+                flushed.notified().await;
+                peer.write_all(b"ready").await?;
+                Ok::<_, io::Error>(())
+            };
+
+            tokio::try_join!(reader, writer, peer_task)?;
             Ok(())
         })
         .await?
