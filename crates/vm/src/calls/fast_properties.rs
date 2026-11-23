@@ -35,8 +35,6 @@ use crate::calls::prepared_call::CallKind;
 use crate::classes::property_table::PackedProp;
 use crate::classes::{Class, ClassIndex};
 use crate::fast::{ScalarStep, store};
-use crate::property_sites::PropertyEntry;
-use crate::unit_caches::CachedSite;
 
 /// Maximum path depth walked directly in the loop.
 const MAX_CHAIN_STEPS: usize = 6;
@@ -56,7 +54,7 @@ impl Machine<'_> {
 
     /// Resolve a declared property on `object` directly from its flat [`PropertyTable`].
     #[inline(always)]
-    fn resolve_prop<'a>(
+    pub(super) fn resolve_prop<'a>(
         &self,
         position: Position,
         object: &'a Object,
@@ -199,6 +197,25 @@ impl Machine<'_> {
             let object = self.property_object(position, path_body.base)?;
             let scope = self.caller_scope_index(position);
             return self.read_prop_indexed(position, object, *name, rest, scope, quiet);
+        }
+        // `[Index, Property]` directly on an array register (e.g. `$items[$left]->key`):
+        // borrow `&Object` straight out of the array with zero `Rc::clone` / `Rc::drop`.
+        if let [PathStep::Index(index_reg), PathStep::Property(name)] = steps
+            && let PathBase::Register(root) = path_body.base
+        {
+            let key = self.array_key_ref(position, *index_reg)?;
+            let base_slot = position.frame.base() + root.index();
+            let object = match self.registers.window(base_slot, 1) {
+                [Some(Value::Array(array))] => match key.get(array) {
+                    Some(Value::Object(object)) => object,
+                    Some(Value::Null) | None if quiet => return Some(Value::Null),
+                    _ => return None,
+                },
+                [Some(Value::Null)] if quiet => return Some(Value::Null),
+                _ => return None,
+            };
+            let scope = self.caller_scope_index(position);
+            return self.read_prop_value(position, object, *name, scope, quiet);
         }
         // General chain with at least one Property step (e.g. `$this->a->b[$k]`,
         // `$class->fieldMappings[$f]->enumType`, `$rows[$k]->prop`).
@@ -404,13 +421,13 @@ impl Machine<'_> {
             let Some(object) = self.property_object(position, path_body.base) else {
                 return Step::Slow;
             };
-            self.write_declared_prop(position, path, object, *last_name, scope, &value)
+            self.write_declared_prop(position, object, *last_name, scope, &value)
         } else {
             let Some(object) = self.resolve_target_object(position, path_body.base, prefix, scope)
             else {
                 return Step::Slow;
             };
-            self.write_declared_prop_table(position, &object, *last_name, scope, &value)
+            self.write_declared_prop(position, &object, *last_name, scope, &value)
         };
         if !written {
             return Step::Slow;
@@ -421,55 +438,34 @@ impl Machine<'_> {
         Step::Done(position.ip)
     }
 
-    /// Write a declared property via [`PropertyTable`], falling back to the
-    /// single-property site cache only for class-typed object assignments.
+    /// Write a declared property via [`PropertyTable`] (including class-typed
+    /// object assignments, for both single and chained targets, with zero site cache).
     #[inline(always)]
-    fn write_declared_prop(
+    pub(super) fn write_declared_prop(
         &self,
         position: Position,
-        path: PathId,
         object: &Object,
         name: NameId,
         scope: Option<ClassIndex>,
         value: &Value,
     ) -> bool {
-        let Some((_, packed)) = self.resolve_prop(position, object, name, scope) else {
+        let Some((table, packed)) = self.resolve_prop(position, object, name, scope) else {
             return false;
         };
         if !packed.is_plain_writable() {
             return false;
         }
         if packed.allows_type(crate::types::own_type(value)) {
-            return write_slot_direct(object, packed.slot(), value);
+            return write_slot_direct(object, packed.slot(), value, table.fills_missing_directly());
         }
-        // Class-typed property receiving an object: check cached `WriteRule::TypedClasses`.
-        if packed.has_class_type() && value.is_object() {
-            return self
-                .with_site(position, (path, Shape::Write), |entry, object, scope| {
-                    entry.write_matching(object, scope, value).then_some(())
-                })
-                .is_some();
+        if packed.has_class_type()
+            && let Value::Object(val_obj) = value
+            && let Some(val_class) = val_obj.class.as_any().downcast_ref::<Class>()
+            && table.allows_object_class(packed.slot(), val_class, self.classes)
+        {
+            return write_slot_direct(object, packed.slot(), value, table.fills_missing_directly());
         }
         false
-    }
-
-    /// Write a declared property via [`PropertyTable`] (for chained targets).
-    #[inline(always)]
-    fn write_declared_prop_table(
-        &self,
-        position: Position,
-        object: &Object,
-        name: NameId,
-        scope: Option<ClassIndex>,
-        value: &Value,
-    ) -> bool {
-        let Some((_, packed)) = self.resolve_prop(position, object, name, scope) else {
-            return false;
-        };
-        if !packed.is_plain_writable() || !packed.allows_type(crate::types::own_type(value)) {
-            return false;
-        }
-        write_slot_direct(object, packed.slot(), value)
     }
 
     /// Write an element of an array held in a declared property (single or chained:
@@ -596,43 +592,13 @@ impl Machine<'_> {
         }
     }
 
-    /// Runs `access` with the instruction's property site, the object the
-    /// path reaches and the class scope of the running code.
-    pub(super) fn with_site<R>(
-        &self,
-        position: Position,
-        (path, shape): (PathId, Shape),
-        access: impl FnOnce(&PropertyEntry, &Object, Option<&Rc<Class>>) -> Option<R>,
-    ) -> Option<R> {
-        let function = position.frame.function;
-        let body = self.code.function(function);
-        let path = body.paths.get(path.index())?;
-        let object = match (path.steps.as_slice(), path.base, shape) {
-            ([PathStep::Property(_)], base, _) => self.property_object(position, base)?,
-            (
-                [
-                    PathStep::Property(_),
-                    PathStep::Index(_) | PathStep::Append,
-                    ..,
-                ],
-                base,
-                Shape::Element,
-            ) => self.property_object(position, base)?,
-            _ => return None,
-        };
-        // The VM keys the site by the position after the instruction,
-        // which is where the loop stands now.
-        let site = self.code.site(function, position.ip)?.try_borrow().ok()?;
-        let CachedSite::Property(entry) = &*site else {
-            return None;
-        };
-        let scope = self.caller_scope(position);
-        access(entry, object, scope)
-    }
-
     /// The object a property path starts from.
     #[inline(always)]
-    fn property_object(&self, position: Position, base: PathBase) -> Option<&Rc<Object>> {
+    pub(super) fn property_object(
+        &self,
+        position: Position,
+        base: PathBase,
+    ) -> Option<&Rc<Object>> {
         match base {
             PathBase::This { .. } => {
                 if position.frame.kind() == CallKind::Function {
@@ -657,8 +623,16 @@ impl Machine<'_> {
     }
 }
 
+/// Writes `value` into a declared property's slot, or says `false` so that
+/// the general path does it: for a reference in the slot, and for an empty
+/// slot unless `fill_missing` (see `PropertyTable::fills_missing_directly`).
 #[inline(always)]
-fn write_slot_direct(object: &Object, slot: usize, value: &Value) -> bool {
+pub(super) fn write_slot_direct(
+    object: &Object,
+    slot: usize,
+    value: &Value,
+    fill_missing: bool,
+) -> bool {
     object
         .update(|properties| {
             properties.layout()?;
@@ -668,19 +642,13 @@ fn write_slot_direct(object: &Object, slot: usize, value: &Value) -> bool {
                     *destination = value.clone();
                     Some(true)
                 }
-                None => {
+                None if fill_missing => {
                     properties.set_slot(slot, value.clone());
                     Some(true)
                 }
+                None => Some(false),
             }
         })
         .flatten()
         .unwrap_or(false)
-}
-
-/// Which paths an access takes.
-#[derive(Clone, Copy)]
-pub(super) enum Shape {
-    Write,
-    Element,
 }
