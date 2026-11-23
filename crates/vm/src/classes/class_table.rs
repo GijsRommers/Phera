@@ -312,10 +312,12 @@ impl ClassTable {
     }
 
     /// Builds the flat method, property, constant and static-property tables of
-    /// every native and user class of this request that has none yet. Taking a
-    /// snapshot calls this so that no fork ever pays to build them.
+    /// every user class of this request that has none yet. Taking a snapshot
+    /// calls this so that no fork ever pays to build them. Native classes build
+    /// their tables lazily once on the worker-shared `Class` the first time
+    /// they are actually touched, avoiding eager memory for unused extensions.
     pub(crate) fn build_method_tables(&self) {
-        for class in self.native.numbered.iter().chain(self.local_classes()) {
+        for class in self.local_classes() {
             class
                 .method_table
                 .get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)));

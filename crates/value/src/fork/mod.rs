@@ -101,16 +101,33 @@ impl<'n> Fork<'n> {
     /// A copy into a new id pool that starts where `ids` is: the same ids
     /// are taken, and the same ones are free for reuse.
     pub fn new(ids: &ObjectIds, natives: &'n dyn NativeFork) -> Self {
+        Self::with_object_hint(ids, natives, 0)
+    }
+
+    /// Like [`Fork::new`], pre-sizing the temporary copier tables from the
+    /// snapshot's tracked object count to avoid repeated rehashes during fork.
+    pub fn with_object_hint(
+        ids: &ObjectIds,
+        natives: &'n dyn NativeFork,
+        object_hint: usize,
+    ) -> Self {
+        fn map_with_cap<V>(cap: usize) -> HashMap<usize, V> {
+            if cap == 0 {
+                HashMap::default()
+            } else {
+                HashMap::with_capacity_and_hasher(cap, Default::default())
+            }
+        }
         Fork {
             ids: ids.fork(),
             natives,
-            objects: HashMap::default(),
+            objects: map_with_cap(object_hint),
             identities: HashMap::default(),
-            references: HashMap::default(),
+            references: map_with_cap(object_hint / 4),
             resources: HashMap::default(),
-            arrays: HashMap::default(),
+            arrays: map_with_cap(object_hint / 2),
             native_copies: None,
-            unfilled_objects: Vec::new(),
+            unfilled_objects: Vec::with_capacity(object_hint),
             unfilled_references: Vec::new(),
             unfilled_attachments: Vec::new(),
             refusal: None,
