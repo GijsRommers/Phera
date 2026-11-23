@@ -154,7 +154,7 @@ impl Machine<'_> {
     ) -> Option<Value> {
         let object = self.property_object(position, path_base)?;
         let scope = self.caller_scope_index(position);
-        let (_, packed) = self.resolve_prop(position, object, name, scope)?;
+        let (table, packed) = self.resolve_prop(position, object, name, scope)?;
         if !packed.is_plain_writable() {
             return None;
         }
@@ -170,7 +170,7 @@ impl Machine<'_> {
         if !packed.allows_type(crate::types::own_type(&stored)) {
             return None;
         }
-        write_slot_direct(object, slot, &stored).then_some(result)
+        write_slot_direct(object, slot, &stored, table.fills_missing_directly()).then_some(result)
     }
 
     /// `$local[$key]... op= $value`: the expression's value.

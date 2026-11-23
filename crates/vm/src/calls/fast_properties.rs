@@ -456,14 +456,14 @@ impl Machine<'_> {
             return false;
         }
         if packed.allows_type(crate::types::own_type(value)) {
-            return write_slot_direct(object, packed.slot(), value);
+            return write_slot_direct(object, packed.slot(), value, table.fills_missing_directly());
         }
         if packed.has_class_type()
             && let Value::Object(val_obj) = value
             && let Some(val_class) = val_obj.class.as_any().downcast_ref::<Class>()
             && table.allows_object_class(packed.slot(), val_class, self.classes)
         {
-            return write_slot_direct(object, packed.slot(), value);
+            return write_slot_direct(object, packed.slot(), value, table.fills_missing_directly());
         }
         false
     }
@@ -623,8 +623,16 @@ impl Machine<'_> {
     }
 }
 
+/// Writes `value` into a declared property's slot, or says `false` so that
+/// the general path does it: for a reference in the slot, and for an empty
+/// slot unless `fill_missing` (see `PropertyTable::fills_missing_directly`).
 #[inline(always)]
-pub(super) fn write_slot_direct(object: &Object, slot: usize, value: &Value) -> bool {
+pub(super) fn write_slot_direct(
+    object: &Object,
+    slot: usize,
+    value: &Value,
+    fill_missing: bool,
+) -> bool {
     object
         .update(|properties| {
             properties.layout()?;
@@ -634,10 +642,11 @@ pub(super) fn write_slot_direct(object: &Object, slot: usize, value: &Value) -> 
                     *destination = value.clone();
                     Some(true)
                 }
-                None => {
+                None if fill_missing => {
                     properties.set_slot(slot, value.clone());
                     Some(true)
                 }
+                None => Some(false),
             }
         })
         .flatten()
