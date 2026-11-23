@@ -2,20 +2,20 @@ file class-paths.php
   const#0 = Null
   symbol#0 = self
 
-function {main} (2 registers, dynamic scope)
+function {main} (1 registers, dynamic scope)
   0000  line 1    DeclareClass { class: class#0 }
   0001  line 1    LoadInt { dst: r0, value: 1 }
   0002  line 1    Return { src: r0 }
 
-function {initializer} (2 registers)
+function {initializer} (1 registers)
   0000  line 1    LoadInt { dst: r0, value: 0 }
   0001  line 1    Return { src: r0 }
 
-function {initializer} (2 registers)
+function {initializer} (1 registers)
   0000  line 1    LoadInt { dst: r0, value: 0 }
   0001  line 1    Return { src: r0 }
 
-function Counter::tick (3 registers)
+function Counter::tick (2 registers)
   path#0 = This { scratch: r0 } [Property(name#0)]
   path#1 = NamedStaticProperty { class: symbol#0, name: name#1, scratch: r0 } []
   0000  line 1    LoadInt { dst: r1, value: 1 }
@@ -23,5 +23,5 @@ function Counter::tick (3 registers)
   0002  line 1    Clear { reg: r0 }
   0003  line 1    IncDecPath { mode: PostIncrement, dst: r1, path: path#1 }
   0004  line 1    Clear { reg: r0 }
-  0005  line 1    LoadConst { dst: r0, constant: const#0 }
+  0005  line 1    LoadNull { dst: r0 }
   0006  line 1    Return { src: r0 }

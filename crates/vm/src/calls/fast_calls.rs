@@ -146,7 +146,7 @@ impl Machine<'_> {
         {
             return self.leave_in_order(frame, caller, (source, destination), value);
         }
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.truncate(start);
         self.registers
             .put(caller.base() + destination.index(), value);
@@ -176,7 +176,7 @@ impl Machine<'_> {
         } else {
             Some(value)
         };
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.release_frame(frame.start(), frame.base());
         if let Some(value) = value {
             self.registers
@@ -231,7 +231,7 @@ impl Machine<'_> {
             return Step::Slow;
         }
         let value = value.clone();
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.release_frame(frame.start(), frame.base());
         self.stack.handed_back = Some(super::execution_loop::HandedBack::Native(value));
         Step::Yield
@@ -270,7 +270,7 @@ impl Machine<'_> {
             return Step::Slow;
         }
         let value = value.clone();
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.release_frame(frame.start(), frame.base());
         self.stack.handed_back = Some(super::execution_loop::HandedBack::NativeLoop(value));
         Step::Yield
@@ -303,7 +303,7 @@ impl Machine<'_> {
         let Some(caller) = self.stack.caller().copied() else {
             return Step::Slow;
         };
-        self.stack.pop();
+        self.stack.pop_for_return();
         self.registers.truncate(frame.start());
         Step::Switched(Position {
             frame: caller,

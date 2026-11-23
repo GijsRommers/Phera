@@ -21,7 +21,6 @@ use phera_bytecode::{PathBase, PathId, Reg, Step as PathStep};
 use phera_value::{ArrayKey, Value};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
-use crate::calls::fast_properties::Shape;
 use crate::element_writes::{MOST_KEYS, Target, writable, write};
 use crate::fast::store;
 
@@ -83,25 +82,12 @@ impl Machine<'_> {
                     _ => (false, None),
                 }
             }
-            (
-                _,
-                [
-                    PathStep::Property(_),
-                    PathStep::Index(_) | PathStep::Append,
-                    ..,
-                ],
-            ) => {
-                let Some(keys) = self.write_keys(position, &path_body.steps[1..]) else {
-                    return Step::Slow;
-                };
-                match self.with_site(position, (path, Shape::Element), |entry, object, scope| {
-                    entry.write_element_matching(
-                        object,
-                        scope,
-                        (keys.as_slice(), keys.target),
-                        value.clone(),
-                    )
-                }) {
+            (base_path, steps)
+                if steps
+                    .iter()
+                    .any(|step| matches!(step, PathStep::Property(_))) =>
+            {
+                match self.write_property_element_fast(position, base_path, steps, value.clone()) {
                     Some(old) => (true, old),
                     None => (false, None),
                 }

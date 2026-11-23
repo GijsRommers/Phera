@@ -318,6 +318,7 @@ pub fn to_bool(v: &Value) -> bool {
         Value::Bool(b) => *b,
         Value::Int(i) => *i != 0,
         Value::Float(f) => *f != 0.0, // NaN is true, -0.0 is false
+        Value::InternedStr(s) => s.is_truthy(),
         Value::String(s) => !(s.is_empty() || (s.len() == 1 && s[0] == b'0')),
         Value::Array(a) => !a.is_empty(),
         Value::Object(object) => !matches!(
@@ -349,6 +350,11 @@ pub fn to_int(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, OpError> {
         Value::Bool(b) => Ok(*b as i64),
         Value::Int(i) => Ok(*i),
         Value::Float(f) => Ok(float_to_int_cast(*f, diag)),
+        Value::InternedStr(s) => Ok(match parse_numeric(s.as_bytes()).value {
+            Some(NumVal::Int(i)) => i,
+            Some(NumVal::Float(f)) => float_string_to_int(f),
+            None => 0,
+        }),
         Value::String(s) => Ok(match parse_numeric(s.as_bytes()).value {
             Some(NumVal::Int(i)) => i,
             Some(NumVal::Float(f)) => float_string_to_int(f),
@@ -378,6 +384,7 @@ pub fn to_float(v: &Value, diag: &mut dyn Diagnostics) -> Result<f64, OpError> {
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Int(i) => Ok(*i as f64),
         Value::Float(f) => Ok(*f),
+        Value::InternedStr(s) => Ok(strtod_prefix(s.as_bytes())),
         Value::String(s) => Ok(strtod_prefix(s.as_bytes())),
         Value::Array(a) => Ok(if a.is_empty() { 0.0 } else { 1.0 }),
         Value::Object(o) => {
@@ -402,7 +409,7 @@ pub fn to_php_string(v: &Value, diag: &mut dyn Diagnostics) -> Result<PhpString,
     match &*v.deref() {
         Value::Null => Ok(PhpString::new()),
         Value::Bool(b) => Ok(PhpString::from(if *b { "1" } else { "" })),
-        Value::Int(i) => Ok(PhpString::from(i.to_string())),
+        Value::Int(i) => Ok(crate::integer_text::integer_string(*i)),
         Value::Float(f) => {
             if f.is_nan() {
                 diag.warning("unexpected NAN value was coerced to string".to_string());
@@ -412,12 +419,14 @@ pub fn to_php_string(v: &Value, diag: &mut dyn Diagnostics) -> Result<PhpString,
                 diag.float_precision(),
             )))
         }
+        Value::InternedStr(s) => Ok(s.to_php_string()),
         Value::String(s) => Ok(s.clone()),
         Value::Array(_) => {
             diag.warning("Array to string conversion".to_string());
             Ok(PhpString::from("Array"))
         }
         Value::Object(o) => match o.class.cast(o, ObjectCast::String) {
+            Some(Value::InternedStr(text)) => Ok(text.to_php_string()),
             Some(Value::String(text)) => Ok(text),
             _ => Err(OpError::new(
                 ErrorKind::Error,
@@ -429,6 +438,16 @@ pub fn to_php_string(v: &Value, diag: &mut dyn Diagnostics) -> Result<PhpString,
         },
         Value::Resource(r) => Ok(PhpString::from(format!("Resource id #{}", r.id))),
         Value::Reference(_) => unreachable!("deref returns non-reference values"),
+    }
+}
+
+/// String conversion that preserves `Value::InternedStr` without allocating.
+pub fn to_string_value(v: &Value, diag: &mut dyn Diagnostics) -> Result<Value, OpError> {
+    match &*v.deref() {
+        Value::InternedStr(s) => Ok(Value::InternedStr(s)),
+        Value::Null => Ok(Value::InternedStr(crate::intern::InternedStr::empty())),
+        Value::Bool(false) => Ok(Value::InternedStr(crate::intern::InternedStr::empty())),
+        _ => to_php_string(v, diag).map(Value::String),
     }
 }
 
@@ -448,6 +467,7 @@ pub fn to_array(v: &Value, diag: &mut dyn Diagnostics) -> PhpArray {
                 Value::Bool(b) => Value::Bool(*b),
                 Value::Int(i) => Value::Int(*i),
                 Value::Float(f) => Value::Float(*f),
+                Value::InternedStr(s) => Value::InternedStr(s),
                 Value::String(s) => Value::String(s.clone()),
                 Value::Resource(r) => Value::Resource(r.clone()),
                 _ => unreachable!(),

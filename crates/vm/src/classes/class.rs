@@ -51,6 +51,8 @@ pub(crate) struct Class {
     /// taken, from the numbers every fork shares, and never again (see
     /// `ClassTable::build_method_tables`).
     pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
+    pub(crate) property_table: std::cell::OnceCell<super::property_table::PropertyTable>,
+    pub(crate) constant_table: std::cell::OnceCell<super::property_table::ConstantTable>,
     pub(crate) serialized_fields:
         std::cell::OnceCell<Option<Rc<[phera_extension_api::serialization::SerializedProperty]>>>,
     /// Constructor presence is immutable after linking, including inheritance.
@@ -453,13 +455,53 @@ impl Class {
             .get_or_init(|| super::property_facts::PropertyFacts::of(self))
     }
 
+    /// Flat data-oriented property lookup table, built once and shared across forks.
+    #[inline]
+    pub(crate) fn property_table(&self) -> &super::property_table::PropertyTable {
+        self.property_table
+            .get_or_init(|| super::property_table::PropertyTable::build(self))
+    }
+
+    /// Flat data-oriented class constant lookup table, built once and shared across forks.
+    #[inline]
+    pub(crate) fn constant_table(&self) -> &super::property_table::ConstantTable {
+        self.constant_table
+            .get_or_init(|| super::property_table::ConstantTable::build(self))
+    }
+
     /// Whether this class is `target`, extends it or implements it: the same
     /// ancestry as `Class::ancestors`, its parent and interfaces and theirs.
     /// `None` when the walk outgrows its stack or its visits.
     pub(crate) fn derives_from(&self, target: &Class) -> Option<bool> {
+        if std::ptr::eq(self, target) {
+            return Some(true);
+        }
+        if self.parent.is_none() && self.interfaces.is_empty() {
+            return Some(false);
+        }
+        if let Some(parent) = &self.parent
+            && std::ptr::eq(&**parent, target)
+        {
+            return Some(true);
+        }
+        if self
+            .interfaces
+            .iter()
+            .any(|interface| std::ptr::eq(&**interface, target))
+        {
+            return Some(true);
+        }
         let mut waiting: [Option<&Class>; WALK_DEPTH] = [None; WALK_DEPTH];
-        waiting[0] = Some(self);
-        let mut count: usize = 1;
+        let mut count: usize = 0;
+        for ancestor in self.parent.iter().chain(&self.interfaces) {
+            for grand in ancestor.parent.iter().chain(&ancestor.interfaces) {
+                *waiting.get_mut(count)? = Some(&**grand);
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return Some(false);
+        }
         for _ in 0..WALK_VISITS {
             let Some(last) = count.checked_sub(1) else {
                 return Some(false);

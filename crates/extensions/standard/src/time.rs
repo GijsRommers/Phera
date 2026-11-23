@@ -13,7 +13,7 @@
 //! and a timer wakes this one up again. A thousand requests that each wait
 //! 100 ms finish in about 100 ms on a single thread.
 
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use phera_extension_api::{
     Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
@@ -73,22 +73,40 @@ fn microtime(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Ok(Value::from(format!("{fraction:.8} {}", now.as_secs())))
 }
 
-/// `hrtime()`: a clock that only moves forward, for measuring how long
-/// something took. `[seconds, nanoseconds]`, or nanoseconds as one integer
-/// when called with `true`. Like PHP's, it counts from an arbitrary point.
+/// `hrtime()`: the system's monotonic clock, for measuring how long something
+/// took. `[seconds, nanoseconds]`, or nanoseconds as one integer when called
+/// with `true`. Like PHP's, it counts from an arbitrary point in the past (the
+/// machine's start), so the first call in a script is already a large number.
 fn hrtime(_context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    thread_local! {
-        /// The moment this worker thread first asked for the time.
-        static STARTED: Instant = Instant::now();
-    }
-    let elapsed = STARTED.with(|started| started.elapsed());
+    let (seconds, nanoseconds) = monotonic_now();
     if args::bool(arguments, 0).unwrap_or(false) {
-        return Ok(Value::Int(elapsed.as_nanos() as i64));
+        return Ok(Value::Int(seconds * 1_000_000_000 + nanoseconds));
     }
     let mut parts = PhpArray::new();
-    parts.push(Value::Int(elapsed.as_secs() as i64))?;
-    parts.push(Value::Int(i64::from(elapsed.subsec_nanos())))?;
+    parts.push(Value::Int(seconds))?;
+    parts.push(Value::Int(nanoseconds))?;
     Ok(Value::from(parts))
+}
+
+/// The reading of the system's monotonic clock as `(seconds, nanoseconds)`.
+/// The clock only moves forward and is not tied to the wall clock, so a
+/// changed date does not affect it.
+#[cfg(unix)]
+fn monotonic_now() -> (i64, i64) {
+    let now = rustix::time::clock_gettime(rustix::time::ClockId::Monotonic);
+    (now.tv_sec, now.tv_nsec)
+}
+
+/// Where the system's clock reading is not available (not Unix), fall back to
+/// the time since this process first asked, which also only moves forward.
+#[cfg(not(unix))]
+fn monotonic_now() -> (i64, i64) {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+
+    static STARTED: OnceLock<Instant> = OnceLock::new();
+    let elapsed = STARTED.get_or_init(Instant::now).elapsed();
+    (elapsed.as_secs() as i64, i64::from(elapsed.subsec_nanos()))
 }
 
 /// The amount to wait, or PHP's ValueError for a negative argument.

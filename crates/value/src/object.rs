@@ -215,6 +215,14 @@ impl Object {
             .map_or_else(|_| PhpArray::new(), |properties| properties.to_array())
     }
 
+    /// The properties as `(array) $object` makes them (see
+    /// [`Properties::to_cast_array`]).
+    pub fn to_cast_array(&self) -> PhpArray {
+        self.properties
+            .try_borrow()
+            .map_or_else(|_| PhpArray::new(), |properties| properties.to_cast_array())
+    }
+
     /// Reads the stored table without cloning it or entering a PHP callback.
     pub fn with_properties<R>(&self, read: impl FnOnce(&Properties) -> R) -> Option<R> {
         let properties = self.properties.try_borrow().ok()?;
@@ -236,12 +244,20 @@ impl Object {
     /// The key under which PHP stores the private property `name` declared
     /// by `class`.
     pub fn private_key(class: &str, name: &str) -> ArrayKey {
-        ArrayKey::str(format!("\0{class}\0{name}").into_bytes())
+        let mut bytes = Vec::with_capacity(class.len() + name.len() + 2);
+        bytes.push(0);
+        bytes.extend_from_slice(class.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(name.as_bytes());
+        ArrayKey::interned_str(&bytes)
     }
 
     /// The key under which PHP stores the protected property `name`.
     pub fn protected_key(name: &str) -> ArrayKey {
-        ArrayKey::str(format!("\0*\0{name}").into_bytes())
+        let mut bytes = Vec::with_capacity(name.len() + 3);
+        bytes.extend_from_slice(b"\0*\0");
+        bytes.extend_from_slice(name.as_bytes());
+        ArrayKey::interned_str(&bytes)
     }
 }
 

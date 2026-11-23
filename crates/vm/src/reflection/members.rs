@@ -216,7 +216,7 @@ impl Vm {
                         class: class.index.number(),
                         slot,
                     }),
-                    slot_access: slot_access(slot, property, is_virtual),
+                    slot_access: slot_access(slot, property, is_virtual, class),
                     ..MemberInfo::default()
                 };
                 if let Some((_, first, unit, declared)) = property_source(&property.name) {
@@ -343,6 +343,7 @@ fn slot_access(
     slot: PropertySlot,
     property: &crate::classes::class::PropertyDefault,
     is_virtual: bool,
+    class: &Class,
 ) -> Option<phera_extension_api::reflection::SlotAccess> {
     let PropertySlot::Instance(index) = slot else {
         return None;
@@ -362,6 +363,7 @@ fn slot_access(
     Some(phera_extension_api::reflection::SlotAccess {
         key: property.key.clone(),
         slot: index,
+        layout: class.layout.clone()?,
         writes,
     })
 }

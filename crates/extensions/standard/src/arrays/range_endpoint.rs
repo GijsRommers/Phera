@@ -55,6 +55,9 @@ pub(super) fn endpoint(
             result.number = result.integer as f64;
         }
         Value::Null => {}
+        Value::InternedStr(string) => {
+            parse_string(context, string.as_bytes(), number, name, &mut result);
+        }
         Value::String(string) => {
             parse_string(context, string.as_bytes(), number, name, &mut result);
         }

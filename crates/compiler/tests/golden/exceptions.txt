@@ -7,7 +7,7 @@ file golden.php
   symbol#1 = Error
   symbol#2 = Throwable
 
-function {main} (10 registers, dynamic scope)
+function {main} (9 registers, dynamic scope)
   r0 = $error
   site#0 = r0->name#1([]), after @30
   handler#0 = Handler { start: @0, end: @6, catch: Some(@7), finally: None, exception: r4, cleanup: [r5] }

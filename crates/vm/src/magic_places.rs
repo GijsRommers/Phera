@@ -138,7 +138,10 @@ impl Vm {
             } else if let Step::Index(index) = step {
                 if update {
                     PathKey::Index(Some(self.write_index_key(&value, index)?))
-                } else if matches!(value, Value::Array(_) | Value::String(_)) {
+                } else if matches!(
+                    value,
+                    Value::Array(_) | Value::InternedStr(_) | Value::String(_)
+                ) {
                     PathKey::Index(Some(self.read_index_key(index, missing)?))
                 } else {
                     // No offset is converted if the container cannot be indexed.

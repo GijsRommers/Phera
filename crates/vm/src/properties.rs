@@ -113,6 +113,7 @@ impl Vm {
             },
             StaticClass::Register(class) => match self.read_local(class) {
                 Value::Object(object) => object.class.name().to_owned(),
+                Value::InternedStr(name) => name.to_string_lossy(),
                 Value::String(name) => name.to_string_lossy(),
                 _ => {
                     return Err(NativeError::error(
@@ -447,9 +448,16 @@ impl Vm {
             } else {
                 "protected"
             };
+            // PHP names the class of the object the property was reached through,
+            // not the class that declares it: `Cannot access protected property
+            // Child::$prop`.
+            let reported_class = if property.visibility == Visibility::Protected {
+                phera_value::class_display_name(object.class.name())
+            } else {
+                phera_value::class_display_name(&property.declaring)
+            };
             return Err(NativeError::error(format!(
-                "Cannot access {visibility} property {}::${name}",
-                property.declaring
+                "Cannot access {visibility} property {reported_class}::${name}"
             )));
         }
         if instance.is_some() {

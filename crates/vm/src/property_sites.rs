@@ -101,21 +101,6 @@ impl PropertyEntry {
         crate::property_storage::write_element_known(object, self.known(), keys, value)
     }
 
-    /// `++` or `--` of an integer property, for an increment from `scope`,
-    /// as [`Vm::increment_property_site`] does: the expression's value, or
-    /// `None` with nothing changed.
-    pub(crate) fn increment_matching(
-        &self,
-        object: &Object,
-        scope: Option<&Rc<crate::classes::Class>>,
-        mode: phera_bytecode::IncDec,
-    ) -> Option<Value> {
-        if !self.matches(object, scope) {
-            return None;
-        }
-        self.increment(object, mode)
-    }
-
     /// Whether this entry was made for the object's class and a read or
     /// write from class scope `scope`.
     fn matches(&self, object: &Object, scope: Option<&Rc<crate::classes::Class>>) -> bool {
@@ -130,28 +115,10 @@ impl PropertyEntry {
     /// The integer increment of [`Vm::increment_property_site`], once the
     /// entry is known to fit the object.
     fn increment(&self, object: &Object, mode: phera_bytecode::IncDec) -> Option<Value> {
-        use phera_bytecode::IncDec;
         if !self.write_rule.allows(TypeMask::INT) {
             return None;
         }
-        let Some(Value::Int(old)) = crate::property_storage::read_known(object, self.known())
-        else {
-            return None;
-        };
-        let delta = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
-            1
-        } else {
-            -1
-        };
-        let new = old.checked_add(delta)?;
-        crate::property_storage::write_known(object, self.known(), Value::Int(new));
-        Some(Value::Int(
-            if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
-                old
-            } else {
-                new
-            },
-        ))
+        crate::property_storage::increment_known(object, self.known(), mode)
     }
 
     fn read(&self, object: &Object) -> Option<Value> {

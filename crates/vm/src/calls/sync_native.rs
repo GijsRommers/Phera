@@ -18,15 +18,64 @@ use super::native_signature::{accepts, exact_types, native_type};
 use super::pending::LinkedFunction;
 use crate::Vm;
 
+/// Pure, side-effect-free built-ins that the interpreter loop can answer
+/// inline on exact-typed arguments without exiting to `Vm::execute`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PureNative {
+    StrStartsWith,
+    StrEndsWith,
+    StrContains,
+    Strpos,
+    Strrpos,
+    Substr,
+    Trim,
+    Ltrim,
+    Rtrim,
+    InArray,
+    ArrayKeyExists,
+    Implode,
+    Explode,
+    StrReplace,
+    Ord,
+    Chr,
+    Abs,
+}
+
+impl PureNative {
+    fn for_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "str_starts_with" => Self::StrStartsWith,
+            "str_ends_with" => Self::StrEndsWith,
+            "str_contains" => Self::StrContains,
+            "strpos" => Self::Strpos,
+            "strrpos" => Self::Strrpos,
+            "substr" => Self::Substr,
+            "trim" => Self::Trim,
+            "ltrim" => Self::Ltrim,
+            "rtrim" | "chop" => Self::Rtrim,
+            "in_array" => Self::InArray,
+            "array_key_exists" | "key_exists" => Self::ArrayKeyExists,
+            "implode" | "join" => Self::Implode,
+            "explode" => Self::Explode,
+            "str_replace" => Self::StrReplace,
+            "ord" => Self::Ord,
+            "chr" => Self::Chr,
+            "abs" => Self::Abs,
+            _ => return None,
+        })
+    }
+}
+
 /// The registry signature reduced to the checks needed by a positional call.
 #[derive(Clone, Copy)]
 pub(crate) struct NativeLink {
     handler: Handler,
     name: &'static str,
-    min: usize,
-    max: usize,
+    pub(crate) min: usize,
+    pub(crate) max: usize,
     masks: [TypeMask; 4],
     object_handler: bool,
+    pub(crate) pure: Option<PureNative>,
 }
 
 #[derive(Clone, Copy)]
@@ -69,6 +118,7 @@ impl NativeLink {
             },
             masks,
             object_handler: registry.object_handler(entry.name).is_some(),
+            pure: PureNative::for_name(entry.name),
         })
     }
 
@@ -272,9 +322,75 @@ impl Vm {
                         None => Ok(Some(BatchExit::NativeCall(destination))),
                     }
                 }
-                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
-                    crate::class_intrinsics::ClassFunction::ObjectId,
-                )) => Ok(self.object_id_call(call, destination)),
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::FunctionExists) => {
+                    Ok(self.function_exists_call(call, destination))
+                }
+                CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(function)) => {
+                    Ok(match function {
+                        crate::class_intrinsics::ClassFunction::ObjectId => {
+                            self.object_id_call(call, destination)
+                        }
+                        crate::class_intrinsics::ClassFunction::ClassExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Class,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::InterfaceExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Interface,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::TraitExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Trait,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::EnumExists => self
+                            .class_query_call(
+                                crate::class_queries::ExistsKind::Enum,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::IsA => self.relation_query_call(
+                            crate::class_relation_queries::RelationQuery::IsA,
+                            call,
+                            destination,
+                        ),
+                        crate::class_intrinsics::ClassFunction::IsSubclassOf => self
+                            .relation_query_call(
+                                crate::class_relation_queries::RelationQuery::IsSubclassOf,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::MethodExists => self
+                            .member_query_call(
+                                crate::class_member_queries::MemberQuery::Method,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::PropertyExists => self
+                            .member_query_call(
+                                crate::class_member_queries::MemberQuery::Property,
+                                call,
+                                destination,
+                            ),
+                        crate::class_intrinsics::ClassFunction::GetClass => self.class_name_call(
+                            crate::class_queries::ClassNameQuery::GetClass,
+                            call,
+                            destination,
+                        ),
+                        crate::class_intrinsics::ClassFunction::GetParentClass => self
+                            .class_name_call(
+                                crate::class_queries::ClassNameQuery::GetParentClass,
+                                call,
+                                destination,
+                            ),
+                        _ => Some(BatchExit::NativeCall(destination)),
+                    })
+                }
                 _ => Ok(Some(BatchExit::NativeCall(destination))),
             };
         };

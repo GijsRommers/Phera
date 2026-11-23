@@ -1,7 +1,7 @@
 //! `number_format(1234567.891, 2)` is `"1,234,567.89"`.
 
 use phera_extension_api::{
-    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpString, Value, args,
+    Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, Value, args,
 };
 
 use super::{buffer, check_size, decimal::FixedDigits};
@@ -49,8 +49,9 @@ fn number_format(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         ));
     }
     let precision = places.max(0) as usize;
-    let point = args::string(arguments, 2).map_or(&b"."[..], PhpString::as_bytes);
-    let thousands = args::string(arguments, 3).map_or(&b","[..], PhpString::as_bytes);
+    let point = args::string(arguments, 2).map_or(&b"."[..], phera_extension_api::StrRef::as_bytes);
+    let thousands =
+        args::string(arguments, 3).map_or(&b","[..], phera_extension_api::StrRef::as_bytes);
     let number = args::float(arguments, 0).unwrap_or_default();
     // Integers must not pass through a double, which would lose the low
     // digits of numbers near PHP_INT_MAX.

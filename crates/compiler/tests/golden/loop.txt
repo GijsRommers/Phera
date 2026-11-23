@@ -1,6 +1,6 @@
 file golden.php
 
-function {main} (4 registers, dynamic scope)
+function {main} (3 registers, dynamic scope)
   r0 = $index
   0000  line 1    LoadInt { dst: r1, value: 0 }
   0001  line 1    Assign { local: r0, src: r1 }

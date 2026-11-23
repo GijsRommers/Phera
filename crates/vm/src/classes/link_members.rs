@@ -126,7 +126,7 @@ impl Vm {
         for property in &declaration.properties {
             let property_name = &unit.names[property.name.index()];
             let key = match property.visibility {
-                Visibility::Public => ArrayKey::str(property_name.as_bytes()),
+                Visibility::Public => ArrayKey::interned_str(property_name.as_bytes()),
                 Visibility::Protected => Object::protected_key(property_name),
                 Visibility::Private => Object::private_key(name, property_name),
             };

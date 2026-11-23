@@ -51,6 +51,8 @@ pub(crate) struct LoadedUnit {
     /// The key of each of the file's names, lowercased; shared with the
     /// compiled file, which numbered them once.
     name_keys: Arc<[NameKey]>,
+    /// The case-sensitive property key of each of the file's names.
+    prop_keys: Arc<[phera_bytecode::PropKey]>,
     /// The key of each of the file's symbols (functions, classes, methods
     /// referred to by name), lowercased.
     symbol_keys: Arc<[NameKey]>,
@@ -198,7 +200,8 @@ impl CodeTable {
         let count = 1 + unit.functions.len() as u32;
         let first = FunctionIndex(self.worker.number(unit, count, self.own_leases()));
         let mut facts = Vec::with_capacity(count as usize);
-        let (name_keys, symbol_keys, class_keys) = if let Some(metadata) = &unit.metadata {
+        let (name_keys, prop_keys, symbol_keys, class_keys) = if let Some(metadata) = &unit.metadata
+        {
             facts.extend(metadata.functions.iter().cloned().enumerate().map(
                 |(offset, signature)| {
                     let local = offset.checked_sub(1).map(|local| local as u32);
@@ -210,6 +213,7 @@ impl CodeTable {
             ));
             (
                 metadata.name_keys.clone(),
+                metadata.prop_keys.clone(),
                 metadata.symbol_keys.clone(),
                 metadata.class_keys.clone(),
             )
@@ -235,6 +239,7 @@ impl CodeTable {
                 .collect();
             (
                 phera_bytecode::name_keys::keys(names.iter().map(String::as_str)),
+                phera_bytecode::name_keys::prop_keys(unit.names.iter().map(String::as_str)),
                 phera_bytecode::name_keys::keys(symbols.iter().map(String::as_str)),
                 phera_bytecode::class_keys(unit),
             )
@@ -249,6 +254,7 @@ impl CodeTable {
             cache: UnitCache::new(unit),
             first,
             name_keys,
+            prop_keys,
             symbol_keys,
             class_keys,
         });
@@ -293,6 +299,16 @@ impl CodeTable {
         name: phera_bytecode::NameId,
     ) -> NameKey {
         self.loaded(function).name_keys[name.index()]
+    }
+
+    /// The case-sensitive property key of name `name` of the file `function` belongs to.
+    #[inline]
+    pub(crate) fn unit_prop_key(
+        &self,
+        function: FunctionIndex,
+        name: phera_bytecode::NameId,
+    ) -> phera_bytecode::PropKey {
+        self.loaded(function).prop_keys[name.index()]
     }
 
     /// The number of function `local` of the file whose top-level code is `first`.
@@ -557,6 +573,7 @@ impl crate::snapshot::ForkCopy for CodeTable {
                     cache: loaded.cache.fork_copy(fork),
                     first: loaded.first,
                     name_keys: loaded.name_keys.clone(),
+                    prop_keys: loaded.prop_keys.clone(),
                     symbol_keys: loaded.symbol_keys.clone(),
                     class_keys: loaded.class_keys.clone(),
                 })

@@ -5,7 +5,6 @@
 
 use std::io;
 
-use phera_extension_api::value::PhpString;
 use phera_extension_api::{
     ConstantValue, Context, FunctionEntry, NativeError, NativeResult, Param, ParamType, PhpArray,
     Registry, Value, args,
@@ -190,7 +189,7 @@ pub fn fields_array(fields: Vec<Option<Vec<u8>>>) -> Result<PhpArray, NativeErro
 
 fn str_getcsv(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let dialect = Dialect::from_arguments(context, "str_getcsv", arguments, 1)?;
-    let input = args::string(arguments, 0).map_or(&[][..], PhpString::as_bytes);
+    let input = args::bytes(arguments, 0);
     let fields = dialect
         .decode(input.to_vec(), || Ok(Vec::new()))
         .map_err(|error| NativeError::error(error.to_string()))?;

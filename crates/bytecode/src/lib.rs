@@ -46,7 +46,7 @@ pub mod reflection;
 mod unit;
 mod unit_metadata;
 
-pub use name_keys::NameKey;
+pub use name_keys::{NameKey, PropKey};
 pub use unit_metadata::{
     DeclarationScope, FunctionShape, FunctionSignature, UnitMetadata, class_keys,
 };

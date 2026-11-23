@@ -38,8 +38,10 @@ impl Compiler<'_> {
                         let folded = checking_jump_table
                             .then(|| match_constant(condition))
                             .flatten();
-                        checking_jump_table =
-                            matches!(folded, Some(Value::Int(_) | Value::String(_)));
+                        checking_jump_table = matches!(
+                            folded,
+                            Some(Value::Int(_) | Value::InternedStr(_) | Value::String(_))
+                        );
                         // The jump-table probe folds constants with the subject's
                         // line. PHP's scalar literal nodes keep their own lines.
                         if folded.is_some()
@@ -132,7 +134,7 @@ fn has_jump_table(expression: &ast::Match) -> bool {
     {
         if !matches!(
             match_constant(condition),
-            Some(Value::Int(_) | Value::String(_))
+            Some(Value::Int(_) | Value::InternedStr(_) | Value::String(_))
         ) {
             return false;
         }

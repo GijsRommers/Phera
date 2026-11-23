@@ -335,6 +335,8 @@ impl ClassTable {
             class
                 .method_table
                 .get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)));
+            let _ = class.property_table();
+            let _ = class.constant_table();
         }
     }
 
@@ -411,7 +413,7 @@ impl ClassTable {
         }
     }
 
-    fn by_number(&self, number: u32) -> Option<&Rc<Class>> {
+    pub(crate) fn by_number(&self, number: u32) -> Option<&Rc<Class>> {
         let number = number as usize;
         let base = self.native_count as usize;
         match number.checked_sub(base) {
@@ -440,19 +442,24 @@ impl ClassTable {
 
     /// Class identifiers ignore case, including names produced by dynamic expressions.
     pub(crate) fn get(&self, name: &str) -> Option<Rc<Class>> {
+        self.get_ref(name).cloned()
+    }
+
+    /// Borrowed lookup matching [`Self::get`], avoiding an `Rc::clone` on fast paths.
+    pub(crate) fn get_ref(&self, name: &str) -> Option<&Rc<Class>> {
         let name = name.strip_prefix('\\').unwrap_or(name);
         if !name.bytes().any(|byte| byte.is_ascii_uppercase()) {
-            return self.get_lowercase(name).cloned();
+            return self.get_lowercase(name);
         }
         let mut buffer = [0; 64];
         if let Some(bytes) = buffer.get_mut(..name.len()) {
             bytes.copy_from_slice(name.as_bytes());
             bytes.make_ascii_lowercase();
             if let Ok(name) = std::str::from_utf8(bytes) {
-                return self.get_lowercase(name).cloned();
+                return self.get_lowercase(name);
             }
         }
-        self.get_lowercase(&name.to_ascii_lowercase()).cloned()
+        self.get_lowercase(&name.to_ascii_lowercase())
     }
 
     /// Value-owned leases implement PHP's LIFO reuse without inspecting weak handles.

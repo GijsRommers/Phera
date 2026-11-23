@@ -25,7 +25,7 @@ impl ClassDefinitions {
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: std::collections::HashSet::new(),
-                name_value: phera_value::Value::from("stdClass"),
+                name_value: phera_value::Value::interned(b"stdClass"),
                 name: "stdClass".into(),
                 parent: None,
                 interfaces: Vec::new(),
@@ -41,6 +41,8 @@ impl ClassDefinitions {
                 property_facts: std::cell::OnceCell::new(),
                 methods: HashMap::new(),
                 method_table: std::cell::OnceCell::new(),
+                property_table: std::cell::OnceCell::new(),
+                constant_table: std::cell::OnceCell::new(),
                 serialized_fields: std::cell::OnceCell::new(),
                 constructor: None,
                 magic: None,
@@ -145,7 +147,7 @@ impl ClassDefinitions {
                 let key = match native_visibility(property.visibility) {
                     Visibility::Private => Object::private_key(entry.name, property.name),
                     Visibility::Protected => Object::protected_key(property.name),
-                    Visibility::Public => ArrayKey::str(property.name),
+                    Visibility::Public => ArrayKey::interned_str(property.name.as_bytes()),
                 };
                 let inherited = defaults.iter().position(|candidate| {
                     candidate.name == property.name
@@ -259,7 +261,7 @@ impl ClassDefinitions {
                     identity: identity.clone(),
                     declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                     ancestors: super::class::ancestor_names(&parent, &interfaces),
-                    name_value: phera_value::Value::from(entry.name),
+                    name_value: phera_value::Value::interned(entry.name.as_bytes()),
                     name: entry.name.into(),
                     parent,
                     interfaces,
@@ -286,6 +288,8 @@ impl ClassDefinitions {
                     magic: super::magic::MagicMethods::link(&methods),
                     methods,
                     method_table: std::cell::OnceCell::new(),
+                    property_table: std::cell::OnceCell::new(),
+                    constant_table: std::cell::OnceCell::new(),
                     serialized_fields: std::cell::OnceCell::new(),
                     property_template,
                     layout,

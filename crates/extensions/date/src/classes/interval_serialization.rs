@@ -27,7 +27,7 @@ pub fn unserialize(_: &mut dyn Context, this: This<'_>, arguments: &[Value]) -> 
     let data = args::array(arguments, 0).expect("serialization data");
     restore(data)?.store(object);
     for (key, value) in data.iter() {
-        if matches!(&key, ArrayKey::String(_)) && !internal(&key) && !value.is_reference() {
+        if key.as_str_bytes().is_some() && !internal(&key) && !value.is_reference() {
             object.set(key, value.clone());
         }
     }
@@ -40,8 +40,8 @@ pub fn set_state(context: &mut dyn Context, _: This<'_>, arguments: &[Value]) ->
 
 fn restore(data: &PhpArray) -> Result<Interval, NativeError> {
     let get = |key| data.get(&ArrayKey::str(key));
-    if let Some(Value::String(source)) = get("date_string") {
-        return interval::relative(source.as_bytes(), false).map_err(|message| {
+    if let Some(source) = get("date_string").and_then(Value::as_str_bytes) {
+        return interval::relative(source, false).map_err(|message| {
             NativeError::error(message.replacen("): ", ") while unserializing: ", 1))
         });
     }
@@ -97,7 +97,19 @@ fn restore(data: &PhpArray) -> Result<Interval, NativeError> {
 }
 
 fn internal(key: &ArrayKey) -> bool {
-    matches!(key, ArrayKey::String(key) if matches!(key.as_bytes(),
-        b"y" | b"m" | b"d" | b"h" | b"i" | b"s" | b"f" | b"invert" | b"days"
-            | b"from_string" | b"date_string"))
+    key.as_str_bytes().is_some_and(|key| {
+        matches!(
+            key,
+            b"y" | b"m"
+                | b"d"
+                | b"h"
+                | b"i"
+                | b"s"
+                | b"f"
+                | b"invert"
+                | b"days"
+                | b"from_string"
+                | b"date_string"
+        )
+    })
 }

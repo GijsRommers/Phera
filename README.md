@@ -417,10 +417,11 @@ Laravel and Symfony applications get this with no change:
 
 - **Laravel** (a project with `artisan` and `bootstrap/app.php`): Phera runs
   its own entry script for `public/index.php`, which bootstraps the
-  application and its service providers, then handles the request.
+  application and its service providers, warms it up, then handles the
+  request.
 - **Symfony** with `symfony/runtime`: Phera sets `APP_RUNTIME` to its own
-  runtime class (unless something else chose one), which boots the kernel
-  and then handles the request.
+  runtime class (unless something else chose one), which boots the kernel,
+  warms it up, and then handles the request.
 - **Any other application** marks the point itself:
 
   ```php
@@ -432,6 +433,75 @@ Laravel and Symfony applications get this with no change:
 
   The first start serves such a script from the top until it reaches the
   call; later starts boot it before the first connection.
+
+The warm-up builds, once per worker, what nearly every request would build
+first. For Laravel: every Eloquent model under `app/Models` is booted and
+one query is built for it (no connection is opened), and the framework
+services Octane resolves in a new worker are resolved (the application's
+`octane.warm` list when it has one). For Symfony: the event dispatcher,
+with its listeners still created on first use. On the test applications a
+Laravel Eloquent route went from 104 to 53 million instructions per request
+and a Symfony route without a database from 13.3 to 12.5 million. Every
+worker boots a little longer (165 to 214 ms on that Laravel application)
+and holds what was built (16 MiB more).
+
+**Laravel: a model's `boot()` and `booted()` run once per worker.** Under
+PHP they run in every request that uses the model. Here they run when the
+worker boots, with no request and no signed-in user. If that code asks for
+the request or the user (`request()`, `auth()->user()`), it fails at that
+moment; Phera then leaves the model alone and it boots inside each request,
+exactly as before. If it reads something else that differs per request (the
+clock, a cache, `$_SERVER`, `$_COOKIE`), it gets the worker's answer once,
+and every request of that worker sees it: `static::$bootedAt = now()` is
+the worker's boot time, a global scope chosen from a cached setting stays
+chosen until the worker boots again. A closure passed to
+`addGlobalScope()` or `creating()` still runs per query or per save, with
+the request; only the code that registers it runs once.
+`phera serve --no-service-warmup public` (or `PHERA_SERVICE_WARMUP=0` in the
+environment) turns the warm-up off and models boot per request again.
+
+### Warm-up requests
+
+Most of what a route builds the first time it is used is the application's
+own: its services, listeners, compiled routes, loaded classes. Phera cannot
+know whether running one of your routes without a visitor is safe, so this
+part is yours to declare. Name the paths, and each worker handles them as
+requests before it takes the snapshot:
+
+```toml
+# phera.toml
+[server]
+warmup = ["/api/posts", "/"]
+```
+
+or `phera serve --warmup /api/posts --warmup / public` (the option wins over
+the file; both become the environment variable `PHERA_WARMUP`, which you can
+also set yourself). On the test applications a Laravel Eloquent route went
+from WARMUP_README.
+
+The contract:
+
+- A warm-up request is an anonymous `GET`: no cookie, no credentials, the
+  host of `APP_URL` (Laravel) or `localhost` (Symfony). **It must change
+  nothing**: no row, no file, no message sent.
+- It runs once per worker boot, in every worker. A worker boots at start,
+  again when a PHP file changed, and up to three more times while it learns
+  which classes requests load. A route that writes a file the application
+  includes makes the worker boot again.
+- A path that throws, redirects or answers with an error is logged once per
+  boot, and the worker starts anyway. A route behind a login is such a path:
+  the warm-up is not signed in.
+- After each warm-up request Phera resets the framework as it is reset
+  between two requests of a long-running worker: for Laravel what Octane
+  resets (session, signed-in user, queued cookies, locale, configuration,
+  log context, scoped instances and more), for Symfony the kernel's own
+  service reset at the start of every request.
+- **Whatever a warm-up request leaves in objects that outlive a request,
+  and that those resets do not know, is what every request starts from.** A
+  singleton of yours that remembers the request it was built for, a Symfony
+  listener whose constructor reads the current request, a static property:
+  each keeps the warm-up's value. If your application runs correctly under
+  Laravel Octane or a long-running Symfony runtime, it does here.
 
 The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
 are empty and `$_SERVER` holds the environment and the script's paths. Each
