@@ -1,9 +1,8 @@
 //! Request class lookup, leased object ids, and weak cycle-cleanup records.
 
-use std::{
-    collections::HashMap,
-    rc::{Rc, Weak},
-};
+use std::rc::{Rc, Weak};
+
+use foldhash::HashMap;
 
 use phera_value::{Object, ObjectIds};
 

@@ -42,7 +42,8 @@ fn split(keys: &[ArrayKey], target: Target) -> Option<(&[ArrayKey], Option<&Arra
     }
 }
 
-/// Whether writing at `keys` of `array` is a plain write.
+/// Whether writing at `keys` of `array` is a plain write (all intermediate
+/// levels already exist as arrays; required for compound ops like `++`/`+=`).
 pub(crate) fn writable(array: &PhpArray, keys: &[ArrayKey], target: Target) -> bool {
     let Some((levels, last)) = split(keys, target) else {
         return false;
@@ -51,6 +52,23 @@ pub(crate) fn writable(array: &PhpArray, keys: &[ArrayKey], target: Target) -> b
     for key in levels {
         current = match current.get(key) {
             Some(Value::Array(inner)) => inner,
+            _ => return false,
+        };
+    }
+    last.is_none_or(|last| !matches!(current.get(last), Some(Value::Reference(_))))
+}
+
+/// Whether writing at `keys` of `array` is a plain assignment, allowing missing
+/// intermediate levels (`None`) to be auto-vivified as fresh arrays (silent in PHP).
+pub(crate) fn writable_creating(array: &PhpArray, keys: &[ArrayKey], target: Target) -> bool {
+    let Some((levels, last)) = split(keys, target) else {
+        return false;
+    };
+    let mut current = array;
+    for key in levels {
+        current = match current.get(key) {
+            Some(Value::Array(inner)) => inner,
+            None => return true,
             _ => return false,
         };
     }
@@ -70,6 +88,31 @@ pub(crate) fn write(
     let (levels, last) = split(keys, target)?;
     let mut current = Rc::make_mut(array);
     for key in levels {
+        current = match current.get_mut(key) {
+            Some(Value::Array(inner)) => Rc::make_mut(inner),
+            _ => return None,
+        };
+    }
+    match last {
+        Some(last) => Some(current.insert(last.clone(), value)),
+        None => current.push(value).ok().map(|_| None),
+    }
+}
+
+/// Stores `value` at `keys`, auto-vivifying missing intermediate levels as empty
+/// arrays once [`writable_creating`] has approved the path.
+pub(crate) fn write_creating(
+    array: &mut Rc<PhpArray>,
+    keys: &[ArrayKey],
+    target: Target,
+    value: Value,
+) -> Option<Option<Value>> {
+    let (levels, last) = split(keys, target)?;
+    let mut current = Rc::make_mut(array);
+    for key in levels {
+        if current.get(key).is_none() {
+            current.insert(key.clone(), Value::Array(Rc::new(PhpArray::new())));
+        }
         current = match current.get_mut(key) {
             Some(Value::Array(inner)) => Rc::make_mut(inner),
             _ => return None,

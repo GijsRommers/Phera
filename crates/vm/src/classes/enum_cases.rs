@@ -14,10 +14,9 @@
 //! together when all of them exist and their backing values were found to
 //! be distinct, so a read before that still runs the check.
 
-use std::{
-    collections::{HashMap, HashSet},
-    rc::Rc,
-};
+use std::rc::Rc;
+
+use foldhash::{HashMap, HashMapExt, HashSet};
 
 use phera_bytecode::EnumBacking;
 use phera_extension_api::NativeError;

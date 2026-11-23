@@ -9,7 +9,7 @@ use std::rc::Rc;
 /// Trait property defaults may consult constants from the class still being linked.
 pub(crate) struct InitializerClass {
     pub(crate) name: String,
-    pub(crate) constants: std::collections::HashMap<String, Rc<crate::classes::LinkedConstant>>,
+    pub(crate) constants: foldhash::HashMap<String, Rc<crate::classes::LinkedConstant>>,
 }
 
 pub(crate) struct InitializerFrame {

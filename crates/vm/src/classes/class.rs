@@ -1,6 +1,8 @@
 //! Linked metadata shares inherited methods and defaults while each object owns its properties.
 
-use std::{any::Any, collections::HashMap, rc::Rc};
+use std::{any::Any, rc::Rc};
+
+use foldhash::{HashMap, HashSet};
 
 use crate::calls::call_state::ParameterSpec;
 use phera_bytecode::{ClassKind, Visibility};
@@ -23,7 +25,7 @@ pub(crate) struct Class {
     /// Class names are immutable PHP strings, shared by self/static/parent::class.
     pub(crate) name_value: Value,
     /// Complete lowercase ancestry is built at linking and stays immutable.
-    pub(crate) ancestors: std::collections::HashSet<String>,
+    pub(crate) ancestors: HashSet<String>,
     pub(crate) parent: Option<Rc<Class>>,
     pub(crate) interfaces: Vec<Rc<Class>>,
     pub(crate) traits: Vec<String>,
@@ -356,8 +358,9 @@ pub(crate) struct MethodSignature {
 pub(crate) fn ancestor_names(
     parent: &Option<Rc<Class>>,
     interfaces: &[Rc<Class>],
-) -> std::collections::HashSet<String> {
-    let mut names = std::collections::HashSet::new();
+) -> HashSet<String> {
+    use foldhash::HashSetExt;
+    let mut names = HashSet::new();
     for class in parent.iter().chain(interfaces) {
         names.insert(class.name.to_ascii_lowercase());
         names.extend(class.ancestors.iter().cloned());
