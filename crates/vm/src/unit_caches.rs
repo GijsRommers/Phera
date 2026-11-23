@@ -211,8 +211,6 @@ impl SiteRecord {
 pub(crate) enum CachedSite {
     Empty,
     Property(Rc<crate::property_sites::PropertyEntry>),
-    /// A static property read (see `crate::static_sites`).
-    Static(Rc<crate::static_sites::StaticEntry>),
     /// What an unqualified built-in call in a namespace found when it first
     /// ran (see `crate::builtin_guards`).
     BuiltinGuard(crate::builtin_guards::Resolution),
@@ -531,7 +529,6 @@ impl CachedSite {
         match self {
             CachedSite::Empty => CachedSite::Empty,
             CachedSite::Property(entry) => CachedSite::Property(entry.clone()),
-            CachedSite::Static(entry) => CachedSite::Static(entry.clone()),
             CachedSite::BuiltinGuard(resolution) => CachedSite::BuiltinGuard(*resolution),
             CachedSite::Function(linked) => match linked.shared() {
                 Some(linked) => CachedSite::Function(Box::new(linked)),

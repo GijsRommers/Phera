@@ -53,6 +53,7 @@ pub(crate) struct Class {
     pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
     pub(crate) property_table: std::cell::OnceCell<super::property_table::PropertyTable>,
     pub(crate) constant_table: std::cell::OnceCell<super::property_table::ConstantTable>,
+    pub(crate) static_prop_table: std::cell::OnceCell<super::property_table::StaticPropTable>,
     pub(crate) serialized_fields:
         std::cell::OnceCell<Option<Rc<[phera_extension_api::serialization::SerializedProperty]>>>,
     /// Constructor presence is immutable after linking, including inheritance.
@@ -467,6 +468,13 @@ impl Class {
     pub(crate) fn constant_table(&self) -> &super::property_table::ConstantTable {
         self.constant_table
             .get_or_init(|| super::property_table::ConstantTable::build(self))
+    }
+
+    /// Flat data-oriented static property lookup table, built once and shared across forks.
+    #[inline]
+    pub(crate) fn static_prop_table(&self) -> &super::property_table::StaticPropTable {
+        self.static_prop_table
+            .get_or_init(|| super::property_table::StaticPropTable::build(self))
     }
 
     /// Whether this class is `target`, extends it or implements it: the same
