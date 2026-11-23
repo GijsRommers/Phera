@@ -154,9 +154,35 @@ pub(crate) fn with_known<R>(
         .flatten()
 }
 
-/// [`write_at`] for a site.
-pub(crate) fn write_known(object: &Object, property: Known<'_>, value: Value) {
-    object.update(|properties| property.set(properties, value));
+/// Increment or decrement an integer property in a single mutable borrow.
+pub(crate) fn increment_known(
+    object: &Object,
+    property: Known<'_>,
+    mode: phera_bytecode::IncDec,
+) -> Option<Value> {
+    use phera_bytecode::IncDec;
+    object
+        .update(|properties| {
+            let Some(Value::Int(slot)) = property.get_mut(properties) else {
+                return None;
+            };
+            let old = *slot;
+            let delta = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
+                1
+            } else {
+                -1
+            };
+            let new = old.checked_add(delta)?;
+            *slot = new;
+            Some(Value::Int(
+                if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
+                    old
+                } else {
+                    new
+                },
+            ))
+        })
+        .flatten()
 }
 
 /// [`write_direct_at`] for a site.

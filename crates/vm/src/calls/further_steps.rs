@@ -57,7 +57,23 @@ impl Machine<'_> {
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
             | Instruction::NewArray { .. }
+            | Instruction::ArraySet { .. }
+            | Instruction::ArrayPush { .. }
+            | Instruction::ArrayKeyExists { .. }
             | Instruction::FetchIndex { .. } => self.value_step::<GUARDED>(&instruction, position),
+            Instruction::InLiteralArray {
+                dst,
+                needle,
+                haystack,
+                strict,
+            } => self.in_literal_array::<GUARDED>(position, dst, (needle, haystack, strict)),
+            Instruction::CallNativeDirect {
+                function,
+                args,
+                count,
+                dst,
+                ..
+            } => self.call_native_direct::<GUARDED>(position, function, (args, count), dst),
             Instruction::Fetch {
                 dst,
                 path,
@@ -151,6 +167,9 @@ impl Machine<'_> {
             Instruction::InitCall { function } => self.prepare_named_call(position, function),
             Instruction::FetchNamedClassConstant { dst, class, name } => {
                 self.fetch_named_class_constant::<GUARDED>(position, dst, (class, name))
+            }
+            Instruction::FetchClassConstant { dst, class, name } => {
+                self.fetch_class_constant::<GUARDED>(position, dst, (class, name))
             }
             Instruction::FetchClassName { dst, class } => {
                 self.fetch_class_name::<GUARDED>(position, dst, class)
