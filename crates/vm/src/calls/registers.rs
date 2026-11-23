@@ -160,6 +160,22 @@ impl Registers {
         }
     }
 
+    /// Release a returning PHP frame. Its temporary registers often end in
+    /// runs of empty slots. Test four at a time so these slots need neither
+    /// a second tag test nor a write. The remaining values are still dropped
+    /// from first to last, including any locals with visible destructors.
+    #[inline]
+    pub(crate) fn release_return_window(&mut self, start: usize) {
+        if start < self.top {
+            let mut window = &self.slots[start..self.top];
+            while let [rest @ .., None, None, None, None] = window {
+                window = rest;
+            }
+            self.top = start + window.len();
+            self.truncate(start);
+        }
+    }
+
     /// Empty the registers of a frame that ends, from `start` (its window,
     /// with `$this` or the closure below `base`) up. PHP releases a
     /// function's variables first, in order, and `$this` after them, so a
@@ -174,7 +190,7 @@ impl Registers {
                 None
             }
         });
-        self.truncate(start);
+        self.release_return_window(start);
         drop(prefix);
     }
 

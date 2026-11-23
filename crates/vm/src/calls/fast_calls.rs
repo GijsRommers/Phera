@@ -147,7 +147,7 @@ impl Machine<'_> {
             return self.leave_in_order(frame, caller, (source, destination), value);
         }
         self.stack.pop_for_return();
-        self.registers.truncate(start);
+        self.registers.release_return_window(start);
         self.registers
             .put(caller.base() + destination.index(), value);
         Step::Switched(Position {
@@ -304,7 +304,7 @@ impl Machine<'_> {
             return Step::Slow;
         };
         self.stack.pop_for_return();
-        self.registers.truncate(frame.start());
+        self.registers.release_return_window(frame.start());
         Step::Switched(Position {
             frame: caller,
             ip: caller.ip(),

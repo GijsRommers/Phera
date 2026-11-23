@@ -1466,7 +1466,8 @@ Done on the branch `engine/calls` (pull request #9):
   argument facts, a closure, a class context) is in a side table by depth.
   Returns pop the frame and release that entry when present. The compiler
   can omit the trailing scratch slot when binding, branch and call operands
-  all fit in the smaller window.
+  all fit in the smaller window. Frame release skips groups of four empty
+  slots at the end before dropping the remaining values in order.
 - One flat code table per request; functions, methods, closures and
   class initializers refer to code by `FunctionIndex`.
 - One `match` executes an instruction. The interpreter loop borrows the
