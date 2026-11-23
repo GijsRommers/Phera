@@ -51,6 +51,7 @@ long-running workers runs:
 | scoped instances | `FlushTemporaryContainerInstances` |
 | the route's controller | `ApplicationGateway::terminate` |
 | the stand-in request bound again; the router's current request and route, the compiled view engines | `Worker::handle` |
+| the objects the facades remember | `CurrentApplication::set` |
 | the application's terminating callbacks back to what they were | Octane throws its per-request copy of the application away |
 
 A warm-up request that throws, or is answered with anything but a 2xx

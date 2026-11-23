@@ -377,10 +377,15 @@ final class WarmUp
         // service that follows the bound request, and the router and the
         // compiled view engines forget what they kept.
         $app->instance('request', Request::create($config['app']['url'] ?? 'http://localhost'));
-        Facade::clearResolvedInstance('request');
         (fn () => $this->currentRequest = $this->current = null)->call($app->make('router'));
-        $app->make('view.engine.resolver')->forget('blade');
-        $app->make('view.engine.resolver')->forget('php');
+        if ($app->resolved('view.engine.resolver')) {
+            $app->make('view.engine.resolver')->forget('blade');
+            $app->make('view.engine.resolver')->forget('php');
+        }
+
+        // CurrentApplication::set(): a facade remembers the object it
+        // found, and some of those objects were just forgotten.
+        Facade::clearResolvedInstances();
 
         // Octane handles a request in a copy of the application and throws
         // the copy away, and with it what the request asked the application
