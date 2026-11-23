@@ -215,10 +215,10 @@ certificates, speaks HTTP/2 and HTTP/3 to browsers, and sends plain
 HTTP/1.1 to a container. So the work that matters most is being a good
 upstream, not being an edge server.
 
-The list below is the order of work. Built so far (2026-11-18): steps 1,
-2, 3 and 8, and of step 5 the platform's `PORT`, the health path and the
+The list below is the order of work. Built so far (2026-11-23): steps 1,
+2, 3, 4 and 8, and of step 5 the platform's `PORT`, the health path and the
 graceful end on `SIGTERM`. The server speaks HTTP/1.1 with keep-alive and
-runs one worker per core.
+cleartext HTTP/2 (`h2c`) on one listener, running one worker per core.
 
 1. **Limits and timeouts** (5.1). A proxy does not protect a worker from a
    script that never ends or a body that is too large.

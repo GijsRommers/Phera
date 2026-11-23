@@ -118,10 +118,12 @@ when it finishes.
 
 ### Serving a site
 
-Run `phera serve public` to serve a document root. PHP diagnostics, including
-fatal backtraces, go to the server log by default. Use `phera serve --dev public`
-to display diagnostics in responses and check PHP files on each request during
-local development.
+Run `phera serve public` to serve a document root over HTTP/1.1 and cleartext
+HTTP/2 (`h2c` with prior knowledge) on one listener. PHP sees
+`$_SERVER['SERVER_PROTOCOL']` as `HTTP/2.0` on HTTP/2 requests. PHP diagnostics,
+including fatal backtraces, go to the server log by default. Use `phera serve
+--dev public` to display diagnostics in responses and check PHP files on each
+request during local development.
 
 The web SAPI queues stderr diagnostics and `error_log()` messages. When the
 queue fills or a record exceeds 64 KiB, it drops the record so the request can
