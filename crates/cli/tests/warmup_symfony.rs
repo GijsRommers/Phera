@@ -186,13 +186,22 @@ fn a_warm_up_request_leaves_no_session_and_no_entity() {
     // ...two visitors have their own...
     let ada = get(&warmed, "/visit?name=ada", &[]).cookies();
     let bob = get(&warmed, "/visit?name=bob", &[]).cookies();
-    assert_eq!(get(&warmed, "/visit", &[("Cookie", &ada)]).body, r#"{"before":"ada"}"#);
-    assert_eq!(get(&warmed, "/visit", &[("Cookie", &bob)]).body, r#"{"before":"bob"}"#);
+    assert_eq!(
+        get(&warmed, "/visit", &[("Cookie", &ada)]).body,
+        r#"{"before":"ada"}"#
+    );
+    assert_eq!(
+        get(&warmed, "/visit", &[("Cookie", &bob)]).body,
+        r#"{"before":"bob"}"#
+    );
     assert_eq!(get(&warmed, "/visit", &[]).body, r#"{"before":null}"#);
     // ...and no entity the warm-up loaded is still managed: Symfony's own
     // reset of its services runs at the start of every request.
     let state = get(&symfony.php, "/api/state", &[]).body;
-    assert!(state.contains(r#""entities_managed":0,"transaction_open":false"#), "{state}");
+    assert!(
+        state.contains(r#""entities_managed":0,"transaction_open":false"#),
+        "{state}"
+    );
     assert_eq!(get(&warmed, "/api/state", &[]).body, state);
     assert_eq!(
         get(&warmed, "/api/products", &[]).body,
@@ -210,9 +219,18 @@ fn a_listener_the_warm_up_built_was_built_for_the_warm_up() {
     // reads the current request in its constructor; under PHP that is the
     // request being answered, here it is the warm-up's.
     let (warmed, _log) = symfony.warmed_by("/visit");
-    assert_eq!(get(&symfony.php, "/api/ping", &[]).header("x-listener-built-for"), ["/api/ping"]);
-    assert_eq!(get(&symfony.warm, "/api/ping", &[]).header("x-listener-built-for"), ["/api/ping"]);
-    assert_eq!(get(&warmed, "/api/ping", &[]).header("x-listener-built-for"), ["/visit"]);
+    assert_eq!(
+        get(&symfony.php, "/api/ping", &[]).header("x-listener-built-for"),
+        ["/api/ping"]
+    );
+    assert_eq!(
+        get(&symfony.warm, "/api/ping", &[]).header("x-listener-built-for"),
+        ["/api/ping"]
+    );
+    assert_eq!(
+        get(&warmed, "/api/ping", &[]).header("x-listener-built-for"),
+        ["/visit"]
+    );
 }
 
 #[test]

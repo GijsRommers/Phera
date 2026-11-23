@@ -67,7 +67,11 @@ fn a_path_must_start_with_a_slash_and_hold_no_space() {
 
     let root = Served::root_of("warmup-bad-file");
     std::fs::create_dir_all(root.join("public")).expect("create the site");
-    std::fs::write(root.join("phera.toml"), "[server]\nwarmup = \"/api/posts\"\n").expect("write");
+    std::fs::write(
+        root.join("phera.toml"),
+        "[server]\nwarmup = \"/api/posts\"\n",
+    )
+    .expect("write");
     std::fs::write(root.join("public/index.php"), INDEX).expect("write");
     let output = Command::new(phera)
         .arg("serve")
