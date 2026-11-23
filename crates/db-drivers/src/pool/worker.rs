@@ -25,8 +25,8 @@ thread_local! {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) struct WorkerId {
-    thread: ThreadId,
-    runtime: Id,
+    pub(super) thread: ThreadId,
+    pub(super) runtime: Id,
 }
 
 pub(super) struct Worker {

@@ -143,7 +143,7 @@ impl Vm {
             static_variables,
             diagnostic_reporter: crate::diagnostic_reporter::DiagnosticReporter::new(),
             diagnostic_location: None,
-            include_state: self.include_state.clone(),
+            include_state: self.include_state.forked(),
             call_stack,
             finally_stack: Vec::new(),
             generator_suspension: None,

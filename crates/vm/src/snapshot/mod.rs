@@ -151,7 +151,9 @@ impl<T: ForkCopy> ForkCopy for std::collections::VecDeque<T> {
 }
 
 /// Globals keep their order of declaration, so the copy keeps it too.
-impl<K: Clone + Eq + std::hash::Hash, V: ForkCopy> ForkCopy for indexmap::IndexMap<K, V> {
+impl<K: Clone + Eq + std::hash::Hash, V: ForkCopy, S: std::hash::BuildHasher + Default> ForkCopy
+    for indexmap::IndexMap<K, V, S>
+{
     fn fork_copy(&self, fork: &mut Fork<'_>) -> Self {
         self.iter()
             .map(|(key, value)| (key.clone(), value.fork_copy(fork)))
