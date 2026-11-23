@@ -42,6 +42,18 @@ pub(crate) struct EnumCases {
     validating: HashSet<ClassIndex>,
 }
 
+impl EnumCases {
+    #[inline]
+    pub(crate) fn needs_backing(&self, class: &Class) -> bool {
+        class
+            .enum_info
+            .as_ref()
+            .is_some_and(|info| info.backing.is_some())
+            && !self.backed.contains_key(&class.index)
+            && !self.validating.contains(&class.index)
+    }
+}
+
 /// The request stores one object per case and indexes backing values separately.
 pub(crate) struct BackingBuilder {
     pub(crate) class: Rc<Class>,

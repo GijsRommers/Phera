@@ -152,6 +152,9 @@ impl Machine<'_> {
             Instruction::FetchNamedClassConstant { dst, class, name } => {
                 self.fetch_named_class_constant::<GUARDED>(position, dst, (class, name))
             }
+            Instruction::FetchClassConstant { dst, class, name } => {
+                self.fetch_class_constant::<GUARDED>(position, dst, (class, name))
+            }
             Instruction::FetchClassName { dst, class } => {
                 self.fetch_class_name::<GUARDED>(position, dst, class)
             }

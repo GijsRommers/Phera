@@ -125,6 +125,9 @@ pub(super) struct Machine<'a> {
     /// The request's evaluated class constants, read by the loop's
     /// class constant reads.
     pub(super) class_states: &'a crate::classes::class_state::ClassStates,
+    /// The request's validated enum cases, read by class constants and
+    /// `Enum::from`/`Enum::tryFrom`.
+    pub(super) enum_cases: &'a crate::classes::enums::EnumCases,
 }
 
 /// Where the loop is: which function, its registers, its next instruction.
@@ -173,6 +176,7 @@ impl Vm {
                 ids: &self.object_ids,
                 registry: &self.registry,
                 class_states: &self.class_states,
+                enum_cases: &self.enum_cases,
             };
             // While no live object has a destructor due, no release can
             // make one due, and the loop is the plain one (see
@@ -599,6 +603,7 @@ impl Machine<'_> {
             | Instruction::IncDecPath { .. }
             | Instruction::InitCall { .. }
             | Instruction::FetchClassName { .. }
+            | Instruction::FetchClassConstant { .. }
             | Instruction::InstanceOf { .. }
             | Instruction::InstanceOfBranch { .. }
             | Instruction::InstanceOfBranchIf { .. }
