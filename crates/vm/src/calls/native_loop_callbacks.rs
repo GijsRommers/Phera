@@ -57,17 +57,46 @@ impl Vm {
             return Err(internal_error!("native loop"));
         };
         let origin = state.origin;
-        let closure = match &state.callee.target {
-            CallTarget::Closure(closure) => Some(closure.clone()),
-            _ => None,
-        };
         let count = arguments.iter().flatten().count();
         let mut arguments = arguments.map(Option::unwrap_or_default);
         let arguments = arguments.get_mut(..count).unwrap_or_default();
-        if let Some(closure) = closure
-            && self.enter_closure_callback(&closure, arguments)
-        {
-            return Ok(());
+        match &state.callee.target {
+            CallTarget::Closure(closure) => {
+                let closure = closure.clone();
+                if self.enter_closure_callback(&closure, arguments) {
+                    return Ok(());
+                }
+            }
+            CallTarget::User(function) => {
+                let function = *function;
+                if self.enter_php_callback(
+                    function,
+                    crate::calls::prepared_call::CallKind::Function,
+                    None,
+                    None,
+                    arguments,
+                ) {
+                    return Ok(());
+                }
+            }
+            CallTarget::Method { method, context } => {
+                if let crate::classes::MethodBody::User(function) = method.body
+                    && context.invocation == crate::classes::Invocation::Method
+                {
+                    let receiver = context.receiver.clone();
+                    let called = receiver.is_none().then_some(context.called.index);
+                    if self.enter_php_callback(
+                        function,
+                        crate::calls::prepared_call::CallKind::Method,
+                        receiver,
+                        called,
+                        arguments,
+                    ) {
+                        return Ok(());
+                    }
+                }
+            }
+            _ => {}
         }
         let Some(state) = self.call_stack.native_loops.last() else {
             return Err(internal_error!("native loop"));
@@ -86,6 +115,85 @@ impl Vm {
         Ok(())
     }
 
+    /// Whether `arguments` match a plain PHP function/method/closure directly
+    /// without coercion, defaults, or reference binding.
+    fn callback_arguments_fit(
+        &self,
+        function: crate::code_table::FunctionIndex,
+        arguments: &[Value],
+    ) -> bool {
+        use crate::function_facts::FunctionShape;
+        let facts = self.code.facts(function);
+        let count = arguments.len();
+        facts.shape == FunctionShape::Plain
+            && usize::from(facts.required) <= count
+            && usize::from(facts.parameters) >= count
+            && self.call_stack.depth() < self.frame_limit
+            && arguments.iter().enumerate().all(|(index, argument)| {
+                facts.takes_value(index)
+                    && (!facts.is_typed(index)
+                        || facts
+                            .parameter_masks
+                            .get(index)
+                            .is_some_and(|mask| mask.intersects(crate::types::own_type(argument)))
+                        || self
+                            .code
+                            .function(function)
+                            .parameters
+                            .get(index)
+                            .and_then(|param| param.ty)
+                            .is_some_and(|declared| {
+                                crate::class_types::fast_class_type_matches(
+                                    &self.code,
+                                    &self.classes,
+                                    function,
+                                    declared,
+                                    argument,
+                                )
+                            }))
+            })
+    }
+
+    /// Direct frame entry for a PHP function or method callback (e.g.
+    /// `array_map([$this, 'hydrate'], $rows)`), avoiding `Callee::clone()`.
+    fn enter_php_callback(
+        &mut self,
+        function: crate::code_table::FunctionIndex,
+        kind: crate::calls::prepared_call::CallKind,
+        receiver: Option<Rc<Object>>,
+        called: Option<crate::classes::ClassIndex>,
+        arguments: &mut [Value],
+    ) -> bool {
+        use crate::calls::frame::Frame;
+        if !self.callback_arguments_fit(function, arguments) {
+            return false;
+        }
+        let facts = self.code.facts(function);
+        let count = arguments.len();
+        let start = self.registers.len();
+        let base = start + kind.prefix();
+        let window = (facts.registers.max(facts.parameters) as usize).max(1);
+        self.registers.grow_to(base + window);
+        if let Some(receiver) = receiver {
+            self.registers.put(start, Value::Object(receiver));
+        }
+        for (offset, argument) in arguments.iter_mut().enumerate() {
+            self.registers.put(base + offset, std::mem::take(argument));
+        }
+        let mut frame = Frame::of_kind(function, kind, base, None);
+        if usize::from(facts.parameters) > count {
+            frame = frame.with_passed(count);
+        }
+        frame.mark_native_loop();
+        self.call_stack.push(frame);
+        if let Some(called) = called
+            && Some(called) != facts.class
+        {
+            self.call_stack.current_extras_mut().called = Some(called);
+        }
+        true
+    }
+
     /// Enters a closure written in PHP with these arguments the way the
     /// interpreter loop enters `$f($value)`: its window with the closure
     /// and its captured variables, the arguments where its parameters are,
@@ -98,7 +206,6 @@ impl Vm {
         arguments: &mut [Value],
     ) -> bool {
         use crate::calls::frame::Frame;
-        use crate::function_facts::FunctionShape;
         let function = {
             let native = closure.native.borrow();
             let Some(state) = native
@@ -115,23 +222,11 @@ impl Vm {
             };
             function
         };
-        let facts = self.code.facts(function);
-        let count = arguments.len();
-        let fits = facts.shape == FunctionShape::Plain
-            && usize::from(facts.required) <= count
-            && usize::from(facts.parameters) >= count
-            && arguments.iter().enumerate().all(|(index, argument)| {
-                facts.takes_value(index)
-                    && (!facts.is_typed(index)
-                        || facts
-                            .parameter_masks
-                            .get(index)
-                            .is_some_and(|mask| mask.intersects(crate::types::own_type(argument))))
-            })
-            && self.call_stack.depth() < self.frame_limit;
-        if !fits {
+        if !self.callback_arguments_fit(function, arguments) {
             return false;
         }
+        let facts = self.code.facts(function);
+        let count = arguments.len();
         let parts = (&mut self.call_stack, &mut self.registers);
         if !crate::calls::php_windows::push_closure_call(&self.code, parts, closure) {
             return false;

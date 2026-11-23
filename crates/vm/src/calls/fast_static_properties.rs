@@ -6,17 +6,14 @@
 //! if (isset(Facade::$resolved[$key])) { ... } // Fetch, Isset
 //! ```
 //!
-//! The path names its class (`Post::`, `self::`, `static::`, `parent::`) and
-//! has up to [`MOST_KEYS`] index steps. The VM recorded what the property's
-//! first read found in the instruction's site (see `crate::static_sites`):
-//! the slot of its value and the class context that holds for. When the
-//! running code has that context, the value is read from the slot here, as
-//! the VM's `Fetch` gives it: the value, or for `isset`, `??` and `empty`
-//! null when a key is missing.
+//! Resolves the target class (`Post::`, `self::`, `static::`, `parent::`)
+//! directly against its flat [`StaticPropTable`] indexed by case-sensitive
+//! [`PropKey`], with zero per-instruction site cache, zero `RefCell` borrows,
+//! and borrowed [`FastKey`] lookups for up to [`MOST_KEYS`] index steps.
 //!
 //! Everything else goes to the VM ([`Step::Slow`]):
-//! - a site without an entry, or made for another class scope or called
-//!   class;
+//! - an undeclared class or property, a trait's own static (which deprecates),
+//!   a visibility violation, or an uninitialized static slot;
 //! - a missing element in a plain read, which warns;
 //! - a level that is not an array, or a PHP reference on the way;
 //! - a key that is not an integer or a string.
@@ -25,8 +22,7 @@ use phera_bytecode::{FetchMode, PathBase, PathId, Reg, Step as PathStep};
 use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
-use crate::element_writes::{MOST_KEYS, Target};
-use crate::unit_caches::CachedSite;
+use crate::element_writes::MOST_KEYS;
 
 impl Machine<'_> {
     /// `Fetch` of a static property, or of an element of one, in `mode`.
@@ -45,33 +41,46 @@ impl Machine<'_> {
     }
 
     /// The value `path` names: `Some(None)` when a key on the way is
-    /// missing, `None` for a path or a site this does not take.
+    /// missing, `None` for a path this does not take.
     fn static_value(&self, position: Position, path: PathId) -> Option<Option<Value>> {
         let function = position.frame.function;
         let body = self.code.function(function).paths.get(path.index())?;
-        if !matches!(body.base, PathBase::NamedStaticProperty { .. })
-            || body.steps.len() > MOST_KEYS
-            || body
-                .steps
-                .iter()
-                .any(|step| !matches!(step, PathStep::Index(_)))
-        {
-            return None;
-        }
-        // The VM keys the site by the position after the instruction,
-        // which is where the loop stands now.
-        let site = self.code.site(function, position.ip)?.try_borrow().ok()?;
-        let CachedSite::Static(entry) = &*site else {
+        let PathBase::NamedStaticProperty { class, name, .. } = body.base else {
             return None;
         };
-        let context = self.current_context();
-        if context.as_ref().and_then(|context| context.scope_index()) != entry.scope
-            || (entry.called.is_some()
-                && context.as_ref().and_then(|context| context.called_index()) != entry.called)
-        {
+        if body.steps.len() > MOST_KEYS {
             return None;
         }
-        let storage = self.class_states.existing_slot(entry.slot)?;
+        let prop_key = self.code.unit_prop_key(function, name);
+        let scope = self.caller_scope_index(position);
+        let key = self.code.unit_symbol_key(function, class);
+        let packed = if let Some(linked) = self.classes.by_key(key) {
+            linked.static_prop_table().get(prop_key)?
+        } else {
+            let written = &self.code.unit(function).symbols.get(class.index())?.written;
+            match written.as_str() {
+                "self" => self
+                    .caller_scope(position)?
+                    .static_prop_table()
+                    .get(prop_key)?,
+                "parent" => self
+                    .caller_scope(position)?
+                    .parent
+                    .as_deref()?
+                    .static_prop_table()
+                    .get(prop_key)?,
+                "static" => self
+                    .current_context()?
+                    .called()?
+                    .static_prop_table()
+                    .get(prop_key)?,
+                _ => return None,
+            }
+        };
+        if !packed.visible_to(scope, self.classes) {
+            return None;
+        }
+        let storage = self.class_states.existing_slot(packed.slot())?;
         if !storage.initialized.get() || !storage.value_initialized.get() {
             return None;
         }
@@ -80,23 +89,27 @@ impl Machine<'_> {
         if body.steps.is_empty() {
             return Some(Some(value.deref().clone()));
         }
-        let keys = self.write_keys(position, &body.steps)?;
-        if !matches!(keys.target, Target::Last) {
-            return None;
-        }
         let Value::Array(array) = &*value else {
             return None;
         };
-        let (last, levels) = keys.as_slice().split_last()?;
+        let (last, levels) = body.steps.split_last()?;
         let mut current = &**array;
-        for key in levels {
-            current = match current.get(key) {
+        for step in levels {
+            let PathStep::Index(register) = *step else {
+                return None;
+            };
+            let key = self.array_key_ref(position, register)?;
+            current = match key.get(current) {
                 Some(Value::Array(inner)) => inner,
                 None => return Some(None),
                 Some(_) => return None,
             };
         }
-        match current.get(last) {
+        let PathStep::Index(last_register) = *last else {
+            return None;
+        };
+        let last_key = self.array_key_ref(position, last_register)?;
+        match last_key.get(current) {
             Some(Value::Reference(_)) => None,
             found => Some(found.cloned()),
         }

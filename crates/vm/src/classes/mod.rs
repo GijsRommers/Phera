@@ -25,6 +25,7 @@ mod property_hook_contracts;
 mod property_hook_inheritance;
 pub(crate) mod property_hooks;
 mod property_names;
+pub(crate) mod property_table;
 mod protocol_methods;
 mod signatures;
 mod static_calls;

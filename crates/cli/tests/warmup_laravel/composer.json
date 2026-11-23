@@ -1,0 +1,5 @@
+{
+    "name": "phera/warm-up-test-application",
+    "description": "The Laravel application of crates/cli/tests/warmup_laravel.rs; its vendor directory comes from an installed application.",
+    "autoload": {"psr-4": {"App\\": "app/"}}
+}

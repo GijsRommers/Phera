@@ -26,8 +26,9 @@ use std::sync::{
 /// ```
 #[derive(Default)]
 pub struct RequestState {
-    /// One value per type. `TypeId` is Rust's run-time name for a type.
-    slots: HashMap<TypeId, Slot>,
+    /// One value per type in a flat vector (typically 4–12 entries per request).
+    /// Linear scan over `TypeId` avoids SipHash overhead and hash table allocations.
+    slots: Vec<(TypeId, Slot)>,
 }
 
 /// One extension's state, with the name of its type for error messages.
@@ -56,11 +57,24 @@ pub fn copy_state<T: Clone + 'static>(
 
 impl RequestState {
     /// The state of type `T`, created on first use.
+    #[inline]
     pub fn get_or_default<T: Default + 'static>(&mut self) -> &mut T {
-        let slot = self.slots.entry(TypeId::of::<T>()).or_insert_with(|| Slot {
-            value: Box::new(T::default()),
-            name: std::any::type_name::<T>(),
-        });
+        let id = TypeId::of::<T>();
+        let index = match self.slots.iter().position(|(key, _)| *key == id) {
+            Some(index) => index,
+            None => {
+                let index = self.slots.len();
+                self.slots.push((
+                    id,
+                    Slot {
+                        value: Box::new(T::default()),
+                        name: std::any::type_name::<T>(),
+                    },
+                ));
+                index
+            }
+        };
+        let slot = &mut self.slots[index].1;
         // The slot under `T`'s id always holds a `T`. If that were ever not
         // so, start over with a fresh value instead of panicking.
         if !slot.value.is::<T>() {
@@ -73,14 +87,23 @@ impl RequestState {
     }
 
     /// The state of type `T`, if anything created it.
+    #[inline]
     pub fn get<T: 'static>(&self) -> Option<&T> {
-        self.slots.get(&TypeId::of::<T>())?.value.downcast_ref()
+        let id = TypeId::of::<T>();
+        self.slots
+            .iter()
+            .find(|(key, _)| *key == id)?
+            .1
+            .value
+            .downcast_ref()
     }
 
     /// Removes and returns the state of type `T`. The runtime uses this after
     /// a request to collect what an extension gathered.
     pub fn take<T: 'static>(&mut self) -> Option<T> {
-        let slot = self.slots.remove(&TypeId::of::<T>())?;
+        let id = TypeId::of::<T>();
+        let index = self.slots.iter().position(|(key, _)| *key == id)?;
+        let (_, slot) = self.slots.swap_remove(index);
         slot.value.downcast().ok().map(|state| *state)
     }
 
@@ -92,17 +115,19 @@ impl RequestState {
         forks: &HashMap<TypeId, StateFork>,
         fork: &mut phera_value::Fork<'_>,
     ) -> Result<RequestState, &'static str> {
-        let mut copy = RequestState::default();
+        let mut copy = RequestState {
+            slots: Vec::with_capacity(self.slots.len()),
+        };
         for (type_id, slot) in &self.slots {
             let make = forks.get(type_id).ok_or(slot.name)?;
             if let Some(value) = make(slot.value.as_ref(), fork) {
-                copy.slots.insert(
+                copy.slots.push((
                     *type_id,
                     Slot {
                         value,
                         name: slot.name,
                     },
-                );
+                ));
             }
         }
         Ok(copy)

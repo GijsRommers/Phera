@@ -122,17 +122,6 @@ impl<'a> Known<'a> {
             None => properties.get_mut(self.key),
         }
     }
-
-    fn set(self, properties: &mut phera_value::Properties, value: Value) {
-        match self.slot_in(properties) {
-            Some(slot) => {
-                properties.set_slot(slot, value);
-            }
-            None => {
-                properties.insert(self.key.clone(), value);
-            }
-        }
-    }
 }
 
 /// [`read_at`] for a site.
@@ -142,64 +131,33 @@ pub(crate) fn read_known(object: &Object, property: Known<'_>) -> Option<Value> 
         .flatten()
 }
 
-/// Borrows the stored value of a known property while running `read`,
-/// avoiding cloning an outer array before indexing into it.
-pub(crate) fn with_known<R>(
+/// Increment or decrement an integer property in a single mutable borrow.
+pub(crate) fn increment_known(
     object: &Object,
     property: Known<'_>,
-    read: impl FnOnce(&Value) -> Option<R>,
-) -> Option<R> {
-    object
-        .with_properties(|properties| read(property.get(properties)?))
-        .flatten()
-}
-
-/// [`write_at`] for a site.
-pub(crate) fn write_known(object: &Object, property: Known<'_>, value: Value) {
-    object.update(|properties| property.set(properties, value));
-}
-
-/// [`write_direct_at`] for a site.
-pub(crate) fn write_direct_known(
-    object: &Object,
-    property: Known<'_>,
-    value: &Value,
-    may_initialize: impl FnOnce() -> bool,
-) -> bool {
-    object
-        .update(|properties| match property.get_mut(properties) {
-            Some(Value::Reference(_)) => false,
-            Some(destination) => {
-                *destination = value.clone();
-                true
-            }
-            None if may_initialize() => {
-                property.set(properties, value.clone());
-                true
-            }
-            None => false,
-        })
-        .unwrap_or(false)
-}
-
-/// A plain write of an element of the array a property holds, for a
-/// site (see `crate::element_writes`): what the element held, or `None`
-/// with nothing changed when the property is not such an array.
-pub(crate) fn write_element_known(
-    object: &Object,
-    property: Known<'_>,
-    (keys, place): (&[ArrayKey], crate::element_writes::Target),
-    value: Value,
-) -> Option<Option<Value>> {
+    mode: phera_bytecode::IncDec,
+) -> Option<Value> {
+    use phera_bytecode::IncDec;
     object
         .update(|properties| {
-            let Some(Value::Array(array)) = property.get_mut(properties) else {
+            let Some(Value::Int(slot)) = property.get_mut(properties) else {
                 return None;
             };
-            if !crate::element_writes::writable(array, keys, place) {
-                return None;
-            }
-            crate::element_writes::write(array, keys, place, value)
+            let old = *slot;
+            let delta = if matches!(mode, IncDec::PreIncrement | IncDec::PostIncrement) {
+                1
+            } else {
+                -1
+            };
+            let new = old.checked_add(delta)?;
+            *slot = new;
+            Some(Value::Int(
+                if matches!(mode, IncDec::PostIncrement | IncDec::PostDecrement) {
+                    old
+                } else {
+                    new
+                },
+            ))
         })
         .flatten()
 }

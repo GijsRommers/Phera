@@ -15,7 +15,7 @@
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
 use std::time::Duration;
 
 /// A running `phera serve`, stopped when dropped.
@@ -23,23 +23,42 @@ pub struct Server {
     process: Child,
     /// `127.0.0.1:<port>`, as the server's banner printed it.
     pub address: String,
+    /// The server's standard output, kept open: a worker that boots an
+    /// application prints a line about it later, and a closed pipe would
+    /// make that print fail.
+    _output: Option<BufReader<ChildStdout>>,
 }
 
 impl Server {
     /// Serves `root` on a free port with `workers` worker threads, with the
     /// extra `environment` variables set.
     pub fn start(phera: &Path, root: &Path, workers: usize, environment: &[(&str, &str)]) -> Self {
+        Self::start_with(phera, root, workers, environment, &[], Stdio::null())
+    }
+
+    /// Like `start`, with more `phera serve` options (`--dev`, ...) and the
+    /// server's log (its standard error) sent to `log`, a file for example.
+    pub fn start_with(
+        phera: &Path,
+        root: &Path,
+        workers: usize,
+        environment: &[(&str, &str)],
+        options: &[&str],
+        log: impl Into<Stdio>,
+    ) -> Self {
         let mut process = Command::new(phera)
             .args(["serve", "--listen", "127.0.0.1:0", "--workers"])
             .arg(workers.to_string())
+            .args(options)
             .arg(root)
             .envs(environment.iter().copied())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(log)
             .spawn()
             .expect("start phera serve");
         let mut banner = String::new();
-        BufReader::new(process.stdout.take().expect("piped stdout"))
+        let mut output = BufReader::new(process.stdout.take().expect("piped stdout"));
+        output
             .read_line(&mut banner)
             .expect("read the listen banner");
         let address = banner
@@ -48,7 +67,11 @@ impl Server {
             .and_then(|rest| rest.split_whitespace().next())
             .unwrap_or_else(|| panic!("no address in the banner {banner:?}"))
             .to_owned();
-        Self { process, address }
+        Self {
+            process,
+            address,
+            _output: Some(output),
+        }
     }
 
     /// PHP's built-in server (`php -n -S`) on `root` with `workers`
@@ -89,7 +112,11 @@ impl Server {
             .stderr(Stdio::null())
             .spawn()
             .expect("start php -S");
-        let server = Self { process, address };
+        let server = Self {
+            process,
+            address,
+            _output: None,
+        };
         for _ in 0..200 {
             if TcpStream::connect(&server.address).is_ok() {
                 return server;
@@ -119,6 +146,18 @@ impl Server {
     ) -> String {
         self.try_request(method, target, headers, body)
             .expect("send the request and read its response")
+    }
+
+    /// One request as raw HTTP, or the error of a server that does not
+    /// answer (yet): a worker that is still booting has not accepted.
+    pub fn try_request_once(
+        &self,
+        method: &str,
+        target: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> std::io::Result<String> {
+        self.try_request(method, target, headers, body)
     }
 
     /// Sends a `GET` for every path at the same time, one connection each,

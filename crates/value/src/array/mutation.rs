@@ -16,6 +16,28 @@ use super::{ArrayKey, PhpArray};
 use crate::error::OpError;
 use crate::value::Value;
 
+/// The entries of an array being built by [`PhpArray::build_distinct`].
+pub struct DistinctEntries {
+    storage: Vec<Entry>,
+    next_free: Option<i64>,
+}
+
+impl DistinctEntries {
+    /// Appends an entry whose key is not among those pushed before.
+    #[inline]
+    pub fn push(&mut self, key: ArrayKey, value: Value) {
+        if let ArrayKey::Int(index) = key
+            && self.next_free.is_none_or(|next| index >= next)
+        {
+            self.next_free = Some(index.saturating_add(1));
+        }
+        self.storage.push(Entry {
+            key,
+            value: Some(value),
+        });
+    }
+}
+
 impl PhpArray {
     /// Builds an ordered array from entries whose keys are already distinct.
     /// Callers must validate that property before using this constructor.
@@ -23,7 +45,19 @@ impl PhpArray {
         entries: impl IntoIterator<Item = Result<(ArrayKey, Value), E>>,
     ) -> Result<Self, E> {
         let entries = entries.into_iter();
-        let mut storage = Vec::with_capacity(entries.size_hint().0);
+        let capacity = entries.size_hint().0;
+        Self::try_from_distinct_with_capacity(entries, capacity)
+    }
+
+    /// [`PhpArray::try_from_distinct`] for entries whose number the caller
+    /// knows (or bounds closely): the slots are allocated once, at that
+    /// size, where an iterator that filters reports none.
+    pub fn try_from_distinct_with_capacity<E>(
+        entries: impl IntoIterator<Item = Result<(ArrayKey, Value), E>>,
+        capacity: usize,
+    ) -> Result<Self, E> {
+        let entries = entries.into_iter();
+        let mut storage = Vec::with_capacity(capacity);
         let mut array = Self::new();
         for entry in entries {
             let (key, value) = entry?;
@@ -37,6 +71,23 @@ impl PhpArray {
         }
         array.storage = Storage::from_entries(storage);
         Ok(array)
+    }
+
+    /// Builds an ordered array from entries whose keys are already distinct,
+    /// which `fill` pushes one by one into slots made for `capacity`. The
+    /// entries go straight into the array's storage, with no iterator and no
+    /// result in between.
+    pub fn build_distinct(capacity: usize, fill: impl FnOnce(&mut DistinctEntries)) -> Self {
+        let mut entries = DistinctEntries {
+            storage: Vec::with_capacity(capacity),
+            next_free: None,
+        };
+        fill(&mut entries);
+        Self {
+            storage: Storage::from_entries(entries.storage),
+            next_free: entries.next_free,
+            ..Self::default()
+        }
     }
 
     /// Replaces the value of an existing key in place, or appends the entry

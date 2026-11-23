@@ -172,7 +172,9 @@ fn update_facts(function: &Function, facts: &mut [Fact], instruction: Instructio
             facts.fill(Unknown);
             let scalar = !matches!(
                 op,
-                phera_bytecode::BuiltinUnary::GetType | phera_bytecode::BuiltinUnary::GetClass
+                phera_bytecode::BuiltinUnary::GetType
+                    | phera_bytecode::BuiltinUnary::GetClass
+                    | phera_bytecode::BuiltinUnary::StrToLower
             );
             set_fact(facts, dst, if scalar { Scalar } else { Unknown });
         }

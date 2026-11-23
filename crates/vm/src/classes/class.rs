@@ -19,10 +19,6 @@ pub(crate) struct Class {
     pub(crate) origin: ClassOrigin,
     /// The owning Rc can be recovered from an object's borrowed ClassHandle without a name lookup.
     pub(crate) identity: std::rc::Weak<Class>,
-    /// Only compiled declaration names enter this cache, not arbitrary is_a inputs.
-    /// Keyed by this class and resolved declaration name; immutable ancestry means
-    /// results cannot change during the request, including cached negative results.
-    pub(crate) declaration_matches: std::cell::RefCell<HashMap<String, bool>>,
     pub(crate) name: String,
     /// Class names are immutable PHP strings, shared by self/static/parent::class.
     pub(crate) name_value: Value,
@@ -51,6 +47,9 @@ pub(crate) struct Class {
     /// taken, from the numbers every fork shares, and never again (see
     /// `ClassTable::build_method_tables`).
     pub(crate) method_table: std::cell::OnceCell<super::method_table::MethodTable>,
+    pub(crate) property_table: std::cell::OnceCell<super::property_table::PropertyTable>,
+    pub(crate) constant_table: std::cell::OnceCell<super::property_table::ConstantTable>,
+    pub(crate) static_prop_table: std::cell::OnceCell<super::property_table::StaticPropTable>,
     pub(crate) serialized_fields:
         std::cell::OnceCell<Option<Rc<[phera_extension_api::serialization::SerializedProperty]>>>,
     /// Constructor presence is immutable after linking, including inheritance.
@@ -367,21 +366,8 @@ pub(crate) fn ancestor_names(
 }
 
 impl Class {
-    /// Avoid repeated lowercase allocation for names from compiled type declarations.
     pub(crate) fn matches_declaration(&self, name: &str) -> bool {
-        if self.name.eq_ignore_ascii_case(name) {
-            return true;
-        }
-        if let Some(result) = self.declaration_matches.borrow().get(name) {
-            return *result;
-        }
-        let result = self.is_a(name);
-        let mut declarations = self.declaration_matches.borrow_mut();
-        // Native definitions outlive requests. Cache only bounded, canonical ancestry matches.
-        if self.declaration.is_some() || (result && declarations.len() < 64) {
-            declarations.insert(name.to_owned(), result);
-        }
-        result
+        self.is_a(name)
     }
 }
 
@@ -419,18 +405,6 @@ impl Method {
     }
 }
 
-impl Class {
-    /// A complete simple declaration can reuse the same membership result that
-    /// matches_declaration made after resolution. Relative keywords are excluded
-    /// by the caller; compound spellings never enter this name-keyed cache.
-    pub(crate) fn cached_declaration_result(&self, name: &str) -> Option<bool> {
-        if self.name.eq_ignore_ascii_case(name) {
-            return Some(true);
-        }
-        self.declaration_matches.borrow().get(name).copied()
-    }
-}
-
 /// A default int can widen to float without scalar coercion from strings.
 pub(crate) fn widen_property_value(value: Value, ty: Option<&phera_bytecode::Type>) -> Value {
     ty.and_then(|ty| crate::types::widen_int_to_float(&value, ty.mask))
@@ -453,13 +427,60 @@ impl Class {
             .get_or_init(|| super::property_facts::PropertyFacts::of(self))
     }
 
+    /// Flat data-oriented property lookup table, built once and shared across forks.
+    #[inline]
+    pub(crate) fn property_table(&self) -> &super::property_table::PropertyTable {
+        self.property_table
+            .get_or_init(|| super::property_table::PropertyTable::build(self))
+    }
+
+    /// Flat data-oriented class constant lookup table, built once and shared across forks.
+    #[inline]
+    pub(crate) fn constant_table(&self) -> &super::property_table::ConstantTable {
+        self.constant_table
+            .get_or_init(|| super::property_table::ConstantTable::build(self))
+    }
+
+    /// Flat data-oriented static property lookup table, built once and shared across forks.
+    #[inline]
+    pub(crate) fn static_prop_table(&self) -> &super::property_table::StaticPropTable {
+        self.static_prop_table
+            .get_or_init(|| super::property_table::StaticPropTable::build(self))
+    }
+
     /// Whether this class is `target`, extends it or implements it: the same
     /// ancestry as `Class::ancestors`, its parent and interfaces and theirs.
     /// `None` when the walk outgrows its stack or its visits.
     pub(crate) fn derives_from(&self, target: &Class) -> Option<bool> {
+        if std::ptr::eq(self, target) {
+            return Some(true);
+        }
+        if self.parent.is_none() && self.interfaces.is_empty() {
+            return Some(false);
+        }
+        if let Some(parent) = &self.parent
+            && std::ptr::eq(&**parent, target)
+        {
+            return Some(true);
+        }
+        if self
+            .interfaces
+            .iter()
+            .any(|interface| std::ptr::eq(&**interface, target))
+        {
+            return Some(true);
+        }
         let mut waiting: [Option<&Class>; WALK_DEPTH] = [None; WALK_DEPTH];
-        waiting[0] = Some(self);
-        let mut count: usize = 1;
+        let mut count: usize = 0;
+        for ancestor in self.parent.iter().chain(&self.interfaces) {
+            for grand in ancestor.parent.iter().chain(&ancestor.interfaces) {
+                *waiting.get_mut(count)? = Some(&**grand);
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return Some(false);
+        }
         for _ in 0..WALK_VISITS {
             let Some(last) = count.checked_sub(1) else {
                 return Some(false);

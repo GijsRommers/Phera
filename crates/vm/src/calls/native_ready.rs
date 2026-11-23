@@ -38,29 +38,31 @@ impl Vm {
             return false;
         };
         let key = self.code.unit_name_key(frame.frame.function, name);
-        let Some(found) = self
-            .classes
-            .cached_method_table(&class)
-            .and_then(|table| table.get(key))
-        else {
+        let Some(table) = self.classes.cached_method_table(&class) else {
             return false;
         };
-        let MethodBody::Native(entry) = found.method.body else {
+        let Some(packed) = table.get(key) else {
+            return false;
+        };
+        let Some(extra) = table.extra(packed) else {
+            return false;
+        };
+        let MethodBody::Native(entry) = extra.method.body else {
             return false;
         };
         if !matches!(entry.handler, NativeMethod::Window(_))
-            || found.method.visibility != Visibility::Public
-            || found.method.is_static
+            || packed.visibility() != Visibility::Public
+            || packed.is_static()
             || frame.scope().is_some_and(|scope| class.is_a(&scope.name))
         {
             return false;
         }
-        let Some(scope) = found.scope.upgrade() else {
+        let Some(scope) = extra.scope.upgrade() else {
             return false;
         };
-        let signature = found.method.signature(&self.code);
+        let signature = extra.method.signature(&self.code);
         let target = CallTarget::Method {
-            method: found.method.clone(),
+            method: extra.method.clone(),
             context: MethodContext {
                 receiver: Some(object.clone()),
                 scope,

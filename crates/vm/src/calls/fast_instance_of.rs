@@ -19,8 +19,6 @@
 //! the interfaces to walk do not fit the walk's fixed stack, and in the
 //! guarded loop (some object has a destructor due).
 
-use std::rc::Rc;
-
 use phera_bytecode::{Reg, SymbolId, Target};
 use phera_value::Value;
 
@@ -87,38 +85,43 @@ impl Machine<'_> {
         match self.registers.window(slot, 1) {
             [Some(Value::Object(object))] => {
                 let class = object.class.as_any().downcast_ref::<Class>()?;
-                match self.instance_target(position, symbol) {
-                    Some(target) => class.derives_from(&target),
+                let function = position.frame.function;
+                let key = self.code.unit_symbol_key(function, symbol);
+                // Fast path: non-relative loaded class — no Rc clone, no written-string scan.
+                if let Some(target) = self.classes.by_key(key) {
+                    return class.derives_from(target);
+                }
+                let written = &self
+                    .code
+                    .unit(function)
+                    .symbols
+                    .get(symbol.index())?
+                    .written;
+                match written.as_str() {
+                    "self" => class.derives_from(self.caller_scope(position)?),
+                    "parent" => class.derives_from(self.caller_scope(position)?.parent.as_deref()?),
+                    "static" => {
+                        let called = self.current_context()?.called()?;
+                        class.derives_from(&called)
+                    }
                     // A name no class of this request has: nothing is an
                     // instance of it, and `instanceof` never autoloads.
-                    None if !self.relative_symbol(position, symbol) => Some(false),
-                    None => None,
+                    _ => Some(false),
                 }
             }
             // Only an object is an instance; `self` outside a class is an
             // error the VM raises.
             [Some(Value::Reference(_))] | [None] | [] => None,
-            [Some(_)] if self.relative_symbol(position, symbol) => None,
-            [Some(_)] => Some(false),
+            [Some(_)] => {
+                let function = position.frame.function;
+                let key = self.code.unit_symbol_key(function, symbol);
+                if self.classes.by_key(key).is_some() || !self.relative_symbol(position, symbol) {
+                    Some(false)
+                } else {
+                    None
+                }
+            }
             _ => None,
-        }
-    }
-
-    /// The class `symbol` names at this point of the running code.
-    fn instance_target(&self, position: Position, symbol: SymbolId) -> Option<Rc<Class>> {
-        let function = position.frame.function;
-        let written = &self
-            .code
-            .unit(function)
-            .symbols
-            .get(symbol.index())?
-            .written;
-        let context = self.current_context();
-        match written.as_str() {
-            "self" => context?.scope().cloned(),
-            "static" => context?.called(),
-            "parent" => context?.scope()?.parent.clone(),
-            _ => self.linked_class(position, symbol),
         }
     }
 

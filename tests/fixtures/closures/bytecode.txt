@@ -2,7 +2,7 @@ file closure-listing.php
   const#0 = Null
   symbol#0 = strlen
 
-function {main} (12 registers, dynamic scope)
+function {main} (11 registers, dynamic scope)
   r0 = $a
   r1 = $b
   r2 = $f
@@ -25,20 +25,20 @@ function {main} (12 registers, dynamic scope)
   0014  line 1    LoadInt { dst: r10, value: 1 }
   0015  line 1    Return { src: r10 }
 
-function {closure:closure-listing.php:4} (6 registers)
+function {closure:closure-listing.php:4} (5 registers)
   r0 = $x
   r1 = $a
   r2 = $b
   0000  line 4    Binary { op: Add, dst: r3, lhs: r0, rhs: r1 }
   0001  line 4    Binary { op: Add, dst: r3, lhs: r3, rhs: r2 }
   0002  line 4    Return { src: r3 }
-  0003  line 4    LoadConst { dst: r4, constant: const#0 }
+  0003  line 4    LoadNull { dst: r4 }
   0004  line 4    Return { src: r4 }
 
-function {closure:closure-listing.php:5} (5 registers)
+function {closure:closure-listing.php:5} (4 registers)
   r0 = $x
   r1 = $a
   0000  line 5    Binary { op: Add, dst: r2, lhs: r0, rhs: r1 }
   0001  line 5    Return { src: r2 }
-  0002  line 5    LoadConst { dst: r3, constant: const#0 }
+  0002  line 5    LoadNull { dst: r3 }
   0003  line 5    Return { src: r3 }
