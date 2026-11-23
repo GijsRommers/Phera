@@ -93,7 +93,7 @@ impl Vm {
     ) -> Value {
         self.cancel_enum_case(&class, name.clone());
         let object = self.classes.allocate(class.clone());
-        object.set(ArrayKey::str("name"), Value::from(name.as_str()));
+        object.set(enum_name_key(), Value::from(name.as_str()));
         if let Some(value) = backing {
             object.set(ArrayKey::str("value"), value);
         }
@@ -261,8 +261,24 @@ impl BackingBuilder {
     }
 }
 
+// The enum's fixed property name is initialized once. If the table has
+// filled, a worker keeps one shared handle for the same bytes.
+fn enum_name_key() -> ArrayKey {
+    use phera_value::{InternedStr, PhpString};
+    use std::sync::OnceLock;
+
+    static INTERNED: OnceLock<Option<&'static InternedStr>> = OnceLock::new();
+    thread_local! {
+        static KEY: ArrayKey = ArrayKey::String(PhpString::from_interned_or_bytes(
+            *INTERNED.get_or_init(|| InternedStr::try_intern(b"name")),
+            b"name",
+        ));
+    }
+    KEY.with(Clone::clone)
+}
+
 fn name_of(object: &Object) -> Result<String, NativeError> {
-    if let Some(Value::String(name)) = object.get(&ArrayKey::str("name")) {
+    if let Some(Value::String(name)) = object.get(&enum_name_key()) {
         Ok(name.to_string_lossy())
     } else {
         Err(internal_error!("enum case name"))

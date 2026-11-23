@@ -8,7 +8,7 @@ use std::{
 };
 
 use phera_bytecode::{CompiledUnit, Constant};
-use phera_value::{PhpArray, Value};
+use phera_value::{PhpArray, PhpString, Value};
 
 /// Materialized immutable literals share PHP COW values across frame activations.
 /// Keyed by constant/symbol index in a retained unit; populated at first unit use.
@@ -289,14 +289,18 @@ impl UnitCache {
     pub(crate) fn new(unit: &CompiledUnit) -> Self {
         Self {
             trace_file: OnceCell::new(),
-            names: unit.names.iter().map(|name| name.as_str().into()).collect(),
+            names: unit
+                .names
+                .iter()
+                .map(|name| string(unit, name.as_bytes()))
+                .collect(),
             symbols: RefCell::new(Vec::new()),
             symbol_count: unit.symbols.len(),
             direct_natives: OnceCell::new(),
             constants: unit
                 .constants
                 .iter()
-                .map(crate::unit_caches::value)
+                .map(|constant| value(unit, constant))
                 .collect(),
             type_scopes: match &unit.metadata {
                 Some(metadata) => metadata.type_scopes.clone(),
@@ -322,21 +326,31 @@ impl UnitCache {
             class_names: unit
                 .symbols
                 .iter()
-                .map(|symbol| phera_value::Value::from(symbol.written.as_str()))
+                .map(|symbol| Value::String(string(unit, symbol.written.as_bytes())))
                 .collect(),
             base: None,
         }
     }
 }
 
+/// Materialize a literal or declared name. Linking only reads the prepared
+/// metadata, including when this file is first used during a request.
+pub(crate) fn string(unit: &CompiledUnit, bytes: &[u8]) -> PhpString {
+    let interned = unit
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.interned_string(bytes));
+    PhpString::from_interned_or_bytes(interned, bytes)
+}
+
 /// Materialize bytecode constants as request-local PHP values.
-pub(crate) fn value(constant: &Constant) -> Value {
+pub(crate) fn value(unit: &CompiledUnit, constant: &Constant) -> Value {
     match constant {
         Constant::Null => Value::Null,
         Constant::Array(entries) => {
             let mut array = PhpArray::new();
             for (key, constant) in entries {
-                let value = value(constant);
+                let value = value(unit, constant);
                 match key {
                     phera_bytecode::ConstantKey::Next => {
                         let _ = array.push(value);
@@ -345,7 +359,7 @@ pub(crate) fn value(constant: &Constant) -> Value {
                         array.insert(phera_value::ArrayKey::Int(*key), value);
                     }
                     phera_bytecode::ConstantKey::String(key) => {
-                        array.insert(phera_value::ArrayKey::String(key.clone().into()), value);
+                        array.insert(phera_value::ArrayKey::String(string(unit, key)), value);
                     }
                 }
             }
@@ -354,7 +368,7 @@ pub(crate) fn value(constant: &Constant) -> Value {
         Constant::Bool(value) => Value::Bool(*value),
         Constant::Int(value) => Value::Int(*value),
         Constant::Float(value) => Value::Float(*value),
-        Constant::String(value) => Value::from(value.clone()),
+        Constant::String(value) => Value::String(string(unit, value)),
     }
 }
 

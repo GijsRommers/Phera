@@ -61,16 +61,22 @@ impl RequestCodeCache {
         &self,
         script: &Path,
         policy: IncludeCachePolicy,
+        trusted: bool,
     ) -> Result<Arc<CompiledUnit>, RuntimeError> {
         let lookup = IncludeLookup::Absolute(script.as_os_str());
         if let Some(unit) = self.cached_include(&lookup, policy) {
             return Ok(unit);
         }
-        let unit = self
-            .worker
-            .shared
-            .compile_candidates(vec![script.to_path_buf()], validation(policy))
-            .await?;
+        let shared = &self.worker.shared;
+        let unit = if trusted {
+            shared
+                .compile_entry(script.to_path_buf(), validation(policy))
+                .await?
+        } else {
+            shared
+                .compile_candidates(vec![script.to_path_buf()], validation(policy))
+                .await?
+        };
         self.remember_include(lookup, &unit, policy);
         Ok(unit)
     }
@@ -172,7 +178,7 @@ impl CodeLoader for RequestCodeCache {
 
     fn load(&self, path: PathBuf) -> LocalFuture<'_, Result<Arc<CompiledUnit>, CodeLoadError>> {
         Box::pin(async move {
-            self.entry(&path, IncludeCachePolicy::default())
+            self.entry(&path, IncludeCachePolicy::default(), false)
                 .await
                 .map_err(include_error)
         })

@@ -45,7 +45,7 @@ pub(crate) fn native_constants(registry: &phera_extension_api::Registry) -> Nati
             (
                 name.to_owned(),
                 GlobalConstant {
-                    value: value.to_value(),
+                    value,
                     deprecated: deprecated.map(Rc::from),
                 },
             )

@@ -90,6 +90,18 @@ impl CodeCache {
         self.compile_candidates(vec![path], validation).await
     }
 
+    /// Compile an entry explicitly selected by the host, rather than a PHP include.
+    pub(crate) async fn compile_entry(
+        &self,
+        path: PathBuf,
+        validation: Validation,
+    ) -> Result<Arc<CompiledUnit>, RuntimeError> {
+        let cache = self.clone();
+        tokio::task::spawn_blocking(move || cache.load(&path, validation, true))
+            .await
+            .map_err(|error| RuntimeError::Internal(error.to_string()))?
+    }
+
     pub(crate) async fn compile_candidates(
         &self,
         candidates: Vec<PathBuf>,
@@ -102,7 +114,7 @@ impl CodeCache {
                 error: std::io::ErrorKind::NotFound.into(),
             };
             for candidate in candidates {
-                match cache.load(&candidate, validation) {
+                match cache.load(&candidate, validation, false) {
                     Err(error @ RuntimeError::Read { .. }) => last = error,
                     result => return result,
                 }
@@ -114,12 +126,23 @@ impl CodeCache {
     }
 
     /// Only requests for the same canonical path wait for one another.
-    fn load(&self, path: &Path, validation: Validation) -> Result<Arc<CompiledUnit>, RuntimeError> {
+    fn load(
+        &self,
+        path: &Path,
+        validation: Validation,
+        trusted: bool,
+    ) -> Result<Arc<CompiledUnit>, RuntimeError> {
         let canonical = path.canonicalize().map_err(|error| RuntimeError::Read {
             path: path.to_path_buf(),
             error,
         })?;
-        self.load_canonical(&canonical, path, validation, CompileStack::Dedicated)
+        self.load_canonical(
+            &canonical,
+            path,
+            validation,
+            CompileStack::Dedicated,
+            trusted,
+        )
     }
 
     /// The preload pool provides a reusable large stack for each blocking thread.
@@ -129,6 +152,7 @@ impl CodeCache {
             path,
             Validation::Timestamps,
             CompileStack::PreloadWorker,
+            true,
         )
     }
 
@@ -138,6 +162,7 @@ impl CodeCache {
         path: &Path,
         validation: Validation,
         stack: CompileStack,
+        trusted: bool,
     ) -> Result<Arc<CompiledUnit>, RuntimeError> {
         let read_error = |error| RuntimeError::Read {
             path: path.to_path_buf(),
@@ -164,7 +189,7 @@ impl CodeCache {
             return cached.compiled.clone().map_err(RuntimeError::Compile);
         }
         let source = std::fs::read(canonical).map_err(read_error)?;
-        let compiled = self.compile_source(&source, &canonical.to_string_lossy(), stack);
+        let compiled = self.compile_source(&source, &canonical.to_string_lossy(), stack, trusted);
         *revision = Some(CachedRevision {
             stamp,
             compiled: compiled.clone(),
@@ -185,7 +210,7 @@ impl CodeCache {
             return Ok(unit.clone());
         }
         let unit = self
-            .compile_source(source.as_bytes(), file, CompileStack::Dedicated)
+            .compile_source(source.as_bytes(), file, CompileStack::Dedicated, true)
             .map_err(RuntimeError::Compile)?;
         shipped.insert(file.to_owned(), unit.clone());
         Ok(unit)
@@ -196,6 +221,7 @@ impl CodeCache {
         source: &[u8],
         file: &str,
         stack: CompileStack,
+        trusted: bool,
     ) -> Result<Arc<CompiledUnit>, CompileError> {
         let natives = phera_compiler::NativeFunctions {
             lookup: &|name| {
@@ -252,7 +278,11 @@ impl CodeCache {
             // Every file from the cache gets its process number and name keys,
             // on the command line too: its classes are then found by key, as
             // a web request finds them.
-            unit.metadata = Some(Arc::new(phera_bytecode::UnitMetadata::new(&unit)));
+            let mut metadata = phera_bytecode::UnitMetadata::new(&unit);
+            if trusted {
+                metadata.intern_literals(&unit);
+            }
+            unit.metadata = Some(Arc::new(metadata));
             Arc::new(unit)
         })
     }
@@ -283,7 +313,7 @@ impl phera_vm::CodeLoader for CodeCache {
                 Some(IncludeSource::Unavailable) => StreamInclude::Unavailable,
                 Some(IncludeSource::AlreadyIncluded) => StreamInclude::AlreadyIncluded,
                 Some(IncludeSource::Source { name, bytes }) => StreamInclude::Compiled(
-                    self.compile_source(&bytes, &name, CompileStack::Dedicated),
+                    self.compile_source(&bytes, &name, CompileStack::Dedicated, false),
                 ),
             })
         })
@@ -319,6 +349,48 @@ pub(crate) fn include_error(error: RuntimeError) -> phera_vm::CodeLoadError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn only_an_explicit_entry_can_intern_new_disk_literals() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("entry.php");
+        let dynamic = dir.path().join("dynamic.php");
+        std::fs::write(&entry, "<?php return 'host-selected';").unwrap();
+        std::fs::write(&dynamic, "<?php return 'request-selected';").unwrap();
+        let cache = CodeCache::new(
+            Arc::new(phera_extension_api::Registry::new()),
+            FileMode::Web,
+        );
+        let unit = cache
+            .compile_entry(entry.clone(), Validation::Frozen)
+            .await
+            .unwrap();
+        assert!(
+            unit.metadata
+                .as_ref()
+                .unwrap()
+                .interned_string(b"host-selected")
+                .is_some()
+        );
+        let unit = cache.compile(dynamic).await.unwrap();
+        assert!(
+            unit.metadata
+                .as_ref()
+                .unwrap()
+                .interned_string(b"request-selected")
+                .is_none()
+        );
+
+        std::fs::write(&entry, "<?php return 'generated replacement';").unwrap();
+        let unit = cache.compile(entry).await.unwrap();
+        assert!(
+            unit.metadata
+                .as_ref()
+                .unwrap()
+                .interned_string(b"generated replacement")
+                .is_none()
+        );
+    }
 
     #[tokio::test]
     async fn concurrent_misses_share_the_same_compilation() {

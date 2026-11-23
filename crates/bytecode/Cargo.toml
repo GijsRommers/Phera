@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 phera-source.workspace = true
+phera-value.workspace = true
 
 [lints]
 workspace = true

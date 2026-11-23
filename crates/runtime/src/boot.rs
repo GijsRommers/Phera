@@ -42,13 +42,22 @@ pub enum BootReport {
 impl WebWorker {
     /// Boots `script` and keeps the result for this worker's requests.
     pub async fn boot(&self, script: &Path, document_root: &Path) -> BootReport {
+        self.boot_with_entry(script, document_root, true).await
+    }
+
+    async fn boot_with_entry(
+        &self,
+        script: &Path,
+        document_root: &Path,
+        trusted_entry: bool,
+    ) -> BootReport {
         if !self.snapshots.start_boot(script) {
             return BootReport::Failed("a boot of this script is running already".into());
         }
         let started = Instant::now();
         let (state, report) = self
             .runtime
-            .boot_script(self, script, document_root, started)
+            .boot_script(self, script, document_root, started, trusted_entry)
             .await;
         self.snapshots.finish_boot(script, state);
         report
@@ -63,7 +72,9 @@ impl WebWorker {
         let worker = self.clone();
         let (script, document_root) = (script.to_path_buf(), document_root.to_path_buf());
         tokio::task::spawn_local(async move {
-            if let BootReport::Failed(message) = worker.boot(&script, &document_root).await {
+            if let BootReport::Failed(message) =
+                worker.boot_with_entry(&script, &document_root, false).await
+            {
                 eprintln!(
                     "phera: worker {}: DEFECT: {} cannot be snapshotted, its requests run from the top: {message}",
                     worker.index,
@@ -81,11 +92,12 @@ impl Runtime {
         script: &Path,
         document_root: &Path,
         started: Instant,
+        trusted_entry: bool,
     ) -> (ScriptState, BootReport) {
         let code = std::rc::Rc::new(crate::worker_code_cache::RequestCodeCache::new(
             worker.code.clone(),
         ));
-        let unit = match self.entry_unit(&code, script).await {
+        let unit = match self.entry_unit(&code, script, trusted_entry).await {
             Ok(unit) => unit,
             Err(error) => return failed(error.to_string()),
         };

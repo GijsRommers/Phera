@@ -23,7 +23,7 @@ impl ArrayKey {
 
     /// Normalize an owned string as PHP does for `$array[$key]`.
     pub fn from_string(string: PhpString) -> Self {
-        match numeric_string_key(string.as_bytes()) {
+        match string.numeric_key() {
             Some(key) => Self::Int(key),
             None => Self::String(string),
         }
@@ -50,7 +50,7 @@ impl ArrayKey {
                 );
                 Ok(ArrayKey::str(""))
             }
-            Value::String(s) => Ok(match numeric_string_key(s.as_bytes()) {
+            Value::String(s) => Ok(match s.numeric_key() {
                 Some(key) => Self::Int(key),
                 None => Self::String(s.clone()),
             }),

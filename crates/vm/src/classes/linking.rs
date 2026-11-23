@@ -599,7 +599,10 @@ impl Vm {
             identity: identity.clone(),
             declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
             ancestors: super::class::ancestor_names(&parent, &interfaces),
-            name_value: phera_value::Value::from(name.as_str()),
+            name_value: phera_value::Value::String(crate::unit_caches::string(
+                unit,
+                name.as_bytes(),
+            )),
             name: name.clone(),
             has_native_layout: parent.as_ref().is_some_and(|class| class.has_native_layout),
             parent,

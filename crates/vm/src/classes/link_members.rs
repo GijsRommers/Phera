@@ -126,13 +126,27 @@ impl Vm {
         for property in &declaration.properties {
             let property_name = &unit.names[property.name.index()];
             let key = match property.visibility {
-                Visibility::Public => ArrayKey::str(property_name.as_bytes()),
+                Visibility::Public => {
+                    ArrayKey::String(crate::unit_caches::string(unit, property_name.as_bytes()))
+                }
                 Visibility::Protected => Object::protected_key(property_name),
                 Visibility::Private => Object::private_key(name, property_name),
             };
+            let key = match key {
+                ArrayKey::String(bytes) if property.visibility != Visibility::Public => {
+                    let interned = unit
+                        .metadata
+                        .as_ref()
+                        .and_then(|meta| meta.interned_string(bytes.as_bytes()));
+                    interned.map_or(ArrayKey::String(bytes), |value| {
+                        ArrayKey::String(phera_value::PhpString::from_interned(value))
+                    })
+                }
+                key => key,
+            };
             let value = match property.default {
                 Some(phera_bytecode::Initializer::Literal(index)) => {
-                    crate::unit_caches::value(&unit.constants[index.index()])
+                    crate::unit_caches::value(unit, &unit.constants[index.index()])
                 }
                 _ => phera_value::Value::Null,
             };

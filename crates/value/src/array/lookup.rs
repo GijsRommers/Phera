@@ -1,6 +1,5 @@
 //! Reading by key: `$a[5]`, `$a['name']`, `isset($a['name'])`.
 
-use super::key::numeric_string_key;
 use super::storage::Storage;
 use super::{ArrayKey, PhpArray};
 use crate::string::PhpString;
@@ -47,7 +46,7 @@ impl PhpArray {
     /// normalisation) without cloning the [`PhpString`] handle.
     #[inline]
     pub fn get_str(&self, key: &PhpString) -> Option<&Value> {
-        if let Some(index) = numeric_string_key(key.as_bytes()) {
+        if let Some(index) = key.numeric_key() {
             return self.get_int(index);
         }
         match &self.storage {
@@ -94,7 +93,7 @@ impl PhpArray {
     /// normalisation) without cloning the [`PhpString`] handle.
     #[inline]
     pub fn get_mut_str(&mut self, key: &PhpString) -> Option<&mut Value> {
-        if let Some(index) = numeric_string_key(key.as_bytes()) {
+        if let Some(index) = key.numeric_key() {
             return self.get_mut_int(index);
         }
         match &mut self.storage {

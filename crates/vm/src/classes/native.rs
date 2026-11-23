@@ -5,7 +5,7 @@ use super::class_table::ClassDefinitions;
 use super::{Class, Method, MethodBody};
 use phera_bytecode::{ClassKind, Type, TypeMask, Visibility};
 use phera_extension_api::{ClassKind as NativeKind, ConstantValue, NativeMethod};
-use phera_value::{ArrayKey, Object};
+use phera_value::{ArrayKey, Object, PhpString, Value};
 use std::{collections::HashMap, rc::Rc};
 
 impl ClassDefinitions {
@@ -25,7 +25,7 @@ impl ClassDefinitions {
                 identity: identity.clone(),
                 declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                 ancestors: std::collections::HashSet::new(),
-                name_value: phera_value::Value::from("stdClass"),
+                name_value: Value::String(PhpString::intern_literal(b"stdClass")),
                 name: "stdClass".into(),
                 parent: None,
                 interfaces: Vec::new(),
@@ -147,6 +147,10 @@ impl ClassDefinitions {
                     Visibility::Protected => Object::protected_key(property.name),
                     Visibility::Public => ArrayKey::str(property.name),
                 };
+                let key = match key {
+                    ArrayKey::String(bytes) => ArrayKey::String(PhpString::intern_literal(&bytes)),
+                    key => key,
+                };
                 let inherited = defaults.iter().position(|candidate| {
                     candidate.name == property.name
                         && candidate.visibility != Visibility::Private
@@ -212,7 +216,12 @@ impl ClassDefinitions {
                         declaring: entry.name.into(),
                         visibility: Visibility::Public,
                         is_final: false,
-                        initializer: super::class::ConstantInitializer::Value(value.to_value()),
+                        initializer: super::class::ConstantInitializer::Value(match value {
+                            ConstantValue::String(bytes) => {
+                                Value::String(PhpString::intern_literal(bytes.as_bytes()))
+                            }
+                            value => value.to_value(),
+                        }),
                         ty: Some(constant_type(value)),
                     }),
                 );
@@ -259,7 +268,7 @@ impl ClassDefinitions {
                     identity: identity.clone(),
                     declaration_matches: std::cell::RefCell::new(std::collections::HashMap::new()),
                     ancestors: super::class::ancestor_names(&parent, &interfaces),
-                    name_value: phera_value::Value::from(entry.name),
+                    name_value: Value::String(PhpString::intern_literal(entry.name.as_bytes())),
                     name: entry.name.into(),
                     parent,
                     interfaces,

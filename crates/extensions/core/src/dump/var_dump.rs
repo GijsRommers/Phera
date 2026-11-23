@@ -113,9 +113,13 @@ impl<const COUNTS: bool> Style for VarDump<'_, COUNTS> {
                 out.extend_from_slice(string.as_bytes());
                 out.push(b'"');
                 if COUNTS {
-                    out.extend_from_slice(
-                        format!(" refcount({})", string.storage_owners()).as_bytes(),
-                    );
+                    if string.is_literal() {
+                        out.extend_from_slice(b" interned");
+                    } else {
+                        out.extend_from_slice(
+                            format!(" refcount({})", string.storage_owners()).as_bytes(),
+                        );
+                    }
                 }
             }
             Value::Resource(resource) => {
