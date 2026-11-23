@@ -61,8 +61,8 @@ fn get(context: &mut dyn Context, object: &Object, index: Value) -> NativeResult
     require(object)?;
     let entry = cache(object, |cache| cache.rows.get(&key).cloned())?;
     Ok(entry.unwrap_or_else(|| {
-        if let Value::String(value) = value {
-            crate::warn_string_key(context, value.as_bytes());
+        if let Some(value) = value.as_str_bytes() {
+            crate::warn_string_key(context, value);
         }
         Value::Null
     }))

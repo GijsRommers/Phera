@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use phera_extension_api::{ArrayKey, Context, NativeError, WorkingDirectory};
+use phera_extension_api::{Context, NativeError, WorkingDirectory};
 use tokio::{fs::File, io::AsyncReadExt};
 
 use super::{
@@ -65,17 +65,15 @@ pub async fn open(directory: &Path, locale: &str, fallback: bool) -> Option<Load
 
 pub async fn index(directory: &Path) -> Option<Vec<String>> {
     let bundle = read(directory, "res_index").await?;
-    let (_, Node::Table(rows)) = bundle.root.iter().find(
-        |(key, _)| matches!(key, ArrayKey::String(key) if key.as_bytes() == b"InstalledLocales"),
-    )?
+    let (_, Node::Table(rows)) = bundle
+        .root
+        .iter()
+        .find(|(key, _)| key.as_str_bytes() == Some(b"InstalledLocales"))?
     else {
         return None;
     };
     rows.iter()
-        .map(|(key, _)| match key {
-            ArrayKey::String(key) => Some(std::str::from_utf8(key.as_bytes()).ok()?.to_owned()),
-            _ => None,
-        })
+        .map(|(key, _)| Some(std::str::from_utf8(key.as_str_bytes()?).ok()?.to_owned()))
         .collect()
 }
 

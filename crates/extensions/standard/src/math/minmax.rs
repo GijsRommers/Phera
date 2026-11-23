@@ -172,6 +172,15 @@ fn select_scalar_array<'a>(
             (Value::Float(best), Value::Float(candidate)) => {
                 extremum.prefers(0, threeway(*best, *candidate))
             }
+            (Value::InternedStr(best), Value::InternedStr(candidate)) => {
+                extremum.prefers(0, smart_strcmp(best.as_bytes(), candidate.as_bytes()))
+            }
+            (Value::InternedStr(best), Value::String(candidate)) => {
+                extremum.prefers(0, smart_strcmp(best.as_bytes(), candidate.as_bytes()))
+            }
+            (Value::String(best), Value::InternedStr(candidate)) => {
+                extremum.prefers(0, smart_strcmp(best.as_bytes(), candidate.as_bytes()))
+            }
             (Value::String(best), Value::String(candidate)) => {
                 extremum.prefers(0, smart_strcmp(best.as_bytes(), candidate.as_bytes()))
             }

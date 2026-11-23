@@ -112,6 +112,24 @@ const CALLS: &[(&str, &str)] = &[
     ("escape-bytea", "pg_escape_bytea($db, \"a\\x00\\xff\")"),
     ("unescape-bytea", "pg_unescape_bytea('\\x5c00ff')"),
     (
+        "query-nul-terminates-sql",
+        "pg_fetch_row(pg_query($db, \"SELECT 7\\x00; SELECT 8\"))",
+    ),
+    (
+        "prepare-name-nul",
+        "(function () use ($db) {
+            $pid = pg_get_pid($db);
+            pg_prepare($db, \"nul_oracle\\x00suffix\", 'SELECT 9');
+            $row = pg_fetch_row(pg_execute($db, 'nul_oracle', []));
+            $next = pg_fetch_result(pg_query($db, 'SELECT 11'), 0, 0);
+            return [$row, $next, pg_get_pid($db) === $pid];
+        })()",
+    ),
+    (
+        "unescape-bytea-octal",
+        "bin2hex(pg_unescape_bytea('\\000\\200\\377'))",
+    ),
+    (
         "query-params",
         "pg_fetch_assoc(pg_query_params($db, 'SELECT $1::integer AS a, $2::boolean AS b', [1, true]))",
     ),
@@ -119,6 +137,20 @@ const CALLS: &[(&str, &str)] = &[
         "prepare-execute",
         "(function () use ($db) { pg_prepare($db, 'q1', 'SELECT $1::text AS a');
         return pg_fetch_row(pg_execute($db, 'q1', ['hello'])); })()",
+    ),
+    (
+        "text-result-groups",
+        r#"(function () use ($db) {
+            pg_query($db, "SET extra_float_digits TO 0; SET IntervalStyle TO 'iso_8601'");
+            $result = pg_query_params($db, "SELECT n, CASE WHEN n % 2 = 0 THEN TRUE END AS b,
+                CASE WHEN n % 3 = 0 THEN 'x'::character(4) END AS padded,
+                CASE WHEN n % 5 = 0 THEN '192.0.2.1'::inet END AS address,
+                CASE WHEN n % 7 = 0 THEN ARRAY[n, NULL] END AS a,
+                1.2345678901234567::float8 AS f, 12.50::numeric AS d, 12.50::money AS m,
+                '2 months -4 days 05:06:07'::interval AS i, decode('00ff', 'hex') AS bytes
+                FROM generate_series(1, $1::int) n ORDER BY n DESC", [130]);
+            $rows = pg_fetch_all($result);
+            return [count($rows), $rows[63], $rows[64], hash('sha256', serialize($rows))]; })()"#,
     ),
     (
         "send-query",

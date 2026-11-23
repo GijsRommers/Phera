@@ -1,3 +1,5 @@
+Partly replaced by `2026-11-20-snapshots-are-the-only-mode.md`: there is no `--no-snapshot`.
+
 # Adapters are PHP shipped in the binary, compiled under the application's names
 
 - Date: 2026-11-20

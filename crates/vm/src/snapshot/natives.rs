@@ -26,6 +26,8 @@ use crate::closures::ClosureState;
 pub(super) struct VmNatives<'r> {
     pub(super) registry: &'r phera_extension_api::Registry,
     pub(super) rebind: std::cell::RefCell<Vec<(usize, Vec<phera_value::ArrayKey>)>>,
+    /// The fork's queue of released generators.
+    pub(super) releases: crate::generators::cleanup::ReleaseQueue,
 }
 
 impl NativeFork for VmNatives<'_> {
@@ -61,6 +63,12 @@ impl NativeFork for VmNatives<'_> {
         // A lazy object's initializer, resolved when the object was made.
         if let Some(callee) = state.downcast_ref::<Callee>() {
             return Ok(Box::new(callee.fork_copy(fork)));
+        }
+        if let Some(generator) = crate::generators::fork_generator(state, fork, &self.releases) {
+            return generator;
+        }
+        if let Some(fiber) = crate::fibers::fork_fiber(state, fork) {
+            return fiber;
         }
         if let Some(keys) = crate::reference_holders::bound_properties(state) {
             let address = std::ptr::from_ref(object) as usize;

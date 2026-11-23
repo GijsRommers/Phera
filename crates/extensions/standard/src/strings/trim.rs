@@ -69,14 +69,23 @@ fn trim_with(
     function: &str,
     side: Side,
 ) -> NativeResult {
+    let original = args::bytes(arguments, 0);
+    let characters = args::bytes(arguments, 1);
+    let mask = if characters.len() > 1 {
+        Some(character_mask(context, function, characters))
+    } else {
+        None
+    };
     let characters = if args::given(arguments, 1) {
-        args::bytes(arguments, 1)
+        characters
     } else {
         DEFAULT_CHARACTERS
     };
-    let strip = character_mask(context, function, characters);
-    let keep = |byte: &u8| !strip[usize::from(*byte)];
-    let mut trimmed = args::bytes(arguments, 0);
+    let keep = |byte: &u8| match &mask {
+        Some(mask) => !mask[usize::from(*byte)],
+        None => !characters.contains(byte),
+    };
+    let mut trimmed = original;
     if side != Side::Right {
         let start = trimmed.iter().position(keep).unwrap_or(trimmed.len());
         trimmed = &trimmed[start..];
@@ -85,7 +94,11 @@ fn trim_with(
         let end = trimmed.iter().rposition(keep).map_or(0, |last| last + 1);
         trimmed = &trimmed[..end];
     }
-    Ok(Value::from(trimmed))
+    Ok(if trimmed.len() == original.len() {
+        arguments[0].clone()
+    } else {
+        Value::from(trimmed)
+    })
 }
 
 /// `trim(string $string, string $characters = " \n\r\t\v\0"): string`

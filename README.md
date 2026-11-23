@@ -28,11 +28,25 @@ Measured in November 2026 against PHP 8.5, the same script or request on both.
 | What | State |
 | --- | --- |
 | Laravel 13 JSON API with Eloquent | Runs. `artisan migrate` and 20 API requests (validation, create, read, update, delete, pagination, relations, a transaction) give PHP's answers on SQLite, MySQL and PostgreSQL |
-| Symfony 7.4 with Doctrine | Runs. `doctrine:schema:create` and 22 API requests (routes with parameters, validation, relations, aggregate queries) give PHP's answers on SQLite. One known defect: under a long run of requests on one worker a request can hang until the time limit; it is being fixed |
+| Symfony 7.4 with Doctrine | Runs. `doctrine:schema:create` and 22 API requests (routes with parameters, validation, relations, aggregate queries) give PHP's answers on SQLite |
 | WordPress | `mysqli` and the engine fixes it needed are in. The end-to-end comparison with PHP has not been repeated since |
-| PHP's own test suite (php-src) | 9,052 of the 13,388 core tests pass. Of 4,542 tests for the later extensions (dom, openssl, session, curl, intl and others) 1,436 pass |
+| PHP's own test suite (php-src) | 9,136 of the 13,388 core tests pass. Of 4,542 tests for the later extensions (dom, the XML family, openssl, session, curl, intl and others) 1,737 pass |
 | Speed of plain scripts | Between about the same CPU time as PHP's interpreter (arrays, arithmetic) and 5.5 times as much (method calls) |
-| Speed of a framework request | About 4 times PHP's CPU for one Laravel API request in production mode: 63 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 204 million against 27 million. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
+| Speed of a framework request | About 2.1 times PHP's instruction count for one Laravel API request in production mode: 34.5 million instructions against 16.6 million for PHP with opcache, on a plain route. Phera boots the framework once per worker and answers each request from a copy of the booted application ([below](#-boot-once-fork-every-request)). A route that reads the database costs 138 million against 27 million, 5.0 times, and a Symfony and Doctrine route with 49 statements 301 million against 30 million, 10 times. Under load, measured before this way of running existed, PHP-FPM behind nginx served 8,288 requests per second on a plain route and Phera 228; that test has not been repeated yet |
+
+Phera validates union and intersection declarations during compilation and
+checks inherited property types when linking classes. Ordinary typed
+parameters with a literal `null` default accept `null` and emit PHP's
+implicit-nullability deprecation.
+Typed property references require the same conversion for every property
+holding the reference.
+During cycle collection, a WeakMap entry keeps its value reachable only
+while the map and key are reachable.
+Closure captures, static values and bound receivers participate in
+cycle collection.
+The compiler diagnoses ambiguous ternary chains, invalid loop operands
+and misplaced namespace declarations. Syntax-only tokenization accepts
+those constructs.
 
 ## 🧰 The `phera` command
 
@@ -134,6 +148,19 @@ Composer's generated class map and files autoload list. The start line gives
 the count and elapsed time. PHP still runs each file when the application
 includes it. The Zend-specific `opcache.preload` directive is unsupported.
 
+After a worker has served enough requests that its requests stop autoloading
+new classes, `phera serve` boots the application once more in the background
+and loads those classes through the application's own autoloaders just before
+`Phera\snapshot()`, so later requests find them declared and run no autoloader
+for them (64 requests without a new class, at most 3 warm-up boots per
+worker; see
+[the decision](docs/decisions/2026-11-21-request-autoloads-are-declared-in-the-snapshot.md)).
+Like `opcache.preload`, a warmed class exists before the request starts:
+`class_exists($name, false)` is true for it. An autoloader with a side
+effect (logging, counting) is called once per warmed class in the warm-up
+boot and then no longer in requests. `phera serve --no-class-warmup` turns
+this off.
+
 Use `flush()` to stream PHP output before the request ends. If you started
 an output buffer, use `ob_flush()` or `ob_end_flush()` to release its contents.
 An outer buffer can still hold the bytes. `ob_implicit_flush()` sends each
@@ -185,6 +212,28 @@ Register PHP filters with `stream_filter_register()` and combine them with
 built-in filters on native streams or application wrappers. Phera limits
 chains to 16 stages and intermediate buckets to 8 MiB.
 
+Stream sockets use the worker's event loop for TCP, UDP and Unix connections.
+PHP programs can open a client or listener, wait for readiness with
+`stream_select()`, and use the regular read, write, and timeout functions.
+TCP clients can start TLS when connecting or upgrade an existing connection.
+Listeners can accept TLS directly or upgrade an accepted connection.
+By default clients verify the server's certificate and host name.
+A live socket held by the boot prevents `Phera\snapshot()` from creating
+a snapshot. Persistent sockets created during boot connect on first use
+in each fork. `pfsockopen()` and `STREAM_CLIENT_PERSISTENT` can reuse a
+clean idle connection on the same worker.
+`fopen()` and `file_get_contents()` support buffered HTTP and HTTPS
+responses. `get_headers()` fetches the response headers, and
+`http_get_last_response_headers()` returns the latest headers in the
+current request. HTTP calls also populate the caller's legacy `$http_response_header` variable.
+URL credentials use Basic authentication and stay on their origin. Stream contexts can store
+default options for these calls.
+
+PHP host, DNS and MX lookups leave the worker available while waiting.
+Service and protocol lookups use the system tables, and
+`net_get_interfaces()` exposes local interface addresses, including the system's IPv6 scope
+bits on Apple. `getmxrr()` and `dns_get_mx()` return false when the answer contains no mail exchanger.
+
 Modern DOM supports CSS selectors, live class tokens, and `innerHTML`.
 Legacy `DOMDocument` supports local XSD validation for common content models,
 including Symfony's service configuration. Complex type derivation and XSD
@@ -222,7 +271,15 @@ functions. Backticks emit PHP 8.5's compile-time deprecation. On Unix, `mail()`
 and `mb_send_mail()` pipe the message to the command in `sendmail_path`.
 `phera serve --no-process public` disables program launches for web requests,
 including `mail()` and `mb_send_mail()`.
-The standard library retains PHP’s deprecated `utf8_encode()` Latin-1 conversion.
+The standard library retains PHP’s deprecated Latin-1 conversions
+`utf8_encode()` and `utf8_decode()`, plus C-locale `strftime()` and
+`gmstrftime()`. The input filters read the original request values even
+after the script changes its superglobals. The `phpinfo()` text report
+redacts process environment and request variable values.
+
+`get_browser()`, `register_tick_function()`, `dl()`,
+`output_add_rewrite_var()`, `assert_options()` and `strptime()` throw
+`Phera\NotSupportedException`.
 
 BCMath provides arbitrary-precision decimal functions and the immutable
 `BcMath\Number` class. Set the default procedural scale with `bcmath.scale`
@@ -246,7 +303,42 @@ read, written, sought, truncated and unlinked in the current transaction.
 Native function return types are visible through reflection. Compatibility
 testing is in progress. MySQL LOCAL INFILE is disabled.
 
-Not started: gd, fileinfo, zip, sockets.
+Fileinfo is built in. Use `finfo` or `mime_content_type()` to identify common
+uploads from their contents. Fileinfo uses a bounded Rust classifier for images,
+documents, archives, media, fonts, and executables. It provides the MIME type,
+charset, known extensions, and a description. Custom magic databases and
+libmagic's complete signature catalog are outside this implementation.
+
+GD provides image buffers, PNG, JPEG, GIF, BMP and WebP codecs, drawing,
+thumbnail operations, filters, and the five built-in fonts. The same build
+includes `getimagesize()` and `exif_imagetype()`. Compatibility limits are
+listed in the [GD coverage notes](crates/extensions/gd/README.md).
+
+The sockets extension supports TCP, UDP and Unix sockets, including
+descriptor passing with Unix socket messages. A `Socket` and an exported
+stream share the same connection. Some platform-specific options, resolver
+hints and out-of-band operations remain incomplete.
+
+Not started: zip.
+
+### Database connection pool
+
+MySQL and PostgreSQL sockets stay on the worker that opens them.
+`PHERA_PDO_POOL_SIZE` (20 by default) limits pooled sockets to each database
+across the process. An idle worker can close one of its sockets when
+another worker is waiting for a turn. `PHERA_PDO_POOL_IDLE_SECONDS` (60),
+`PHERA_PDO_POOL_LIFETIME_SECONDS` (1800) and
+`PHERA_PDO_POOL_WAIT_SECONDS` (30) control the pool's timeouts.
+`PHERA_PDO_IO_THREADS` is accepted for compatibility and has no effect.
+Unpooled connections, including PDO with `PHERA_ATTR_POOL => false` and
+nonpersistent mysqli and pgsql connections opened by a request, are outside
+the pool limit. Each fork reconnects a boot connection on first use and
+replays the boot's session changes. The fork can borrow a pooled socket for
+a nonpersistent mysqli or pgsql connection opened during boot.
+
+PDO placeholder parsing follows each database's quoting and comment rules.
+The [PDO coverage notes](crates/extensions/pdo/README.md#differences-from-php-85)
+describe two PostgreSQL emulation differences from PHP 8.5.
 
 ### Sodium
 
@@ -350,10 +442,11 @@ Laravel and Symfony applications get this with no change:
 
 - **Laravel** (a project with `artisan` and `bootstrap/app.php`): Phera runs
   its own entry script for `public/index.php`, which bootstraps the
-  application and its service providers, then handles the request.
+  application and its service providers, warms it up, then handles the
+  request.
 - **Symfony** with `symfony/runtime`: Phera sets `APP_RUNTIME` to its own
-  runtime class (unless something else chose one), which boots the kernel
-  and then handles the request.
+  runtime class (unless something else chose one), which boots the kernel,
+  warms it up, and then handles the request.
 - **Any other application** marks the point itself:
 
   ```php
@@ -366,17 +459,95 @@ Laravel and Symfony applications get this with no change:
   The first start serves such a script from the top until it reaches the
   call; later starts boot it before the first connection.
 
+The warm-up builds, once per worker, what nearly every request would build
+first. For Laravel: every Eloquent model under `app/Models` is booted and
+one query is built for it (no connection is opened), and the framework
+services Octane resolves in a new worker are resolved (the application's
+`octane.warm` list when it has one). For Symfony: the event dispatcher,
+with its listeners still created on first use. On the test applications a
+Laravel Eloquent route went from 104 to 53 million instructions per request
+and a Symfony route without a database from 13.3 to 12.5 million. Every
+worker boots a little longer (165 to 214 ms on that Laravel application)
+and holds what was built (16 MiB more).
+
+**Laravel: a model's `boot()` and `booted()` run once per worker.** Under
+PHP they run in every request that uses the model. Here they run when the
+worker boots, with no request and no signed-in user. If that code asks for
+the request or the user (`request()`, `auth()->user()`), it fails at that
+moment; Phera then leaves the model alone and it boots inside each request,
+exactly as before. If it reads something else that differs per request (the
+clock, a cache, `$_SERVER`, `$_COOKIE`), it gets the worker's answer once,
+and every request of that worker sees it: `static::$bootedAt = now()` is
+the worker's boot time, a global scope chosen from a cached setting stays
+chosen until the worker boots again. A closure passed to
+`addGlobalScope()` or `creating()` still runs per query or per save, with
+the request; only the code that registers it runs once.
+`phera serve --no-service-warmup public` (or `PHERA_SERVICE_WARMUP=0` in the
+environment) turns the warm-up off and models boot per request again.
+
+### Warm-up requests
+
+Most of what a route builds the first time it is used is the application's
+own: its services, listeners, compiled routes, loaded classes. Phera cannot
+know whether running one of your routes without a visitor is safe, so this
+part is yours to declare. Name the paths, and each worker handles them as
+requests before it takes the snapshot:
+
+```toml
+# phera.toml
+[server]
+warmup = ["/api/posts", "/"]
+```
+
+or `phera serve --warmup /api/posts --warmup / public` (the option wins over
+the file; both become the environment variable `PHERA_WARMUP`, which you can
+also set yourself). On the test applications a Laravel Eloquent route went
+from WARMUP_README.
+
+The contract:
+
+- A warm-up request is an anonymous `GET`: no cookie, no credentials, the
+  host of `APP_URL` (Laravel) or `localhost` (Symfony). **It must change
+  nothing**: no row, no file, no message sent.
+- It runs once per worker boot, in every worker. A worker boots at start,
+  again when a PHP file changed, and up to three more times while it learns
+  which classes requests load. A route that writes a file the application
+  includes makes the worker boot again.
+- A path that throws, redirects or answers with an error is logged once per
+  boot, and the worker starts anyway. A route behind a login is such a path:
+  the warm-up is not signed in.
+- After each warm-up request Phera resets the framework as it is reset
+  between two requests of a long-running worker: for Laravel what Octane
+  resets (session, signed-in user, queued cookies, locale, configuration,
+  log context, scoped instances and more), for Symfony the kernel's own
+  service reset at the start of every request.
+- **Whatever a warm-up request leaves in objects that outlive a request,
+  and that those resets do not know, is what every request starts from.** A
+  singleton of yours that remembers the request it was built for, a Symfony
+  listener whose constructor reads the current request, a static property:
+  each keeps the warm-up's value. If your application runs correctly under
+  Laravel Octane or a long-running Symfony runtime, it does here.
+
 The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
 are empty and `$_SERVER` holds the environment and the script's paths. Each
 request gets its own copy of every object, static property and global, so
-nothing one request does reaches another. What cannot be copied (an open
-file or socket, a started session, a database transaction) makes
+nothing one request does reaches another. A database or Redis connection
+made in the boot connects again on first use in each request, from the pool,
+with what the boot set on its session (`SET`, `USE`, the charset) replayed;
+an open file is opened again at the same position; DOM documents, generators,
+curl handles and temporary files are copied; a `GdImage` copies its pixels,
+palette and rendering options, and a `finfo` object its flags. What cannot be duplicated (an
+open transaction, a lock, a suspended Fiber, a pipe to a process, a directory
+handle, an open gzip file, an `SQLite3` object, a prepared statement) makes
 `Phera\snapshot()` throw `Phera\SnapshotException`, naming the class and
 where it was found; the worker then serves the application from the top.
 A changed file boots the worker again in the background, following
 `opcache.validate_timestamps` and `opcache.revalidate_freq`. The boot's
 objects are never destroyed; each request's copies are destroyed at its end,
-as PHP-FPM destroys a request's objects. `--no-snapshot` turns all of it off.
+as PHP-FPM destroys a request's objects. Snapshots are the only mode and
+cannot be turned off; a request that has to run from the top (its boot was
+refused) is logged as a defect and counted in the `--health` answer's
+`Phera-From-The-Top` header.
 
 A Laravel API request took 525 million instructions run from the top, and
 102 million as a fork (PHP 8.5 with opcache: 48 million). The design is in

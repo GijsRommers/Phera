@@ -15,6 +15,14 @@ Usage:
                                           0.0.0.0:$PORT when PORT is set
     --workers N                           default: one per CPU core
     --preload                             compile Composer files before listening
+    --no-class-warmup                     do not declare in the snapshot the
+                                          classes requests autoload
+    --no-service-warmup                   Laravel, Symfony: do not resolve the
+                                          framework's services before the
+                                          snapshot
+    --warmup PATH                         Laravel, Symfony: handle a GET of
+                                          PATH before the snapshot (may be
+                                          repeated; see the README)
     --no-process                          forbid starting external programs
     --request-timeout SECONDS             stop a request after this long
                                           (default 60; 0: never)
@@ -33,9 +41,6 @@ Usage:
                                           private means every private range
     --health PATH                         answer this path with 200 and ok,
                                           without running PHP
-    --no-snapshot                         run every request from the top: no
-                                          boot at start, no Laravel or Symfony
-                                          adapter
     ENV OPTIONS as below
   phera new [OPTIONS] [DIRECTORY]         start a project; asks for what
                                           is not given
@@ -95,6 +100,15 @@ pub(crate) struct ServeOptions {
     /// `None` means one worker per CPU core.
     pub workers: Option<usize>,
     pub preload: bool,
+    /// Declare in the snapshot the classes requests autoload; on unless
+    /// `--no-class-warmup` is given.
+    pub class_warmup: bool,
+    /// Let the framework adapters resolve services before the snapshot; on
+    /// unless `--no-service-warmup` is given.
+    pub service_warmup: bool,
+    /// `--warmup`: the paths the framework adapters handle as requests
+    /// before the snapshot, in the order given.
+    pub warmup: Vec<String>,
     /// `--compress`: gzip or brotli for clients that accept it. Off unless
     /// given, since the proxy in front usually compresses.
     pub compress: bool,
@@ -107,9 +121,6 @@ pub(crate) struct ServeOptions {
     pub trusted_proxies: Option<String>,
     /// `--health`: a path the server answers itself.
     pub health_path: Option<String>,
-    /// `--no-snapshot`: no boot at start and no framework adapter; every
-    /// request runs the script from the top.
-    pub no_snapshot: bool,
     pub path: PathBuf,
 }
 
@@ -291,13 +302,15 @@ fn parse_serve(
         listen: None,
         workers: None,
         preload: false,
+        class_warmup: true,
+        service_warmup: true,
+        warmup: Vec::new(),
         compress: false,
         no_process: false,
         request_timeout: None,
         request_read_timeout: None,
         trusted_proxies: None,
         health_path: None,
-        no_snapshot: false,
         path: PathBuf::from("."),
     };
     while let Some(argument) = arguments.next() {
@@ -324,7 +337,15 @@ fn parse_serve(
             }
             "--compress" => options.compress = true,
             "--preload" => options.preload = true,
-            "--no-snapshot" => options.no_snapshot = true,
+            "--no-class-warmup" => options.class_warmup = false,
+            "--no-service-warmup" => options.service_warmup = false,
+            "--warmup" => {
+                let path = arguments
+                    .next()
+                    .filter(|path| is_warmup_path(path))
+                    .ok_or("--warmup needs a path like /api/posts?page=1, without spaces.")?;
+                options.warmup.push(path);
+            }
             "--dev" => options.dev = true,
             "--no-process" => options.no_process = true,
             "--trusted-proxies" => {
@@ -367,4 +388,10 @@ fn parse_serve(
         }
     }
     Ok(options)
+}
+
+/// Whether `path` can be a warm-up request: a path on this site, in one
+/// piece (the adapters receive the paths separated by white space).
+pub(crate) fn is_warmup_path(path: &str) -> bool {
+    path.starts_with('/') && !path.contains(char::is_whitespace)
 }

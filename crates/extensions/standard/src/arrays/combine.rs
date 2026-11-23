@@ -7,6 +7,7 @@ use phera_extension_api::{
 };
 
 use super::combine_recursive::combine_pair;
+use super::{IntegerKeys, append_entry};
 use crate::arguments::required_array;
 
 pub(super) const FUNCTIONS: &[FunctionEntry] = &[
@@ -26,12 +27,6 @@ pub(super) enum Collision {
     Replace,
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum Depth {
-    Shallow,
-    Recursive,
-}
-
 /// `array_merge(array ...$arrays): array`
 ///
 /// ```php
@@ -43,8 +38,14 @@ const ARRAY_MERGE: FunctionEntry = FunctionEntry::sync(
     array_merge,
 );
 
-fn array_merge(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    combine(context, arguments, Collision::Merge, Depth::Shallow)
+fn array_merge(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let mut result = PhpArray::new();
+    for index in 0..arguments.len() {
+        for (key, value) in required_array(arguments, index).iter() {
+            append_entry(&mut result, key, value, IntegerKeys::Renumber)?;
+        }
+    }
+    Ok(Value::from(result))
 }
 
 /// `array_replace(array $array, array ...$replacements): array`
@@ -61,8 +62,14 @@ const ARRAY_REPLACE: FunctionEntry = FunctionEntry::sync(
     array_replace,
 );
 
-fn array_replace(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    combine(context, arguments, Collision::Replace, Depth::Shallow)
+fn array_replace(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let mut result = (**required_array(arguments, 0)).clone();
+    for index in 1..arguments.len() {
+        for (key, value) in required_array(arguments, index).iter() {
+            result.insert(key, value.clone());
+        }
+    }
+    Ok(Value::from(result))
 }
 
 /// `array_merge_recursive(array ...$arrays): array`: values under the same
@@ -79,7 +86,7 @@ const ARRAY_MERGE_RECURSIVE: FunctionEntry = FunctionEntry::sync(
 );
 
 fn array_merge_recursive(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    combine(context, arguments, Collision::Merge, Depth::Recursive)
+    combine(context, arguments, Collision::Merge)
 }
 
 /// `array_replace_recursive(array $array, array ...$replacements): array`:
@@ -98,15 +105,10 @@ const ARRAY_REPLACE_RECURSIVE: FunctionEntry = FunctionEntry::sync(
 );
 
 fn array_replace_recursive(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    combine(context, arguments, Collision::Replace, Depth::Recursive)
+    combine(context, arguments, Collision::Replace)
 }
 
-fn combine(
-    context: &mut dyn Context,
-    arguments: &[Value],
-    collision: Collision,
-    depth: Depth,
-) -> NativeResult {
+fn combine(context: &mut dyn Context, arguments: &[Value], collision: Collision) -> NativeResult {
     // Replacing starts from a copy of the first array, which keeps its next
     // free integer key; merging starts empty and numbers from 0.
     let (mut result, sources) = match collision {
@@ -115,7 +117,7 @@ fn combine(
     };
     for index in sources {
         let source = required_array(arguments, index).clone();
-        result = combine_pair(context, result, source, collision, depth)?;
+        result = combine_pair(context, result, source, collision)?;
     }
     Ok(Value::from(result))
 }

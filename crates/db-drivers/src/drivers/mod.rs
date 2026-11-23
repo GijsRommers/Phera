@@ -8,9 +8,8 @@
 //! $statement->fetchAll();                                              // RawRows::into_php
 //! ```
 //!
-//! A driver's methods run on the I/O runtime (see `crate::pool`), so what
-//! goes in and comes out is plain data that may cross threads: SQL, bound
-//! values, and [`RawRows`], which the PHP worker turns into PHP values.
+//! A driver's methods run on the current PHP worker (see `crate::pool`).
+//! The extension shapes the driver's PHP cell values when it fetches a row.
 //!
 //! # Adding a driver
 //!
@@ -25,13 +24,14 @@
 
 pub mod mysql;
 pub mod postgres;
+mod row_buffer;
 pub mod sqlite;
 mod tls;
 
+pub use row_buffer::RowBuffer;
+
 use std::sync::Arc;
 use std::time::Duration;
-
-use phera_extension_api::Value;
 
 use crate::dsn::{DriverName, Dsn};
 use crate::errors::DbError;
@@ -48,12 +48,14 @@ pub struct Column {
 }
 
 /// A result as PHP values, kept by the statement for its fetch calls.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Rows {
     pub columns: Vec<Column>,
-    pub values: Vec<Vec<Value>>,
+    pub values: RowBuffer,
     /// `rowCount()`: rows changed, or for a query the rows returned.
     pub affected: u64,
+    /// PostgreSQL can stream rows even when their column count is zero.
+    pub has_pending_rows: bool,
 }
 
 #[derive(Default)]
@@ -74,7 +76,7 @@ pub enum Prepared {
         number: u64,
     },
     Postgres {
-        statement: tokio_postgres::Statement,
+        statement: postgres::Statement,
         number: u64,
     },
     /// Native binds to an unnamed statement, `Pdo\Pgsql::ATTR_DISABLE_PREPARES`.
@@ -84,16 +86,10 @@ pub enum Prepared {
     Sqlite(phera_sqlite::Statement),
 }
 
-/// A result as the driver returned it. It becomes PHP values on the worker,
-/// in [`RawRows::into_php`], because PHP values cannot cross threads.
+/// A result whose client rows still have to be converted into PHP cells.
 pub enum RawRows {
     /// No result set, only the number of rows changed.
     Affected(u64),
-    Postgres {
-        columns: Vec<Column>,
-        rows: Vec<postgres::Row>,
-        affected: u64,
-    },
     Mysql {
         columns: Vec<mysql_async::Column>,
         rows: Vec<mysql_async::Row>,
@@ -105,7 +101,6 @@ impl RawRows {
     pub fn has_columns(&self) -> bool {
         match self {
             Self::Affected(_) => false,
-            Self::Postgres { columns, .. } => !columns.is_empty(),
             Self::Mysql { columns, .. } => !columns.is_empty(),
         }
     }
@@ -116,11 +111,6 @@ impl RawRows {
                 affected,
                 ..Rows::default()
             }),
-            Self::Postgres {
-                columns,
-                rows,
-                affected,
-            } => postgres::values::convert(columns, rows, affected),
             Self::Mysql {
                 columns,
                 rows,
@@ -167,10 +157,10 @@ impl Driver {
     /// calls it with the statement's number.
     pub async fn prepare(&mut self, sql: &Sql, number: u64) -> Result<Prepared, DbError> {
         match self {
-            Self::Postgres(driver) => driver
-                .prepare(sql)
-                .await
-                .map(|statement| Prepared::Postgres { statement, number }),
+            Self::Postgres(driver) => Ok(Prepared::Postgres {
+                statement: driver.prepare(number),
+                number,
+            }),
             Self::Mysql(driver) => driver.prepare(sql).await.map(Prepared::Mysql),
             Self::Sqlite(driver) => driver
                 .database
@@ -189,7 +179,7 @@ impl Driver {
         prepared: &Prepared,
         values: &[BoundValue],
         options: &Execution,
-    ) -> Result<RawRows, DbError> {
+    ) -> Result<Rows, DbError> {
         // Quoting a value into SQL text needs the value to be text.
         let binary = |value: &BoundValue| matches!(value, BoundValue::String(bytes) if std::str::from_utf8(bytes).is_err());
         if matches!(prepared, Prepared::Emulated) && values.iter().any(binary) {
@@ -207,26 +197,26 @@ impl Driver {
     }
 
     /// `$pdo->exec($sql)`: SQL text without placeholders, for its row count.
-    pub async fn exec(&mut self, sql: &str) -> Result<RawRows, DbError> {
+    pub async fn exec(&mut self, sql: &str) -> Result<Rows, DbError> {
         match self {
             Self::Postgres(driver) => {
-                driver.discard_lazy();
+                driver.discard_lazy().await?;
                 driver.run_unprepared(sql).await
             }
             Self::Mysql(driver) => driver.exec(sql).await,
-            Self::Sqlite(driver) => driver.run_unprepared(sql).await,
+            Self::Sqlite(driver) => driver.run_unprepared(sql).await?.into_php(),
         }
     }
 
     /// SQL text sent as it is: `BEGIN`, `COMMIT` and `ROLLBACK`.
-    pub async fn run_unprepared(&mut self, sql: &str) -> Result<RawRows, DbError> {
+    pub async fn run_unprepared(&mut self, sql: &str) -> Result<Rows, DbError> {
         match self {
             Self::Postgres(driver) => {
-                driver.discard_lazy();
+                driver.discard_lazy().await?;
                 driver.run_unprepared(sql).await
             }
             Self::Mysql(driver) => driver.run_unprepared(sql).await,
-            Self::Sqlite(driver) => driver.run_unprepared(sql).await,
+            Self::Sqlite(driver) => driver.run_unprepared(sql).await?.into_php(),
         }
     }
 
@@ -234,7 +224,7 @@ impl Driver {
     pub async fn last_id(&mut self, name: Option<&str>) -> Result<String, DbError> {
         match self {
             Self::Postgres(driver) => {
-                driver.discard_lazy();
+                driver.discard_lazy().await?;
                 driver.last_id(name).await
             }
             Self::Mysql(driver) => Ok(driver.last_id()),
@@ -250,10 +240,7 @@ impl Driver {
     /// `$pdo->quote($string)`, which depends on the session's escaping mode.
     pub async fn quote(&mut self, bytes: &[u8]) -> Result<String, DbError> {
         match self {
-            Self::Postgres(driver) => {
-                driver.buffer_lazy().await;
-                driver.quote(bytes).await
-            }
+            Self::Postgres(driver) => Ok(driver.quote(bytes)),
             Self::Mysql(driver) => driver.quote(bytes).await,
             Self::Sqlite(_) => Ok(String::from_utf8_lossy(&sqlite::quote(bytes)).into_owned()),
         }
@@ -267,7 +254,7 @@ impl Driver {
     ) -> Result<(i16, Option<String>), DbError> {
         match self {
             Self::Postgres(driver) => {
-                driver.discard_lazy();
+                driver.buffer_lazy().await;
                 driver.metadata(column).await
             }
             Self::Mysql(_) | Self::Sqlite(_) => Err(connection_error("Mismatched metadata driver")),
@@ -277,7 +264,7 @@ impl Driver {
     /// `$pdo->inTransaction()`, asked of the server.
     pub async fn transaction_state(&mut self) -> Option<bool> {
         match self {
-            Self::Postgres(driver) => Some(driver.transaction_state().await),
+            Self::Postgres(driver) => Some(driver.transaction_state()),
             Self::Mysql(driver) => driver.transaction_state(),
             Self::Sqlite(driver) => driver.database.transaction().await.ok(),
         }

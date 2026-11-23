@@ -139,7 +139,7 @@ jobs:
           php-version: '8.5'
           extensions: >-
             json, pcre, ctype, curl, pdo, pdo_pgsql, mysqlnd, mysqli, pgsql, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, sodium, libxml, dom, simplexml, xml, xmlreader, xmlwriter, intl, posix,
-            bcmath, gmp, zlib, timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
+            bcmath, exif, fileinfo, gd, gmp, zlib, sockets, timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
           REDIS_PATH: .
@@ -152,7 +152,7 @@ jobs:
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
           echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
-          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "curl", "pdo", "pdo_pgsql", "mysqlnd", "mysqli", "pgsql", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "sodium", "libxml", "dom", "simplexml", "xml", "xmlreader", "xmlwriter", "intl", "posix", "bcmath", "gmp", "zlib", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
+          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "curl", "pdo", "pdo_pgsql", "mysqlnd", "mysqli", "pgsql", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "sodium", "libxml", "dom", "simplexml", "xml", "xmlreader", "xmlwriter", "intl", "posix", "bcmath", "exif", "fileinfo", "gd", "gmp", "zlib", "sockets", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites
@@ -172,18 +172,42 @@ jobs:
     name: Test (Linux, PHP 8.5, PostgreSQL 17, MySQL 8.4)
     # The name is a required check in the branch protection, so it stays. It
     # passes when every part of the suite passed. `always()` makes it fail
-    # when a part failed: a skipped job would count as passed.
+    # when a part failed or did not run: a skipped job would count as passed.
+    # That includes a draft, whose parts are skipped: on 2026-11-21 a pull
+    # request was merged on the skipped checks of a run that started while it
+    # was still a draft.
     needs: test-part
-    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: A draft does not run the long jobs
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft
+        run: |
+          echo "::error::Draft pull request: the long test jobs do not run. Mark it ready to run them."
+          exit 1
       - name: Every part of the test suite passed
         run: test "${{ needs.test-part.result }}" = "success"
 
   pdo-end-to-end:
     name: PDO end to end
     # The name is a required check in the branch protection, so it stays as it
-    # is although the job now runs the SQLite and Redis comparisons too.
+    # is although the job now runs the SQLite and Redis comparisons too. It
+    # passes when the comparisons ran and passed; like `test` above it fails
+    # on a draft instead of being skipped.
+    needs: database-comparisons
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: A draft does not run the long jobs
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft
+        run: |
+          echo "::error::Draft pull request: the long test jobs do not run. Mark it ready to run them."
+          exit 1
+      - name: The database and Redis comparisons passed
+        run: test "${{ needs.database-comparisons.result }}" = "success"
+
+  database-comparisons:
+    name: Database and Redis comparisons
     # Runs the database and Redis comparisons through the release binary.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
@@ -229,7 +253,7 @@ jobs:
           php-version: '8.5'
           extensions: >-
             json, pcre, ctype, curl, pdo, pdo_pgsql, mysqlnd, mysqli, pgsql, pdo_mysql, pdo_sqlite, sqlite3, mbstring, iconv, tokenizer, openssl, sodium, libxml, dom, simplexml, xml, xmlreader, xmlwriter, intl, posix,
-            bcmath, gmp, zlib, timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
+            bcmath, exif, fileinfo, gd, gmp, zlib, sockets, timezonedb-2026.5, redis-phpredis/phpredis@6.3.0
           coverage: none
         env:
           REDIS_PATH: .
@@ -242,7 +266,7 @@ jobs:
         run: |
           echo "PHERA_PHP_REAL=$(command -v php)" >> "$GITHUB_ENV"
           echo "PHERA_PHP=$GITHUB_WORKSPACE/.github/scripts/php-oracle.sh" >> "$GITHUB_ENV"
-          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "curl", "pdo", "pdo_pgsql", "mysqlnd", "mysqli", "pgsql", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "sodium", "libxml", "dom", "simplexml", "xml", "xmlreader", "xmlwriter", "intl", "posix", "bcmath", "gmp", "zlib", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
+          echo "PHERA_PHP_SHARED_EXTENSIONS=$(php -n -r 'foreach (["json", "pcre", "ctype", "curl", "pdo", "pdo_pgsql", "mysqlnd", "mysqli", "pgsql", "pdo_mysql", "pdo_sqlite", "sqlite3", "mbstring", "iconv", "tokenizer", "openssl", "sodium", "libxml", "dom", "simplexml", "xml", "xmlreader", "xmlwriter", "intl", "posix", "bcmath", "exif", "fileinfo", "gd", "gmp", "zlib", "sockets", "timezonedb", "redis"] as $e) { if (!extension_loaded($e)) echo "$e "; }')" >> "$GITHUB_ENV"
       # Fail on missing prerequisites instead of silently skipping the PDO suites.
       - name: Verify PHP version, extensions and database connections
         run: make ci-prerequisites

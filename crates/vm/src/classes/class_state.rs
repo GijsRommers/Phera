@@ -19,7 +19,12 @@
 //! A child class that does not redeclare an inherited static property
 //! shares its parent's slot, as PHP shares the property: `Child::$count++`
 //! changes `Counter::$count` too.
+//!
+//! Slots are numbered by the worker (see [`SlotNumbers`]), so that a class
+//! linked by one request of the worker has slots that mean the same in
+//! every other: a request's tables grow to a slot when it first uses it.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use phera_value::Value;
@@ -35,25 +40,65 @@ pub(crate) struct StaticSlot(u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ConstantSlot(u32);
 
-/// One request's static properties and evaluated class constants.
+/// The worker's next static and constant slot numbers.
 #[derive(Default)]
+pub(crate) struct SlotNumbers {
+    statics: Cell<u32>,
+    constants: Cell<u32>,
+}
+
+impl SlotNumbers {
+    fn next(counter: &Cell<u32>) -> u32 {
+        let slot = counter.get();
+        counter.set(slot.saturating_add(1));
+        slot
+    }
+}
+
+/// One request's static properties and evaluated class constants.
 pub(crate) struct ClassStates {
     /// Made on first use from the declaration's default value.
     statics: Vec<Option<Rc<StaticProperty>>>,
     constants: Vec<ConstantState>,
+    numbers: Rc<SlotNumbers>,
+}
+
+impl Default for ClassStates {
+    /// States with a numbering of their own (a command-line run, a test).
+    fn default() -> Self {
+        Self::for_worker(&Rc::default())
+    }
 }
 
 impl ClassStates {
+    /// The bytes of the slot tables, for a fork's footprint.
+    pub(crate) fn heap_bytes(&self) -> usize {
+        self.statics.capacity() * std::mem::size_of::<Option<Rc<StaticProperty>>>()
+            + self.constants.capacity() * std::mem::size_of::<ConstantState>()
+    }
+
     /// A new static property's slot, for a declaration being linked.
+    /// A request's states, with slots numbered by its worker.
+    pub(crate) fn for_worker(numbers: &Rc<SlotNumbers>) -> Self {
+        ClassStates {
+            statics: Vec::new(),
+            constants: Vec::new(),
+            numbers: numbers.clone(),
+        }
+    }
+
+    /// The worker's slot numbering these states use.
+    pub(crate) fn numbers(&self) -> Rc<SlotNumbers> {
+        self.numbers.clone()
+    }
+
     pub(crate) fn new_static(&mut self) -> StaticSlot {
-        self.statics.push(None);
-        StaticSlot(self.statics.len() as u32 - 1)
+        StaticSlot(SlotNumbers::next(&self.numbers.statics))
     }
 
     /// A new evaluated constant's slot, for a declaration being linked.
     pub(crate) fn new_constant(&mut self) -> ConstantSlot {
-        self.constants.push(ConstantState::Uninitialized);
-        ConstantSlot(self.constants.len() as u32 - 1)
+        ConstantSlot(SlotNumbers::next(&self.numbers.constants))
     }
 
     /// The storage of a static property, made from its default on first use.
@@ -63,7 +108,11 @@ impl ClassStates {
         property: &PropertyDefault,
     ) -> Option<Rc<StaticProperty>> {
         let StaticSlot(slot) = property.static_storage?;
-        let entry = self.statics.get_mut(slot as usize)?;
+        let slot = slot as usize;
+        if self.statics.len() <= slot {
+            self.statics.resize(slot + 1, None);
+        }
+        let entry = &mut self.statics[slot];
         Some(
             entry
                 .get_or_insert_with(|| {
@@ -86,6 +135,15 @@ impl ClassStates {
         self.statics.get(slot as usize)?.as_ref()
     }
 
+    /// The storage in `slot`, if this request made it already: a static
+    /// property read site's (see `crate::static_sites`).
+    pub(crate) fn existing_slot(
+        &self,
+        StaticSlot(slot): StaticSlot,
+    ) -> Option<&Rc<StaticProperty>> {
+        self.statics.get(slot as usize)?.as_ref()
+    }
+
     /// The state of an evaluated constant.
     pub(crate) fn constant(&self, ConstantSlot(slot): ConstantSlot) -> &ConstantState {
         self.constants
@@ -94,9 +152,12 @@ impl ClassStates {
     }
 
     pub(crate) fn set_constant(&mut self, ConstantSlot(slot): ConstantSlot, state: ConstantState) {
-        if let Some(entry) = self.constants.get_mut(slot as usize) {
-            *entry = state;
+        let slot = slot as usize;
+        if self.constants.len() <= slot {
+            self.constants
+                .resize_with(slot + 1, || ConstantState::Uninitialized);
         }
+        self.constants[slot] = state;
     }
 }
 
@@ -126,6 +187,10 @@ impl crate::snapshot::ForkCopy for ClassStates {
                 }
             })
             .collect();
-        ClassStates { statics, constants }
+        ClassStates {
+            statics,
+            constants,
+            numbers: self.numbers.clone(),
+        }
     }
 }

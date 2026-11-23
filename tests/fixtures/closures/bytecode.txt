@@ -2,7 +2,7 @@ file closure-listing.php
   const#0 = Null
   symbol#0 = strlen
 
-function {main} (12 registers, dynamic scope)
+function {main} (11 registers, dynamic scope)
   r0 = $a
   r1 = $b
   r2 = $f
@@ -15,33 +15,30 @@ function {main} (12 registers, dynamic scope)
   0004  line 4    Capture { src: r0, kind: Value }
   0005  line 4    Capture { src: r1, kind: Reference }
   0006  line 4    MakeClosure { dst: r7, function: function#0, binding: Bound }
-  0007  line 4    Assign { local: r2, src: r7 }
-  0008  line 4    Clear { reg: r7 }
-  0009  line 5    Capture { src: r0, kind: Quiet }
-  0010  line 5    MakeClosure { dst: r8, function: function#1, binding: Bound }
-  0011  line 5    Assign { local: r3, src: r8 }
-  0012  line 5    Clear { reg: r8 }
-  0013  line 6    InitCall { function: symbol#0 }
-  0014  line 6    MakeCallable { dst: r9 }
-  0015  line 6    Assign { local: r4, src: r9 }
-  0016  line 6    Clear { reg: r9 }
-  0017  line 1    LoadInt { dst: r10, value: 1 }
-  0018  line 1    Return { src: r10 }
+  0007  line 4    AssignTake { local: r2, src: r7 }
+  0008  line 5    Capture { src: r0, kind: Quiet }
+  0009  line 5    MakeClosure { dst: r8, function: function#1, binding: Bound }
+  0010  line 5    AssignTake { local: r3, src: r8 }
+  0011  line 6    InitCall { function: symbol#0 }
+  0012  line 6    MakeCallable { dst: r9 }
+  0013  line 6    AssignTake { local: r4, src: r9 }
+  0014  line 1    LoadInt { dst: r10, value: 1 }
+  0015  line 1    Return { src: r10 }
 
-function {closure:closure-listing.php:4} (6 registers)
+function {closure:closure-listing.php:4} (5 registers)
   r0 = $x
   r1 = $a
   r2 = $b
   0000  line 4    Binary { op: Add, dst: r3, lhs: r0, rhs: r1 }
   0001  line 4    Binary { op: Add, dst: r3, lhs: r3, rhs: r2 }
   0002  line 4    Return { src: r3 }
-  0003  line 4    LoadConst { dst: r4, constant: const#0 }
+  0003  line 4    LoadNull { dst: r4 }
   0004  line 4    Return { src: r4 }
 
-function {closure:closure-listing.php:5} (5 registers)
+function {closure:closure-listing.php:5} (4 registers)
   r0 = $x
   r1 = $a
   0000  line 5    Binary { op: Add, dst: r2, lhs: r0, rhs: r1 }
   0001  line 5    Return { src: r2 }
-  0002  line 5    LoadConst { dst: r3, constant: const#0 }
+  0002  line 5    LoadNull { dst: r3 }
   0003  line 5    Return { src: r3 }

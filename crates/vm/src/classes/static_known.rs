@@ -54,7 +54,6 @@ impl Vm {
                 &method.written,
             )
         })?;
-        self.link_class_symbol(symbol, &class);
         let context = self.current().and_then(|frame| frame.method());
         let receiver = context
             .as_ref()

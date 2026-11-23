@@ -10,7 +10,7 @@ pub fn copy<const FROM: bool>(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture
     Box::pin(async move {
         let call = if FROM { "pg_copy_from" } else { "pg_copy_to" };
         let state = connection::argument(c, args::value(&a, 0), call)?;
-        let lease = state.borrow().lease()?;
+        let lease = connection::lease(&state).await?;
         let source = args::string(&a, 1).map_or_else(String::new, |s| s.to_string_lossy());
         let sep_arg = if FROM { 3 } else { 2 };
         let separator =
@@ -107,7 +107,7 @@ pub fn line<const END: bool>(c: &mut dyn Context, a: Vec<Value>) -> LocalFuture<
             &Value::Null
         };
         let handle = connection::argument(c, conn, call)?;
-        let lease = handle.borrow().lease()?;
+        let lease = connection::lease(&handle).await?;
         let row = args::bytes(&a, usize::from(explicit)).to_vec();
         let status = connection::run(&lease, move |driver| {
             Box::pin(async move {

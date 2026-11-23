@@ -4,7 +4,9 @@ use std::collections::HashSet;
 
 use phera_bytecode::reflection::DeclarationMetadata;
 use phera_bytecode::{ClassDeclaration, CompiledUnit, TraitAdaptation, Visibility};
-use phera_extension_api::reflection::{AttributeTarget, MemberInfo, PropertyHandle, PropertySlot};
+use phera_extension_api::reflection::{
+    AttributeTarget, MemberInfo, MethodHandle, PropertyHandle, PropertySlot,
+};
 
 use crate::classes::class::ConstantInitializer;
 use crate::{Vm, classes::Class, code_table::FunctionIndex};
@@ -107,7 +109,12 @@ impl Vm {
         methods.sort_by_key(|method| self.method_listing_order(class, method));
         methods
             .into_iter()
-            .map(|method| MemberInfo {
+            .enumerate()
+            .map(|(index, method)| MemberInfo {
+                method: u32::try_from(index).ok().map(|index| MethodHandle {
+                    class: class.index.number(),
+                    index,
+                }),
                 name: method.name.clone(),
                 class: method.declaring.clone(),
                 lookup_class: class.name.clone(),
@@ -209,6 +216,7 @@ impl Vm {
                         class: class.index.number(),
                         slot,
                     }),
+                    slot_access: slot_access(slot, property, is_virtual, class),
                     ..MemberInfo::default()
                 };
                 if let Some((_, first, unit, declared)) = property_source(&property.name) {
@@ -324,4 +332,38 @@ impl Vm {
         }
         members
     }
+}
+
+/// Where an object keeps a plain instance property, for the direct methods
+/// of `ReflectionProperty` (see `phera_extension_api::reflection::SlotAccess`):
+/// none for a static, virtual or hooked property. Writes take the slot only
+/// for a property that is not readonly, has no asymmetric visibility, and
+/// whose type names no class.
+fn slot_access(
+    slot: PropertySlot,
+    property: &crate::classes::class::PropertyDefault,
+    is_virtual: bool,
+    class: &Class,
+) -> Option<phera_extension_api::reflection::SlotAccess> {
+    let PropertySlot::Instance(index) = slot else {
+        return None;
+    };
+    if is_virtual || property.hooks.is_some() {
+        return None;
+    }
+    let writes = (!property.is_readonly
+        && property.set_visibility.is_none()
+        && property.ty.as_ref().is_none_or(|ty| ty.classes.is_empty()))
+    .then(|| {
+        property
+            .ty
+            .as_ref()
+            .map_or(phera_bytecode::TypeMask::MIXED, |ty| ty.mask)
+    });
+    Some(phera_extension_api::reflection::SlotAccess {
+        key: property.key.clone(),
+        slot: index,
+        layout: class.layout.clone()?,
+        writes,
+    })
 }

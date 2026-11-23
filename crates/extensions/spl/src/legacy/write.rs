@@ -39,6 +39,7 @@ impl Writer {
                 Part::Value(value) => self.write_value(value, &mut stack)?,
                 Part::Key(key) => match key {
                     ArrayKey::Int(key) => self.bytes(format!("i:{key};").as_bytes()),
+                    ArrayKey::Interned(key) => self.string(key.as_bytes()),
                     ArrayKey::String(key) => self.string(key.as_bytes()),
                 },
                 Part::Close => self.bytes(b"}"),
@@ -72,6 +73,7 @@ impl Writer {
             Value::Bool(value) => self.bytes(if value { b"b:1;" } else { b"b:0;" }),
             Value::Int(value) => self.bytes(format!("i:{value};").as_bytes()),
             Value::Float(value) => self.bytes(format!("d:{};", float_repr(value)).as_bytes()),
+            Value::InternedStr(string) => self.string(string.as_bytes()),
             Value::String(string) => self.string(string.as_bytes()),
             Value::Resource(_) => self.bytes(b"i:0;"),
             Value::Array(array) => {

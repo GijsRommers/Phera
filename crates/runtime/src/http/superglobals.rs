@@ -13,7 +13,7 @@
 //! headers give one cookie string, and two `Content-Type` headers describe a
 //! form only when the form type comes first.
 
-use std::path::Path;
+use std::{path::Path, rc::Rc};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 use tempfile::TempPath;
@@ -65,25 +65,31 @@ pub(crate) fn define_superglobals(
 
     // PHP's default `request_order` is "GP": POST values override GET ones,
     // and cookies are left out.
-    let mut merged = get.clone();
-    for (key, value) in post.iter() {
-        merged.insert(key.clone(), value.clone());
-    }
-
-    vm.set_global(
-        "_SERVER",
-        Value::from(server(
-            request,
-            &headers,
-            script,
-            document_root,
-            environment,
-        )),
-    );
-    vm.set_global("_GET", Value::from(get));
-    vm.set_global("_POST", Value::from(post));
-    vm.set_global("_COOKIE", Value::from(cookie));
-    vm.set_global("_REQUEST", Value::from(merged));
+    let server = Rc::new(server(
+        request,
+        &headers,
+        script,
+        document_root,
+        environment,
+    ));
+    let get = Rc::new(get);
+    let merged = if post.is_empty() {
+        get.clone()
+    } else {
+        let mut merged = (*get).clone();
+        for (key, value) in post.iter() {
+            merged.insert(key.clone(), value.clone());
+        }
+        Rc::new(merged)
+    };
+    let post = Rc::new(post);
+    let cookie = Rc::new(cookie);
+    phera_ext_filter::capture_http_inputs(vm.state_mut(), &get, &post, &cookie, &server);
+    vm.set_global("_SERVER", Value::Array(server));
+    vm.set_global("_GET", Value::Array(get));
+    vm.set_global("_POST", Value::Array(post));
+    vm.set_global("_COOKIE", Value::Array(cookie));
+    vm.set_global("_REQUEST", Value::Array(merged));
     vm.set_global("_FILES", Value::from(files));
     temporary_files
 }

@@ -32,9 +32,10 @@ impl Boundary {
             return Ok(Self::ClosedOpen);
         };
         if let Value::Object(object) = value
-            && let Some(Value::String(case)) = object.get(&ArrayKey::str("name"))
+            && let Some(case) = object.get(&ArrayKey::str("name"))
+            && let Some(case) = case.as_str_bytes()
         {
-            let boundary = match case.as_bytes() {
+            let boundary = match case {
                 b"ClosedOpen" => Self::ClosedOpen,
                 b"ClosedClosed" => Self::ClosedClosed,
                 b"OpenClosed" => Self::OpenClosed,

@@ -181,6 +181,12 @@ impl Vm {
             .current_slot_mut(local)
             .and_then(Option::as_mut);
         let changed = match target {
+            Some(Value::InternedStr(existing)) => {
+                let mut owned = existing.to_php_string();
+                owned.push_bytes(source.as_bytes());
+                *target.expect("matched Some") = Value::String(owned);
+                true
+            }
             Some(Value::String(target)) => {
                 target.push_bytes(source.as_bytes());
                 true
@@ -189,11 +195,18 @@ impl Vm {
                 let mut target = reference
                     .try_borrow_mut()
                     .map_err(|_| internal_error!("borrowed string"))?;
-                if let Value::String(target) = &mut *target {
-                    target.push_bytes(source.as_bytes());
-                    true
-                } else {
-                    false
+                match &mut *target {
+                    Value::InternedStr(existing) => {
+                        let mut owned = existing.to_php_string();
+                        owned.push_bytes(source.as_bytes());
+                        *target = Value::String(owned);
+                        true
+                    }
+                    Value::String(target) => {
+                        target.push_bytes(source.as_bytes());
+                        true
+                    }
+                    _ => false,
                 }
             }
             _ => false,
@@ -268,12 +281,45 @@ impl Vm {
         }
     }
 
+    /// `(array) $object` for an object of a class whose properties are all
+    /// in its slots and its undeclared table: no hook, no native property
+    /// view, no lazy state, nothing to run and nothing to report. The array
+    /// is built from the slots at its final size. `None` for any other
+    /// operand, which takes the general way.
+    #[inline]
+    fn plain_object_array(&self, source: Reg) -> Option<phera_value::PhpArray> {
+        let operand = self.operand(source);
+        let Value::Object(object) = &*operand else {
+            return None;
+        };
+        let class = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()?;
+        // A closure has no properties to show; the general way makes its array.
+        if class.name == "Closure"
+            || class
+                .property_facts()
+                .has(crate::classes::property_facts::PropertyFacts::HOOKS)
+            || (self.classes.has_lazy_objects && object.lazy_instance().is_some())
+        {
+            return None;
+        }
+        Some(object.to_cast_array())
+    }
+
     pub(crate) fn execute_cast(
         &mut self,
         to: phera_bytecode::CastKind,
         destination: Reg,
         source: Reg,
     ) -> Result<(), NativeError> {
+        if to == CastKind::Array
+            && let Some(array) = self.plain_object_array(source)
+        {
+            self.set(destination, Value::from(array));
+            return Ok(());
+        }
         let value = self.get(source);
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let result = match to {
@@ -284,8 +330,12 @@ impl Vm {
             CastKind::Float => {
                 Value::Float(phera_value::to_float(&value, &mut diagnostics.buffer)?)
             }
-            CastKind::String => Value::String(to_php_string(&value, &mut diagnostics.buffer)?),
+            CastKind::String => phera_value::to_string_value(&value, &mut diagnostics.buffer)?,
             CastKind::Array => Value::from(match &value {
+                // A closure has no properties to show: the array holds it.
+                Value::Object(object) if object.class.name() == "Closure" => {
+                    phera_value::PhpArray::from_values([value.clone()], 1)
+                }
                 Value::Object(object) => diagnostics
                     .vm
                     .object_properties(object, PropertyPurpose::ArrayCast)?,
@@ -368,6 +418,11 @@ impl Vm {
         };
         drop(diagnostics);
         let value = value?;
+        if let Some(limit) = crate::typed_increment::IntegerLimit::reached(&old, &value, mode)
+            && let Value::Reference(cell) = self.raw_local(local)
+        {
+            self.check_increment_reference(&cell, limit)?;
+        }
         self.assign_local(local, value.clone())?;
         self.set(
             destination,

@@ -10,7 +10,8 @@
 //! here are frequent in framework code but rarer in tight loops: plain
 //! value operators (`crate::fast_values`), declared property reads and
 //! writes (`fast_properties`), calls by name (`fast_named_calls`), class
-//! names (`fast_class_names`). They
+//! names (`fast_class_names`), `instanceof` (`fast_instance_of`), `foreach` start and end
+//! (`fast_foreach`). They
 //! are reached through this one function, kept out of line, because every
 //! case added to `step` itself changes how the compiler lays out the
 //! whole loop (measured: two to five percent on loops that never run
@@ -48,21 +49,57 @@ impl Machine<'_> {
                 done => done,
             },
             Instruction::Binary { .. }
+            | Instruction::BinaryBranch { .. }
+            | Instruction::BinaryBranchIf { .. }
+            | Instruction::BinaryIntBranch { .. }
+            | Instruction::BinaryIntBranchIf { .. }
             | Instruction::Unary { .. }
+            | Instruction::Cast {
+                to: phera_bytecode::CastKind::String,
+                ..
+            }
             | Instruction::JumpIfNull { .. }
             | Instruction::JumpIfNotNull { .. }
             | Instruction::NewArray { .. }
+            | Instruction::ArraySet { .. }
+            | Instruction::ArrayPush { .. }
+            | Instruction::ArrayKeyExists { .. }
             | Instruction::FetchIndex { .. } => self.value_step::<GUARDED>(&instruction, position),
+            Instruction::InLiteralArray {
+                dst,
+                needle,
+                haystack,
+                strict,
+            } => self.in_literal_array::<GUARDED>(position, dst, (needle, haystack, strict)),
+            Instruction::CallNativeDirect {
+                function,
+                args,
+                count,
+                dst,
+                ..
+            } => self.call_native_direct::<GUARDED>(position, function, (args, count), dst),
             Instruction::Fetch {
                 dst,
                 path,
                 mode: FetchMode::Read,
             } => match self.fetch_property::<GUARDED>(position, dst, path) {
-                Step::Slow => {
-                    self.fetch_property_element::<GUARDED>(position, dst, (path, FetchMode::Read))
-                }
+                Step::Slow => match self.fetch_local_element::<GUARDED>(
+                    position,
+                    dst,
+                    (path, FetchMode::Read),
+                ) {
+                    Step::Slow => {
+                        self.fetch_static::<GUARDED>(position, dst, (path, FetchMode::Read))
+                    }
+                    done => done,
+                },
                 done => done,
             },
+            Instruction::Fetch {
+                dst,
+                path,
+                mode: FetchMode::Destructure,
+            } => self.fetch_local_element::<GUARDED>(position, dst, (path, FetchMode::Destructure)),
             Instruction::Fetch {
                 dst,
                 path,
@@ -71,29 +108,74 @@ impl Machine<'_> {
                 Some(found) => self.store_quiet::<GUARDED>(position, dst, found),
                 None => match self.fetch_property_quietly::<GUARDED>(position, dst, path) {
                     Step::Slow => {
-                        self.fetch_property_element::<GUARDED>(position, dst, (path, mode))
+                        match self.fetch_local_element::<GUARDED>(position, dst, (path, mode)) {
+                            Step::Slow => self.fetch_static::<GUARDED>(position, dst, (path, mode)),
+                            done => done,
+                        }
                     }
                     done => done,
                 },
             },
-            // An element of an object with ArrayAccess, then a property.
+            // Declared property first (disjoint from `[Index]`/`[Append]` dimensions),
+            // then ArrayAccess dimensions, then plain array element writes.
             Instruction::AssignPath { path, src } => {
-                let written = if self.classes.has_dimensions {
-                    self.write_dimension_path(position, path, src)
-                } else {
-                    Step::Slow
-                };
-                match written {
-                    Step::Slow => self.assign_property::<GUARDED>(position, path, src),
+                match self.assign_property::<GUARDED>(position, path, (src, None)) {
+                    Step::Slow => {
+                        let written = if self.classes.has_dimensions {
+                            self.write_dimension_path(position, path, src)
+                        } else {
+                            Step::Slow
+                        };
+                        match written {
+                            Step::Slow => {
+                                self.assign_element::<GUARDED>(position, path, (src, None))
+                            }
+                            done => done,
+                        }
+                    }
                     done => done,
                 }
             }
+            // Only arrays are written here, so an `ArrayAccess` object on
+            // the path is left to the VM as well.
+            Instruction::AssignPathFromLocal { path, src, dst } => {
+                match self.assign_property::<GUARDED>(position, path, (src, Some(dst))) {
+                    Step::Slow => self.assign_element::<GUARDED>(position, path, (src, Some(dst))),
+                    done => done,
+                }
+            }
+            Instruction::AssignOpPath { op, dst, path, src } => {
+                self.assign_operation::<GUARDED>(position, (op, dst), path, src)
+            }
             Instruction::IncDecPath { mode, dst, path } => {
-                self.increment_property::<GUARDED>(position, (mode, dst), path)
+                match self.increment_property::<GUARDED>(position, (mode, dst), path) {
+                    Step::Slow => self.increment_element::<GUARDED>(position, (mode, dst), path),
+                    done => done,
+                }
             }
             Instruction::InitCall { function } => self.prepare_named_call(position, function),
+            Instruction::FetchNamedClassConstant { dst, class, name } => {
+                self.fetch_named_class_constant::<GUARDED>(position, dst, (class, name))
+            }
+            Instruction::FetchClassConstant { dst, class, name } => {
+                self.fetch_class_constant::<GUARDED>(position, dst, (class, name))
+            }
             Instruction::FetchClassName { dst, class } => {
                 self.fetch_class_name::<GUARDED>(position, dst, class)
+            }
+            Instruction::SendPath { path } => self.send_path_value(position, path),
+            Instruction::IterStart { iter, src, .. } => {
+                self.start_array_iteration::<GUARDED>(position, iter, src)
+            }
+            Instruction::IterEnd { iter } => self.end_array_iteration::<GUARDED>(position, iter),
+            Instruction::InstanceOf { dst, src, class } => {
+                self.instance_of::<GUARDED>(position, dst, src, class)
+            }
+            Instruction::InstanceOfBranch { src, class, target } => {
+                self.instance_of_branch::<GUARDED>(position, src, class, target, false)
+            }
+            Instruction::InstanceOfBranchIf { src, class, target } => {
+                self.instance_of_branch::<GUARDED>(position, src, class, target, true)
             }
             _ => Step::Slow,
         }
@@ -125,15 +207,15 @@ impl Machine<'_> {
     }
 
     /// Stores what a quiet read found.
-    fn store_quiet<const GUARDED: bool>(
+    pub(super) fn store_quiet<const GUARDED: bool>(
         &mut self,
         position: Position,
         destination: Reg,
         value: Value,
     ) -> Step {
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, value) {
-            ScalarStep::Complete => Step::Done(position.ip),
+        match store::<GUARDED, _>(slots, destination, value) {
+            ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
     }
@@ -154,7 +236,7 @@ impl Machine<'_> {
                 self.publish(ip);
                 Step::Yield
             }
-            ScalarStep::Complete => Step::Done(ip),
+            ScalarStep::Complete | ScalarStep::Released => Step::Done(ip),
         }
     }
 }

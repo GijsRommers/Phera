@@ -40,8 +40,9 @@ pub(super) fn accept(
         }
         let subject = stringify(context, if use_key { &key } else { &value }).await?;
         let matched = match regex.mode {
-            Mode::Match => matches!(&subject, Value::String(subject)
-                if phera_ext_pcre::simple_match(regex.pattern.as_bytes(), subject.as_bytes())),
+            Mode::Match => subject.as_str_bytes().is_some_and(|subject| {
+                phera_ext_pcre::simple_match(regex.pattern.as_bytes(), subject)
+            }),
             Mode::GetMatch | Mode::AllMatches => {
                 let captures = Rc::new(RefCell::new(Value::Null));
                 let name = if matches!(regex.mode, Mode::GetMatch) {

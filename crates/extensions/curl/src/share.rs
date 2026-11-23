@@ -18,11 +18,12 @@ use crate::{classes, constants::ids::*, cookies::CookieJar, easy};
 
 pub(crate) type ShareHandle = Rc<RefCell<Share>>;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct DnsCache {
     entries: VecDeque<DnsEntry>,
 }
 
+#[derive(Clone)]
 struct DnsEntry {
     host: String,
     port: u16,
@@ -65,6 +66,37 @@ pub(crate) struct Share {
     pub(crate) attachments: usize,
     pub(crate) pool_scope: u64,
     error: i64,
+}
+
+/// A share handle in a fork of a snapshot: the fork's own copy of its
+/// cookies and DNS cache, made once and attached to the fork's copies of
+/// the handles that used it. A persistent share is meant to outlive the
+/// request, so its DNS cache stays the worker's.
+pub(crate) fn forked(
+    share: &ShareHandle,
+    fork: &mut phera_extension_api::value::Fork<'_>,
+) -> ShareHandle {
+    fork.shared_native(share, |share, _| {
+        let share = share.borrow();
+        let persistent = share.pool_scope & 1 << 63 != 0;
+        RefCell::new(Share {
+            cookies: share
+                .cookies
+                .as_ref()
+                .map(|jar| Rc::new(RefCell::new(jar.borrow().clone()))),
+            dns: share.dns.as_ref().map(|dns| {
+                if persistent {
+                    dns.clone()
+                } else {
+                    let cache = dns.lock().map(|cache| cache.clone()).unwrap_or_default();
+                    Arc::new(Mutex::new(cache))
+                }
+            }),
+            attachments: 0,
+            pool_scope: share.pool_scope,
+            error: share.error,
+        })
+    })
 }
 
 const HANDLE: Param = Param::new("share_handle", ParamType::Class("CurlShareHandle"));

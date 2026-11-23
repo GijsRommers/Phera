@@ -67,10 +67,37 @@ impl FunctionFacts {
         index < self.parameters as usize && index < 64 && self.by_reference & (1 << index) != 0
     }
 
+    /// Whether every declared parameter takes a copy of its argument (none
+    /// is by reference or variadic), so that no argument can be one a
+    /// reference was expected for.
+    pub(crate) fn takes_values_only(&self) -> bool {
+        self.special == 0 && self.parameters <= 64
+    }
+
     /// Whether parameter `index` is declared and takes a copy of its
     /// argument: it is neither by reference nor variadic.
     pub(crate) fn takes_value(&self, index: usize) -> bool {
         index < self.parameters as usize && index < 64 && self.special & (1 << index) == 0
+    }
+
+    /// The facts at a number of a function the request has not loaded: no
+    /// unit, no code. They are never run (see `crate::code_table::CodeTable`).
+    pub(crate) fn placeholder() -> Self {
+        Self::bind(
+            (UnitIndex(u32::MAX), FunctionIndex(u32::MAX), None),
+            FunctionSignature {
+                registers: 0,
+                parameters: 0,
+                required: 0,
+                typed: 0,
+                special: 0,
+                by_reference: 0,
+                parameter_masks: std::sync::Arc::from([]),
+                return_mask: None,
+                shape: phera_bytecode::FunctionShape::Plain,
+            },
+            Default::default(),
+        )
     }
 
     pub(crate) fn bind(

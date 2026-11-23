@@ -1,6 +1,6 @@
 //! Allocation prepares constructors before sends and shallow clones preserve nested handles.
 
-use phera_bytecode::{ClassKind, Reg, SymbolId};
+use phera_bytecode::{ClassKind, Reg, SymbolId, Target};
 use phera_extension_api::NativeError;
 use phera_value::Value;
 
@@ -41,24 +41,6 @@ impl Vm {
         }
     }
 
-    /// Remember which class a named class symbol of the running file means.
-    /// Relative names (`self`, `parent`, `static`) depend on the frame and
-    /// are never linked. A declared class cannot go away, so the link holds
-    /// for the rest of the request.
-    pub(crate) fn link_class_symbol(&self, symbol: SymbolId, class: &Rc<super::Class>) {
-        let Some(frame) = self.current() else {
-            return;
-        };
-        let relative = frame
-            .unit()
-            .symbols
-            .get(symbol.index())
-            .is_none_or(|symbol| matches!(symbol.written.as_str(), "self" | "parent" | "static"));
-        if !relative && let Some(slot) = frame.cache().classes.get(symbol.index()) {
-            *slot.borrow_mut() = Some(class.clone());
-        }
-    }
-
     /// Literal class cache is keyed by unit/symbol, filled after successful lookup.
     /// Relative keywords bypass it. Linked classes cannot be replaced in a request,
     /// and the unit/class owners keep identities alive until request teardown.
@@ -75,25 +57,13 @@ impl Vm {
             let name = self.class_symbol(symbol)?;
             return self.new_named_object(&name);
         }
-        let cached = frame
-            .cache()
-            .classes
-            .get(symbol.index())
-            .and_then(|slot| slot.borrow().clone());
-        let class = if let Some(class) = cached {
-            class
-        } else {
-            let class = self
+        let key = self.code.unit_symbol_key(frame.frame.function, symbol);
+        let class = match self.classes.by_key(key) {
+            Some(class) => class.clone(),
+            None => self
                 .classes
                 .get(written)
-                .ok_or_else(|| Self::class_miss(written, "Class"))?;
-            if let Some(slot) = self
-                .current()
-                .and_then(|frame| frame.cache().classes.get(symbol.index()))
-            {
-                *slot.borrow_mut() = Some(class.clone());
-            }
-            class
+                .ok_or_else(|| Self::class_miss(written, "Class"))?,
         };
         self.new_linked_object(class)
     }
@@ -146,7 +116,7 @@ impl Vm {
         let properties = if let Some(template) = &class.property_template {
             template.clone()
         } else {
-            let mut properties = phera_value::PhpArray::new();
+            let mut properties = phera_value::Properties::for_class(&*class);
             for property in &class.defaults {
                 if property.initialized {
                     let value = if let Some(initializer) = &property.initializer {
@@ -223,6 +193,60 @@ impl Vm {
         Ok(())
     }
 
+    /// The four `instanceof` branches, out of line: one arm of `execute`
+    /// leads here, so that its other arms keep their shape.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn instance_of_branches(
+        &mut self,
+        instruction: phera_bytecode::Instruction,
+        work: &mut usize,
+    ) -> Result<(), NativeError> {
+        use phera_bytecode::Instruction as I;
+        match instruction {
+            I::InstanceOfBranch { src, class, target } => {
+                self.instance_of_branch(src, class, target, false, work)
+            }
+            I::InstanceOfBranchIf { src, class, target } => {
+                self.instance_of_branch(src, class, target, true, work)
+            }
+            I::DynamicInstanceOfBranch { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, false, work)
+            }
+            I::DynamicInstanceOfBranchIf { src, class, target } => {
+                self.dynamic_instance_of_branch(src, class, target, true, work)
+            }
+            _ => Err(internal_error!("instanceof branch")),
+        }
+    }
+
+    /// `instanceof` whose answer only decides a jump: compute it exactly as
+    /// `instance_of` does, then jump when it equals `when`.
+    fn instance_of_branch(
+        &mut self,
+        source: Reg,
+        symbol: SymbolId,
+        target: Target,
+        when: bool,
+        work: &mut usize,
+    ) -> Result<(), NativeError> {
+        let name = self.class_symbol(symbol)?;
+        let matches = match self.read_local(source) {
+            Value::Object(object) => self
+                .classes
+                .get(object.class.name())
+                .is_some_and(|class| self.class_matches(&class, &name)),
+            _ => false,
+        };
+        if matches == when {
+            if self.backward(target) {
+                *work += 1;
+            }
+            self.jump(target)?;
+        }
+        Ok(())
+    }
+
     /// $this is not a local variable and is unavailable in a static/global frame.
     pub(crate) fn fetch_this(&mut self, destination: Reg) -> Result<(), NativeError> {
         let receiver = self
@@ -235,43 +259,38 @@ impl Vm {
 }
 
 impl Vm {
-    /// Mirrors class_symbol's binding rules while sharing immutable PHP name strings.
-    pub(crate) fn class_symbol_value(&self, symbol: SymbolId) -> Result<Value, NativeError> {
-        let frame = self
-            .current()
-            .ok_or_else(|| internal_error!("class name frame"))?;
-        let name = &frame
-            .unit()
-            .symbols
-            .get(symbol.index())
-            .ok_or_else(|| internal_error!("class name symbol"))?
-            .written;
-        let class = match name.as_str() {
-            phera_bytecode::TRAIT_CLASS_NAME => {
-                let function = frame.frame.function;
-                self.code
-                    .facts(function)
-                    .class
-                    .map(|class| self.classes.class(class))
-                    .or_else(|| frame.scope())
-                    .cloned()
-            }
+    /// The class a relative symbol names in the running frame: `self`,
+    /// `static`, `parent`, or a trait method's own class. `Some(None)` when
+    /// the frame has no such class; `None` for a symbol that names a class
+    /// by its name.
+    pub(crate) fn relative_class(&self, symbol: SymbolId) -> Option<Option<Rc<super::Class>>> {
+        let frame = self.current()?;
+        let name = &frame.unit().symbols.get(symbol.index())?.written;
+        Some(match name.as_str() {
+            phera_bytecode::TRAIT_CLASS_NAME => self
+                .code
+                .facts(frame.frame.function)
+                .class
+                .map(|class| self.classes.class(class))
+                .or_else(|| frame.scope())
+                .cloned(),
             "self" => frame.scope().cloned(),
             "static" => frame.called(),
             "parent" => frame.scope().and_then(|scope| scope.parent.clone()),
-            _ => {
-                return frame
-                    .cache()
-                    .class_names
-                    .get(symbol.index())
-                    .cloned()
-                    .ok_or_else(|| internal_error!("class name cache"));
-            }
-        };
-        if let Some(class) = class {
-            return Ok(class.name_value.clone());
+            _ => return None,
+        })
+    }
+
+    /// Mirrors class_symbol's binding rules while sharing immutable PHP name strings.
+    pub(crate) fn class_symbol_value(&self, symbol: SymbolId) -> Result<Value, NativeError> {
+        match self.relative_class(symbol) {
+            Some(Some(class)) => Ok(class.name_value.clone()),
+            // Preserve exact diagnostics for missing relative scopes in the resolver.
+            Some(None) => self.class_symbol(symbol).map(Value::from),
+            None => self
+                .current()
+                .and_then(|frame| frame.cache().class_names.get(symbol.index()).cloned())
+                .ok_or_else(|| internal_error!("class name cache")),
         }
-        // Preserve exact diagnostics for missing relative scopes in the resolver.
-        self.class_symbol(symbol).map(Value::from)
     }
 }

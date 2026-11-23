@@ -7,6 +7,7 @@ use phera_extension_api::{Registry, RequestState};
 use phera_value::{PhpArray, Value};
 
 pub use native_tables::NativeTables;
+pub use snapshot::WarmupSink;
 pub use snapshot::{BootOutcome, Snapshot, SnapshotMode};
 
 use crate::calls::frame::{Frame, FrameView};
@@ -27,6 +28,7 @@ mod arrays;
 mod attribute_diagnostics;
 mod autoload;
 mod builtin_calls;
+mod builtin_guards;
 mod bundled_classes;
 mod callable_classes;
 mod callable_introspection;
@@ -38,9 +40,13 @@ mod class_constants;
 mod class_function;
 mod class_intrinsics;
 mod class_listings;
+mod class_member_queries;
+mod class_queries;
+mod class_relation_queries;
 mod class_types;
 mod classes;
 mod closure_binding;
+mod closure_cycles;
 mod closure_drop;
 mod closure_equality;
 mod closure_initializers;
@@ -70,6 +76,7 @@ mod dimension_instructions;
 mod dimensions;
 mod dispatch;
 mod dynamic_variables;
+mod element_writes;
 mod error_handler_signatures;
 mod error_handlers;
 mod error_traces;
@@ -154,6 +161,7 @@ mod properties;
 mod property_hook_continuation;
 mod property_hook_sites;
 mod property_mutation;
+mod property_plans;
 mod property_set_visibility;
 mod property_sites;
 mod property_storage;
@@ -169,6 +177,8 @@ mod sensitive_parameters;
 mod serialization;
 mod snapshot;
 mod spl_autoload;
+mod static_places;
+mod static_sites;
 mod static_variables;
 mod string_comparison;
 mod string_offsets;
@@ -177,12 +187,14 @@ mod traversable_foreach;
 mod traversable_unpack;
 mod traversal;
 mod trigger_errors;
+mod typed_increment;
 mod typed_references;
 mod types;
 mod unit_caches;
 mod unpacking;
 mod unsupported_items;
 mod web_output;
+mod worker_code;
 
 pub use include_lookup::{
     CodeLoadError, CodeLoader, IncludeCachePolicy, IncludeLoad, IncludeLookup, RelativeInclude,
@@ -262,6 +274,9 @@ pub struct Vm {
     /// Whether output or a diagnostic needs to invoke a PHP callback.
     pending_callbacks: bool,
     failed_native: Option<error_traces::NativeTrace>,
+    /// The arguments of a native call that missed a class, kept by the miss
+    /// for its second call (see `calls::native_retries`).
+    missed_native: Option<Vec<Value>>,
     /// What extensions remember during this request (response headers, ...).
     state: RequestState,
     reflection_cache: Option<Box<reflection::ReflectionCache>>,
@@ -291,7 +306,7 @@ impl Vm {
 
     /// Start a fresh request with the worker's already linked built-ins.
     pub fn with_native_tables(native: &NativeTables) -> Self {
-        let classes = classes::ClassTable::new(native.classes.clone());
+        let classes = classes::ClassTable::new(native.classes.clone(), native.linked.clone());
         let object_ids = classes.ids_handle();
         Self {
             enum_cases: classes::enums::EnumCases::default(),
@@ -322,8 +337,8 @@ impl Vm {
             native_view_depth: None,
             prelinked_classes: std::collections::HashSet::new(),
             function_table: function_table::FunctionTable::new(),
-            code: code_table::CodeTable::default(),
-            class_states: Default::default(),
+            code: code_table::CodeTable::for_worker(&native.code),
+            class_states: classes::class_state::ClassStates::for_worker(&native.slots),
             globals: globals::Globals::new(),
             extension_values: Default::default(),
             static_variables: static_variables::StaticVariables::new(),
@@ -349,6 +364,7 @@ impl Vm {
             error_handlers: error_handlers::ErrorHandlers::default(),
             pending_callbacks: false,
             failed_native: None,
+            missed_native: None,
             state: RequestState::default(),
             reflection_cache: None,
         }

@@ -14,6 +14,8 @@ use crate::constants::*;
 pub enum Call {
     Var,
     Array,
+    Input,
+    InputArray,
 }
 
 impl Call {
@@ -21,13 +23,16 @@ impl Call {
         match self {
             Self::Var => "filter_var",
             Self::Array => "filter_var_array",
+            Self::Input => "filter_input",
+            Self::InputArray => "filter_input_array",
         }
     }
 
     pub fn number(self) -> usize {
         match self {
             Self::Var => 3,
-            Self::Array => 2,
+            Self::Input => 4,
+            Self::Array | Self::InputArray => 2,
         }
     }
 
@@ -172,10 +177,7 @@ impl Options {
     }
 
     pub fn string(&self, name: &str) -> Option<phera_extension_api::PhpString> {
-        match &*self.get(name)?.deref() {
-            Value::String(string) => Some(string.clone()),
-            _ => None,
-        }
+        self.get(name)?.deref().to_php_string()
     }
 
     pub fn int(&self, context: &mut dyn Context, name: &str) -> Result<Option<i64>, NativeError> {

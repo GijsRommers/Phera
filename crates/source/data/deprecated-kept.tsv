@@ -5,6 +5,7 @@ function	imagedestroy
 function	ldap_connect
 function	libxml_disable_entity_loader
 function	openssl_pkey_free
+function	socket_set_timeout
 function	utf8_encode
 function	xml_parser_free
 constant	E_STRICT

@@ -281,6 +281,7 @@ async fn open_file(
                 .map(|file| {
                     let mut stream = Stream::file(file, Wrapper::File, &mode, &uri);
                     stream.blocked = parsed.blocked();
+                    stream.path = Some(filename.clone());
                     stream
                 })
                 .map_err(|error| {

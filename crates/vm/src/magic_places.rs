@@ -1,7 +1,7 @@
 //! `$object->items['key']` walks properties and offsets in source order.
 //! The last step of isset/empty uses a different hook protocol from ??.
 
-use phera_bytecode::{FetchMode, PathBase, Reg, Step};
+use phera_bytecode::{FetchMode, Reg, Step};
 use phera_extension_api::NativeError;
 use phera_value::{ArrayKey, Object, Value};
 use std::rc::Rc;
@@ -79,9 +79,6 @@ impl Vm {
     ) -> Result<PathRead, NativeError> {
         let missing = fetch_missing(mode);
         let register = self.base_register(&place, Creation::Existing, missing)?;
-        if register.is_some() && matches!(place.base()?, PathBase::StaticProperty { .. }) {
-            self.check_static_read(&place, missing)?;
-        }
         let value = register.map_or(Value::Null, |register| self.read_root(register, missing));
         Ok(PathRead {
             place,
@@ -141,7 +138,10 @@ impl Vm {
             } else if let Step::Index(index) = step {
                 if update {
                     PathKey::Index(Some(self.write_index_key(&value, index)?))
-                } else if matches!(value, Value::Array(_) | Value::String(_)) {
+                } else if matches!(
+                    value,
+                    Value::Array(_) | Value::InternedStr(_) | Value::String(_)
+                ) {
                     PathKey::Index(Some(self.read_index_key(index, missing)?))
                 } else {
                     // No offset is converted if the container cannot be indexed.

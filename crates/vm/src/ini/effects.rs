@@ -66,7 +66,19 @@ impl Vm {
                 }
                 self.ini_overrides.serialization_precision = Some(precision as i32);
             }
-            "unserialize_max_depth" | "zend.assertions" | "memory_limit" | "fiber.stack_size" => {
+            "zend.assertions" => {
+                let assertions = self.ini_number(entry.name, bytes);
+                let previous = self.ini_overrides.assertions.unwrap_or(1);
+                if function != "startup" && (assertions < 0) != (previous < 0) {
+                    self.warn(
+                        "zend.assertions may be completely enabled or disabled only in php.ini"
+                            .into(),
+                    );
+                    return Ok(false);
+                }
+                self.ini_overrides.assertions = Some(assertions);
+            }
+            "unserialize_max_depth" | "memory_limit" | "fiber.stack_size" => {
                 if !self.ini_quantity(entry.name, bytes) {
                     return Ok(false);
                 }
@@ -92,17 +104,16 @@ impl Vm {
         }
     }
 
-    fn ini_quantity(&mut self, name: &str, bytes: &[u8]) -> bool {
+    fn ini_number(&mut self, name: &str, bytes: &[u8]) -> i64 {
         let (number, diagnostic) = parse_quantity(bytes);
         if let Some(message) = diagnostic {
             self.warn(format!("Invalid \"{name}\" setting. {message}"));
         }
-        if name == "zend.assertions" && number < 0 {
-            self.warn(
-                "zend.assertions may be completely enabled or disabled only in php.ini".into(),
-            );
-            return false;
-        }
+        number
+    }
+
+    fn ini_quantity(&mut self, name: &str, bytes: &[u8]) -> bool {
+        let number = self.ini_number(name, bytes);
         if name == "fiber.stack_size" && number < 0 {
             self.warn("fiber.stack_size must be a positive number".into());
             return false;

@@ -43,9 +43,15 @@ impl Vm {
     /// A copy of this VM that shares nothing a script can change with it.
     pub(crate) fn fork_vm(&self) -> Result<Vm, SnapshotRefusal> {
         self.check_forkable()?;
+        // Generators the boot made are released into the fork's own queue.
+        let generator_releases = self.generator_releases.as_ref().map(|_| Rc::default());
         let natives = VmNatives {
             registry: &self.registry,
             rebind: Default::default(),
+            releases: generator_releases
+                .as_ref()
+                .map(Rc::downgrade)
+                .unwrap_or_default(),
         };
         let mut fork = Fork::new(self.classes.ids(), &natives);
         let globals = self.globals.fork_copy(&mut fork);
@@ -95,6 +101,10 @@ impl Vm {
             }
         }
         let ids = fork.ids().clone();
+        #[cfg(debug_assertions)]
+        if std::env::var_os("PHERA_FORK_FOOTPRINT").is_some() {
+            super::footprint::report(&fork, &code, &registers, &class_states);
+        }
         let copies = fork.finish().map_err(|refusal| SnapshotRefusal {
             class: refusal.class,
             reason: refusal.reason,
@@ -133,7 +143,7 @@ impl Vm {
             finally_stack: Vec::new(),
             generator_suspension: None,
             generator_traces: Vec::new(),
-            generator_releases: None,
+            generator_releases,
             draining_generators: false,
             closing_generator: None,
             executed_instructions: 0,
@@ -148,6 +158,7 @@ impl Vm {
             error_handlers,
             pending_callbacks: false,
             failed_native: None,
+            missed_native: None,
             state,
             reflection_cache: None,
             property_references,
@@ -166,27 +177,30 @@ impl Vm {
     /// Refuses a copy in the middle of an operation that a fork could not
     /// finish: the operation's state lives in the Rust stack, not the VM.
     fn check_forkable(&self) -> Result<(), SnapshotRefusal> {
-        let busy = if self.call_stack.callback_depth() > 0 {
-            Some("inside a callback of a built-in function")
-        } else if self.active_fiber.is_some() {
-            Some("inside a Fiber")
-        } else if self.generator_suspension.is_some() || self.closing_generator.is_some() {
-            Some("inside a generator")
-        } else if !self.finally_stack.is_empty() {
-            Some("while a finally block runs")
-        } else if !self.property_guards.is_empty() || self.returned_hook.is_some() {
-            Some("inside a magic method or property hook")
-        } else if self.initializer_scope.is_some() {
-            Some("while a constant or default value is evaluated")
-        } else if self
-            .suspended_fibers
-            .values()
-            .any(|fiber| fiber.strong_count() > 0)
-        {
-            Some("while a Fiber is suspended")
-        } else {
-            None
-        };
+        // A built-in that runs its callbacks on the frame stack keeps its
+        // state in `CallStack::native_loops`, which a fork does not copy.
+        let busy =
+            if self.call_stack.callback_depth() > 0 || !self.call_stack.native_loops.is_empty() {
+                Some("inside a callback of a built-in function")
+            } else if self.active_fiber.is_some() {
+                Some("inside a Fiber")
+            } else if self.generator_suspension.is_some() || self.closing_generator.is_some() {
+                Some("inside a generator")
+            } else if !self.finally_stack.is_empty() {
+                Some("while a finally block runs")
+            } else if !self.property_guards.is_empty() || self.returned_hook.is_some() {
+                Some("inside a magic method or property hook")
+            } else if self.initializer_scope.is_some() {
+                Some("while a constant or default value is evaluated")
+            } else if self
+                .suspended_fibers
+                .values()
+                .any(|fiber| fiber.strong_count() > 0)
+            {
+                Some("while a Fiber is suspended")
+            } else {
+                None
+            };
         match busy {
             Some(reason) => Err(SnapshotRefusal::state(
                 "Phera\\snapshot()",

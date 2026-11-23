@@ -1,8 +1,9 @@
 //! Grouped, unique, key-pair and ordinary fetchAll result construction.
 
+use crate::column_keys::Layout;
 use crate::constants::FETCH_GROUP;
-use crate::fetch::{FetchMode, convert, stringify};
-use crate::statement::state;
+use crate::fetch::{FetchMode, ValueOptions, convert, stringify};
+use crate::statement::{Statement, state};
 use phera_extension_api::value::to_php_string;
 use phera_extension_api::{ArrayKey, Context, NativeError, NativeResult, Object, PhpArray, Value};
 use std::rc::Rc;
@@ -35,42 +36,56 @@ pub fn all(
     };
     let mode = configuration.mode;
     let column = configuration.column;
-    let attributes = statement.connection.attributes.borrow().clone();
-    let mut result = PhpArray::new();
-    for row in &statement.rows.values[statement.cursor..] {
+    let Statement {
+        connection,
+        rows,
+        keys,
+        cursor,
+        fetch_flags,
+        ..
+    } = &mut *statement;
+    let attributes = ValueOptions::from(&*connection.attributes.borrow());
+    let keys = if mode.uses_names() {
+        keys.get(&rows.columns)
+    } else {
+        Layout::default()
+    };
+    let mut result = PhpArray::with_capacity(rows.values.len().saturating_sub(*cursor));
+    while let Some(row) = rows.values.get_mut(*cursor) {
+        *cursor += 1;
         match grouping {
             Grouping::None if matches!(mode, FetchMode::KeyPair) => {
-                if row.len() != 2 {
+                let [first, second] = row else {
                     return Err(crate::errors::exception(
                         "SQLSTATE[HY000]: General error: PDO::FETCH_KEY_PAIR fetch mode \
                          requires the result set to contain exactly 2 columns.",
                         None,
                         0,
                     ));
-                }
-                let key = stringify(context, row[0].clone(), &attributes)?;
+                };
+                let key = stringify(context, std::mem::take(first), attributes)?;
                 result.insert(
                     group_key(context, &key)?,
-                    stringify(context, row[1].clone(), &attributes)?,
+                    stringify(context, std::mem::take(second), attributes)?,
                 );
             }
             Grouping::None => {
                 result.push(convert(
                     context,
-                    row,
-                    &statement.rows.columns,
+                    row.iter_mut().map(std::mem::take),
+                    keys,
                     mode,
                     column,
-                    &attributes,
+                    attributes,
                 )?)?;
             }
             Grouping::Group | Grouping::Unique => {
-                let Some(first) = row.first() else {
+                let Some((first, rest)) = row.split_first_mut() else {
                     continue;
                 };
                 let (key, value) = if matches!(mode, FetchMode::Column) {
                     let explicit = arguments.len() > 1
-                        || (statement.fetch_flags != 0
+                        || (*fetch_flags != 0
                             && (arguments.is_empty()
                                 || matches!(arguments.first(), Some(Value::Int(0)))));
                     let key_column = if matches!(grouping, Grouping::Group) && explicit {
@@ -93,24 +108,24 @@ pub fn all(
                         .ok_or_else(|| NativeError::value_error("Invalid column index"))?;
                     let value = convert(
                         context,
-                        row,
-                        &statement.rows.columns,
+                        row.iter_mut().map(std::mem::take),
+                        keys,
                         mode,
                         value_column,
-                        &attributes,
+                        attributes,
                     )?;
-                    let key = stringify(context, key, &attributes)?;
+                    let key = stringify(context, key, attributes)?;
                     (group_key(context, &key)?, value)
                 } else {
-                    let first = stringify(context, first.clone(), &attributes)?;
+                    let first = stringify(context, std::mem::take(first), attributes)?;
                     let key = group_key(context, &first)?;
                     let value = convert(
                         context,
-                        &row[1..],
-                        &statement.rows.columns[1..],
+                        rest.iter_mut().map(std::mem::take),
+                        keys.without_first(),
                         mode,
                         column,
-                        &attributes,
+                        attributes,
                     )?;
                     (key, value)
                 };
@@ -127,7 +142,6 @@ pub fn all(
             }
         }
     }
-    statement.cursor = statement.rows.values.len();
     Ok(Value::from(result))
 }
 

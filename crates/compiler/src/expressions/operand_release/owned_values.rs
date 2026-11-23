@@ -135,6 +135,30 @@ fn jump_target(instruction: &Instruction) -> Option<usize> {
         | Instruction::BranchNull {
             target: Target(target),
             ..
+        }
+        | Instruction::BranchNotNull {
+            target: Target(target),
+            ..
+        }
+        | Instruction::BranchInstanceOf {
+            target: Target(target),
+            ..
+        }
+        | Instruction::BranchDynamicInstanceOf {
+            target: Target(target),
+            ..
+        }
+        | Instruction::GuardBuiltin {
+            call: Target(target),
+            ..
+        }
+        | Instruction::BranchCompare {
+            target: Target(target),
+            ..
+        }
+        | Instruction::BranchCompareInt {
+            target: Target(target),
+            ..
         } => Some(*target),
         _ => None,
     }
@@ -220,8 +244,14 @@ fn reads_only(instruction: &Instruction, register: Reg) -> bool {
             source,
             ..
         } => *destination != register && *source == register,
-        Instruction::Branch { value, .. } | Instruction::BranchNull { value, .. } => {
-            *value == register
+        Instruction::Branch { value, .. }
+        | Instruction::BranchNull { value, .. }
+        | Instruction::BranchNotNull { value, .. } => *value == register,
+        Instruction::BranchCompare { left, right, .. } => *left == register || *right == register,
+        Instruction::BranchCompareInt { left, .. } => *left == register,
+        Instruction::BranchInstanceOf { source, .. } => *source == register,
+        Instruction::BranchDynamicInstanceOf { source, class, .. } => {
+            *source == register || *class == register
         }
         Instruction::Echo(value) => *value == register,
         Instruction::Move {

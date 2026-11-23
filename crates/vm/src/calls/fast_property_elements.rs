@@ -1,104 +1,55 @@
-//! Reads of an array element held in a property, in the interpreter loop.
-//!
-//! ```php
-//! class Container {
-//!     private array $instances = [];
-//!     public function has(string $id): bool {
-//!         return isset($this->instances[$id]);     // Fetch $this->instances[$id], quietly
-//!     }
-//!     public function get(string $id) {
-//!         return $this->instances[$id];            // Fetch, reading
-//!     }
-//! }
-//! ```
-//!
-//! The VM records the property's site for such a read (`Vm::prepare_element_site`)
-//! as it does for a read of the property alone. When that site matches the
-//! object's class and the caller's scope, and the property has no hooks,
-//! the loop reads the property from it and then walks the array keys (at
-//! most three, integer or string). A read gives the element when every key
-//! is present; a quiet read (`??`, `isset`, `empty`) gives null when one is
-//! missing or a level is null, without a diagnostic. Anything else (a missing
-//! key in a read, which warns; an object with `ArrayAccess`; a string offset;
-//! a PHP reference) answers [`Step::Slow`] with nothing changed.
+//! Array key helpers for the interpreter loop's fast element reads and writes.
 
-use phera_bytecode::{FetchMode, PathId, Reg, Step as PathStep};
-use phera_value::{ArrayKey, Value};
+use phera_bytecode::Reg;
+use phera_value::{ArrayKey, InternedStr, PhpArray, PhpString, Value};
 
-use crate::calls::execution_loop::{Machine, Position, Step};
-use crate::calls::fast_properties::Shape;
-use crate::fast::{ScalarStep, store};
+use crate::calls::execution_loop::{Machine, Position};
 
-/// How many keys after the property the loop walks itself.
-const MOST_KEYS: usize = 3;
+/// A borrowed integer or string array key from a VM register, avoiding any
+/// `PhpString` clone or refcount traffic on array lookups.
+#[derive(Clone, Copy)]
+pub(super) enum FastKey<'a> {
+    Int(i64),
+    Interned(&'static InternedStr),
+    Str(&'a PhpString),
+}
 
-impl Machine<'_> {
-    /// `Fetch` of `$this->property[$key]...` or `$object->property[$key]...`.
-    pub(super) fn fetch_property_element<const GUARDED: bool>(
-        &mut self,
-        position: Position,
-        destination: Reg,
-        (path, mode): (PathId, FetchMode),
-    ) -> Step {
-        let quiet = match mode {
-            FetchMode::Read => false,
-            FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty => true,
-            FetchMode::Destructure => return Step::Slow,
-        };
-        let Some(value) = self.property_element(position, path, quiet) else {
-            return Step::Slow;
-        };
-        let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, value) {
-            ScalarStep::Complete => Step::Done(position.ip),
-            ScalarStep::Fallback => Step::Slow,
+impl FastKey<'_> {
+    /// Looks up this key in `array` using the fastest available lookup path
+    /// (direct integer hash, precomputed interned hash, or borrowed bytes).
+    #[inline]
+    pub(super) fn get(self, array: &PhpArray) -> Option<&Value> {
+        match self {
+            Self::Int(integer) => array.get_int(integer),
+            Self::Interned(string) => array.get_interned(string),
+            Self::Str(string) => array.get_str(string),
         }
     }
+}
 
-    fn property_element(&self, position: Position, path: PathId, quiet: bool) -> Option<Value> {
-        let property =
-            self.with_site(position, (path, Shape::Element), |entry, object, scope| {
-                if entry.hooks.is_some() {
-                    return None;
-                }
-                entry.read_matching(object, scope)
-            })?;
-        let keys = &self
-            .code
-            .function(position.frame.function)
-            .paths
-            .get(path.index())?
-            .steps[1..];
-        if keys.len() > MOST_KEYS {
-            return None;
+impl Machine<'_> {
+    /// An integer or string key in a register, borrowed without cloning [`PhpString`].
+    #[inline]
+    pub(super) fn array_key_ref(&self, position: Position, register: Reg) -> Option<FastKey<'_>> {
+        match self
+            .registers
+            .window(position.frame.base() + register.index(), 1)
+        {
+            [Some(Value::Int(integer))] => Some(FastKey::Int(*integer)),
+            [Some(Value::InternedStr(string))] => Some(FastKey::Interned(string)),
+            [Some(Value::String(string))] => Some(FastKey::Str(string)),
+            _ => None,
         }
-        let mut current = property;
-        for step in keys {
-            let PathStep::Index(register) = step else {
-                return None;
-            };
-            let key = self.array_key(position, *register)?;
-            current = match &current {
-                Value::Array(array) => match array.get(&key) {
-                    Some(Value::Reference(_)) => return None,
-                    Some(element) => element.clone(),
-                    None if quiet => return Some(Value::Null),
-                    None => return None,
-                },
-                Value::Null if quiet => return Some(Value::Null),
-                _ => return None,
-            };
-        }
-        Some(current)
     }
 
     /// An integer or string key in a register, as PHP converts it.
-    fn array_key(&self, position: Position, register: Reg) -> Option<ArrayKey> {
+    pub(super) fn array_key(&self, position: Position, register: Reg) -> Option<ArrayKey> {
         match self
             .registers
             .window(position.frame.base() + register.index(), 1)
         {
             [Some(Value::Int(integer))] => Some(ArrayKey::Int(*integer)),
+            [Some(Value::InternedStr(string))] => Some(string.to_array_key()),
             [Some(Value::String(string))] => Some(ArrayKey::from_string(string.clone())),
             _ => None,
         }

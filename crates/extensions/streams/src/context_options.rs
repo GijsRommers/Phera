@@ -3,6 +3,8 @@
 //! $options = stream_context_create(['file' => ['example' => true]]);
 //! stream_context_get_options(fopen('file.txt', 'r', context: $options));
 
+mod parameters;
+
 use std::rc::Rc;
 
 use phera_extension_api::{
@@ -10,13 +12,17 @@ use phera_extension_api::{
     Registry, Value, args, value::Resource,
 };
 
+use self::parameters::{get_params, set_params, update_params};
 use crate::request::{files, new_resource};
 use crate::resource::{argument_resource, given, with_stream};
 
 pub const OPTIONAL_CONTEXT: Param = Param::new("context", ParamType::Mixed).optional();
 
-#[derive(Clone)]
-struct Options(PhpArray);
+#[derive(Clone, Default)]
+struct Options {
+    wrappers: PhpArray,
+    notification: Option<Value>,
+}
 
 pub fn register(registry: &mut Registry) {
     const CREATE: &[Param] = &[
@@ -26,6 +32,8 @@ pub fn register(registry: &mut Registry) {
         Param::new("params", ParamType::Array).nullable().optional(),
     ];
     const GET: &[Param] = &[Param::new("stream_or_context", ParamType::Mixed)];
+    const CONTEXT: Param = Param::new("context", ParamType::Mixed);
+    const OPTIONS: Param = Param::new("options", ParamType::Array);
     const SET: &[Param] = &[
         Param::new("context", ParamType::Mixed),
         Param::new("wrapper_or_options", ParamType::ArrayOrString),
@@ -38,6 +46,31 @@ pub fn register(registry: &mut Registry) {
         FunctionEntry::sync("stream_context_create", CREATE, create),
         FunctionEntry::sync("stream_context_get_options", GET, get_options),
         FunctionEntry::sync("stream_context_set_option", SET, set_option),
+        FunctionEntry::sync(
+            "stream_context_get_default",
+            const { &[OPTIONS.nullable().optional()] },
+            get_default,
+        ),
+        FunctionEntry::sync(
+            "stream_context_set_default",
+            const { &[OPTIONS] },
+            set_default,
+        ),
+        FunctionEntry::sync(
+            "stream_context_get_params",
+            const { &[CONTEXT] },
+            get_params,
+        ),
+        FunctionEntry::sync(
+            "stream_context_set_params",
+            const { &[CONTEXT, Param::new("params", ParamType::Array)] },
+            set_params,
+        ),
+        FunctionEntry::sync(
+            "stream_context_set_options",
+            const { &[CONTEXT, OPTIONS] },
+            set_options,
+        ),
     ] {
         registry.function(entry);
     }
@@ -58,23 +91,36 @@ pub fn validate(value: &Value, function: &str, index: usize) -> Result<(), Nativ
 }
 
 fn create(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let mut options = PhpArray::new();
+    let mut options = Options::default();
     if let Some(array) = args::array(arguments, 0) {
-        merge(&mut options, array)?;
+        merge(&mut options.wrappers, array)?;
     }
-    if let Some(params) = args::array(arguments, 1)
-        && let Some(input) = params.get(&ArrayKey::str("options"))
-    {
-        let Value::Array(array) = input else {
-            return Err(NativeError::type_error("Invalid stream/context parameter"));
-        };
-        merge(&mut options, array)?;
+    if let Some(params) = args::array(arguments, 1) {
+        update_params(
+            context,
+            &mut options,
+            params,
+            "stream_context_create",
+            "options",
+        )?;
     }
-    Ok(create_options(context, options))
+    Ok(new_resource(context.state(), "stream-context", options))
 }
 
-fn create_options(context: &mut dyn Context, options: PhpArray) -> Value {
-    new_resource(context.state(), "stream-context", Options(options))
+fn get_default(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let value = default_for_wrapper(context);
+    if let Some(options) = args::array(arguments, 0) {
+        merge_into(&value, options, "stream_context_get_default")?;
+    }
+    Ok(value)
+}
+
+fn set_default(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let value = default_for_wrapper(context);
+    if let Some(options) = args::array(arguments, 0) {
+        merge_into(&value, options, "stream_context_set_default")?;
+    }
+    Ok(value)
 }
 
 pub(crate) fn default_for_wrapper(context: &mut dyn Context) -> Value {
@@ -86,7 +132,7 @@ pub(crate) fn default_for_wrapper(context: &mut dyn Context) -> Value {
         files.default_context = Some(crate::request::resource(
             id,
             "stream-context",
-            Options(PhpArray::new()),
+            Options::default(),
         ));
     }
     files.default_context.clone().unwrap_or(Value::Null)
@@ -102,6 +148,7 @@ fn attached(
     context: &mut dyn Context,
     resource: &Rc<Resource>,
     function: &str,
+    parameter: &str,
 ) -> Result<Option<Rc<Resource>>, NativeError> {
     if resource.kind == "stream-context" && !resource.is_closed() {
         return Ok(Some(resource.clone()));
@@ -112,49 +159,109 @@ fn attached(
             _ => None,
         });
     }
-    with_stream(resource, |_| ()).map_err(|_| invalid(function))?;
+    if !crate::directory::is_open(resource)
+        && crate::user_directory::of(resource).is_none()
+        && with_stream(resource, |_| ()).is_err()
+    {
+        return Err(invalid_target(function, parameter));
+    }
     Ok(files(context).stream_contexts.get(&resource.id).cloned())
+}
+
+fn invalid_target(function: &str, parameter: &str) -> NativeError {
+    NativeError::type_error(format!(
+        "{function}(): Argument #1 (${parameter}) must be a valid stream/context"
+    ))
 }
 
 fn get_options(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let function = "stream_context_get_options";
+    let options = read_options(context, arguments, function, "stream_or_context")?;
+    Ok(Value::from(options.wrappers))
+}
+
+fn read_options(
+    context: &mut dyn Context,
+    arguments: &[Value],
+    function: &str,
+    parameter: &str,
+) -> Result<Options, NativeError> {
     let resource = argument_resource(
         args::value(arguments, 0),
         function,
-        "#1 ($stream_or_context)",
+        &format!("#1 (${parameter})"),
     )?;
-    let Some(resource) = attached(context, resource, function)? else {
-        return Ok(Value::from(PhpArray::new()));
+    let Some(target) = attached(context, resource, function, parameter)? else {
+        return Ok(Options::default());
     };
-    let data = resource.data.borrow();
-    let result = data
+    let data = target.data.borrow();
+    Ok(data
         .as_ref()
         .and_then(|data| data.downcast_ref::<Options>())
-        .ok_or_else(|| invalid(function))?;
-    Ok(Value::from(result.0.clone()))
+        .ok_or_else(|| invalid_target(function, parameter))?
+        .clone())
 }
 
-fn set_option(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let function = "stream_context_set_option";
-    let resource = argument_resource(args::value(arguments, 0), function, "#1 ($context)")?;
-    let target = match attached(context, resource, function)? {
-        Some(target) => target,
-        None => {
-            let options = create_options(context, PhpArray::new());
-            let Value::Resource(options) = options else {
-                return Err(invalid(function));
-            };
-            files(context)
-                .stream_contexts
-                .insert(resource.id, options.clone());
-            options
-        }
+fn writable_context(
+    context: &mut dyn Context,
+    value: &Value,
+    function: &str,
+) -> Result<Rc<Resource>, NativeError> {
+    let resource = argument_resource(value, function, "#1 ($context)")?;
+    if let Some(target) = attached(context, resource, function, "context")? {
+        return Ok(target);
+    }
+    let Value::Resource(target) =
+        new_resource(context.state(), "stream-context", Options::default())
+    else {
+        return Err(invalid_target(function, "context"));
     };
+    files(context)
+        .stream_contexts
+        .insert(resource.id, target.clone());
+    Ok(target)
+}
+
+pub(crate) fn attach(context: &mut dyn Context, stream: &Value, options: &Value) {
+    if let (Value::Resource(stream), Value::Resource(options)) = (stream, &*options.deref()) {
+        files(context)
+            .stream_contexts
+            .insert(stream.id, options.clone());
+    }
+}
+
+fn update_options<T>(
+    target: &Rc<Resource>,
+    function: &str,
+    update: impl FnOnce(&mut Options) -> Result<T, NativeError>,
+) -> Result<T, NativeError> {
     let mut data = target.data.borrow_mut();
     let options = data
         .as_mut()
         .and_then(|data| data.downcast_mut::<Options>())
-        .ok_or_else(|| invalid(function))?;
+        .ok_or_else(|| invalid_target(function, "context"))?;
+    update(options)
+}
+
+fn merge_into(target: &Value, options: &PhpArray, function: &str) -> Result<(), NativeError> {
+    let Value::Resource(target) = target else {
+        return Err(invalid_target(function, "context"));
+    };
+    update_options(target, function, |data| merge(&mut data.wrappers, options))
+}
+
+fn set_options(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let function = "stream_context_set_options";
+    let target = writable_context(context, args::value(arguments, 0), function)?;
+    if let Some(array) = args::array(arguments, 1) {
+        merge_into(&Value::Resource(target), array, function)?;
+    }
+    Ok(Value::Bool(true))
+}
+
+fn set_option(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
+    let function = "stream_context_set_option";
+    let target = writable_context(context, args::value(arguments, 0), function)?;
     if arguments.len() == 2 {
         context.deprecated(
             concat!(
@@ -177,7 +284,7 @@ fn set_option(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
                 "when argument #2 ($wrapper_or_options) is an array"
             )));
         }
-        merge(&mut options.0, array)?;
+        merge_into(&Value::Resource(target), array, function)?;
     } else {
         let Some(name) = args::string(arguments, 2) else {
             return Err(NativeError::value_error(concat!(
@@ -191,25 +298,29 @@ fn set_option(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
                 "when argument #2 ($wrapper_or_options) is a string"
             )));
         }
-        set(
-            &mut options.0,
-            ArrayKey::str(args::bytes(arguments, 1)),
-            ArrayKey::str(name.as_bytes()),
-            args::value(arguments, 3).clone(),
-        );
+        update_options(&target, function, |options| {
+            set(
+                &mut options.wrappers,
+                ArrayKey::str(args::bytes(arguments, 1)),
+                ArrayKey::str(name.as_bytes()),
+                args::value(arguments, 3).clone(),
+            );
+            Ok(())
+        })?;
     }
     Ok(Value::Bool(true))
 }
 
 fn merge(target: &mut PhpArray, source: &PhpArray) -> Result<(), NativeError> {
     for (key, entry) in source.iter() {
-        let (ArrayKey::String(_), Value::Array(options)) = (&key, entry) else {
+        let (ArrayKey::Interned(_) | ArrayKey::String(_), Value::Array(options)) = (&key, entry)
+        else {
             return Err(NativeError::value_error(
                 "Options should have the form [\"wrappername\"][\"optionname\"] = $value",
             ));
         };
         for (option, value) in options.iter() {
-            if let ArrayKey::String(_) = option {
+            if matches!(option, ArrayKey::Interned(_) | ArrayKey::String(_)) {
                 set(target, key.clone(), option.clone(), value.clone());
             }
         }
@@ -232,14 +343,13 @@ pub(crate) fn option(value: &Value, wrapper: &str, key: &str) -> Option<Value> {
     };
     let data = resource.data.borrow();
     let options = data.as_ref()?.downcast_ref::<Options>()?;
-    let Value::Array(options) = options.0.get(&ArrayKey::str(wrapper))? else {
+    let Value::Array(options) = options.wrappers.get(&ArrayKey::str(wrapper))? else {
         return None;
     };
     options.get(&ArrayKey::str(key)).cloned()
 }
 
-/// A stream context holds options only (arrays of strings and numbers), so a
-/// fork of a snapshot gets a copy.
+/// A fork gets its own options and a copy of the notification callable.
 pub(crate) fn fork_context(
     data: &dyn std::any::Any,
     fork: &mut phera_extension_api::value::Fork<'_>,
@@ -247,9 +357,24 @@ pub(crate) fn fork_context(
     let options = data
         .downcast_ref::<Options>()
         .ok_or("an unknown stream context")?;
-    let mut copy = options.0.clone();
-    for (_, value) in copy.iter_mut() {
+    let mut copy = options.clone();
+    for (_, value) in copy.wrappers.iter_mut() {
         *value = fork.value(value);
     }
-    Ok(Box::new(Options(copy)))
+    copy.notification = options.notification.as_ref().map(|value| fork.value(value));
+    Ok(Box::new(copy))
+}
+
+pub(crate) fn for_wrapper(context: &Value, wrapper: &str) -> PhpArray {
+    let Value::Resource(resource) = &*context.deref() else {
+        return PhpArray::new();
+    };
+    let data = resource.data.borrow();
+    let options = data
+        .as_ref()
+        .and_then(|data| data.downcast_ref::<Options>());
+    match options.and_then(|options| options.wrappers.get(&ArrayKey::str(wrapper))) {
+        Some(Value::Array(options)) => options.as_ref().clone(),
+        _ => PhpArray::new(),
+    }
 }

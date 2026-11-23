@@ -25,29 +25,32 @@ pub use phera_bytecode::{BinaryOp as NativeBinaryOp, UnaryOp as NativeUnaryOp};
 pub use phera_source::{CompileDiagnostic, CompileDiagnosticKind, CompileDiagnosticSite};
 pub use phera_value as value;
 pub use phera_value::ObjectCast as NativeCastKind;
-pub use phera_value::{ArrayKey, Diagnostics, Object, PhpArray, PhpString, Value};
+pub use phera_value::{
+    ArrayKey, Diagnostics, InternedStr, Object, PhpArray, PhpString, StrRef, Value,
+};
 
 pub use arguments::{args, prepare_arguments, prepare_call, prepare_single_argument};
 pub use class::{
-    AsyncMethod, ClassEntry, ClassKind, MethodEntry, MethodPreparation, MethodReturn, NativeMethod,
-    NativePropertyAccess, NativePropertyMutation, NativePropertyRead, NativeStringProperty,
-    PrepareMethod, PropertyEntry, PropertyType, SyncMethod, Visibility, WindowMethod,
+    AsyncMethod, ClassEntry, ClassKind, DirectMethod, MethodEntry, MethodPreparation, MethodReturn,
+    NativeMethod, NativePropertyAccess, NativePropertyMutation, NativePropertyRead,
+    NativeStringProperty, PrepareMethod, PropertyEntry, PropertyType, ReadyMethod, SyncMethod,
+    Visibility, WindowMethod,
 };
 pub use context::{Context, GeneratorOperation, LocalFuture, PropertyView, RequestCallback};
 mod property_view_request;
 pub use error::{NativeError, NativeResult, Unwind};
 pub use function::{
-    AsyncFn, FunctionEntry, NativeFn, NativeNumericParameter, Param, ParamType, SyncFn,
+    AsyncFn, FunctionEntry, NativeFn, NativeId, NativeNumericParameter, Param, ParamType, SyncFn,
     SyncSelector, deprecated_method,
 };
 pub use object_handlers::{
     ClassHooks, DimensionReferenceMode, DirectDimensions, IteratorFactory, NativeBinary,
-    NativeClone, NativeCompare, NativeComparison, NativeCount, NativeDimensions, NativeForkHook,
-    NativeIterator, NativeRelease, PropertyProjection, PropertyPurpose, fork_clone,
+    NativeClone, NativeCompare, NativeComparison, NativeCount, NativeCycleTrace, NativeDimensions,
+    NativeForkHook, NativeIterator, NativeRelease, PropertyProjection, PropertyPurpose, fork_clone,
     fork_refused_handle,
 };
 pub use property_view_request::{PropertyViewContinuation, PropertyViewRequest};
-pub use registry::{BundledSource, ConstantValue, Registry, ResourceFork};
+pub use registry::{BundledSource, ConstantValue, Registry, ResourceFork, folded_name};
 pub use state::{ProcessCancellation, RequestState, StateFork, copy_state, fresh_state};
 pub use working_directory::WorkingDirectory;
 
@@ -87,3 +90,4 @@ pub trait Extension {
 pub mod fiber;
 pub mod ini;
 pub mod reflection;
+pub mod zend_sort;

@@ -99,6 +99,12 @@ pub enum Instruction {
         class: Reg,
         name: String,
     },
+    /// A constant of a class the source names (`Post::LIMIT`).
+    NamedClassConstant {
+        destination: Reg,
+        class: String,
+        name: String,
+    },
     /// Publish a request-local class declaration.
     DeclareClass(usize),
     /// Prepare a constructor using the same sends as a function call.
@@ -271,6 +277,12 @@ pub enum Instruction {
         operator: phera_bytecode::BuiltinUnary,
         source: Reg,
     },
+    /// The built-in behind a `GuardBuiltin`; emits NamespacedBuiltin.
+    NamespacedBuiltin {
+        destination: Reg,
+        operator: phera_bytecode::BuiltinUnary,
+        source: Reg,
+    },
     BuiltinFrame {
         destination: Reg,
         operator: phera_bytecode::BuiltinFrame,
@@ -298,6 +310,14 @@ pub enum Instruction {
     Echo(Reg),
     /// Transfer control to an IR target; emits Jump with a relocated target.
     Jump(Target),
+    /// Before an unqualified built-in call in a namespace: fall through to
+    /// the built-in when the call means the global function, else jump to
+    /// `call`, the general call; emits GuardBuiltin.
+    GuardBuiltin {
+        name: String,
+        fallback: Option<String>,
+        call: Target,
+    },
     /// Branch on PHP truthiness; emits JumpIf or JumpIfNot.
     Branch {
         value: Reg,
@@ -308,6 +328,44 @@ pub enum Instruction {
     BranchNull {
         value: Reg,
         target: Target,
+    },
+    /// Branch when the value is not null; emits JumpIfNotNull. A condition
+    /// `$x === null` / `$x !== null` lowers to `BranchNull`/`BranchNotNull`.
+    BranchNotNull {
+        value: Reg,
+        target: Target,
+    },
+    /// Compare two registers and branch on the result; emits BinaryBranch.
+    /// Used where the comparison's value is only a condition's decision.
+    BranchCompare {
+        operator: Binary,
+        left: Reg,
+        right: Reg,
+        target: Target,
+        when: bool,
+    },
+    /// Compare a register with an integer literal and branch; emits BinaryIntBranch.
+    BranchCompareInt {
+        operator: Binary,
+        left: Reg,
+        rhs: i32,
+        target: Target,
+        when: bool,
+    },
+    /// `source instanceof class`, branching on the answer; emits
+    /// InstanceOfBranch / InstanceOfBranchIf.
+    BranchInstanceOf {
+        source: Reg,
+        class: String,
+        target: Target,
+        when: bool,
+    },
+    /// The evaluated-class form; emits DynamicInstanceOfBranch(If).
+    BranchDynamicInstanceOf {
+        source: Reg,
+        class: Reg,
+        target: Target,
+        when: bool,
     },
     /// Prepare and invoke an evaluated callee; emits InitDynamicCall, argument sends, and Call.
     Call {

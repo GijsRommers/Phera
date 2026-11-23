@@ -1,9 +1,10 @@
 //! `bindParam(':id', $id, PDO::PARAM_INT)` reads the current referenced value on execute.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use phera_extension_api::value::{to_bool, to_int, to_php_string};
-use phera_extension_api::{ArrayKey, Context, NativeError, Value};
+use phera_extension_api::{ArrayKey, Context, NativeError, PhpArray, Value};
 
 use crate::constants::{PARAM_BOOL, PARAM_INT, PARAM_LOB, PARAM_NULL, PARAM_STR};
 use crate::errors::{DbError, unsupported};
@@ -39,6 +40,72 @@ pub struct Binding {
 }
 
 pub use phera_db_drivers::parameters::BoundValue;
+
+/// The PHP array already puts sequential emulated parameters in SQL order.
+pub enum Bindings {
+    Packed(Rc<PhpArray>),
+    Keyed(HashMap<String, Binding>),
+}
+
+impl Default for Bindings {
+    fn default() -> Self {
+        Self::Keyed(HashMap::new())
+    }
+}
+
+impl Bindings {
+    pub fn packed(params: &Value) -> Option<Self> {
+        if let Value::Array(array) = &*params.deref()
+            && array.is_list()
+        {
+            return Some(Self::Packed(array.clone()));
+        }
+        None
+    }
+
+    pub fn from_execute(params: &Value) -> Result<Self, NativeError> {
+        execute_bindings(params).map(Self::Keyed)
+    }
+
+    pub fn insert(&mut self, key: String, binding: Binding) {
+        if let Self::Packed(array) = self {
+            let bindings = array.iter().enumerate().map(|(index, (_, value))| {
+                (
+                    index.to_string(),
+                    Binding {
+                        value: value.clone(),
+                        kind: ParameterType::String,
+                    },
+                )
+            });
+            *self = Self::Keyed(bindings.collect());
+        }
+        if let Self::Keyed(bindings) = self {
+            bindings.insert(key, binding);
+        }
+    }
+}
+
+pub fn read_packed(
+    context: &mut dyn Context,
+    array: &PhpArray,
+) -> Result<Vec<BoundValue>, NativeError> {
+    array
+        .iter()
+        .map(|(_, value)| {
+            let value = value.deref();
+            if value.is_null() {
+                Ok(BoundValue::Null)
+            } else {
+                Ok(BoundValue::String(
+                    to_php_string(&value, context.diagnostics())?
+                        .as_bytes()
+                        .to_vec(),
+                ))
+            }
+        })
+        .collect()
+}
 
 impl Binding {
     pub fn read(&self, context: &mut dyn Context) -> Result<BoundValue, NativeError> {
@@ -80,7 +147,9 @@ pub fn key(value: &Value, method: Option<&str>) -> Result<String, NativeError> {
             }
             Ok(position.to_string())
         }
-        Value::String(name) => {
+        Value::InternedStr(_) | Value::String(_) => {
+            let name = value.deref();
+            let name = name.str_ref().expect("checked string");
             if name.as_bytes().is_empty()
                 && let Some(method) = method
             {
@@ -96,12 +165,15 @@ pub fn key(value: &Value, method: Option<&str>) -> Result<String, NativeError> {
     }
 }
 
-pub fn execute_bindings(params: &Value) -> Result<HashMap<String, Binding>, NativeError> {
+fn execute_bindings(params: &Value) -> Result<HashMap<String, Binding>, NativeError> {
     let mut bindings = HashMap::new();
     if let Value::Array(array) = &*params.deref() {
         for (param, value) in array.iter() {
             let name = match param {
                 ArrayKey::Int(position) => key(&Value::Int(position), None)?,
+                ArrayKey::Interned(name) => {
+                    name.to_string_lossy().trim_start_matches(':').to_owned()
+                }
                 ArrayKey::String(name) => name.to_string_lossy().trim_start_matches(':').to_owned(),
             };
             bindings.insert(

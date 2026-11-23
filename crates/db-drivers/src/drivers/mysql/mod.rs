@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use mysql_async::prelude::Queryable;
-use mysql_async::{Conn, Params, Row, Statement};
+use mysql_async::prelude::{Protocol, Queryable};
+use mysql_async::{Conn, Params, QueryResult, Statement};
 
 mod connect;
 mod information;
@@ -16,11 +16,11 @@ pub mod values;
 #[cfg(test)]
 mod auth_tests;
 
-use super::{Execution, Prepared, RawRows};
+use super::{Execution, Prepared, RowBuffer, Rows};
 use crate::connect_options::MysqlOptions;
 use crate::errors::DbError;
 use crate::parameters::{BoundValue, literal, quote};
-use crate::placeholders::Sql;
+use crate::placeholders::{Sql, Syntax};
 use values::parameter;
 
 pub struct Mysql {
@@ -39,6 +39,7 @@ pub struct Mysql {
 
 impl Mysql {
     pub async fn close(mut self) {
+        self.abort_stream().await;
         if let Some(connection) = self.connection.take() {
             let _ = connection.disconnect().await;
         }
@@ -109,7 +110,7 @@ impl Mysql {
         prepared: &Prepared,
         values: &[BoundValue],
         options: &Execution,
-    ) -> Result<RawRows, DbError> {
+    ) -> Result<Rows, DbError> {
         self.check_pending().await?;
         match prepared {
             Prepared::Mysql(statement) => {
@@ -117,31 +118,31 @@ impl Mysql {
                 if let Some(owner) = &options.mysql_stream {
                     return self
                         .stream(stream::Query::Binary(statement.clone(), params), owner)
-                        .await
-                        .map(|outcome| outcome.rows);
+                        .await?
+                        .rows
+                        .into_php();
                 }
-                let mut result = self
+                let result = self
                     .connection()?
                     .exec_iter(statement, params)
                     .await
                     .map_err(error)?;
-                let columns = result.columns_ref().to_vec();
-                let rows: Vec<Row> = result.collect().await.map_err(error)?;
-                let affected = result.affected_rows();
-                let insert_id = result.last_insert_id().unwrap_or(0);
-                result.drop_result().await.map_err(error)?;
+                let (rows, insert_id) = buffered(result).await?;
                 self.last_insert_id = insert_id;
-                Ok(RawRows::Mysql {
-                    columns,
-                    rows,
-                    affected,
-                })
-            }
-            Prepared::Emulated if values.is_empty() => {
-                self.text(&sql.source, options.mysql_stream.as_ref()).await
+                Ok(rows)
             }
             Prepared::Emulated => {
-                let mode = self.backslash_escapes().await?;
+                if values.is_empty() {
+                    return self.text(&sql.source, options.mysql_stream.as_ref()).await;
+                }
+                sql.check_emulation()?;
+                let mode = if sql.has_sensitive_quotes() {
+                    let syntax = self.placeholder_syntax().await?;
+                    sql.check_string_mode(syntax)?;
+                    syntax.backslash_strings()
+                } else {
+                    self.backslash_escapes().await?
+                };
                 let query = sql.render(|i| match &values[i] {
                     BoundValue::String(bytes) => {
                         let quoted = quote(bytes, mode);
@@ -163,11 +164,11 @@ impl Mysql {
         }
     }
 
-    pub async fn run_unprepared(&mut self, sql: &str) -> Result<RawRows, DbError> {
+    pub async fn run_unprepared(&mut self, sql: &str) -> Result<Rows, DbError> {
         self.text(sql, None).await
     }
 
-    async fn text(&mut self, sql: &str, owner: Option<&Arc<()>>) -> Result<RawRows, DbError> {
+    async fn text(&mut self, sql: &str, owner: Option<&Arc<()>>) -> Result<Rows, DbError> {
         self.check_pending().await?;
         if !self.options.multiple {
             require_single_statement(self.connection()?, sql).await?;
@@ -175,27 +176,20 @@ impl Mysql {
         if let Some(owner) = owner {
             return self
                 .stream(stream::Query::Text(sql.as_bytes().to_vec()), owner)
-                .await
-                .map(|outcome| outcome.rows);
+                .await?
+                .rows
+                .into_php();
         }
-        let mut result = self.connection()?.query_iter(sql).await.map_err(error)?;
-        let columns = result.columns_ref().to_vec();
-        let rows: Vec<Row> = result.collect().await.map_err(error)?;
-        let affected = result.affected_rows();
-        let insert_id = result.last_insert_id().unwrap_or(0);
-        result.drop_result().await.map_err(error)?;
+        let result = self.connection()?.query_iter(sql).await.map_err(error)?;
+        let (rows, insert_id) = buffered(result).await?;
         self.last_insert_id = insert_id;
-        Ok(RawRows::Mysql {
-            columns,
-            rows,
-            affected,
-        })
+        Ok(rows)
     }
 
-    pub async fn exec(&mut self, sql: &str) -> Result<RawRows, DbError> {
+    pub async fn exec(&mut self, sql: &str) -> Result<Rows, DbError> {
         let rows = self.run_unprepared(sql).await?;
         // PHP exec() has no statement on which to consume a SELECT's result.
-        self.pending_exec_rows = rows.has_columns();
+        self.pending_exec_rows = !rows.columns.is_empty();
         Ok(rows)
     }
 
@@ -219,15 +213,34 @@ impl Mysql {
 
     async fn backslash_escapes(&mut self) -> Result<bool, DbError> {
         self.check_pending().await?;
+        if let Some(enabled) = self.observed_backslashes() {
+            return Ok(enabled);
+        }
+        // An error packet has no status flags, and the client discards the
+        // previous OK packet. Ask for the mode before quoting again.
+        Ok(!self
+            .sql_mode()
+            .await?
+            .split(',')
+            .any(|value| value == "NO_BACKSLASH_ESCAPES"))
+    }
+
+    async fn sql_mode(&mut self) -> Result<String, DbError> {
         let mode: Option<String> = self
             .connection()?
             .query_first("SELECT @@SESSION.sql_mode")
             .await
             .map_err(error)?;
-        Ok(!mode
-            .unwrap_or_default()
-            .split(',')
-            .any(|value| value == "NO_BACKSLASH_ESCAPES"))
+        Ok(mode.unwrap_or_default())
+    }
+
+    pub async fn placeholder_syntax(&mut self) -> Result<Syntax, DbError> {
+        self.check_pending().await?;
+        let mode = self.sql_mode().await?;
+        Ok(Syntax::Mysql {
+            backslash_strings: !mode.split(',').any(|value| value == "NO_BACKSLASH_ESCAPES"),
+            ansi_quotes: mode.split(',').any(|value| value == "ANSI_QUOTES"),
+        })
     }
 
     pub async fn quote(&mut self, bytes: &[u8]) -> Result<String, DbError> {
@@ -259,6 +272,18 @@ impl Mysql {
     fn connection(&mut self) -> Result<&mut Conn, DbError> {
         self.connection.as_mut().ok_or_else(Self::closed)
     }
+}
+
+async fn buffered<P: Protocol>(mut result: QueryResult<'_, '_, P>) -> Result<(Rows, u64), DbError> {
+    let columns = result.columns_ref().to_vec();
+    let mut values = RowBuffer::with_capacity(columns.len(), 0);
+    while let Some(row) = result.next().await.map_err(error)? {
+        values::push_pdo_row(&mut values, row, &columns);
+    }
+    let affected = result.affected_rows();
+    let insert_id = result.last_insert_id().unwrap_or(0);
+    result.drop_result().await.map_err(error)?;
+    Ok((values::finish(columns, values, affected), insert_id))
 }
 
 async fn configure(connection: &mut Conn, settings: &MysqlOptions) -> Result<(), DbError> {

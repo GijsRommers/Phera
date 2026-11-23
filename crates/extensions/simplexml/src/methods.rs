@@ -236,7 +236,7 @@ fn qualified_name(method: &str, arguments: &[Value]) -> Result<Name, NativeError
         None => Name::new(qualified.as_ref()),
     };
     name.namespace = args::string(arguments, 2)
-        .map(phera_extension_api::PhpString::to_string_lossy)
+        .map(phera_extension_api::StrRef::to_string_lossy)
         .filter(|namespace| !namespace.is_empty());
     Ok(name)
 }

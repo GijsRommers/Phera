@@ -82,7 +82,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         )],
         query::get,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::asynchronous(
         "pg_connection_busy",
         &[Param::new(
             "connection",
@@ -90,7 +90,7 @@ pub const ENTRIES: &[FunctionEntry] = &[
         )],
         query::busy,
     ),
-    FunctionEntry::sync(
+    FunctionEntry::asynchronous(
         "pg_consume_input",
         &[Param::new(
             "connection",
