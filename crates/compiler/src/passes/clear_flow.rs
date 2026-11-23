@@ -535,6 +535,8 @@ fn transfer(function: &Function, constants: &[Constant], facts: &mut [Fact], ins
                 BuiltinUnary::TypeCheck(_)
                 | BuiltinUnary::IsResource
                 | BuiltinUnary::Defined
+                | BuiltinUnary::ObjectId
+                | BuiltinUnary::StrToLower
                 | BuiltinUnary::Strlen => Scalar,
                 BuiltinUnary::Count | BuiltinUnary::Sizeof => Scalar,
             },

@@ -244,6 +244,8 @@ pub(super) fn builtin_unary(name: &str) -> Option<BuiltinUnary> {
         "sizeof" => B::Sizeof,
         "gettype" => B::GetType,
         "get_class" => B::GetClass,
+        "spl_object_id" => B::ObjectId,
+        "strtolower" => B::StrToLower,
         "defined" => B::Defined,
         "is_resource" => B::IsResource,
         "is_null" => B::TypeCheck(T::NULL),

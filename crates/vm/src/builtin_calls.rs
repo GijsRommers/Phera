@@ -50,10 +50,18 @@ impl Vm {
         binding: ArgumentBinding,
     ) -> Result<Option<BatchExit>, NativeError> {
         let value = self.read_local(source);
+        // PHP calls these like any function, so a failure has its frame.
+        let binding = if matches!(operation, BuiltinUnary::ObjectId | BuiltinUnary::StrToLower) {
+            ArgumentBinding::Caller
+        } else {
+            binding
+        };
         let name = match operation {
             BuiltinUnary::Strlen => "strlen",
             BuiltinUnary::Count => "count",
             BuiltinUnary::Sizeof => "sizeof",
+            BuiltinUnary::ObjectId => "spl_object_id",
+            BuiltinUnary::StrToLower => "strtolower",
             BuiltinUnary::GetClass => {
                 if let Value::Object(object) = &value {
                     self.set(destination, Value::from(object.class.name()));
@@ -188,6 +196,15 @@ pub(crate) fn builtin_value(operation: BuiltinUnary, value: &Value) -> Option<Va
             Value::Resource(resource) if !resource.is_closed()
         ))),
         (B::GetType, value) => Some(Value::from(value.gettype_name())),
+        (B::ObjectId, Value::Object(object)) => Some(Value::Int(object.id.into())),
+        // A string with no capital letter is its own lower case, as in PHP.
+        (B::StrToLower, Value::String(string)) => Some(Value::String(
+            if string.as_bytes().iter().any(u8::is_ascii_uppercase) {
+                string.as_bytes().to_ascii_lowercase().into()
+            } else {
+                string.clone()
+            },
+        )),
         _ => None,
     }
 }

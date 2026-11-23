@@ -46,6 +46,6 @@ pub use ops::{
     unary_plus,
 };
 pub use properties::{Properties, PropertyLayout};
-pub use string::PhpString;
+pub use string::{PhpString, push_integer};
 pub use value::{Value, ValueRef};
 pub use weak_object::WeakObject;

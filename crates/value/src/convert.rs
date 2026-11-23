@@ -402,7 +402,7 @@ pub fn to_php_string(v: &Value, diag: &mut dyn Diagnostics) -> Result<PhpString,
     match &*v.deref() {
         Value::Null => Ok(PhpString::new()),
         Value::Bool(b) => Ok(PhpString::from(if *b { "1" } else { "" })),
-        Value::Int(i) => Ok(PhpString::from(i.to_string())),
+        Value::Int(i) => Ok(PhpString::from_integer(*i)),
         Value::Float(f) => {
             if f.is_nan() {
                 diag.warning("unexpected NAN value was coerced to string".to_string());
