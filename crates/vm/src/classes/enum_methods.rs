@@ -41,6 +41,31 @@ impl Vm {
         let Some(backing) = info.backing else {
             return Err(internal_error!("enum lookup without backing"));
         };
+        // Fast path for a validated backed enum called with a single exact
+        // backing value (e.g. `Status::from('active')` or `$enum::tryFrom($id)`),
+        // skipping generic native parameter binding and trace allocation.
+        if let [argument] = arguments
+            && !self.needs_enum_backing(class)
+        {
+            let exact_key = match (backing, &*argument.deref()) {
+                (EnumBacking::Int, Value::Int(number)) => Some(ArrayKey::Int(*number)),
+                (EnumBacking::String, Value::InternedStr(string)) => {
+                    Some(ArrayKey::Interned(string))
+                }
+                (EnumBacking::String, Value::String(string)) => {
+                    Some(ArrayKey::String(string.clone()))
+                }
+                _ => None,
+            };
+            if let Some(key) = exact_key {
+                if let Some(value) = self.backed_enum_case(class, &key) {
+                    return Ok(value);
+                }
+                if matches!(operation, EnumMethod::TryFrom) {
+                    return Ok(Value::Null);
+                }
+            }
+        }
         let strict = Context::strict_types(self);
         // PHP's weak null deprecation names the public union even for int
         // backing. The native argument parser converts it to integer zero.

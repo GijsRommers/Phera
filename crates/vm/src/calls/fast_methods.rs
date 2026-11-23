@@ -25,6 +25,7 @@ use phera_value::{Object, Value};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::frame::Frame;
+use crate::calls::native_signature::direct_site;
 use crate::calls::php_windows::push_php_call;
 use crate::calls::prepared_call::CallKind;
 use crate::calls::window_context::WindowContext;
@@ -194,6 +195,11 @@ impl Machine<'_> {
                     .put(position.frame.base() + destination.index(), value);
                 Step::Done(site.after.index())
             }
+            // A native method with a direct handler and arguments, as
+            // `call_site_direct` runs it.
+            SiteOutcome::Direct(handler, masks) => {
+                self.call_site_direct(position, (body, site), (handler, &masks), destination)
+            }
             SiteOutcome::Native if !site.receiver_taken => {
                 let object = object.clone();
                 self.call_site_native(position, (body, site), &object, destination)
@@ -260,6 +266,14 @@ impl Machine<'_> {
                     && let Some(getter) = entry.direct =>
             {
                 SiteOutcome::Getter(getter)
+            }
+            // A direct handler with arguments, as `call_site_direct` runs it.
+            MethodBody::Native(entry)
+                if method.visibility == Visibility::Public
+                    && !self.shadowed_by_private(self.caller_scope(position), key, method)
+                    && let Some((handler, masks)) = direct_site(entry, site.arguments as usize) =>
+            {
+                SiteOutcome::Direct(handler, masks)
             }
             MethodBody::Native(_) => SiteOutcome::Native,
             _ => SiteOutcome::Vm,
@@ -500,7 +514,7 @@ impl Machine<'_> {
     /// that declares it, read from the function's facts; a closure's takes
     /// the general way.
     #[inline(always)]
-    fn caller_scope(&self, position: Position) -> Option<&Rc<Class>> {
+    pub(super) fn caller_scope(&self, position: Position) -> Option<&Rc<Class>> {
         match position.frame.kind() {
             CallKind::Function => None,
             CallKind::Method | CallKind::Constructor => self
@@ -583,7 +597,7 @@ impl Machine<'_> {
     /// to a static method, or to an instance method of the running object
     /// through `self::`, `parent::` or `static::`.
     #[inline(always)]
-    pub(super) fn prepare_static(
+    pub(super) fn prepare_static<const GUARDED: bool>(
         &mut self,
         position: Position,
         symbols: (SymbolId, SymbolId),
@@ -592,31 +606,58 @@ impl Machine<'_> {
         let (class_symbol, method_symbol) = symbols;
         let function = position.frame.function;
         let context = self.current_context();
-        let scope = context.and_then(|context| context.scope());
-        let written = &self.code.unit(function).symbols[class_symbol.index()].written;
-        let (class, relative) = match (written.as_str(), scope) {
-            ("self", Some(scope)) => (scope.clone(), true),
-            ("static", Some(_)) => match context.and_then(|context| context.called()) {
-                Some(called) => (called, true),
-                None => return Step::Slow,
-            },
-            ("parent", Some(scope)) => match &scope.parent {
-                Some(parent) => (parent.clone(), true),
-                None => return Step::Slow,
-            },
-            ("self" | "static" | "parent", None) => return Step::Slow,
-            _ => match self.linked_class(position, class_symbol) {
-                Some(class) => (class, false),
-                None => return Step::Slow,
-            },
+        let scope = context.as_ref().and_then(|context| context.scope());
+        let class_key = self.code.unit_symbol_key(function, class_symbol);
+        let owned_called: Option<Rc<Class>>;
+        let (class_ref, relative): (&Class, bool) = if let Some(named) =
+            self.classes.by_key(class_key)
+        {
+            (named.as_ref(), false)
+        } else {
+            let Some(symbol) = self.code.unit(function).symbols.get(class_symbol.index()) else {
+                return Step::Slow;
+            };
+            match (symbol.written.as_str(), scope) {
+                ("self", Some(scope)) => (scope.as_ref(), true),
+                ("static", Some(_)) => {
+                    owned_called = context.as_ref().and_then(|context| context.called());
+                    let Some(called) = owned_called.as_deref() else {
+                        return Step::Slow;
+                    };
+                    (called, true)
+                }
+                ("parent", Some(scope)) => match &scope.parent {
+                    Some(parent) => (parent.as_ref(), true),
+                    None => return Step::Slow,
+                },
+                _ => return Step::Slow,
+            }
         };
         let key = self.code.unit_symbol_key(function, method_symbol);
-        let Some(found) = self.classes.method_table(&class).get(key) else {
+        let Some(found) = self.classes.method_table(class_ref).get(key) else {
             return Step::Slow;
         };
+        if let MethodBody::Enum(
+            operation @ (crate::classes::enums::EnumMethod::From
+            | crate::classes::enums::EnumMethod::TryFrom),
+        ) = found.method.body
+        {
+            let ready = class_ref
+                .enum_info
+                .as_ref()
+                .and_then(|info| info.backing)
+                .filter(|_| !self.enum_cases.needs_backing(class_ref))
+                .map(|backing| (class_ref.index, backing));
+            return match ready {
+                Some((class_index, backing)) => self
+                    .try_inline_enum_from::<GUARDED>(position, class_index, backing, operation)
+                    .unwrap_or(Step::Slow),
+                None => Step::Slow,
+            };
+        }
         let receiver = match (found.method.is_static, relative) {
             (true, _) => None,
-            (false, true) => context.and_then(|context| context.this()).cloned(),
+            (false, true) => context.as_ref().and_then(|context| context.this()).cloned(),
             (false, false) => return Step::Slow,
         };
         if !may_call(&found, scope)
@@ -632,7 +673,7 @@ impl Machine<'_> {
             (false, ClassBinding::Forward, Some(context)) => context
                 .called_index()
                 .or_else(|| context.called().map(|called| called.index)),
-            (false, _, _) => Some(class.index),
+            (false, _, _) => Some(class_ref.index),
         };
         let MethodBody::User(function) = found.method.body else {
             return Step::Slow;
@@ -641,6 +682,185 @@ impl Machine<'_> {
             return Step::Slow;
         }
         self.prepare_php_method(function, receiver, called, position.ip)
+    }
+
+    /// `StaticCall` (`$class::$method(...)`): handles public static PHP methods
+    /// without leaving the interpreter loop or allocating class/method strings.
+    #[inline(never)]
+    pub(super) fn prepare_dynamic_static<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        class_reg: Reg,
+        method_reg: Reg,
+        binding: ClassBinding,
+    ) -> Step {
+        let base = position.frame.base();
+        let method_bytes = match self.registers.window(base + method_reg.index(), 1) {
+            [Some(Value::InternedStr(string))] => string.as_bytes(),
+            [Some(Value::String(string))] => string.as_bytes(),
+            _ => return Step::Slow,
+        };
+        let Ok(method_str) = std::str::from_utf8(method_bytes) else {
+            return Step::Slow;
+        };
+        let mut lower_buf = [0u8; 64];
+        let method_lower = if !method_str.bytes().any(|b| b.is_ascii_uppercase()) {
+            method_str
+        } else if let Some(buf) = lower_buf.get_mut(..method_str.len()) {
+            buf.copy_from_slice(method_str.as_bytes());
+            buf.make_ascii_lowercase();
+            let Ok(lower) = std::str::from_utf8(buf) else {
+                return Step::Slow;
+            };
+            lower
+        } else {
+            return Step::Slow;
+        };
+        let class_ref: &Class = match self.registers.window(base + class_reg.index(), 1) {
+            [Some(Value::Object(object))] => match object.class.as_any().downcast_ref::<Class>() {
+                Some(class) => class,
+                None => return Step::Slow,
+            },
+            [Some(Value::InternedStr(name))] => {
+                let Ok(name) = std::str::from_utf8(name.as_bytes()) else {
+                    return Step::Slow;
+                };
+                match self.classes.get_ref(name) {
+                    Some(class) => class.as_ref(),
+                    None => return Step::Slow,
+                }
+            }
+            [Some(Value::String(name))] => {
+                let Ok(name) = std::str::from_utf8(name.as_bytes()) else {
+                    return Step::Slow;
+                };
+                match self.classes.get_ref(name) {
+                    Some(class) => class.as_ref(),
+                    None => return Step::Slow,
+                }
+            }
+            _ => return Step::Slow,
+        };
+        let Some(method) = class_ref.methods.get(method_lower) else {
+            return Step::Slow;
+        };
+        if let MethodBody::Enum(
+            operation @ (crate::classes::enums::EnumMethod::From
+            | crate::classes::enums::EnumMethod::TryFrom),
+        ) = method.body
+        {
+            let ready = class_ref
+                .enum_info
+                .as_ref()
+                .and_then(|info| info.backing)
+                .filter(|_| !self.enum_cases.needs_backing(class_ref))
+                .map(|backing| (class_ref.index, backing));
+            return match ready {
+                Some((class_index, backing)) => self
+                    .try_inline_enum_from::<GUARDED>(position, class_index, backing, operation)
+                    .unwrap_or(Step::Slow),
+                None => Step::Slow,
+            };
+        }
+        if !method.is_static || method.is_abstract || method.visibility != Visibility::Public {
+            return Step::Slow;
+        }
+        let MethodBody::User(callee) = method.body else {
+            return Step::Slow;
+        };
+        let scope = self.caller_scope(position);
+        if scope.is_some_and(|scope| {
+            scope
+                .methods
+                .get(method_lower)
+                .is_some_and(|m| m.visibility == Visibility::Private && !Rc::ptr_eq(m, method))
+        }) {
+            return Step::Slow;
+        }
+        let called = match (binding, self.current_context()) {
+            (ClassBinding::Forward, Some(context)) => context
+                .called_index()
+                .or_else(|| context.called().map(|called| called.index)),
+            _ => Some(class_ref.index),
+        };
+        self.prepare_php_method(callee, None, called, position.ip)
+    }
+
+    /// Execute `Enum::from($x)` / `Enum::tryFrom($x)` directly inside the loop
+    /// when the backed enum is already validated, the next instruction sends a
+    /// single plain backing argument, and the instruction after is `Call`.
+    fn try_inline_enum_from<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        class_index: ClassIndex,
+        backing: phera_bytecode::EnumBacking,
+        operation: crate::classes::enums::EnumMethod,
+    ) -> Option<Step> {
+        use phera_bytecode::EnumBacking;
+        use phera_value::ArrayKey;
+        let instructions = self.code.instructions(position.frame.function);
+        let send = *instructions.get(position.ip)?;
+        let Instruction::Call { dst, .. } = *instructions.get(position.ip + 1)? else {
+            return None;
+        };
+        let base = position.frame.base();
+        let (key, clear_src) = match send {
+            Instruction::SendValue { src, .. }
+            | Instruction::SendLocal { local: src }
+            | Instruction::SendTake { src, .. } => {
+                let take = matches!(send, Instruction::SendTake { .. });
+                let [Some(value)] = self.registers.window(base + src.index(), 1) else {
+                    return None;
+                };
+                if value.is_reference() {
+                    return None;
+                }
+                let key = match (backing, value) {
+                    (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(*number),
+                    (EnumBacking::String, Value::InternedStr(string)) => ArrayKey::Interned(string),
+                    (EnumBacking::String, Value::String(string)) => {
+                        ArrayKey::String(string.clone())
+                    }
+                    _ => return None,
+                };
+                (key, take.then_some(src))
+            }
+            Instruction::SendConst { constant } => {
+                let literal = self
+                    .code
+                    .cache(position.frame.function)
+                    .constants
+                    .get(constant.index())?;
+                let key = match (backing, literal) {
+                    (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(*number),
+                    (EnumBacking::String, Value::InternedStr(string)) => ArrayKey::Interned(string),
+                    (EnumBacking::String, Value::String(string)) => {
+                        ArrayKey::String(string.clone())
+                    }
+                    _ => return None,
+                };
+                (key, None)
+            }
+            _ => return None,
+        };
+        let result = match self.enum_cases.backed_case(class_index, &key) {
+            Some(case) => case,
+            None if matches!(operation, crate::classes::enums::EnumMethod::TryFrom) => Value::Null,
+            None => return None,
+        };
+        if self.registers.window(base + dst.index(), 1).is_empty() {
+            return None;
+        }
+        if let Some(src) = clear_src {
+            drop(self.registers.take_defined(base + src.index()));
+        }
+        let slots = self.registers.tail_mut(base);
+        match crate::fast::store::<GUARDED, _>(slots, dst, result) {
+            crate::fast::ScalarStep::Complete | crate::fast::ScalarStep::Released => {
+                Some(Step::Done(position.ip + 2))
+            }
+            crate::fast::ScalarStep::Fallback => None,
+        }
     }
 
     /// Record a PHP method call with `$this` in the window's first register.
@@ -668,13 +888,6 @@ impl Machine<'_> {
     /// The class scope of the running frame (`self::`), if it has one.
     fn running_scope(&self) -> Option<&Rc<Class>> {
         self.current_context().and_then(|context| context.scope())
-    }
-
-    /// The class a named class symbol of the running file means in this
-    /// request, by the symbol's process name key.
-    pub(super) fn linked_class(&self, position: Position, symbol: SymbolId) -> Option<Rc<Class>> {
-        let key = self.code.unit_symbol_key(position.frame.function, symbol);
-        self.classes.by_key(key).cloned()
     }
 
     /// The window of the running frame, if it is a method or closure.

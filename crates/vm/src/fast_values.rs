@@ -32,7 +32,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use phera_bytecode::{BinaryOp, FetchMode, Instruction, Reg, Target, UnaryOp};
-use phera_value::{Diagnostics, PhpArray, Value, to_bool};
+use phera_value::{ArrayKey, Diagnostics, PhpArray, Value, to_bool};
 
 use crate::fast::{ScalarStep, store};
 
@@ -122,6 +122,11 @@ pub(crate) fn value_step<const GUARDED: bool>(
         Instruction::NewArray { dst, .. } => {
             store::<GUARDED, _>(slots, dst, Value::Array(Rc::new(PhpArray::new())))
         }
+        Instruction::ArraySet { array, key, src } => array_set(slots, array, key, src),
+        Instruction::ArrayPush { array, src } => array_push(slots, array, src),
+        Instruction::ArrayKeyExists { dst, key, array } => {
+            array_key_exists::<GUARDED>(slots, dst, key, array)
+        }
         Instruction::FetchIndex {
             dst,
             base,
@@ -137,6 +142,77 @@ pub(crate) fn value_step<const GUARDED: bool>(
         }
         _ => ScalarStep::Fallback,
     }
+}
+
+/// `ArraySet`: `$array[$key] = $src` during array literal construction when
+/// `array` is an array, `key` is an integer or string, and `src` is defined.
+#[inline(always)]
+fn array_set(slots: &mut [Option<Value>], array: Reg, key: Reg, src: Reg) -> ScalarStep {
+    let array_key = match slots.get(key.index()) {
+        Some(Some(Value::Int(integer))) => ArrayKey::Int(*integer),
+        Some(Some(Value::InternedStr(string))) => match string.numeric_key() {
+            Some(integer) => ArrayKey::Int(integer),
+            None => ArrayKey::Interned(string),
+        },
+        Some(Some(Value::String(string))) => ArrayKey::from_string(string.clone()),
+        _ => return ScalarStep::Fallback,
+    };
+    let Some(Some(source)) = slots.get(src.index()) else {
+        return ScalarStep::Fallback;
+    };
+    let value = source.deref().clone();
+    let Some(Some(Value::Array(target))) = slots.get_mut(array.index()) else {
+        return ScalarStep::Fallback;
+    };
+    Rc::make_mut(target).insert(array_key, value);
+    ScalarStep::Complete
+}
+
+/// `ArrayPush`: `$array[] = $src` during array literal construction when
+/// `array` is an array and `src` is defined.
+#[inline(always)]
+fn array_push(slots: &mut [Option<Value>], array: Reg, src: Reg) -> ScalarStep {
+    let Some(Some(source)) = slots.get(src.index()) else {
+        return ScalarStep::Fallback;
+    };
+    let value = source.deref().clone();
+    let Some(Some(Value::Array(target))) = slots.get_mut(array.index()) else {
+        return ScalarStep::Fallback;
+    };
+    match Rc::make_mut(target).push(value) {
+        Ok(_) => ScalarStep::Complete,
+        Err(_) => ScalarStep::Fallback,
+    }
+}
+
+/// `ArrayKeyExists`: `array_key_exists($key, $array)` for an array and plain key.
+#[inline(always)]
+fn array_key_exists<const GUARDED: bool>(
+    slots: &mut [Option<Value>],
+    dst: Reg,
+    key: Reg,
+    array: Reg,
+) -> ScalarStep {
+    let found = {
+        let (Some(Some(key_val)), Some(Some(array_val))) =
+            (slots.get(key.index()), slots.get(array.index()))
+        else {
+            return ScalarStep::Fallback;
+        };
+        let array_ref = array_val.deref();
+        let Value::Array(array) = &*array_ref else {
+            return ScalarStep::Fallback;
+        };
+        let key_ref = key_val.deref();
+        match &*key_ref {
+            Value::Int(integer) => array.get_int(*integer).is_some(),
+            Value::Bool(boolean) => array.get_int(i64::from(*boolean)).is_some(),
+            Value::InternedStr(string) => array.contains_interned(string),
+            Value::String(string) => array.get_str(string).is_some(),
+            _ => return ScalarStep::Fallback,
+        }
+    };
+    store::<GUARDED, _>(slots, dst, Value::Bool(found))
 }
 
 /// `JumpIfNull` (`when_null`) or `JumpIfNotNull`. An unset register falls
@@ -170,9 +246,8 @@ fn jump_on_null(
 #[inline(always)]
 fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode) -> Option<Value> {
     let quiet = match mode {
-        FetchMode::Read => false,
+        FetchMode::Read | FetchMode::Destructure => false,
         FetchMode::Quiet | FetchMode::Isset | FetchMode::Empty => true,
-        FetchMode::Destructure => return None,
     };
     let key = slots.get(index.index())?.as_ref()?;
     if !matches!(
@@ -195,8 +270,37 @@ fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode
                 None => None,
             }
         }
+        Some(Value::InternedStr(string)) if mode != FetchMode::Destructure => {
+            string_offset_element(string.as_bytes(), key, quiet)
+        }
+        Some(Value::String(string)) if mode != FetchMode::Destructure => {
+            string_offset_element(string.as_bytes(), key, quiet)
+        }
         None | Some(Value::Null) if quiet => Some(Value::Null),
         _ => None,
+    }
+}
+
+/// `$string[$int_index]` when the index is an integer: returns the single-byte
+/// string, or `null` in quiet mode when out of bounds. Out-of-bounds reads fall
+/// back for PHP's warning.
+#[inline(always)]
+fn string_offset_element(bytes: &[u8], key: &Value, quiet: bool) -> Option<Value> {
+    let Value::Int(index) = *key else {
+        return None;
+    };
+    let from_start = if index < 0 {
+        (bytes.len() as i64).checked_add(index)?
+    } else {
+        index
+    };
+    match usize::try_from(from_start)
+        .ok()
+        .and_then(|pos| bytes.get(pos))
+    {
+        Some(&byte) => Some(Value::from(vec![byte])),
+        None if quiet => Some(Value::Null),
+        None => None,
     }
 }
 

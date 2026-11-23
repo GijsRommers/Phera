@@ -1,0 +1,5 @@
+framework:
+    secret: '%env(APP_SECRET)%'
+    session: true
+    router:
+        default_uri: 'http://warmup.test'
