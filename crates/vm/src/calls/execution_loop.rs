@@ -319,7 +319,7 @@ impl Machine<'_> {
                 }
                 Step::Slow => {
                     self.publish(position.ip);
-                    return LoopExit::Slow(instruction);
+                    return LoopExit::Slow(*instruction);
                 }
                 Step::Yield => return LoopExit::Yield,
             }
@@ -327,15 +327,16 @@ impl Machine<'_> {
     }
 
     /// Run simple instructions of one frame with its registers borrowed and
-    /// the counters in locals, until one is not simple. Returns that one,
-    /// with `position` just past it.
+    /// the counters in locals, until one is not simple. Lend that instruction
+    /// to `step`, with `position` just past it. Reading its operands from
+    /// the code slice avoids copying the instruction at each scalar exit.
     #[inline(always)]
-    fn run_simple<const GUARDED: bool>(
+    fn run_simple<'code, const GUARDED: bool>(
         &mut self,
-        instructions: &[Instruction],
+        instructions: &'code [Instruction],
         position: &mut Position,
         windowed: bool,
-    ) -> Result<Instruction, LoopExit> {
+    ) -> Result<&'code Instruction, LoopExit> {
         // Code with more registers than a window runs on the checked tail
         // of the register file, one instruction at a time, through `step`
         // and the VM (see `registers::WINDOW`).
@@ -344,7 +345,7 @@ impl Machine<'_> {
                 Some(instruction) => {
                     position.ip += 1;
                     self.executed += 1;
-                    Ok(*instruction)
+                    Ok(instruction)
                 }
                 None => Err(LoopExit::Invalid),
             };
@@ -372,7 +373,7 @@ impl Machine<'_> {
                 complete => complete,
             };
             if step == ScalarStep::Fallback {
-                break Ok(*instruction);
+                break Ok(instruction);
             }
             // Only the guarded loop's writes answer `Released`: freeing what
             // a register held may have queued a destructor.
@@ -516,9 +517,9 @@ impl Machine<'_> {
     /// The instructions that are not simple but need only the borrowed
     /// state: `foreach` over a snapshot, direct calls and plain returns.
     #[inline(always)]
-    fn step<const GUARDED: bool>(&mut self, instruction: Instruction, position: Position) -> Step {
+    fn step<const GUARDED: bool>(&mut self, instruction: &Instruction, position: Position) -> Step {
         let base = position.frame.base();
-        match instruction {
+        match *instruction {
             // Rare on the routes: out of `step`'s line (see `cold_step`).
             Instruction::IterNext { .. }
             | Instruction::IterNextKeyed { .. }
@@ -527,7 +528,7 @@ impl Machine<'_> {
             | Instruction::CheckType { .. }
             | Instruction::New { .. }
             | Instruction::InitDynamicCall { .. }
-            | Instruction::GuardBuiltin { .. } => self.cold_step::<GUARDED>(instruction, position),
+            | Instruction::GuardBuiltin { .. } => self.cold_step::<GUARDED>(*instruction, position),
             Instruction::CallDirect {
                 function,
                 args,
@@ -563,7 +564,7 @@ impl Machine<'_> {
                 }
             }
             Instruction::AssignConst { .. } | Instruction::SendConst { .. } => {
-                self.literal_step::<GUARDED>(instruction, position)
+                self.literal_step::<GUARDED>(*instruction, position)
             }
             Instruction::SendLocal { local } => match self.send(position, local) {
                 Step::Slow => self.send_reference(position, local),
@@ -605,7 +606,7 @@ impl Machine<'_> {
             | Instruction::IterStart { .. }
             | Instruction::IterEnd { .. }
             | Instruction::FetchNamedClassConstant { .. } => {
-                self.further_step::<GUARDED>(instruction, position)
+                self.further_step::<GUARDED>(*instruction, position)
             }
             _ => Step::Slow,
         }
