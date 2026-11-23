@@ -417,10 +417,11 @@ Laravel and Symfony applications get this with no change:
 
 - **Laravel** (a project with `artisan` and `bootstrap/app.php`): Phera runs
   its own entry script for `public/index.php`, which bootstraps the
-  application and its service providers, then handles the request.
+  application and its service providers, warms it up, then handles the
+  request.
 - **Symfony** with `symfony/runtime`: Phera sets `APP_RUNTIME` to its own
-  runtime class (unless something else chose one), which boots the kernel
-  and then handles the request.
+  runtime class (unless something else chose one), which boots the kernel,
+  warms it up, and then handles the request.
 - **Any other application** marks the point itself:
 
   ```php
@@ -432,6 +433,20 @@ Laravel and Symfony applications get this with no change:
 
   The first start serves such a script from the top until it reaches the
   call; later starts boot it before the first connection.
+
+The warm-up builds, once per worker, what nearly every request would build
+first. For Laravel: every Eloquent model under `app/Models` is booted and
+one query is built for it (no connection is opened), and the framework
+services Octane resolves in a new worker are resolved (the application's
+`octane.warm` list when it has one). For Symfony: the HTTP kernel, the
+router's matcher and Doctrine's metadata. On the test applications a
+Laravel Eloquent route went from WARM_README. Two things to know:
+
+- A model's `boot()` and `booted()` run once per worker, not once per
+  request, and without a request. A model whose boot asks for the request or
+  the signed-in user is left alone and boots in the request, as before.
+- `phera serve --no-service-warmup public` (or `PHERA_SERVICE_WARMUP=0` in
+  the environment) turns the warm-up off.
 
 The boot runs without a request: `$_GET`, `$_POST`, `$_COOKIE` and `$_FILES`
 are empty and `$_SERVER` holds the environment and the script's paths. Each

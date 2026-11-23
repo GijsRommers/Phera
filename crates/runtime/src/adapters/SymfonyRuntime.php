@@ -5,10 +5,10 @@
  *
  * `phera serve` sets APP_RUNTIME to this class when the application uses
  * symfony/runtime and nothing else chose a runtime. It is Symfony's own
- * runtime, except for HTTP: the kernel boots once per worker, before the
- * first request, and every request continues after Phera\snapshot() with
- * a copy of the booted kernel. What the runner does after the call is what
- * Symfony's HttpKernelRunner does.
+ * runtime, except for HTTP: the kernel boots and warms up once per worker,
+ * before the first request, and every request continues after
+ * Phera\snapshot() with a copy of that kernel. What the runner does after
+ * the call is what Symfony's HttpKernelRunner does.
  */
 
 namespace Phera\Symfony;
@@ -45,6 +45,7 @@ final class SnapshotRunner implements RunnerInterface
     {
         if ($this->kernel instanceof KernelInterface) {
             $this->kernel->boot();
+            $this->warmUp($this->kernel);
         }
 
         \Phera\snapshot();
@@ -68,5 +69,46 @@ final class SnapshotRunner implements RunnerInterface
         }
 
         return 0;
+    }
+
+    /**
+     * Builds, before the snapshot, what nearly every request would build
+     * first. Whatever exists at Phera\snapshot() is not built again by any
+     * request.
+     *
+     * No request exists while this runs, so it only builds what Symfony
+     * itself builds once and keeps for many requests when a kernel is
+     * long-running, and it runs no code of the application: the HTTP
+     * kernel with its event dispatcher (listeners are not created, they
+     * stay lazy), the router's matcher loaded from the cache the build
+     * warmed, and Doctrine's metadata of the mapped entities. No connection
+     * is opened. `phera serve --no-service-warmup` turns it off.
+     */
+    private function warmUp(KernelInterface $kernel): void
+    {
+        if ('0' === ($_SERVER['PHERA_SERVICE_WARMUP'] ?? '')) {
+            return;
+        }
+
+        $container = $kernel->getContainer();
+        $steps = [
+            static fn () => $container->get('http_kernel'),
+            static fn () => $container->get('router')->getMatcher(),
+            static function () use ($container) {
+                $doctrine = $container->get('doctrine');
+                foreach ($doctrine->getManagerNames() as $name => $service) {
+                    $doctrine->getManager($name)->getMetadataFactory()->getAllMetadata();
+                }
+            },
+        ];
+        foreach ($steps as $step) {
+            try {
+                $step();
+            } catch (\Throwable) {
+                // A service the application does not have, or one that
+                // cannot be built yet: the request that needs it reports
+                // it, as it always did.
+            }
+        }
     }
 }

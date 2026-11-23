@@ -121,6 +121,18 @@ impl Server {
             .expect("send the request and read its response")
     }
 
+    /// One request as raw HTTP, or the error of a server that does not
+    /// answer (yet): a worker that is still booting has not accepted.
+    pub fn try_request_once(
+        &self,
+        method: &str,
+        target: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> std::io::Result<String> {
+        self.try_request(method, target, headers, body)
+    }
+
     /// Sends a `GET` for every path at the same time, one connection each,
     /// and returns the raw responses in the order of `paths`.
     pub fn get_all(&self, paths: impl IntoIterator<Item = String>) -> Vec<String> {
