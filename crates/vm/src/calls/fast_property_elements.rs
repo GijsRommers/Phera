@@ -18,7 +18,7 @@ impl FastKey<'_> {
     /// Looks up this key in `array` using the fastest available lookup path
     /// (direct integer hash, precomputed interned hash, or borrowed bytes).
     #[inline]
-    pub(super) fn get<'v>(self, array: &'v PhpArray) -> Option<&'v Value> {
+    pub(super) fn get(self, array: &PhpArray) -> Option<&Value> {
         match self {
             Self::Int(integer) => array.get_int(integer),
             Self::Interned(string) => array.get_interned(string),

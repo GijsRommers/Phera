@@ -54,26 +54,6 @@ impl PropertyEntry {
         self.read(object)
     }
 
-    /// Borrows a non-hooked, non-reference property value while running `read`,
-    /// so nested array indexing does not clone the outer `PhpArray` handle.
-    pub(crate) fn with_matching_value<R>(
-        &self,
-        object: &Object,
-        scope: Option<&Rc<crate::classes::Class>>,
-        read: impl FnOnce(&Value) -> Option<R>,
-    ) -> Option<R> {
-        if self.hooks.is_some() || !self.matches(object, scope) || !self.read_without_static_notice
-        {
-            return None;
-        }
-        crate::property_storage::with_known(object, self.known(), |value| {
-            if matches!(value, Value::Reference(_)) {
-                return None;
-            }
-            read(value)
-        })
-    }
-
     /// Stores `value` for a write from `scope` when this entry was made for
     /// the object's class and that scope and the value fits the declared
     /// type as it is, as [`Vm::write_property_site`] does; `false`, with

@@ -142,18 +142,6 @@ pub(crate) fn read_known(object: &Object, property: Known<'_>) -> Option<Value> 
         .flatten()
 }
 
-/// Borrows the stored value of a known property while running `read`,
-/// avoiding cloning an outer array before indexing into it.
-pub(crate) fn with_known<R>(
-    object: &Object,
-    property: Known<'_>,
-    read: impl FnOnce(&Value) -> Option<R>,
-) -> Option<R> {
-    object
-        .with_properties(|properties| read(property.get(properties)?))
-        .flatten()
-}
-
 /// Increment or decrement an integer property in a single mutable borrow.
 pub(crate) fn increment_known(
     object: &Object,
