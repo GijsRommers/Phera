@@ -442,10 +442,16 @@ pub enum Instruction {
     InitDynamicCall {
         callee: Reg,
     },
-    /// Passes a computed value. If the parameter is by reference, PHP
-    /// rejects this, except for function results, which pass with a notice.
+    /// Passes a computed value. A by-reference parameter rejects it, unless
+    /// the argument was written as a call or as `new` (`of_call`):
+    ///
+    /// ```php
+    /// end(explode(',', $list));   // Notice: Only variables should be passed by reference
+    /// end($a . $b);               // Error: could not be passed by reference
+    /// ```
     SendValue {
         src: Reg,
+        of_call: bool,
     },
     /// Passes a local variable: by reference if the parameter wants one,
     /// otherwise its value.
@@ -468,6 +474,31 @@ pub enum Instruction {
     Call {
         dst: Reg,
         result: CallResult,
+    },
+    /// `Assign` of a temporary read nowhere else: the value moves into the
+    /// local and `src` is left empty, where `Assign` would copy it and a
+    /// `Clear` release it afterwards.
+    AssignTake {
+        local: Reg,
+        src: Reg,
+    },
+    /// `SendValue` of a temporary read nowhere else: `src` is left empty
+    /// after the send, so no `Clear` follows.
+    SendTake {
+        src: Reg,
+        /// As in [`Instruction::SendValue`].
+        of_call: bool,
+    },
+    /// `local = constants[constant]`: a literal assigned where it is read,
+    /// in place of a `LoadConst` into a temporary and an `AssignTake` of it.
+    AssignConst {
+        local: Reg,
+        constant: ConstId,
+    },
+    /// Sends `constants[constant]`: a literal sent where it is read, in
+    /// place of a `LoadConst` into a temporary and a `SendTake` of it.
+    SendConst {
+        constant: ConstId,
     },
     /// The method call that [`crate::MethodSite`] `site` of the running
     /// function describes, made at once when it is plain; otherwise the

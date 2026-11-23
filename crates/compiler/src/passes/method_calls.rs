@@ -123,6 +123,8 @@ pub(crate) fn rewrite(function: &mut Function) {
             first_argument,
             arguments: call.sends.len() as u16,
             after: Target(instructions.len() as u32),
+            // Settled by the takes pass, once the code no longer moves.
+            receiver_taken: false,
         });
         index = call.call + 1;
     }
@@ -175,7 +177,11 @@ fn give_own_registers(function: &mut Function, call: &mut FoundCall) -> bool {
             Instruction::LoadBool { value, .. } => Instruction::LoadBool { dst: fresh, value },
             other => other,
         };
-        function.instructions[send] = Instruction::SendValue { src: fresh };
+        // A literal, so not the result of a call.
+        function.instructions[send] = Instruction::SendValue {
+            src: fresh,
+            of_call: false,
+        };
         for (index, argument) in &mut call.sends {
             if *index == send {
                 *argument = SiteArgument::Value(fresh);
@@ -247,7 +253,7 @@ fn plain_call(
             Instruction::SendLocal { local } if local.index() < locals => {
                 sends.push((index, SiteArgument::Local(local)));
             }
-            Instruction::SendValue { src } => {
+            Instruction::SendValue { src, .. } => {
                 let (_, load, again) = *literals
                     .iter()
                     .rev()

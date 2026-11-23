@@ -24,7 +24,10 @@ impl Tables<'_> {
             ir::ArgumentSource::Value(source) if argument.spread => {
                 Instruction::SendSpread { src: source }
             }
-            ir::ArgumentSource::Value(source) => Instruction::SendValue { src: source },
+            ir::ArgumentSource::Value(source) => Instruction::SendValue {
+                src: source,
+                of_call: argument.of_call,
+            },
             ir::ArgumentSource::Place(place)
                 if place.scope == ir::PlaceScope::Local && place.path.is_empty() =>
             {
