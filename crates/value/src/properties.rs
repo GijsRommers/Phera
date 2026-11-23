@@ -275,18 +275,70 @@ impl Properties {
         }
     }
 
-    /// The properties as one array in PHP's order: `(array) $object`,
-    /// `get_object_vars`, `var_dump`.
+    /// The properties as one array in PHP's order: `get_object_vars`,
+    /// `var_dump`.
     pub fn to_array(&self) -> PhpArray {
+        self.array_of(false)
+    }
+
+    /// The properties as `(array) $object` makes them: in PHP's order, with
+    /// the name of an undeclared property that reads as an integer (`5`,
+    /// from `(object) [5 => 'five']` or `$object->{'5'}`) as an integer key.
+    pub fn to_cast_array(&self) -> PhpArray {
+        self.array_of(true)
+    }
+
+    fn array_of(&self, integer_names: bool) -> PhpArray {
         if self.layout.is_none() {
-            return self.others.as_deref().cloned().unwrap_or_default();
+            let others = self.others.as_deref().cloned().unwrap_or_default();
+            return if integer_names {
+                Self::with_integer_names(others)
+            } else {
+                others
+            };
         }
         // A declared key and an undeclared one never coincide, so the keys
-        // are distinct and the array is built in one go.
-        let entries = self
-            .iter()
-            .map(|(key, value)| Ok::<_, std::convert::Infallible>((key, copy_element(value))));
-        match PhpArray::try_from_distinct(entries) {
+        // are distinct and the array is built in one go, at its size.
+        let capacity = self.slots.len() + self.others.as_deref().map_or(0, PhpArray::len);
+        let array = PhpArray::build_distinct(capacity, |entries| {
+            if let Some(layout) = &self.layout {
+                for (key, slot) in layout.keys().iter().zip(self.slots.iter()) {
+                    if let Some(value) = slot {
+                        entries.push(key.clone(), copy_element(value));
+                    }
+                }
+            }
+            if let Some(others) = self.others.as_deref() {
+                for (key, value) in others.iter() {
+                    entries.push(key, copy_element(value));
+                }
+            }
+        });
+        match self.others {
+            Some(_) if integer_names => Self::with_integer_names(array),
+            _ => array,
+        }
+    }
+
+    /// `array` with each string key that reads as an integer made one. Two
+    /// keys cannot meet: `"5"` and `5` are not both properties, and `"05"`
+    /// stays a string.
+    fn with_integer_names(array: PhpArray) -> PhpArray {
+        let numeric = array.keys().any(|key| {
+            matches!(&key, crate::array::ArrayKey::String(name)
+                if !matches!(crate::array::ArrayKey::from_string(name.clone()), crate::array::ArrayKey::String(_)))
+        });
+        if !numeric {
+            return array;
+        }
+        let entries = array.iter().map(|(key, value)| {
+            let key = match key {
+                crate::array::ArrayKey::String(name) => crate::array::ArrayKey::from_string(name),
+                key => key,
+            };
+            Ok::<_, std::convert::Infallible>((key, value.clone()))
+        });
+        match PhpArray::try_from_distinct_with_capacity(entries, array.len()) {
             Ok(array) => array,
             Err(never) => match never {},
         }
@@ -390,5 +442,66 @@ impl Drop for Properties {
         }
         let slots = std::mem::take(&mut self.slots);
         PhpArray::release_entries(slots.into_vec().into_iter().flatten());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A table of properties the class does not declare: `(array) $object`
+    /// reads the names of integers as integers, `get_object_vars` and
+    /// `var_dump` as they are.
+    #[test]
+    fn a_cast_makes_integer_keys_of_names_that_read_as_integers() {
+        let mut others = PhpArray::new();
+        others.insert(ArrayKey::str("a"), Value::Int(1));
+        others.insert(ArrayKey::str("5"), Value::Int(2));
+        others.insert(ArrayKey::str("05"), Value::Int(3));
+        let properties = Properties::from_array(others);
+        assert_eq!(
+            properties.to_array().keys().collect::<Vec<_>>(),
+            vec![ArrayKey::str("a"), ArrayKey::str("5"), ArrayKey::str("05")]
+        );
+        assert_eq!(
+            properties.to_cast_array().keys().collect::<Vec<_>>(),
+            vec![ArrayKey::str("a"), ArrayKey::Int(5), ArrayKey::str("05")]
+        );
+    }
+
+    /// Declared properties come first, in layout order, those without a
+    /// value left out, then the undeclared ones; a lone reference is copied.
+    #[test]
+    fn a_cast_lists_declared_properties_then_the_others() {
+        let layout = Rc::new(PropertyLayout::new([
+            ArrayKey::str("\0*\0hidden"),
+            ArrayKey::str("unset"),
+            ArrayKey::str("shown"),
+        ]));
+        let mut properties = Properties::with_layout(
+            layout,
+            vec![
+                Some(Value::Int(1)),
+                None,
+                Some(Value::Reference(Rc::new(std::cell::RefCell::new(
+                    Value::Int(2),
+                )))),
+            ]
+            .into_boxed_slice(),
+        );
+        properties.insert(ArrayKey::str("dynamic"), Value::Int(3));
+        let array = properties.to_cast_array();
+        assert_eq!(
+            array.keys().collect::<Vec<_>>(),
+            vec![
+                ArrayKey::str("\0*\0hidden"),
+                ArrayKey::str("shown"),
+                ArrayKey::str("dynamic")
+            ]
+        );
+        assert!(matches!(
+            array.get(&ArrayKey::str("shown")),
+            Some(Value::Int(2))
+        ));
     }
 }

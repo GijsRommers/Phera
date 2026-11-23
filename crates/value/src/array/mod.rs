@@ -37,6 +37,7 @@ mod tests;
 
 use crate::value::Value;
 pub use key::ArrayKey;
+pub use mutation::DistinctEntries;
 use std::fmt;
 use storage::Storage;
 

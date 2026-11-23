@@ -215,6 +215,14 @@ impl Object {
             .map_or_else(|_| PhpArray::new(), |properties| properties.to_array())
     }
 
+    /// The properties as `(array) $object` makes them (see
+    /// [`Properties::to_cast_array`]).
+    pub fn to_cast_array(&self) -> PhpArray {
+        self.properties
+            .try_borrow()
+            .map_or_else(|_| PhpArray::new(), |properties| properties.to_cast_array())
+    }
+
     /// Reads the stored table without cloning it or entering a PHP callback.
     pub fn with_properties<R>(&self, read: impl FnOnce(&Properties) -> R) -> Option<R> {
         let properties = self.properties.try_borrow().ok()?;

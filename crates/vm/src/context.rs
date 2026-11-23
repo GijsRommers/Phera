@@ -897,6 +897,9 @@ impl Context for Vm {
             .and_then(|class| class.hooks.as_ref()?.properties);
         match projection {
             Some(project) => project(self, object, purpose),
+            None if purpose == phera_extension_api::PropertyPurpose::ArrayCast => {
+                Ok(object.to_cast_array())
+            }
             None => Ok(object.to_array()),
         }
     }

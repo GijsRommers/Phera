@@ -268,12 +268,45 @@ impl Vm {
         }
     }
 
+    /// `(array) $object` for an object of a class whose properties are all
+    /// in its slots and its undeclared table: no hook, no native property
+    /// view, no lazy state, nothing to run and nothing to report. The array
+    /// is built from the slots at its final size. `None` for any other
+    /// operand, which takes the general way.
+    #[inline]
+    fn plain_object_array(&self, source: Reg) -> Option<phera_value::PhpArray> {
+        let operand = self.operand(source);
+        let Value::Object(object) = &*operand else {
+            return None;
+        };
+        let class = object
+            .class
+            .as_any()
+            .downcast_ref::<crate::classes::Class>()?;
+        // A closure has no properties to show; the general way makes its array.
+        if class.name == "Closure"
+            || class
+                .property_facts()
+                .has(crate::classes::property_facts::PropertyFacts::HOOKS)
+            || (self.classes.has_lazy_objects && object.lazy_instance().is_some())
+        {
+            return None;
+        }
+        Some(object.to_cast_array())
+    }
+
     pub(crate) fn execute_cast(
         &mut self,
         to: phera_bytecode::CastKind,
         destination: Reg,
         source: Reg,
     ) -> Result<(), NativeError> {
+        if to == CastKind::Array
+            && let Some(array) = self.plain_object_array(source)
+        {
+            self.set(destination, Value::from(array));
+            return Ok(());
+        }
         let value = self.get(source);
         let mut diagnostics = crate::diagnostics::OperatorDiagnostics::new(self);
         let result = match to {
@@ -286,6 +319,10 @@ impl Vm {
             }
             CastKind::String => Value::String(to_php_string(&value, &mut diagnostics.buffer)?),
             CastKind::Array => Value::from(match &value {
+                // A closure has no properties to show: the array holds it.
+                Value::Object(object) if object.class.name() == "Closure" => {
+                    phera_value::PhpArray::from_values([value.clone()], 1)
+                }
                 Value::Object(object) => diagnostics
                     .vm
                     .object_properties(object, PropertyPurpose::ArrayCast)?,
