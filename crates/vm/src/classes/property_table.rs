@@ -33,6 +33,7 @@ const TABLE_HAS_MAGIC_GET: u8 = 1 << 1;
 const TABLE_HAS_MAGIC_ISSET: u8 = 1 << 2;
 const TABLE_HAS_STATICS: u8 = 1 << 3;
 const TABLE_HASHED: u8 = 1 << 4;
+const TABLE_HAS_MAGIC_SET: u8 = 1 << 5;
 
 /// Compact 16-byte `Copy` descriptor for a declared instance property.
 #[derive(Clone, Copy)]
@@ -154,6 +155,9 @@ impl PropertyTable {
         if facts.has(PropertyFacts::MAGIC_ISSET) {
             table_flags |= TABLE_HAS_MAGIC_ISSET;
         }
+        if facts.has(PropertyFacts::MAGIC_SET) {
+            table_flags |= TABLE_HAS_MAGIC_SET;
+        }
         if !class.static_properties.is_empty() {
             table_flags |= TABLE_HAS_STATICS;
         }
@@ -274,6 +278,15 @@ impl PropertyTable {
     pub(crate) fn quiet_null_when_missing(&self) -> bool {
         self.table_flags & (TABLE_HAS_MAGIC_GET | TABLE_HAS_MAGIC_ISSET | TABLE_HAS_NATIVE_PROPS)
             == 0
+    }
+
+    /// True when a write may fill a declared property that holds no value.
+    /// With `__set`, a property that was `unset()` sends its next write to
+    /// `__set` instead, so such a write must take the general path, which
+    /// tells an unset property from one that was never initialized.
+    #[inline(always)]
+    pub(crate) fn fills_missing_directly(&self) -> bool {
+        self.table_flags & TABLE_HAS_MAGIC_SET == 0
     }
 
     /// Resolve a declared property by interned [`PropKey`] and caller scope.
