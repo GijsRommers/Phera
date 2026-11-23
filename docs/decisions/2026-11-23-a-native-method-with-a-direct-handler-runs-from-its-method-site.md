@@ -33,13 +33,13 @@ Instructions per operation above an empty loop, `m.php` of this pull request (Li
 
 | operation | PHP 8.5 | before | after |
 | --- | ---: | ---: | ---: |
-| `ReflectionProperty::getValue($e)` | 207 | 1,567 | 535 |
-| `ReflectionProperty::setValue($e, 'n')` | 308 | 1,943 | 812 |
-| `ReflectionProperty::setRawValueWithoutLazyInitialization($e, 'n')` | 378 | 1,936 | 812 |
-| accessor `setValue` (a method that tests `instanceof` and calls the line above) | 724 | 4,026 | 2,847 |
-| hydrate one row of five fields | 7,561 | 44,837 | 38,952 |
+| `ReflectionProperty::getValue($e)` | 206 | 1,555 | 522 |
+| `ReflectionProperty::setValue($e, 'n')` | 308 | 1,920 | 788 |
+| `ReflectionProperty::setRawValueWithoutLazyInitialization($e, 'n')` | 378 | 1,913 | 788 |
+| accessor `setValue` (a method that tests `instanceof` and calls the line above) | 724 | 3,938 | 2,758 |
+| hydrate one row of five fields | 7,561 | 43,648 | 37,762 |
 
-The calls are still two and a half times PHP's. What is left is the cost of any native method call from a site, not of reflection: a method with no argument and nothing to do (`$method->isStatic()`) costs 377 here against 132 in PHP. That cost is in `call_method` and the loop that dispatches it (about 300 of the 535), which this change leaves to the work on method calls.
+The calls are still two and a half times PHP's. What is left is the cost of any native method call from a site, not of reflection: a method with no argument and nothing to do (`$method->isStatic()`) costs 377 here against 132 in PHP. That cost is in `call_method` and the loop that dispatches it (about 300 of the 522), which this change leaves to the work on method calls.
 
 `bench-spl` is 15% lower in instructions, `bench-natives` 2.6% and `bench-reflection` 2.3%, because every native method with a direct handler and arguments takes this path: `ArrayObject`, `SplFixedArray`, `SplObjectStorage`, `DateTime` and the others.
 
