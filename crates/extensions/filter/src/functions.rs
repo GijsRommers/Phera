@@ -9,8 +9,8 @@ use std::rc::Rc;
 
 use phera_extension_api::value::to_int;
 use phera_extension_api::{
-    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, PhpArray,
-    Registry, Value, args, prepare_call,
+    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
+    PhpArray, Registry, Value, args, prepare_call,
 };
 
 use crate::apply;
@@ -111,7 +111,7 @@ async fn by_key(
 ) -> NativeResult {
     let mut result = PhpArray::new();
     for (key, filter) in definition.iter() {
-        let Some(name) = key.as_str_bytes() else {
+        let ArrayKey::String(name) = &key else {
             return Err(NativeError::type_error(format!(
                 "{}(): Argument #2 ($options) must contain only string keys",
                 call.name()

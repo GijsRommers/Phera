@@ -92,10 +92,10 @@ impl Vm {
                 vm,
             )
         })?;
-        let extension = arguments
-            .first()
-            .and_then(Value::str_ref)
-            .map(|name| name.to_string_lossy());
+        let extension = match arguments.first() {
+            Some(Value::String(name)) => Some(name.to_string_lossy()),
+            _ => None,
+        };
         let loaded = extension.as_ref().is_some_and(|name| {
             self.registry
                 .extensions()
@@ -207,7 +207,7 @@ impl Vm {
             let params = [Param::new(parameter, ParamType::String)];
             phera_extension_api::prepare_call(function, &params, &mut arguments, vm)
         })?;
-        let Some(name) = arguments.first().and_then(Value::str_ref) else {
+        let Some(Value::String(name)) = arguments.first() else {
             return Err(internal_error!("constant or function name"));
         };
         let name = name.to_string_lossy();

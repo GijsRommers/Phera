@@ -144,7 +144,7 @@ impl SlotAccess {
             Value::Bool(false) => TypeMask::FALSE,
             Value::Int(_) => TypeMask::INT,
             Value::Float(_) => TypeMask::FLOAT,
-            Value::InternedStr(_) | Value::String(_) => TypeMask::STRING,
+            Value::String(_) => TypeMask::STRING,
             Value::Array(_) => TypeMask::ARRAY,
             Value::Object(_) => TypeMask::OBJECT,
             _ => return false,

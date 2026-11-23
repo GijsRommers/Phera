@@ -53,9 +53,8 @@ pub(crate) fn to_number(v: &Value, diag: &mut dyn Diagnostics) -> Result<NumVal,
         Value::Float(f) => Ok(NumVal::Float(*f)),
         Value::Bool(b) => Ok(NumVal::Int(*b as i64)),
         Value::Null => Ok(NumVal::Int(0)),
-        Value::InternedStr(_) | Value::String(_) => {
-            let bytes = v.as_str_bytes().expect("checked string");
-            let p = parse_numeric(bytes);
+        Value::String(s) => {
+            let p = parse_numeric(s.as_bytes());
             match p.value {
                 None => Err(ConvFail),
                 Some(val) => {
@@ -92,9 +91,8 @@ pub fn try_get_long(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, ConvFa
         Value::Bool(b) => Ok(*b as i64),
         Value::Null => Ok(0),
         Value::Float(f) => Ok(crate::convert::float_to_key_int(*f, diag)),
-        Value::InternedStr(_) | Value::String(_) => {
-            let bytes = v.as_str_bytes().expect("checked string");
-            let p = parse_numeric(bytes);
+        Value::String(s) => {
+            let p = parse_numeric(s.as_bytes());
             match p.value {
                 None => Err(ConvFail),
                 Some(NumVal::Int(i)) => {
@@ -111,7 +109,7 @@ pub fn try_get_long(v: &Value, diag: &mut dyn Diagnostics) -> Result<i64, ConvFa
                     if l as f64 != f {
                         diag.deprecated(format!(
                             "Implicit conversion from float-string \"{}\" to int loses precision",
-                            String::from_utf8_lossy(bytes)
+                            String::from_utf8_lossy(s.as_bytes())
                         ));
                     }
                     Ok(l)

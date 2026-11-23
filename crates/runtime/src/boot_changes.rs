@@ -135,9 +135,6 @@ impl Carried {
 /// Whether the boot left a value as it was: the same string or number.
 fn same(old: &Value, new: &Value) -> bool {
     match (old, new) {
-        (Value::InternedStr(old), Value::InternedStr(new)) => std::ptr::eq(*old, *new),
-        (Value::InternedStr(old), Value::String(new)) => old.as_bytes() == new.as_bytes(),
-        (Value::String(old), Value::InternedStr(new)) => old.as_bytes() == new.as_bytes(),
         (Value::String(old), Value::String(new)) => old.as_bytes() == new.as_bytes(),
         (Value::Int(old), Value::Int(new)) => old == new,
         (Value::Float(old), Value::Float(new)) => old.to_bits() == new.to_bits(),

@@ -60,8 +60,7 @@ impl StatementClass {
                 "{argument} PDO::ATTR_STATEMENT_CLASS class must be a valid class"
             ))
         };
-        let class = class.deref();
-        let Some(name) = class.str_ref() else {
+        let Value::String(name) = &*class.deref() else {
             return Err(invalid_class());
         };
         let name = name.to_string_lossy();

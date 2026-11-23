@@ -318,9 +318,9 @@ fn default_value(
 
 fn hook_kind(args: &[Value]) -> Result<PropertyHookKind, NativeError> {
     let name = args::object(args, 0).and_then(|object| object.get(&ArrayKey::str("name")));
-    match name.as_ref().and_then(Value::as_str_bytes) {
-        Some(b"Get") => Ok(PropertyHookKind::Get),
-        Some(b"Set") => Ok(PropertyHookKind::Set),
+    match name {
+        Some(Value::String(name)) if name.as_bytes() == b"Get" => Ok(PropertyHookKind::Get),
+        Some(Value::String(name)) if name.as_bytes() == b"Set" => Ok(PropertyHookKind::Set),
         _ => Err(NativeError::type_error("Expected a PropertyHookType case")),
     }
 }

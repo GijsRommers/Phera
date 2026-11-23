@@ -83,10 +83,7 @@ impl Vm {
 }
 
 fn spread_key(value: Value, target: SpreadTarget) -> Result<ArrayKey, NativeError> {
-    if matches!(
-        &*value.deref(),
-        Value::Int(_) | Value::InternedStr(_) | Value::String(_)
-    ) {
+    if matches!(&*value.deref(), Value::Int(_) | Value::String(_)) {
         return Ok(ArrayKey::from_value(&value)?);
     }
     let target = match target {

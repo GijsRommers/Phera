@@ -253,9 +253,7 @@ fn default_namespace(
     let current = lookup_namespace(context, this, &[])?;
     let expected = args::bytes(arguments, 0);
     Ok(Value::Bool(
-        current
-            .as_str_bytes()
-            .is_some_and(|value| value == expected),
+        matches!(&current, Value::String(value) if value.as_bytes() == expected),
     ))
 }
 

@@ -44,7 +44,7 @@ impl PrintR<'_> {
             Container::Array(_) => "Array\n".to_string(),
             Container::Object(object) if object.class.is_enum() => {
                 let backing = match object.get(&ArrayKey::str("value")) {
-                    Some(Value::InternedStr(_) | Value::String(_)) => ":string",
+                    Some(Value::String(_)) => ":string",
                     Some(Value::Int(_)) => ":int",
                     _ => "",
                 };
@@ -88,14 +88,13 @@ impl Style for PrintR<'_> {
         out.push(b'[');
         match (key, container) {
             (ArrayKey::Int(int), _) => out.extend_from_slice(int.to_string().as_bytes()),
-            (ArrayKey::Interned(_) | ArrayKey::String(_), Container::Array(_)) => {
-                out.extend_from_slice(key.as_str_bytes().expect("checked string key"));
+            (ArrayKey::String(string), Container::Array(_)) => {
+                out.extend_from_slice(string.as_bytes());
             }
             // A property shows who may see it: [name:protected] or
             // [name:Class:private].
-            (ArrayKey::Interned(_) | ArrayKey::String(_), Container::Object(_)) => {
-                let (name, scope) =
-                    split_property_key(key.as_str_bytes().expect("checked string key"));
+            (ArrayKey::String(string), Container::Object(_)) => {
+                let (name, scope) = split_property_key(string.as_bytes());
                 out.extend_from_slice(name);
                 match scope {
                     PropertyScope::Public => {}

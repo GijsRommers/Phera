@@ -140,7 +140,6 @@ impl Vm {
 pub(crate) fn display_key(key: &ArrayKey) -> String {
     match key {
         ArrayKey::Int(index) => index.to_string(),
-        ArrayKey::Interned(string) => format!("\"{}\"", string.to_string_lossy()),
         ArrayKey::String(string) => format!("\"{}\"", string.to_string_lossy()),
     }
 }

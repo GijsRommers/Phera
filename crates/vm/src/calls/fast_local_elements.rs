@@ -65,7 +65,7 @@ impl Machine<'_> {
             let PathStep::Index(register) = step else {
                 return None;
             };
-            let [Some(key @ (Value::Int(_) | Value::InternedStr(_) | Value::String(_)))] =
+            let [Some(key @ (Value::Int(_) | Value::String(_)))] =
                 self.registers.window(base + register.index(), 1)
             else {
                 return None;
@@ -79,24 +79,13 @@ impl Machine<'_> {
         let (last, levels) = keys.split_last()?;
         let mut current = &**array;
         for key in levels {
-            let found = match key.expect("validated above") {
-                Value::Int(integer) => current.get_int(*integer),
-                Value::InternedStr(string) => current.get_interned(string),
-                Value::String(string) => current.get_str(string),
-                _ => unreachable!("validated above"),
-            };
+            let found = current.get_value_key((*key)?)?;
             current = match found {
                 Some(Value::Array(inner)) => inner,
                 None => return Some(None),
                 Some(_) => return None,
             };
         }
-        let found = match last.expect("validated above") {
-            Value::Int(integer) => current.get_int(*integer),
-            Value::InternedStr(string) => current.get_interned(string),
-            Value::String(string) => current.get_str(string),
-            _ => unreachable!("validated above"),
-        };
-        Some(found)
+        current.get_value_key((*last)?)
     }
 }

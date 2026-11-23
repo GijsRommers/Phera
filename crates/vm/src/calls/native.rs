@@ -123,12 +123,12 @@ impl Vm {
             }
             CallTarget::Intrinsic(crate::intrinsics::Intrinsic::Class(
                 crate::class_function::ClassFunction::PropertyExists,
-            )) if let (Some(destination), [Value::Object(object), name]) =
+            )) if let (Some(destination), [Value::Object(object), Value::String(name)]) =
                 (destination, arguments.as_slice())
-                && let Some(name) = name.to_php_string()
                 && object.lazy().is_some() =>
             {
-                Box::pin(self.lazy_property_exists(destination, object.clone(), name)).await?;
+                Box::pin(self.lazy_property_exists(destination, object.clone(), name.clone()))
+                    .await?;
                 self.call_stack.recycle_native_arguments(arguments);
                 Ok(None)
             }

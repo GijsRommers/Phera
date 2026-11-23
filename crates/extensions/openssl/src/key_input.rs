@@ -65,7 +65,6 @@ pub(crate) async fn load(
         });
     }
     let string = match value {
-        Value::InternedStr(string) => string.to_php_string(),
         Value::String(string) => string,
         Value::Object(_) => context.stringify(&value).await?,
         _ => return Ok(None),

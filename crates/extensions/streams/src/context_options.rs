@@ -313,14 +313,13 @@ fn set_option(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
 
 fn merge(target: &mut PhpArray, source: &PhpArray) -> Result<(), NativeError> {
     for (key, entry) in source.iter() {
-        let (ArrayKey::Interned(_) | ArrayKey::String(_), Value::Array(options)) = (&key, entry)
-        else {
+        let (ArrayKey::String(_), Value::Array(options)) = (&key, entry) else {
             return Err(NativeError::value_error(
                 "Options should have the form [\"wrappername\"][\"optionname\"] = $value",
             ));
         };
         for (option, value) in options.iter() {
-            if matches!(option, ArrayKey::Interned(_) | ArrayKey::String(_)) {
+            if let ArrayKey::String(_) = option {
                 set(target, key.clone(), option.clone(), value.clone());
             }
         }

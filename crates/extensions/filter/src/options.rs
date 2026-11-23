@@ -177,7 +177,10 @@ impl Options {
     }
 
     pub fn string(&self, name: &str) -> Option<phera_extension_api::PhpString> {
-        self.get(name)?.deref().to_php_string()
+        match &*self.get(name)?.deref() {
+            Value::String(string) => Some(string.clone()),
+            _ => None,
+        }
     }
 
     pub fn int(&self, context: &mut dyn Context, name: &str) -> Result<Option<i64>, NativeError> {

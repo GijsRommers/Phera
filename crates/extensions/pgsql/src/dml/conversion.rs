@@ -1,6 +1,6 @@
 //! `pg_convert($db, $table, $fields)` converts PHP values to SQL fragments.
 
-use phera_extension_api::{Context, NativeError, PhpArray, Value, value::to_php_string};
+use phera_extension_api::{ArrayKey, Context, NativeError, PhpArray, Value, value::to_php_string};
 
 use super::metadata::Column;
 use crate::escape;
@@ -22,11 +22,11 @@ pub fn convert(
     };
     let mut fields = Vec::with_capacity(values.len());
     for (key, value) in values.iter() {
-        let Some(name) = key.as_str_bytes() else {
+        let ArrayKey::String(name) = key else {
             context.warning(format!("{call}(): Accepts only associative array"));
             return Ok(None);
         };
-        let name = String::from_utf8_lossy(name).into_owned();
+        let name = name.to_string_lossy();
         let column = columns.iter().find(|column| column.name == name);
         let value = value.deref();
         let no_conversion = flags & 256 != 0;
@@ -50,7 +50,7 @@ pub fn convert(
                 Some(value) => value,
                 None => {
                     if (matches!(&*value, Value::Null)
-                        || value.as_str_bytes().is_some_and(<[u8]>::is_empty) && flags & 4 != 0)
+                        || matches!(&*value, Value::String(s) if s.as_bytes().is_empty() && flags & 4 != 0))
                         && column.default
                         && flags & 2 == 0
                     {
@@ -75,7 +75,7 @@ fn convert_value(
     column: &Column,
     flags: i64,
 ) -> Result<Option<Value>, NativeError> {
-    let empty = value.as_str_bytes().is_some_and(<[u8]>::is_empty);
+    let empty = matches!(value, Value::String(s) if s.as_bytes().is_empty());
     if matches!(value, Value::Null) || empty && flags & 4 != 0 {
         return Ok(
             ((!column.not_null || flags & 8 != 0) && (!column.default || flags & 2 != 0))
@@ -87,23 +87,15 @@ fn convert_value(
         "int2" | "int4" | "int8" | "oid" => match value {
             Value::Int(number) => Some(Value::Int(*number)),
             Value::Float(number) => Some(Value::Int(*number as i64)),
-            Value::InternedStr(_) | Value::String(_) if text.is_empty() => {
-                Some(Value::from("NULL"))
-            }
-            Value::InternedStr(_) | Value::String(_) if text.parse::<i64>().is_ok() => {
-                Some(Value::from(text))
-            }
+            Value::String(_) if text.is_empty() => Some(Value::from("NULL")),
+            Value::String(_) if text.parse::<i64>().is_ok() => Some(Value::from(text)),
             _ => None,
         },
         "float4" | "float8" | "numeric" | "money" => match value {
             Value::Int(number) => Some(Value::Int(*number)),
             Value::Float(number) => Some(Value::Float(*number)),
-            Value::InternedStr(_) | Value::String(_) if text.is_empty() => {
-                Some(Value::from("NULL"))
-            }
-            Value::InternedStr(_) | Value::String(_)
-                if text.parse::<f64>().is_ok_and(f64::is_finite) =>
-            {
+            Value::String(_) if text.is_empty() => Some(Value::from("NULL")),
+            Value::String(_) if text.parse::<f64>().is_ok_and(f64::is_finite) => {
                 Some(Value::from(text))
             }
             _ => None,

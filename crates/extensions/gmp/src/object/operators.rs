@@ -40,10 +40,6 @@ fn operand(context: &mut dyn Context, value: &Value) -> Result<BigInt> {
     let coerced = match value {
         Value::Object(object) if object.class.name() == "GMP" => Some(number(object)),
         Value::Int(integer) => Some(BigInt::from(*integer)),
-        Value::InternedStr(string) => {
-            return integer::parse(string.as_bytes(), 0)
-                .ok_or_else(|| NativeError::value_error("Number is not an integer string"));
-        }
         Value::String(string) => {
             return integer::parse(string.as_bytes(), 0)
                 .ok_or_else(|| NativeError::value_error("Number is not an integer string"));
@@ -95,13 +91,6 @@ fn shift(context: &mut dyn Context, op: Op, left: &Value, right: &Value) -> Resu
         Value::Int(integer) => *integer,
         Value::Object(object) if object.class.name() == "GMP" => integer::to_int(&number(object)),
         Value::Float(_) => value::to_int(right, context.diagnostics())?,
-        Value::InternedStr(text) => {
-            let numeric = value::parse_numeric(text.as_bytes());
-            match numeric.value {
-                Some(value::NumVal::Int(integer)) if numeric.exact => integer,
-                _ => return Err(NativeError::value_error("Number is not an integer string")),
-            }
-        }
         Value::String(text) => {
             let numeric = value::parse_numeric(text.as_bytes());
             match numeric.value {

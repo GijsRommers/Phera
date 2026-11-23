@@ -110,7 +110,6 @@ pub fn float_results_within_one_ulp(php: &str, rust: &str) -> bool {
 fn encode_key(key: &ArrayKey) -> String {
     match key {
         ArrayKey::Int(int) => format!("I:{int}"),
-        ArrayKey::Interned(string) => format!("S:{}", hex(string.as_bytes())),
         ArrayKey::String(string) => format!("S:{}", hex(string.as_bytes())),
     }
 }
@@ -122,7 +121,6 @@ pub fn encode(value: &Value) -> String {
         Value::Bool(flag) => format!("B:{}", u8::from(*flag)),
         Value::Int(int) => format!("I:{int}"),
         Value::Float(float) => encode_float(*float),
-        Value::InternedStr(string) => format!("S:{}", hex(string.as_bytes())),
         Value::String(string) => format!("S:{}", hex(string.as_bytes())),
         Value::Array(array) => {
             let mut text = String::from("A(");
@@ -185,10 +183,9 @@ pub fn php_literal(value: &Value) -> String {
         // The shortest representation reads back as the same float, and the
         // cast keeps `1` a float and `-0` negative.
         Value::Float(float) => format!("(float)\"{}\"", float_repr(*float)),
-        Value::InternedStr(_) | Value::String(_) => {
-            let escaped: String = value
-                .as_str_bytes()
-                .expect("checked string")
+        Value::String(string) => {
+            let escaped: String = string
+                .as_bytes()
                 .iter()
                 .map(|byte| format!("\\x{byte:02x}"))
                 .collect();
@@ -200,7 +197,6 @@ pub fn php_literal(value: &Value) -> String {
                 .map(|(key, item)| {
                     let key = match key {
                         ArrayKey::Int(int) => php_literal(&Value::Int(int)),
-                        ArrayKey::Interned(string) => php_literal(&Value::InternedStr(string)),
                         ArrayKey::String(string) => php_literal(&Value::String(string.clone())),
                     };
                     format!("{key} => {}", php_literal(item))

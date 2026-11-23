@@ -6,6 +6,7 @@ use std::{
 };
 
 use crate::ArrayKey;
+use crate::Value;
 use crate::value::ClassHandle;
 
 /// The decoder's class allowlist and depth at entry into a native C: payload.
@@ -202,9 +203,7 @@ pub fn incomplete_object_message(object: &crate::Object, action: &str) -> String
     let name = match object.get(&crate::ArrayKey::interned_str(
         INCOMPLETE_CLASS_NAME.as_bytes(),
     )) {
-        Some(value) if value.is_string() => {
-            value.str_ref().expect("checked string").to_string_lossy()
-        }
+        Some(Value::String(name)) => name.to_string_lossy(),
         _ => "unknown".into(),
     };
     format!(

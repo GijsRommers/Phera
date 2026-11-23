@@ -1,9 +1,7 @@
 //! Reading by key: `$a[5]`, `$a['name']`, `isset($a['name'])`.
 
-use super::key::numeric_string_key;
 use super::storage::Storage;
 use super::{ArrayKey, PhpArray};
-use crate::intern::InternedStr;
 use crate::string::PhpString;
 use crate::value::Value;
 
@@ -12,7 +10,7 @@ use crate::value::Value;
 pub(super) fn list_position(key: &ArrayKey) -> Option<usize> {
     match key {
         ArrayKey::Int(index) => usize::try_from(*index).ok(),
-        ArrayKey::Interned(_) | ArrayKey::String(_) => None,
+        ArrayKey::String(_) => None,
     }
 }
 
@@ -35,6 +33,7 @@ impl PhpArray {
         }
     }
 
+    /// Reads an integer-keyed element without constructing an [`ArrayKey`].
     #[inline]
     pub fn get_int(&self, key: i64) -> Option<&Value> {
         match &self.storage {
@@ -43,34 +42,27 @@ impl PhpArray {
         }
     }
 
-    /// Borrowed lookup by an interned string: uses the pre-computed numeric
-    /// classification and hash with zero allocation and pointer-equality hits.
-    #[inline]
-    pub fn get_interned(&self, key: &'static InternedStr) -> Option<&Value> {
-        if let Some(int_key) = key.numeric_key() {
-            return self.get_int(int_key);
-        }
-        match &self.storage {
-            Storage::List(_) => None,
-            Storage::Map(map) => map.entries[map.find_interned(key)?].value.as_ref(),
-        }
-    }
-
-    /// Borrowed lookup by a `PhpString` without cloning an `ArrayKey`.
+    /// Reads a string-keyed element (applying PHP numeric-string key
+    /// normalisation) without cloning the [`PhpString`] handle.
     #[inline]
     pub fn get_str(&self, key: &PhpString) -> Option<&Value> {
-        self.get_str_bytes(key.as_bytes())
-    }
-
-    /// Borrowed lookup by raw string bytes with PHP numeric-key normalization.
-    #[inline]
-    pub fn get_str_bytes(&self, bytes: &[u8]) -> Option<&Value> {
-        if let Some(int_key) = numeric_string_key(bytes) {
-            return self.get_int(int_key);
+        if let Some(index) = key.numeric_key() {
+            return self.get_int(index);
         }
         match &self.storage {
             Storage::List(_) => None,
-            Storage::Map(map) => map.entries[map.find_str_bytes(bytes)?].value.as_ref(),
+            Storage::Map(map) => map.entries[map.find_str(key)?].value.as_ref(),
+        }
+    }
+
+    /// Reads `$array[$key]` for integer or string keys. The outer option
+    /// distinguishes an unsupported key from an absent element.
+    #[inline]
+    pub fn get_value_key(&self, key: &Value) -> Option<Option<&Value>> {
+        match key {
+            Value::Int(key) => Some(self.get_int(*key)),
+            Value::String(key) => Some(self.get_str(key)),
+            _ => None,
         }
     }
 
@@ -85,6 +77,7 @@ impl PhpArray {
         }
     }
 
+    /// Mutably borrows an integer-keyed element without constructing an [`ArrayKey`].
     #[inline]
     pub fn get_mut_int(&mut self, key: i64) -> Option<&mut Value> {
         match &mut self.storage {
@@ -96,34 +89,23 @@ impl PhpArray {
         }
     }
 
-    #[inline]
-    pub fn get_mut_interned(&mut self, key: &'static InternedStr) -> Option<&mut Value> {
-        if let Some(int_key) = key.numeric_key() {
-            return self.get_mut_int(int_key);
-        }
-        match &mut self.storage {
-            Storage::List(_) => None,
-            Storage::Map(map) => {
-                let position = map.find_interned(key)?;
-                map.entries[position].value.as_mut()
-            }
-        }
-    }
-
+    /// Mutably borrows a string-keyed element (applying PHP numeric-string key
+    /// normalisation) without cloning the [`PhpString`] handle.
     #[inline]
     pub fn get_mut_str(&mut self, key: &PhpString) -> Option<&mut Value> {
-        if let Some(int_key) = numeric_string_key(key.as_bytes()) {
-            return self.get_mut_int(int_key);
+        if let Some(index) = key.numeric_key() {
+            return self.get_mut_int(index);
         }
         match &mut self.storage {
             Storage::List(_) => None,
             Storage::Map(map) => {
-                let position = map.find_str_bytes(key.as_bytes())?;
+                let position = map.find_str(key)?;
                 map.entries[position].value.as_mut()
             }
         }
     }
 
+    #[inline]
     pub fn contains_key(&self, key: &ArrayKey) -> bool {
         self.find_pos(key).is_some()
     }
@@ -131,11 +113,6 @@ impl PhpArray {
     #[inline]
     pub fn contains_int(&self, key: i64) -> bool {
         self.get_int(key).is_some()
-    }
-
-    #[inline]
-    pub fn contains_interned(&self, key: &'static InternedStr) -> bool {
-        self.get_interned(key).is_some()
     }
 
     #[inline]

@@ -122,8 +122,8 @@ impl Vm {
         };
         let class = match &value {
             Value::Object(object) => self.classes.for_object(object),
-            Value::InternedStr(_) | Value::String(_) => {
-                let name = value.str_ref().expect("checked string").to_string_lossy();
+            Value::String(name) => {
+                let name = name.to_string_lossy();
                 if autoload {
                     self.lookup_class_from(&name, Some((function.name(), &arguments)))
                         .await?
@@ -278,10 +278,7 @@ impl Vm {
 }
 
 fn check_object_or_class(function: ClassFunction, value: &Value) -> Result<(), NativeError> {
-    if matches!(
-        value,
-        Value::InternedStr(_) | Value::String(_) | Value::Object(_)
-    ) {
+    if matches!(value, Value::String(_) | Value::Object(_)) {
         return Ok(());
     }
     Err(NativeError::type_error(format!(
@@ -300,7 +297,8 @@ fn invalid_class_argument(function: ClassFunction, value: &Value) -> NativeError
 }
 
 fn string(value: &Value) -> String {
-    value
-        .str_ref()
-        .map_or_else(String::new, |name| name.to_string_lossy())
+    match value {
+        Value::String(name) => name.to_string_lossy(),
+        _ => String::new(),
+    }
 }

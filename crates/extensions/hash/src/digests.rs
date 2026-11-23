@@ -131,7 +131,7 @@ const HASH_EQUALS: FunctionEntry = FunctionEntry::sync(
 fn hash_equals(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     for (index, name) in ["known_string", "user_string"].into_iter().enumerate() {
         let value = &arguments[index];
-        if !value.is_string() {
+        if !matches!(value, Value::String(_)) {
             return Err(NativeError::type_error(format!(
                 "hash_equals(): Argument #{} (${name}) must be of type string, {} given",
                 index + 1,

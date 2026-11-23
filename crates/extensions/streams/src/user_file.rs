@@ -162,7 +162,10 @@ pub(crate) async fn open(
         );
         return Ok(None);
     }
-    let opened_path = opened.borrow().as_str_bytes().map(|path| path.to_vec());
+    let opened_path = match &*opened.borrow() {
+        Value::String(path) => Some(path.as_bytes().to_vec()),
+        _ => None,
+    };
     let file = Rc::new(UserFile {
         object,
         context: stream_context,

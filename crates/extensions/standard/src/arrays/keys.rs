@@ -191,24 +191,19 @@ const KEY_EXISTS: FunctionEntry = FunctionEntry::sync(
 
 fn array_key_exists(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let array = required_array(arguments, 1);
-    let key = &arguments[0];
-    let found = match key {
-        Value::Int(i) => array.contains_int(*i),
-        Value::InternedStr(s) => array.contains_interned(s),
-        Value::String(s) => array.contains_str(s),
+    let exists = match &*arguments[0].deref() {
+        Value::Int(key) => array.contains_int(*key),
+        Value::String(key) => array.contains_str(key),
         Value::Null => {
             context.deprecated(
                 "Using null as the key parameter for array_key_exists() is deprecated, use an empty string instead"
                     .into(),
             );
-            array.contains_interned(phera_extension_api::InternedStr::empty())
+            array.contains_str(&PhpString::empty())
         }
-        _ => {
-            let key = ArrayKey::from_value_diag(key, context.diagnostics())?;
-            array.contains_key(&key)
-        }
+        other => array.contains_key(&ArrayKey::from_value_diag(other, context.diagnostics())?),
     };
-    Ok(Value::Bool(found))
+    Ok(Value::Bool(exists))
 }
 
 /// `array_change_key_case(array $array, int $case = CASE_LOWER): array`,
@@ -237,12 +232,6 @@ fn array_change_key_case(_: &mut dyn Context, arguments: &[Value]) -> NativeResu
     let mut result = PhpArray::new();
     for (key, value) in required_array(arguments, 0).iter() {
         let key = match key {
-            ArrayKey::Interned(name) if upper => {
-                ArrayKey::String(PhpString::from(name.as_bytes().to_ascii_uppercase()))
-            }
-            ArrayKey::Interned(name) => {
-                ArrayKey::String(PhpString::from(name.as_bytes().to_ascii_lowercase()))
-            }
             ArrayKey::String(name) if upper => {
                 ArrayKey::String(PhpString::from(name.as_bytes().to_ascii_uppercase()))
             }

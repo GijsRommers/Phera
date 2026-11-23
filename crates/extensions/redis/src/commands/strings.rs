@@ -38,13 +38,6 @@ pub async fn build(
                                 b.token(flag);
                             }
                         }
-                        phera_extension_api::ArrayKey::Interned(key) => {
-                            let flag = key.to_string_lossy().to_uppercase();
-                            if matches!(flag.as_str(), "EX" | "PX" | "EXAT" | "PXAT") {
-                                b.token(flag);
-                                b.arg(value);
-                            }
-                        }
                         phera_extension_api::ArrayKey::String(key) => {
                             let flag = key.to_string_lossy().to_uppercase();
                             if matches!(flag.as_str(), "EX" | "PX" | "EXAT" | "PXAT") {
@@ -85,7 +78,6 @@ pub async fn build(
                 for (key, value) in values.iter() {
                     let key = match key {
                         phera_extension_api::ArrayKey::Int(i) => Value::Int(i),
-                        phera_extension_api::ArrayKey::Interned(s) => Value::InternedStr(s),
                         phera_extension_api::ArrayKey::String(s) => Value::String(s.clone()),
                     };
                     b.key(&key);

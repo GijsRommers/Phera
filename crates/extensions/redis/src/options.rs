@@ -31,7 +31,6 @@ pub fn set(_: &mut dyn Context, session: &Session, option: i64, value: &Value) -
         }
         2 => {
             options.prefix = match value {
-                Value::InternedStr(s) => s.as_bytes().to_vec(),
                 Value::String(s) => s.as_bytes().to_vec(),
                 _ => crate::connection::string(value).into_bytes(),
             }
@@ -94,7 +93,6 @@ pub async fn serialize(
                 .call(&Value::from("json_encode"), vec![value.clone()])
                 .await?;
             Ok(match value {
-                Value::InternedStr(s) => s.as_bytes().to_vec(),
                 Value::String(s) => s.as_bytes().to_vec(),
                 _ => Vec::new(),
             })

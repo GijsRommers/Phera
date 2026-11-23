@@ -181,7 +181,7 @@ pub(crate) fn stringify(
     attributes: ValueOptions,
 ) -> NativeResult {
     if matches!(attributes.nulls, NullHandling::EmptyString)
-        && value.as_str_bytes().is_some_and(<[u8]>::is_empty)
+        && matches!(&value, Value::String(text) if text.as_bytes().is_empty())
     {
         return Ok(Value::Null);
     }

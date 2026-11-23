@@ -27,7 +27,7 @@ impl Vm {
             .current()
             .is_some_and(|frame| frame.function().strict_types);
         match &*value.deref() {
-            Value::InternedStr(_) | Value::String(_) => return Ok(None),
+            Value::String(_) => return Ok(None),
             Value::Null if property.nullable => return Ok(None),
             Value::Int(_) | Value::Float(_) | Value::Bool(_) if !strict => return Ok(None),
             Value::Object(_) if !strict && Self::has_string_conversion(value) => {}

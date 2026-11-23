@@ -26,13 +26,10 @@ impl Encoder {
             ));
         }
         if object.class.is_enum() {
-            let Some(case) = object.get(&ArrayKey::str("name")) else {
+            let Some(Value::String(case)) = object.get(&ArrayKey::str("name")) else {
                 return Err(NativeError::error("Enum case has no name"));
             };
-            let Some(case) = case.as_str_bytes() else {
-                return Err(NativeError::error("Enum case has no name"));
-            };
-            self.output.enum_case(name.as_bytes(), case);
+            self.output.enum_case(name.as_bytes(), case.as_bytes());
             return Ok(None);
         }
         if context.has_serialization_method(object, "__serialize") {
@@ -58,9 +55,6 @@ impl Encoder {
                 .unwrap_or_default();
             let result = result?;
             match &*result.try_deref()? {
-                Value::InternedStr(payload) => self
-                    .output
-                    .custom_object(name.as_bytes(), payload.as_bytes()),
                 Value::String(payload) => self
                     .output
                     .custom_object(name.as_bytes(), payload.as_bytes()),
@@ -115,8 +109,8 @@ impl Encoder {
         } else {
             None
         };
-        let name = match original.as_ref().and_then(Value::as_str_bytes) {
-            Some(name) => name,
+        let name = match &original {
+            Some(Value::String(name)) => name.as_bytes(),
             _ => name.as_bytes(),
         };
         self.output.object(name, entries.len());
@@ -141,7 +135,7 @@ async fn sleep_properties(
     let mut selected = PhpArray::with_capacity(names.len());
     for name in names.values() {
         let name = name.try_deref()?.clone();
-        if !name.is_string() {
+        if !matches!(name, Value::String(_)) {
             context.warning(invalid_return());
         }
         let name = context.stringify(&name).await?;

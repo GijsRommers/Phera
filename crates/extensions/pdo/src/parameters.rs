@@ -147,9 +147,7 @@ pub fn key(value: &Value, method: Option<&str>) -> Result<String, NativeError> {
             }
             Ok(position.to_string())
         }
-        Value::InternedStr(_) | Value::String(_) => {
-            let name = value.deref();
-            let name = name.str_ref().expect("checked string");
+        Value::String(name) => {
             if name.as_bytes().is_empty()
                 && let Some(method) = method
             {
@@ -171,9 +169,6 @@ fn execute_bindings(params: &Value) -> Result<HashMap<String, Binding>, NativeEr
         for (param, value) in array.iter() {
             let name = match param {
                 ArrayKey::Int(position) => key(&Value::Int(position), None)?,
-                ArrayKey::Interned(name) => {
-                    name.to_string_lossy().trim_start_matches(':').to_owned()
-                }
                 ArrayKey::String(name) => name.to_string_lossy().trim_start_matches(':').to_owned(),
             };
             bindings.insert(

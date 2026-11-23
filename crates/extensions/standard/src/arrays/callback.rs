@@ -52,7 +52,7 @@ fn check(
 ) -> Result<(), NativeError> {
     let reason = match &*callable.deref() {
         Value::Null if null == NullCallback::Allowed => return Ok(()),
-        Value::InternedStr(_) | Value::String(_) | Value::Object(_) => return Ok(()),
+        Value::String(_) | Value::Object(_) => return Ok(()),
         Value::Array(array) => {
             let first = array.get(&ArrayKey::Int(0));
             let second = array.get(&ArrayKey::Int(1));

@@ -91,7 +91,7 @@ pub(super) fn append_entry(
     value: &Value,
     keys: IntegerKeys,
 ) -> Result<(), NativeError> {
-    if keys == IntegerKeys::Preserve || matches!(key, ArrayKey::Interned(_) | ArrayKey::String(_)) {
+    if keys == IntegerKeys::Preserve || matches!(key, ArrayKey::String(_)) {
         result.insert(key, value.clone());
     } else {
         result.push(value.clone())?;

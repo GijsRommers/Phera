@@ -16,7 +16,7 @@ impl Vm {
         };
         if matches!(
             object.class.cast(object, phera_value::ObjectCast::String),
-            Some(Value::InternedStr(_) | Value::String(_))
+            Some(Value::String(_))
         ) {
             return true;
         }
@@ -35,10 +35,8 @@ impl Vm {
         let Value::Object(object) = value.deref().clone() else {
             return Ok(None);
         };
-        if let Some(text) = object
-            .class
-            .cast(&object, phera_value::ObjectCast::String)
-            .and_then(|value| value.to_php_string())
+        if let Some(Value::String(text)) =
+            object.class.cast(&object, phera_value::ObjectCast::String)
         {
             return Ok(Some(text));
         }
@@ -55,7 +53,7 @@ impl Vm {
         let result = self
             .invoke_magic_method(method, class.clone(), object, [])
             .await?;
-        if let Some(text) = result.deref().to_php_string() {
+        if let Value::String(text) = result.deref().clone() {
             return Ok(Some(text));
         }
         Err(NativeError::error(format!(

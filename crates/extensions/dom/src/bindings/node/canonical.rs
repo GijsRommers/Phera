@@ -30,10 +30,6 @@ pub(super) fn c14n_file<'a>(
         const METHOD: &str = "DOMNode::C14NFile";
         let (_, path) = io::filename(context, &arguments, METHOD)?;
         match canonicalize(context, this.as_ref(), &arguments, 1, METHOD)? {
-            Value::InternedStr(xml) => match tokio::fs::write(path, xml.as_bytes()).await {
-                Ok(()) => Ok(Value::Int(xml.as_bytes().len() as i64)),
-                Err(_) => Ok(Value::Bool(false)),
-            },
             Value::String(xml) => match tokio::fs::write(path, xml.as_bytes()).await {
                 Ok(()) => Ok(Value::Int(xml.as_bytes().len() as i64)),
                 Err(_) => Ok(Value::Bool(false)),
@@ -58,8 +54,8 @@ fn canonicalize(
     if let Some(prefixes) = prefixes {
         if exclusive {
             for (_, prefix) in prefixes.iter() {
-                if let Some(prefix) = prefix.deref().as_str_bytes() {
-                    include.push(String::from_utf8_lossy(prefix).into_owned());
+                if let Value::String(prefix) = &*prefix.deref() {
+                    include.push(String::from_utf8_lossy(prefix.as_bytes()).into_owned());
                 }
             }
         } else {
@@ -82,7 +78,7 @@ fn canonicalize(
             ))
         })?;
         let query_value = query_value.deref();
-        let Some(expression) = query_value.str_ref() else {
+        let Value::String(expression) = &*query_value else {
             let actual = query_value.type_name();
             return Err(NativeError::type_error(format!(
                 "{method}(): Argument #{number} ($xpath) \"query\" option must be a string, \
@@ -94,10 +90,10 @@ fn canonicalize(
             && let Value::Array(entries) = &*value.deref()
         {
             for (key, value) in entries.iter() {
-                if let (Some(key), Some(uri)) = (key.as_str_bytes(), value.deref().as_str_bytes()) {
+                if let (ArrayKey::String(key), Value::String(uri)) = (key, &*value.deref()) {
                     namespaces.insert(
-                        String::from_utf8_lossy(key).into_owned(),
-                        String::from_utf8_lossy(uri).into_owned(),
+                        String::from_utf8_lossy(key.as_bytes()).into_owned(),
+                        String::from_utf8_lossy(uri.as_bytes()).into_owned(),
                     );
                 }
             }

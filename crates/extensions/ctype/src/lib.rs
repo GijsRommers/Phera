@@ -85,9 +85,9 @@ fn check(
     in_class: fn(&u8) -> bool,
 ) -> NativeResult {
     let value = arguments.first().unwrap_or(&Value::Null).deref();
-    if let Some(string) = value.as_str_bytes() {
+    if let Value::String(string) = &*value {
         return Ok(Value::Bool(
-            !string.is_empty() && string.iter().all(in_class),
+            !string.is_empty() && string.as_bytes().iter().all(in_class),
         ));
     }
     context.deprecated(format!(

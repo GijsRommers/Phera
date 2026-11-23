@@ -94,10 +94,7 @@ fn array_flip(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let array = required_array(arguments, 0);
     let mut result = PhpArray::with_capacity(array.len());
     for (key, value) in array.iter() {
-        if matches!(
-            &*value.deref(),
-            Value::Int(_) | Value::InternedStr(_) | Value::String(_)
-        ) {
+        if matches!(&*value.deref(), Value::Int(_) | Value::String(_)) {
             result.insert(ArrayKey::from_value(value)?, Value::from(key));
         } else {
             context.warning(

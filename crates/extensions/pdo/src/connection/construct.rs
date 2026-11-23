@@ -54,11 +54,6 @@ pub(super) fn construct_with_call<'a>(
             if let Some(value) = options.get(&ArrayKey::Int(ATTR_PERSISTENT)) {
                 use phera_extension_api::value::{is_numeric, to_int};
                 attributes.persistent = match &*value.deref() {
-                    Value::InternedStr(text)
-                        if !text.as_bytes().is_empty() && !is_numeric(text.as_bytes()) =>
-                    {
-                        true
-                    }
                     Value::String(text)
                         if !text.as_bytes().is_empty() && !is_numeric(text.as_bytes()) =>
                     {

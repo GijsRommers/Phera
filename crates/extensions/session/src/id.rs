@@ -59,7 +59,7 @@ fn session_id(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             .to_vec(),
     );
     if let Some(next) = next {
-        *id = Some(next.to_php_string());
+        *id = Some(next.clone());
     }
     Ok(previous)
 }

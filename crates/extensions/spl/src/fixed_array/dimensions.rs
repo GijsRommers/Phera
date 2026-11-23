@@ -26,7 +26,7 @@ fn index(context: &mut dyn Context, index: &Value) -> Result<Option<usize>, Nati
     let value = index.deref();
     if matches!(
         &*value,
-        Value::Int(_) | Value::Bool(_) | Value::Float(_) | Value::InternedStr(_) | Value::String(_)
+        Value::Int(_) | Value::Bool(_) | Value::Float(_) | Value::String(_)
     ) && let ArrayKey::Int(index) = ArrayKey::from_value_diag(&value, context.diagnostics())?
     {
         return Ok(usize::try_from(index).ok());

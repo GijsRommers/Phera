@@ -76,40 +76,29 @@ impl Machine<'_> {
             return None;
         }
         let base = position.frame.base();
-        let mut key_values: [Option<&Value>; MOST_KEYS] = [None; MOST_KEYS];
-        for (slot, step) in key_values.iter_mut().zip(keys) {
-            let PathStep::Index(register) = step else {
-                return None;
-            };
-            let [Some(key @ (Value::Int(_) | Value::InternedStr(_) | Value::String(_)))] =
-                self.registers.window(base + register.index(), 1)
-            else {
-                return None;
-            };
-            *slot = Some(key);
-        }
-        let key_slice = &key_values[..keys.len()];
         self.with_site(position, (path, Shape::Element), |entry, object, scope| {
-            entry.with_matching_value(object, scope, |mut current| {
-                for key in key_slice {
-                    current = match current {
-                        Value::Array(array) => {
-                            let found = match key.expect("validated above") {
-                                Value::Int(integer) => array.get_int(*integer),
-                                Value::InternedStr(string) => array.get_interned(string),
-                                Value::String(string) => array.get_str(string),
-                                _ => unreachable!("validated above"),
-                            };
-                            match found {
-                                Some(Value::Reference(_)) => return None,
-                                Some(element) => element,
-                                None if quiet => return Some(Value::Null),
-                                None => return None,
-                            }
+            entry.with_matching_value(object, scope, |property| {
+                let mut current = property;
+                for step in keys {
+                    let PathStep::Index(register) = step else {
+                        return None;
+                    };
+                    let [Some(key)] = self.registers.window(base + register.index(), 1) else {
+                        return None;
+                    };
+                    let next = match current {
+                        Value::Array(array) => array.get_value_key(key)?,
+                        Value::Null if quiet && matches!(key, Value::Int(_) | Value::String(_)) => {
+                            return Some(Value::Null);
                         }
-                        Value::Null if quiet => return Some(Value::Null),
                         _ => return None,
                     };
+                    match next {
+                        Some(Value::Reference(_)) => return None,
+                        Some(element) => current = element,
+                        None if quiet => return Some(Value::Null),
+                        None => return None,
+                    }
                 }
                 Some(current.clone())
             })
@@ -123,7 +112,6 @@ impl Machine<'_> {
             .window(position.frame.base() + register.index(), 1)
         {
             [Some(Value::Int(integer))] => Some(ArrayKey::Int(*integer)),
-            [Some(Value::InternedStr(string))] => Some(string.to_array_key()),
             [Some(Value::String(string))] => Some(ArrayKey::from_string(string.clone())),
             _ => None,
         }

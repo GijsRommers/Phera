@@ -54,9 +54,7 @@ pub const CLASSES: &[ClassEntry] = &[
 const METHODS: &[MethodEntry] = &[
     MethodEntry::public("open", OPEN, |context, _, arguments| {
         check(context)?;
-        let path = args::string(arguments, 0)
-            .map(|s| s.to_php_string())
-            .unwrap_or_default();
+        let path = args::string(arguments, 0).cloned().unwrap_or_default();
         Ok(Value::Bool(match files::open(context, &path) {
             Ok(()) => true,
             Err(message) => {
@@ -81,9 +79,7 @@ const METHODS: &[MethodEntry] = &[
             if !opened(context, "read")? {
                 return Ok(Value::Bool(false));
             }
-            let id = args::string(&arguments, 0)
-                .map(|s| s.to_php_string())
-                .unwrap_or_default();
+            let id = args::string(&arguments, 0).cloned().unwrap_or_default();
             Ok(files::read(context, &id, "SessionHandler::read")
                 .await?
                 .map_or(Value::Bool(false), Value::from))
@@ -95,9 +91,7 @@ const METHODS: &[MethodEntry] = &[
             if !opened(context, "write")? {
                 return Ok(Value::Bool(false));
             }
-            let id = args::string(&arguments, 0)
-                .map(|s| s.to_php_string())
-                .unwrap_or_default();
+            let id = args::string(&arguments, 0).cloned().unwrap_or_default();
             let data = args::bytes(&arguments, 1).to_vec();
             Ok(Value::Bool(
                 files::write(context, &id, data, false, "SessionHandler::write").await?,
@@ -110,9 +104,7 @@ const METHODS: &[MethodEntry] = &[
             if !opened(context, "destroy")? {
                 return Ok(Value::Bool(false));
             }
-            let id = args::string(&arguments, 0)
-                .map(|s| s.to_php_string())
-                .unwrap_or_default();
+            let id = args::string(&arguments, 0).cloned().unwrap_or_default();
             Ok(Value::Bool(files::destroy(context, &id).await?))
         })
     })

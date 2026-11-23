@@ -139,9 +139,9 @@ async fn change_owner(
     check_path(function, "#1 ($filename)", name)?;
     let operand = args::value(&arguments, 1);
     let metadata_kind = match (owner, operand) {
-        (Owner::User, Value::InternedStr(_) | Value::String(_)) => 2,
+        (Owner::User, Value::String(_)) => 2,
         (Owner::User, _) => 3,
-        (Owner::Group, Value::InternedStr(_) | Value::String(_)) => 4,
+        (Owner::Group, Value::String(_)) => 4,
         (Owner::Group, _) => 5,
     };
     if let Some(result) =

@@ -34,7 +34,6 @@ impl<'a> Builder<'a> {
     pub fn key(&mut self, value: &Value) {
         let mut bytes = self.options.prefix.clone();
         match value {
-            Value::InternedStr(s) => bytes.extend_from_slice(s.as_bytes()),
             Value::String(s) => bytes.extend_from_slice(s.as_bytes()),
             _ => bytes.extend_from_slice(string(value).as_bytes()),
         }
@@ -42,9 +41,6 @@ impl<'a> Builder<'a> {
     }
     pub fn arg(&mut self, value: &Value) {
         match value {
-            Value::InternedStr(s) => {
-                self.command.arg(s.as_bytes());
-            }
             Value::String(s) => {
                 self.command.arg(s.as_bytes());
             }
@@ -124,11 +120,6 @@ pub fn array(value: Option<&Value>) -> Option<&phera_extension_api::PhpArray> {
 
 pub fn option<'a>(value: Option<&'a Value>, name: &str) -> Option<&'a Value> {
     array(value)?.iter().find_map(|(key, value)| match key {
-        phera_extension_api::ArrayKey::Interned(s)
-            if s.to_string_lossy().eq_ignore_ascii_case(name) =>
-        {
-            Some(value)
-        }
         phera_extension_api::ArrayKey::String(s)
             if s.to_string_lossy().eq_ignore_ascii_case(name) =>
         {
@@ -144,16 +135,6 @@ pub fn flags(builder: &mut Builder<'_>, value: Option<&Value>) {
             match key {
                 phera_extension_api::ArrayKey::Int(_) => {
                     builder.token(string(value).to_uppercase())
-                }
-                phera_extension_api::ArrayKey::Interned(key) => {
-                    builder.token(key.to_string_lossy().to_uppercase());
-                    if let Value::Array(items) = value {
-                        for (_, item) in items.iter() {
-                            builder.arg(item);
-                        }
-                    } else {
-                        builder.arg(value);
-                    }
                 }
                 phera_extension_api::ArrayKey::String(key) => {
                     builder.token(key.to_string_lossy().to_uppercase());

@@ -249,7 +249,8 @@ fn display_callable(callee: &Callee, original: &Value) -> NativeResult {
 }
 
 fn string(value: &Value) -> String {
-    value
-        .str_ref()
-        .map_or_else(String::new, |value| value.to_string_lossy())
+    match value {
+        Value::String(value) => value.to_string_lossy(),
+        _ => String::new(),
+    }
 }

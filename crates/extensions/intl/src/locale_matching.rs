@@ -63,8 +63,7 @@ pub fn lookup(context: &mut dyn Context, values: &[Value], site: &str) -> Native
     let canonical = args::bool(values, 2).unwrap_or(false);
     let mut candidates = Vec::with_capacity(tags.len().min(100));
     for (_, tag) in tags.iter() {
-        let tag = tag.deref();
-        let Some(tag) = tag.str_ref() else {
+        let Value::String(tag) = &*tag.deref() else {
             return Err(NativeError::value_error(format!(
                 "{site}(): Argument #2 ($locale) must only contain string values"
             )));
@@ -73,7 +72,7 @@ pub fn lookup(context: &mut dyn Context, values: &[Value], site: &str) -> Native
         if canonical && normalized.is_empty() {
             return lookup_error(context, site, "unable to canonicalize lang_tag");
         }
-        candidates.push((normalized, tag.to_value()));
+        candidates.push((normalized, tag.clone()));
     }
     let needle = normalize(&range, canonical);
     if needle.is_empty() {
@@ -84,11 +83,11 @@ pub fn lookup(context: &mut dyn Context, values: &[Value], site: &str) -> Native
             return Ok(if canonical {
                 Value::from(normalized.clone())
             } else {
-                original.clone()
+                Value::from(original.clone())
             });
         }
     }
-    Ok(fallback.map_or_else(|| Value::from(""), |value| value.to_value()))
+    Ok(fallback.map_or_else(|| Value::from(""), |value| Value::from(value.clone())))
 }
 
 fn lookup_error(context: &mut dyn Context, site: &str, detail: &str) -> NativeResult {

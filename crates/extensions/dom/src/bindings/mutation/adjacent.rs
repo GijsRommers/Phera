@@ -173,13 +173,6 @@ fn change_nodes(
                     }
                 }
             }
-            Value::InternedStr(value) => {
-                node.shared.borrow_mut().document.arena.allocate(Node::new(
-                    Kind::Text,
-                    Name::new("#text"),
-                    String::from_utf8_lossy(value.as_bytes()),
-                ))
-            }
             Value::String(value) => node.shared.borrow_mut().document.arena.allocate(Node::new(
                 Kind::Text,
                 Name::new("#text"),

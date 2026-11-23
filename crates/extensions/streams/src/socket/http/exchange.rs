@@ -97,14 +97,14 @@ fn build_request(
     authorization: Option<header::HeaderValue>,
 ) -> io::Result<Request<Full<Bytes>>> {
     let path = uri.path_and_query().map_or("/", |value| value.as_str());
-    let method = match option(options, "method").and_then(Value::as_str_bytes) {
-        Some(method) if !use_get || method == b"HEAD" => {
-            hyper::Method::from_bytes(method).map_err(invalid)?
+    let method = match option(options, "method") {
+        Some(Value::String(method)) if !use_get || method.as_bytes() == b"HEAD" => {
+            hyper::Method::from_bytes(method.as_bytes()).map_err(invalid)?
         }
         _ => hyper::Method::GET,
     };
-    let body = match option(options, "content").and_then(Value::as_str_bytes) {
-        Some(body) if !use_get => Bytes::copy_from_slice(body),
+    let body = match option(options, "content") {
+        Some(Value::String(body)) if !use_get => Bytes::copy_from_slice(body.as_bytes()),
         _ => Bytes::new(),
     };
     let version = match option(options, "protocol_version") {
@@ -118,11 +118,6 @@ fn build_request(
             header::HeaderValue::from_str(host).map_err(invalid)?,
         );
         match option(options, "header") {
-            Some(Value::InternedStr(value)) => {
-                for line in value.as_bytes().split(|byte| *byte == b'\n') {
-                    add_header(headers, line, same_origin, use_get)?;
-                }
-            }
             Some(Value::String(value)) => {
                 for line in value.as_bytes().split(|byte| *byte == b'\n') {
                     add_header(headers, line, same_origin, use_get)?;
@@ -130,8 +125,8 @@ fn build_request(
             }
             Some(Value::Array(value)) => {
                 for entry in value.values() {
-                    if let Some(line) = entry.deref().as_str_bytes() {
-                        add_header(headers, line, same_origin, use_get)?;
+                    if let Value::String(line) = &*entry.deref() {
+                        add_header(headers, line.as_bytes(), same_origin, use_get)?;
                     }
                 }
             }

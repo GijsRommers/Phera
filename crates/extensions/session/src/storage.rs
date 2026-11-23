@@ -73,7 +73,6 @@ pub async fn read(
     if let Some(object) = user::handler(context) {
         let value = user::call(context, object, "read", vec![id.clone().into()], function).await?;
         Ok(match value {
-            Some(Value::InternedStr(bytes)) => Some(bytes.as_bytes().to_vec()),
             Some(Value::String(bytes)) => Some(bytes.as_bytes().to_vec()),
             _ => None,
         })

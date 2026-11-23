@@ -259,7 +259,6 @@ fn file(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
             .await?
         {
             match crate::filtered_files::contents(context, stream, "file", 0, None).await? {
-                Value::InternedStr(bytes) => bytes.to_php_string(),
                 Value::String(bytes) => bytes,
                 other => return Ok(other),
             }
@@ -275,7 +274,6 @@ fn file(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
             )
             .await?
             {
-                Value::InternedStr(bytes) => bytes.to_php_string(),
                 Value::String(bytes) => bytes,
                 other => return Ok(other),
             }
@@ -290,7 +288,6 @@ fn file(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
             )
             .await?;
             match crate::filtered_files::contents(context, stream, "file", 0, None).await? {
-                Value::InternedStr(bytes) => bytes.to_php_string(),
                 Value::String(bytes) => bytes,
                 other => return Ok(other),
             }

@@ -67,7 +67,6 @@ pub(super) fn unserialize(
             return Err(invalid_serialization());
         };
         let iterator = match field(3) {
-            Some(Value::InternedStr(name)) => Some(name.to_string_lossy()),
             Some(Value::String(name)) => Some(name.to_string_lossy()),
             None | Some(Value::Null) => None,
             _ => return Err(invalid_serialization()),

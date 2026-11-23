@@ -3,59 +3,44 @@
 use std::hash::{Hash, Hasher};
 
 use crate::error::{Diagnostics, OpError};
-use crate::intern::{InternedStr, StrRef};
 use crate::string::PhpString;
 use crate::value::Value;
 
 /// An array key after PHP's normalisation: integer, or a string (used for
 /// strings that are not canonical decimal integers in `i64` range).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArrayKey {
     Int(i64),
-    Interned(&'static InternedStr),
     String(PhpString),
 }
-
-const _: () = assert!(std::mem::size_of::<ArrayKey>() == 16);
-
-impl PartialEq for ArrayKey {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Int(a), Self::Int(b)) => a == b,
-            (Self::Interned(a), Self::Interned(b)) => std::ptr::eq(*a, *b),
-            (Self::Interned(a), Self::String(b)) | (Self::String(b), Self::Interned(a)) => {
-                a.as_bytes() == b.as_bytes()
-            }
-            (Self::String(a), Self::String(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-
-impl Eq for ArrayKey {}
 
 impl Hash for ArrayKey {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
-            Self::Int(i) => {
+            Self::Int(index) => {
                 0u8.hash(state);
-                i.hash(state);
+                index.hash(state);
             }
-            Self::Interned(s) => {
+            Self::String(string) => {
                 1u8.hash(state);
-                s.as_bytes().hash(state);
-            }
-            Self::String(s) => {
-                1u8.hash(state);
-                s.as_bytes().hash(state);
+                string.hash(state);
             }
         }
     }
 }
 
 impl ArrayKey {
+    /// Prepare a declaration's string key without numeric normalization.
+    pub fn interned_str(bytes: &[u8]) -> Self {
+        Self::String(PhpString::intern_literal(bytes))
+    }
+
+    /// Normalize a compiled array key such as `'42'` to an integer.
+    pub fn interned(bytes: &[u8]) -> Self {
+        Self::from_string(PhpString::intern_literal(bytes))
+    }
+
     pub fn int(i: i64) -> Self {
         ArrayKey::Int(i)
     }
@@ -64,50 +49,9 @@ impl ArrayKey {
         ArrayKey::String(s.into())
     }
 
-    /// Normalizes a static/compile-time string into an interned array key (or
-    /// an integer key if numeric), avoiding any `Rc` allocation or digit scan
-    /// on subsequent lookups.
-    #[inline]
-    pub fn interned(bytes: &[u8]) -> Self {
-        match InternedStr::try_intern(bytes) {
-            Some(s) => s.to_array_key(),
-            None => Self::from_string(PhpString::from(bytes)),
-        }
-    }
-
-    /// Creates an interned string key without numeric normalisation (for PHP
-    /// property names like `"\0Class\0prop"` or declared property keys).
-    #[inline]
-    pub fn interned_str(bytes: &[u8]) -> Self {
-        match InternedStr::try_intern(bytes) {
-            Some(s) => ArrayKey::Interned(s),
-            None => ArrayKey::String(PhpString::from(bytes)),
-        }
-    }
-
-    /// Borrows the string bytes if this key is a string key.
-    #[inline(always)]
-    pub fn as_str_bytes(&self) -> Option<&[u8]> {
-        match self {
-            Self::Int(_) => None,
-            Self::Interned(s) => Some(s.as_bytes()),
-            Self::String(s) => Some(s.as_bytes()),
-        }
-    }
-
-    /// Borrows this key as a `StrRef` if it is a string key.
-    #[inline(always)]
-    pub fn str_ref(&self) -> Option<StrRef<'_>> {
-        match self {
-            Self::Int(_) => None,
-            Self::Interned(s) => Some(StrRef::Interned(s)),
-            Self::String(s) => Some(StrRef::Dynamic(s)),
-        }
-    }
-
     /// Normalize an owned string as PHP does for `$array[$key]`.
     pub fn from_string(string: PhpString) -> Self {
-        match numeric_string_key(string.as_bytes()) {
+        match string.numeric_key() {
             Some(key) => Self::Int(key),
             None => Self::String(string),
         }
@@ -132,10 +76,9 @@ impl ArrayKey {
                     "Using null as an array offset is deprecated, use an empty string instead"
                         .to_string(),
                 );
-                Ok(ArrayKey::Interned(InternedStr::empty()))
+                Ok(ArrayKey::String(PhpString::empty()))
             }
-            Value::InternedStr(s) => Ok(s.to_array_key()),
-            Value::String(s) => Ok(match numeric_string_key(s.as_bytes()) {
+            Value::String(s) => Ok(match s.numeric_key() {
                 Some(key) => Self::Int(key),
                 None => Self::String(s.clone()),
             }),

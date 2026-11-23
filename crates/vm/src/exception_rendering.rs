@@ -85,7 +85,6 @@ fn trace_lines(trace: &Value, string_limit: usize) -> Vec<String> {
                 .map(|(key, value)| {
                     let value = crate::error_values::trace_argument(value, string_limit);
                     match key {
-                        ArrayKey::Interned(name) => format!("{}: {value}", name.to_string_lossy()),
                         ArrayKey::String(name) => format!("{}: {value}", name.to_string_lossy()),
                         _ => value,
                     }

@@ -47,9 +47,6 @@ impl Vm {
                     ));
                 }
                 ArrayKey::Int(_) => {}
-                ArrayKey::Interned(name) => {
-                    self.call_stack.top_details_mut()?.named = Some(name.to_php_string())
-                }
                 ArrayKey::String(name) => self.call_stack.top_details_mut()?.named = Some(name),
             }
             let index = CallView::top(&self.code, &self.call_stack)?.argument_index()?;

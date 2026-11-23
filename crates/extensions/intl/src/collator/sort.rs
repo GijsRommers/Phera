@@ -52,8 +52,8 @@ pub fn array(
     };
     let mut values = Vec::with_capacity(array.len());
     for (key, value) in array.iter() {
-        if let Some(text) = value.deref().as_str_bytes()
-            && std::str::from_utf8(text).is_err()
+        if let Value::String(text) = &*value.deref()
+            && std::str::from_utf8(text.as_bytes()).is_err()
         {
             let detail = if matches!(operation, Operation::SortKeys) {
                 "Sort with sort keys failed"
@@ -64,7 +64,10 @@ pub fn array(
         }
         let entry = match mode {
             KeyMode::SortKeys => {
-                let bytes = value.as_str_bytes().unwrap_or(b"");
+                let bytes = match value {
+                    Value::String(text) => text.as_bytes(),
+                    _ => b"",
+                };
                 SortValue::String(self::key(&state.formatter, bytes))
             }
             KeyMode::Strings => {
@@ -133,9 +136,9 @@ fn regular(
 ) -> Ordering {
     let left_value = left.deref();
     let right_value = right.deref();
-    if let (Some(left), Some(right)) = (left_value.as_str_bytes(), right_value.as_str_bytes()) {
-        let left_number = parse_numeric(left);
-        let right_number = parse_numeric(right);
+    if let (Value::String(left), Value::String(right)) = (&*left_value, &*right_value) {
+        let left_number = parse_numeric(left.as_bytes());
+        let right_number = parse_numeric(right.as_bytes());
         let left_number = left_number.exact.then_some(left_number.value).flatten();
         let right_number = right_number.exact.then_some(right_number.value).flatten();
         if let (Some(left), Some(right)) = (left_number, right_number) {
@@ -146,7 +149,7 @@ fn regular(
                     .unwrap_or(Ordering::Equal),
             };
         }
-        return collator.compare_utf8(left, right);
+        return collator.compare_utf8(left.as_bytes(), right.as_bytes());
     }
     compare(left, right, context.diagnostics())
         .unwrap_or(0)

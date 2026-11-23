@@ -87,7 +87,6 @@ fn construct(_: &mut dyn Context, this: Option<&Rc<Object>>, values: &[Value]) -
 fn operand(raw: &Value, argument: Argument) -> Result<Decimal> {
     match raw {
         Value::Int(integer) => Ok(Decimal::integer(*integer)),
-        Value::InternedStr(string) => argument.parse(string.as_bytes()),
         Value::String(string) => argument.parse(string.as_bytes()),
         Value::Object(object) => {
             value(object).ok_or_else(|| NativeError::error("BcMath\\Number is not initialized"))
@@ -246,8 +245,7 @@ fn unserialize(_: &mut dyn Context, this: Option<&Rc<Object>>, values: &[Value])
     let raw = args::array(values, 0)
         .and_then(|data| data.get(&ArrayKey::str("value")))
         .ok_or_else(invalid)?;
-    let raw = raw.deref();
-    let Some(encoded) = raw.as_str_bytes() else {
+    let Value::String(encoded) = &*raw.deref() else {
         return Err(invalid());
     };
     if encoded.is_empty() {
@@ -256,7 +254,7 @@ fn unserialize(_: &mut dyn Context, this: Option<&Rc<Object>>, values: &[Value])
     if this.native.borrow().is_some() {
         return Err(readonly("value"));
     }
-    let number = Decimal::parse(encoded).ok_or_else(invalid)?;
+    let number = Decimal::parse(encoded.as_bytes()).ok_or_else(invalid)?;
     *this.native.borrow_mut() = Some(Box::new(number));
     Ok(Value::Null)
 }

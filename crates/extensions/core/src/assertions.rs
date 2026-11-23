@@ -61,7 +61,7 @@ fn assert_with_object(
 }
 
 fn assert(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    if matches!(arguments, [condition] | [condition, Value::InternedStr(_) | Value::String(_) | Value::Null] if to_bool(condition))
+    if matches!(arguments, [condition] | [condition, Value::String(_) | Value::Null] if to_bool(condition))
     {
         return Ok(Value::Bool(true));
     }
@@ -113,7 +113,6 @@ fn check(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             .is_none_or(|value| phera_extension_api::ini::boolean(value.as_bytes()))
         {
             let text = match description {
-                Some(Value::InternedStr(text)) => text.to_string_lossy(),
                 Some(Value::String(text)) => text.to_string_lossy(),
                 _ => "Assertion".to_owned(),
             };
@@ -124,7 +123,6 @@ fn check(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     Err(match description {
         // A ready-made exception is thrown as it is.
         Some(Value::Object(exception)) => context.throw_object(exception),
-        Some(Value::InternedStr(text)) => failure(text.to_string_lossy()),
         Some(Value::String(text)) => failure(text.to_string_lossy()),
         // No description at all: PHP's message is empty.
         _ => failure(String::new()),

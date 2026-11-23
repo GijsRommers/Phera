@@ -337,10 +337,6 @@ pub(crate) fn loaded_target_class(
     let reflection = context.reflection()?;
     match target {
         Value::Object(object) => reflection.reflect_object_class(object),
-        Value::InternedStr(name) => {
-            let name = String::from_utf8_lossy(name.as_bytes());
-            reflection.reflect_loaded_class(&name)
-        }
         Value::String(name) => {
             let name = String::from_utf8_lossy(name.as_bytes());
             reflection.reflect_loaded_class(&name)
@@ -365,7 +361,6 @@ pub(crate) async fn load_target_class(
 pub(crate) fn target_class(value: &Value) -> Result<Cow<'_, str>, NativeError> {
     match value {
         Value::Object(object) => Ok(Cow::Borrowed(object.class.name())),
-        Value::InternedStr(name) => Ok(String::from_utf8_lossy(name.as_bytes())),
         Value::String(name) => Ok(String::from_utf8_lossy(name.as_bytes())),
         _ => Err(exception("Expected a class name or object")),
     }
@@ -475,26 +470,6 @@ fn relationship(
         let other = match args.first() {
             Some(Value::Object(object)) if object.class.is_instance_of("ReflectionClass") => {
                 reflected_class(Some(object))?.info
-            }
-            Some(Value::InternedStr(name)) => {
-                let name = name.to_string_lossy();
-                engine(context)?
-                    .reflect_class(&name)
-                    .await
-                    .map_err(|error| match relationship {
-                        Relationship::Interface
-                            if matches!(
-                                &error,
-                                phera_extension_api::NativeError::Throw {
-                                    class: "ReflectionException",
-                                    ..
-                                }
-                            ) =>
-                        {
-                            exception(format!("Interface \"{name}\" does not exist"))
-                        }
-                        _ => error,
-                    })?
             }
             Some(Value::String(name)) => {
                 let name = name.to_string_lossy();

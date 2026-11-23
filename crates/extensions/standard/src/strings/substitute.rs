@@ -189,13 +189,11 @@ fn strtr(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Na
 }
 
 async fn translate(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    if let [string_val, Value::Array(pairs)] = arguments
-        && let Some(string) = string_val.as_str_bytes()
-    {
+    if let [Value::String(string), Value::Array(pairs)] = arguments {
         if string.is_empty() {
-            return Ok(string_val.clone());
+            return Ok(Value::String(string.clone()));
         }
-        return translate_pairs(context, string, pairs).await;
+        return translate_pairs(context, string.as_bytes(), pairs).await;
     }
     let mut prepared = arguments.to_vec();
     let params = if prepared.len() == 2 {
@@ -254,7 +252,6 @@ async fn translate_pairs(
     for (key, value) in pairs.iter() {
         let key = match key {
             ArrayKey::Int(number) => number.to_string().into_bytes().into(),
-            ArrayKey::Interned(string) => string.to_php_string(),
             ArrayKey::String(string) => string,
         };
         if key.is_empty() {

@@ -24,10 +24,7 @@ fn can_join_sync(slots: &[Option<Value>]) -> bool {
     let array = match slots {
         [Some(Value::Array(array))]
         | [Some(Value::Array(array)), Some(Value::Null)]
-        | [
-            Some(Value::InternedStr(_) | Value::String(_)),
-            Some(Value::Array(array)),
-        ] => array,
+        | [Some(Value::String(_)), Some(Value::Array(array))] => array,
         _ => return false,
     };
     array
@@ -139,7 +136,6 @@ fn joined_buffer(separator: &[u8], array: &PhpArray) -> Result<Vec<u8>, NativeEr
         .saturating_mul(array.len().saturating_sub(1));
     let length = array.values().try_fold(separators, |length, value| {
         let bytes = match value {
-            Value::InternedStr(string) => string.len(),
             Value::String(string) => string.len(),
             Value::Int(number) => integer_length(*number),
             Value::Bool(boolean) => usize::from(*boolean),
@@ -162,7 +158,6 @@ fn append_scalar(
     value: &Value,
 ) -> Result<(), NativeError> {
     match value {
-        Value::InternedStr(string) => append_bytes(result, separator, string.as_bytes()),
         Value::String(string) => append_bytes(result, separator, string.as_bytes()),
         Value::Int(number) => {
             reserve(

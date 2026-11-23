@@ -76,22 +76,17 @@ impl Vm {
         let scope = match &*scope.deref() {
             Value::Null => None,
             Value::Object(object) => self.classes.for_object(object),
-            Value::InternedStr(_) | Value::String(_) => {
-                let bytes = scope.deref();
-                let name = bytes.str_ref().expect("checked string");
-                if name.as_bytes() == b"static" {
-                    original
-                        .context
-                        .as_ref()
-                        .map(|context| context.scope.clone())
-                } else {
-                    let name = name.to_string_lossy();
-                    let Some(class) = self.classes.get(&name) else {
-                        self.warn(format!("Class \"{name}\" not found"));
-                        return Ok(BindingScope::Missing);
-                    };
-                    Some(class)
-                }
+            Value::String(name) if name.as_bytes() == b"static" => original
+                .context
+                .as_ref()
+                .map(|context| context.scope.clone()),
+            Value::String(name) => {
+                let name = name.to_string_lossy();
+                let Some(class) = self.classes.get(&name) else {
+                    self.warn(format!("Class \"{name}\" not found"));
+                    return Ok(BindingScope::Missing);
+                };
+                Some(class)
             }
             other => {
                 return Err(NativeError::type_error(format!(

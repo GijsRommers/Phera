@@ -265,10 +265,6 @@ impl Vm {
                 }
             }
             Step::DynamicProperty(register) => match self.read_root(register, Missing::Silent) {
-                Value::InternedStr(name) => match std::str::from_utf8(name.as_bytes()) {
-                    Ok(name) => name,
-                    Err(_) => return Ok(None),
-                },
                 Value::String(name) => {
                     dynamic = name;
                     match std::str::from_utf8(dynamic.as_bytes()) {

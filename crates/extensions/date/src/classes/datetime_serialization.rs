@@ -31,8 +31,8 @@ pub fn unserialize(context: &mut dyn Context, this: This<'_>, arguments: &[Value
     let date = restore(context, data, Instant::base_class(object))?;
     store(object, date);
     for (key, value) in data.iter() {
-        if let Some(name) = key.as_str_bytes()
-            && !matches!(name, b"date" | b"timezone" | b"timezone_type")
+        if let ArrayKey::String(name) = &key
+            && !matches!(name.as_bytes(), b"date" | b"timezone" | b"timezone_type")
             && !value.is_reference()
         {
             object.set(key, value.clone());
@@ -62,22 +62,20 @@ fn restore(
 ) -> Result<Instant, NativeError> {
     let invalid = || NativeError::error(format!("Invalid serialization data for {class} object"));
     let get = |key| data.get(&ArrayKey::str(key));
-    let (Some(date), Some(Value::Int(kind)), Some(timezone)) = (
-        get("date").and_then(Value::as_str_bytes),
-        get("timezone_type"),
-        get("timezone").and_then(Value::as_str_bytes),
-    ) else {
+    let (Some(Value::String(date)), Some(Value::Int(kind)), Some(Value::String(timezone))) =
+        (get("date"), get("timezone_type"), get("timezone"))
+    else {
         return Err(invalid());
     };
-    let mut input = date.to_vec();
+    let mut input = date.as_bytes().to_vec();
     let zone = match kind {
         1 | 2 => {
             input.push(b' ');
-            input.extend_from_slice(timezone);
+            input.extend_from_slice(timezone.as_bytes());
             None
         }
         3 => Some(ZoneKind::Identifier(
-            Zone::named(timezone).ok_or_else(invalid)?,
+            Zone::named(timezone.as_bytes()).ok_or_else(invalid)?,
         )),
         _ => return Err(invalid()),
     };

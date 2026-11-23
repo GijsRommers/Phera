@@ -39,7 +39,6 @@ impl Input {
                     )
                     .await?
                 {
-                    Value::InternedStr(content) => Ok(content.as_bytes().to_vec()),
                     Value::String(content) => Ok(content.as_bytes().to_vec()),
                     _ => Ok(Vec::new()),
                 }

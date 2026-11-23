@@ -60,7 +60,6 @@ fn from_array(
     let array = args::array(arguments, 0).ok_or_else(|| exception("Expected an array"))?;
     let key = match arguments.get(1) {
         Some(Value::Int(key)) => ArrayKey::Int(*key),
-        Some(Value::InternedStr(key)) => ArrayKey::Interned(key),
         Some(Value::String(key)) => ArrayKey::String(key.clone()),
         _ => return Err(exception("Array key not found")),
     };

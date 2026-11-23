@@ -175,27 +175,18 @@ fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode
         FetchMode::Destructure => return None,
     };
     let key = slots.get(index.index())?.as_ref()?;
-    if !matches!(
-        key,
-        Value::Int(_) | Value::InternedStr(_) | Value::String(_)
-    ) {
-        return None;
-    }
     match slots.get(base.index())? {
         Some(Value::Array(array)) => {
-            let found = match key {
-                Value::Int(integer) => array.get_int(*integer),
-                Value::InternedStr(string) => array.get_interned(string),
-                Value::String(string) => array.get_str(string),
-                _ => unreachable!("checked above"),
-            };
+            let found = array.get_value_key(key)?;
             match found {
                 Some(value) => Some(value.deref().clone()),
                 None if quiet => Some(Value::Null),
                 None => None,
             }
         }
-        None | Some(Value::Null) if quiet => Some(Value::Null),
+        None | Some(Value::Null) if quiet && matches!(key, Value::Int(_) | Value::String(_)) => {
+            Some(Value::Null)
+        }
         _ => None,
     }
 }
@@ -205,12 +196,7 @@ fn array_element(slots: &[Option<Value>], base: Reg, index: Reg, mode: FetchMode
 fn is_plain(value: &Value) -> bool {
     matches!(
         value,
-        Value::Null
-            | Value::Bool(_)
-            | Value::Int(_)
-            | Value::Float(_)
-            | Value::InternedStr(_)
-            | Value::String(_)
+        Value::Null | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::String(_)
     )
 }
 

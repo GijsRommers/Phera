@@ -57,7 +57,6 @@ impl Vm {
         let key = match (backing, argument) {
             (EnumBacking::Int, Value::Int(number)) => ArrayKey::Int(*number),
             (EnumBacking::String, Value::Int(number)) => ArrayKey::str(number.to_string()),
-            (EnumBacking::String, Value::InternedStr(string)) => ArrayKey::Interned(string),
             (EnumBacking::String, Value::String(string)) => ArrayKey::String(string.clone()),
             _ => return Err(internal_error!("enum backing conversion")),
         };
@@ -72,10 +71,9 @@ impl Vm {
         }
         let value = match key {
             ArrayKey::Int(number) => number.to_string(),
-            ArrayKey::Interned(_) | ArrayKey::String(_) => {
-                let bytes = key
-                    .as_str_bytes()
-                    .expect("checked string key")
+            ArrayKey::String(string) => {
+                let bytes = string
+                    .as_bytes()
                     .split(|byte| *byte == 0)
                     .next()
                     .unwrap_or_default();

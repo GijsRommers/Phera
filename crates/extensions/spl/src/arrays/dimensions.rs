@@ -73,7 +73,7 @@ fn direct_set(object: &Object, offset: &Value, value: &Value) -> bool {
 fn direct_key(value: &Value) -> Option<ArrayKey> {
     match value {
         Value::Int(index) => Some(ArrayKey::Int(*index)),
-        Value::InternedStr(_) | Value::String(_) => ArrayKey::from_value(value).ok(),
+        Value::String(_) => ArrayKey::from_value(value).ok(),
         _ => None,
     }
 }
@@ -130,7 +130,6 @@ pub(super) fn get(context: &mut dyn Context, object: &Object, offset: Value) -> 
 fn warn_missing(context: &mut dyn Context, key: &ArrayKey) {
     match key {
         ArrayKey::Int(key) => context.warning(format!("Undefined array key {key}")),
-        ArrayKey::Interned(key) => crate::warn_string_key(context, key.as_bytes()),
         ArrayKey::String(key) => crate::warn_string_key(context, key.as_bytes()),
     }
 }
