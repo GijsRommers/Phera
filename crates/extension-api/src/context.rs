@@ -130,6 +130,11 @@ pub trait Context {
     /// Replaces the symbol, retaining aliases to the old variable.
     fn replace_request_global(&mut self, _name: &str, _value: Value) {}
 
+    /// Replace a symbol in the executing PHP scope, leaving its old aliases intact.
+    fn replace_caller_variable(&mut self, _name: &str, _value: Value) -> Result<(), NativeError> {
+        Ok(())
+    }
+
     /// Flushes an extension after user shutdown callbacks and output finalization.
     fn register_request_finalizer(&mut self, _callback: crate::AsyncFn) {}
 
@@ -349,6 +354,19 @@ pub trait Context {
         Box::pin(std::future::ready(Err(NativeError::error(
             "Cannot call a PHP callback without a runtime",
         ))))
+    }
+
+    /// Calls a PHP callback with the active late-static class when it has a compatible scope.
+    fn forward_static_callback(
+        &mut self,
+        function: &str,
+        _callable: &Value,
+        _arguments: &PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        let error = NativeError::error(format!(
+            "Cannot call {function}() when no class scope is active"
+        ));
+        Box::pin(std::future::ready(Err(error)))
     }
 
     /// Calls an instance method with ordinary PHP method dispatch.

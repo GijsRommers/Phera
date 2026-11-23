@@ -49,6 +49,14 @@ impl Compiler<'_> {
         let mut traits = Vec::new();
         let mut enum_cases = Vec::new();
         let trait_scope = (declaration.kind == ast::ClassKind::Trait).then_some(name.as_str());
+        // The resolved parent, known before the members compile, so a
+        // `parent::CONST` in a method can use the parent's own name.
+        let parent = declaration
+            .extends
+            .first()
+            .filter(|_| declaration.kind == ast::ClassKind::Class)
+            .map(|parent| self.resolve(parent, NameKind::Class).0);
+        let previous_parent = std::mem::replace(&mut self.parent_scope, parent.clone());
         for member in &declaration.members {
             if let ast::ClassMemberKind::EnumCase {
                 name: case,
@@ -316,6 +324,7 @@ impl Compiler<'_> {
                 self.lines.line(method.name.span.start),
             )?);
         }
+        self.parent_scope = previous_parent;
         let can_hoist = timing == DeclarationTiming::Hoisted
             && declaration.kind != ast::ClassKind::Enum
             && traits.is_empty();
@@ -329,11 +338,7 @@ impl Compiler<'_> {
             metadata,
             line: line as u32,
             name: name.clone(),
-            parent: declaration
-                .extends
-                .first()
-                .filter(|_| declaration.kind == ast::ClassKind::Class)
-                .map(|parent| self.resolve(parent, NameKind::Class).0),
+            parent,
             interfaces: declaration
                 .implements
                 .iter()

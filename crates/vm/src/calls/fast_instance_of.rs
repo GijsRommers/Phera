@@ -19,20 +19,12 @@
 //! the interfaces to walk do not fit the walk's fixed stack, and in the
 //! guarded loop (some object has a destructor due).
 
-use std::rc::Rc;
-
-use phera_bytecode::{Reg, SymbolId};
+use phera_bytecode::{Reg, SymbolId, Target};
 use phera_value::Value;
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::classes::Class;
 use crate::fast::{ScalarStep, store};
-
-/// How many classes the walk keeps waiting at once, and how many it
-/// visits in all (an interface reached along two paths is visited twice).
-/// Real hierarchies stay far below both; a larger one goes to the VM.
-const WALK_DEPTH: usize = 32;
-const WALK_VISITS: usize = 256;
 
 impl Machine<'_> {
     /// `InstanceOf`, as `Vm::instance_of` answers it.
@@ -43,58 +35,93 @@ impl Machine<'_> {
         source: Reg,
         symbol: SymbolId,
     ) -> Step {
-        // A `catch` clause is an `instanceof` of the thrown object, reached
-        // while the unwinding may have left a destructor waiting; the VM's
-        // exit runs it before the clause's code, as PHP does.
-        if GUARDED && self.ids.has_doomed() {
+        let Some(answer) = self.instance_of_answer::<GUARDED>(position, source, symbol) else {
             return Step::Slow;
-        }
-        let slot = position.frame.base() + source.index();
-        let answer = match self.registers.window(slot, 1) {
-            [Some(Value::Object(object))] => {
-                let Some(class) = object.class.as_any().downcast_ref::<Class>() else {
-                    return Step::Slow;
-                };
-                match self.instance_target(position, symbol) {
-                    Some(target) => match derives_from(class, &target) {
-                        Some(answer) => answer,
-                        None => return Step::Slow,
-                    },
-                    // A name no class of this request has: nothing is an
-                    // instance of it, and `instanceof` never autoloads.
-                    None if !self.relative_symbol(position, symbol) => false,
-                    None => return Step::Slow,
-                }
-            }
-            // Only an object is an instance; `self` outside a class is an
-            // error the VM raises.
-            [Some(Value::Reference(_))] | [None] | [] => return Step::Slow,
-            [Some(_)] if self.relative_symbol(position, symbol) => return Step::Slow,
-            [Some(_)] => false,
-            _ => return Step::Slow,
         };
         let slots = self.registers.tail_mut(position.frame.base());
-        match store::<GUARDED>(slots, destination, Value::Bool(answer)) {
+        match store::<GUARDED, _>(slots, destination, Value::Bool(answer)) {
             ScalarStep::Complete | ScalarStep::Released => Step::Done(position.ip),
             ScalarStep::Fallback => Step::Slow,
         }
     }
 
-    /// The class `symbol` names at this point of the running code.
-    fn instance_target(&self, position: Position, symbol: SymbolId) -> Option<Rc<Class>> {
-        let function = position.frame.function;
-        let written = &self
-            .code
-            .unit(function)
-            .symbols
-            .get(symbol.index())?
-            .written;
-        let context = self.current_context();
-        match written.as_str() {
-            "self" => context?.scope().cloned(),
-            "static" => context?.called(),
-            "parent" => context?.scope()?.parent.clone(),
-            _ => self.linked_class(position, symbol),
+    /// `InstanceOfBranch` / `InstanceOfBranchIf`: the same answer, jumping to
+    /// `target` when it equals `when` instead of storing it.
+    pub(super) fn instance_of_branch<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        source: Reg,
+        symbol: SymbolId,
+        target: Target,
+        when: bool,
+    ) -> Step {
+        let Some(answer) = self.instance_of_answer::<GUARDED>(position, source, symbol) else {
+            return Step::Slow;
+        };
+        if answer == when {
+            if target.index() < position.ip && self.spend_work() {
+                return Step::Yield;
+            }
+            return Step::Done(target.index());
+        }
+        Step::Done(position.ip)
+    }
+
+    /// The `instanceof` answer for a resolved class name, or `None` when the
+    /// VM must answer it.
+    fn instance_of_answer<const GUARDED: bool>(
+        &mut self,
+        position: Position,
+        source: Reg,
+        symbol: SymbolId,
+    ) -> Option<bool> {
+        // A `catch` clause is an `instanceof` of the thrown object, reached
+        // while the unwinding may have left a destructor waiting; the VM's
+        // exit runs it before the clause's code, as PHP does.
+        if GUARDED && self.ids.has_doomed() {
+            return None;
+        }
+        let slot = position.frame.base() + source.index();
+        match self.registers.window(slot, 1) {
+            [Some(Value::Object(object))] => {
+                let class = object.class.as_any().downcast_ref::<Class>()?;
+                let function = position.frame.function;
+                let key = self.code.unit_symbol_key(function, symbol);
+                // Fast path: non-relative loaded class — no Rc clone, no written-string scan.
+                if let Some(target) = self.classes.by_key(key) {
+                    return class.derives_from(target);
+                }
+                let written = &self
+                    .code
+                    .unit(function)
+                    .symbols
+                    .get(symbol.index())?
+                    .written;
+                match written.as_str() {
+                    "self" => class.derives_from(self.caller_scope(position)?),
+                    "parent" => class.derives_from(self.caller_scope(position)?.parent.as_deref()?),
+                    "static" => {
+                        let called = self.current_context()?.called()?;
+                        class.derives_from(&called)
+                    }
+                    // A name no class of this request has: nothing is an
+                    // instance of it, and `instanceof` never autoloads.
+                    _ => Some(false),
+                }
+            }
+            // Only an object is an instance; `self` outside a class is an
+            // error the VM raises.
+            [Some(Value::Reference(_))] | [None] | [] => None,
+            [Some(_)] => {
+                let function = position.frame.function;
+                let key = self.code.unit_symbol_key(function, symbol);
+                if self.classes.by_key(key).is_some() || !self.relative_symbol(position, symbol) {
+                    Some(false)
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 
@@ -106,28 +133,4 @@ impl Machine<'_> {
             .get(symbol.index())
             .is_none_or(|symbol| matches!(symbol.written.as_str(), "self" | "static" | "parent"))
     }
-}
-
-/// Whether `class` is `target`, extends it or implements it: the same
-/// ancestry as `Class::ancestors`, its parent and interfaces and theirs.
-/// `None` when the walk outgrows its stack or its visits.
-pub(super) fn derives_from(class: &Class, target: &Class) -> Option<bool> {
-    let mut waiting: [Option<&Class>; WALK_DEPTH] = [None; WALK_DEPTH];
-    waiting[0] = Some(class);
-    let mut count: usize = 1;
-    for _ in 0..WALK_VISITS {
-        let Some(last) = count.checked_sub(1) else {
-            return Some(false);
-        };
-        count = last;
-        let class = waiting.get(last).copied().flatten()?;
-        if std::ptr::eq(class, target) {
-            return Some(true);
-        }
-        for ancestor in class.parent.iter().chain(&class.interfaces) {
-            *waiting.get_mut(count)? = Some(&**ancestor);
-            count += 1;
-        }
-    }
-    None
 }

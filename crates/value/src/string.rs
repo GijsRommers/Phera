@@ -35,6 +35,11 @@ impl PhpString {
         self.0.len()
     }
 
+    /// Number of values sharing the backing storage, for `debug_zval_dump()`.
+    pub fn storage_owners(&self) -> usize {
+        Rc::strong_count(&self.0)
+    }
+
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

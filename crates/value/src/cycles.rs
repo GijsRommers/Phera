@@ -20,6 +20,9 @@
 //! 3. Whatever is not reached from such a value is garbage: it is only held
 //!    by other garbage.
 //!
+//! A WeakMap attachment contributes to the internal count of its value.
+//! Reachability through the attachment requires both the map and its key.
+//!
 //! The walk uses an explicit work list, never Rust recursion, and touches
 //! each value once, so it costs time in proportion to the number of live
 //! objects and the values they hold. It holds one clone of each value it
@@ -39,6 +42,9 @@ use crate::array::PhpArray;
 use crate::object::Object;
 use crate::value::Value;
 
+mod weak_edges;
+use weak_edges::{Dependencies, WeakEdge};
+
 /// What the walk found to be garbage.
 #[derive(Default)]
 pub struct Garbage {
@@ -48,6 +54,8 @@ pub struct Garbage {
     pub arrays: Vec<Rc<PhpArray>>,
     /// PHP references held only by garbage.
     pub references: Vec<Rc<RefCell<Value>>>,
+    /// Attachments on reachable keys whose maps are garbage.
+    pub inactive_attachments: Vec<(Rc<Object>, usize)>,
 }
 
 /// One value that can own others.
@@ -90,18 +98,18 @@ impl Node {
     fn visit_children(&self, mut visit: impl FnMut(&Value)) -> bool {
         match self {
             Node::Object(object) => {
-                let Ok(native) = object.native.try_borrow() else {
+                let Ok(native) = object.native.try_borrow_mut() else {
                     return false;
                 };
-                if native.is_some() {
-                    return false;
-                }
                 let Ok(properties) = object.properties.try_borrow() else {
                     return false;
                 };
-                let mut visit = visit;
-                properties.values().for_each(&mut visit);
-                object.visit_attachments(&mut visit);
+                if let Some(native) = native.as_deref()
+                    && !object.class.trace_native_values(native, &mut visit)
+                {
+                    return false;
+                }
+                properties.values().for_each(visit);
                 true
             }
             Node::Array(array) => {
@@ -168,6 +176,7 @@ struct Walk {
     index_of: HashMap<usize, usize, BuildHasherDefault<AddressHasher>>,
     /// Who holds whom: the indexes of the values each entry holds.
     edges: Vec<usize>,
+    weak_edges: Vec<WeakEdge>,
     work: Vec<usize>,
 }
 
@@ -186,6 +195,21 @@ impl Walk {
             self.work.push(index);
         }
         index
+    }
+
+    fn count_owner(&mut self, key: usize, value: &Value) -> Option<usize> {
+        let child = match self.index_of.get(&key) {
+            Some(&known) => known,
+            None => {
+                if matches!(value, Value::Object(object) if is_leaf(object)) {
+                    return None;
+                }
+                let node = Node::of(value)?;
+                self.enter(key, || node)
+            }
+        };
+        self.entries[child].internal += 1;
+        Some(child)
     }
 }
 
@@ -207,31 +231,35 @@ pub fn find_garbage(objects: impl IntoIterator<Item = Rc<Object>>) -> Garbage {
         let node = walk.entries[index].node.clone();
         let start = walk.edges.len();
         let seen = node.visit_children(|value| {
-            let Some(key) = key_of(value) else {
-                return;
-            };
-            if matches!(value, Value::Object(object) if is_leaf(object)) {
-                return;
+            if let Some(key) = key_of(value)
+                && let Some(child) = walk.count_owner(key, value)
+            {
+                walk.edges.push(child);
             }
-            let child = match walk.index_of.get(&key) {
-                Some(&known) => known,
-                None => match Node::of(value) {
-                    Some(node) => walk.enter(key, || node),
-                    None => return,
-                },
-            };
-            walk.entries[child].internal += 1;
-            walk.edges.push(child);
         });
         let end = walk.edges.len();
         walk.entries[index].edges = seen.then_some(start..end);
+        if let Node::Object(object) = node {
+            object.visit_attachments(|owner, value| {
+                if let Some(address) = key_of(value) {
+                    let child = walk.count_owner(address, value);
+                    walk.weak_edges.push(WeakEdge {
+                        key: index,
+                        owner,
+                        child,
+                    });
+                }
+            });
+        }
     }
     let Walk {
         mut entries,
         edges,
+        weak_edges,
         mut work,
-        ..
+        index_of,
     } = walk;
+    let dependencies = Dependencies::new(entries.len(), &weak_edges, &index_of);
     // 2. Values held from outside are alive, with all they hold. The walk
     //    holds one handle on each value. A value whose contents could not
     //    be seen keeps what it holds unseen: it stays alive.
@@ -248,9 +276,25 @@ pub fn find_garbage(objects: impl IntoIterator<Item = Rc<Object>>) -> Garbage {
                 work.push(child);
             }
         }
+        dependencies.visit(index, |other, child| {
+            if other.is_none_or(|other| entries[other].alive) && !entries[child].alive {
+                entries[child].alive = true;
+                work.push(child);
+            }
+        });
     }
     // 3. The rest is garbage, with the leaf objects only garbage holds.
     let mut garbage = Garbage::default();
+    for edge in weak_edges {
+        if entries[edge.key].alive
+            && index_of
+                .get(&edge.owner)
+                .is_some_and(|&owner| !entries[owner].alive)
+            && let Node::Object(key) = &entries[edge.key].node
+        {
+            garbage.inactive_attachments.push((key.clone(), edge.owner));
+        }
+    }
     for entry in entries.into_iter().filter(|entry| !entry.alive) {
         match entry.node {
             Node::Object(object) => garbage.objects.push(object),
@@ -258,7 +302,7 @@ pub fn find_garbage(objects: impl IntoIterator<Item = Rc<Object>>) -> Garbage {
             Node::Reference(cell) => garbage.references.push(cell),
         }
     }
-    let leaves = held_leaves(&garbage);
+    let leaves = held_leaves(&garbage, &index_of);
     garbage.objects.extend(leaves);
     garbage.objects.sort_by_key(|object| object.id);
     garbage
@@ -284,11 +328,15 @@ fn is_leaf(object: &Object) -> bool {
 
 /// The leaf objects that only `garbage` holds: every handle on them comes
 /// from a garbage value.
-fn held_leaves(garbage: &Garbage) -> Vec<Rc<Object>> {
+fn held_leaves(
+    garbage: &Garbage,
+    known: &HashMap<usize, usize, BuildHasherDefault<AddressHasher>>,
+) -> Vec<Rc<Object>> {
     let mut held: HashMap<usize, (Rc<Object>, usize), BuildHasherDefault<AddressHasher>> =
         HashMap::default();
     let mut tally = |value: &Value| {
         if let Value::Object(object) = value
+            && !known.contains_key(&object.address())
             && is_leaf(object)
         {
             let entry = held
@@ -299,6 +347,14 @@ fn held_leaves(garbage: &Garbage) -> Vec<Rc<Object>> {
     };
     for object in &garbage.objects {
         Node::Object(object.clone()).visit_children(&mut tally);
+        object.visit_attachments(|_, value| tally(value));
+    }
+    for (key, owner) in &garbage.inactive_attachments {
+        key.visit_attachments(|candidate, value| {
+            if candidate == *owner {
+                tally(value);
+            }
+        });
     }
     for array in &garbage.arrays {
         array.values().for_each(&mut tally);

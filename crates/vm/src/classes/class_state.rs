@@ -34,7 +34,7 @@ use crate::reference_holders::StaticProperty;
 
 /// The number of a static property's storage in [`ClassStates`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct StaticSlot(u32);
+pub(crate) struct StaticSlot(pub(crate) u32);
 
 /// The number of an evaluated constant's state in [`ClassStates`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -132,6 +132,15 @@ impl ClassStates {
         property: &PropertyDefault,
     ) -> Option<&Rc<StaticProperty>> {
         let StaticSlot(slot) = property.static_storage?;
+        self.statics.get(slot as usize)?.as_ref()
+    }
+
+    /// The storage in `slot`, if this request made it already: a static
+    /// property read site's (see `crate::static_sites`).
+    pub(crate) fn existing_slot(
+        &self,
+        StaticSlot(slot): StaticSlot,
+    ) -> Option<&Rc<StaticProperty>> {
         self.statics.get(slot as usize)?.as_ref()
     }
 

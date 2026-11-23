@@ -216,6 +216,7 @@ impl Vm {
                         class: class.index.number(),
                         slot,
                     }),
+                    slot_access: slot_access(slot, property, is_virtual, class),
                     ..MemberInfo::default()
                 };
                 if let Some((_, first, unit, declared)) = property_source(&property.name) {
@@ -331,4 +332,38 @@ impl Vm {
         }
         members
     }
+}
+
+/// Where an object keeps a plain instance property, for the direct methods
+/// of `ReflectionProperty` (see `phera_extension_api::reflection::SlotAccess`):
+/// none for a static, virtual or hooked property. Writes take the slot only
+/// for a property that is not readonly, has no asymmetric visibility, and
+/// whose type names no class.
+fn slot_access(
+    slot: PropertySlot,
+    property: &crate::classes::class::PropertyDefault,
+    is_virtual: bool,
+    class: &Class,
+) -> Option<phera_extension_api::reflection::SlotAccess> {
+    let PropertySlot::Instance(index) = slot else {
+        return None;
+    };
+    if is_virtual || property.hooks.is_some() {
+        return None;
+    }
+    let writes = (!property.is_readonly
+        && property.set_visibility.is_none()
+        && property.ty.as_ref().is_none_or(|ty| ty.classes.is_empty()))
+    .then(|| {
+        property
+            .ty
+            .as_ref()
+            .map_or(phera_bytecode::TypeMask::MIXED, |ty| ty.mask)
+    });
+    Some(phera_extension_api::reflection::SlotAccess {
+        key: property.key.clone(),
+        slot: index,
+        layout: class.layout.clone()?,
+        writes,
+    })
 }

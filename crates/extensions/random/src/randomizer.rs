@@ -195,7 +195,7 @@ fn unserialize(
     *object.native.try_borrow_mut().map_err(|_| invalid())? = Some(Box::new(Randomizer {
         engine: engine.clone(),
     }));
-    object.update(|properties| *properties = (**members).clone());
+    object.update(|properties| properties.replace_all((**members).clone()));
     Ok(Value::Null)
 }
 

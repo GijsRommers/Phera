@@ -25,6 +25,7 @@ impl Vm {
     /// Implements PHP Echo semantics outside the dispatch loop.
     pub(crate) fn echo_value(&mut self, source: Reg) -> Result<(), NativeError> {
         let text = match &*self.operand(source) {
+            Value::InternedStr(text) => Some(text.to_php_string()),
             Value::String(text) => Some(text.clone()),
             _ => None,
         };

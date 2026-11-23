@@ -144,6 +144,7 @@ pub async fn create(
         && context.has_method(&object, "create_sid")
     {
         return match call(context, object, "create_sid", Vec::new(), function).await? {
+            Some(Value::InternedStr(id)) => Ok(id.to_php_string()),
             Some(Value::String(id)) => Ok(id),
             Some(_) => Err(NativeError::error("Session id must be a string")),
             None => Err(NativeError::error("No session id returned by function")),

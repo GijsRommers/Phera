@@ -2,8 +2,8 @@
 
 use phera_extension_api::value::{loose_equals, strict_equals};
 use phera_extension_api::{
-    ArrayKey, Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType,
-    PhpString, Registry, Value, args,
+    Context, FunctionEntry, LocalFuture, NativeError, NativeResult, Param, ParamType, Registry,
+    Value, args,
 };
 
 use crate::arguments::required_array;
@@ -34,9 +34,9 @@ fn can_search_sync(slots: &[Option<Value>]) -> bool {
     })
 }
 
-fn plainly_non_numeric(string: &PhpString) -> bool {
+fn plainly_non_numeric(bytes: &[u8]) -> bool {
     // A numeric string starts with whitespace, a sign, a dot or a digit.
-    string.as_bytes().first().is_none_or(|first| *first > b'9')
+    bytes.first().is_none_or(|first| *first > b'9')
 }
 
 fn in_array_sync(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
@@ -96,12 +96,12 @@ impl Equality {
         left: &Value,
         right: &Value,
     ) -> Result<bool, NativeError> {
-        if let (Value::String(left), Value::String(right)) = (left, right)
+        if let (Some(left), Some(right)) = (left.str_ref(), right.str_ref())
             && (matches!(self, Self::Strict)
-                || plainly_non_numeric(left)
-                || plainly_non_numeric(right))
+                || plainly_non_numeric(left.as_bytes())
+                || plainly_non_numeric(right.as_bytes()))
         {
-            return Ok(left.as_bytes() == right.as_bytes());
+            return Ok(left == right);
         }
         let compare = match self {
             Self::Strict => strict_equals,
@@ -131,7 +131,16 @@ pub(super) const IN_ARRAY: FunctionEntry = FunctionEntry::asynchronous(
 );
 
 fn in_array(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
-    Box::pin(async move { Ok(Value::Bool(search(context, &arguments).await?.is_some())) })
+    Box::pin(async move {
+        let equality = Equality::from_strict_argument(&arguments);
+        let needle = &arguments[0];
+        for value in required_array(&arguments, 1).values() {
+            if equality.equal(context, needle, value).await? {
+                return Ok(Value::Bool(true));
+            }
+        }
+        Ok(Value::Bool(false))
+    })
 }
 
 /// `array_search(mixed $needle, array $haystack, bool $strict = false):
@@ -153,22 +162,13 @@ pub(super) const ARRAY_SEARCH: FunctionEntry = FunctionEntry::asynchronous(
 
 fn array_search(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        let found = search(context, &arguments).await?;
-        Ok(found.map_or(Value::Bool(false), Value::from))
-    })
-}
-
-/// The first key of `$haystack` whose value equals `$needle`.
-async fn search(
-    context: &mut dyn Context,
-    arguments: &[Value],
-) -> Result<Option<ArrayKey>, NativeError> {
-    let needle = &arguments[0];
-    let equality = Equality::from_strict_argument(arguments);
-    for (key, value) in required_array(arguments, 1).iter() {
-        if equality.equal(context, needle, value).await? {
-            return Ok(Some(key));
+        let equality = Equality::from_strict_argument(&arguments);
+        let needle = &arguments[0];
+        for (key, value) in required_array(&arguments, 1).iter() {
+            if equality.equal(context, needle, value).await? {
+                return Ok(Value::from(key));
+            }
         }
-    }
-    Ok(None)
+        Ok(Value::Bool(false))
+    })
 }

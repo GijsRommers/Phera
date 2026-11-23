@@ -25,9 +25,10 @@ use std::sync::{Arc, Weak};
 
 use super::Class;
 
-/// A class name looked up while an entry was linked, and what it was then:
-/// the class's number, or `None` when no class had the name.
-pub(crate) type Dependency = (String, Option<u32>);
+/// A class name looked up while an entry was linked, by its key, and what
+/// it was then: the class's number, or `None` when no class had the name.
+/// Checking an entry is one keyed lookup per dependency.
+pub(crate) type Dependency = (phera_bytecode::NameKey, Option<u32>);
 
 /// A trait method composed into the class: its own function number, the
 /// body it was composed from, and the name it has in the class.

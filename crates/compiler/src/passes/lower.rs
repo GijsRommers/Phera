@@ -223,6 +223,16 @@ impl Tables<'_> {
                 | Instruction::JumpIf { target, .. }
                 | Instruction::JumpIfNot { target, .. }
                 | Instruction::JumpIfNull { target, .. }
+                | Instruction::JumpIfNotNull { target, .. }
+                | Instruction::GuardBuiltin { call: target, .. }
+                | Instruction::BinaryIntBranch { target, .. }
+                | Instruction::BinaryIntBranchIf { target, .. }
+                | Instruction::BinaryBranch { target, .. }
+                | Instruction::BinaryBranchIf { target, .. }
+                | Instruction::InstanceOfBranch { target, .. }
+                | Instruction::InstanceOfBranchIf { target, .. }
+                | Instruction::DynamicInstanceOfBranch { target, .. }
+                | Instruction::DynamicInstanceOfBranchIf { target, .. }
                 | Instruction::IterNext { end: target, .. }
                 | Instruction::IterNextKeyed { end: target, .. } => Some(target),
                 _ => None,
@@ -296,7 +306,49 @@ impl Tables<'_> {
             // Removes the moves that became `Nop`.
             crate::passes::optimize::optimize(&mut function);
         }
+        crate::passes::clear_flow::elide(&mut function, &self.unit.constants, &self.unit.types);
+        // Last: the passes above never see `CallMethod`, whose site table
+        // reads the argument registers.
+        crate::passes::method_calls::rewrite(&mut function);
+        // Then the temporaries read once and cleared are taken.
+        crate::passes::takes::rewrite(&mut function);
+        use_immediate_literals(&mut function, &self.unit.constants);
+        // A binding uses the scratch register explicitly. A comparison branch
+        // uses the last register implicitly on its VM fallback. Direct calls
+        // can also name the end of the window, even for zero arguments.
+        if areas.is_none()
+            && scratch.0 > 0
+            && function.registers == scratch.0 + 1
+            && !function.instructions.iter().any(|op| {
+                matches!(
+                    op,
+                    Instruction::BindReference { .. }
+                        | Instruction::BinaryBranch { .. }
+                        | Instruction::BinaryBranchIf { .. }
+                )
+            })
+        {
+            function.registers = scratch.0;
+        }
         function
+    }
+}
+
+/// Embed scalars such as the `null` in `return null;` in their load instructions.
+/// Run after the takes pass so that readers can still absorb table-backed operands.
+fn use_immediate_literals(function: &mut Function, constants: &[Constant]) {
+    for instruction in function.instructions.iter_mut() {
+        let Instruction::LoadConst { dst, constant } = *instruction else {
+            continue;
+        };
+        *instruction = match constants[constant.index()] {
+            Constant::Null => Instruction::LoadNull { dst },
+            Constant::Bool(value) => Instruction::LoadBool { dst, value },
+            Constant::Int(value) if let Ok(value) = i32::try_from(value) => {
+                Instruction::LoadInt { dst, value }
+            }
+            _ => continue,
+        };
     }
 }
 

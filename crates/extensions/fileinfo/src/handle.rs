@@ -313,6 +313,19 @@ fn mime(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nat
     Box::pin(async move {
         const NAME: &str = "mime_content_type";
         let contents = match args::value(&arguments, 0) {
+            Value::InternedStr(path) => {
+                if path.is_empty() {
+                    return Err(NativeError::value_error(
+                        "mime_content_type(): Argument #1 ($filename) must not be empty",
+                    ));
+                }
+                if path.as_bytes().contains(&0) {
+                    return Err(NativeError::type_error(
+                        "mime_content_type(): Argument #1 ($filename) must not contain any null bytes",
+                    ));
+                }
+                inspect_path(context, NAME, path.as_bytes(), LIMIT, 0).await?
+            }
             Value::String(path) => {
                 if path.is_empty() {
                     return Err(NativeError::value_error(

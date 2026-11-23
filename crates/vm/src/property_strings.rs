@@ -1,7 +1,6 @@
 //! A weak typed property assignment performs the same Stringable conversion
 //! as a weak typed argument, for example `$object->label = $stringable`.
 
-use phera_bytecode::PathBase;
 use phera_extension_api::{NativeError, NativeResult};
 use phera_value::{ArrayKey, Object, Value};
 
@@ -28,7 +27,7 @@ impl Vm {
             .current()
             .is_some_and(|frame| frame.function().strict_types);
         match &*value.deref() {
-            Value::String(_) => return Ok(None),
+            Value::InternedStr(_) | Value::String(_) => return Ok(None),
             Value::Null if property.nullable => return Ok(None),
             Value::Int(_) | Value::Float(_) | Value::Bool(_) if !strict => return Ok(None),
             Value::Object(_) if !strict && Self::has_string_conversion(value) => {}
@@ -62,7 +61,7 @@ impl Vm {
         {
             return Ok(None);
         }
-        let PathBase::StaticProperty { class, name, .. } = place.base()? else {
+        let Some((class, name)) = crate::static_places::static_base(place.base()?) else {
             return Ok(None);
         };
         let (class_name, property_name) = self.static_property_names(class, name)?;

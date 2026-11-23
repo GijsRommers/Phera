@@ -75,6 +75,20 @@ pub async fn build(
                             }
                             b.token(flag);
                         }
+                        phera_extension_api::ArrayKey::Interned(key) => {
+                            let flag = key.to_string_lossy().to_uppercase();
+                            if flag == "WITHSCORES" {
+                                if phera_extension_api::value::to_bool(value) {
+                                    b.token(flag);
+                                    b.shape = Shape::Scores;
+                                }
+                            } else if flag == "LIMIT" {
+                                b.token(flag);
+                                b.args(std::slice::from_ref(value));
+                            } else if phera_extension_api::value::to_bool(value) {
+                                b.token(flag);
+                            }
+                        }
                         phera_extension_api::ArrayKey::String(key) => {
                             let flag = key.to_string_lossy().to_uppercase();
                             if flag == "WITHSCORES" {

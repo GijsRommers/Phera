@@ -1,9 +1,9 @@
 //! Callee-first call lowering and source-order argument sends.
 
 use phera_ast as ast;
-use phera_bytecode::Reg;
+use phera_bytecode::{BuiltinFrame, Reg};
 
-use crate::ir::{Argument, Constant, Instruction};
+use crate::ir::{Argument, Constant, Instruction, Target};
 use crate::policies::NameKind;
 use crate::{CompileError, Compiler};
 
@@ -31,68 +31,107 @@ impl Compiler<'_> {
         {
             self.function.dynamic_scope = true;
         }
-        let quoted_condition = if let ExpressionKind::Name(name) = &callee.kind
-            && callee.span == name.span
-        {
-            let (resolved, fallback) = self.resolve(name, NameKind::Function);
-            if fallback.is_none()
-                && let Some(result) = self.compile_builtin_call(&resolved, arguments, line)?
-            {
-                return Ok(result);
+        let name = match &callee.kind {
+            ExpressionKind::Name(name) if callee.span == name.span => name,
+            _ => {
+                let callee = self.compile_expression(callee)?;
+                self.emit(Instruction::StartDynamicCall { callee }, line);
+                return self.compile_arguments(arguments, opening_line);
             }
-            let quoted = self.assertion_text(name, arguments);
-            self.emit(
-                Instruction::StartCall {
-                    name: resolved,
-                    fallback,
-                },
-                line,
-            );
-            quoted
-        } else {
-            let callee = self.compile_expression(callee)?;
-            self.emit(Instruction::StartDynamicCall { callee }, line);
-            return self.compile_arguments(arguments, opening_line);
         };
-        let Some((description, name)) = quoted_condition else {
-            return self.compile_arguments(arguments, line);
+        let (resolved, fallback) = self.resolve(name, NameKind::Function);
+        if fallback.is_none()
+            && let Some(result) = self.compile_builtin_call(&resolved, arguments, line)?
+        {
+            return Ok(result);
+        }
+        if let Some(fallback) = &fallback
+            && let Some(result) =
+                self.compile_namespaced_builtin(&resolved, fallback, arguments, line)?
+        {
+            return Ok(result);
+        }
+        let assertion = fallback
+            .as_deref()
+            .unwrap_or(&resolved)
+            .eq_ignore_ascii_case("assert");
+        let call = Instruction::StartCall {
+            name: resolved,
+            fallback,
         };
-        // `assert($x > 1)` is called as `assert($x > 1, 'assert($x > 1)')`:
-        // the message of a failed assertion is the condition as written.
-        let temporary_objects = match arguments {
-            ast::Arguments::List(arguments) => self.send_arguments(arguments, line)?,
-            _ => Vec::new(),
-        };
-        let description = self.literal(Constant::Bytes(description), line)?;
+        if assertion
+            && self
+                .native_functions
+                .is_none_or(|native| (native.lookup)("assert").is_some())
+            && let ast::Arguments::List(arguments) = arguments
+        {
+            return self.compile_assertion(call, arguments, line);
+        }
+        self.emit(call, line);
+        self.compile_arguments(arguments, line)
+    }
+
+    fn compile_assertion(
+        &mut self,
+        call: Instruction,
+        arguments: &[ast::Argument],
+        line: usize,
+    ) -> Result<Reg, CompileError> {
+        let destination = self.allocate_register()?;
         self.emit(
-            Instruction::Send {
-                argument: Argument {
-                    source: crate::ir::ArgumentSource::Value(description),
-                    name,
-                    spread: false,
-                },
+            Instruction::BuiltinFrame {
+                destination,
+                operator: BuiltinFrame::AssertionsDisabled,
             },
             line,
         );
-        self.finish_call(temporary_objects, line)
+        let skip = self.emit(
+            Instruction::Branch {
+                value: destination,
+                target: Target(0),
+                when: true,
+            },
+            line,
+        );
+        self.emit(call, line);
+        let temporary_objects = self.send_arguments(arguments, line)?;
+        // PHP uses the written condition as the default failure message.
+        if let Some((description, name)) = self.assertion_text(arguments) {
+            let description = self.literal(Constant::Bytes(description), line)?;
+            self.emit(
+                Instruction::Send {
+                    argument: Argument {
+                        source: crate::ir::ArgumentSource::Value(description),
+                        name,
+                        spread: false,
+                        of_call: false,
+                    },
+                },
+                line,
+            );
+        }
+        let source = self.finish_call(temporary_objects, line)?;
+        self.emit(
+            Instruction::Move {
+                destination,
+                source,
+            },
+            line,
+        );
+        self.patch(skip, self.position());
+        Ok(destination)
     }
 
     /// For `assert(condition)` with nothing else, the text `assert(condition)`
     /// that PHP uses as the failure message, and the name to pass it under:
     /// after `assert(assertion: $x)` the description must be named too.
-    /// `None` for any other call.
-    fn assertion_text(
-        &self,
-        name: &ast::Name,
-        arguments: &ast::Arguments,
-    ) -> Option<(Vec<u8>, Option<String>)> {
-        let ast::Arguments::List(arguments) = arguments else {
+    /// The description is omitted when the argument shape does not supply
+    /// one identifiable condition.
+    fn assertion_text(&self, arguments: &[ast::Argument]) -> Option<(Vec<u8>, Option<String>)> {
+        let [condition] = arguments else {
             return None;
         };
-        let [condition] = arguments.as_slice() else {
-            return None;
-        };
-        if condition.spread || !name.text.eq_ignore_ascii_case("assert") {
+        if condition.spread {
             return None;
         }
         let description_name = match &condition.name {
@@ -199,6 +238,7 @@ impl Compiler<'_> {
                     source,
                     name: argument.name.as_ref().map(|name| name.name.clone()),
                     spread: argument.spread,
+                    of_call: self.is_call_result(&argument.value),
                 },
             },
             line,

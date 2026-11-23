@@ -178,7 +178,9 @@ async fn enter(
         Value::Array(array) => Container::Array(array.clone()),
         Value::Object(object)
             if object.class.is_enum()
-                && let Some(Value::String(name)) = object.get(&ArrayKey::str("name"))
+                && let Some(name) = object
+                    .get(&ArrayKey::str("name"))
+                    .and_then(|v| v.to_php_string())
                 && style.enum_case(out, object, &name, place) =>
         {
             return Ok(Entered::Scalar);

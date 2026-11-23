@@ -8,10 +8,10 @@ pub fn build(name: &str, a: &[Value], b: &mut Builder<'_>) -> bool {
             b.shape = Shape::Values;
             if let Some(options) = array(a.get(1)) {
                 for (key, value) in options.iter() {
-                    let phera_extension_api::ArrayKey::String(key) = key else {
+                    let Some(key) = key.as_str_bytes() else {
                         continue;
                     };
-                    match key.to_string_lossy().to_lowercase().as_str() {
+                    match String::from_utf8_lossy(key).to_lowercase().as_str() {
                         "by" => {
                             b.token("BY");
                             b.key(value);

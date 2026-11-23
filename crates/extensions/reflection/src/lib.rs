@@ -25,6 +25,7 @@ mod method;
 mod modifiers;
 mod parameter;
 mod property;
+mod property_slots;
 mod reference;
 mod types;
 
@@ -127,8 +128,13 @@ fn inspect<T: Any, R>(
 }
 
 fn bind<T: Any>(object: &Object, name: Option<&str>, value: T) -> NativeResult {
+    bind_value(object, name.map(Value::from), value)
+}
+
+/// Install native state and a PHP string, for example the name of `new ReflectionClass(Foo::class)`.
+fn bind_value<T: Any>(object: &Object, name: Option<Value>, value: T) -> NativeResult {
     if let Some(name) = name {
-        object.set(ArrayKey::str("name"), Value::from(name));
+        object.set(ArrayKey::str("name"), name);
     }
     *object
         .native

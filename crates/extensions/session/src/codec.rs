@@ -41,6 +41,7 @@ impl Format {
         }
         for (key, value) in array.iter() {
             let key = match key {
+                ArrayKey::Interned(key) => key.to_php_string(),
                 ArrayKey::String(key) => key,
                 ArrayKey::Int(key) => {
                     warning(context, function, &format!("Skipping numeric key {key}"));

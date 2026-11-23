@@ -2,15 +2,17 @@
 
 use std::{borrow::Cow, rc::Rc};
 
-use phera_extension_api::reflection::{MemberInfo, MemberKind, ReflectedClassKind};
+use phera_extension_api::reflection::{ClassInfo, MemberInfo, MemberKind, ReflectedClassKind};
 use phera_extension_api::{
     ArrayKey, ClassEntry, Context, LocalFuture, MethodEntry, NativeError, NativeResult, Object,
     Param, ParamType, PhpArray, Registry, Value, args,
 };
 
 use crate::{
-    UNCLONEABLE, allocate, bind,
-    class::{ReflectedClass, reflected_class, target_class},
+    UNCLONEABLE, allocate, bind, bind_value,
+    class::{
+        ReflectedClass, load_target_class, loaded_target_class, reflected_class, target_class,
+    },
     class_members::{find, members},
     engine, exception, inspect, member, receiver,
 };
@@ -30,7 +32,8 @@ pub(crate) fn register(registry: &mut Registry) {
                     "__construct",
                     const { &[Param::new("objectOrClass", ParamType::ObjectOrString)] },
                     construct_enum,
-                ),
+                )
+                .with_ready(construct_loaded_enum),
                 MethodEntry::public("hasCase", CASE_NAME, has_case).returning("bool"),
                 MethodEntry::public("getCase", CASE_NAME, get_case)
                     .returning("ReflectionEnumUnitCase"),
@@ -86,20 +89,33 @@ fn construct_enum(
     args: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
-        let name = reflect_target(&args)?;
-        let info = engine(context)?.reflect_class(&name).await?;
-        if info.kind != ReflectedClassKind::Enum {
-            return Err(exception(format!("Class \"{}\" is not an enum", info.name)));
-        }
-        bind(
-            receiver(this.as_ref())?,
-            Some(&info.name),
-            ReflectedClass {
-                info: info.clone(),
-                object: None,
-            },
-        )
+        let target = args
+            .first()
+            .ok_or_else(|| exception("Missing reflection class name"))?;
+        let info = load_target_class(context, target).await?;
+        bind_enum(receiver(this.as_ref())?, info)
     })
+}
+
+/// Bind `new ReflectionEnum(Status::class)` once Status is linked.
+fn construct_loaded_enum(
+    context: &mut dyn Context,
+    this: &Rc<Object>,
+    args: &[Value],
+) -> Option<NativeResult> {
+    let info = loaded_target_class(context, args.first()?)?;
+    Some(bind_enum(this, info))
+}
+
+fn bind_enum(this: &Object, info: Rc<ClassInfo>) -> NativeResult {
+    if info.kind != ReflectedClassKind::Enum {
+        return Err(exception(format!("Class \"{}\" is not an enum", info.name)));
+    }
+    bind_value(
+        this,
+        Some(info.name_value.clone()),
+        ReflectedClass { info, object: None },
+    )
 }
 
 fn construct_case(

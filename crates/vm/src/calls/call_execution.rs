@@ -111,7 +111,15 @@ impl Vm {
             .ok_or_else(|| internal_error!("direct call target"))?;
         self.prepare_php_call(function);
         for index in 0..count as usize {
-            let value = self.registers.take(from + index);
+            // Every parameter of a direct call takes a value (the compiler
+            // makes no direct call to a function with a by-reference
+            // parameter), so a reference that a call returned straight into
+            // the argument area is read here: `grow(refret())` must not
+            // change the variable `refret` returned.
+            let value = match self.registers.take(from + index) {
+                reference @ Value::Reference(_) => reference.deref().clone(),
+                value => value,
+            };
             self.store_sent_value(index, value)?;
         }
         *work += 1;

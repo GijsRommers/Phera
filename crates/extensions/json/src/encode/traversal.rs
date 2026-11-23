@@ -56,8 +56,8 @@ impl Container {
             self.next = entries.next_position(position);
             let (key, value) = entries.entry_at(position)?;
             if matches!(self.owner, Owner::Object(..))
-                && let ArrayKey::String(name) = &key
-                && split_property_key(name.as_bytes()).1 != PropertyScope::Public
+                && let Some(name) = key.as_str_bytes()
+                && split_property_key(name).1 != PropertyScope::Public
             {
                 continue;
             }

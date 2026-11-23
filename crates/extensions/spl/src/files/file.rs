@@ -122,9 +122,8 @@ fn construct(
         let name = args::bytes(&arguments, 0);
         native::check_path("SplFileObject::__construct", "#1 ($filename)", name)?;
         let location = Location::info(name);
-        let mode = args::string(&arguments, 1)
-            .cloned()
-            .unwrap_or_else(|| PhpString::from("r"));
+        let mode =
+            args::string(&arguments, 1).map_or_else(|| PhpString::from("r"), |s| s.to_php_string());
         initialize(
             context,
             receiver(this.as_ref())?,
@@ -183,9 +182,8 @@ pub(super) fn open_file(
             ));
         }
         let location = location?;
-        let mode = args::string(&arguments, 0)
-            .cloned()
-            .unwrap_or_else(|| PhpString::from("r"));
+        let mode =
+            args::string(&arguments, 0).map_or_else(|| PhpString::from("r"), |s| s.to_php_string());
         let result = context.create_object(&class, PhpArray::new())?;
         let Value::Object(file) = &result else {
             return Err(NativeError::error("File factory must return an object"));

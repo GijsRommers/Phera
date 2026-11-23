@@ -84,7 +84,7 @@ fn create_parser(context: &mut dyn Context, arguments: &[Value], namespaces: boo
     } else {
         "xml_parser_create"
     };
-    let encoding = args::string(arguments, 0).map(phera_extension_api::PhpString::to_string_lossy);
+    let encoding = args::string(arguments, 0).map(phera_extension_api::StrRef::to_string_lossy);
     let codec = encoding
         .filter(|encoding| !encoding.is_empty())
         .map(|encoding| {
@@ -96,10 +96,8 @@ fn create_parser(context: &mut dyn Context, arguments: &[Value], namespaces: boo
         })
         .transpose()?;
     let separator = namespaces.then(|| {
-        args::string(arguments, 1).map_or(
-            ":".to_owned(),
-            phera_extension_api::PhpString::to_string_lossy,
-        )
+        args::string(arguments, 1)
+            .map_or(":".to_owned(), phera_extension_api::StrRef::to_string_lossy)
     });
     let value = context.create_object(CLASS, PhpArray::new())?;
     let Value::Object(ref object) = value else {

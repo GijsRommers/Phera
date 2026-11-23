@@ -27,6 +27,16 @@ impl Diagnostics for Vm {
 }
 
 impl Context for Vm {
+    fn replace_caller_variable(&mut self, name: &str, value: Value) -> Result<(), NativeError> {
+        if self.current().is_none() {
+            self.set_global(name, value);
+            return Ok(());
+        }
+        let local = self.named_slot(name)?;
+        self.set(local, value);
+        Ok(())
+    }
+
     fn is_snapshot_boot(&self) -> bool {
         self.snapshot.mode == crate::SnapshotMode::Boot
     }
@@ -564,6 +574,46 @@ impl Context for Vm {
         }
     }
 
+    fn forward_static_callback(
+        &mut self,
+        function: &str,
+        callable: &Value,
+        arguments: &phera_value::PhpArray,
+    ) -> LocalFuture<'_, NativeResult> {
+        use crate::calls::call_state::CallTarget;
+
+        let call = self
+            .current()
+            .and_then(|frame| frame.called())
+            .ok_or_else(|| {
+                NativeError::error(format!(
+                    "Cannot call {function}() when no class scope is active"
+                ))
+            });
+        let resolved = call.and_then(|called| {
+            let mut callee = self.resolve_callable(callable)?;
+            match &mut callee.target {
+                CallTarget::Method { context, .. }
+                    if context.receiver.is_none() && called.is_a(&context.called.name) =>
+                {
+                    context.called = called;
+                }
+                CallTarget::Magic(magic)
+                    if magic.context.receiver.is_none()
+                        && called.is_a(&magic.context.called.name) =>
+                {
+                    std::rc::Rc::make_mut(magic).context.called = called;
+                }
+                _ => {}
+            }
+            Ok(callee)
+        });
+        match resolved {
+            Ok(callee) => self.invoke_array_callback(callee, arguments),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
     fn call_method(
         &mut self,
         object: std::rc::Rc<phera_value::Object>,
@@ -766,7 +816,9 @@ impl Context for Vm {
     ) -> Option<std::rc::Rc<phera_value::Object>> {
         let class = class.as_any().downcast_ref::<crate::classes::Class>()?;
         let class = class.identity.upgrade()?;
-        Some(self.classes.allocate_with_properties(class, properties))
+        let mut table = phera_value::Properties::for_class(&*class);
+        table.replace_all(properties);
+        Some(self.classes.allocate_with_properties(class, table))
     }
 
     fn serialization_properties(
@@ -855,6 +907,9 @@ impl Context for Vm {
             .and_then(|class| class.hooks.as_ref()?.properties);
         match projection {
             Some(project) => project(self, object, purpose),
+            None if purpose == phera_extension_api::PropertyPurpose::ArrayCast => {
+                Ok(object.to_cast_array())
+            }
             None => Ok(object.to_array()),
         }
     }
@@ -1048,7 +1103,7 @@ impl Vm {
         if !properties.is_empty() {
             object.update(|storage| {
                 if storage.is_empty() {
-                    *storage = properties;
+                    storage.replace_all(properties);
                 } else {
                     for (key, value) in properties.iter() {
                         storage.insert(key, value.clone());

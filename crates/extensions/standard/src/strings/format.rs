@@ -96,7 +96,11 @@ fn scalar_array(slots: &[Option<Value>]) -> bool {
 // range and NaN can warn during a cast. Send both shapes to the output path
 // that can await a user error handler.
 fn quiet_format(slots: &[Option<Value>]) -> bool {
-    matches!(slots.first(), Some(Some(Value::String(format))) if !format.contains(&b'.'))
+    slots
+        .first()
+        .and_then(Option::as_ref)
+        .and_then(Value::as_str_bytes)
+        .is_some_and(|format| !format.contains(&b'.'))
 }
 
 fn quiet_scalar(value: &Value) -> bool {

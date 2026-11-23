@@ -13,6 +13,7 @@ use phera_value::{PhpArray, Value};
 
 use crate::Vm;
 use crate::arrays::ArrayWrite;
+use crate::calls::callback_binding::ArgumentBinding;
 use crate::calls::execution_loop::BatchExit;
 use crate::calls::sends::SentArgument;
 
@@ -45,6 +46,15 @@ impl Vm {
                 return Ok(Some(BatchExit::Instruction(instruction)));
             }
             I::Call { dst, .. } => return self.call::<TRACK_GENERATORS>(dst, work),
+            // The loop makes a method site's call at once where it can;
+            // the `InitMethodCall`, sends and `Call` that follow make it
+            // otherwise.
+            // The loop hands a method site here when the VM must prepare
+            // the call (`__call`, a closure, a generator): the following
+            // `InitMethodCall` runs here, by its handler, not through
+            // `execute` again (a recursive `execute` would no longer be
+            // inlined into the batch loop).
+            I::CallMethod { .. } => self.start_written_out_call::<TRACK_GENERATORS>()?,
             I::CallDirect {
                 function,
                 args,
@@ -110,9 +120,19 @@ impl Vm {
             } => self.static_style_call(class, method, binding)?,
             I::New { class } => self.new_object(class)?,
             I::NewDynamic { class } => self.new_dynamic_object(class)?,
-            I::SendValue { src } if TRACK_GENERATORS && self.send_window_argument(src)? => {}
+            I::SendValue { src, .. } if TRACK_GENERATORS && self.send_window_argument(src)? => {}
             I::SendLocal { local } if TRACK_GENERATORS && self.send_window_argument(local)? => {}
-            I::SendValue { src } => self.send(SentArgument::Value(src))?,
+            I::SendValue { src, of_call } => self.send(SentArgument::computed(src, of_call))?,
+            // A temporary read once: sent, then empty.
+            I::SendTake { src, of_call } => {
+                if !(TRACK_GENERATORS && self.send_window_argument(src)?) {
+                    self.send(SentArgument::computed(src, of_call))?;
+                }
+                self.clear_local(src)?;
+            }
+            I::SendConst { constant } => {
+                self.send(SentArgument::Literal(self.literal(constant)?))?
+            }
             I::SendLocal { local } => self.send(SentArgument::Local(local))?,
             I::SendPath { path } => {
                 if !self.send_path(self.path(path)?)? {
@@ -137,6 +157,13 @@ impl Vm {
             I::Move { dst, src } => self.move_local(dst, src)?,
             I::Clear { reg } | I::UnsetLocal { local: reg } => self.clear_local(reg)?,
             I::Assign { local, src } => return self.execute_assign(local, src),
+            // A temporary read once: assigned, then empty.
+            I::AssignTake { local, src } => {
+                let exit = self.execute_assign(local, src)?;
+                self.clear_local(src)?;
+                return Ok(exit);
+            }
+            I::AssignConst { local, constant } => self.assign_literal(local, constant)?,
             I::AssignOp { op, local, src } => return self.execute_assign_op(op, local, src),
             I::CheckType { local, ty } => self.check_local_type(local, ty)?,
             I::IncDecLocal { mode, dst, local } => self.execute_inc_dec(mode, dst, local)?,
@@ -146,11 +173,35 @@ impl Vm {
                 lhs,
                 rhs,
                 target,
-            } => self.binary_int_branch(op, lhs, rhs, target)?,
+            } => self.binary_int_branch(op, lhs, rhs, target, false, work)?,
+            I::BinaryIntBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            } => self.binary_int_branch(op, lhs, rhs, target, true, work)?,
             I::BinaryInt { op, dst, lhs, rhs } => self.execute_binary_int(op, dst, lhs, rhs)?,
             I::Binary { dst, op, lhs, rhs } => return self.execute_binary(op, dst, lhs, rhs),
+            I::BinaryBranch {
+                op,
+                lhs,
+                rhs,
+                target,
+            } => return self.binary_branch(op, lhs, rhs, target, false, work),
+            I::BinaryBranchIf {
+                op,
+                lhs,
+                rhs,
+                target,
+            } => return self.binary_branch(op, lhs, rhs, target, true, work),
             I::Unary { dst, op, src } => self.execute_unary(dst, op, src)?,
-            I::BuiltinUnary { op, dst, src } => return self.execute_builtin_unary(op, src, dst),
+            I::BuiltinUnary { op, dst, src } => {
+                return self.execute_builtin_unary(op, src, dst, ArgumentBinding::Frameless);
+            }
+            I::NamespacedBuiltin { op, dst, src } => {
+                return self.execute_builtin_unary(op, src, dst, ArgumentBinding::Caller);
+            }
+            I::GuardBuiltin { function, call } => self.execute_guard_builtin(function, call)?,
             I::BuiltinFrame { op, dst } => self.execute_builtin_frame(op, dst)?,
             I::ArrayKeyExists { dst, key, array } => {
                 return self.execute_array_key_exists(key, array, dst);
@@ -188,12 +239,21 @@ impl Vm {
             }
             I::AssignPathFromLocal { path, src, dst } => {
                 let handled = if let Some(value) = self.read_defined_local(src) {
-                    self.assign_property_site(&self.path(path)?, &value, Some((src, dst)))?
+                    let place = self.path(path)?;
+                    if self.assign_property_site(&place, &value, Some((src, dst)))? {
+                        true
+                    } else if place.has_properties()?
+                        && let Some(stored) = self.assign_plain_property(&place, &value)?
+                    {
+                        self.set(dst, stored);
+                        true
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 };
                 if !handled {
-                    self.prepare_element_site(&self.path(path)?)?;
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
             }
@@ -212,6 +272,9 @@ impl Vm {
             I::UnsetPath { path } => {
                 let place = self.path(path)?;
                 if place.has_properties()? {
+                    if self.unset_plain_property(&place)? {
+                        return Ok(None);
+                    }
                     return Ok(Some(BatchExit::Instruction(instruction)));
                 }
                 self.unset_place(&place)?;
@@ -235,6 +298,12 @@ impl Vm {
             I::ThisOrNull { dst } => self.this_or_null(dst),
             I::Clone { .. } => return Ok(Some(BatchExit::Instruction(instruction))),
             I::InstanceOf { dst, src, class } => self.instance_of(dst, src, class)?,
+            I::InstanceOfBranch { .. }
+            | I::InstanceOfBranchIf { .. }
+            | I::DynamicInstanceOfBranch { .. }
+            | I::DynamicInstanceOfBranchIf { .. } => {
+                self.instance_of_branches(instruction, work)?
+            }
 
             I::CheckReturn { source } => {
                 if self.return_string_coercion_needed(&self.raw_local(source)) {
@@ -437,6 +506,7 @@ impl Vm {
         let target = self.read_local(class);
         let class = match &target {
             Value::Object(object) => std::borrow::Cow::Borrowed(object.class.name()),
+            Value::InternedStr(name) => String::from_utf8_lossy(name.as_bytes()),
             Value::String(name) => String::from_utf8_lossy(name.as_bytes()),
             _ => {
                 return Err(NativeError::error(
@@ -482,10 +552,16 @@ impl Vm {
         let constant = linked
             .constants
             .get(&self.code.unit(function).names[name.index()])?;
-        if constant.deprecated.is_some()
-            || self.needs_enum_backing(linked)
-            || !self.can_read_class_constant(constant)
-        {
+        if constant.deprecated.is_some() || !self.can_read_class_constant(constant) {
+            return None;
+        }
+        // A stored enum case was checked when it was stored; any other
+        // constant of a backed enum waits for that check.
+        let is_case = matches!(
+            constant.initializer,
+            crate::classes::class::ConstantInitializer::EnumCase { .. }
+        );
+        if !is_case && self.needs_enum_backing(linked) {
             return None;
         }
         self.ready_constant_value(&constant.initializer)

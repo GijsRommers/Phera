@@ -291,6 +291,7 @@ impl Vm {
         } = iteration;
         if let Some(key) = key {
             let name = match name {
+                ArrayKey::Interned(name) => Value::InternedStr(name),
                 ArrayKey::String(name) => Value::String(name),
                 ArrayKey::Int(index) => Value::Int(index),
             };

@@ -19,6 +19,15 @@ use phera_extension_api::NativeError;
 use crate::Vm;
 use crate::classes::Class;
 
+/// Whether `name` can name a bundled class (`Phera\...`). The general class
+/// lookup loads those from their source even when no autoloader is
+/// registered, so a caller that answers "no class" without running any PHP
+/// code must ask this first.
+pub(crate) fn is_bundled_class_name(name: &str) -> bool {
+    name.get(..6)
+        .is_some_and(|head| head.eq_ignore_ascii_case("phera\\"))
+}
+
 impl Vm {
     /// Declares the bundled class `name` if Phera ships one.
     pub(crate) async fn load_bundled_class(
@@ -26,7 +35,7 @@ impl Vm {
         name: &str,
     ) -> Result<Option<Rc<Class>>, NativeError> {
         let lowercase = name.to_ascii_lowercase();
-        if !lowercase.starts_with("phera\\") {
+        if !is_bundled_class_name(name) {
             return Ok(None);
         }
         let Some(source) = self.registry.bundled_source(&lowercase) else {

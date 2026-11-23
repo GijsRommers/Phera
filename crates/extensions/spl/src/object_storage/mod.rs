@@ -61,8 +61,8 @@ async fn hash(
             vec![Value::Object(object.clone())],
         )
         .await?;
-    if let Value::String(string) = &*value.deref() {
-        return Ok(Key::Custom(string.clone()));
+    if let Some(string) = value.deref().to_php_string() {
+        return Ok(Key::Custom(string));
     }
     Err(NativeError::type_error(format!(
         "{}::getHash() must return a string",

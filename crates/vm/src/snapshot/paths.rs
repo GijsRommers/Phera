@@ -107,6 +107,9 @@ impl Vm {
 fn property(key: &ArrayKey) -> String {
     match key {
         ArrayKey::Int(number) => number.to_string(),
+        ArrayKey::Interned(name) => {
+            String::from_utf8_lossy(split_property_key(name.as_bytes()).0).into_owned()
+        }
         ArrayKey::String(name) => {
             String::from_utf8_lossy(split_property_key(name.as_bytes()).0).into_owned()
         }
@@ -116,6 +119,7 @@ fn property(key: &ArrayKey) -> String {
 fn element(key: &ArrayKey) -> String {
     match key {
         ArrayKey::Int(number) => number.to_string(),
+        ArrayKey::Interned(name) => format!("'{}'", name.to_string_lossy()),
         ArrayKey::String(name) => format!("'{}'", name.to_string_lossy()),
     }
 }

@@ -60,11 +60,13 @@ fn build(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
         return Ok(Value::from(""));
     };
     let numeric_prefix = args::bytes(arguments, 1);
-    let separator = args::string(arguments, 2).cloned().unwrap_or_else(|| {
-        context
-            .ini_get(b"arg_separator.output")
-            .unwrap_or_else(|| "&".into())
-    });
+    let separator = args::string(arguments, 2)
+        .map(phera_extension_api::StrRef::to_php_string)
+        .unwrap_or_else(|| {
+            context
+                .ini_get(b"arg_separator.output")
+                .unwrap_or_else(|| "&".into())
+        });
     let separator = separator.as_bytes();
     let encoding = if args::int(arguments, 3).unwrap_or(1) as i32 == 2 {
         Encoding::Raw
@@ -92,7 +94,10 @@ fn build(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
             continue;
         };
         let is_object = matches!(frame.identity, Identity::Object(_));
-        if is_object && matches!(&key, ArrayKey::String(name) if name.as_bytes().starts_with(b"\0"))
+        if is_object
+            && key
+                .as_str_bytes()
+                .is_some_and(|name| name.starts_with(b"\0"))
         {
             continue;
         }
@@ -112,6 +117,7 @@ fn build(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
                 }
                 key_bytes.extend_from_slice(index.to_string().as_bytes());
             }
+            ArrayKey::Interned(name) => encode_into(&mut key_bytes, name.as_bytes(), encoding),
             ArrayKey::String(name) => encode_into(&mut key_bytes, name.as_bytes(), encoding),
         }
         if nested {

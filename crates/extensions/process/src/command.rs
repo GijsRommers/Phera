@@ -9,9 +9,7 @@ use std::process::{Command, Stdio};
 
 use phera_ext_standard::environment::RequestEnvironment;
 use phera_ext_streams::wait_with_execution_limit;
-use phera_extension_api::{
-    ArrayKey, Context, NativeError, ProcessCancellation, Value, WorkingDirectory,
-};
+use phera_extension_api::{Context, NativeError, ProcessCancellation, Value, WorkingDirectory};
 
 use super::child::ManagedChild;
 
@@ -51,10 +49,10 @@ pub(crate) async fn from_value(
     value: &Value,
 ) -> Result<(Command, Vec<u8>), NativeError> {
     let Value::Array(items) = value else {
-        let Value::String(text) = value else {
+        let Some(text) = value.as_str_bytes() else {
             return Err(NativeError::type_error("proc_open(): Invalid command type"));
         };
-        return Ok((shell(text.as_bytes()), text.as_bytes().to_vec()));
+        return Ok((shell(text), text.to_vec()));
     };
     let mut words = Vec::with_capacity(items.len());
     for (_, value) in items.iter() {
@@ -111,10 +109,8 @@ pub(crate) async fn configure(
             if value.is_empty() {
                 continue;
             }
-            let (name, value) = match key {
-                ArrayKey::String(key) if !key.as_bytes().is_empty() => {
-                    (c_prefix(key.as_bytes()).to_vec(), c_prefix(&value))
-                }
+            let (name, value) = match key.as_str_bytes() {
+                Some(key) if !key.is_empty() => (c_prefix(key).to_vec(), c_prefix(&value)),
                 _ => {
                     let value = c_prefix(&value);
                     let Some(split) = value.iter().position(|&byte| byte == b'=') else {

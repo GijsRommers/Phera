@@ -331,6 +331,11 @@ impl Tables<'_> {
                 operator: op,
                 source: src,
             } => Instruction::BuiltinUnary { op, dst, src },
+            Old::NamespacedBuiltin {
+                destination: dst,
+                operator: op,
+                source: src,
+            } => Instruction::NamespacedBuiltin { op, dst, src },
             Old::BuiltinFrame {
                 destination: dst,
                 operator: op,
@@ -387,6 +392,109 @@ impl Tables<'_> {
                 value,
                 target: Target(target.0 as u32),
             },
+            Old::BranchNotNull { value, target } => Instruction::JumpIfNotNull {
+                value,
+                target: Target(target.0 as u32),
+            },
+            Old::GuardBuiltin {
+                name,
+                fallback,
+                call,
+            } => Instruction::GuardBuiltin {
+                function: self.symbol(&name, fallback, crate::policies::NameKind::Function),
+                call: Target(call.0 as u32),
+            },
+            Old::BranchCompare {
+                operator,
+                left,
+                right,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                if when {
+                    Instruction::BinaryBranchIf {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs: right,
+                        target,
+                    }
+                } else {
+                    Instruction::BinaryBranch {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs: right,
+                        target,
+                    }
+                }
+            }
+            Old::BranchCompareInt {
+                operator,
+                left,
+                rhs,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                if when {
+                    Instruction::BinaryIntBranchIf {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs,
+                        target,
+                    }
+                } else {
+                    Instruction::BinaryIntBranch {
+                        op: binary(operator),
+                        lhs: left,
+                        rhs,
+                        target,
+                    }
+                }
+            }
+            Old::BranchInstanceOf {
+                source,
+                class,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                let class = self.symbol(&class, None, crate::policies::NameKind::Class);
+                if when {
+                    Instruction::InstanceOfBranchIf {
+                        src: source,
+                        class,
+                        target,
+                    }
+                } else {
+                    Instruction::InstanceOfBranch {
+                        src: source,
+                        class,
+                        target,
+                    }
+                }
+            }
+            Old::BranchDynamicInstanceOf {
+                source,
+                class,
+                target,
+                when,
+            } => {
+                let target = Target(target.0 as u32);
+                if when {
+                    Instruction::DynamicInstanceOfBranchIf {
+                        src: source,
+                        class,
+                        target,
+                    }
+                } else {
+                    Instruction::DynamicInstanceOfBranch {
+                        src: source,
+                        class,
+                        target,
+                    }
+                }
+            }
             Old::Suppress(true) => Instruction::BeginSilence,
             Old::Suppress(false) => Instruction::EndSilence,
             Old::ReturnReference(src) => Instruction::ReturnReference { src },

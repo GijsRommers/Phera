@@ -52,7 +52,10 @@ pub(crate) fn register(registry: &mut Registry) {
                     "__construct",
                     const { &[CLASS_ARGUMENT, Param::new("property", ParamType::String)] },
                     |c, o, a| construct(c, o, a, MemberKind::Property),
-                ),
+                )
+                .with_ready(|c, o, a| {
+                    crate::member::construct_loaded(c, o, a, MemberKind::Property)
+                }),
                 MethodEntry::public("getName", &[], |_, o, _| {
                     data(o, |m| Value::from(m.name.as_str()))
                 }),
@@ -96,14 +99,17 @@ pub(crate) fn register(registry: &mut Registry) {
                 MethodEntry::public("getDefaultValue", &[], default_value),
                 MethodEntry::public("getValue", OBJECT, |c, o, a| {
                     read(c, o, a, PropertyRead::Value, "getValue")
-                }),
+                })
+                .with_direct(crate::property_slots::get_value),
                 MethodEntry::public("isInitialized", OBJECT, |c, o, a| {
                     read(c, o, a, PropertyRead::Initialized, "isInitialized")
-                }),
+                })
+                .with_direct(crate::property_slots::is_initialized),
                 MethodEntry::public("getRawValue", RAW_OBJECT, |c, o, a| {
                     read(c, o, a, PropertyRead::Raw, "getRawValue")
                 })
-                .returning("mixed"),
+                .returning("mixed")
+                .with_direct(crate::property_slots::get_value),
                 MethodEntry::public(
                     "setRawValue",
                     const {
@@ -122,13 +128,15 @@ pub(crate) fn register(registry: &mut Registry) {
                         set_raw(c, member, a)
                     },
                 )
-                .returning("void"),
+                .returning("void")
+                .with_direct(crate::property_slots::set_value),
                 MethodEntry::public_async(
                     "setRawValueWithoutLazyInitialization",
                     const { &[crate::lazy::OBJECT, Param::new("value", ParamType::Mixed)] },
                     crate::lazy::write_property,
                 )
-                .returning("void"),
+                .returning("void")
+                .with_direct(crate::property_slots::set_value),
                 MethodEntry::public(
                     "skipLazyInitialization",
                     const { &[crate::lazy::OBJECT] },
@@ -138,7 +146,8 @@ pub(crate) fn register(registry: &mut Registry) {
                 MethodEntry::public("isLazy", const { &[crate::lazy::OBJECT] }, |c, o, a| {
                     crate::lazy::property(c, o, a, LazyPropertyOperation::IsLazy)
                 })
-                .returning("bool"),
+                .returning("bool")
+                .with_direct(crate::property_slots::is_lazy),
                 MethodEntry::public(
                     "setValue",
                     const {
@@ -149,7 +158,8 @@ pub(crate) fn register(registry: &mut Registry) {
                         ]
                     },
                     set_value,
-                ),
+                )
+                .with_direct(crate::property_slots::set_value),
                 MethodEntry::public("hasType", &[], |_, o, _| {
                     data(o, |m| Value::Bool(m.declared_type.is_some()))
                 }),
@@ -308,9 +318,9 @@ fn default_value(
 
 fn hook_kind(args: &[Value]) -> Result<PropertyHookKind, NativeError> {
     let name = args::object(args, 0).and_then(|object| object.get(&ArrayKey::str("name")));
-    match name {
-        Some(Value::String(name)) if name.as_bytes() == b"Get" => Ok(PropertyHookKind::Get),
-        Some(Value::String(name)) if name.as_bytes() == b"Set" => Ok(PropertyHookKind::Set),
+    match name.as_ref().and_then(Value::as_str_bytes) {
+        Some(b"Get") => Ok(PropertyHookKind::Get),
+        Some(b"Set") => Ok(PropertyHookKind::Set),
         _ => Err(NativeError::type_error("Expected a PropertyHookType case")),
     }
 }

@@ -35,9 +35,6 @@ impl Vm {
         if mode == FetchMode::Read && self.fetch_property_site(&place, destination)? {
             return Ok(None);
         }
-        if mode != FetchMode::Destructure {
-            self.prepare_element_site(&place)?;
-        }
         if self.classes.has_dimensions && self.prepare_dimension(&place)? {
             return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
                 dst: destination,
@@ -51,6 +48,9 @@ impl Vm {
                     || self.current().is_some_and(|frame| frame.this().is_some()))
                 && self.start_cached_getter(&place, destination)?
             {
+                return Ok(None);
+            }
+            if self.fetch_plain_property(&place, destination, mode)? {
                 return Ok(None);
             }
             return Ok(Some(BatchExit::Instruction(Instruction::Fetch {
@@ -99,9 +99,6 @@ impl Vm {
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?
         {
-            // The loop updates the next such property itself (see
-            // `calls::fast_compound_assignments`).
-            self.prepare_update_site(&place)?;
             return Ok(Some(BatchExit::Instruction(Instruction::AssignOpPath {
                 op: operator,
                 dst: destination,
@@ -159,7 +156,6 @@ impl Vm {
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?
         {
-            self.prepare_update_site(&place)?;
             return Ok(Some(BatchExit::Instruction(Instruction::IncDecPath {
                 mode,
                 dst: destination,
@@ -175,6 +171,11 @@ impl Vm {
         };
         drop(diagnostics);
         let value = value?;
+        if let Some(limit) = crate::typed_increment::IntegerLimit::reached(&old, &value, mode)
+            && let Some(register) = register
+        {
+            self.check_increment_place(&place, register, &keys, limit)?;
+        }
         self.finish_indexed_update(&place, register, keys, value.clone())?;
         self.set(
             destination,
@@ -193,8 +194,7 @@ impl Vm {
         place: &AccessPath,
     ) -> Result<(Option<Reg>, InlineStack<PathKey>, Value), NativeError> {
         let register = self.base_register(place, Creation::Existing, Missing::Warn)?;
-        self.check_static_read(place, Missing::Warn)?;
-        if let phera_bytecode::PathBase::StaticProperty { class, name, .. } = place.base()? {
+        if let Some((class, name)) = crate::static_places::static_base(place.base()?) {
             self.validate_static_mutation(
                 class,
                 name,
@@ -253,20 +253,20 @@ impl Vm {
         {
             self.restart_subject_iterators(register);
         }
+        if place.has_properties()?
+            && !(self.classes.has_dimensions && self.prepare_dimension(&place)?)
+            && self.assign_plain_property(&place, &value)?.is_some()
+        {
+            return Ok(None);
+        }
         if (self.classes.has_dimensions && self.prepare_dimension(&place)?)
             || place.has_properties()?
             || (self.may_cast_typed_reference(&value) && place.steps()?.next().is_some())
             || (matches!(value, phera_value::Value::Object(_))
-                && matches!(
-                    place.base()?,
-                    phera_bytecode::PathBase::StaticProperty { .. }
-                )
+                && crate::static_places::static_base(place.base()?).is_some()
                 && place.steps()?.next().is_none()
                 && Self::has_string_conversion(&value))
         {
-            // The loop writes the next such element itself (see
-            // `calls::fast_element_writes`).
-            self.prepare_element_site(&place)?;
             return Ok(Some(BatchExit::Instruction(Instruction::AssignPath {
                 path,
                 src: source,

@@ -53,15 +53,15 @@ var_dump($parked->isTerminated());
 
 #[test]
 fn a_refused_switch_leaves_the_fiber_suspended() {
-    // `array_map` with a string callable awaits its callback, which takes
-    // Rust stack. Just under the callback limit the callbacks still run,
-    // and the switch is the one refused.
+    // `array_map` over three arrays awaits its callback, which takes Rust
+    // stack. Just under the callback limit the callbacks still run, and the
+    // switch is the one refused.
     let output = run(r#"<?php
-function down(int $depth, Closure $callback) {
+function down(int $depth, Closure $callback, mixed $_ = null) {
     if ($depth === 0) {
         $callback();
     } else {
-        array_map('down', [$depth - 1], [$callback]);
+        array_map('down', [$depth - 1], [$callback], [null]);
     }
 }
 $parked = new Fiber(fn () => Fiber::suspend('parked'));

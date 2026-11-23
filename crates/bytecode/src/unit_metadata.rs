@@ -17,7 +17,11 @@ pub struct UnitMetadata {
     /// The process's key of each name and of each symbol (see
     /// [`crate::name_keys`]), given when the file was compiled.
     pub name_keys: Arc<[crate::NameKey]>,
+    pub prop_keys: Arc<[crate::PropKey]>,
     pub symbol_keys: Arc<[crate::NameKey]>,
+    /// The key of each class the file declares, by its lowercased name: a
+    /// declaration looks itself up by it.
+    pub class_keys: Arc<[crate::NameKey]>,
     pub type_scopes: Arc<[DeclarationScope]>,
 }
 
@@ -38,7 +42,9 @@ impl UnitMetadata {
         Self {
             id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             name_keys: crate::name_keys::keys(names.iter().map(String::as_str)),
+            prop_keys: crate::name_keys::prop_keys(unit.names.iter().map(String::as_str)),
             symbol_keys: crate::name_keys::keys(symbols.iter().map(String::as_str)),
+            class_keys: class_keys(unit),
             functions: std::iter::once(&unit.main)
                 .chain(&unit.functions)
                 .map(|body| FunctionSignature::new(body, &unit.types))
@@ -48,6 +54,16 @@ impl UnitMetadata {
             type_scopes: unit.types.iter().map(DeclarationScope::of).collect(),
         }
     }
+}
+
+/// The key of each class `unit` declares, by its lowercased name.
+pub fn class_keys(unit: &CompiledUnit) -> Arc<[crate::NameKey]> {
+    let names: Vec<String> = unit
+        .classes
+        .iter()
+        .map(|class| class.name.to_ascii_lowercase())
+        .collect();
+    crate::name_keys::keys(names.iter().map(String::as_str))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

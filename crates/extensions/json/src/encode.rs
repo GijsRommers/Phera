@@ -244,9 +244,13 @@ impl Encoder {
                 let _ = write!(self.output, "{integer}");
                 self.output.push('"');
             }
-            ArrayKey::String(name) => {
+            ArrayKey::Interned(_) | ArrayKey::String(_) => {
                 let start = self.output.len();
-                if let Err(error) = encode_string(&mut self.output, name.as_bytes(), self.flags) {
+                if let Err(error) = encode_string(
+                    &mut self.output,
+                    key.as_str_bytes().expect("checked string key"),
+                    self.flags,
+                ) {
                     self.output.truncate(start);
                     self.error = error;
                     self.output.push_str("\"\"");
@@ -265,6 +269,7 @@ impl Encoder {
                 let _ = write!(self.output, "{integer}");
             }
             Value::Float(number) => self.number(*number),
+            Value::InternedStr(bytes) => self.string(bytes.as_bytes()),
             Value::String(bytes) => self.string(bytes.as_bytes()),
             Value::Resource(_) => self.failure(Error::Unsupported),
             Value::Reference(reference) => {

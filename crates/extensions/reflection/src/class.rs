@@ -8,11 +8,12 @@ use std::{
 use phera_extension_api::reflection::lazy::{SKIP_DESTRUCTOR, SKIP_INITIALIZATION_ON_SERIALIZE};
 use phera_extension_api::reflection::{ClassInfo, ReflectedClassKind};
 use phera_extension_api::{
-    ArrayKey, ClassEntry, ConstantValue, Context, LocalFuture, MethodEntry, NativeResult, Object,
-    Param, ParamType, PhpArray, PropertyEntry, PropertyType, Registry, Value, Visibility, args,
+    ArrayKey, ClassEntry, ConstantValue, Context, LocalFuture, MethodEntry, NativeError,
+    NativeResult, Object, Param, ParamType, PhpArray, PropertyEntry, PropertyType, Registry, Value,
+    Visibility, args,
 };
 
-use crate::{UNCLONEABLE, allocate, bind, engine, exception, load, receiver, values};
+use crate::{UNCLONEABLE, allocate, bind_value, engine, exception, load, receiver, values};
 
 pub(crate) const NAME_PROPERTY: PropertyEntry =
     PropertyEntry::typed("name", PropertyType::String, Visibility::Public);
@@ -52,7 +53,8 @@ pub(crate) fn register(registry: &mut Registry) {
                 "__construct",
                 const { &[Param::new("object", ParamType::Object)] },
                 construct,
-            )]
+            )
+            .with_ready(construct_loaded)]
         },
         ..ClassEntry::class("ReflectionObject")
     });
@@ -64,15 +66,14 @@ const IDENTITY_METHODS: &[MethodEntry] = const {
             "__construct",
             const { &[Param::new("objectOrClass", ParamType::ObjectOrString)] },
             construct,
-        ),
-        MethodEntry::public("getName", &[], |_, o, _| {
-            data(o, |r| Value::from(r.name.as_str()))
-        })
-        .with_direct(|object, _| {
-            let state = object.native.try_borrow().ok()?;
-            let reflection = state.as_ref()?.downcast_ref::<ReflectedClass>()?;
-            Some(Value::from(reflection.info.name.as_str()))
-        }),
+        )
+        .with_ready(construct_loaded),
+        MethodEntry::public("getName", &[], |_, o, _| data(o, |r| r.name_value.clone()))
+            .with_direct(|object, _| {
+                let state = object.native.try_borrow().ok()?;
+                let reflection = state.as_ref()?.downcast_ref::<ReflectedClass>()?;
+                Some(reflection.info.name_value.clone())
+            }),
         MethodEntry::public("getShortName", &[], |_, o, _| {
             data(o, |r| Value::from(split(&r.name).1))
         }),
@@ -295,35 +296,76 @@ fn construct(
         let argument = args
             .first()
             .ok_or_else(|| exception("Missing reflection class name"))?;
-        let name = target_class(argument)?;
-        let info = engine(context)?.reflect_class(&name).await?;
-        let object = if this.class.is_instance_of("ReflectionObject") {
-            match argument {
-                Value::Object(object) => {
-                    crate::keep(this, Value::Object(object.clone()));
-                    Some(Rc::downgrade(object))
-                }
-                _ => None,
-            }
-        } else {
-            None
-        };
-        bind(
-            this,
-            Some(&info.name),
-            ReflectedClass {
-                info: info.clone(),
-                object,
-            },
-        )
+        let info = load_target_class(context, argument).await?;
+        bind_class(this, argument, info)
     })
 }
 
-pub(crate) fn target_class(
-    value: &Value,
-) -> Result<Cow<'_, str>, phera_extension_api::NativeError> {
+/// Bind `new ReflectionClass(Service::class)` once Service is linked.
+fn construct_loaded(
+    context: &mut dyn Context,
+    this: &Rc<Object>,
+    args: &[Value],
+) -> Option<NativeResult> {
+    let argument = args.first()?;
+    let info = loaded_target_class(context, argument)?;
+    Some(bind_class(this, argument, info))
+}
+
+/// `ReflectionObject($object)` also retains the instance for dynamic members.
+fn bind_class(this: &Object, argument: &Value, info: Rc<ClassInfo>) -> NativeResult {
+    let object = match argument {
+        Value::Object(object) if this.class.is_instance_of("ReflectionObject") => {
+            crate::keep(this, Value::Object(object.clone()));
+            Some(Rc::downgrade(object))
+        }
+        _ => None,
+    };
+    bind_value(
+        this,
+        Some(info.name_value.clone()),
+        ReflectedClass { info, object },
+    )
+}
+
+/// Resolve `new ReflectionClass($object)` from the linked object, or a named
+/// target from the table. A name miss leaves the call to the autoload path.
+pub(crate) fn loaded_target_class(
+    context: &mut dyn Context,
+    target: &Value,
+) -> Option<Rc<ClassInfo>> {
+    let reflection = context.reflection()?;
+    match target {
+        Value::Object(object) => reflection.reflect_object_class(object),
+        Value::InternedStr(name) => {
+            let name = String::from_utf8_lossy(name.as_bytes());
+            reflection.reflect_loaded_class(&name)
+        }
+        Value::String(name) => {
+            let name = String::from_utf8_lossy(name.as_bytes());
+            reflection.reflect_loaded_class(&name)
+        }
+        _ => None,
+    }
+}
+
+/// The bound call also accepts shapes such as `new ReflectionClass(objectOrClass: $name)`.
+pub(crate) async fn load_target_class(
+    context: &mut dyn Context,
+    target: &Value,
+) -> Result<Rc<ClassInfo>, NativeError> {
+    if let Some(info) = loaded_target_class(context, target) {
+        return Ok(info);
+    }
+    let name = target_class(target)?;
+    engine(context)?.reflect_class(&name).await
+}
+
+/// Borrow the class name while resolving `new ReflectionEnumUnitCase(Status::class, 'Ready')`.
+pub(crate) fn target_class(value: &Value) -> Result<Cow<'_, str>, NativeError> {
     match value {
         Value::Object(object) => Ok(Cow::Borrowed(object.class.name())),
+        Value::InternedStr(name) => Ok(String::from_utf8_lossy(name.as_bytes())),
         Value::String(name) => Ok(String::from_utf8_lossy(name.as_bytes())),
         _ => Err(exception("Expected a class name or object")),
     }
@@ -433,6 +475,26 @@ fn relationship(
         let other = match args.first() {
             Some(Value::Object(object)) if object.class.is_instance_of("ReflectionClass") => {
                 reflected_class(Some(object))?.info
+            }
+            Some(Value::InternedStr(name)) => {
+                let name = name.to_string_lossy();
+                engine(context)?
+                    .reflect_class(&name)
+                    .await
+                    .map_err(|error| match relationship {
+                        Relationship::Interface
+                            if matches!(
+                                &error,
+                                phera_extension_api::NativeError::Throw {
+                                    class: "ReflectionException",
+                                    ..
+                                }
+                            ) =>
+                        {
+                            exception(format!("Interface \"{name}\" does not exist"))
+                        }
+                        _ => error,
+                    })?
             }
             Some(Value::String(name)) => {
                 let name = name.to_string_lossy();

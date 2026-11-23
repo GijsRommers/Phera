@@ -57,6 +57,25 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     };
     loaded.paths.extend(settings.path);
     let adapter = Adapter::detect(&site, &mut loaded.environment);
+    if !options.service_warmup {
+        loaded.environment.insert(
+            phera_runtime::adapters::SERVICE_WARMUP_VARIABLE.to_vec(),
+            b"0".to_vec(),
+        );
+    }
+    // The option wins over the project's file; with neither, a variable
+    // the environment already holds stays as it is.
+    let warmup = if options.warmup.is_empty() {
+        &settings.warmup
+    } else {
+        &options.warmup
+    };
+    if !warmup.is_empty() {
+        loaded.environment.insert(
+            phera_runtime::adapters::WARMUP_REQUESTS_VARIABLE.to_vec(),
+            warmup.join(" ").into_bytes(),
+        );
+    }
     site.exclude_files(loaded.paths);
     let site = Arc::new(site);
     let trusted_proxies = match options
@@ -90,7 +109,8 @@ pub(crate) fn serve(options: ServeOptions) -> ExitCode {
     let mut runtime = Runtime::with_environment(loaded.environment)
         .with_startup_ini(options.ini)
         .with_web_development(options.dev)
-        .without_web_processes(options.no_process);
+        .without_web_processes(options.no_process)
+        .without_class_warmup(!options.class_warmup);
     if let (Adapter::Laravel, Some(front_controller)) = (adapter, site.front_controller()) {
         runtime = runtime.with_entry_script(
             front_controller.to_path_buf(),

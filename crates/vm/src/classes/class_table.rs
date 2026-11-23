@@ -1,18 +1,15 @@
 //! Request class lookup, leased object ids, and weak cycle-cleanup records.
 
 use std::{
-    cell::OnceCell,
     collections::HashMap,
     rc::{Rc, Weak},
 };
 
-use phera_value::{Object, ObjectIds, PhpArray};
+use phera_value::{Object, ObjectIds};
 
 use super::Class;
 use super::method_table::MethodTable;
 use super::operations::ClassOperations;
-
-type NativeMethodTables = Box<[OnceCell<MethodTable>]>;
 
 /// A class's position in the request's class table: a method frame's class
 /// scope and called class are kept as these numbers.
@@ -20,8 +17,15 @@ type NativeMethodTables = Box<[OnceCell<MethodTable>]>;
 pub(crate) struct ClassIndex(u32);
 
 impl ClassIndex {
+    pub(crate) const INVALID: Self = Self(u32::MAX);
+
     pub(crate) fn number(self) -> u32 {
         self.0
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_valid(self) -> bool {
+        self.0 != u32::MAX
     }
 }
 
@@ -90,6 +94,15 @@ impl ClassDefinitions {
 // fork's definitions must not touch its classes: the snapshot and the other
 // forks share them.
 
+/// One entry of a request's declaration order.
+#[derive(Clone, Copy)]
+enum Declared {
+    /// The class at this position of the request's table.
+    Class(u32),
+    /// This request's `class_alias` at this index.
+    Alias(u32),
+}
+
 /// One request's classes and objects. Built-ins are the worker's; PHP classes
 /// are entries of the worker's table of linked classes (see
 /// `super::worker_classes`), and the request holds which it has declared.
@@ -102,8 +115,10 @@ pub(crate) struct ClassTable {
     local: Vec<Option<Rc<Class>>>,
     /// The worker positions of the declared classes, in declaration order.
     declared: Vec<u32>,
-    /// Names in declaration order, aliases included (`get_declared_classes`).
-    order: Vec<Rc<str>>,
+    /// What was declared, in order, aliases included (`get_declared_classes`):
+    /// a position of `local` or an index of `aliases`, so that declaring a
+    /// class copies no name.
+    order: Vec<Declared>,
     /// This request's `class_alias` names, with their process key and the
     /// number of the class they name (which may be a built-in). Checked
     /// after the worker's names and the built-ins, so that a lookup of a
@@ -120,7 +135,6 @@ pub(crate) struct ClassTable {
     pub(crate) has_property_views: bool,
     pub(crate) has_lazy_objects: bool,
     native_count: u32,
-    native_methods: OnceCell<NativeMethodTables>,
     pub(crate) objects: Vec<Weak<Object>>,
     ids: Rc<ObjectIds>,
     /// Allocations left before the cycle collector should run (see
@@ -150,7 +164,6 @@ impl ClassTable {
             has_property_views: native.has_property_views,
             has_lazy_objects: false,
             native_count: native.numbered.len() as u32,
-            native_methods: OnceCell::new(),
             native,
             local: Vec::new(),
             objects: Vec::new(),
@@ -177,9 +190,16 @@ impl ClassTable {
         *self.recording.borrow_mut() = Some(Vec::new());
     }
 
-    /// Ends a link: the names it looked up, and the position it used.
-    pub(crate) fn end_link(&mut self) -> (Vec<super::worker_classes::Dependency>, Option<u32>) {
-        let recorded = self.recording.borrow_mut().take().unwrap_or_default();
+    /// Linking against a class that is still being declared is request-local.
+    pub(crate) fn discard_link_dependencies(&self) {
+        *self.recording.borrow_mut() = None;
+    }
+
+    /// Ends a link: the reusable dependencies, and the position it used.
+    pub(crate) fn end_link(
+        &mut self,
+    ) -> (Option<Vec<super::worker_classes::Dependency>>, Option<u32>) {
+        let recorded = self.recording.borrow_mut().take();
         (recorded, self.linking.take())
     }
 
@@ -192,10 +212,10 @@ impl ClassTable {
         }
     }
 
-    /// The number of the class `lowercase` names in this request, without
+    /// The number of the class `key` names in this request, without
     /// recording the lookup.
-    pub(crate) fn resolve_number(&self, lowercase: &str) -> Option<u32> {
-        self.find(lowercase).map(|class| class.index.0)
+    pub(crate) fn resolve_number(&self, key: phera_bytecode::NameKey) -> Option<u32> {
+        self.by_key(key).map(|class| class.index.0)
     }
 
     /// Names a class linked for this request alone: found through its own
@@ -272,51 +292,38 @@ impl ClassTable {
         if self.local.len() <= index {
             self.local.resize(index + 1, None);
         }
-        self.order.push(class.name.as_str().into());
+        self.order.push(Declared::Class(position));
         self.local[index] = Some(class);
         self.declared.push(position);
     }
 
-    /// The class's methods by name key, built on first use. The keys are
-    /// the process's, so the table is valid in every request that shares
-    /// the class.
-    #[inline]
+    /// The class's methods by name key, built once on the class itself and
+    /// shared across every request and fork in the worker (native and PHP alike).
+    #[inline(always)]
     pub(crate) fn method_table<'c>(&'c self, class: &'c Class) -> &'c MethodTable {
-        let index = class.index.0 as usize;
-        let cell = if index < self.native_count as usize {
-            &self
-                .native_methods
-                .get()
-                .unwrap_or_else(|| self.allocate_native_method_tables())[index]
-        } else {
-            &class.method_table
-        };
-        cell.get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)))
+        class
+            .method_table
+            .get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)))
     }
 
-    #[cold]
-    fn allocate_native_method_tables(&self) -> &NativeMethodTables {
-        self.native_methods
-            .get_or_init(|| (0..self.native_count).map(|_| OnceCell::new()).collect())
-    }
-
+    #[inline(always)]
     pub(crate) fn cached_method_table<'c>(&'c self, class: &'c Class) -> Option<&'c MethodTable> {
-        let index = class.index.0 as usize;
-        if index < self.native_count as usize {
-            self.native_methods.get()?[index].get()
-        } else {
-            class.method_table.get()
-        }
+        class.method_table.get()
     }
 
-    /// Builds the method table of every class of this request that has
-    /// none yet. Taking a snapshot calls this, so that no fork builds a
-    /// table of a class they all share.
+    /// Builds the flat method, property, constant and static-property tables of
+    /// every user class of this request that has none yet. Taking a snapshot
+    /// calls this so that no fork ever pays to build them. Native classes build
+    /// their tables lazily once on the worker-shared `Class` the first time
+    /// they are actually touched, avoiding eager memory for unused extensions.
     pub(crate) fn build_method_tables(&self) {
         for class in self.local_classes() {
             class
                 .method_table
                 .get_or_init(|| MethodTable::build(class, |method| self.get(&method.declaring)));
+            let _ = class.property_table();
+            let _ = class.constant_table();
+            let _ = class.static_prop_table();
         }
     }
 
@@ -326,11 +333,18 @@ impl ClassTable {
         self.register(position, class);
     }
 
+    /// A declaration completed across an autoload is request-local.
+    pub(crate) fn publish_delayed(&mut self, class: Rc<Class>) {
+        let position = class.index.0 - self.native_count;
+        self.own_name(&class.name.to_ascii_lowercase(), position);
+        self.insert(class);
+    }
+
     pub(crate) fn alias(&mut self, name: String, class: Rc<Class>) -> bool {
         if self.get_lowercase(&name).is_some() {
             return false;
         }
-        self.order.push(name.as_str().into());
+        self.order.push(Declared::Alias(self.aliases.len() as u32));
         let key = phera_bytecode::name_keys::key(&name);
         self.aliases.push((name.into(), key, class.index.0));
         true
@@ -348,7 +362,18 @@ impl ClassTable {
             .order
             .iter()
             .map(String::as_str)
-            .chain(self.order.iter().map(|name| &**name))
+            .chain(self.order.iter().filter_map(|declared| {
+                match declared {
+                    Declared::Class(position) => self
+                        .local
+                        .get(*position as usize)?
+                        .as_ref()
+                        .map(|class| class.name.as_str()),
+                    Declared::Alias(index) => {
+                        self.aliases.get(*index as usize).map(|alias| &*alias.0)
+                    }
+                }
+            }))
     }
 
     /// The class with number `index`.
@@ -375,7 +400,7 @@ impl ClassTable {
         }
     }
 
-    fn by_number(&self, number: u32) -> Option<&Rc<Class>> {
+    pub(crate) fn by_number(&self, number: u32) -> Option<&Rc<Class>> {
         let number = number as usize;
         let base = self.native_count as usize;
         match number.checked_sub(base) {
@@ -395,44 +420,52 @@ impl ClassTable {
         if let Ok(mut recording) = self.recording.try_borrow_mut()
             && let Some(recorded) = recording.as_mut()
         {
-            recorded.push((name.to_owned(), found.map(|class| class.index.0)));
+            // Recording runs while a class is linked, not on a reuse.
+            let key = phera_bytecode::name_keys::key(name);
+            recorded.push((key, found.map(|class| class.index.0)));
         }
         found
     }
 
     /// Class identifiers ignore case, including names produced by dynamic expressions.
     pub(crate) fn get(&self, name: &str) -> Option<Rc<Class>> {
+        self.get_ref(name).cloned()
+    }
+
+    /// Borrowed lookup matching [`Self::get`], avoiding an `Rc::clone` on fast paths.
+    pub(crate) fn get_ref(&self, name: &str) -> Option<&Rc<Class>> {
         let name = name.strip_prefix('\\').unwrap_or(name);
         if !name.bytes().any(|byte| byte.is_ascii_uppercase()) {
-            return self.get_lowercase(name).cloned();
+            return self.get_lowercase(name);
         }
         let mut buffer = [0; 64];
         if let Some(bytes) = buffer.get_mut(..name.len()) {
             bytes.copy_from_slice(name.as_bytes());
             bytes.make_ascii_lowercase();
             if let Ok(name) = std::str::from_utf8(bytes) {
-                return self.get_lowercase(name).cloned();
+                return self.get_lowercase(name);
             }
         }
-        self.get_lowercase(&name.to_ascii_lowercase()).cloned()
+        self.get_lowercase(&name.to_ascii_lowercase())
     }
 
     /// Value-owned leases implement PHP's LIFO reuse without inspecting weak handles.
     pub(crate) fn allocate(&mut self, class: Rc<Class>) -> Rc<Object> {
-        self.allocate_with_properties(class, PhpArray::new())
+        let properties = phera_value::Properties::for_class(&*class);
+        self.allocate_with_properties(class, properties)
     }
 
     pub(crate) fn allocate_with_properties(
         &mut self,
         class: Rc<Class>,
-        properties: PhpArray,
+        properties: phera_value::Properties,
     ) -> Rc<Object> {
         self.has_dimensions |= class.operations.has(ClassOperations::DIMENSIONS);
         let has_destructor = class
             .magic
             .as_ref()
             .is_some_and(|magic| magic.destruct.is_some());
-        let object = Object::allocate_with_properties(&self.ids, class, properties);
+        let object = Object::allocate_with(&self.ids, class, properties);
         if has_destructor {
             object.expect_destructor();
         }
@@ -506,7 +539,7 @@ impl Drop for ClassTable {
         // the pool, which holds the queue, so an unclosed queue would leak.
         drop(self.ids.close());
         for object in self.objects.iter().filter_map(Weak::upgrade) {
-            object.update(|properties| *properties = phera_value::PhpArray::new());
+            object.update(|properties| *properties = phera_value::Properties::default());
             drop(object.take_attachments());
             if let Ok(mut native) = object.native.try_borrow_mut() {
                 *native = None;
@@ -539,7 +572,6 @@ impl ClassTable {
             has_property_views: self.has_property_views,
             has_lazy_objects: self.has_lazy_objects,
             native_count: self.native_count,
-            native_methods: self.native_methods.clone(),
             objects,
             ids,
             allocations_before_collection: self.allocations_before_collection.clone(),

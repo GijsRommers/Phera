@@ -53,6 +53,24 @@ impl CompiledUnit {
         for (index, path) in function.paths.iter().enumerate() {
             writeln!(f, "  path#{index} = {:?} {:?}", path.base, path.steps)?;
         }
+        for (index, site) in function.method_sites.iter().enumerate() {
+            let arguments = function
+                .site_arguments
+                .get(site.argument_range())
+                .unwrap_or_default();
+            writeln!(
+                f,
+                "  site#{index} = {:?}->{:?}({arguments:?}), after {:?}{}",
+                site.receiver,
+                site.method,
+                site.after,
+                if site.receiver_taken {
+                    ", takes the receiver"
+                } else {
+                    ""
+                }
+            )?;
+        }
         for (index, handler) in function.handlers.iter().enumerate() {
             writeln!(f, "  handler#{index} = {handler:?}")?;
         }

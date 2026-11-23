@@ -296,6 +296,16 @@ impl Vm {
                     Write::Increment(mode) => {
                         let (updated, result) = self.increment_dimension(&value, mode)?;
                         if let Value::Reference(reference) = value {
+                            if matches!(updated, Value::Float(_)) {
+                                let old = reference
+                                    .try_borrow()
+                                    .map_err(|_| internal_error!("borrowed dimension"))?;
+                                if let Some(limit) = crate::typed_increment::IntegerLimit::reached(
+                                    &old, &updated, mode,
+                                ) {
+                                    self.check_increment_reference(&reference, limit)?;
+                                }
+                            }
                             let updated = self.check_reference_assignment(&reference, updated)?;
                             *reference
                                 .try_borrow_mut()
@@ -334,6 +344,11 @@ impl Vm {
             Write::Increment(mode) => {
                 let old = read(self)?;
                 let (value, result) = self.increment_dimension(&old, mode)?;
+                if let Some(limit) =
+                    crate::typed_increment::IntegerLimit::reached(&old, &value, mode)
+                {
+                    self.check_increment_target(&root, &keys, limit)?;
+                }
                 (value, Mutation::Assign, result)
             }
             Write::Reference => {
