@@ -252,7 +252,6 @@ impl Machine<'_> {
     /// the batch loop, which hands it to the built-in's next step
     /// (`calls::native_loops`). The cases `leave_to_native` leaves to the
     /// VM stay with it here too.
-    #[cold]
     #[inline(never)]
     fn leave_to_native_loop(&mut self, frame: Frame, source: Option<Reg>) -> Step {
         let facts = self.code.facts(frame.function);
@@ -281,7 +280,10 @@ impl Machine<'_> {
         {
             return Step::Slow;
         }
-        let value = value.clone();
+        let value = match source {
+            Some(source) => self.registers.take(frame.base() + source.index()),
+            None => Value::Null,
+        };
         self.stack.pop_for_return();
         self.registers.release_frame(frame.start(), frame.base());
         self.stack.handed_back = Some(super::execution_loop::HandedBack::NativeLoop(value));

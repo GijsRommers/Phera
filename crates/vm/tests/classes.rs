@@ -247,3 +247,61 @@ async fn integer_leaf_calls_still_obey_the_frame_limit() {
         );
     }
 }
+
+/// Flat method/static tables, zero-cache polymorphic class checks, and
+/// two-array / object-method native-loop `array_map` preserve PHP semantics.
+#[tokio::test]
+async fn flat_tables_and_native_loop_array_map_semantics() {
+    let source = r#"<?php
+interface Left { public function left(): string; }
+interface Right { public function right(): string; }
+class BothA implements Left, Right {
+    public function __construct(public string $tag) {}
+    public function left(): string { return 'L:' . $this->tag; }
+    public function right(): string { return 'R:' . $this->tag; }
+}
+class BothB implements Left, Right {
+    public function __construct(public string $tag) {}
+    public function left(): string { return 'l:' . $this->tag; }
+    public function right(): string { return 'r:' . $this->tag; }
+}
+class Base {
+    public static array $table = ['a' => 10];
+    private static function secret(): string { return 'base-priv'; }
+    protected static function who(): string { return static::class; }
+    public static function callSecret(): string { return self::secret(); }
+    public static function callWho(): string { return static::who(); }
+    public function combine(Left&Right $item, ?string $suffix): string {
+        return $item->left() . '|' . $item->right() . '|' . ($suffix ?? 'none');
+    }
+}
+class Child extends Base {
+    private static function secret(): string { return 'child-priv'; }
+    public static function callBoth(): string {
+        return parent::callSecret() . ',' . self::secret() . ',' . parent::callWho();
+    }
+}
+function checkIntersection(Left&Right $x): Left|Right { return $x; }
+$items = [new BothA('1'), new BothB('2'), new BothA('3')];
+$mapper = new Child();
+$mapped = array_map([$mapper, 'combine'], $items, ['x', 'y']);
+$tags = array_map(fn (Left&Right $o, int $i): string => checkIntersection($o)->left() . '#' . $i, $items, [0, 1, 2]);
+Child::$table['b'] = 20;
+$sum = Base::$table['a'] + Child::$table['b'];
+$firstTag = $items[0]->tag . $items[1]->tag;
+echo $mapped[0], ';', $mapped[1], ';', $mapped[2], '/', $tags[0], ',', $tags[1], ',', $tags[2], '/', Child::callBoth(), '/', $sum, '/', $firstTag;
+"#;
+    let unit = Arc::new(phera_compiler::compile(source, "dod-fast-paths.php").unwrap());
+    let mut interpreter = Vm::new(Arc::new(Registry::new()));
+    let status = interpreter.run(unit).await;
+    assert_eq!(
+        status,
+        0,
+        "unexpected error: {}",
+        String::from_utf8_lossy(&interpreter.output)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&interpreter.output),
+        "L:1|R:1|x;l:2|r:2|y;L:3|R:3|none/L:1#0,l:2#1,L:3#2/base-priv,child-priv,Child/30/12"
+    );
+}
