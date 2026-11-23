@@ -60,19 +60,19 @@ scratch copies of the test applications (2026-11-22); these are the product's
 adapters, same binary with the warm-up on and off, one worker, instructions
 per settled request (lowest of the pairs):
 
-| Route | Main `1fcc6383` | Off | On | Change | Times PHP-FPM |
+| Route | Main `0c63b85f` | Off | On | Change | Times PHP-FPM |
 |---|---:|---:|---:|---:|---|
-| Laravel `/api/posts?page=2` | 106.45M | 106.31M | 54.97M | −48.3% | 6.4 to 3.3 (16.7M) |
-| Laravel `/api/hello` | 25.15M | 25.16M | 24.46M | −2.8% | 3.4 to 3.3 (7.4M) |
-| Symfony `/api/ping` | 14.00M | 14.01M | 13.16M | −6.0% | |
-| Symfony `/api/db-yardstick` | 441.72M | 441.78M | 441.37M | −0.1% | 7.6 (57.9M) |
+| Laravel `/api/posts?page=2` | 104.31M | 104.31M | 52.68M | −49.5% | 6.2 to 3.2 (16.7M) |
+| Laravel `/api/hello` | 23.18M | 23.17M | 22.04M | −4.9% | 3.1 to 3.0 (7.4M) |
+| Symfony `/api/ping` | 13.28M | 13.29M | 12.46M | −6.2% | |
+| Symfony `/api/db-yardstick` | 433.90M | 433.79M | 433.50M | −0.1% | 7.5 (57.9M) |
 
-`bin/gate.sh` against main, four pairs: `/api/hello` 25.10M to 24.45M
-(−2.6%), `/api/posts?page=2` 106.40M to 54.98M (−48.3%). The review's
-"no request" rows were 74.9M and 22.5M: posts is below it because all
-three models of the application are booted, not one; hello is above it
-because the booted models make its fork dearer (below) and the session
-store is not resolved (0.6M).
+`bin/gate.sh` against main `0c63b85f`, four pairs: `/api/hello` 23.12M to
+22.10M (−4.4%), `/api/posts?page=2` 104.53M to 52.78M (−49.5%). The
+review's "no request" rows were 74.9M and 22.5M: posts is below it because
+all three models of the application are booted, not one; hello is at it
+although the session store is not resolved (0.6M) and the booted models
+make its fork dearer (below).
 
 Where it comes from, each step alone, tried in a scratch copy of the entry
 script before the adapter was written (Laravel, main `1fcc6383`):
@@ -110,29 +110,33 @@ what the warm-up built, whether it uses it or not.
 
 | | Off | On |
 |---|---:|---:|
-| Laravel: a request that ends right after `Phera\snapshot()` (the fork) | 4.95M | 7.54M |
-| Symfony: the same | 1.63M | 1.86M |
-| Laravel with 100 more models that no route uses: `/api/hello` | 25.11M | 25.87M |
-| ... `/api/posts?page=2` | 106.33M | 56.52M |
-| Laravel, boot of a worker | 205 ms, 324 files | 249 ms, 439 files |
-| ... process start until one worker has booted | 2,398M | 2,935M |
-| ... with the 100 models | 181 ms | 389 ms, 542 files |
-| Symfony, boot of a worker | 49 ms | 51 ms |
-| Laravel, memory of the process, one worker, after 200 requests | 102.1 MiB | 111.4 MiB |
-| ... four workers | 185.4 MiB | 203.2 MiB |
-| ... one worker, with the 100 models | 98 MiB | 155 MiB |
-| Symfony, memory, one worker | 28.2 MiB | 28.4 MiB |
+| Laravel: a request that ends right after `Phera\snapshot()` (the fork) | 3.22M | 5.29M |
+| Symfony: the same (measured on `1fcc6383`) | 1.63M | 1.86M |
+| Laravel with 100 more models that no route uses: `/api/hello` | 23.17M | 23.29M |
+| ... `/api/posts?page=2` | 104.27M | 53.92M |
+| Laravel, boot of a worker | 165 ms, 324 files | 214 ms, 439 files |
+| ... process start until one worker has booted | 2,283M | 2,870M |
+| ... with the 100 models | 166 ms | 366 ms, 542 files |
+| Symfony, boot of a worker | 46 ms | 46 ms |
+| Laravel, memory of the process, one worker, after 200 requests | 96.2 MiB | 112.3 MiB |
+| ... four workers | 174.4 MiB | 199.3 MiB |
+| ... one worker, with the 100 models (measured on `1fcc6383`) | 98 MiB | 155 MiB |
+| Symfony, memory, one worker | 28.1 MiB | 28.6 MiB |
 
-Each booted model adds about 16,000 instructions to every fork and, in this
-engine, 0.5 to 0.75 MiB to every worker: that is what a declared Eloquent
-model class costs, with or without the warm-up (a server with the warm-up
-off reaches the same 160 MiB once its requests have used all 100 models).
-The warm-up pays it for every model at the boot instead of for the models
-requests happen to use. On the test application no route costs more than
-before. An application with hundreds of models and routes that use none
-of them would see those routes rise by about 1.6M per hundred models;
-booting only the models a worker's requests have used (the class warm-up
-already keeps that list) is the way out if that shows up.
+A fork copies every object of the snapshot. With the warm-up that is 953
+objects on the test application instead of 204, and 667 of the difference
+are one thing: the rule set of Doctrine's inflector, which Laravel builds
+when a model works out its table name. A request reads 13 to 22 of the 953
+and writes to 7 to 11. Each booted model adds about 12,000 instructions to
+every fork and, in this engine, 0.5 to 0.75 MiB to every worker: that is
+what a declared Eloquent model class costs, with or without the warm-up (a
+server with the warm-up off reaches the same 160 MiB once its requests
+have used all 100 models). The warm-up pays it for every model at the boot
+instead of for the models requests happen to use. On the test application
+no route costs more than before; with the 100 unused models `/api/hello`
+rises by 0.5%. The cause is the fork, not the warm-up: a fork that copies
+only what a request writes removes this cost, and that is the next piece
+of work.
 
 ## Turned down
 
