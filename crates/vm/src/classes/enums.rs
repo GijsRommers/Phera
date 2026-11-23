@@ -166,7 +166,7 @@ impl Vm {
     }
 
     pub(super) fn link_enum_members(
-        &self,
+        &mut self,
         declaration: &ClassDeclaration,
         unit: &std::sync::Arc<CompiledUnit>,
         info: &mut EnumInfo,
@@ -218,6 +218,7 @@ impl Vm {
                         backing: case
                             .backing
                             .map(|function| self.code.index_in(unit, Some(function.index()))),
+                        slot: Some(self.class_states.new_constant()),
                     },
                     ty: None,
                 }),
@@ -260,6 +261,7 @@ pub(super) fn native_unit_enum(
                 initializer: ConstantInitializer::EnumCase {
                     name: name.into(),
                     backing: None,
+                    slot: None,
                 },
                 ty: None,
             }),
@@ -275,7 +277,7 @@ pub(super) fn enum_property(class: &str, name: &str) -> PropertyDefault {
     PropertyDefault {
         set_visibility: None,
         is_final: false,
-        key: ArrayKey::str(name),
+        key: ArrayKey::interned_str(name.as_bytes()),
         value: Value::Null,
         static_storage: None,
         name: name.to_owned(),

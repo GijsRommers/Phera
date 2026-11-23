@@ -54,12 +54,13 @@ impl Vm {
         origin: ArgumentOrigin,
         binding: ArgumentBinding,
     ) -> NativeResult {
-        if matches!(entry.handler, NativeFn::DeprecatedSync(_))
-            && let Some(message) = phera_source::deprecations::kept_notice(
-                phera_source::deprecations::ItemKind::Function,
-                entry.name,
-            )
-        {
+        if matches!(
+            entry.handler,
+            NativeFn::DeprecatedSync(_) | NativeFn::DeprecatedAsync(_)
+        ) && let Some(message) = phera_source::deprecations::kept_notice(
+            phera_source::deprecations::ItemKind::Function,
+            entry.name,
+        ) {
             self.diagnostic("Deprecated", message.into());
             self.drain_error_handlers().await?;
         }
@@ -101,6 +102,12 @@ impl Vm {
         match entry.handler {
             NativeFn::Sync(handler) | NativeFn::DeprecatedSync(handler) => {
                 let result = handler(self, &arguments);
+                // Kept for a second call (see `calls::native_retries`).
+                if let Err(error) = &result
+                    && crate::autoload::ClassMiss::is(error)
+                {
+                    self.keep_missed_arguments(&arguments);
+                }
                 if let Err(error) = &result
                     && binding.has_native_frame()
                 {
@@ -113,7 +120,7 @@ impl Vm {
                 self.call_stack.recycle_native_arguments(arguments);
                 result
             }
-            NativeFn::Async(handler) => {
+            NativeFn::Async(handler) | NativeFn::DeprecatedAsync(handler) => {
                 self.run_async_native_function(entry.name, handler, arguments, binding)
                     .await
             }
@@ -173,13 +180,19 @@ impl Vm {
         }
         let retained = self.retain_native_arguments(&arguments);
         let result = handler(self, arguments).await;
+        // Kept for a second call (see `calls::native_retries`).
+        if let Err(error) = &result
+            && crate::autoload::ClassMiss::is(error)
+        {
+            self.keep_missed_arguments(retained.as_slice());
+        }
         self.finish_native_future(result, NativeFrame::Function(name), retained)
     }
 
     /// Publish the native frame while PHP callbacks are active, for Throwable::getTrace().
     fn native_callback_frame(
         &mut self,
-        name: &str,
+        name: &'static str,
         handler: phera_extension_api::AsyncFn,
         arguments: Vec<Value>,
     ) -> phera_extension_api::LocalFuture<'_, NativeResult> {
@@ -192,6 +205,16 @@ impl Vm {
                 });
             let result = handler(self, arguments).await;
             let site = self.native_callback_sites.pop();
+            // Kept for a second call (see `calls::native_retries`).
+            if let Err(error) = &result
+                && crate::autoload::ClassMiss::is(error)
+            {
+                let trace = site.as_ref().and_then(|site| match &site.native {
+                    crate::error_traces::NativeCaller::Saved(trace) => Some(trace),
+                    _ => None,
+                });
+                self.keep_traced_arguments(name, trace);
+            }
             if let Err(error) = &result
                 && self.needs_native_failure_frame(error)
             {

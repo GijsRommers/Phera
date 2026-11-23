@@ -61,6 +61,7 @@ impl AlgorithmSelection {
 
 fn selection(context: &mut dyn Context, name: &str, value: &Value) -> Option<AlgorithmSelection> {
     let result = match value {
+        Value::InternedStr(bytes) => Algorithm::resolve(context, name, bytes.as_bytes())?,
         Value::String(bytes) => Algorithm::resolve(context, name, bytes.as_bytes())?,
         Value::Int(0) => return Some(AlgorithmSelection::Default),
         Value::Int(1) | Value::Null => Algorithm::Sha1,

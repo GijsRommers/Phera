@@ -31,7 +31,7 @@ pub fn register(registry: &mut Registry) {
         FunctionEntry::asynchronous("scandir", SCAN, scandir),
         FunctionEntry::asynchronous("readdir", &[HANDLE], readdir),
         FunctionEntry::asynchronous("rewinddir", &[HANDLE], rewinddir),
-        FunctionEntry::sync("closedir", &[HANDLE], closedir),
+        FunctionEntry::asynchronous("closedir", &[HANDLE], closedir),
         FunctionEntry::sync("getcwd", &[], getcwd),
         FunctionEntry::sync("chdir", &[DIRECTORY], chdir),
     ] {
@@ -72,6 +72,29 @@ async fn open(context: &mut dyn Context, arguments: Vec<Value>, function: &str) 
     files(context).use_default_context(stream_context);
     if name.is_empty() {
         return Ok(Value::Bool(false));
+    }
+    if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+        let supplied = if stream_context.is_null() {
+            crate::context_options::default_for_wrapper(context)
+        } else {
+            stream_context.clone()
+        };
+        let Some(dir) =
+            crate::user_directory::open(context, wrapper, function, name, supplied).await?
+        else {
+            return warn_false(
+                context,
+                format!(
+                    "{}: Failed to open directory: operation failed",
+                    path_call(function, name)
+                ),
+            );
+        };
+        let value = crate::user_resource::make_directory(context, dir);
+        if let Value::Resource(resource) = &value {
+            files(context).directory = Some(resource.clone());
+        }
+        return Ok(value);
     }
     match open_directory(context, name, function).await? {
         Ok(dir) => {
@@ -118,14 +141,36 @@ pub async fn directory_entries(
     context: &mut dyn Context,
     name: &[u8],
 ) -> Result<io::Result<Vec<Vec<u8>>>, NativeError> {
-    collect_entries(context, name, 2).await
+    collect_entries(context, name, 2, Value::Null).await
 }
 
 async fn collect_entries(
     context: &mut dyn Context,
     name: &[u8],
     order: i64,
+    stream_context: Value,
 ) -> Result<io::Result<Vec<Vec<u8>>>, NativeError> {
+    if let Some(wrapper) = crate::user_wrappers::locate(context, name) {
+        let function = "scandir";
+        let Some(dir) =
+            crate::user_directory::open(context, wrapper, function, name, stream_context).await?
+        else {
+            return Ok(Err(io::Error::other("operation failed")));
+        };
+        let result = async {
+            let mut entries = Vec::new();
+            while let Some(entry) = dir.read(context, function).await?.to_php_string() {
+                entries.push(entry.as_bytes().to_vec());
+            }
+            sort(&mut entries, order);
+            Ok::<_, NativeError>(entries)
+        }
+        .await;
+        let closed = dir.close(context).await;
+        let entries = result?;
+        closed?;
+        return Ok(Ok(entries));
+    }
     let directory = match open_directory(context, name, "scandir").await? {
         Ok(directory) => directory,
         Err(error) => return Ok(Err(error)),
@@ -136,18 +181,22 @@ async fn collect_entries(
                 .filter_map(Result::ok)
                 .map(|entry| entry.file_name().to_bytes().to_vec())
                 .collect();
-            match order {
-                0 => entries.sort_unstable(),
-                2 => (),
-                _ => {
-                    entries.sort_unstable();
-                    entries.reverse();
-                }
-            }
+            sort(&mut entries, order);
             entries
         })
         .await?;
     Ok(Ok(entries))
+}
+
+fn sort(entries: &mut [Vec<u8>], order: i64) {
+    match order {
+        0 => entries.sort_unstable(),
+        2 => (),
+        _ => {
+            entries.sort_unstable();
+            entries.reverse();
+        }
+    }
 }
 
 fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
@@ -163,7 +212,7 @@ fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
             ));
         }
         let order = args::int(&arguments, 1).unwrap_or(0);
-        let entries = match collect_entries(context, name, order).await? {
+        let entries = match collect_entries(context, name, order, stream_context.clone()).await? {
             Ok(entries) => entries,
             Err(error) => {
                 let description = reason(&error);
@@ -189,20 +238,37 @@ fn scandir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, 
 fn readdir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let handle = handle(context, &arguments, "readdir")?;
-        read(&handle).await
+        read(context, &handle, "readdir").await
     })
 }
 
 fn rewinddir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
     Box::pin(async move {
         let handle = handle(context, &arguments, "rewinddir")?;
-        rewind(&handle).await
+        rewind(context, &handle).await
     })
 }
 
-fn closedir(context: &mut dyn Context, arguments: &[Value]) -> NativeResult {
-    let handle = handle(context, arguments, "closedir")?;
-    handle.data.borrow_mut().take();
+fn closedir(context: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, NativeResult> {
+    Box::pin(async move {
+        let handle = handle(context, &arguments, "closedir")?;
+        close(context, &handle).await
+    })
+}
+
+pub async fn close(context: &mut dyn Context, resource: &Resource) -> NativeResult {
+    let dir = crate::user_directory::of(resource);
+    if dir.as_ref().is_some_and(|dir| dir.is_busy()) {
+        return Err(NativeError::error(
+            "Directory is already executing a callback",
+        ));
+    }
+    if let Some(dir) = dir {
+        crate::user_resource::release(context, resource);
+        dir.close(context).await?;
+    } else {
+        resource.data.borrow_mut().take();
+    }
     Ok(Value::Null)
 }
 
@@ -249,14 +315,16 @@ fn handle(
 }
 
 pub fn is_open(resource: &Resource) -> bool {
-    resource
-        .data
-        .borrow()
-        .as_ref()
-        .is_some_and(|dir| dir.is::<Dir>())
+    resource.data.borrow().as_ref().is_some_and(|dir| {
+        dir.is::<Dir>()
+            || dir.is::<crate::user_resource::UserHandle<crate::user_directory::UserDirectory>>()
+    })
 }
 
-pub async fn read(resource: &Resource) -> NativeResult {
+pub async fn read(context: &mut dyn Context, resource: &Resource, function: &str) -> NativeResult {
+    if let Some(dir) = crate::user_directory::of(resource) {
+        return dir.read(context, function).await;
+    }
     with_directory(resource, |dir| {
         dir.read()
             .and_then(Result::ok)
@@ -266,7 +334,10 @@ pub async fn read(resource: &Resource) -> NativeResult {
     .map(|value| value.map_or(Value::Bool(false), Value::from))
 }
 
-pub async fn rewind(resource: &Resource) -> NativeResult {
+pub async fn rewind(context: &mut dyn Context, resource: &Resource) -> NativeResult {
+    if let Some(dir) = crate::user_directory::of(resource) {
+        return dir.rewind(context).await;
+    }
     with_directory(resource, Dir::rewind).await?;
     Ok(Value::Null)
 }

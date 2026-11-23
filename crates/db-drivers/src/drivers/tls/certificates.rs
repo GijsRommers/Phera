@@ -42,6 +42,10 @@ pub fn certificates(host: &str) -> TestCertificates {
 }
 
 impl TestCertificates {
+    pub fn server_der(&self) -> &[u8] {
+        &self.server_der
+    }
+
     pub fn server(&self, require_client: bool) -> Arc<ServerConfig> {
         let provider = phera_io_pool::tls::provider().clone();
         let builder = ServerConfig::builder_with_provider(provider.clone())

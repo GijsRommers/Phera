@@ -13,14 +13,21 @@ pub enum BuiltinUnary {
     GetType,
     GetClass,
     Defined,
+    /// `spl_object_id($object)`, for an object operand; any other operand
+    /// takes the call, with its frame.
+    ObjectId,
+    /// `strtolower($string)`, for a string operand; any other operand takes
+    /// the call, which converts it.
+    StrToLower,
 }
 
-/// Builtins that read the PHP frame itself, as in `func_num_args()`.
+/// Builtins that take no argument registers, such as `func_num_args()`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinFrame {
     ArgumentCount,
     ArgumentsFrom(u32),
     CalledClass,
+    AssertionsDisabled,
 }
 
 /// `call_user_func($callback, $value)` and `call_user_func_array($callback, $values)`.

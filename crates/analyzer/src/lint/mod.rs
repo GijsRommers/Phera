@@ -190,7 +190,8 @@ fn analyze(
         scope: RuleScope::default(),
         findings: Vec::new(),
     };
-    match phera_parser::parse_bytes_on_current_stack(source) {
+    let (parsed, _) = phera_parser::parse_file_on_current_stack(source, true);
+    match parsed {
         Ok(program) => {
             if !enabled.statements.is_empty()
                 || !enabled.expressions.is_empty()

@@ -209,10 +209,9 @@ impl Vm {
                                 !ty.mask.intersects(phera_bytecode::TypeMask::NULL)
                             })
                         {
-                            return Err(NativeError::error(format!(
-                                "Cannot access uninitialized non-nullable property {}::${} by reference",
-                                property.declaring, property.name,
-                            )));
+                            return Err(crate::typed_references::uninitialized_reference_error(
+                                property,
+                            ));
                         }
                         if stored.is_none()
                             && !slot.as_ref().is_some_and(|key| {
@@ -266,7 +265,7 @@ impl Vm {
                     let value = array.get(&key).cloned().unwrap_or_default();
                     (PathKey::Index(Some(key)), value)
                 }
-                (Value::String(_), PathKey::Index(_)) => {
+                (Value::InternedStr(_) | Value::String(_), PathKey::Index(_)) => {
                     return Err(NativeError::error(
                         "Cannot create references to/from string offsets",
                     ));

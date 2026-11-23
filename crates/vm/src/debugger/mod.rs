@@ -41,10 +41,8 @@ impl Vm {
                 return None;
             };
             let value = values.get(&ArrayKey::str(name))?.deref();
-            let Value::String(value) = &*value else {
-                return None;
-            };
-            Some(String::from_utf8_lossy(value.as_bytes()).into_owned())
+            let bytes = value.as_str_bytes()?;
+            Some(String::from_utf8_lossy(bytes).into_owned())
         })
     }
 

@@ -84,6 +84,7 @@ pub(super) fn class(node: &Node, html: bool) -> &'static str {
 
 pub(super) const HOOKS: ClassHooks = ClassHooks {
     clone: Some(NativeClone::CopyWithHandle(node::clone_object)),
+    fork: Some(super::fork_node),
     property_access: Some(&NativePropertyAccess {
         read,
         mutate,

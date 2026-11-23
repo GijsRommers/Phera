@@ -73,12 +73,11 @@ fn scalar(object: &Object, name: &str) -> String {
     let value = object
         .get(&Object::protected_key(name))
         .or_else(|| object.get(&ArrayKey::str(name)));
-    match value
-        .as_ref()
-        .and_then(|value| value.try_deref().ok())
-        .as_deref()
-    {
-        Some(Value::String(value)) => value.to_string_lossy(),
+    let value = value.as_ref().and_then(|value| value.try_deref().ok());
+    if let Some(text) = value.as_deref().and_then(Value::str_ref) {
+        return text.to_string_lossy();
+    }
+    match value.as_deref() {
         Some(Value::Int(value)) => value.to_string(),
         _ => String::new(),
     }

@@ -37,6 +37,9 @@ impl Vm {
             stop,
             frame_limit: self.frame_limit,
             ids: &self.object_ids,
+            registry: &self.registry,
+            class_states: &self.class_states,
+            enum_cases: &self.enum_cases,
         };
         let progress = machine.debug_step(instruction)?;
         *work = machine.work;
@@ -64,11 +67,11 @@ impl Machine<'_> {
         let previous = frame.ip();
         let mut ip = previous + 1;
         let slots = self.registers.tail_mut(frame.base());
-        let scalar = match scalar_step::<true>(&instruction, slots, &mut ip) {
+        let scalar = match scalar_step::<true, _>(&instruction, slots, &mut ip) {
             ScalarStep::Fallback => match instruction {
                 Instruction::FetchIndex {
                     dst, base, index, ..
-                } => array_index_step::<true>(dst, base, index, slots),
+                } => array_index_step::<true, _>(dst, base, index, slots),
                 _ => ScalarStep::Fallback,
             },
             complete => complete,
@@ -85,7 +88,7 @@ impl Machine<'_> {
             return Ok(Progress::Advanced);
         }
         Ok(
-            match self.step::<true>(instruction, Position { frame, ip }) {
+            match self.step::<true>(&instruction, Position { frame, ip }) {
                 Step::Done(ip) => {
                     self.publish(ip);
                     Progress::Advanced

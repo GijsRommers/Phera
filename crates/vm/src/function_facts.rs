@@ -9,11 +9,13 @@
 //! mask for a one-bit check of an argument), parameter 2 by reference, the
 //! return type `float`, how many registers a frame needs. It is made once,
 //! when the file is loaded, and read on every call, so it is kept small.
+//! It also holds the function's instructions, shared with the compiled
+//! file, so that a call or a return reaches them from here.
 
 use std::sync::Arc;
 
 pub(crate) use phera_bytecode::FunctionShape;
-use phera_bytecode::{FunctionSignature, TypeMask};
+use phera_bytecode::{Code, FunctionSignature, TypeMask};
 
 use crate::code_table::{FunctionIndex, UnitIndex};
 
@@ -21,6 +23,8 @@ use crate::code_table::{FunctionIndex, UnitIndex};
 /// call, so it is kept small and next to nothing else.
 #[derive(Clone)]
 pub(crate) struct FunctionFacts {
+    /// The function's instructions, which the interpreter loop runs.
+    pub(crate) instructions: Code,
     pub(crate) unit: UnitIndex,
     /// `None` for a file's top-level code, else its number within the file.
     pub(crate) local: Option<u32>,
@@ -63,17 +67,46 @@ impl FunctionFacts {
         index < self.parameters as usize && index < 64 && self.by_reference & (1 << index) != 0
     }
 
+    /// Whether every declared parameter takes a copy of its argument (none
+    /// is by reference or variadic), so that no argument can be one a
+    /// reference was expected for.
+    pub(crate) fn takes_values_only(&self) -> bool {
+        self.special == 0 && self.parameters <= 64
+    }
+
     /// Whether parameter `index` is declared and takes a copy of its
     /// argument: it is neither by reference nor variadic.
     pub(crate) fn takes_value(&self, index: usize) -> bool {
         index < self.parameters as usize && index < 64 && self.special & (1 << index) == 0
     }
 
+    /// The facts at a number of a function the request has not loaded: no
+    /// unit, no code. They are never run (see `crate::code_table::CodeTable`).
+    pub(crate) fn placeholder() -> Self {
+        Self::bind(
+            (UnitIndex(u32::MAX), FunctionIndex(u32::MAX), None),
+            FunctionSignature {
+                registers: 0,
+                parameters: 0,
+                required: 0,
+                typed: 0,
+                special: 0,
+                by_reference: 0,
+                parameter_masks: std::sync::Arc::from([]),
+                return_mask: None,
+                shape: phera_bytecode::FunctionShape::Plain,
+            },
+            Default::default(),
+        )
+    }
+
     pub(crate) fn bind(
         (unit, unit_first, local): (UnitIndex, FunctionIndex, Option<u32>),
         signature: FunctionSignature,
+        instructions: Code,
     ) -> Self {
         Self {
+            instructions,
             unit,
             local,
             unit_first,

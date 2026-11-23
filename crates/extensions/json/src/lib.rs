@@ -21,6 +21,11 @@ use phera_extension_api::{
     ClassEntry, Extension, FunctionEntry, MethodEntry, Param, ParamType, Registry,
 };
 
+/// Check JSON syntax without changing the request's `json_last_error()`.
+pub fn valid_json(bytes: &[u8], depth: usize) -> bool {
+    decode::validate(bytes, depth, 0).is_ok()
+}
+
 pub struct Json;
 
 impl Extension for Json {
@@ -42,6 +47,9 @@ impl Extension for Json {
             Param::new("depth", ParamType::Int).optional(),
         ];
         registry.function_with_callback_frame("json_encode", ENCODE, encode::json_encode);
+        registry.register_sync_selector("json_encode", |slots| {
+            encode::can_encode_sync(slots).then_some(encode::encode_sync)
+        });
 
         const DECODE: &[Param] = &[
             Param::new("json", ParamType::String),

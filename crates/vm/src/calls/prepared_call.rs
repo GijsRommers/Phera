@@ -50,6 +50,13 @@ pub(crate) enum PreparedCallee {
     /// `new` of a class without a constructor: the arguments are evaluated
     /// and dropped, and the call gives the new object, kept below them.
     Constructed,
+    /// A synchronous native function, by its number in the registry. The
+    /// call has no details: its parameters are the registry entry's. When
+    /// the general path has to handle such a call (a named argument, a
+    /// by-reference parameter, an argument to convert), it first turns it
+    /// into a `General` call with its full description (see
+    /// `calls::native_calls`).
+    Native(phera_extension_api::NativeId),
     /// Anything else; its [`Callee`] is in the call's details.
     General,
 }

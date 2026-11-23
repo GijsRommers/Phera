@@ -36,6 +36,41 @@ pub(super) struct Storage {
 }
 
 impl Activation {
+    /// The copy for a fork of a snapshot: the generator's own register
+    /// window and the calls it was preparing, with every value copied.
+    pub(super) fn forked(&self, fork: &mut phera_value::Fork<'_>) -> Result<Self, String> {
+        use crate::snapshot::ForkCopy;
+        if !self.storage.finally.is_empty() {
+            return Err("it is suspended inside a finally block".into());
+        }
+        let storage = &self.storage;
+        Ok(Activation {
+            frame: self.frame,
+            silence: self.silence.clone(),
+            storage: Storage {
+                registers: storage.registers.fork_copy(fork),
+                extras: storage
+                    .extras
+                    .as_ref()
+                    .map(|extras| Box::new(extras.fork_copy(fork))),
+                calls: storage
+                    .calls
+                    .iter()
+                    .map(|(call, details)| (*call, details.fork_copy(fork)))
+                    .collect(),
+                finally: Vec::new(),
+                captures: storage
+                    .captures
+                    .iter()
+                    .map(|capture| PendingCapture {
+                        base: capture.base,
+                        value: capture.value.fork_copy(fork),
+                    })
+                    .collect(),
+            },
+        })
+    }
+
     /// The scalar interpreter has no access to the VM side tables.
     pub(super) fn local_registers(&mut self) -> Option<&mut [Option<Value>]> {
         if !self.silence.is_empty()

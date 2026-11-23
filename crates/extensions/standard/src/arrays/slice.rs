@@ -39,8 +39,12 @@ fn array_slice(_: &mut dyn Context, arguments: &[Value]) -> NativeResult {
     let range = clamped_range(array.len(), offset, args::int(arguments, 2));
     let keys = IntegerKeys::preserve_if(args::bool(arguments, 3).unwrap_or(false));
     let mut result = PhpArray::new();
-    for (key, value) in array.iter().skip(range.start).take(range.len()) {
-        append_entry(&mut result, key, value, keys)?;
+    if !range.is_empty()
+        && let Some(position) = array.position_at(range.start)
+    {
+        for (key, value) in array.iter_from(position).take(range.len()) {
+            append_entry(&mut result, key, value, keys)?;
+        }
     }
     Ok(Value::from(result))
 }

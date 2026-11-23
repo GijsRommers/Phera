@@ -56,6 +56,61 @@ pub(crate) fn optimize(function: &mut Function) {
     }
 }
 
+/// Let a binary operator read variables directly instead of the copies
+/// made just before it.
+///
+/// `$i < $n` is compiled as `Move t1, $i; Move t2, $n; Binary t1 < t2`:
+/// each operand is copied when it is evaluated, so that a later operand
+/// that assigns the variable (`$a + ($a = 5)`) cannot change an earlier
+/// one. When the copies are the instructions right before the operator,
+/// with no jump target between, nothing can run in between, and the
+/// operator reads the variables (`Binary t1, $i < $n`). The VM's operator
+/// warns about an unset variable as the copy did, left operand first.
+pub(crate) fn fold_operand_copies(function: &mut Function) {
+    let boundaries: HashSet<_> = function
+        .instructions
+        .iter()
+        .filter_map(target)
+        .map(|target| target.index())
+        .collect();
+    let locals = function.locals.len();
+    for index in 1..function.instructions.len() {
+        let Instruction::Binary { op, dst, lhs, rhs } = function.instructions[index] else {
+            continue;
+        };
+        let (mut left, mut right) = (lhs, rhs);
+        // At most the two copies of the two operands, nearest first.
+        for position in (index.saturating_sub(2)..index).rev() {
+            if boundaries.contains(&(position + 1)) {
+                break;
+            }
+            let Instruction::Move { dst: copy, src } = function.instructions[position] else {
+                break;
+            };
+            if copy.index() < locals
+                || src.index() >= locals
+                || (copy != left && copy != right)
+                || (copy != dst && !dead_after(function, index, copy))
+            {
+                break;
+            }
+            if left == copy {
+                left = src;
+            }
+            if right == copy {
+                right = src;
+            }
+            function.instructions[position] = Instruction::Nop;
+        }
+        function.instructions[index] = Instruction::Binary {
+            op,
+            dst,
+            lhs: left,
+            rhs: right,
+        };
+    }
+}
+
 /// A single append step needs no runtime bytecode-path lookup.
 pub(crate) fn specialize_appends(function: &mut Function) {
     for instruction in &mut function.instructions {

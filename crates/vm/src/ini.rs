@@ -14,8 +14,8 @@
 //! `Registry::ini_update`. Session functions and INI calls share the same
 //! values and reject writes PHP forbids while a session is active.
 //!
-//! Some recorded options have partial effects. The assertion guard is checked
-//! after argument evaluation; bail and callback are only remembered.
+//! Some recorded options have partial effects. Assertion bail and callback
+//! are only remembered.
 //! The mbstring settings apply only to encodings and operations implemented
 //! by Phera.
 //! The fiber stack size validates PHP's lower bound without allocating a
@@ -39,6 +39,7 @@ pub(crate) struct IniOverrides {
     reporting_ini_modified: bool,
     precision: Option<i32>,
     serialization_precision: Option<i32>,
+    assertions: Option<i64>,
 }
 
 impl IniOverrides {
@@ -90,6 +91,10 @@ impl Vm {
 
     pub(crate) fn serialization_precision(&self) -> i32 {
         self.ini_overrides.serialization_precision.unwrap_or(-1)
+    }
+
+    pub(crate) fn assertions_disabled(&self) -> bool {
+        self.ini_overrides.assertions.unwrap_or(1) <= 0
     }
 
     pub(crate) fn ini_get(&self, name: &[u8]) -> Option<PhpString> {

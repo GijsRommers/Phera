@@ -7,8 +7,10 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use phera_bytecode::{BinaryOp, IncDec, Instruction};
-use phera_extension_api::{DimensionReferenceMode, NativeError, NativeResult};
+use phera_bytecode::{BinaryOp, IncDec, Instruction, Step};
+use phera_extension_api::{
+    DimensionReferenceMode, NativeError, NativePropertyMutation, NativePropertyRead, NativeResult,
+};
 use phera_value::Value;
 
 use crate::{
@@ -182,14 +184,69 @@ impl Vm {
             if !returned.is_reference() && !returned.is_object() {
                 self.indirect_dimension_notice(&path.object);
             }
+            let Some((returned, suffix)) = self
+                .write_native_properties(returned, &path.suffix, &write)
+                .await?
+            else {
+                return Ok(Value::Null);
+            };
             if let Some(next) =
-                self.find_dimension(returned.deref().clone(), path.suffix.iter().copied())?
+                self.find_dimension(returned.deref().clone(), suffix.iter().copied())?
             {
                 path = next;
                 continue;
             }
-            return self.mutate_returned_value(returned, &path.suffix, write);
+            return self.mutate_returned_value(returned, suffix, write);
         }
+    }
+
+    /// Follow object-valued native getters after an overloaded dimension.
+    async fn write_native_properties<'a>(
+        &mut self,
+        mut receiver: Value,
+        mut suffix: &'a [Step],
+        write: &Write,
+    ) -> Result<Option<(Value, &'a [Step])>, NativeError> {
+        while let Some((&Step::Property(name), rest)) = suffix.split_first() {
+            let Value::Object(object) = receiver.deref().clone() else {
+                break;
+            };
+            let Some(access) = self
+                .classes
+                .for_object(&object)
+                .and_then(|class| class.property_access)
+            else {
+                break;
+            };
+            let name = self.name(name)?.to_owned();
+            if rest.is_empty() {
+                let converted;
+                let mutation = match write {
+                    Write::Assign(value) => {
+                        converted = self
+                            .native_string_assignment(access, &object, &name, value)
+                            .await?;
+                        NativePropertyMutation::Assign(converted.as_ref().unwrap_or(value))
+                    }
+                    Write::Unset => NativePropertyMutation::Unset,
+                    _ => break,
+                };
+                if (access.mutate)(self, &object, &name, mutation)? {
+                    return Ok(None);
+                }
+                break;
+            }
+            let Some(next) = (access.read)(self, &object, &name, NativePropertyRead::Update)?
+            else {
+                break;
+            };
+            if !next.is_object() {
+                break;
+            }
+            receiver = next;
+            suffix = rest;
+        }
+        Ok(Some((receiver, suffix)))
     }
 
     async fn write_dimension(&mut self, path: DimensionPath, write: Write) -> NativeResult {
@@ -239,6 +296,16 @@ impl Vm {
                     Write::Increment(mode) => {
                         let (updated, result) = self.increment_dimension(&value, mode)?;
                         if let Value::Reference(reference) = value {
+                            if matches!(updated, Value::Float(_)) {
+                                let old = reference
+                                    .try_borrow()
+                                    .map_err(|_| internal_error!("borrowed dimension"))?;
+                                if let Some(limit) = crate::typed_increment::IntegerLimit::reached(
+                                    &old, &updated, mode,
+                                ) {
+                                    self.check_increment_reference(&reference, limit)?;
+                                }
+                            }
                             let updated = self.check_reference_assignment(&reference, updated)?;
                             *reference
                                 .try_borrow_mut()
@@ -277,6 +344,11 @@ impl Vm {
             Write::Increment(mode) => {
                 let old = read(self)?;
                 let (value, result) = self.increment_dimension(&old, mode)?;
+                if let Some(limit) =
+                    crate::typed_increment::IntegerLimit::reached(&old, &value, mode)
+                {
+                    self.check_increment_target(&root, &keys, limit)?;
+                }
                 (value, Mutation::Assign, result)
             }
             Write::Reference => {

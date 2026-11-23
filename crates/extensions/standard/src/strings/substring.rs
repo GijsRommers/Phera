@@ -221,6 +221,25 @@ fn span(arguments: &[Value], span: Span) -> i64 {
     let characters = args::bytes(arguments, 1);
     let offset = args::int(arguments, 2).unwrap_or_default();
     let range = clamped_range(string.len(), offset, args::int(arguments, 3));
-    let in_span = |byte: &&u8| characters.contains(byte) == (span == Span::Inside);
-    string[range].iter().take_while(in_span).count() as i64
+    let bytes = &string[range];
+    let inside = span == Span::Inside;
+    if characters.len() <= 4 || bytes.len() <= 4 {
+        return bytes
+            .iter()
+            .take_while(|byte| characters.contains(byte) == inside)
+            .count() as i64;
+    }
+    let mut members = [0_u64; 4];
+    for &byte in characters {
+        let byte = usize::from(byte);
+        members[byte / 64] |= 1 << (byte % 64);
+    }
+    bytes
+        .iter()
+        .take_while(|&&byte| {
+            let byte = usize::from(byte);
+            let member = members[byte / 64] & (1 << (byte % 64)) != 0;
+            member == inside
+        })
+        .count() as i64
 }

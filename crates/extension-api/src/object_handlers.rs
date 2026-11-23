@@ -86,6 +86,7 @@ pub trait NativeIterator {
     fn read_input<'a>(
         &'a mut self,
         _context: &'a mut dyn Context,
+        _operation: IteratorStep,
     ) -> LocalFuture<'a, Result<(), NativeError>> {
         Box::pin(async { Ok(()) })
     }
@@ -157,6 +158,7 @@ pub type NativeBinary = fn(
 pub type NativeUnary =
     fn(&mut dyn Context, crate::NativeUnaryOp, &Object) -> Result<Option<Value>, NativeError>;
 pub type NativeCast = fn(&Object, crate::NativeCastKind) -> Option<Value>;
+pub type NativeRelease = for<'a> fn(&'a mut dyn Context, &'a Object) -> LocalFuture<'a, ()>;
 
 /// Copies an object's native state for a fork of a snapshot: every PHP value
 /// inside goes through the [`phera_value::Fork`] (`fork.value(...)`), so that
@@ -174,6 +176,10 @@ pub type NativeForkHook = fn(
     &mut phera_value::Fork<'_>,
 ) -> Result<Box<dyn std::any::Any>, String>;
 
+/// Enumerates the strong PHP handles physically owned by a native payload.
+/// A payload that cannot be inspected returns false before calling the visitor.
+pub type NativeCycleTrace = fn(&dyn std::any::Any, &mut dyn FnMut(&Value)) -> bool;
+
 #[derive(Clone, Copy, Default)]
 pub struct ClassHooks {
     /// The error for script allocation of a factory-only native object.
@@ -184,6 +190,8 @@ pub struct ClassHooks {
     pub binary: Option<NativeBinary>,
     pub unary: Option<NativeUnary>,
     pub cast: Option<NativeCast>,
+    /// Release a native object that opted into the destructor queue.
+    pub release: Option<NativeRelease>,
     /// Native state that cannot be represented by PHP's serialization format.
     pub forbid_serialization: bool,
     /// An exception of this class (or a subclass) shows no argument values in
@@ -193,6 +201,10 @@ pub struct ClassHooks {
     pub properties: Option<PropertyProjection>,
     /// Direct read, mutation or presence check for one virtual property.
     pub property_access: Option<&'static crate::NativePropertyAccess>,
+    /// The native class's declared instance properties have no backing slots.
+    pub virtual_properties: bool,
+    /// Edges in native state. An absent hook leaves the payload opaque.
+    pub trace_native: Option<NativeCycleTrace>,
     pub iterator: Option<IteratorFactory>,
     /// Cursor creation for foreach by reference. Its current values must be reference cells.
     pub iterator_by_reference: Option<IteratorFactory>,
@@ -216,10 +228,13 @@ impl ClassHooks {
         binary: None,
         unary: None,
         cast: None,
+        release: None,
         forbid_serialization: false,
         redact_trace_arguments: false,
         properties: None,
         property_access: None,
+        virtual_properties: false,
+        trace_native: None,
         iterator: None,
         iterator_by_reference: None,
         iterator_fallback_if_overridden: &[],

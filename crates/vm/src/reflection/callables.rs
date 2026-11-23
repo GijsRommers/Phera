@@ -35,7 +35,17 @@ impl Vm {
         receiver: Option<Rc<Object>>,
         for_closure: bool,
     ) -> Result<Callee, NativeError> {
+        let named;
+        let target = match target {
+            FunctionTarget::Member(handle) => {
+                named = self.member_target(*handle)?;
+                &named
+            }
+            target => target,
+        };
         let callee = match target {
+            // Turned into a method by name above.
+            FunctionTarget::Member(_) => return Err(internal_error!("reflected member target")),
             FunctionTarget::Named(name) => self.resolve_callee(name)?,
             FunctionTarget::Closure(object) => {
                 let object = object
@@ -47,7 +57,9 @@ impl Vm {
                 let object = closure_invoke_receiver(receiver)?;
                 self.resolve_callable(&Value::Object(object))?
             }
-            FunctionTarget::Method { .. } | FunctionTarget::PropertyHook { .. } => {
+            FunctionTarget::Method { .. }
+            | FunctionTarget::LinkedMethod { .. }
+            | FunctionTarget::PropertyHook { .. } => {
                 let (class, method) = self.reflection_target_method(target)?;
                 let scope = self
                     .classes
@@ -84,6 +96,13 @@ impl Vm {
     ) -> Result<(Rc<Class>, Rc<Method>), NativeError> {
         match target {
             FunctionTarget::Method { class, name } => self.reflection_method(class, name),
+            FunctionTarget::LinkedMethod { class, name } => {
+                let class = self
+                    .classes
+                    .numbered(*class)
+                    .ok_or_else(|| exception("Class does not exist"))?;
+                Self::reflection_linked_method(class, name)
+            }
             FunctionTarget::PropertyHook { property, kind } => {
                 self.reflection_hook_method(*property, *kind)
             }
@@ -100,6 +119,14 @@ impl Vm {
             .classes
             .get(class)
             .ok_or_else(|| exception(format!("Class \"{class}\" does not exist")))?;
+        Self::reflection_linked_method(class, name)
+    }
+
+    /// Select the declaration of `new ReflectionMethod($service, 'run')` from its linked class.
+    fn reflection_linked_method(
+        class: Rc<Class>,
+        name: &str,
+    ) -> Result<(Rc<Class>, Rc<Method>), NativeError> {
         let method = class
             .methods
             .get(&name.to_ascii_lowercase())
@@ -136,9 +163,21 @@ impl Vm {
 
     pub(super) fn reflection_statics(&mut self, target: &FunctionTarget) -> NativeResult {
         let mut values = PhpArray::new();
+        let named;
+        let target = match target {
+            FunctionTarget::Member(handle) => {
+                named = self.member_target(*handle)?;
+                &named
+            }
+            target => target,
+        };
         let function = match target {
+            // Turned into a method by name above.
+            FunctionTarget::Member(_) => return Err(internal_error!("reflected member target")),
             FunctionTarget::Named(name) => function_of(&self.resolve_callee(name)?.target),
-            FunctionTarget::Method { .. } | FunctionTarget::PropertyHook { .. } => {
+            FunctionTarget::Method { .. }
+            | FunctionTarget::LinkedMethod { .. }
+            | FunctionTarget::PropertyHook { .. } => {
                 method_function(&self.reflection_target_method(target)?.1)
             }
             FunctionTarget::ClosureInvoke(_) => None,

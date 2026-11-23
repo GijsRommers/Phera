@@ -4,7 +4,7 @@ Callback validation preserves the unsupported exception
 <?php
 // This fixture asserts behavior specific to Phera’s deprecated-item policy.
 try {
-    array_map('strftime', []);
+    array_map('date_sunset', []);
 } catch (\Phera\NotSupportedException $error) {
     echo get_class($error), ': ', $error->getMessage(), "\n";
 }
@@ -19,6 +19,6 @@ try {
     echo get_class($error), ': ', $error->getMessage(), "\n";
 }
 --EXPECT--
-Phera\NotSupportedException: strftime() is not supported by Phera: deprecated since PHP 8.1, use IntlDateFormatter::format() instead
+Phera\NotSupportedException: date_sunset() is not supported by Phera: deprecated since PHP 8.1, use date_sun_info() instead
 Phera\NotSupportedException: lcg_value() is not supported by Phera: deprecated since PHP 8.4, use \Random\Randomizer::getFloat() instead
 Phera\NotSupportedException: Redis::sortAsc() is not supported by Phera: deprecated by phpredis

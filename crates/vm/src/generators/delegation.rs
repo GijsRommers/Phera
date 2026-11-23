@@ -16,6 +16,19 @@ use crate::Vm;
 
 use super::{Item, generator_object};
 
+impl Delegate {
+    pub(super) fn forked(&self, fork: &mut phera_value::Fork<'_>) -> Result<Self, String> {
+        match self {
+            Delegate::Array { values, position } => Ok(Delegate::Array {
+                values: fork.array(values),
+                position: *position,
+            }),
+            Delegate::Generator(inner) => Ok(Delegate::Generator(fork.object(inner))),
+            Delegate::Cursor { .. } => Err("it delegates to an iterator with yield from".into()),
+        }
+    }
+}
+
 pub(super) enum Delegate {
     Array {
         values: Rc<PhpArray>,
@@ -71,6 +84,7 @@ impl Vm {
                 Ok(values.entry_at(index).map(|(key, value)| Item {
                     key: match key {
                         ArrayKey::Int(key) => Value::Int(key),
+                        ArrayKey::Interned(key) => Value::InternedStr(key),
                         ArrayKey::String(key) => Value::String(key),
                     },
                     value: value.clone(),

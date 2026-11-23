@@ -20,7 +20,16 @@ pub(crate) fn encode_string(
     out.push('"');
     let mut remaining = bytes;
     while !remaining.is_empty() {
-        let (sequence, rest) = remaining.split_at(sequence_length(remaining));
+        let plain = remaining
+            .iter()
+            .take_while(|&&byte| plain_ascii(byte))
+            .count();
+        let (run, rest) = remaining.split_at(plain);
+        out.push_str(std::str::from_utf8(run).map_err(|_| Error::Utf8)?);
+        if rest.is_empty() {
+            break;
+        }
+        let (sequence, rest) = rest.split_at(sequence_length(rest));
         if let Ok(text) = std::str::from_utf8(sequence) {
             for character in text.chars() {
                 escape_char(character, flags, out);
@@ -36,6 +45,12 @@ pub(crate) fn encode_string(
     }
     out.push('"');
     Ok(())
+}
+
+/// ASCII bytes that never need escaping under any encode flag.
+fn plain_ascii(byte: u8) -> bool {
+    (b' '..=0x7f).contains(&byte)
+        && !matches!(byte, b'"' | b'\\' | b'/' | b'<' | b'>' | b'&' | b'\'')
 }
 
 /// Length of the UTF-8 sequence that starts `bytes`, valid or not. As in

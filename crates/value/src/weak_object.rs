@@ -30,6 +30,8 @@ use std::rc::{Rc, Weak};
 
 use crate::object::{Object, ObjectIds};
 
+pub(crate) type Incarnation = (usize, Weak<Object>);
+
 /// A weak handle on a PHP object; see the module documentation. The
 /// default handle refers to nothing.
 #[derive(Clone, Debug, Default)]
@@ -58,7 +60,7 @@ impl WeakObject {
         }
         let pool = self.pool.upgrade()?;
         let incarnations = pool.incarnations.try_borrow().ok()?;
-        let (origin, current) = incarnations.get(&self.id)?;
+        let (origin, current) = incarnations.get(self.id as usize)?.as_ref()?;
         if *origin != self.origin {
             return None;
         }
@@ -82,10 +84,10 @@ impl Object {
     /// contents for its destructor has the identity of the one it took
     /// over from.
     pub fn identity(&self) -> usize {
-        if self.incarnated
-            && let Some(pool) = &self.pool
+        if let Some(pool) = &self.pool
+            && pool.incarnated
             && let Ok(incarnations) = pool.incarnations.try_borrow()
-            && let Some((origin, _)) = incarnations.get(&self.id)
+            && let Some(Some((origin, _))) = incarnations.get(self.id as usize)
         {
             return *origin;
         }
@@ -134,8 +136,8 @@ mod tests {
         drop(target);
         let doomed = ids.take_doomed();
         let seen = weak.upgrade().expect("still alive while queued");
-        assert!(Rc::ptr_eq(&seen, &doomed[0]));
-        assert!(weak.refers_to(&doomed[0]));
+        assert!(Rc::ptr_eq(&seen, doomed[0].object()));
+        assert!(weak.refers_to(doomed[0].object()));
         drop((seen, doomed));
         assert!(!weak.is_alive());
     }
@@ -153,7 +155,7 @@ mod tests {
         let doomed = ids.take_doomed();
         assert_eq!(doomed.len(), 1);
         assert!(weak.upgrade().is_none());
-        assert!(!weak.refers_to(&doomed[0]));
+        assert!(!weak.refers_to(doomed[0].object()));
     }
 
     #[test]

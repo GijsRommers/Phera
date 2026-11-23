@@ -18,6 +18,14 @@ Usage:
     --debug                               start a DBGp session for each request
     --debug-boot                          debug worker boot with --debug --dev
     --allow-remote-debug                  allow debug mode on a non-loopback address
+    --no-class-warmup                     do not declare in the snapshot the
+                                          classes requests autoload
+    --no-service-warmup                   Laravel, Symfony: do not resolve the
+                                          framework's services before the
+                                          snapshot
+    --warmup PATH                         Laravel, Symfony: handle a GET of
+                                          PATH before the snapshot (may be
+                                          repeated; see the README)
     --no-process                          forbid starting external programs
     --request-timeout SECONDS             stop a request after this long
                                           (default 60; 0: never)
@@ -36,9 +44,6 @@ Usage:
                                           private means every private range
     --health PATH                         answer this path with 200 and ok,
                                           without running PHP
-    --no-snapshot                         run every request from the top: no
-                                          boot at start, no Laravel or Symfony
-                                          adapter
     ENV OPTIONS as below
   phera new [OPTIONS] [DIRECTORY]         start a project; asks for what
                                           is not given
@@ -48,6 +53,20 @@ Usage:
   phera --dump <file.php>                 print the compiled bytecode
   phera check [OPTIONS] <paths...>        type-check PHP (see check --help)
   phera lint [OPTIONS] [paths...]         lint PHP (see lint --help)
+  phera install [--no-dev] [--frozen-lockfile] [--offline] [-o]
+  phera update [packages...] [-W] [--dry-run] [--lock]
+  phera add vendor/package[:constraint]... [--dev]
+  phera remove vendor/package...
+  phera audit [--locked] [--no-dev] [--format table|json]
+  phera why vendor/package
+  phera why-not vendor/package version
+  phera outdated [--all]
+  phera show [vendor/package]
+  phera licenses
+  phera validate
+  phera run-script name [arguments...]
+  phera exec binary [arguments...]
+  phera dump-autoload [-o] [--no-dev]
   phera upgrade [OPTIONS]                 update Phera (see upgrade --help)
   phera --version
 
@@ -66,6 +85,7 @@ pub(crate) enum Command {
         script: String,
     },
     Serve(ServeOptions),
+    Packages(Vec<String>),
     Help(&'static str),
     Check(phera_analyzer::config::Options),
     Lint(phera_analyzer::lint::Command),
@@ -87,6 +107,15 @@ pub(crate) struct ServeOptions {
     /// `None` means one worker per CPU core.
     pub workers: Option<usize>,
     pub preload: bool,
+    /// Declare in the snapshot the classes requests autoload; on unless
+    /// `--no-class-warmup` is given.
+    pub class_warmup: bool,
+    /// Let the framework adapters resolve services before the snapshot; on
+    /// unless `--no-service-warmup` is given.
+    pub service_warmup: bool,
+    /// `--warmup`: the paths the framework adapters handle as requests
+    /// before the snapshot, in the order given.
+    pub warmup: Vec<String>,
     /// `--compress`: gzip or brotli for clients that accept it. Off unless
     /// given, since the proxy in front usually compresses.
     pub compress: bool,
@@ -99,9 +128,6 @@ pub(crate) struct ServeOptions {
     pub trusted_proxies: Option<String>,
     /// `--health`: a path the server answers itself.
     pub health_path: Option<String>,
-    /// `--no-snapshot`: no boot at start and no framework adapter; every
-    /// request runs the script from the top.
-    pub no_snapshot: bool,
     pub path: PathBuf,
 }
 
@@ -143,6 +169,11 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             arguments.next();
             parse_new(arguments).map(Command::New)
         }
+        Some(
+            "install" | "update" | "add" | "require" | "remove" | "audit" | "why" | "why-not"
+            | "outdated" | "show" | "licenses" | "validate" | "run-script" | "exec"
+            | "dump-autoload",
+        ) => Ok(Command::Packages(arguments.collect())),
         Some("upgrade") => {
             arguments.next();
             command_with_help(arguments, crate::upgrade::HELP, |args| {
@@ -150,8 +181,20 @@ pub(crate) fn parse(arguments: impl Iterator<Item = String>) -> Result<Command, 
             })
         }
         Some(_) => {
-            // `phera run file.php` and `phera file.php` mean the same.
-            arguments.next_if(|argument| argument == "run");
+            let named = arguments.next_if(|argument| argument == "run").is_some();
+            if named
+                && !debug
+                && matches!(&files, FileSelection::Automatic)
+                && ini.is_empty()
+                && arguments
+                    .peek()
+                    .is_some_and(|name| crate::packages::is_script(name))
+            {
+                let args = std::iter::once("run-script".to_owned())
+                    .chain(arguments)
+                    .collect();
+                return Ok(Command::Packages(args));
+            }
             leading_options(&mut arguments, &mut files, &mut ini, &mut debug)?;
             let arguments: Vec<String> = arguments.collect();
             let script = arguments.first().cloned().ok_or("No script given.")?;
@@ -278,13 +321,15 @@ fn parse_serve(
         listen: None,
         workers: None,
         preload: false,
+        class_warmup: true,
+        service_warmup: true,
+        warmup: Vec::new(),
         compress: false,
         no_process: false,
         request_timeout: None,
         request_read_timeout: None,
         trusted_proxies: None,
         health_path: None,
-        no_snapshot: false,
         path: PathBuf::from("."),
     };
     while let Some(argument) = arguments.next() {
@@ -311,7 +356,15 @@ fn parse_serve(
             }
             "--compress" => options.compress = true,
             "--preload" => options.preload = true,
-            "--no-snapshot" => options.no_snapshot = true,
+            "--no-class-warmup" => options.class_warmup = false,
+            "--no-service-warmup" => options.service_warmup = false,
+            "--warmup" => {
+                let path = arguments
+                    .next()
+                    .filter(|path| is_warmup_path(path))
+                    .ok_or("--warmup needs a path like /api/posts?page=1, without spaces.")?;
+                options.warmup.push(path);
+            }
             "--dev" => options.dev = true,
             "--debug" => options.debug = true,
             "--debug-boot" => options.debug_boot = true,
@@ -357,4 +410,10 @@ fn parse_serve(
         }
     }
     Ok(options)
+}
+
+/// Whether `path` can be a warm-up request: a path on this site, in one
+/// piece (the adapters receive the paths separated by white space).
+pub(crate) fn is_warmup_path(path: &str) -> bool {
+    path.starts_with('/') && !path.contains(char::is_whitespace)
 }

@@ -176,19 +176,19 @@ impl Property {
 fn array_key(key: &ArrayKey) -> (Vec<u8>, String) {
     match key {
         ArrayKey::Int(number) => (number.to_string().into_bytes(), number.to_string()),
-        ArrayKey::String(text) => (
-            text.as_bytes().to_vec(),
-            format!("\"{}\"", quote(text.as_bytes(), '"')),
-        ),
+        _ => {
+            let bytes = key.as_str_bytes().unwrap_or_default();
+            (bytes.to_vec(), format!("\"{}\"", quote(bytes, '"')))
+        }
     }
 }
 
 fn object_key(key: &ArrayKey, class: &str) -> (Vec<u8>, String, &'static str) {
-    let ArrayKey::String(text) = key else {
+    let Some(bytes) = key.as_str_bytes() else {
         let (name, member) = array_key(key);
         return (name, member, "public");
     };
-    let mut parts = text.as_bytes().splitn(3, |&byte| byte == 0);
+    let mut parts = bytes.splitn(3, |&byte| byte == 0);
     let first = parts.next().unwrap_or_default();
     let (name, name_in_path, visibility) = match (first, parts.next(), parts.next()) {
         (b"", Some(b"*"), Some(name)) => (name, quote(name, '"'), "protected"),
@@ -200,7 +200,7 @@ fn object_key(key: &ArrayKey, class: &str) -> (Vec<u8>, String, &'static str) {
             format!("*{}*{}", String::from_utf8_lossy(owner), quote(name, '"')),
             "private",
         ),
-        _ => (text.as_bytes(), quote(text.as_bytes(), '"'), "public"),
+        _ => (bytes, quote(bytes, '"'), "public"),
     };
     let member = if name_in_path
         .chars()
@@ -231,12 +231,14 @@ fn quote(bytes: &[u8], delimiter: char) -> String {
 
 pub(super) fn scalar(value: Option<&Value>) -> (&'static str, Vec<u8>) {
     let value = value.and_then(|value| value.try_deref().ok());
+    if let Some(bytes) = value.as_deref().and_then(Value::as_str_bytes) {
+        return ("string", bytes.to_vec());
+    }
     match value.as_deref() {
         Some(Value::Null) => ("null", Vec::new()),
         Some(Value::Bool(value)) => ("bool", vec![if *value { b'1' } else { b'0' }]),
         Some(Value::Int(value)) => ("int", value.to_string().into_bytes()),
         Some(Value::Float(value)) => ("float", phera_value::float_repr(*value).into_bytes()),
-        Some(Value::String(value)) => ("string", value.as_bytes().to_vec()),
         Some(Value::Resource(value)) => (
             "resource",
             format!("resource id='{}' type='{}'", value.id, value.kind).into_bytes(),

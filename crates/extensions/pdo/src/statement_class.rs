@@ -13,6 +13,20 @@ pub struct StatementClass {
     arguments: Option<Rc<PhpArray>>,
 }
 
+impl StatementClass {
+    /// The copy for a fork of a snapshot: the constructor arguments may
+    /// hold objects, which are the fork's own.
+    pub fn forked(&self, fork: &mut phera_extension_api::value::Fork<'_>) -> Self {
+        StatementClass {
+            name: self.name.clone(),
+            arguments: self
+                .arguments
+                .as_ref()
+                .map(|arguments| fork.array(arguments)),
+        }
+    }
+}
+
 impl Default for StatementClass {
     fn default() -> Self {
         Self {
@@ -46,7 +60,8 @@ impl StatementClass {
                 "{argument} PDO::ATTR_STATEMENT_CLASS class must be a valid class"
             ))
         };
-        let Value::String(name) = &*class.deref() else {
+        let class = class.deref();
+        let Some(name) = class.str_ref() else {
             return Err(invalid_class());
         };
         let name = name.to_string_lossy();

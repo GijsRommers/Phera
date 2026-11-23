@@ -180,6 +180,9 @@ impl Vm {
         self.finish_include_scope()?;
         self.abandon_native_view();
         if let Some(frame) = self.call_stack.pop() {
+            if frame.returns_to_native_loop() {
+                self.abandon_native_loop();
+            }
             self.closure_captures
                 .retain(|capture| capture.base < frame.base());
             self.abandon_calls_unconstructed(frame.start());

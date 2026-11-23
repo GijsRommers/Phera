@@ -19,7 +19,7 @@
 //! boot in the background of the worker; requests keep forking the old
 //! snapshot until the new one is ready.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -87,6 +87,29 @@ fn modified(file: &Path) -> Option<SystemTime> {
 /// How long a failed boot waits before it is tried again.
 const RETRY_AFTER: Duration = Duration::from_secs(2);
 
+/// The worker boots again to declare the collected classes in the snapshot
+/// after this many forked requests without a new class in the list. At the
+/// gate's 40–200 requests per second that is one to six seconds; a route hit
+/// once an hour still lands in the list and is declared at the next settle.
+const WARMUP_SETTLE_REQUESTS: u64 = 64;
+
+/// At most this many warm-up boots per script per worker, so a site with
+/// thousands of routes does not boot forever. Boots that a changed file
+/// starts do not count against this.
+const WARMUP_MAX_BOOTS: u32 = 3;
+
+/// The classes this worker's requests autoloaded, and how long ago the
+/// list last grew.
+#[derive(Default)]
+pub(crate) struct Warmup {
+    pub(crate) classes: Rc<RefCell<Vec<String>>>,
+    requests_since_growth: Cell<u64>,
+    /// How many warm-up boots ran, and the length of the list the last
+    /// boot that used it declared.
+    boots: Cell<u32>,
+    declared_len: Cell<usize>,
+}
+
 /// What requests do while a snapshot whose files changed boots again.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Stale {
@@ -112,6 +135,8 @@ pub(crate) struct WorkerSnapshots {
     scripts: RefCell<HashMap<PathBuf, ScriptState>>,
     /// Scripts whose boot is running now.
     booting: RefCell<Vec<PathBuf>>,
+    /// Per script, the classes its requests autoloaded.
+    warmup: RefCell<HashMap<PathBuf, Warmup>>,
 }
 
 impl WorkerSnapshots {
@@ -143,9 +168,18 @@ impl WorkerSnapshots {
                 (Plan::Classic, stale)
             }
             Some(ScriptState::Failed(at)) => {
+                count_from_the_top();
                 (Plan::Classic, !booting && at.elapsed() >= RETRY_AFTER)
             }
             None => (Plan::Classic, false),
+        }
+    }
+
+    /// The snapshot of `script`, if its boot finished with one.
+    pub(crate) fn snapshot(&self, script: &Path) -> Option<Rc<Snapshot>> {
+        match self.scripts.borrow().get(script) {
+            Some(ScriptState::Ready(snapshot, ..)) => Some(snapshot.clone()),
+            _ => None,
         }
     }
 
@@ -171,6 +205,84 @@ impl WorkerSnapshots {
         self.scripts
             .borrow_mut()
             .insert(script.to_path_buf(), state);
+    }
+
+    /// The sink a fork of `script` records the classes its requests
+    /// autoload into.
+    pub(crate) fn warmup_sink(&self, script: &Path) -> phera_vm::WarmupSink {
+        self.warmup
+            .borrow_mut()
+            .entry(script.to_path_buf())
+            .or_default()
+            .classes
+            .clone()
+    }
+
+    /// The classes collected for `script` so far.
+    pub(crate) fn warmup_classes(&self, script: &Path) -> Vec<String> {
+        self.warmup
+            .borrow()
+            .get(script)
+            .map(|warmup| warmup.classes.borrow().clone())
+            .unwrap_or_default()
+    }
+
+    /// How many warm-up boots ran for `script` (a boot a changed file
+    /// started does not count).
+    pub(crate) fn warmup_boots(&self, script: &Path) -> u32 {
+        self.warmup
+            .borrow()
+            .get(script)
+            .map(|warmup| warmup.boots.get())
+            .unwrap_or(0)
+    }
+
+    /// Records that a boot of `script` declared `len` classes from the
+    /// warm-up list: the length the last boot declared.
+    pub(crate) fn note_declared(&self, script: &Path, len: usize) {
+        let mut warmup = self.warmup.borrow_mut();
+        let Some(entry) = warmup.get_mut(script) else {
+            return;
+        };
+        if len > entry.declared_len.get() {
+            entry.declared_len.set(len);
+        }
+        entry.requests_since_growth.set(0);
+    }
+
+    /// Records that a forked request of `script` ran; `grew` says it
+    /// autoloaded a class not in the list yet. Returns true when the
+    /// worker should boot again to declare the list.
+    ///
+    /// A warm-up boot starts only when the list has grown since the last
+    /// boot that used it (its length is `declared_len`) and has then been
+    /// stable for WARMUP_SETTLE_REQUESTS requests. A settled worker whose
+    /// requests load nothing new therefore never boots again.
+    pub(crate) fn note_forked_request(&self, script: &Path, grew: bool) -> bool {
+        let booting = self.booting.borrow().iter().any(|path| path == script);
+        let mut warmup = self.warmup.borrow_mut();
+        let Some(entry) = warmup.get_mut(script) else {
+            return false;
+        };
+        if grew {
+            entry.requests_since_growth.set(0);
+        } else {
+            entry
+                .requests_since_growth
+                .set(entry.requests_since_growth.get() + 1);
+        }
+        let len = entry.classes.borrow().len();
+        if len > entry.declared_len.get()
+            && entry.requests_since_growth.get() >= WARMUP_SETTLE_REQUESTS
+            && entry.boots.get() < WARMUP_MAX_BOOTS
+            && !booting
+        {
+            entry.boots.set(entry.boots.get() + 1);
+            entry.declared_len.set(len);
+            entry.requests_since_growth.set(0);
+            return true;
+        }
+        false
     }
 }
 
@@ -212,4 +324,19 @@ pub(crate) fn remember(script: &Path) {
     {
         let _ = std::fs::write(marker, script.as_os_str().as_encoded_bytes());
     }
+}
+
+/// Requests of this process that ran from the top although their script
+/// snapshots: its boot failed or was refused, or a fork could not be made.
+/// Snapshots are the only mode; each of these is a defect to fix, which the
+/// server's log names and `--health` reports (`Phera-From-The-Top`).
+static FROM_THE_TOP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub(crate) fn count_from_the_top() {
+    FROM_THE_TOP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// How many requests ran from the top so far (see [`count_from_the_top`]).
+pub fn requests_from_the_top() -> u64 {
+    FROM_THE_TOP.load(std::sync::atomic::Ordering::Relaxed)
 }

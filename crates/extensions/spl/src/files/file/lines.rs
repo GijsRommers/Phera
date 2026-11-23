@@ -38,6 +38,7 @@ fn unreadable(path: &PhpString) -> NativeError {
 }
 
 pub(super) async fn raw_line(
+    context: &mut dyn Context,
     object: &Object,
     numbering: LineNumber,
     require_line: bool,
@@ -59,7 +60,7 @@ pub(super) async fn raw_line(
             Ok(Value::Bool(false))
         };
     }
-    let line = stream.read_line(limit).await?.unwrap_or_default();
+    let line = stream.read_line(context, limit).await?.unwrap_or_default();
     let mut line = line.as_slice();
     if flags & DROP_NEW_LINE != 0
         && let Some(without_lf) = line.strip_suffix(b"\n")
@@ -110,7 +111,7 @@ async fn iteration_line(
             let result = context
                 .call_method(object.clone(), "getCurrentLine", Vec::new())
                 .await?;
-            let Value::String(text) = &*result.deref() else {
+            let Some(text) = result.deref().to_php_string() else {
                 return Err(NativeError::type_error(format!(
                     "{}::getCurrentLine(): Return value must be of type string, {} returned",
                     object.class.name(),
@@ -121,13 +122,17 @@ async fn iteration_line(
                 file.text = Some(text.clone());
                 file.current = Some(Value::String(text.clone()));
             })?;
-            Value::String(text.clone())
+            Value::String(text)
         } else {
-            raw_line(object, LineNumber::AdvanceAfterBuffered, require_line).await?
+            raw_line(
+                context,
+                object,
+                LineNumber::AdvanceAfterBuffered,
+                require_line,
+            )
+            .await?
         };
-        if flags & SKIP_EMPTY == 0
-            || !matches!(&line, Value::String(text) if text.as_bytes().is_empty())
-        {
+        if flags & SKIP_EMPTY == 0 || !line.as_str_bytes().is_some_and(<[u8]>::is_empty) {
             return Ok(line);
         }
         change(object, clear)?;
@@ -229,13 +234,19 @@ pub(super) fn string(
 }
 
 pub(super) fn fgets(
-    _: &mut dyn Context,
+    context: &mut dyn Context,
     this: Option<Rc<Object>>,
     _: Vec<Value>,
 ) -> LocalFuture<'_, NativeResult> {
-    Box::pin(
-        async move { raw_line(receiver(this.as_ref())?, LineNumber::AlwaysAdvance, true).await },
-    )
+    Box::pin(async move {
+        raw_line(
+            context,
+            receiver(this.as_ref())?,
+            LineNumber::AlwaysAdvance,
+            true,
+        )
+        .await
+    })
 }
 
 pub(super) fn seek(

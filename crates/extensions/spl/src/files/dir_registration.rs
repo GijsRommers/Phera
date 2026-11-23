@@ -57,11 +57,11 @@ pub(super) fn register(registry: &mut Registry) {
                 Method::public("getExtension", &[], i::extension).tentative_return("string"),
                 Method::public("getBasename", &[i::SUFFIX], i::basename).tentative_return("string"),
                 Method::public("isDot", &[], d::is_dot).tentative_return("bool"),
-                Method::public("rewind", &[], d::rewind).tentative_return("void"),
+                Method::public_async("rewind", &[], d::rewind).tentative_return("void"),
                 Method::public("valid", &[], d::valid).tentative_return("bool"),
                 Method::public("key", &[], d::index).tentative_return("mixed"),
                 Method::public("current", &[], d::identity).tentative_return("mixed"),
-                Method::public("next", &[], d::next).tentative_return("void"),
+                Method::public_async("next", &[], d::next).tentative_return("void"),
                 Method::public_async("seek", &[OFFSET], d::seek).tentative_return("void"),
                 Method::public("__toString", &[], d::filename).returning("string"),
             ]
@@ -78,7 +78,7 @@ pub(super) fn register(registry: &mut Registry) {
                     const { &[PATH, FLAGS.with_default(ConstantValue::Int(d::SKIP_DOTS))] },
                     d::filesystem,
                 ),
-                Method::public("rewind", &[], d::rewind).tentative_return("void"),
+                Method::public_async("rewind", &[], d::rewind).tentative_return("void"),
                 Method::public("key", &[], d::key).tentative_return("string"),
                 Method::public_async("current", &[], d::current)
                     .tentative_return("string|SplFileInfo|FilesystemIterator"),
@@ -98,7 +98,7 @@ pub(super) fn register(registry: &mut Registry) {
                     const { &[PATH, FLAGS.with_default(ConstantValue::Int(0))] },
                     d::recursive,
                 ),
-                Method::public("hasChildren", &[ALLOW_LINKS], d::has_children)
+                Method::public_async("hasChildren", &[ALLOW_LINKS], d::has_children)
                     .tentative_return("bool"),
                 Method::public_async("getChildren", &[], d::children).tentative_return(RECURSIVE),
                 Method::public("getSubPath", &[], d::sub_path).tentative_return("string"),

@@ -26,7 +26,7 @@ pub fn construct(
     Box::pin(async move {
         let o = o.as_ref().ok_or_else(missing)?;
         let connection = connection::handle(args::object(&a, 0))?;
-        connection.borrow().lease()?;
+        connection.borrow().ensure_open()?;
         let state = statements::attach(o, connection);
         if let Some(sql) = args::string(&a, 1) {
             statements::prepare(

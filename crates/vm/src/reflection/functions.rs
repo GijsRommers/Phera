@@ -43,6 +43,8 @@ impl Vm {
             attributes: Vec::new(),
         };
         match target {
+            // `Vm::member_function` turns it into a method by name first.
+            FunctionTarget::Member(_) => return Err(internal_error!("reflected member target")),
             FunctionTarget::Named(name) => {
                 let callee = self
                     .resolve_callee(name)
@@ -50,7 +52,9 @@ impl Vm {
                 reflected.name = callee.name.to_string();
                 self.reflect_callee(&mut reflected, &callee.target, None);
             }
-            FunctionTarget::Method { .. } | FunctionTarget::PropertyHook { .. } => {
+            FunctionTarget::Method { .. }
+            | FunctionTarget::LinkedMethod { .. }
+            | FunctionTarget::PropertyHook { .. } => {
                 let (class, method) = self.reflection_target_method(target)?;
                 self.reflect_method_signature(&mut reflected, &method, &class.name);
                 reflected.member = Some(MemberInfo {
@@ -275,23 +279,7 @@ impl Vm {
             .map(|(position, param)| {
                 let metadata = metadata.and_then(|metadata| metadata.parameters.get(position));
                 let optional = required.is_none_or(|required| position > required);
-                let declared_type = param.ty.map(|id| {
-                    let ty = &unit.types[id.index()].display;
-                    if param.default_display.as_deref() == Some("null")
-                        && !ty.starts_with('?')
-                        && !ty.split('|').any(|name| matches!(name, "null" | "mixed"))
-                    {
-                        if ty.contains('|') {
-                            format!("{ty}|null")
-                        } else if ty.contains('&') {
-                            format!("({ty})|null")
-                        } else {
-                            format!("?{ty}")
-                        }
-                    } else {
-                        ty.clone()
-                    }
-                });
+                let declared_type = param.ty.map(|id| unit.types[id.index()].display.clone());
                 ParameterInfo {
                     name: unit.names[param.name.index()].clone(),
                     position,
@@ -356,17 +344,27 @@ fn native_parameter(position: usize, param: Param, stub: Option<StubParameter>) 
         Some(name.into())
     };
     let (default, default_constant, default_display) = match stub {
-        Some(parameter) => (
-            parameter.default().and_then(|default| match default {
-                StubDefault::EnumCase(class, case) => {
-                    Some(ParameterDefault::NativeEnumCase { class, case })
-                }
-                default => default.literal().map(ParameterDefault::Literal),
-            }),
-            parameter.constant_name().map(str::to_owned),
-            (!parameter.expression.is_empty() && parameter.expression != "UNKNOWN")
-                .then(|| parameter.expression.to_owned()),
-        ),
+        Some(parameter) => {
+            let default =
+                if param.platform_default && param.default_name == parameter.constant_name() {
+                    param
+                        .default
+                        .map(|value| ParameterDefault::Literal(value.to_value()))
+                } else {
+                    parameter.default().and_then(|default| match default {
+                        StubDefault::EnumCase(class, case) => {
+                            Some(ParameterDefault::NativeEnumCase { class, case })
+                        }
+                        default => default.literal().map(ParameterDefault::Literal),
+                    })
+                };
+            (
+                default,
+                parameter.constant_name().map(str::to_owned),
+                (!parameter.expression.is_empty() && parameter.expression != "UNKNOWN")
+                    .then(|| parameter.expression.to_owned()),
+            )
+        }
         None => (
             param
                 .default
@@ -389,5 +387,27 @@ fn native_parameter(position: usize, param: Param, stub: Option<StubParameter>) 
         default_display,
         internal: true,
         attributes: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ParameterDefault, native_parameter, signature};
+    use phera_extension_api::{ConstantValue, Param, ParamType, Value};
+
+    #[test]
+    fn named_native_default_uses_the_registered_value() {
+        let parameter = Param::new("backlog", ParamType::Int)
+            .with_platform_constant_default("SOMAXCONN", ConstantValue::Int(4096));
+        let stub = signature("socket_create_listen")
+            .unwrap()
+            .parameters()
+            .nth(1);
+        let reflected = native_parameter(1, parameter, stub);
+        assert_eq!(reflected.default_constant.as_deref(), Some("SOMAXCONN"));
+        assert!(matches!(
+            reflected.default,
+            Some(ParameterDefault::Literal(Value::Int(4096)))
+        ));
     }
 }

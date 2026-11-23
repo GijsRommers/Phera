@@ -25,7 +25,7 @@ use super::{Generator, Item, State, activation::Activation};
 #[derive(Default)]
 pub(crate) struct Releases(RefCell<Vec<Released>>);
 
-pub(super) type ReleaseQueue = Weak<Releases>;
+pub(crate) type ReleaseQueue = Weak<Releases>;
 
 enum Released {
     Owners {

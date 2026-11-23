@@ -11,6 +11,18 @@ try {
         ('A',10,1.25,true),('B',20,2.50,false),('C',30,3.75,true)");
     $value="O'Reilly\\path"; $quoted=$p->quote($value);
     var_dump($quoted,$p->query("SELECT $quoted")->fetchColumn());
+    $statement = $p->prepare('SELECT ?');
+    foreach (['NO_BACKSLASH_ESCAPES', ''] as $mode) {
+        $p->exec("SET SESSION sql_mode = '$mode'");
+        $statement->execute([$value]);
+        var_dump($p->quote($value), $statement->fetchColumn() === $value);
+        try {
+            $p->query('SELECT +');
+        } catch (PDOException $error) {
+            var_dump($error->getCode());
+        }
+        var_dump($p->quote($value));
+    }
  } finally {
     if ($p->inTransaction()) {$p->rollBack();}
     $p->exec("DROP TABLE IF EXISTS $t");

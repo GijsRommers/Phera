@@ -65,6 +65,7 @@ impl Vm {
     }
 
     fn publish_diagnostic(&mut self, kind: &str, message: PhpString) {
+        self.diagnostic_reporter.raised += 1;
         if self.queue_diagnostic(kind, &message) {
             return;
         }

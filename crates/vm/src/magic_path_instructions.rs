@@ -51,6 +51,20 @@ impl Vm {
                 }
             }
         };
+        if let Some(limit) = crate::typed_increment::IntegerLimit::reached(&old, &value, mode) {
+            match &target.target {
+                Some(UpdateTarget::Resolved { register, keys }) => {
+                    self.check_increment_place(place, *register, keys, limit)?;
+                }
+                Some(UpdateTarget::Property { object, key }) => {
+                    self.check_increment_property(object, key, limit)?;
+                }
+                Some(UpdateTarget::Indirect { root, keys }) => {
+                    self.check_increment_target(root, keys, limit)?;
+                }
+                _ => {}
+            }
+        }
         let result = match mode {
             IncDec::PostIncrement | IncDec::PostDecrement => old,
             IncDec::PreIncrement | IncDec::PreDecrement => value.clone(),

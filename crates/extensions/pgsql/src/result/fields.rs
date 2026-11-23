@@ -93,7 +93,7 @@ pub fn table(_: &mut dyn Context, arguments: Vec<Value>) -> LocalFuture<'_, Nati
         let Some(connection) = connection else {
             return Ok(Value::Bool(false));
         };
-        let lease = connection.borrow().lease()?;
+        let lease = crate::connection::lease(&connection).await?;
         let query = format!("SELECT relname FROM pg_catalog.pg_class WHERE oid = {oid}");
         let output = connection::run(&lease, move |pg| {
             Box::pin(async move { pg.native_query(&query).await })
