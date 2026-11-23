@@ -39,6 +39,7 @@ use crate::value::Value;
 pub use key::ArrayKey;
 use std::fmt;
 use storage::Storage;
+pub(crate) use storage::hash_str_bytes;
 
 #[derive(Default)]
 pub struct PhpArray {
