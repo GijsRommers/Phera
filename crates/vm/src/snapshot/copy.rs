@@ -53,7 +53,8 @@ impl Vm {
                 .map(Rc::downgrade)
                 .unwrap_or_default(),
         };
-        let mut fork = Fork::new(self.classes.ids(), &natives);
+        let mut fork =
+            Fork::with_object_hint(self.classes.ids(), &natives, self.classes.objects.len());
         let globals = self.globals.fork_copy(&mut fork);
         let registers = self.registers.fork_copy(&mut fork);
         let call_stack = self.call_stack.fork_copy(&mut fork);

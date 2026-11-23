@@ -382,9 +382,18 @@ impl CallStack {
 /// positions, including calls whose arguments were being evaluated.
 impl crate::snapshot::ForkCopy for CallStack {
     fn fork_copy(&self, fork: &mut phera_value::Fork<'_>) -> Self {
+        let active_extras = self.frames.len().min(self.extras.len());
+        let mut extras = Vec::with_capacity(active_extras);
+        for (frame, extra) in self.frames.iter().zip(self.extras.iter()) {
+            if frame.has_extras() {
+                extras.push(extra.fork_copy(fork));
+            } else {
+                extras.push(FrameExtras::new());
+            }
+        }
         CallStack {
             frames: self.frames.clone(),
-            extras: self.extras.fork_copy(fork),
+            extras,
             empty: FrameExtras::new(),
             preparing: self.preparing.clone(),
             details: self.details.fork_copy(fork),

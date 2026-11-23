@@ -6,7 +6,9 @@
 //! ```
 
 use super::{Class, Method};
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
+
+use foldhash::HashMap;
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct ClassOperations(u16);

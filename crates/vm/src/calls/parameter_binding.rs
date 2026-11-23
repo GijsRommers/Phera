@@ -113,16 +113,9 @@ impl Vm {
             return Ok(value);
         }
         if scope == types::DeclarationScope::Absolute
-            && self.matches_cached_class_type(&value, declaration, unit, cache)
+            && self.matches_declared_class_type(entry, declaration, &value)
         {
             return Ok(value);
-        }
-        // A fork's file has no class checks until one is asked for: make
-        // them from the snapshot's and check again, so that this value and
-        // the next of its class are accepted by the remembered answer.
-        if !cache.class_types.is_made() {
-            self.code.make_class_types(entry);
-            return self.check_window_argument((entry, call), index, offset, value);
         }
         // The coercion below may run PHP code (a `__toString`), so it gets
         // its own owner of the unit instead of a borrow of the code table.

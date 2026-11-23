@@ -34,7 +34,7 @@ use crate::reference_holders::StaticProperty;
 
 /// The number of a static property's storage in [`ClassStates`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct StaticSlot(u32);
+pub(crate) struct StaticSlot(pub(crate) u32);
 
 /// The number of an evaluated constant's state in [`ClassStates`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

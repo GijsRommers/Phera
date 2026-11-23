@@ -1,6 +1,8 @@
 //! A trait's declared properties and constants belong to each consuming class.
 
-use std::{collections::HashMap, rc::Rc};
+use std::rc::Rc;
+
+use foldhash::{HashMap, HashMapExt};
 
 use phera_bytecode::{ClassDeclaration, CompiledUnit, Visibility};
 use phera_extension_api::NativeError;
