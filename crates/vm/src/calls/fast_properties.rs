@@ -422,6 +422,7 @@ impl Machine<'_> {
                 return Step::Slow;
             };
             self.write_declared_prop(position, object, *last_name, scope, &value)
+                || self.initialize_readonly(position, object, *last_name, scope, &value)
         } else {
             let Some(object) = self.resolve_target_object(position, path_body.base, prefix, scope)
             else {
@@ -453,7 +454,7 @@ impl Machine<'_> {
             return false;
         };
         if !packed.is_plain_writable() {
-            return self.initialize_readonly(object, (table, packed), scope, value);
+            return false;
         }
         if packed.allows_type(crate::types::own_type(value)) {
             return write_slot_direct(object, packed.slot(), value, table.fills_missing_directly());
@@ -474,15 +475,22 @@ impl Machine<'_> {
     /// value fit the declared type as it is. A second write, a write from
     /// another class, a class with `__set` (an unset property calls it) and a
     /// value that needs a conversion are the VM's, which raises PHP's error.
+    ///
+    /// Tried only once the plain write has refused, out of line, so that the
+    /// plain write keeps its code.
     #[cold]
     #[inline(never)]
     fn initialize_readonly(
         &self,
+        position: Position,
         object: &Object,
-        (table, packed): (&crate::classes::property_table::PropertyTable, PackedProp),
+        name: NameId,
         scope: Option<ClassIndex>,
         value: &Value,
     ) -> bool {
+        let Some((table, packed)) = self.resolve_prop(position, object, name, scope) else {
+            return false;
+        };
         if !packed.initializes_readonly_from(scope) || !table.fills_missing_directly() {
             return false;
         }
