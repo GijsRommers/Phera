@@ -25,6 +25,7 @@ use phera_value::{Object, Value};
 
 use crate::calls::execution_loop::{Machine, Position, Step};
 use crate::calls::frame::Frame;
+use crate::calls::native_signature::direct_site;
 use crate::calls::php_windows::push_php_call;
 use crate::calls::prepared_call::CallKind;
 use crate::calls::window_context::WindowContext;
@@ -194,6 +195,11 @@ impl Machine<'_> {
                     .put(position.frame.base() + destination.index(), value);
                 Step::Done(site.after.index())
             }
+            // A native method with a direct handler and arguments, as
+            // `call_site_direct` runs it.
+            SiteOutcome::Direct(handler, masks) => {
+                self.call_site_direct(position, (body, site), (handler, &masks), destination)
+            }
             SiteOutcome::Native if !site.receiver_taken => {
                 let object = object.clone();
                 self.call_site_native(position, (body, site), &object, destination)
@@ -260,6 +266,14 @@ impl Machine<'_> {
                     && let Some(getter) = entry.direct =>
             {
                 SiteOutcome::Getter(getter)
+            }
+            // A direct handler with arguments, as `call_site_direct` runs it.
+            MethodBody::Native(entry)
+                if method.visibility == Visibility::Public
+                    && !self.shadowed_by_private(self.caller_scope(position), key, method)
+                    && let Some((handler, masks)) = direct_site(entry, site.arguments as usize) =>
+            {
+                SiteOutcome::Direct(handler, masks)
             }
             MethodBody::Native(_) => SiteOutcome::Native,
             _ => SiteOutcome::Vm,
